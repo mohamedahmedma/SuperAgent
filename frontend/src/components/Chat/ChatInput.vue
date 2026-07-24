@@ -4,8 +4,8 @@
       <div class="hitl-panel-header">
         <span class="hitl-icon"><i class="fa-solid fa-circle-question"></i></span>
         <span>
-          <strong>需要你补充一下</strong>
-          <small>喵喵会沿着你的选择继续原来的检索流程</small>
+          <strong>Just need a bit more from you</strong>
+          <small>Mew will continue the original search based on your choice</small>
         </span>
       </div>
       <div class="hitl-panel-prompt">{{ chatStore.currentPendingHitl.prompt }}</div>
@@ -29,8 +29,8 @@
       <button
         class="attach-btn"
         type="button"
-        title="当前版本暂不支持聊天附件"
-        aria-label="聊天附件暂不可用"
+        title="Attachments aren't supported yet"
+        aria-label="Chat attachments unavailable"
         disabled
       >
         <i class="fa-solid fa-paperclip"></i>
@@ -53,8 +53,8 @@
         v-if="chatStore.isViewingStreamingSession"
         type="button"
         class="send-btn stop-btn"
-        title="终止回答"
-        aria-label="终止回答"
+        title="Stop response"
+        aria-label="Stop response"
         @click="chatStore.handleStop"
       >
         <i class="fa-solid fa-stop"></i>
@@ -65,8 +65,8 @@
         type="button"
         class="send-btn"
         :disabled="chatStore.isLoading"
-        :title="chatStore.isLoading ? '当前已有回答正在生成' : '发送'"
-        aria-label="发送消息"
+        :title="chatStore.isLoading ? 'A response is already being generated' : 'Send'"
+        aria-label="Send message"
         @click="onSend"
       >
         <i class="fa-regular fa-paper-plane"></i>
@@ -74,8 +74,8 @@
     </div>
 
     <div class="input-footer">
-      <span>AI 生成内容可能有误，重要结论请结合引用复核。</span>
-      <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
+      <span>AI-generated content may contain errors — verify important conclusions against the cited sources.</span>
+      <span><kbd>Enter</kbd> to send · <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</span>
     </div>
   </div>
 </template>

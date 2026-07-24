@@ -1,10 +1,14 @@
 """
-HTML 知识库处理：编码检测、去脚本/样式、语义线性化，并按章节拆成多「页」供三层分块复用。
+HTML knowledge base processing: encoding detection, script/style stripping, semantic
+linearization, and splitting into multiple "pages" by section for reuse by the three-level
+chunking pipeline.
 
-设计要点：
-- 优先解析 <main>/<article>，否则 <body>，避免全站导航噪声。
-- 将 h1–h4 与段落、列表项按文档顺序线性化，标题转为 Markdown 风格前缀。
-- 若存在多个二级标题区块，按区块拆成多个 page_number，改善 chunk_id 分散与可解释性。
+Design notes:
+- Prefers parsing <main>/<article>, falling back to <body>, to avoid site-wide navigation noise.
+- Linearizes h1-h4 headings along with paragraphs and list items in document order, converting
+  headings to Markdown-style prefixes.
+- If multiple level-2 heading blocks exist, splits them into separate page_number values to
+  improve chunk_id distribution and interpretability.
 """
 
 from __future__ import annotations
@@ -131,7 +135,7 @@ def _split_into_sections(linear: str, page_title: str) -> list[dict[str, Any]]:
             sec_title = first_line[3:].strip()
         elif i == 1 and first_line.startswith("# ") and not first_line.startswith("##"):
             sec_title = first_line[2:].strip()
-        prefix = f"[章节: {sec_title}]\n\n" if sec_title else ""
+        prefix = f"[Section: {sec_title}]\n\n" if sec_title else ""
         sections.append({"page": i, "title": sec_title, "text": prefix + block})
     return sections
 
@@ -150,7 +154,7 @@ def parse_html_file_to_sections(file_path: str | Path) -> list[dict[str, Any]]:
 
 
 def load_html_for_document_loader(file_path: str, filename: str) -> list[Document]:
-    """供 DocumentLoader 使用：返回 LangChain Document 列表，metadata.page 为章节序号。"""
+    """For use by DocumentLoader: returns a list of LangChain Document objects, with metadata.page as the section number."""
     sections = parse_html_file_to_sections(file_path)
     docs: list[Document] = []
     for sec in sections:

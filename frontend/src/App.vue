@@ -63,7 +63,7 @@ watch(
 
 const handleUnauthorized = () => {
   authStore.handleLogout();
-  alert('登录已过期，请重新登录');
+  alert('Your session has expired, please log in again');
 };
 
 onMounted(async () => {

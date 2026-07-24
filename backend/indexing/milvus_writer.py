@@ -1,4 +1,4 @@
-"""文档向量化并写入 Milvus - 支持密集+稀疏向量"""
+"""Embeds documents and writes them to Milvus - supports dense + sparse vectors"""
 import os
 
 from backend.indexing.embedding import EmbeddingService, embedding_service as _default_embedding_service
@@ -6,7 +6,7 @@ from backend.indexing.milvus_client import MilvusStore, get_milvus_store
 
 
 class MilvusWriter:
-    """文档向量化并写入 Milvus 服务 - 支持混合检索"""
+    """Service that embeds documents and writes them to Milvus - supports hybrid retrieval"""
 
     def __init__(self, embedding_service: EmbeddingService = None, milvus_manager: MilvusStore = None):
         self.embedding_service = embedding_service or _default_embedding_service

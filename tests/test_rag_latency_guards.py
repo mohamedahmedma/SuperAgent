@@ -133,21 +133,21 @@ class RagLatencyGuardTests(unittest.TestCase):
         cases = [
             ({
                 "method": "step_back",
-                "step_back_question": "更抽象的问题是什么？",
+                "step_back_question": "What is a more abstract way to ask this?",
                 "hyde_document": "",
-            }, "step_back", "退步问题"),
+            }, "step_back", "Step-back question"),
             ({
                 "method": "hyde",
                 "step_back_question": "",
-                "hyde_document": "一段可能的答案式文档",
-            }, "hyde", "假设性答案文档"),
+                "hyde_document": "A possible answer-style document",
+            }, "hyde", "Hypothetical answer document"),
         ]
         for payload, expected_method, expected_marker in cases:
             with self.subTest(method=expected_method):
                 model = Model(payload)
                 utils._get_rewrite_model = lambda: model
 
-                result = utils.rewrite_query_once("具体问题")
+                result = utils.rewrite_query_once("specific question")
 
                 self.assertEqual(1, model.calls)
                 self.assertEqual(expected_method, result["rewrite_method"])

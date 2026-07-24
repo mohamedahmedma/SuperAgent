@@ -42,7 +42,7 @@ export const useAuthStore = defineStore('auth', {
       const username = this.authForm.username.trim();
       const password = this.authForm.password.trim();
       if (!username || !password) {
-        throw new Error('用户名和密码不能为空');
+        throw new Error('Username and password cannot be empty');
       }
 
       this.authLoading = true;
@@ -65,7 +65,7 @@ export const useAuthStore = defineStore('auth', {
         this.authForm.password = '';
         this.authForm.admin_code = '';
       } catch (error: any) {
-        const errMsg = error.response?.data?.detail || error.message || '认证失败';
+        const errMsg = error.response?.data?.detail || error.message || 'Authentication failed';
         throw new Error(errMsg);
       } finally {
         this.authLoading = false;

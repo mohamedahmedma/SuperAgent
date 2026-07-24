@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SuperMew 项目架构与核心代码解析</title>
+    <title>SuperMew Project Architecture & Core Code Walkthrough</title>
     <style>
         :root {
             --primary-color: #4A90E2;
@@ -51,7 +51,7 @@
             overflow: hidden;
         }
 
-        /* 侧边栏：项目结构 */
+        /* Sidebar: project structure */
         .sidebar {
             width: var(--sidebar-width);
             background-color: var(--card-bg);
@@ -128,7 +128,7 @@
             color: var(--primary-color);
         }
 
-        /* 主内容区 */
+        /* Main content area */
         .main-content {
             flex: 1;
             padding: 40px;
@@ -169,7 +169,7 @@
             padding-left: 10px;
         }
 
-        /* RAG 流程图样式 */
+        /* RAG flow diagram styles */
         .flow-diagram {
             display: flex;
             flex-direction: column;
@@ -232,7 +232,7 @@
             justify-content: center;
         }
 
-        /* 代码展示区 */
+        /* Code display area */
         pre {
             background-color: var(--code-bg);
             color: #f8f8f2;
@@ -269,7 +269,7 @@
             font-weight: 500;
         }
 
-        /* 动态内容控制 */
+        /* Dynamic content control */
         .details-section {
             display: none;
         }
@@ -316,7 +316,7 @@
             font-weight: 500;
         }
         
-        /* 导航栏 */
+        /* Navigation bar */
         .page-nav {
             margin-bottom: 30px;
             display: flex;
@@ -346,57 +346,57 @@
 <body>
 
     <header>
-        <h1>🐈 SuperMew - 项目架构解析</h1>
-        <div style="font-weight: 500; color: #666;">高级 RAG 知识库系统 ｜ FastAPI + LangGraph + Milvus</div>
+        <h1>🐈 SuperMew - Project Architecture Walkthrough</h1>
+        <div style="font-weight: 500; color: #666;">Advanced RAG Knowledge Base System | FastAPI + LangGraph + Milvus</div>
     </header>
 
     <div class="container">
-        <!-- 左侧项目树 -->
+        <!-- Left-hand project tree -->
         <div class="sidebar">
-            <h2>项目文件结构</h2>
+            <h2>Project File Structure</h2>
             <div class="tree-view">
                 <ul>
                     <li class="folder" onclick="showPage('page-overview')">SuperMew/</li>
                     <ul>
                         <li class="file" onclick="showPage('page-overview')">
-                            <span class="filename">main.py</span><span class="badge">入口</span>
+                            <span class="filename">main.py</span><span class="badge">Entry point</span>
                         </li>
-                        
-                        <li class="folder">backend/ <span class="badge">核心代码区</span></li>
+
+                        <li class="folder">backend/ <span class="badge">Core code</span></li>
                         <ul>
                             <li class="file active" id="nav-api" onclick="showPage('page-api')">
-                                <span class="filename">api.py</span><span class="badge">REST路由</span>
+                                <span class="filename">api.py</span><span class="badge">REST routes</span>
                             </li>
                             <li class="file" id="nav-rag" onclick="showPage('page-rag')">
                                 <span class="filename">rag_pipeline.py</span><span class="badge">LangGraph</span>
                             </li>
                             <li class="file" id="nav-agent" onclick="showPage('page-agent')">
-                                <span class="filename">agent.py</span><span class="badge">流式/Agent</span>
+                                <span class="filename">agent.py</span><span class="badge">Streaming/Agent</span>
                             </li>
                             <li class="file" id="nav-tools" onclick="showPage('page-tools')">
-                                <span class="filename">tools.py</span><span class="badge">工具网关</span>
+                                <span class="filename">tools.py</span><span class="badge">Tool gateway</span>
                             </li>
                             <li class="file" id="nav-embedding" onclick="showPage('page-embedding')">
-                                <span class="filename">embedding.py</span><span class="badge">本地BM25</span>
+                                <span class="filename">embedding.py</span><span class="badge">Local BM25</span>
                             </li>
                             <li class="file" id="nav-milvus" onclick="showPage('page-milvus')">
-                                <span class="filename">milvus_client.py</span><span class="badge">混合检索库</span>
+                                <span class="filename">milvus_client.py</span><span class="badge">Hybrid retrieval store</span>
                             </li>
                             <li class="file" id="nav-milvus_writer" onclick="showPage('page-milvus_writer')">
-                                <span class="filename">milvus_writer.py</span><span class="badge">数据写入</span>
+                                <span class="filename">milvus_writer.py</span><span class="badge">Data writer</span>
                             </li>
                             <li class="file" id="nav-doc_loader" onclick="showPage('page-doc_loader')">
-                                <span class="filename">document_loader.py</span><span class="badge">层级切块</span>
+                                <span class="filename">document_loader.py</span><span class="badge">Hierarchical chunking</span>
                             </li>
                             <li class="file" id="nav-parent_store" onclick="showPage('page-parent_store')">
-                                <span class="filename">parent_chunk_store.py</span><span class="badge">本地块存储</span>
+                                <span class="filename">parent_chunk_store.py</span><span class="badge">Local chunk store</span>
                             </li>
                         </ul>
 
                         <li class="folder">frontend/</li>
                         <ul>
                             <li class="file" onclick="showPage('page-frontend')">
-                                <span class="filename">index.html</span><span class="badge">原生UI</span>
+                                <span class="filename">index.html</span><span class="badge">Vanilla UI</span>
                             </li>
                         </ul>
                     </ul>
@@ -404,48 +404,48 @@
             </div>
         </div>
 
-        <!-- 右侧详情区 -->
+        <!-- Right-hand detail area -->
         <div class="main-content" id="main-scroll">
-            
-            <!-- ================= PAGE: OVERVIEW (总结) ================= -->
+
+            <!-- ================= PAGE: OVERVIEW ================= -->
             <div id="page-overview" class="details-section active">
                 <div class="card">
-                    <h2>项目全局总结</h2>
-                    <p>SuperMew 是一个基于 <span class="highlight-text">Self-Reflective RAG (CRAG)</span> 理念构建的高级智能问答知识库系统。它突破了传统简单 RAG（单纯相似度召回然后丢给模型回答）的局限，在召回率、上下文完整度、以及大模型防止幻觉上做了大量的工业级工程设计。</p>
-                    
+                    <h2>Project Overview</h2>
+                    <p>SuperMew is an advanced intelligent Q&A knowledge-base system built around the <span class="highlight-text">Self-Reflective RAG (CRAG)</span> concept. It breaks past the limits of traditional, simple RAG (bare similarity recall handed straight to the model) with a substantial amount of industrial-grade engineering aimed at recall quality, context completeness, and hallucination prevention.</p>
+
                     <div style="margin: 25px 0;">
                         <span class="tag">FastAPI</span>
                         <span class="tag">LangChain</span>
-                        <span class="tag">LangGraph (状态机编排)</span>
-                        <span class="tag">Milvus (双路向量数据库)</span>
-                        <span class="tag">HuggingFace (本地Embedding)</span>
+                        <span class="tag">LangGraph (state machine orchestration)</span>
+                        <span class="tag">Milvus (dual-path vector database)</span>
+                        <span class="tag">HuggingFace (local embeddings)</span>
                     </div>
 
-                    <h3>🌟 六大核心工程亮点</h3>
+                    <h3>🌟 Six Core Engineering Highlights</h3>
                     <ul class="feature-list">
-                        <li><strong>LangGraph 自治检索纠错</strong>：如果初步检索相关性差，系统会自动触发退步提问 (Step-back) 或假设性文档 (HyDE) 生成来扩充查询。</li>
-                        <li><strong>双路混合检索引擎</strong>：系统不依赖商业 API，自己在 <code>embedding.py</code> 徒手实现了持久化的 BM25 稀疏向量计算。结合语义密集向量，在 Milvus 中利用 RRF (Reciprocal Rank Fusion) 算法做排名融合，兼顾语义泛化和专有名词精准匹配。</li>
-                        <li><strong>父子层级文档切片 (Parent-Child Chunking)</strong>：为了解决检索碎片化问题，系统对文档执行 L1/L2/L3 三级切片。仅把极小的 L3 存入 Milvus，一旦命中，自动向上溯源拉取大段 L2/L1 上下文喂给大模型。</li>
-                        <li><strong>防幻觉系统级 Prompt</strong>：严格约束 Agent，要求必须基于知识库结果输出，严禁没结果强答或一回合内陷入死循环查库。</li>
-                        <li><strong>高并发流式穿透体系</strong>：RAG 复杂流程非常耗时，系统通过 <code>asyncio.Queue</code> 在 <code>agent.py</code> 中实现了底层引擎状态的实时捕获，在 LLM 思考前就把 “检索进度” 推送给前端。</li>
-                        <li><strong>轻量级无依赖架构</strong>：核心算法除了依赖底层库外，基本采用原生手写（如 BM25 增量状态机、原生 SSE 协议交互等），极其透明可控。</li>
+                        <li><strong>LangGraph autonomous retrieval correction</strong>: if the initial retrieval relevance is poor, the system automatically triggers a Step-back question or HyDE (hypothetical document) generation to expand the query.</li>
+                        <li><strong>Dual-path hybrid retrieval engine</strong>: rather than relying on a commercial API, the system hand-implements persistent BM25 sparse vector computation in <code>embedding.py</code>. Combined with dense semantic vectors, it uses the RRF (Reciprocal Rank Fusion) algorithm in Milvus to fuse rankings, balancing semantic generalization with precise proper-noun matching.</li>
+                        <li><strong>Parent-Child Chunking</strong>: to solve retrieval fragmentation, the system splits documents into three tiers (L1/L2/L3). Only the tiny L3 chunks go into Milvus; once one is matched, the system automatically traces back up to pull the larger L2/L1 context for the LLM.</li>
+                        <li><strong>Anti-hallucination system prompt</strong>: strictly constrains the Agent to answer only from knowledge-base results, forbidding forced answers with no evidence or getting stuck in a lookup loop within a single turn.</li>
+                        <li><strong>High-concurrency streaming pass-through</strong>: since the full RAG flow is time-consuming, the system uses <code>asyncio.Queue</code> in <code>agent.py</code> to capture the underlying engine state in real time, pushing "retrieval progress" to the frontend before the LLM even starts thinking.</li>
+                        <li><strong>Lightweight, low-dependency architecture</strong>: aside from underlying libraries, the core algorithms are largely hand-written natively (e.g. the BM25 incremental state machine, the native SSE protocol handling), keeping everything highly transparent and controllable.</li>
                     </ul>
                 </div>
 
                 <div class="card">
-                    <h2>LangGraph 核心运转流转图</h2>
-                    <p>展示了当用户提出一个复杂问题时，系统的内部神经元是如何进行图状运转的：</p>
+                    <h2>LangGraph Core Execution Flow</h2>
+                    <p>Shows how the system's internal "neurons" traverse the graph when a user asks a complex question:</p>
                     <div class="flow-diagram">
                         <div class="flow-row">
                             <div class="flow-box" style="background: #e8f5e9; border-color: #4caf50;">
-                                用户提问
+                                User question
                             </div>
                         </div>
                         <div class="flow-arrow">↓</div>
                         <div class="flow-row">
                             <div class="flow-box">
                                 retrieve_initial
-                                <small>Milvus HNSW+BM25 混合检索</small>
+                                <small>Milvus HNSW+BM25 hybrid retrieval</small>
                             </div>
                         </div>
                         <div class="flow-arrow">↓</div>
@@ -453,23 +453,23 @@
                             <div class="flow-box decision">
                                 grade_documents
                                 <small>Grader LLM</small>
-                                <small>相关性评估</small>
+                                <small>Relevance grading</small>
                             </div>
                         </div>
                         <div class="flow-row" style="margin: 0;">
-                            <div style="flex:1; text-align:right; padding-right:40px; color: var(--secondary-color); font-weight: bold;">不相关 (No) ↙</div>
-                            <div style="flex:1; padding-left:40px; color: #4caf50; font-weight: bold;">↘ 相关 (Yes)</div>
+                            <div style="flex:1; text-align:right; padding-right:40px; color: var(--secondary-color); font-weight: bold;">Irrelevant (No) ↙</div>
+                            <div style="flex:1; padding-left:40px; color: #4caf50; font-weight: bold;">↘ Relevant (Yes)</div>
                         </div>
                         <div class="flow-row" style="align-items: flex-start;">
                             <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
                                 <div class="flow-box" style="border-color: var(--secondary-color);">
                                     rewrite_question
-                                    <small>HyDE 假设 / Step-back 泛化</small>
+                                    <small>HyDE hypothesis / Step-back generalization</small>
                                 </div>
                                 <div class="flow-arrow">↓</div>
                                 <div class="flow-box">
                                     retrieve_expanded
-                                    <small>用新查询二次搜索</small>
+                                    <small>Second search with the new query</small>
                                 </div>
                                 <div class="flow-arrow">↘</div>
                             </div>
@@ -480,185 +480,185 @@
                         <div class="flow-row">
                             <div class="flow-box" style="background: #e8f5e9; border-color: #4caf50; width: 60%;">
                                 generate_answer
-                                <small>Agent 组装父级大上下文回答</small>
+                                <small>Agent assembles the parent-level context and answers</small>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- ================= PAGE: RAG PIPELINE (重点1) ================= -->
+            <!-- ================= PAGE: RAG PIPELINE (Highlight 1) ================= -->
             <div id="page-rag" class="details-section">
                 <div class="card">
-                    <h2>🧠 [重点] AI大脑状态机编排 (backend/rag_pipeline.py)</h2>
-                    <p>普通的 RAG 流程是直线的：“搜索 -> 组装Prompt -> 大模型输出”。但真实的文档搜索往往会失败（比如用户用了同义词、指代不明）。本系统使用 <strong>LangGraph</strong> 建立了一个带有自我纠错机制的循环状态图（Self-Reflective RAG）。</p>
-                    
-                    <h3>核心机制 1：文档裁判官 (Grader)</h3>
-                    <p>在初次检索 <code>retrieve_initial</code> 之后，系统不急于让主模型回答，而是先让一个小模型（Grader）去“打分”。如果文档跟问题牛头不对马嘴，直接判定为 <code>no</code>，避免主模型产生幻觉。</p>
+                    <h2>🧠 [Highlight] AI Brain State Machine Orchestration (backend/rag_pipeline.py)</h2>
+                    <p>A typical RAG flow is linear: "search -> assemble prompt -> LLM output". But real-world document search often fails (e.g. the user uses a synonym, or the reference is ambiguous). This system uses <strong>LangGraph</strong> to build a cyclic state graph with a self-correction mechanism (Self-Reflective RAG).</p>
 
-                    <h3>核心机制 2：查询变换 (Query Transformation)</h3>
-                    <p>被 Grader 驳回后，系统进入 <code>rewrite_question_node</code>。这不是简单的换词，而是采用了高阶策略：</p>
+                    <h3>Core Mechanism 1: The Document Judge (Grader)</h3>
+                    <p>After the initial retrieval (<code>retrieve_initial</code>), the system doesn't rush the main model into answering — it first has a small model (the Grader) "score" the results. If the documents are completely off-topic, they're immediately marked <code>no</code>, preventing the main model from hallucinating.</p>
+
+                    <h3>Core Mechanism 2: Query Transformation</h3>
+                    <p>After being rejected by the Grader, the system enters <code>rewrite_question_node</code>. This isn't simple word-swapping — it uses a more advanced strategy:</p>
                     <ul class="feature-list">
-                        <li><strong>HyDE (Hypothetical Document Embeddings)</strong>：当问题很概念化时，让模型直接“盲答”写一篇假设性文章，拿这篇文章的向量去搜索。因为答案的行文风格往往和原始文档更接近，相似度极高。</li>
-                        <li><strong>Step-back (退步提问)</strong>：如果问题是具体的“报错日志”，退回一步提问“这个组件的报错排查原理是什么”，从而召回整体结构文档。</li>
+                        <li><strong>HyDE (Hypothetical Document Embeddings)</strong>: when the question is very conceptual, the model is asked to "blind-answer" by writing a hypothetical article, and that article's vector is used for the search. Because the writing style of an answer tends to be closer to the original documents, the similarity match is much stronger.</li>
+                        <li><strong>Step-back</strong>: if the question is a specific "error log" lookup, the system steps back and asks "what is the troubleshooting principle for this component," which recalls the broader structural documentation.</li>
                     </ul>
 
-                    <h3>核心代码剖析：LangGraph 有向图编译</h3>
-                    <p>这段代码定义了整个 AI 思考的生命周期：</p>
+                    <h3>Core Code Walkthrough: LangGraph Directed Graph Compilation</h3>
+                    <p>This snippet defines the entire lifecycle of the AI's reasoning:</p>
                     <pre><code><span class="keyword">def</span> <span class="function">build_rag_graph</span>():
-    <span class="comment"># 1. RAGState 是图里流通的共享内存，包含了问题、文档和轨迹</span>
+    <span class="comment"># 1. RAGState is the shared memory flowing through the graph, holding the question, documents, and trace</span>
     graph = StateGraph(RAGState)
-    
-    <span class="comment"># 2. 注册图节点（定义执行函数）</span>
+
+    <span class="comment"># 2. Register graph nodes (define the execution functions)</span>
     graph.add_node(<span class="string">"retrieve_initial"</span>, retrieve_initial)
     graph.add_node(<span class="string">"grade_documents"</span>, grade_documents_node)
     graph.add_node(<span class="string">"rewrite_question"</span>, rewrite_question_node)
     graph.add_node(<span class="string">"retrieve_expanded"</span>, retrieve_expanded)
 
-    <span class="comment"># 3. 画出固定的单行道</span>
+    <span class="comment"># 3. Lay out the fixed single-track path</span>
     graph.set_entry_point(<span class="string">"retrieve_initial"</span>)
     graph.add_edge(<span class="string">"retrieve_initial"</span>, <span class="string">"grade_documents"</span>)
-    
-    <span class="comment"># 4. 【灵魂】条件分叉：根据 grader 评分决定走向</span>
+
+    <span class="comment"># 4. [The soul of it] Conditional branch: decide the route based on the grader's score</span>
     graph.add_conditional_edges(
         <span class="string">"grade_documents"</span>,
-        <span class="keyword">lambda</span> state: state.get(<span class="string">"route"</span>), 
+        <span class="keyword">lambda</span> state: state.get(<span class="string">"route"</span>),
         {
-            <span class="string">"generate_answer"</span>: END, <span class="comment"># 裁判给过了：结束图计算，主模型准备输出</span>
-            <span class="string">"rewrite_question"</span>: <span class="string">"rewrite_question"</span>, <span class="comment"># 没过：去重写问题</span>
+            <span class="string">"generate_answer"</span>: END, <span class="comment"># Passed grading: end graph execution, the main model is ready to answer</span>
+            <span class="string">"rewrite_question"</span>: <span class="string">"rewrite_question"</span>, <span class="comment"># Failed grading: go rewrite the question</span>
         },
     )
-    
-    <span class="comment"># 5. 重写完了去二次搜索，完了再结束</span>
+
+    <span class="comment"># 5. Once rewritten, run the second search, then finish</span>
     graph.add_edge(<span class="string">"rewrite_question"</span>, <span class="string">"retrieve_expanded"</span>)
     graph.add_edge(<span class="string">"retrieve_expanded"</span>, END)
-    
+
     <span class="keyword">return</span> graph.compile()</code></pre>
                 </div>
             </div>
 
-            <!-- ================= PAGE: EMBEDDING (重点2) ================= -->
+            <!-- ================= PAGE: EMBEDDING (Highlight 2) ================= -->
             <div id="page-embedding" class="details-section">
                 <div class="card">
-                    <h2>🔢 [重点] 本地增量 BM25 稀疏向量 (backend/embedding.py)</h2>
-                    <p>商业向量模型（如 OpenAI、BAAI）生成的叫做“稠密向量”(Dense)，擅长“语义模糊匹配”。但如果在手册里搜 <span class="highlight-text">"XYZ-9988C 型号"</span>，稠密向量往往全军覆没。系统在此处硬核地在纯 Python 环境下手写了 <strong>BM25 (Sparse) 稀疏向量算法</strong>。</p>
-                    
-                    <h3>硬核点 1：不依赖外接服务的纯净状态机</h3>
-                    <p>系统没有外接 ElasticSearch，而是维护了一个 <code>data/bm25_state.json</code>。每次上传/删除新文档，它都会被安全地锁（<code>threading.Lock()</code>）住并重新计算每个词的 <code>doc_freq</code>（逆文档频率）和全库文档总数 <code>total_docs</code>，实现了轻量级的 <strong>增量 IDF</strong>。</p>
+                    <h2>🔢 [Highlight] Local Incremental BM25 Sparse Vectors (backend/embedding.py)</h2>
+                    <p>The vectors produced by commercial embedding models (e.g. OpenAI, BAAI) are called "dense vectors," and they're great at "fuzzy semantic matching." But search a manual for <span class="highlight-text">"model XYZ-9988C"</span> and dense vectors often fail completely. This is where the system hand-writes a <strong>BM25 (sparse) vector algorithm</strong> in pure Python.</p>
 
-                    <h3>核心代码剖析：TF-IDF 稀疏向量构建</h3>
-                    <p>由于 Milvus <code>SPARSE_INVERTED_INDEX</code> 的要求，我们需要将文本转为一个形如 <code>{词汇ID: 得分}</code> 的字典（其中只包含非零分数，这就叫稀疏）。</p>
+                    <h3>Hardcore Detail 1: A self-contained state machine with no external dependency</h3>
+                    <p>The system doesn't rely on an external ElasticSearch — instead it maintains a <code>data/bm25_state.json</code> file. Every time a document is uploaded or deleted, it's safely locked (<code>threading.Lock()</code>) and each term's <code>doc_freq</code> (inverse document frequency) and the corpus-wide <code>total_docs</code> are recomputed, implementing a lightweight <strong>incremental IDF</strong>.</p>
+
+                    <h3>Core Code Walkthrough: Building the TF-IDF Sparse Vector</h3>
+                    <p>Because of Milvus's <code>SPARSE_INVERTED_INDEX</code> requirements, we need to convert text into a dictionary shaped like <code>{term ID: score}</code> (containing only non-zero scores — that's what makes it "sparse").</p>
                     <pre><code><span class="keyword">def</span> <span class="function">_sparse_vector_for_text_unlocked</span>(self, text: str):
-    <span class="comment"># 1. 拆词并统计当前句子的词频 (Term Frequency, TF)</span>
+    <span class="comment"># 1. Tokenize and count term frequency (TF) for this sentence</span>
     tokens = self.tokenize(text)
     doc_len = len(tokens)
     tf = Counter(tokens)
-    
+
     sparse_vector = {}
     <span class="keyword">for</span> token, freq <span class="keyword">in</span> tf.items():
-        <span class="comment"># 词典索引，用于给 Milvus 做倒排 ID</span>
+        <span class="comment"># Vocabulary index, used to give Milvus an inverted-index ID</span>
         idx = self._vocab[token]
-        
-        <span class="comment"># 2. IDF 计算（逆文档频率）：如果一个词在全库太常见，得分被暴扣</span>
+
+        <span class="comment"># 2. IDF calculation (inverse document frequency): terms too common across the corpus get heavily penalized</span>
         df = self._doc_freq.get(token, <span class="string">0</span>)
         <span class="keyword">if</span> df == <span class="string">0</span>:
             idf = math.log((n + <span class="string">1</span>) / <span class="string">1</span>)
         <span class="keyword">else</span>:
             idf = math.log((n - df + <span class="string">0.5</span>) / (df + <span class="string">0.5</span>) + <span class="string">1</span>)
 
-        <span class="comment"># 3. 经典 BM25 算法公式</span>
-        <span class="comment"># numerator: TF 上限抑制 (饱和度参数 k1)</span>
-        <span class="comment"># denominator: 引入文档长度惩罚 (参数 b)</span>
+        <span class="comment"># 3. The classic BM25 formula</span>
+        <span class="comment"># numerator: caps TF growth (saturation parameter k1)</span>
+        <span class="comment"># denominator: introduces the document-length penalty (parameter b)</span>
         numerator = freq * (self.k1 + <span class="string">1</span>)
         denominator = freq + self.k1 * (<span class="string">1</span> - self.b + self.b * doc_len / avg)
-        
+
         score = idf * numerator / denominator
         <span class="keyword">if</span> score &gt; <span class="string">0</span>:
-            <span class="comment"># { 维度ID: 分数 } 这就是稀疏向量的本质</span>
+            <span class="comment"># { dimension ID: score } — this is the essence of a sparse vector</span>
             sparse_vector[idx] = float(score)
 
     <span class="keyword">return</span> sparse_vector, vocab_changed</code></pre>
                 </div>
             </div>
 
-            <!-- ================= PAGE: MILVUS CLIENT (重点3) ================= -->
+            <!-- ================= PAGE: MILVUS CLIENT (Highlight 3) ================= -->
             <div id="page-milvus" class="details-section">
                 <div class="card">
-                    <h2>🗄️ [重点] 异构多路召回与重排 (backend/milvus_client.py)</h2>
-                    <p>这个模块展示了我们在上一步拿到 Dense 和 Sparse 两种向量后，如何将它们存入 Milvus，并在检索时优雅地合并（Fusion）这两种尺度完全不同的分数。</p>
+                    <h2>🗄️ [Highlight] Heterogeneous Multi-Path Recall & Reranking (backend/milvus_client.py)</h2>
+                    <p>This module shows how, once we have both the Dense and Sparse vectors from the previous step, we store them in Milvus and elegantly fuse these two very differently-scaled result sets at retrieval time.</p>
 
-                    <h3>异构双重索引设计</h3>
-                    <p>建立 Collection 时，不同的向量类型配备了量身定制的武器：</p>
-                    <pre><code><span class="comment"># 给 Dense 向量配 HNSW 图导航索引 (适合语义发散)</span>
+                    <h3>Dual Heterogeneous Index Design</h3>
+                    <p>When the collection is created, each vector type gets an index tailored to it:</p>
+                    <pre><code><span class="comment"># Give the Dense vector an HNSW graph-navigation index (good for semantic divergence)</span>
 index_params.add_index(
     field_name=<span class="string">"dense_embedding"</span>, index_type=<span class="string">"HNSW"</span>, metric_type=<span class="string">"IP"</span>
 )
-<span class="comment"># 给 Sparse 向量配 倒排索引 (倒排索引是关键词检索引擎的核心)</span>
+<span class="comment"># Give the Sparse vector an inverted index (the core of any keyword search engine)</span>
 index_params.add_index(
-    field_name=<span class="string">"sparse_embedding"</span>, index_type=<span class="string">"SPARSE_INVERTED_INDEX"</span>, 
-    metric_type=<span class="string">"IP"</span>, params={<span class="string">"drop_ratio_build"</span>: <span class="string">0.2</span>} <span class="comment"># 压缩长尾垃圾词</span>
+    field_name=<span class="string">"sparse_embedding"</span>, index_type=<span class="string">"SPARSE_INVERTED_INDEX"</span>,
+    metric_type=<span class="string">"IP"</span>, params={<span class="string">"drop_ratio_build"</span>: <span class="string">0.2</span>} <span class="comment"># Compress away long-tail junk terms</span>
 )</code></pre>
 
-                    <h3>核心代码剖析：RRF (Reciprocal Rank Fusion) 算法</h3>
-                    <p>这是混合检索最难的一步：Dense 的距离分数（例如 0.81）和 BM25 的得分（例如 25.4）如同苹果和香蕉，没法加权平均。系统巧妙使用了 <span class="highlight-text">RRF 算法</span>，<strong>彻底抛弃绝对分数，仅使用两边的排名次序来合并</strong>。</p>
+                    <h3>Core Code Walkthrough: The RRF (Reciprocal Rank Fusion) Algorithm</h3>
+                    <p>This is the hardest step in hybrid retrieval: Dense distance scores (e.g. 0.81) and BM25 scores (e.g. 25.4) are like apples and oranges — you can't just take a weighted average. The system cleverly uses the <span class="highlight-text">RRF algorithm</span>, which <strong>completely discards absolute scores and merges results using only each side's rank order</strong>.</p>
                     <pre><code><span class="keyword">def</span> <span class="function">hybrid_retrieve</span>(self, dense_embedding, sparse_embedding, top_k=<span class="string">5</span>):
-    <span class="comment"># 1. 构造语义查询：让它多跑一点候选量 (top_k * 2) 参与后面大乱斗</span>
+    <span class="comment"># 1. Build the semantic query: fetch extra candidates (top_k * 2) to feed the fusion below</span>
     dense_search = AnnSearchRequest(
         data=[dense_embedding], anns_field=<span class="string">"dense_embedding"</span>, limit=top_k * <span class="string">2</span>
     )
-    
-    <span class="comment"># 2. 构造关键词纯词频查询</span>
+
+    <span class="comment"># 2. Build the pure keyword/term-frequency query</span>
     sparse_search = AnnSearchRequest(
         data=[sparse_embedding], anns_field=<span class="string">"sparse_embedding"</span>, limit=top_k * <span class="string">2</span>
     )
-    
-    <span class="comment"># 3. 部署 RRF 重排器 (重排分 = 1 / (k参数 + 单路排名))</span>
-    <span class="comment"># 排名越靠前（单路排名越小），分数越大；如果两路都排名高，分数加成极高</span>
+
+    <span class="comment"># 3. Set up the RRF reranker (rerank score = 1 / (k parameter + per-path rank))</span>
+    <span class="comment"># The higher the rank (the smaller the per-path rank number), the higher the score; ranking high on both paths gives a big boost</span>
     reranker = RRFRanker(k=<span class="string">60</span>)
-    
-    <span class="comment"># 4. 把并发的两路搜索抛给 Milvus 底层执行，直接获取排好序的金子</span>
+
+    <span class="comment"># 4. Hand both concurrent search paths off to Milvus and get back the sorted results</span>
     results = self.client.hybrid_search(
         collection_name=self.collection_name,
-        reqs=[dense_search, sparse_search], <span class="comment"># 多路并发</span>
-        ranker=reranker,                    <span class="comment"># 使用 RRF 统分</span>
+        reqs=[dense_search, sparse_search], <span class="comment"># Multi-path concurrency</span>
+        ranker=reranker,                    <span class="comment"># Use RRF to combine scores</span>
         limit=top_k
     )
     <span class="keyword">return</span> results</code></pre>
                 </div>
             </div>
 
-            <!-- ================= PAGE: DOC LOADER (重点4) ================= -->
+            <!-- ================= PAGE: DOC LOADER (Highlight 4) ================= -->
             <div id="page-doc_loader" class="details-section">
                 <div class="card">
-                    <h2>📄 [重点] Parent-Child 文档层级切片 (backend/document_loader.py)</h2>
-                    <p>系统用“三级切块”解决了 RAG 永远的痛：切小了（命中率高但模型看不懂上下文），切大了（一整页去匹配，检索全是干扰项）。</p>
+                    <h2>📄 [Highlight] Parent-Child Document Chunking (backend/document_loader.py)</h2>
+                    <p>The system uses "three-tier chunking" to solve RAG's perennial pain point: chunk too small (high hit rate, but the model can't understand the context), chunk too large (matching a whole page floods retrieval with noise).</p>
 
-                    <h3>切块策略设计与存储分离</h3>
-                    <p>文档通过 <code>RecursiveCharacterTextSplitter</code> 滑动窗口变成了三层。但最牛的地方在于：<span class="highlight-text">入库 Milvus 的永远只有最小的碎块（L3），大块（L1/L2）只作为本地 JSON 存储着</span>，只带有血缘 ID（<code>parent_chunk_id</code>）。等极精准的 L3 命中后，系统凭 ID 把沉睡的 L1 大段捞起供模型理解。</p>
+                    <h3>Chunking Strategy & Storage Separation</h3>
+                    <p>Documents pass through a sliding-window <code>RecursiveCharacterTextSplitter</code> and become three tiers. But the cleverest part is: <span class="highlight-text">only the smallest fragments (L3) ever go into Milvus — the larger chunks (L1/L2) are stored purely as local JSON</span>, carrying only a lineage ID (<code>parent_chunk_id</code>). Once a highly precise L3 chunk is matched, the system uses that ID to pull up the dormant, larger L1 passage for the model to understand.</p>
 
-                    <h3>核心代码剖析：血缘级联切分</h3>
+                    <h3>Core Code Walkthrough: Lineage-Cascaded Splitting</h3>
                     <pre><code><span class="keyword">class</span> <span class="class">DocumentLoader</span>:
     <span class="keyword">def</span> <span class="function">_split_page_to_three_levels</span>(self, text, base_doc):
-        <span class="comment"># 【Level 1 - 宏观层】 约 1200 字符的大章大段</span>
+        <span class="comment"># [Level 1 - macro tier] Large sections of roughly 1200 characters</span>
         level_1_docs = self._splitter_level_1.create_documents([text])
         <span class="keyword">for</span> l1_doc <span class="keyword">in</span> level_1_docs:
-            l1_id = self._build_chunk_id(1) <span class="comment"># 给 L1 颁发唯一身份证</span>
-            
-            <span class="comment"># 【Level 2 - 中观层】 基于刚才生成的 L1 内容，切出 600 字符中段</span>
+            l1_id = self._build_chunk_id(1) <span class="comment"># Issue L1 its unique ID</span>
+
+            <span class="comment"># [Level 2 - meso tier] Split the L1 content just generated into 600-character segments</span>
             level_2_docs = self._splitter_level_2.create_documents([l1_doc.page_content])
             <span class="keyword">for</span> l2_doc <span class="keyword">in</span> level_2_docs:
-                l2_id = self._build_chunk_id(2) <span class="comment"># 给 L2 颁发身份证</span>
-                
-                <span class="comment"># 【Level 3 - 微观层】 基于 L2 内容，切出 300 字符句子</span>
+                l2_id = self._build_chunk_id(2) <span class="comment"># Issue L2 its ID</span>
+
+                <span class="comment"># [Level 3 - micro tier] Split the L2 content into 300-character sentences</span>
                 level_3_docs = self._splitter_level_3.create_documents([l2_doc.page_content])
                 <span class="keyword">for</span> l3_doc <span class="keyword">in</span> level_3_docs:
-                    <span class="comment"># 最终装箱打包，这个字典里的数据最终流入库里</span>
+                    <span class="comment"># Final packaging — this dict is what actually flows into the store</span>
                     root_chunks.append({
                         <span class="string">"text"</span>: l3_doc.page_content,
-                        <span class="string">"chunk_id"</span>: self._build_chunk_id(3), <span class="comment"># 自己的 ID</span>
-                        <span class="string">"parent_chunk_id"</span>: l2_id,  <span class="comment"># 【外键】：我老爸是谁</span>
-                        <span class="string">"root_chunk_id"</span>: l1_id,    <span class="comment"># 【外键】：我爷爷是谁</span>
-                        <span class="string">"chunk_level"</span>: <span class="string">3</span>,          <span class="comment"># 我是第 3 层</span>
+                        <span class="string">"chunk_id"</span>: self._build_chunk_id(3), <span class="comment"># Its own ID</span>
+                        <span class="string">"parent_chunk_id"</span>: l2_id,  <span class="comment"># [Foreign key]: who's my parent</span>
+                        <span class="string">"root_chunk_id"</span>: l1_id,    <span class="comment"># [Foreign key]: who's my grandparent</span>
+                        <span class="string">"chunk_level"</span>: <span class="string">3</span>,          <span class="comment"># I'm tier 3</span>
                     })</code></pre>
                 </div>
             </div>
@@ -666,44 +666,44 @@ index_params.add_index(
             <!-- ================= PAGE: AGENT ================= -->
             <div id="page-agent" class="details-section">
                 <div class="card">
-                    <h2>🤖 Agent 行为约束与流式黑科技 (backend/agent.py)</h2>
-                    <p>负责管理系统的主循环：串联用户记忆、设定大模型行为边界、并提供复杂的 SSE (Server-Sent Events) 双通道流式渲染能力。</p>
-                    
-                    <h3>设计亮点：防幻觉的 System Prompt</h3>
+                    <h2>🤖 Agent Behavior Constraints & Streaming Wizardry (backend/agent.py)</h2>
+                    <p>Manages the system's main loop: chaining together user memory, setting the LLM's behavioral boundaries, and providing complex dual-channel SSE (Server-Sent Events) streaming rendering.</p>
+
+                    <h3>Design Highlight: The Anti-Hallucination System Prompt</h3>
                     <pre><code>system_prompt=(
     <span class="string">"You are a cute cat bot that loves to help users. "</span>
     <span class="string">"Use search_knowledge_base when users ask document questions. "</span>
-    
-    <span class="comment"># 核心约束 1：防止疯狂调工具的死循环 (Rate Limit)</span>
+
+    <span class="comment"># Core constraint 1: prevent an infinite loop of frantic tool calls (rate limit)</span>
     <span class="string">"Do not call the same tool repeatedly in one turn. At most one knowledge tool call per turn. "</span>
-    
-    <span class="comment"># 核心约束 2：强制注意力转移，防止忽略搜索结果</span>
+
+    <span class="comment"># Core constraint 2: force attention back to the results, so search results aren't ignored</span>
     <span class="string">"Once you call search_knowledge_base and receive its result, you MUST immediately produce the Final Answer based on that result. "</span>
-    
-    <span class="comment"># 核心约束 3：反幻觉 (Anti-Hallucination)</span>
+
+    <span class="comment"># Core constraint 3: anti-hallucination</span>
     <span class="string">"If the retrieved context is insufficient, answer honestly that you don't know instead of making up facts."</span>
 )</code></pre>
 
-                    <h3>设计亮点：异步队列解决并发通信难题</h3>
-                    <p>在标准的 Python 流程中，Agent 执行 <code>search_knowledge_base</code> 时整个线程会阻塞。为了让前端看到 <code>"🔍正在重写查询..."</code> 这种底层工具发出的进度，我们利用了 <code>asyncio.Queue</code>：</p>
+                    <h3>Design Highlight: Using an Async Queue to Solve Concurrent Communication</h3>
+                    <p>In a standard Python flow, the whole thread blocks while the Agent runs <code>search_knowledge_base</code>. To let the frontend see progress from that underlying tool, like <code>"🔍Rewriting the query..."</code>, we use <code>asyncio.Queue</code>:</p>
                     <pre><code><span class="keyword">async def</span> <span class="function">chat_with_agent_stream</span>(user_text, user_id, session_id):
-    <span class="comment"># 统一输出通道：模型Token和底层工具状态都往这里丢</span>
+    <span class="comment"># Unified output channel: both model tokens and low-level tool status land here</span>
     output_queue = asyncio.Queue()
 
-    <span class="comment"># 这个代理类会塞进全局，供深层的 LangGraph 执行时实时把进度塞进队列</span>
+    <span class="comment"># This proxy class is placed in the global scope so deep LangGraph execution can push progress into the queue in real time</span>
     <span class="keyword">class</span> <span class="class">_RagStepProxy</span>:
         <span class="keyword">def</span> <span class="function">put_nowait</span>(self, step):
             output_queue.put_nowait({<span class="string">"type"</span>: <span class="string">"rag_step"</span>, <span class="string">"step"</span>: step})
 
-    <span class="comment"># 开启后台独立协程执行大脑推理</span>
+    <span class="comment"># Start a background coroutine to run the brain's reasoning</span>
     <span class="keyword">async def</span> <span class="function">_agent_worker</span>():
         <span class="keyword">async for</span> msg <span class="keyword">in</span> agent.astream(...):
             <span class="keyword">await</span> output_queue.put({<span class="string">"type"</span>: <span class="string">"content"</span>, <span class="string">"content"</span>: msg})
-        <span class="keyword">await</span> output_queue.put(<span class="keyword">None</span>) <span class="comment"># 完成信号</span>
+        <span class="keyword">await</span> output_queue.put(<span class="keyword">None</span>) <span class="comment"># Completion signal</span>
 
     asyncio.create_task(_agent_worker())
 
-    <span class="comment"># 主循环流式返回给前端</span>
+    <span class="comment"># Main loop streams events back to the frontend</span>
     <span class="keyword">while True</span>:
         event = <span class="keyword">await</span> output_queue.get()
         <span class="keyword">if</span> event <span class="keyword">is None</span>: <span class="keyword">break</span>
@@ -714,43 +714,43 @@ index_params.add_index(
             <!-- ================= PAGE: TOOLS ================= -->
             <div id="page-tools" class="details-section">
                 <div class="card">
-                    <h2>🚪 工具网关与状态逃逸 (backend/tools.py)</h2>
-                    <p>这个模块扮演了 <strong>LangChain Agent</strong> 和 <strong>LangGraph RAG 状态机</strong> 之间的桥梁。</p>
-                    
-                    <h3>状态逃逸设计</h3>
-                    <p>普通的 LangChain Tool 只能向大模型返回一段 String。但复杂的 RAG 过程产生了大量珍贵的中间日志（<code>rag_trace</code>）。工具在这里提取出干干净净的文本给模型，而把 <code>rag_trace</code> 偷偷扔进了全局对象，等待上面提到的主循环抽走传给前端。</p>
+                    <h2>🚪 The Tool Gateway & State Escape Hatch (backend/tools.py)</h2>
+                    <p>This module acts as the bridge between the <strong>LangChain Agent</strong> and the <strong>LangGraph RAG state machine</strong>.</p>
+
+                    <h3>State Escape-Hatch Design</h3>
+                    <p>A regular LangChain Tool can only return a plain string to the LLM. But the complex RAG process produces a lot of valuable intermediate logging (<code>rag_trace</code>). Here, the tool extracts a clean text block for the model, while quietly stashing the <code>rag_trace</code> into a global object, waiting for the main loop mentioned earlier to pick it up and forward it to the frontend.</p>
                 </div>
             </div>
 
             <!-- ================= PAGE: MILVUS WRITER ================= -->
             <div id="page-milvus_writer" class="details-section">
                 <div class="card">
-                    <h2>📝 双重向量并行压入 (backend/milvus_writer.py)</h2>
-                    <p>在数据真正落盘到 Milvus 之前调度 Embedding 模型。“一文两算”模式的核心发起地。</p>
+                    <h2>📝 Dual Vector Write-In (backend/milvus_writer.py)</h2>
+                    <p>Schedules the embedding models before data is actually persisted to Milvus. The central launch point for the "compute twice per document" pattern.</p>
                 </div>
             </div>
 
             <!-- ================= PAGE: PARENT STORE ================= -->
             <div id="page-parent_store" class="details-section">
                 <div class="card">
-                    <h2>📦 本地块存储 (backend/parent_chunk_store.py)</h2>
-                    <p>实现本地化的轻量级 JSON 存储库 <code>ParentChunkStore</code>，主要负责在 RAG 返回 L3 碎片数据后，根据 <code>parent_chunk_id</code> 高速取回完整长文本。</p>
+                    <h2>📦 Local Chunk Store (backend/parent_chunk_store.py)</h2>
+                    <p>Implements the lightweight, local <code>ParentChunkStore</code> JSON store, primarily responsible for quickly retrieving the full long-form text via <code>parent_chunk_id</code> once RAG returns L3 fragment data.</p>
                 </div>
             </div>
 
             <!-- ================= PAGE: FRONTEND ================= -->
             <div id="page-frontend" class="details-section">
                 <div class="card">
-                    <h2>🖥️ 前端纯净渲染 (frontend/index.html)</h2>
-                    <p>采用原生 HTML/JS 开发，包含对 SSE 协议 (Server-Sent Events) 的流式解析渲染。</p>
+                    <h2>🖥️ Vanilla Frontend Rendering (frontend/index.html)</h2>
+                    <p>Built with vanilla HTML/JS, including streaming parse-and-render support for the SSE (Server-Sent Events) protocol.</p>
                 </div>
             </div>
 
             <!-- ================= PAGE: API ================= -->
             <div id="page-api" class="details-section">
                 <div class="card">
-                    <h2>🌐 API 核心路由 (backend/api.py)</h2>
-                    <p>FastAPI 的入口文件。通过 <code>StreamingResponse</code> 返回长期存活的流式通讯。</p>
+                    <h2>🌐 Core API Routing (backend/api.py)</h2>
+                    <p>The FastAPI entry point. Returns long-lived streaming communication via <code>StreamingResponse</code>.</p>
                 </div>
             </div>
 
@@ -758,34 +758,34 @@ index_params.add_index(
     </div>
 
     <script>
-        // 单页面应用路由系统
+        // Single-page-app routing system
         function showPage(pageId) {
-            // 1. 隐藏所有页面区域
+            // 1. Hide all page sections
             document.querySelectorAll('.details-section').forEach(el => {
                 el.classList.remove('active');
             });
-            
-            // 2. 清除左侧边栏激活状态
+
+            // 2. Clear the sidebar's active state
             document.querySelectorAll('.file').forEach(el => {
                 el.classList.remove('active');
             });
 
-            // 3. 显示目标页面
+            // 3. Show the target page
             const targetPage = document.getElementById(pageId);
             if (targetPage) {
                 targetPage.classList.add('active');
-                // 回到顶部
+                // Scroll back to the top
                 document.getElementById('main-scroll').scrollTop = 0;
             } else {
                 document.getElementById('page-overview').classList.add('active');
             }
 
-            // 4. 寻找并高亮对应的左侧菜单
+            // 4. Find and highlight the corresponding sidebar entry
             const eventTarget = window.event ? window.event.currentTarget : null;
             if(eventTarget && eventTarget.classList.contains('file')) {
                 eventTarget.classList.add('active');
             } else {
-                // 回落机制：通过ID匹配菜单项
+                // Fallback: match the menu item by ID
                 const navMap = {
                     'page-api': 'nav-api',
                     'page-rag': 'nav-rag',
@@ -805,9 +805,9 @@ index_params.add_index(
             }
         }
         
-        // 初始化时如果没有任何激活状态，默认激活某些元素
+        // On initial load, make sure nothing is left in an active state
         window.onload = function() {
-            // 确保总览默认显示时没有任何 file 是高亮的
+            // Ensure no file entry is highlighted while the overview page is shown by default
             document.querySelectorAll('.file').forEach(el => {
                 el.classList.remove('active');
             });

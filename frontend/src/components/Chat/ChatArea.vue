@@ -8,14 +8,14 @@
             <span class="status-dot"></span>
             <span>{{ generationStatus }}</span>
             <span>·</span>
-            <span>上下文已同步</span>
+            <span>Context synced</span>
           </span>
         </div>
         <div class="chat-header-actions">
-          <button type="button" title="历史会话" aria-label="打开历史会话" @click="openHistory">
+          <button type="button" title="History" aria-label="Open conversation history" @click="openHistory">
             <i class="fa-solid fa-clock-rotate-left"></i>
           </button>
-          <button type="button" title="清空当前对话" aria-label="清空当前对话" @click="chatStore.handleClearChat">
+          <button type="button" title="Clear current chat" aria-label="Clear current chat" @click="chatStore.handleClearChat">
             <i class="fa-regular fa-trash-can"></i>
           </button>
         </div>
@@ -59,15 +59,15 @@ const sessionTitle = computed(() => {
   const session = sessionStore.sessions.find((item) => item.session_id === chatStore.sessionId);
   if (session?.title) return session.title;
   const firstUserMessage = chatStore.messages.find((message) => message.isUser && message.text.trim());
-  if (!firstUserMessage) return '新对话';
+  if (!firstUserMessage) return 'New conversation';
   const text = firstUserMessage.text.trim();
   return text.length > 28 ? text.slice(0, 28) + '…' : text;
 });
 
 const generationStatus = computed(() => {
-  if (chatStore.isViewingStreamingSession) return '喵喵正在生成';
-  if (chatStore.currentPendingHitl) return '等待你的补充';
-  return '喵喵在线';
+  if (chatStore.isViewingStreamingSession) return 'Mew is generating a response';
+  if (chatStore.currentPendingHitl) return 'Waiting for your input';
+  return 'Mew is online';
 });
 
 onBeforeUpdate(() => {

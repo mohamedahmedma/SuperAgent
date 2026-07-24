@@ -91,7 +91,7 @@ RETRIEVAL_TRACE_FIELDS = (
     "retrieval_empty",
 )
 
-# 全局初始化检索依赖（与 api 共用 embedding_service，保证 BM25 状态一致）
+# Initialize retrieval dependencies globally (shares embedding_service with the API to keep BM25 state consistent)
 _milvus_manager = get_milvus_store()
 _parent_chunk_store = ParentChunkStore()
 
@@ -99,7 +99,7 @@ _rewrite_model = None
 
 
 def resolve_candidate_k(top_k: int) -> Tuple[int, Dict[str, Any]]:
-    """解析 Milvus 候选池大小；RETRIEVAL_CANDIDATE_K 优先，否则 top_k × multiplier。"""
+    """Resolve the Milvus candidate pool size; RETRIEVAL_CANDIDATE_K takes priority, otherwise top_k × multiplier."""
     if _RETRIEVAL_CANDIDATE_K_RAW:
         try:
             candidate_k = max(int(_RETRIEVAL_CANDIDATE_K_RAW), top_k)
@@ -122,7 +122,7 @@ def resolve_candidate_k(top_k: int) -> Tuple[int, Dict[str, Any]]:
 
 
 def retrieval_trace_fields(meta: Dict[str, Any]) -> Dict[str, Any]:
-    """从 retrieve meta 提取应写入 rag_trace 的检索字段。"""
+    """Extract the retrieval fields that should be written into rag_trace from the retrieve meta."""
     return {key: meta[key] for key in RETRIEVAL_TRACE_FIELDS if key in meta and meta[key] is not None}
 
 
@@ -134,7 +134,7 @@ def _get_rerank_endpoint() -> str:
 
 
 def _effective_score(doc: dict) -> Optional[float]:
-    """精排分优先，否则用召回分；用于合并聚合与合并后重排。"""
+    """Prefer the rerank score, otherwise use the recall score; used for merge aggregation and post-merge reranking."""
     rerank_score = doc.get("rerank_score")
     if rerank_score is not None:
         return float(rerank_score)
@@ -222,7 +222,7 @@ def _empty_merge_meta() -> Dict[str, Any]:
 
 
 def _auto_merge_candidates(docs: List[dict]) -> Tuple[List[dict], Dict[str, Any]]:
-    """在完整召回候选上执行 L3→L2→L1 合并；不改变顺序，精排由后续步骤负责。"""
+    """Perform L3→L2→L1 merging over the full set of recall candidates; order is unchanged, reranking is handled by a later step."""
     meta = _empty_merge_meta()
     meta["post_merge_candidate_count"] = len(docs)
     if not AUTO_MERGE_ENABLED or not docs:
@@ -246,7 +246,7 @@ def _sort_by_rank_score(docs: List[dict]) -> List[dict]:
 
 
 def dedupe_documents(docs: List[dict]) -> List[dict]:
-    """按 chunk_id 去重；重复项保留更高 rank 分（rerank_score 优先）。"""
+    """Dedupe by chunk_id; duplicates keep the higher rank score (rerank_score takes priority)."""
     by_key: Dict[str, dict] = {}
     order: List[str] = []
     for item in docs:
@@ -321,33 +321,34 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
 
 class RewritePlan(BaseModel):
     method: Literal["step_back", "hyde"] = Field(
-        description="本轮唯一使用的查询重写方式"
+        description="The single query-rewrite method used this round"
     )
     step_back_question: str = Field(
         default="",
         max_length=300,
-        description="仅在 method=step_back 时填写的抽象退步问题",
+        description="The abstracted step-back question, filled in only when method=step_back",
     )
     hyde_document: str = Field(
         default="",
         max_length=1200,
-        description="仅在 method=hyde 时填写的假设性答案文档",
+        description="The hypothetical answer document, filled in only when method=hyde",
     )
 
 
 REWRITE_PROMPT = (
-    "你是 RAG 查询重写规划器。初次检索已经找到相关信号，但证据不足。"
-    "请在 step_back 和 hyde 中只选择一种重写方式，并同时生成该方式需要的内容。\n\n"
-    "选择规则：\n"
-    "- step_back：原问题过于具体，包含实体名、型号、时间、条件或细节，"
-    "需要提升到更概括的概念、机制或原理后再检索。\n"
-    "- hyde：原问题模糊、概念性强、缺少知识库常用术语，"
-    "适合先生成一段可能的答案式文档，再用这段文档检索真实证据。\n\n"
-    "约束：\n"
-    "- method=step_back 时，只填写 step_back_question，hyde_document 必须留空。\n"
-    "- method=hyde 时，只填写 hyde_document，step_back_question 必须留空。\n"
-    "- HyDE 文档只能用于检索，不代表真实证据，不要编造引用或来源。\n\n"
-    "用户问题：{query}"
+    "You are a RAG query-rewrite planner. The initial retrieval already found a relevant signal, "
+    "but the evidence is insufficient. Choose exactly one rewrite method — step_back or hyde — and "
+    "generate the content that method needs.\n\n"
+    "Selection rules:\n"
+    "- step_back: the original question is too specific, containing entity names, model numbers, dates, "
+    "conditions, or details; it needs to be raised to a more general concept, mechanism, or principle before retrieving again.\n"
+    "- hyde: the original question is vague, highly conceptual, or lacks terminology commonly used in the "
+    "knowledge base; it's better to first generate a plausible answer-like document, then use that document to retrieve real evidence.\n\n"
+    "Constraints:\n"
+    "- When method=step_back, fill in only step_back_question; hyde_document must be left empty.\n"
+    "- When method=hyde, fill in only hyde_document; step_back_question must be left empty.\n"
+    "- The HyDE document is for retrieval only and does not represent real evidence — do not fabricate citations or sources.\n\n"
+    "User question: {query}"
 )
 
 
@@ -382,11 +383,11 @@ def rewrite_query_once(query: str) -> dict:
     if method == "step_back":
         if not step_back_question or hyde_document:
             raise ValueError("Step-back rewrite plan must contain only step_back_question")
-        rewritten_query = f"{query}\n\n退步问题：{step_back_question}"
+        rewritten_query = f"{query}\n\nStep-back question: {step_back_question}"
     elif method == "hyde":
         if not hyde_document or step_back_question:
             raise ValueError("HyDE rewrite plan must contain only hyde_document")
-        rewritten_query = f"{query}\n\n假设性答案文档：{hyde_document}"
+        rewritten_query = f"{query}\n\nHypothetical answer document: {hyde_document}"
     else:
         raise ValueError(f"Unsupported rewrite method: {method}")
 
@@ -406,7 +407,7 @@ def _finalize_retrieval(
     candidate_k: int,
     candidate_config: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """生产流水线：召回候选 → Auto-merge → Rerank（top_k）→ 阈值过滤。"""
+    """Production pipeline: recall candidates → Auto-merge → Rerank (top_k) → threshold filtering."""
     candidates, merge_meta = _auto_merge_candidates(retrieved)
     reranked_docs, rerank_meta = _rerank_documents(query=query, docs=candidates, top_k=top_k)
     post_rerank_count = len(reranked_docs)

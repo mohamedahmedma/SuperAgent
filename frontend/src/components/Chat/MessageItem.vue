@@ -9,9 +9,9 @@
 
     <div class="message-column">
       <div v-if="!msg.isUser" class="message-author">
-        <span>喵喵助手</span>
+        <span>Mew Assistant</span>
         <small v-if="msg.ragTrace?.retrieved_chunks?.length">
-          已引用 {{ msg.ragTrace.retrieved_chunks.length }} 个来源
+          Cited {{ msg.ragTrace.retrieved_chunks.length }} sources
         </small>
       </div>
 
@@ -22,7 +22,7 @@
       <template v-else>
         <div v-if="msg.hitlResumeText" class="hitl-resume-note">
           <i class="fa-solid fa-rotate-right"></i>
-          <span>已补充：{{ msg.hitlResumeText }}，正在继续原流程</span>
+          <span>Added: {{ msg.hitlResumeText }} — continuing the original flow</span>
         </div>
 
         <ThinkingTrace

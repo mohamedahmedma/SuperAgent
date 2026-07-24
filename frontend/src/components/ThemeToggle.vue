@@ -4,7 +4,7 @@
     type="button"
     role="switch"
     :aria-checked="theme === 'light'"
-    :aria-label="theme === 'light' ? '切换为深色模式' : '切换为浅色模式'"
+    :aria-label="theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'"
     @click="$emit('toggle')"
   >
     <i class="fa-regular fa-sun theme-toggle-icon theme-toggle-sun" aria-hidden="true"></i>

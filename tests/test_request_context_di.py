@@ -34,7 +34,7 @@ class ChatRequestContextTests(unittest.IsolatedAsyncioTestCase):
                 "from A",
                 "detail A",
                 group="group A",
-                group_label="真实子问题 A",
+                group_label="Real sub-question A",
             )
             ctx_b.emit_rag_step("B", "from B", "detail B", group="group B")
             await asyncio.sleep(0)
@@ -45,7 +45,7 @@ class ChatRequestContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(event_a["type"], "rag_step")
             self.assertEqual(event_a["step"]["icon"], "A")
             self.assertEqual(event_a["step"]["group"], "group A")
-            self.assertEqual(event_a["step"]["group_label"], "真实子问题 A")
+            self.assertEqual(event_a["step"]["group_label"], "Real sub-question A")
             self.assertGreaterEqual(event_a["step"]["elapsed_ms"], 0)
             self.assertGreaterEqual(event_a["step"]["stage_elapsed_ms"], 0)
             self.assertEqual(event_b["type"], "rag_step")

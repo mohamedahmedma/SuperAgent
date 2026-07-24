@@ -1,4 +1,4 @@
-"""文本向量化服务 - 只支持密集向量（由 Milvus 2.5+ 原生支持中文分词与 BM25 全文检索）"""
+"""Text embedding service - dense vectors only (Milvus 2.5+ natively supports Chinese tokenization and BM25 full-text search)"""
 import os
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -14,7 +14,7 @@ def _create_dense_embedder() -> HuggingFaceEmbeddings:
 
 
 class EmbeddingService:
-    """文本向量化服务 - 密集向量本地模型"""
+    """Text embedding service - local dense vector model"""
 
     def __init__(self, state_path=None):
         self._embedder = _create_dense_embedder()
@@ -25,8 +25,8 @@ class EmbeddingService:
         try:
             return self._embedder.embed_documents(texts)
         except Exception as e:
-            raise Exception(f"本地密集嵌入模型调用失败: {str(e)}") from e
+            raise Exception(f"Local dense embedding model call failed: {str(e)}") from e
 
 
-# 全进程唯一实例
+# Process-wide singleton instance
 embedding_service = EmbeddingService()

@@ -1,377 +1,377 @@
-# SuperMew 项目说明
+# SuperMew Project Documentation
 
-Agent的项目记录，方便后续持续更新与展示。
+An Agent project log, kept up to date for ongoing development and demos.
 
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/icey1287/SuperMew)
 
-## 本地部署
+## Local Deployment
 
-### 1) 环境准备
+### 1) Prerequisites
 - Python `3.12+`
-- 包管理建议：`uv`（也支持 `pip`）
-- Docker / Docker Compose（用于启动 Milvus 依赖）
+- Recommended package manager: `uv` (`pip` is also supported)
+- Docker / Docker Compose (used to start the Milvus dependencies)
 
-### 2) 使用 pyproject 安装依赖
-在项目根目录执行：
+### 2) Install dependencies via pyproject
+Run from the project root:
 
 ```bash
-# 方式 A：推荐（uv）
+# Option A: recommended (uv)
 uv sync
 
-# 运行服务
+# Run the service
 uv run python backend/app.py
-# 或
+# or
 uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ```bash
-# 方式 B：pip
+# Option B: pip
 python -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e .
 
-# 运行服务
+# Run the service
 python backend/app.py
-# 或
+# or
 uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 3) 创建 `.env` 文件
+### 3) Create the `.env` file
 
 ```bash
 cp .env.example .env
 ```
 
-按需编辑 `.env` 中的 API Key、模型名与连接地址；变量说明见 `.env.example` 内注释。
+Edit the API keys, model names, and connection URLs in `.env` as needed; see the comments in `.env.example` for details on each variable.
 
-### 4) Docker 部署（数据库 + 缓存 + 向量库）
-当前仓库的 `docker-compose.yml` 同时承载业务依赖与 Milvus 依赖：
-- 业务依赖：`postgres`、`redis`
-- 向量依赖：`etcd`、`minio`、`standalone`、`attu`
+### 4) Docker deployment (database + cache + vector store)
+This repo's `docker-compose.yml` bundles both the application dependencies and the Milvus dependencies:
+- Application dependencies: `postgres`, `redis`
+- Vector dependencies: `etcd`, `minio`, `standalone`, `attu`
 
 ```bash
-# 启动向量库依赖
+# Start the vector store dependencies
 docker compose up -d
 
-# 查看服务状态
+# Check service status
 docker compose ps
 
-# 查看日志（可选）
+# View logs (optional)
 docker compose logs -f standalone
 ```
 
-端口说明：
-- PostgreSQL：`5432`
-- Redis：`6379`
-- Milvus：`19530`
-- Milvus 健康检查：`9091`
-- MinIO API：`9000`
-- MinIO Console：`9001`
-- Attu：`8080`
+Port reference:
+- PostgreSQL: `5432`
+- Redis: `6379`
+- Milvus: `19530`
+- Milvus health check: `9091`
+- MinIO API: `9000`
+- MinIO Console: `9001`
+- Attu: `8080`
 
-### 5) 编译前端代码（首次运行及修改后必做）
-首次运行或前端代码修改后，需要进行前端依赖安装和构建编译，以生成供后端托管的 `frontend/dist` 目录：
+### 5) Build the frontend (required on first run and after any frontend changes)
+On first run, or after modifying the frontend code, you need to install dependencies and build the frontend so the `frontend/dist` directory (served by the backend) gets generated:
 
 ```bash
 cd frontend
 
-# 安装前端依赖
+# Install frontend dependencies
 npm install
 
-# 编译构建静态包
+# Build the static bundle
 npm run build
 ```
 
-编译完成后，构建产物会自动保存在 `frontend/dist/` 中，后端启动时会自动挂载此目录。
+Once the build finishes, the output is saved automatically under `frontend/dist/`; the backend mounts this directory automatically on startup.
 
-### 6) 启动应用并访问
-在 Milvus 启动且前端编译完成后，返回项目根目录并运行后端应用：
+### 6) Start the app and access it
+Once Milvus is running and the frontend has been built, go back to the project root and run the backend app:
 
 ```bash
-# 若当前处于 frontend 目录下，先返回项目根目录
+# If you're currently in the frontend directory, go back to the project root first
 cd ..
 
-# 运行后端应用
+# Run the backend app
 uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-浏览器访问：
-- 前端页面：`http://127.0.0.1:8000/` （后端静态托管编译后的 `frontend/dist` 资源）
-- API 文档：`http://127.0.0.1:8000/docs`
+Open in a browser:
+- Frontend page: `http://127.0.0.1:8000/` (the backend serves the built `frontend/dist` assets statically)
+- API docs: `http://127.0.0.1:8000/docs`
 
-### 7) 前端开发与调试（可选）
-前端基于 Vite + Vue 3 开发。若需要进行前端代码开发与调试：
+### 7) Frontend development & debugging (optional)
+The frontend is built with Vite + Vue 3. To develop and debug the frontend code:
 
 ```bash
 cd frontend
 
-# 1. 启动本地开发服务（运行于 http://localhost:3000，内置反向代理至 FastAPI 后端 8000 端口）
+# 1. Start the local dev server (runs at http://localhost:3000, with a built-in reverse proxy to the FastAPI backend on port 8000)
 npm run dev
 
-# 2. 编译生产包（构建结果将输出至 frontend/dist/ 目录中，供后端静态托管）
+# 2. Build the production bundle (output goes to frontend/dist/, served statically by the backend)
 npm run build
 ```
 
-## 项目概览
-- **核心能力**：
-  - LangChain Agent + 自定义工具。
-  - 文档上传后执行三级滑动窗口分块，叶子分块向量化写入 Milvus，父级分块写入 PostgreSQL。
-  - 用户注册/登录、JWT 鉴权、基于角色的 RBAC 权限控制（admin/user）。
-  - 会话记忆与摘要，聊天与历史记录落地 PostgreSQL，并引入 Redis 缓存热点会话与父文档。
-- **运行形态**：FastAPI 后端 + 现代工程化前端（Vite + Vue 3 + TypeScript + Pinia）+ Milvus 向量库。
+## Project Overview
+- **Core capabilities**:
+  - LangChain Agent + custom tools.
+  - Uploaded documents go through three-tier sliding-window chunking; leaf chunks are embedded and written to Milvus, and parent chunks are written to PostgreSQL.
+  - User registration/login, JWT authentication, role-based RBAC access control (admin/user).
+  - Session memory and summarization; chat and history persist to PostgreSQL, with Redis caching hot sessions and parent documents.
+- **Deployment shape**: FastAPI backend + a modern, engineered frontend (Vite + Vue 3 + TypeScript + Pinia) + Milvus vector store.
 
-## 关键创新点
-- **混合检索落地**：稠密向量 + BM25 稀疏向量，Milvus Hybrid Search + RRF 排序，兼顾语义与词匹配。
-- **低延迟复杂度规划与并行 Sub-Agent 流程**：明显的单事实问题由本地规则直接进入检索；其余问题由 FAST_MODEL 一次完成复杂度判断和 2-4 个子问题规划。复杂问题通过 LangGraph `Send` 并行执行各子问题的“检索 → 证据评判”，最终在 Synthesis 节点去重合成。
-- **纠错型 RAG（Corrective RAG）与单选查询重写**：检索后由独立的 GRADE_MODEL 结构化判断证据相关性、可回答性与歧义。证据不足时，FAST_MODEL 在一次结构化调用中选择 Step-back 或 HyDE，只执行选中的一次重写检索和一次复评。
-- **Jina Rerank 接入**：Hybrid/Dense 召回后进行 API 级精排，支持返回 `rerank_score` 并在前端可视化。
-- **双向降级**：稀疏生成或 Hybrid 调用失败时自动降级为纯稠密检索，提升稳定性。
-- **流式输出（Streaming）**：后端基于 `agent.astream(stream_mode="messages")` 逐 token 推送，前端 SSE + ReadableStream 实现打字机效果。
-- **实时 RAG 过程可视化**：检索过程在模型"思考中"阶段就开始展示，通过 `asyncio.Queue` + 后台任务架构实现工具执行期间的实时推送。
-- **回答终止功能**：前端 `AbortController` + 后端 `StreamingResponse` 支持用户随时中断正在生成的回答。
-- **会话摘要记忆**：自动摘要旧消息并注入系统提示，维持上下文且控制 token。
-- **文档处理链路**：上传 → 切分 → 稠密/稀疏向量同步生成 → Milvus 入库，支持重复上传自动清理旧 chunk。
-- **Milvus 2.5+ 原生 BM25 混合检索**：彻底摒弃本地客户端手写 BM25 序列化和统计同步的繁琐设计。通过在 Milvus 集合 schema 中为 `text` 字段绑定 `FunctionType.BM25` 计算函数，由向量数据库在服务端原生提取稀疏特征，保证高效率的 Dense + Sparse 混合检索与完美的统计对齐。
-- **三级分块 + Auto-merging**：L1/L2/L3 三层滑窗切分；检索时优先召回 L3，满足阈值后自动合并到父块（L3->L2->L1）。
-- **Leaf-only 向量化存储**：仅叶子分块写入 Milvus，父块写入 DocStore，减少向量冗余并保留上下文聚合能力。
-- **工具可扩展**：天气查询示例 + 知识库检索，便于按需增添第三方 API 或企业数据源。
-- **RAG 过程可观测**：记录检索、评分、重写与来源信息，前端可展开查看每一步细节。
-- **查询重写体系**：证据不足时由 FAST_MODEL 在 Step-back 与 HyDE 中单选一种，并只执行一次二次检索，控制模型调用次数与最坏延迟。
-- **相关性评分门控**：基于结构化输出的 `grade_documents` 判断是否需要重写检索。
-- **实时思考链路展示**：通过 `asyncio` 事件循环穿透技术，实现 Agent 在执行 RAG、评分、重写等同步工具时，实时向前端推送思考步骤（Searching -> Grading -> Rewriting），彻底解决"静默思考"问题。
+## Key Innovations
+- **Hybrid retrieval in production**: dense vectors + BM25 sparse vectors, Milvus Hybrid Search + RRF ranking, balancing semantic and lexical matching.
+- **Low-latency complexity planning with parallel Sub-Agents**: obviously simple, single-fact questions go straight to retrieval via local rules; everything else has FAST_MODEL determine complexity and plan 2-4 sub-questions in a single call. Complex questions run each sub-question's "retrieve -> grade evidence" step in parallel via LangGraph's `Send`, then get deduplicated and merged at the Synthesis node.
+- **Corrective RAG with single-choice query rewriting**: after retrieval, a dedicated GRADE_MODEL judges evidence relevance, answerability, and ambiguity via structured output. When evidence is insufficient, FAST_MODEL picks either Step-back or HyDE in a single structured call, and only that one rewrite-retrieval-and-regrade cycle runs.
+- **Jina Rerank integration**: API-level reranking after Hybrid/Dense recall, returning `rerank_score` for frontend visualization.
+- **Two-way degradation**: automatically falls back to pure dense retrieval if sparse vector generation or the Hybrid call fails, improving robustness.
+- **Streaming output**: the backend streams tokens via `agent.astream(stream_mode="messages")`; the frontend uses SSE + ReadableStream for a typewriter effect.
+- **Real-time RAG process visualization**: retrieval progress starts showing while the model is still "thinking," powered by an `asyncio.Queue` + background-task architecture that pushes updates in real time during tool execution.
+- **Answer cancellation**: the frontend's `AbortController` plus the backend's `StreamingResponse` let users interrupt an in-progress answer at any time.
+- **Session summary memory**: old messages are automatically summarized and injected into the system prompt, preserving context while controlling token usage.
+- **Document ingestion pipeline**: upload -> chunk -> generate dense/sparse vectors together -> write to Milvus, with automatic cleanup of old chunks on re-upload.
+- **Milvus 2.5+ native BM25 hybrid retrieval**: entirely drops the tedious pattern of hand-rolled client-side BM25 serialization and statistics syncing. By binding a `FunctionType.BM25` function to the `text` field in the Milvus collection schema, the vector database extracts sparse features natively on the server side, guaranteeing efficient Dense + Sparse hybrid retrieval with perfectly aligned statistics.
+- **Three-tier chunking + Auto-merging**: three-tier sliding-window splitting (L1/L2/L3); retrieval prioritizes L3 recall and automatically merges up to the parent chunk (L3->L2->L1) once a threshold is met.
+- **Leaf-only vector storage**: only leaf chunks are written to Milvus, while parent chunks go to the DocStore, reducing vector redundancy while preserving the ability to aggregate context.
+- **Extensible tools**: a weather-lookup example plus knowledge-base retrieval, making it easy to add third-party APIs or enterprise data sources as needed.
+- **Observable RAG process**: retrieval, grading, rewriting, and source information are all logged; the frontend can expand to inspect every step's details.
+- **Query rewriting system**: when evidence is insufficient, FAST_MODEL picks a single method (Step-back or HyDE) and runs only one secondary retrieval, keeping model-call counts and worst-case latency in check.
+- **Relevance-score gating**: structured-output `grade_documents` determines whether a rewrite-and-retry retrieval is needed.
+- **Real-time thinking-trace display**: using an `asyncio` event-loop pass-through technique, the Agent pushes thinking steps (Searching -> Grading -> Rewriting) to the frontend in real time while running synchronous tools like RAG, grading, and rewriting — completely solving the "silent thinking" problem.
 
-## 未来迭代（Todo Lists）
+## Roadmap (Todo Lists)
 
-### RAG部分
+### RAG
 
-#### 数据层、Chunk分块
+#### Data layer & chunking
 
-1. 先做文档结构解析，按文档结构做粗拆分，再用递归字符分块兜底，保证打的主题单元不被拆分（2000-3000token）；再用语义分块做精细化拆分，控制单块大小（512-1024token）
-2. 代码块、表格、图片特殊处理
-3. 实现 ParentDocument/Auto-merging Retriever 策略 --done
+1. Start with document-structure parsing for a coarse split along structural boundaries, falling back to recursive character chunking to ensure topical units aren't broken apart (2000-3000 tokens); then apply semantic chunking for finer-grained splitting, keeping each chunk within 512-1024 tokens.
+2. Special handling for code blocks, tables, and images.
+3. Implement a ParentDocument/Auto-merging Retriever strategy --done
 
-#### 召回层
+#### Recall layer
 
-1. BM25的k1和b新增参数扫描
-2. RRF额外做BM25和dense的权重，可以通过AB test确定
-3. 做一个小型标注集比较dense only、sparse only、hybrid、hybrid + rerank的gold chunk
+1. Add parameter sweeps for BM25's k1 and b.
+2. Add BM25/dense weighting on top of RRF, tunable via A/B testing.
+3. Build a small labeled set to compare gold chunks across dense-only, sparse-only, hybrid, and hybrid + rerank.
 
-#### 生成层
+#### Generation layer
 
-1. 子问题分解（CoT、专门的分解小模型、判断分几个子问题）
-2. 多文档Refine（一次拼接、串行Refine）
-3. 多文档冲突处理（A文档说X，B文档说非X），回答中显式输出“来源存在冲突”
+1. Sub-question decomposition (CoT, a dedicated small decomposition model, deciding how many sub-questions to split into).
+2. Multi-document refine (single concatenation vs. sequential refine).
+3. Multi-document conflict handling (document A says X, document B says not-X) — explicitly surface "conflicting sources" in the answer.
 
-#### 其他
+#### Other
 
-1. 向量嵌入：新增多模态 embedding 能力
-2. 搭建 RAG 评估体系
-3. Rerank 策略评估（top_k、candidate_k、召回/精排比例）
+1. Vector embeddings: add multimodal embedding support.
+2. Build out a RAG evaluation framework.
+3. Rerank strategy evaluation (top_k, candidate_k, recall/rerank ratio).
 
-### 其他能力拓展
+### Other capability expansion
 
-1. 开发 SQL assistant Skill
-2. 实现暂停功能与人工介入机制 --done
-3. 新增问题类型判断，简单问题跳过复杂处理流程
-4. 扩展网络搜索能力
-5. 支持多步骤规划与任务并行执行
-6. 搭建路由器节点，由 LLM 自主判断下一步动作
-7. 优化 memory 管理：集成 MemO、LangMem 等方案
-8. multi-agent：工具过多，把工具拆分给职责明确的专业化agent，提升工具选择的准确性和整体稳定性
-9. 历史记录会话名称可修改
-10. 死循环检测与恢复：_is_stuck + attempt_loop_recovery
+1. Build a SQL assistant Skill.
+2. Implement a pause feature and human-in-the-loop mechanism --done
+3. Add question-type classification so simple questions can skip the complex processing pipeline.
+4. Expand web search capability.
+5. Support multi-step planning with parallel task execution.
+6. Build a router node so the LLM can autonomously decide the next action.
+7. Improve memory management: integrate solutions like MemO, LangMem.
+8. Multi-agent: with too many tools in one place, split tools across specialized agents with clear responsibilities to improve tool-selection accuracy and overall stability.
+9. Allow renaming session titles in chat history.
+10. Infinite-loop detection and recovery: `_is_stuck` + `attempt_loop_recovery`.
 
-### 后端服务建设（本轮已完成）
+### Backend Service Buildout (completed in this round)
 
-1. 账号体系与权限体系
-- 新增注册登录接口：`/auth/register`、`/auth/login`。
-- 新增用户信息接口：`/auth/me`。
-- 引入 JWT 鉴权中间能力：请求通过 Bearer Token 识别当前用户。
-- 权限隔离：
-  - `admin`：可执行文档上传、删除、文档列表查询。
-  - `user`：仅可聊天、查询和删除自己的会话历史。
+1. Account and permission system
+- Added registration/login endpoints: `/auth/register`, `/auth/login`.
+- Added a user-info endpoint: `/auth/me`.
+- Introduced JWT authentication middleware: requests identify the current user via a Bearer token.
+- Permission isolation:
+  - `admin`: can upload, delete, and list documents.
+  - `user`: can only chat, and query/delete their own session history.
 
-2. 数据库建模与持久化迁移
-- 使用 SQLAlchemy 建立核心模型：`User`、`ChatSession`、`ChatMessage`、`ParentChunk`。
-- 聊天历史由本地 JSON 迁移到 PostgreSQL。
-- 父级分块文档（L1/L2）由本地 JSON 迁移到 PostgreSQL。
+2. Database modeling and persistence migration
+- Established core models with SQLAlchemy: `User`, `ChatSession`, `ChatMessage`, `ParentChunk`.
+- Migrated chat history from local JSON to PostgreSQL.
+- Migrated parent chunk documents (L1/L2) from local JSON to PostgreSQL.
 
-3. Redis 缓存策略
-- 会话消息缓存：按 `user + session` 维度缓存消息列表。
-- 会话列表缓存：按 `user` 维度缓存会话摘要列表。
-- 父文档缓存：按 `chunk_id` 缓存父级分块内容。
-- 写入/删除后执行缓存失效，保证一致性。
+3. Redis caching strategy
+- Session message cache: message lists cached per `user + session`.
+- Session list cache: session summary lists cached per `user`.
+- Parent document cache: parent chunk content cached by `chunk_id`.
+- Cache invalidation runs after writes/deletes to maintain consistency.
 
-4. 密码安全与兼容
-- 新注册用户采用 PBKDF2-SHA256 存储密码哈希（避免 bcrypt 后端兼容问题）。
-- 登录校验兼容历史 bcrypt 哈希，支持平滑迁移。
+4. Password security and compatibility
+- Newly registered users have their password hashed with PBKDF2-SHA256 (avoiding bcrypt backend compatibility issues).
+- Login validation remains compatible with legacy bcrypt hashes, enabling a smooth migration.
 
-## 目录与架构
-- 后端：`backend/`（分层包结构，统一 `from backend.xxx import`）
-  - [app.py](backend/app.py)：FastAPI 入口、CORS、静态资源挂载。
-  - `api/`：HTTP 层
-    - [router.py](backend/api/router.py)：路由聚合。
-    - `routes/`：`auth`、`sessions`、`chat`、`documents` 分文件。
-    - [resources.py](backend/api/resources.py)：Milvus / 上传目录等共享资源。
-  - `chat/`：对话域
-    - [service.py](backend/chat/service.py)：非流式 / 流式聊天入口。
-    - [runtime.py](backend/chat/runtime.py)：模型客户端与每请求 Agent 创建。
-    - [request_context.py](backend/chat/request_context.py)：每请求 RAG step、RAG trace、工具预算上下文。
-    - [storage.py](backend/chat/storage.py)：会话 PostgreSQL + Redis。
-  - `rag/`：检索增强
-    - [pipeline.py](backend/rag/pipeline.py)：LangGraph RAG 工作流。
-    - [utils.py](backend/rag/utils.py)：混合检索、Rerank、Auto-merging。
-  - `indexing/`：文档入库与向量
-    - [embedding.py](backend/indexing/embedding.py)：稠密 + BM25 稀疏向量。
-    - [document_loader.py](backend/indexing/document_loader.py)：PDF/Word/Excel 分块。
-    - [milvus_client.py](backend/indexing/milvus_client.py)、[milvus_writer.py](backend/indexing/milvus_writer.py)。
-    - [parent_chunk_store.py](backend/indexing/parent_chunk_store.py)：父级分块 DocStore。
-  - `tools/`：LangChain Agent 可调用的 `@tool`（天气、知识库检索）。
-  - `infra/`：[database.py](backend/infra/database.py)、[cache.py](backend/infra/cache.py)、[auth.py](backend/infra/auth.py)。
-  - `db/`：[models.py](backend/db/models.py)：ORM 模型。
-  - `schemas/`：Pydantic 请求/响应（auth / chat / documents）。
-  - `jobs/`：[upload_jobs.py](backend/jobs/upload_jobs.py)：异步上传/删除任务进度。
-- 前端：`frontend/`
-  - 采用现代工程化设计（Vite + Vue 3 + TypeScript + Pinia + Axios + Sass）。
-  - **前端工程架构与状态流**：
-    - **Pinia 状态存储**：
-      - `stores/auth.ts`：处理 JWT 鉴权状态、用户注册与登录，维持 Bearer 鉴权请求。
-      - `stores/sessions.ts`：负责多会话历史的创建、异步载入、删除与切换。
-      - `stores/chat.ts`：缓存消息流，承载 RAG 各个阶段执行步骤的响应式更新。
-      - `stores/documents.ts`：实现知识库文档的展示并配合接口轮询监听上传异步任务进度。
-    - **精细化组件设计**：
-      - `ThinkingTrace.vue` & `RetrievalTraceDetails.vue`：动态渲染子/主 Agent 思考状态（Searching, Grading, Rewriting 等步骤），支持展示每路子问题的合并与召回详情。
-      - `References.vue`：折叠卡片展示知识库来源信息，含 RRF Rank、Rerank 语义得分、合并叶子块数、所处层级和页码。
-      - `UploadSection.vue` & `DocumentSettings.vue`：管理员控制面板，动态轮询监听并步进展示上传的多阶段状态机进度。
-    - **流式解包与主动终止**：
-      - `utils/api.ts`：底层采用 `fetch` API 的 `response.body.getReader()` 流式逐块（chunk）解包 SSE 数据，并配合 `AbortController` 绑定终止按钮实现前端主动切断长连接。
-  - 在 `frontend/` 目录下运行 `npm run dev` 即可开始开发联调（运行于 http://localhost:3000）。
-  - 在 `frontend/` 目录下运行 `npm run build` 会生成生产环境编译产物输出至 `frontend/dist/`，供 FastAPI 后端无缝进行静态托管。
-- 数据：`data/`
-  - `documents/`：上传文档原文件。
-- 向量库：Milvus（可由 `docker-compose` 或自建服务提供）。
+## Directory Layout & Architecture
+- Backend: `backend/` (a layered package structure, all imports go through `from backend.xxx import`)
+  - [app.py](backend/app.py): FastAPI entry point, CORS, static asset mounting.
+  - `api/`: HTTP layer
+    - [router.py](backend/api/router.py): route aggregation.
+    - `routes/`: split into `auth`, `sessions`, `chat`, `documents` files.
+    - [resources.py](backend/api/resources.py): shared resources such as Milvus and the upload directory.
+  - `chat/`: conversation domain
+    - [service.py](backend/chat/service.py): non-streaming / streaming chat entry points.
+    - [runtime.py](backend/chat/runtime.py): model clients and per-request Agent creation.
+    - [request_context.py](backend/chat/request_context.py): per-request RAG step, RAG trace, and tool-budget context.
+    - [storage.py](backend/chat/storage.py): session storage in PostgreSQL + Redis.
+  - `rag/`: retrieval augmentation
+    - [pipeline.py](backend/rag/pipeline.py): the LangGraph RAG workflow.
+    - [utils.py](backend/rag/utils.py): hybrid retrieval, reranking, auto-merging.
+  - `indexing/`: document ingestion and vectors
+    - [embedding.py](backend/indexing/embedding.py): dense + BM25 sparse vectors.
+    - [document_loader.py](backend/indexing/document_loader.py): PDF/Word/Excel chunking.
+    - [milvus_client.py](backend/indexing/milvus_client.py), [milvus_writer.py](backend/indexing/milvus_writer.py).
+    - [parent_chunk_store.py](backend/indexing/parent_chunk_store.py): the parent-chunk DocStore.
+  - `tools/`: `@tool`-decorated functions callable by the LangChain Agent (weather, knowledge-base retrieval).
+  - `infra/`: [database.py](backend/infra/database.py), [cache.py](backend/infra/cache.py), [auth.py](backend/infra/auth.py).
+  - `db/`: [models.py](backend/db/models.py): ORM models.
+  - `schemas/`: Pydantic request/response schemas (auth / chat / documents).
+  - `jobs/`: [upload_jobs.py](backend/jobs/upload_jobs.py): async upload/delete job progress.
+- Frontend: `frontend/`
+  - Built with a modern, engineered stack (Vite + Vue 3 + TypeScript + Pinia + Axios + Sass).
+  - **Frontend architecture & state flow**:
+    - **Pinia stores**:
+      - `stores/auth.ts`: handles JWT auth state, user registration and login, and keeps Bearer-authenticated requests going.
+      - `stores/sessions.ts`: handles creating, asynchronously loading, deleting, and switching between multiple chat sessions.
+      - `stores/chat.ts`: caches the message stream and drives reactive updates for each RAG execution step.
+      - `stores/documents.ts`: renders the knowledge-base document list and polls the API to track async upload job progress.
+    - **Fine-grained component design**:
+      - `ThinkingTrace.vue` & `RetrievalTraceDetails.vue`: dynamically render sub-Agent/main-Agent thinking state (Searching, Grading, Rewriting, etc.), including merge and recall details for each sub-question.
+      - `References.vue`: a collapsible card that shows knowledge-base source info, including RRF rank, rerank semantic score, number of merged leaf chunks, tier, and page number.
+      - `UploadSection.vue` & `DocumentSettings.vue`: the admin control panel, polling and stepping through the multi-stage upload state machine.
+    - **Streaming unpacking & active cancellation**:
+      - `utils/api.ts`: uses the `fetch` API's `response.body.getReader()` to unpack SSE data chunk by chunk at a low level, paired with an `AbortController` wired to the cancel button so the frontend can actively terminate a long-lived connection.
+  - Run `npm run dev` inside `frontend/` to start local development (served at http://localhost:3000).
+  - Run `npm run build` inside `frontend/` to produce the production build, output to `frontend/dist/`, which the FastAPI backend serves statically without any extra steps.
+- Data: `data/`
+  - `documents/`: the original uploaded document files.
+- Vector store: Milvus (provided by `docker-compose` or a self-hosted service).
 
-## 核心流程
+## Core Flows
 
-### 1) 项目全链路（端到端）
-1. 用户在前端输入问题，调用 `POST /chat/stream`（流式）。
-2. FastAPI `api/routes/chat.py` 返回 `StreamingResponse(media_type="text/event-stream")`。
-3. LangChain Agent 根据问题类型决定是否调用工具：
-  - 天气问题 → `get_current_weather`
-  - 知识问答 → `search_knowledge_base`
-4. 若命中知识库工具，进入 `backend/rag/pipeline.py` 执行检索工作流，各阶段通过 `ChatRequestContext` 实时推送到前端。
-5. 检索结果与 RAG Trace 一起返回，Agent 流式生成最终回答（逐 token 推送）。
-6. 前端 ReadableStream 逐块解析 SSE，打字机效果实时渲染。
-7. 同时消息持久化到 PostgreSQL，并通过 Redis 缓存加速历史会话回放。
+### 1) End-to-end project flow
+1. The user submits a question in the frontend, calling `POST /chat/stream` (streaming).
+2. FastAPI's `api/routes/chat.py` returns a `StreamingResponse(media_type="text/event-stream")`.
+3. The LangChain Agent decides whether to call a tool based on the question type:
+  - Weather question -> `get_current_weather`
+  - Knowledge question -> `search_knowledge_base`
+4. If the knowledge-base tool is triggered, execution enters `backend/rag/pipeline.py` to run the retrieval workflow, with each stage pushed to the frontend in real time via `ChatRequestContext`.
+5. The retrieval results and RAG trace are returned together, and the Agent streams the final answer (pushed token by token).
+6. The frontend's ReadableStream parses the SSE chunks and renders them in real time with a typewriter effect.
+7. Meanwhile, messages are persisted to PostgreSQL, with Redis caching speeding up replay of historical sessions.
 
-### 2) RAG 全链路（重点）
-1. **复杂度规划**：`classify_complexity`
-  - 明显的短单事实问题由本地规则直接判为 simple，不调用模型。
-  - 其余问题由 FAST_MODEL 一次完成 simple/complex 判断；complex 结果同时给出 2-4 个子问题，不再追加拆题调用。
-2. **检索执行**
-  - simple：进入 `retrieve_initial`，执行一次标准检索。
-  - complex：通过 LangGraph `Send` 并行执行各子问题的“检索 → 证据评判”，随后由 `synthesis` 去重合成。
-  - 调用 `retrieve_documents`。
-  - 先按 `chunk_level == 3` 执行 Milvus Hybrid 检索（Dense + Sparse + RRF），候选池大小由 `RETRIEVAL_CANDIDATE_K` 或 `RETRIEVAL_CANDIDATE_MULTIPLIER` 决定。
-  - 在完整候选上对叶子块执行 Auto-merging（L3→L2→L1），父块从 DocStore 读取。
-  - 对合并后的片段走 Jina Rerank 精排并截断 `top_k`（流水线：`recall_merge_rerank`）。
-3. **证据评判与路由**：`grade_documents`
-  - GRADE_MODEL 一次输出相关性、可回答性、歧义、置信度和 `route`。
-  - 路由仅进入回答、一次重写、HITL 澄清/范围选择或无知识结束；评判失败会显式报错，不切换到其他实现。
-4. **Step-back / HyDE 单选重写**：`rewrite_question`
-  - FAST_MODEL 在一次结构化调用中选择一种方式并生成对应内容。
-  - Step-back：生成更抽象的退步问题，与原问题组成 `rewritten_query`。
-  - HyDE：生成仅用于检索的假设性答案文档，与原问题组成 `rewritten_query`；该文档不作为回答证据。
-5. **二次召回**：`retrieve_rewritten`
-  - 对 `rewritten_query` 再执行一次 L3 召回 → Auto-merging → Rerank。
-6. **答案生成**：Agent 结合上下文生成最终回答。
-7. **可观测追踪**：返回 `rag_trace`，包括
-  - 评分结果与路由决策
-  - `rewrite_method`、`step_back_question` / `hyde_document` 与 `rewritten_query`
-  - 初次/二次检索结果
-  - 三级检索与合并信息（`leaf_retrieve_level`、`auto_merge_*`）
-  - 检索分数 `score` 与精排分数 `rerank_score`
+### 2) RAG flow in detail (the core of the system)
+1. **Complexity planning**: `classify_complexity`
+  - Obviously short, single-fact questions are classified `simple` directly by local rules, without a model call.
+  - Everything else has FAST_MODEL make the simple/complex determination in a single call; a `complex` result also returns 2-4 sub-questions in that same call, with no extra decomposition call needed.
+2. **Retrieval execution**
+  - simple: goes to `retrieve_initial` and runs a single standard retrieval.
+  - complex: each sub-question's "retrieve -> grade evidence" step runs in parallel via LangGraph's `Send`, then `synthesis` deduplicates and merges the results.
+  - Calls `retrieve_documents`.
+  - First runs a Milvus Hybrid retrieval (Dense + Sparse + RRF) filtered to `chunk_level == 3`; the candidate pool size is determined by `RETRIEVAL_CANDIDATE_K` or `RETRIEVAL_CANDIDATE_MULTIPLIER`.
+  - Runs Auto-merging (L3->L2->L1) over the full candidate set of leaf chunks, reading parent chunks from the DocStore.
+  - Passes the merged fragments through Jina Rerank and truncates to `top_k` (pipeline stage: `recall_merge_rerank`).
+3. **Evidence grading & routing**: `grade_documents`
+  - GRADE_MODEL outputs relevance, answerability, ambiguity, confidence, and `route` in a single call.
+  - Routing only leads to answering, a single rewrite, HITL clarification/scope selection, or ending with no knowledge; a grading failure raises an explicit error rather than falling back to another implementation.
+4. **Step-back / HyDE single-choice rewrite**: `rewrite_question`
+  - FAST_MODEL picks one method and generates the corresponding content in a single structured call.
+  - Step-back: generates a more abstract, "stepped-back" question, combined with the original question into `rewritten_query`.
+  - HyDE: generates a hypothetical answer document used only for retrieval, combined with the original question into `rewritten_query`; this document is never used as answer evidence.
+5. **Secondary recall**: `retrieve_rewritten`
+  - Runs another L3 recall -> Auto-merging -> Rerank pass against `rewritten_query`.
+6. **Answer generation**: the Agent combines the context to produce the final answer.
+7. **Observable tracing**: returns a `rag_trace`, including
+  - Grading results and routing decisions
+  - `rewrite_method`, `step_back_question` / `hyde_document`, and `rewritten_query`
+  - Initial/secondary retrieval results
+  - Three-tier retrieval and merge info (`leaf_retrieve_level`, `auto_merge_*`)
+  - Retrieval score `score` and rerank score `rerank_score`
 
-### 3) 文档入库链路
-1. 前端上传 PDF/Word 到 `POST /documents/upload`。
-2. 若同名文件已存在：先清除旧向量与父块 PostgreSQL 数据库及 Redis 缓存，保障库内状态一致。
-3. `document_loader.py` 执行三级滑动窗口分块并写入层级元数据（chunk_id / parent_chunk_id / root_chunk_id / chunk_level）。
-4. L1/L2 父级分块写入 `parent_chunk_store.py`（DocStore / PostgreSQL）。
-5. L3 叶子分块通过 `milvus_writer` 注入密集向量（由本地 `embedding.py` 的 `HuggingFaceEmbeddings` 产生），并将原始文本写入配置了原生分词中文分析器的 `text` 字段。
-6. Milvus 在数据库端自动、同步触发原生 BM25 逆向抽取，动态生成并存储稀疏向量至 `sparse_embedding`，无需客户端介入统计。
-7. 后续检索可直接利用新文档参与召回。
+### 3) Document ingestion flow
+1. The frontend uploads a PDF/Word file to `POST /documents/upload`.
+2. If a file with the same name already exists: old vectors and parent chunks are first cleared from PostgreSQL and the Redis cache to keep the store consistent.
+3. `document_loader.py` runs the three-tier sliding-window chunking and writes the hierarchy metadata (chunk_id / parent_chunk_id / root_chunk_id / chunk_level).
+4. L1/L2 parent chunks are written to `parent_chunk_store.py` (DocStore / PostgreSQL).
+5. L3 leaf chunks get dense vectors injected via `milvus_writer` (produced locally by `embedding.py`'s `HuggingFaceEmbeddings`), and the raw text is written to the `text` field, which is configured with a native Chinese tokenizing analyzer.
+6. Milvus automatically and synchronously triggers native BM25 extraction on the server side, dynamically generating and storing sparse vectors in `sparse_embedding` — no client-side statistics tracking required.
+7. Subsequent retrievals can immediately use the new document during recall.
 
-### 4) Milvus 2.5+ 原生 BM25 处理
-- **机制**：项目利用了 Milvus 2.5+ 新版内置的全文检索机制。创建集合时，定义一个 `FunctionType.BM25` 类型的函数，输入字段为 `text` 字段，输出字段为 `sparse_embedding`。
-- **自动对齐**：当新文本 chunk 插入或删除时，Milvus 在服务端自动进行分词、统计、稀疏特征向量计算。这实现了高效率、零客户端统计负担的密集 + 稀疏混合双塔检索。
+### 4) Milvus 2.5+ native BM25 processing
+- **Mechanism**: the project uses Milvus 2.5+'s new built-in full-text search mechanism. When the collection is created, a `FunctionType.BM25` function is defined with `text` as its input field and `sparse_embedding` as its output field.
+- **Automatic alignment**: whenever a new text chunk is inserted or deleted, Milvus automatically tokenizes, tallies statistics, and computes the sparse feature vector on the server side. This delivers efficient dense + sparse dual-tower retrieval with zero client-side statistics burden.
 
-### 5) 会话记忆链路
-1. 每轮问答按当前登录用户 + `session_id` 写入 PostgreSQL。
-2. 当消息过长时触发摘要压缩，保留长期上下文。
-3. Redis 缓存会话列表与会话消息，减少高频读取数据库压力。
-4. 前端可通过会话接口读取、删除当前用户自己的历史对话。
+### 5) Session memory flow
+1. Each turn is written to PostgreSQL keyed by the logged-in user + `session_id`.
+2. When the message history grows too long, summary compression kicks in to preserve long-term context.
+3. Redis caches the session list and session messages to reduce load on the database from frequent reads.
+4. The frontend can read and delete the current user's own conversation history via the session API.
 
-## 技术栈
-- 后端：FastAPI、LangChain Agents、Pydantic、Uvicorn、SQLAlchemy、PostgreSQL、Redis。
-- 向量与检索：Milvus（HNSW 稠密索引 + SPARSE_INVERTED_INDEX 稀疏索引）、RRF 融合、Jina Rerank 精排。
-- 嵌入与稀疏：`langchain_huggingface` 本地稠密向量（默认 `BAAI/bge-m3`）；Milvus 2.5+ 原生 Chinese 分析器与原生 BM25 特征提取。
-- 前端：Vite + Vue 3 (SFC) + TypeScript + Pinia + Axios + Marked + Highlight.js + FontAwesome，工程化编译与静态文件托管。
-- 工具链：dotenv 配置、requests、langchain_text_splitters、langchain_community.loaders。
+## Tech Stack
+- Backend: FastAPI, LangChain Agents, Pydantic, Uvicorn, SQLAlchemy, PostgreSQL, Redis.
+- Vector & retrieval: Milvus (HNSW dense index + SPARSE_INVERTED_INDEX sparse index), RRF fusion, Jina Rerank.
+- Embeddings & sparse vectors: local dense vectors via `langchain_huggingface` (defaults to `BAAI/bge-m3`); Milvus 2.5+'s native Chinese analyzer and native BM25 feature extraction.
+- Frontend: Vite + Vue 3 (SFC) + TypeScript + Pinia + Axios + Marked + Highlight.js + FontAwesome, with an engineered build and static file hosting.
+- Toolchain: dotenv config, requests, langchain_text_splitters, langchain_community.loaders.
 
-## 环境变量
-需在仓库根目录或运行环境配置：
-- 模型相关：`ARK_API_KEY`、`MODEL`、`FAST_MODEL`、`GRADE_MODEL`、`BASE_URL`。`FAST_MODEL` 负责复杂度规划及 Step-back / HyDE 单选重写；`GRADE_MODEL` 专门负责证据评判。两者都是显式必需配置，不会相互替代或回退到 `MODEL`。
-- 稠密向量：`EMBEDDING_MODEL`、`EMBEDDING_DEVICE`、`DENSE_EMBEDDING_DIM`（需与 Milvus 集合 `dense_embedding` 维度一致）
-- 密集与稀疏：Dense 由本地 embedding 生成；Sparse 由 Milvus 中文 analyzer 与 BM25 Function 自动生成和维护
-- Rerank 相关：`RERANK_MODEL`、`RERANK_BINDING_HOST`、`RERANK_API_KEY`
-- Milvus：`MILVUS_HOST`、`MILVUS_PORT`、`MILVUS_COLLECTION`
-- 数据库缓存：`DATABASE_URL`、`REDIS_URL`
-- 鉴权相关：`JWT_SECRET_KEY`、`ADMIN_INVITE_CODE`、`JWT_ALGORITHM`、`JWT_EXPIRE_MINUTES`
-- 密码参数：`PASSWORD_PBKDF2_ROUNDS`
-- 检索候选池：`RETRIEVAL_CANDIDATE_K`（固定候选数，优先）、`RETRIEVAL_CANDIDATE_MULTIPLIER`（未设 K 时 `max(top_k × 倍数, top_k)`，默认 `3`）
-- Auto-merging：`AUTO_MERGE_ENABLED`、`AUTO_MERGE_THRESHOLD`、`LEAF_RETRIEVE_LEVEL`
-- 工具：`AMAP_WEATHER_API`、`AMAP_API_KEY`
+## Environment Variables
+Configure these at the repo root or in your runtime environment:
+- Model-related: `ARK_API_KEY`, `MODEL`, `FAST_MODEL`, `GRADE_MODEL`, `BASE_URL`. `FAST_MODEL` handles complexity planning and the Step-back / HyDE single-choice rewrite; `GRADE_MODEL` is dedicated to evidence grading. Both are explicitly required and never substitute for each other or fall back to `MODEL`.
+- Dense vectors: `EMBEDDING_MODEL`, `EMBEDDING_DEVICE`, `DENSE_EMBEDDING_DIM` (must match the `dense_embedding` field dimension in the Milvus collection)
+- Dense and sparse: dense vectors come from the local embedding model; sparse vectors are automatically generated and maintained by Milvus's Chinese analyzer and BM25 Function
+- Rerank-related: `RERANK_MODEL`, `RERANK_BINDING_HOST`, `RERANK_API_KEY`
+- Milvus: `MILVUS_HOST`, `MILVUS_PORT`, `MILVUS_COLLECTION`
+- Database/cache: `DATABASE_URL`, `REDIS_URL`
+- Auth-related: `JWT_SECRET_KEY`, `ADMIN_INVITE_CODE`, `JWT_ALGORITHM`, `JWT_EXPIRE_MINUTES`
+- Password parameters: `PASSWORD_PBKDF2_ROUNDS`
+- Retrieval candidate pool: `RETRIEVAL_CANDIDATE_K` (a fixed candidate count, takes priority), `RETRIEVAL_CANDIDATE_MULTIPLIER` (used when K isn't set: `max(top_k x multiplier, top_k)`, default `3`)
+- Auto-merging: `AUTO_MERGE_ENABLED`, `AUTO_MERGE_THRESHOLD`, `LEAF_RETRIEVE_LEVEL`
+- Tools: `AMAP_WEATHER_API`, `AMAP_API_KEY`
 
-## API 速览
-- 鉴权
-  - `POST /auth/register`：注册（支持普通用户/管理员邀请码模式）。
-  - `POST /auth/login`：登录，返回 Bearer Token。
-  - `GET /auth/me`：获取当前登录用户信息。
-- 聊天
-  - `POST /chat`：聊天（非流式），入参 `message`、`session_id`。
-  - `POST /chat/stream`：聊天（流式 SSE），入参同上，返回 `text/event-stream`。
-- 会话（用户隔离）
-  - `GET /sessions`：列出当前用户会话。
-  - `GET /sessions/{session_id}`：拉取当前用户某会话消息。
-  - `DELETE /sessions/{session_id}`：删除当前用户会话。
-- 文档（管理员权限）
-  - `GET /documents`：列出已入库文档及 chunk 数。
-  - `POST /documents/upload`：上传并向量化 PDF/Word/Excel。
-  - `DELETE /documents/{filename}`：删除指定文档向量数据（会先按文件名分页拉取 chunk 文本并同步扣减 BM25 持久化统计，再删 Milvus）。
+## API Overview
+- Auth
+  - `POST /auth/register`: registration (supports a regular-user mode and an admin invite-code mode).
+  - `POST /auth/login`: login, returns a Bearer token.
+  - `GET /auth/me`: fetch the current logged-in user's info.
+- Chat
+  - `POST /chat`: chat (non-streaming), params `message`, `session_id`.
+  - `POST /chat/stream`: chat (streaming SSE), same params, returns `text/event-stream`.
+- Sessions (per-user isolation)
+  - `GET /sessions`: list the current user's sessions.
+  - `GET /sessions/{session_id}`: fetch messages for one of the current user's sessions.
+  - `DELETE /sessions/{session_id}`: delete a session belonging to the current user.
+- Documents (admin only)
+  - `GET /documents`: list ingested documents and their chunk counts.
+  - `POST /documents/upload`: upload and embed a PDF/Word/Excel file.
+  - `DELETE /documents/{filename}`: delete a document's vector data (first paginates through chunk text by filename to decrement the persisted BM25 statistics, then deletes from Milvus).
 
-## 流式输出与实时检索过程 — 技术细节
+## Streaming Output & Real-Time Retrieval — Technical Deep Dive
 
-#### 1. 跨线程事件调度（Cross-Thread Event Scheduling）
-这是一个解决 **"同步工具阻塞异步事件循环"** 问题的关键架构设计，常用于 Python 异步 Web 服务与 CPU 密集型/IO 密集型任务的混合场景。
+#### 1. Cross-Thread Event Scheduling
+This is a key architectural design that solves the **"a synchronous tool blocks the async event loop"** problem, common in Python async web services mixing CPU-bound/IO-bound tasks.
 
-**痛点**：
-FastAPI 运行在单线程的 asyncio Event Loop 上。为了不阻塞主线程，LangChain 通常将同步工具（如 `search_knowledge_base`）放到 `ThreadPoolExecutor` 中运行。但在子线程中，无法直接访问主线程的 `asyncio.Queue`，且 `asyncio.get_event_loop()` 通常会失败。
+**The pain point**:
+FastAPI runs on a single-threaded asyncio event loop. To avoid blocking the main thread, LangChain typically runs synchronous tools (like `search_knowledge_base`) in a `ThreadPoolExecutor`. But from a worker thread, you can't directly access the main thread's `asyncio.Queue`, and `asyncio.get_event_loop()` usually fails there.
 
-**解决方案**：
-我们采用了 **"Request Context + Threadsafe Callback"** 模式：
+**The solution**:
+We use a **"Request Context + Thread-Safe Callback"** pattern:
 
-1.  **请求上下文创建 (Service Layer)**:
-    `chat_with_agent_stream()` 为每个请求创建独立的 `ChatRequestContext`，其中保存本请求的 `output_queue` 与主事件循环。
-2.  **显式依赖注入 (Tool/RAG Layer)**:
-    运行时使用 `create_agent_for_request(ctx)` 为本请求创建 agent，并通过 `make_search_knowledge_base(ctx)` 创建捕获该 `ctx` 的专属工具。RAG pipeline 入口为 `run_rag_graph(question, ctx)`。
-3.  **跨线程发射 (Worker Thread)**:
-    RAG 节点调用 `ctx.emit_rag_step(...)`，内部使用本请求保存的 `loop.call_soon_threadsafe(queue.put_nowait, event)` 将事件投递回主 Loop。
-4.  **隔离保证**:
-    RAG step、RAG trace、知识库工具调用计数都存放在请求上下文对象中。
+1.  **Request context creation (Service Layer)**:
+    `chat_with_agent_stream()` creates an independent `ChatRequestContext` for each request, holding that request's `output_queue` and a reference to the main event loop.
+2.  **Explicit dependency injection (Tool/RAG Layer)**:
+    At runtime, `create_agent_for_request(ctx)` creates the agent for this request, and `make_search_knowledge_base(ctx)` creates a dedicated tool that captures that `ctx`. The RAG pipeline's entry point is `run_rag_graph(question, ctx)`.
+3.  **Cross-thread dispatch (Worker Thread)**:
+    A RAG node calls `ctx.emit_rag_step(...)`, which internally uses the request's saved `loop.call_soon_threadsafe(queue.put_nowait, event)` to deliver the event back to the main loop.
+4.  **Isolation guarantee**:
+    RAG steps, the RAG trace, and the knowledge-base tool call counter are all stored on the request context object.
 
 ```python
-# 核心代码摘要
+# Core code summary
 ctx = ChatRequestContext.for_stream(
     user_id=user_id,
     session_id=session_id,
@@ -379,39 +379,39 @@ ctx = ChatRequestContext.for_stream(
 )
 agent = create_agent_for_request(ctx)
 
-# RAG 节点内
-ctx.emit_rag_step("🔍", "正在检索知识库...", "初始检索")
+# Inside a RAG node
+ctx.emit_rag_step("🔍", "Searching the knowledge base...", "Initial retrieval")
 ```
 
-### 2. 混合检索（Hybrid Search）深度实现
-项目并非在客户端手写复杂的 BM25 特征序列化，而是利用 Milvus 2.5+ 服务端原生分析器构建了极致的双塔检索：
+### 2. Hybrid Search — a deep dive
+Rather than hand-rolling complex BM25 feature serialization on the client, the project builds an extremely efficient dual-tower retrieval on top of Milvus 2.5+'s native server-side analyzer:
 
-- **Dense Pathway**：使用 `langchain_huggingface.HuggingFaceEmbeddings`（默认 `BAAI/bge-m3`）生成稠密向量，维度由 `DENSE_EMBEDDING_DIM` 与集合 schema 对齐（默认 1024），向量可做 L2 归一化后与 Milvus `IP` 度量配合。
-- **Sparse Pathway**：
-    - 文档写入时，仅需将原始文本写入启用 `chinese` 分析器分词的 `text` 字段。
-    - Milvus 服务端自动运行绑定的 `FunctionType.BM25` 计算函数，动态生成对应的稀疏嵌入并同步到 `sparse_embedding` 索引中，完美对齐词表统计。
-- **Milvus 融合**：
-    - 使用 Milvus 的 `AnnSearchRequest` 同时发起稠密和稀疏的两个多路检索请求。
-    - **RRFRanker (Reciprocal Rank Fusion)**: 采用 `k=60` 的倒数排名融合算法，将两路召回结果无参数化地合并，避免了加权求和中调节 `alpha` 参数的困难。
+- **Dense pathway**: dense vectors are generated with `langchain_huggingface.HuggingFaceEmbeddings` (defaults to `BAAI/bge-m3`); the dimension is aligned with the collection schema via `DENSE_EMBEDDING_DIM` (default 1024), and vectors can be L2-normalized to pair with Milvus's `IP` metric.
+- **Sparse pathway**:
+    - When writing a document, only the raw text needs to be written to the `text` field, which has the `chinese` analyzer enabled for tokenization.
+    - The Milvus server automatically runs the bound `FunctionType.BM25` function, dynamically generating the corresponding sparse embedding and syncing it into the `sparse_embedding` index — with statistics perfectly aligned.
+- **Milvus fusion**:
+    - Milvus's `AnnSearchRequest` is used to issue the dense and sparse multi-path retrieval requests concurrently.
+    - **RRFRanker (Reciprocal Rank Fusion)**: uses a reciprocal-rank fusion algorithm with `k=60` to merge the two recall result sets without any parameter tuning, avoiding the difficulty of tuning an `alpha` weight in a weighted-sum approach.
 
-### 3. 前端 "Thinking State Machine"
-前端 `stores/chat.ts` 结合响应式组件 `ThinkingTrace.vue` 维护了一个微型状态机来处理通过 SSE 传回的复杂混合流：
+### 3. The frontend "Thinking State Machine"
+The frontend's `stores/chat.ts`, together with the reactive `ThinkingTrace.vue` component, maintains a small state machine to handle the complex mixed stream coming back over SSE:
 
-1.  **Idle**: 等待用户输入。
-2.  **Thinking (Initial)**: 收到请求，创建消息气泡并置其 `isThinking=true`。
-3.  **Thinking (Active RAG)**: 收到 `type: "rag_step"` 事件。
-    - 状态机保持 `isThinking=true`。
-    - 动态更新当前 RAG 步进文字与状态细节卡片（例如显示 "正在重写查询..."、"Auto-merging 合并完成" 等）。
-    - 往消息项的 `ragSteps` 数组追加步骤，实时推送到组件渲染。
-4.  **Streaming**: 收到首个 `type: "content"` 事件。
-    - **立即切换**: 标记并设置 `isThinking=false`。
-    - 并不销毁或重建气泡，而是隐藏思考详情头部，开始在同一个气泡内流式追加 Markdown 正文文本。
-    - 这样实现了从 "动态检索步骤思考" 到 "大模型流式回答" 的无缝视觉过渡，视觉上极为顺滑。
+1.  **Idle**: waiting for user input.
+2.  **Thinking (Initial)**: the request is received, a message bubble is created, and `isThinking` is set to `true`.
+3.  **Thinking (Active RAG)**: a `type: "rag_step"` event arrives.
+    - The state machine keeps `isThinking=true`.
+    - The current RAG step text and status detail card update dynamically (e.g. showing "Rewriting the query...", "Auto-merging complete", etc.).
+    - Steps are appended to the message item's `ragSteps` array and rendered by the component in real time.
+4.  **Streaming**: the first `type: "content"` event arrives.
+    - **Immediate switch**: `isThinking` is set to `false`.
+    - The bubble is neither destroyed nor recreated — the thinking-detail header is simply hidden, and Markdown body text starts streaming into the same bubble.
+    - This produces a seamless visual transition from "dynamic retrieval-step thinking" to "LLM streaming answer," which reads extremely smoothly.
 
-## 整体架构
+## Overall Architecture
 
 ```
-用户发送消息
+User sends a message
     │
     ▼
 POST /chat/stream → StreamingResponse(text/event-stream)
@@ -419,47 +419,47 @@ POST /chat/stream → StreamingResponse(text/event-stream)
     ▼
 chat_with_agent_stream()
     │
-    ├── 创建统一输出队列 (asyncio.Queue)
-    ├── 创建 ChatRequestContext.for_stream(...)
-    ├── create_agent_for_request(ctx) 绑定本请求专属 tool
-    ├── 启动 _agent_worker 后台任务 (asyncio.create_task)
-    │     └── agent.astream(stream_mode="messages") 逐 token 产出
-    │           ├── AIMessageChunk (文本) → {"type": "content"} 入队
-    │           └── tool_call_chunks (工具调用) → 跳过
+    ├── Create the unified output queue (asyncio.Queue)
+    ├── Create ChatRequestContext.for_stream(...)
+    ├── create_agent_for_request(ctx) binds a tool dedicated to this request
+    ├── Start the _agent_worker background task (asyncio.create_task)
+    │     └── agent.astream(stream_mode="messages") yields token by token
+    │           ├── AIMessageChunk (text) → enqueued as {"type": "content"}
+    │           └── tool_call_chunks (tool calls) → skipped
     │
-    └── 主循环：await output_queue.get() → yield SSE
+    └── Main loop: await output_queue.get() → yield SSE
           ▲
-          │ (并发) RAG 工具在线程池中执行
-          │ ctx.emit_rag_step() → loop.call_soon_threadsafe → 入队
-          │ {"type": "rag_step"} 立即从队列取出并推送到前端
+          │ (concurrently) RAG tools run in the thread pool
+          │ ctx.emit_rag_step() → loop.call_soon_threadsafe → enqueued
+          │ {"type": "rag_step"} is immediately pulled off the queue and pushed to the frontend
 ```
 
-### 后端实现
+### Backend Implementation
 
-#### 1) 流式生成 (`backend/chat/service.py`)
-- 使用 LangGraph `agent.astream(stream_mode="messages")` 获取逐 token 的 `AIMessageChunk`。
-- 过滤 `tool_call_chunks`，只转发文本内容给前端。
-- **关键设计**：Agent 流式循环运行在 `asyncio.create_task` 后台任务中，主生成器只负责从统一 `output_queue` 取事件并 yield。这样 RAG 步骤在工具执行期间（agent 阻塞等待工具返回时）仍然可以实时推送到前端。
+#### 1) Streaming generation (`backend/chat/service.py`)
+- Uses LangGraph's `agent.astream(stream_mode="messages")` to get `AIMessageChunk` token by token.
+- Filters out `tool_call_chunks`, forwarding only text content to the frontend.
+- **Key design**: the Agent's streaming loop runs inside an `asyncio.create_task` background task; the main generator is only responsible for pulling events off the unified `output_queue` and yielding them. This lets RAG steps keep streaming to the frontend in real time even while a tool is executing (i.e. while the agent is blocked waiting on a tool's return value).
 
-#### 2) 实时 RAG 步骤推送 (`backend/tools/knowledge.py` + `backend/rag/pipeline.py`)
-- `ChatRequestContext.emit_rag_step(icon, label, detail)` 通过请求创建时捕获的 `loop.call_soon_threadsafe()` 将步骤从同步线程安全地推送到本请求的异步队列。
-- `make_search_knowledge_base(ctx)` 创建本请求专属 tool，LLM 仍只看到 `query` 参数；Python closure 持有当前请求的 `ctx`。
-- `backend/rag/pipeline.py` 通过 `run_rag_graph(question, ctx)` 接收上下文，子问题进度使用安全标签（如 `子问题 1`）分组。
-- `backend/rag/pipeline.py` 在每个关键节点发射步骤：
-  - `retrieve_initial` → "正在检索知识库..."
-  - `grade_documents` → "正在评估文档相关性..."
-  - `rewrite_question` → "选择 Step-back / HyDE 重写方式"
-  - `retrieve_rewritten` → 使用本轮选中的唯一方式重新检索
+#### 2) Real-time RAG step pushing (`backend/tools/knowledge.py` + `backend/rag/pipeline.py`)
+- `ChatRequestContext.emit_rag_step(icon, label, detail)` uses the `loop.call_soon_threadsafe()` captured when the request context was created to safely push a step from a synchronous thread into this request's async queue.
+- `make_search_knowledge_base(ctx)` creates a tool dedicated to this request; the LLM still only sees the `query` parameter, while the Python closure holds the current request's `ctx`.
+- `backend/rag/pipeline.py` receives the context via `run_rag_graph(question, ctx)`, grouping sub-question progress under safe labels (e.g. `Sub-question 1`).
+- `backend/rag/pipeline.py` emits a step at each key node:
+  - `retrieve_initial` → "Searching the knowledge base..."
+  - `grade_documents` → "Evaluating document relevance..."
+  - `rewrite_question` → "Choosing a Step-back / HyDE rewrite method"
+  - `retrieve_rewritten` → re-runs retrieval using the single method chosen this round
 
-#### 3) SSE 协议格式
-每个事件格式：`data: {JSON}\n\n`，类型字段：
-- `content`：文本 token（打字机效果）
-- `rag_step`：实时检索步骤（`{icon, label, detail}`）
-- `trace`：完整 RAG 追踪信息（回答完成后发送）
-- `error`：错误信息
-- `[DONE]`：流结束标记
+#### 3) SSE protocol format
+Each event has the shape `data: {JSON}\n\n`, with a `type` field:
+- `content`: a text token (typewriter effect)
+- `rag_step`: a real-time retrieval step (`{icon, label, detail}`)
+- `trace`: the full RAG trace info (sent once the answer is complete)
+- `error`: error information
+- `[DONE]`: end-of-stream marker
 
-#### 4) StreamingResponse 配置 (`backend/api/routes/chat.py`)
+#### 4) StreamingResponse configuration (`backend/api/routes/chat.py`)
 ```python
 StreamingResponse(
     event_generator(),
@@ -467,90 +467,90 @@ StreamingResponse(
     headers={
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+        "X-Accel-Buffering": "no",  # Disable Nginx buffering
     },
 )
 ```
 
-### 前端实现
+### Frontend Implementation
 
-#### 1) ReadableStream 解析 (`utils/api.ts`)
-- 使用 `response.body.getReader()` + `TextDecoder` 逐块读取。
-- 手动按 `\n\n` 分割 SSE 事件，解析 `data: ` 前缀后的 JSON。
-- `content` 事件追加到消息文本；`rag_step` 事件追加到检索步骤数组并同步更新思考状态文字。
+#### 1) ReadableStream parsing (`utils/api.ts`)
+- Reads chunk by chunk with `response.body.getReader()` + `TextDecoder`.
+- Manually splits SSE events on `\n\n`, parsing the JSON after the `data: ` prefix.
+- `content` events are appended to the message text; `rag_step` events are appended to the retrieval-step array and simultaneously update the thinking-status text.
 
-#### 2) 思考气泡二合一
-- 发送消息后立即创建带 `isThinking: true` 的气泡，显示跳动圆点 + 动态文字。
-- 收到 `rag_step` 时，`thinkingLabel` 更新为当前步骤（如"正在检索知识库..."）。
-- 收到第一个 `content` token 时，`isThinking = false`，同一气泡无缝切换为正常文本流。
-- **不存在两个分离的气泡**，从思考 → 检索 → 回答全程在同一个气泡内完成。
+#### 2) A unified "thinking bubble"
+- As soon as a message is sent, a bubble with `isThinking: true` is created, showing bouncing dots plus dynamic text.
+- When a `rag_step` arrives, `thinkingLabel` updates to reflect the current step (e.g. "Searching the knowledge base...").
+- When the first `content` token arrives, `isThinking` is set to `false`, and the same bubble seamlessly switches to a normal text stream.
+- **There are never two separate bubbles** — thinking, retrieval, and the answer all happen inside the same bubble from start to finish.
 
-#### 3) Vue 3 响应式注意事项
-- 通过 `this.messages[botMsgIdx]` 索引访问（而非缓存对象引用），确保拿到 Vue 的 reactive proxy。
-- `ragSteps` 数组通过 `push()` 触发响应式更新。
+#### 3) Vue 3 reactivity notes
+- Access is via the `this.messages[botMsgIdx]` index (rather than a cached object reference) to make sure you get Vue's reactive proxy.
+- The `ragSteps` array triggers reactive updates via `push()`.
 
-### 终止功能
+### Cancellation
 
-#### 前端
-- 发送按钮在 `isLoading` 期间切换为红色终止按钮（`v-if/v-else`）。
-- 点击调用 `AbortController.abort()`，取消正在进行的 `fetch` 请求。
-- 捕获 `AbortError`，在气泡中显示"(已终止回答)"。
+#### Frontend
+- The send button switches to a red cancel button while `isLoading` is true (`v-if`/`v-else`).
+- Clicking it calls `AbortController.abort()`, canceling the in-flight `fetch` request.
+- An `AbortError` is caught, and the bubble displays "(answer cancelled)".
 
-#### 后端
-- FastAPI 的 `StreamingResponse` 在客户端断开连接（如浏览器触发 `abort()` 或关闭标签页）时，会检测到 socket 断开。
-- Python 的生成器协议会向响应生成器抛出 `GeneratorExit` 异常。
-- **实现细节**：采用**主动防御式编程**，显式捕获 `GeneratorExit` 并执行 `agent_task.cancel()`。
-- **为什么不依赖框架自动取消？**：虽然 Starlette/FastAPI 拥有基于 `BaseHTTPMiddleware` 的级联取消机制（Cascading Cancellation），但在复杂的后台任务结构或特定中间件配置下，取消信号可能延迟或在传递链中丢失。显式调用 `.cancel()` 提供了**确定性的资源回收**保证。
-- **即时止损原理**：`agent_task.cancel()` 会立即在任务挂起点注入 `asyncio.CancelledError`。对于流式 LLM 请求，这会触发 `httpx` 关闭 TCP 连接。服务端（OpenAI 等）检测到 client 掉线后会立即停止推理，从而实现**真正的 Token 节省**。
+#### Backend
+- FastAPI's `StreamingResponse` detects a dropped socket when the client disconnects (e.g. the browser fires `abort()` or the tab is closed).
+- Python's generator protocol throws a `GeneratorExit` exception into the response generator.
+- **Implementation detail**: uses **proactive defensive programming** — explicitly catching `GeneratorExit` and calling `agent_task.cancel()`.
+- **Why not rely on the framework's automatic cancellation?**: although Starlette/FastAPI has a `BaseHTTPMiddleware`-based cascading cancellation mechanism, the cancellation signal can be delayed or lost along the chain under complex background-task structures or certain middleware configurations. Explicitly calling `.cancel()` guarantees **deterministic resource cleanup**.
+- **How the immediate cutoff works**: `agent_task.cancel()` immediately injects an `asyncio.CancelledError` at the task's suspension point. For a streaming LLM request, this triggers `httpx` to close the TCP connection. The server side (e.g. OpenAI) detects the dropped client and stops inference right away, achieving **real token savings**.
 
-## 更新日志
+## Changelog
 
-### 2026-06-12 全面迁移至 Milvus 2.5+ 原生 BM25 与事务级可靠删除
-- **服务端原生 BM25**：使用 Milvus 2.5+ 内置中文分词器与 BM25 Pipeline Function，稀疏特征和统计由向量库自动维护。
-- **Schema 自动升级**：优化 `ensure_collection` 逻辑，支持自动检测旧版 Schema 并进行 drop 与无缝重建升级。
-- **事务性一键删除**：实现高可靠、强一致性的 `delete_document_transactionally` 删除协调器，一键清理 Milvus 向量数据、PostgreSQL 级联分块记录和 Redis 热缓存，避免产生任何悬空脏数据。
-- **企业级文本净化**：升级文本清洗逻辑，通过 Unicode NFC 标准规范化和 PUA/C0/C1 等非打印/零宽/孤立代理项的彻底过滤，解决 PostgreSQL 与 Milvus 的字符集兼容性报错。
+### 2026-06-12 Full migration to Milvus 2.5+ native BM25 and transactional, reliable deletion
+- **Native server-side BM25**: uses Milvus 2.5+'s built-in Chinese tokenizer and BM25 pipeline function; sparse features and statistics are now maintained automatically by the vector store.
+- **Automatic schema upgrades**: refined the `ensure_collection` logic to auto-detect an outdated schema and seamlessly drop-and-rebuild it.
+- **Transactional one-click deletion**: implemented a highly reliable, strongly consistent `delete_document_transactionally` deletion coordinator that cleans up Milvus vector data, cascading PostgreSQL chunk records, and the Redis hot cache in one shot, avoiding any dangling/orphaned data.
+- **Enterprise-grade text sanitization**: upgraded the text-cleaning logic with Unicode NFC normalization and thorough filtering of non-printable/zero-width/lone-surrogate characters (PUA/C0/C1), fixing character-set compatibility errors between PostgreSQL and Milvus.
 
-### 2026-06-12 前端单文件 CDN 重构为 Vite + Vue 3 + TS 工程化组件架构
-- **现代化架构重构**：将以前臃肿的多合一 HTML/CDN 页面重构为标准的 **Vite + Vue 3 (SFC) + TypeScript + Pinia + Axios + Sass** 现代化工程项目，全部组件和状态高度解耦。
-- **状态及路由管理**：利用 Pinia 建立了 `auth`、`sessions`、`chat`、`documents` 四大 Store 共享核心数据。
-- **高阶交互界面**：增加流式上传进度详情卡片、上传成功后卡片自动折叠、References 参考文献精美折叠展示、Thinking 气泡流畅过度等。
+### 2026-06-12 Refactored the frontend from a single-file CDN page to an engineered Vite + Vue 3 + TS component architecture
+- **Modernized architecture**: refactored the previously bloated, all-in-one HTML/CDN page into a standard **Vite + Vue 3 (SFC) + TypeScript + Pinia + Axios + Sass** engineered project, with all components and state highly decoupled.
+- **State & routing management**: used Pinia to set up four core stores — `auth`, `sessions`, `chat`, `documents` — sharing core data.
+- **Higher-order interactive UI**: added a detailed streaming upload-progress card, automatic card collapse after a successful upload, an elegant collapsible References display, smooth Thinking-bubble transitions, and more.
 
-### 2026-06-03 自适应复杂问题分解、并行 Sub-Agent 与精排门控
-- **低延迟复杂度规划**：明显的单事实问题由本地规则直接进入检索；其余问题由 FAST_MODEL 一次完成复杂度判断，并在 complex 时同时给出 2-4 个子问题。
-- **并行子 Agent 检索**：利用 LangGraph 的 `Send` API 并行调用 `rag_sub_agent`，每个子问题只执行 retrieve 与 grade，避免不可达的嵌套图和二次改写。
-- **子步骤完美分组**：前端界面重新适配并行子流程，在 RAG Step 的 SSE 数据中为子问题建立独立分组标签展示，避免交错重复建组与视觉混淆。
-- **精排与明确路由**：`RERANK_MIN_SCORE` 过滤噪音；空检索直接结束，有相关信号但证据不足时才执行唯一一次 Step-back / HyDE 单选重写。
+### 2026-06-03 Adaptive complex-question decomposition, parallel Sub-Agents, and rerank gating
+- **Low-latency complexity planning**: obviously simple, single-fact questions go straight to retrieval via local rules; everything else has FAST_MODEL determine complexity in a single call, returning 2-4 sub-questions at the same time when complex.
+- **Parallel sub-Agent retrieval**: uses LangGraph's `Send` API to call `rag_sub_agent` in parallel, with each sub-question only running retrieve and grade, avoiding unreachable nested graphs and a second rewrite pass.
+- **Clean sub-step grouping**: the frontend was updated to handle the parallel sub-flow, building independent grouping labels for sub-questions in the RAG Step SSE data to avoid interleaved, duplicated groups and visual confusion.
+- **Reranking and clear routing**: `RERANK_MIN_SCORE` filters out noise; an empty retrieval ends immediately, and only when there's a relevant signal but insufficient evidence does the single Step-back / HyDE rewrite run.
 
-### 2026-06-02 通用 RAG 能力强化与后端生命周期重构
-- **通用 RAG 功能增强**：提供会话摘要长期记忆（Context Manager Notes）、首问本地截断标题，以及多源参考文献的可视化折叠展示卡片。
-- **gRPC 连接生命周期优化**：Milvus 数据库客户端访问由全局连接池改为短生命周期会话（`session()` contextmanager），按请求建立短连接会话，彻底规避连接因长期挂起产生的失效 gRPC channel 问题。
-- **后端分层重组与包依赖解耦**：彻底重构 backend 代码目录包结构，剔除 re-export 导出机制，解决因交叉导入产生的循环依赖，并统一环境加载规范。
+### 2026-06-02 General RAG capability improvements and backend lifecycle refactor
+- **General RAG enhancements**: added long-term session-summary memory (Context Manager Notes), locally truncated titles from the first question, and a nicely collapsible display card for multi-source references.
+- **gRPC connection lifecycle optimization**: switched Milvus database client access from a global connection pool to short-lived sessions (a `session()` context manager), establishing a short connection session per request — completely eliminating stale gRPC channel issues caused by long-hanging connections.
+- **Backend layering and package-dependency decoupling**: thoroughly refactored the backend code's package structure, removed the re-export mechanism, resolved circular dependencies caused by cross-imports, and standardized environment loading.
 
-### 2026-06-01 召回-合并-精排（Rerank）流水线重构
-- **模块化 Pipeline**：重构 RAG 底层实现，将 RAG 流程收拢为高可控的“召回 -> 自动合并 -> 语义重排”流水线，收口统一的参数配置与多级 RAG Trace 追踪。
-- **去重合并高分保留**：修复了在执行 L3 -> L2/L1 叶子向上合并时，在循环内聚合 Rank 分数的算法，防止去重过程中丢失高置信度召回分。
+### 2026-06-01 Refactored the recall-merge-rerank pipeline
+- **Modular pipeline**: refactored the RAG internals into a tightly controlled "recall -> auto-merge -> semantic rerank" pipeline, with unified parameter configuration and multi-tier RAG trace tracking.
+- **Preserving high scores during dedup/merge**: fixed the algorithm that aggregates rank scores in-loop while merging L3 -> L2/L1 leaf chunks upward, preventing high-confidence recall scores from being lost during deduplication.
 
-### 2026-03-21 后端服务建设升级（认证 + 数据库 + 缓存）
-- 新增认证与权限模块：注册、登录、JWT、管理员权限控制。
-- 聊天历史从本地 JSON 迁移到 PostgreSQL，按用户隔离会话数据。
-- 父级分块存储从本地 JSON 迁移到 PostgreSQL。
-- 引入 Redis 缓存会话与父文档，提高读取性能并降低数据库压力。
-- API 升级为 Token 驱动，移除前端直接传 `user_id` 的历史模式。
-- 文档管理接口收敛到管理员角色，避免普通用户误操作知识库。
-- 密码哈希方案升级为 PBKDF2-SHA256，兼容历史 bcrypt 校验。
+### 2026-03-21 Backend service upgrade (auth + database + cache)
+- Added an auth and permissions module: registration, login, JWT, admin access control.
+- Migrated chat history from local JSON to PostgreSQL, isolating session data per user.
+- Migrated parent-chunk storage from local JSON to PostgreSQL.
+- Introduced Redis caching for sessions and parent documents, improving read performance and reducing database load.
+- Upgraded the API to be token-driven, removing the legacy pattern where the frontend passed `user_id` directly.
+- Restricted document-management endpoints to the admin role, preventing regular users from accidentally modifying the knowledge base.
+- Upgraded the password hashing scheme to PBKDF2-SHA256, while remaining compatible with legacy bcrypt verification.
 
-### 2026-03-13 三级分块与 Auto-merging 升级
-- 新增三级滑动窗口分块（L1/L2/L3），并为分块写入层级元数据。
-- 存储策略调整为 Leaf-only：仅 L3 叶子块写入 Milvus，L1/L2 写入本地 DocStore。
-- Auto-merging 改为从 DocStore 拉取父块，减少向量冗余存储。
-- 思考链路新增三级检索与自动合并步骤事件。
-- `rag_trace` 新增 `leaf_retrieve_level` 与 `auto_merge_*` 字段，且历史会话读取同样保留这些字段。
+### 2026-03-13 Three-tier chunking and Auto-merging upgrade
+- Added three-tier sliding-window chunking (L1/L2/L3), writing hierarchy metadata onto each chunk.
+- Adjusted the storage strategy to leaf-only: only L3 leaf chunks are written to Milvus, with L1/L2 written to the local DocStore.
+- Auto-merging now pulls parent chunks from the DocStore, reducing redundant vector storage.
+- Added three-tier retrieval and auto-merge step events to the thinking trace.
+- Added `leaf_retrieve_level` and `auto_merge_*` fields to `rag_trace`, and these fields are also preserved when reading historical sessions.
 
-### 2026-02-19 RAG 实时思考链路修复
-- **问题**：Agent 在执行同步工具（如 `search_knowledge_base`）时，由于运行在线程池中，无法正确获取主线程的 asyncio 事件循环，导致 `emit_rag_step` 事件丢失，前端"思考中"气泡一直静止。
-- **修复**：
-  1. **Backend (`service.py`)**：为每个请求创建 `ChatRequestContext`，在其中捕获主线程 `loop` 与本请求 `output_queue`。
-  2. **Backend (`backend/tools/knowledge.py` + `backend/rag/pipeline.py`)**：使用 per-request tool factory 与显式 `ctx` 参数跨线程调度 RAG step，避免请求间串号。
-  3. **Frontend (`stores/chat.ts`)**：在发送消息时初始化空的 `ragSteps: []` 数组，确保 Vue 响应式系统能立即追踪后续的 push 操作。
-- **效果**：用户提问后，思考气泡内实时跳动显示检索步骤（如"🔍 正在检索知识库..." -> "📊 正在评估文档相关性..."），不再只有静态的"正在思考中..."。
+### 2026-02-19 Fixed the real-time RAG thinking trace
+- **Problem**: because the Agent ran synchronous tools (like `search_knowledge_base`) inside a thread pool, it couldn't correctly access the main thread's asyncio event loop, causing `emit_rag_step` events to be dropped and leaving the frontend's "thinking" bubble frozen.
+- **Fix**:
+  1. **Backend (`service.py`)**: create a `ChatRequestContext` per request, capturing the main thread's `loop` and this request's `output_queue`.
+  2. **Backend (`backend/tools/knowledge.py` + `backend/rag/pipeline.py`)**: use a per-request tool factory and an explicit `ctx` parameter to dispatch RAG steps across threads, avoiding cross-request mix-ups.
+  3. **Frontend (`stores/chat.ts`)**: initialize an empty `ragSteps: []` array when sending a message, so Vue's reactivity system can immediately track subsequent `push()` calls.
+- **Result**: after a user asks a question, the thinking bubble now shows retrieval steps updating live (e.g. "🔍 Searching the knowledge base..." -> "📊 Evaluating document relevance..."), instead of a static "Thinking...".

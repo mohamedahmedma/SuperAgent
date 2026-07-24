@@ -29,8 +29,9 @@ async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_c
                 raise HTTPException(
                     status_code=429,
                     detail=(
-                        "上游模型服务触发限流/额度限制（429）。请检查账号额度/模型状态。\n"
-                        f"原始错误：{message}"
+                        "The upstream model service triggered rate limiting/quota limits (429). "
+                        "Please check your account quota/model status.\n"
+                        f"Original error: {message}"
                     ),
                 )
             if code in (401, 403):

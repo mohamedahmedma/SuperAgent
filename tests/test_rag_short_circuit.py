@@ -171,7 +171,7 @@ class RagShortCircuitTests(unittest.TestCase):
 
     def test_obvious_simple_question_skips_complexity_model(self):
         def retrieve(query, top_k=5):
-            return {"docs": [_doc("丹瑾是湮灭属性")], "meta": _meta(1)}
+            return {"docs": [_doc("Danjin is the Imaginary element")], "meta": _meta(1)}
 
         def grade(schema, prompt):
             return {
@@ -191,7 +191,7 @@ class RagShortCircuitTests(unittest.TestCase):
 
         ctx = self._ctx()
         try:
-            result = pipeline.run_rag_graph("丹瑾是什么属性？", ctx)
+            result = pipeline.run_rag_graph("What element is Danjin?", ctx)
         finally:
             ctx.close()
 
@@ -207,7 +207,7 @@ class RagShortCircuitTests(unittest.TestCase):
             return {
                 "complexity": "complex",
                 "reason": "multiple entities and dimensions",
-                "sub_questions": ["丹瑾的属性与武器", "卡卡罗的属性与武器"],
+                "sub_questions": ["Danjin's element and weapon", "Kakaro's element and weapon"],
             }
 
         def grade(schema, prompt):
@@ -231,7 +231,7 @@ class RagShortCircuitTests(unittest.TestCase):
 
         ctx = self._ctx()
         try:
-            result = pipeline.run_rag_graph("丹瑾 卡卡罗 属性 武器类型 战斗定位", ctx)
+            result = pipeline.run_rag_graph("Danjin Kakaro element weapon type combat role", ctx)
         finally:
             ctx.close()
 
@@ -250,7 +250,7 @@ class RagShortCircuitTests(unittest.TestCase):
             return {
                 "complexity": "complex",
                 "reason": "comparison",
-                "sub_questions": ["丹瑾的定位", "卡卡罗的定位"],
+                "sub_questions": ["Danjin's role", "Kakaro's role"],
             }
 
         def grade(schema, prompt):
@@ -268,7 +268,7 @@ class RagShortCircuitTests(unittest.TestCase):
 
         ctx = self._ctx()
         try:
-            result = pipeline.run_rag_graph("比较丹瑾与卡卡罗的战斗定位", ctx)
+            result = pipeline.run_rag_graph("Compare the combat roles of Danjin and Kakaro", ctx)
         finally:
             ctx.close()
 
@@ -385,7 +385,7 @@ class RagShortCircuitTests(unittest.TestCase):
             return {
                 "rewrite_method": "hyde",
                 "step_back_question": "",
-                "hyde_document": "一段用于召回真实证据的假设性答案",
+                "hyde_document": "A hypothetical answer used to recall real evidence",
                 "rewritten_query": "HyDE rewritten query",
             }
 
@@ -397,15 +397,15 @@ class RagShortCircuitTests(unittest.TestCase):
 
         ctx = self._ctx()
         try:
-            result = pipeline.run_rag_graph("模糊的概念问题", ctx)
+            result = pipeline.run_rag_graph("vague conceptual question", ctx)
         finally:
             ctx.close()
 
-        self.assertEqual(["模糊的概念问题", "HyDE rewritten query"], calls["retrieve"])
+        self.assertEqual(["vague conceptual question", "HyDE rewritten query"], calls["retrieve"])
         self.assertEqual(1, calls["rewrite"])
         self.assertEqual(2, calls["grade"])
         self.assertEqual("hyde", result.get("rag_trace", {}).get("rewrite_method"))
-        self.assertIn("假设性答案", result.get("rag_trace", {}).get("hyde_document", ""))
+        self.assertIn("hypothetical answer", result.get("rag_trace", {}).get("hyde_document", ""))
         self.assertNotIn("step_back_question", result.get("rag_trace", {}))
 
     def test_missing_slot_and_scope_select_do_not_rewrite(self):
@@ -428,8 +428,8 @@ class RagShortCircuitTests(unittest.TestCase):
                         "ambiguity": ambiguity,
                         "route": route,
                         "confidence": 0.61,
-                        "missing_slots": ["版本"] if ambiguity == "missing_slot" else [],
-                        "hitl_prompt": "请补充版本" if ambiguity == "missing_slot" else "请选择方向",
+                        "missing_slots": ["version"] if ambiguity == "missing_slot" else [],
+                        "hitl_prompt": "Please provide the version" if ambiguity == "missing_slot" else "Please choose a direction",
                         "hitl_options": ["A", "B"] if ambiguity == "multiple_candidates" else [],
                     }
 
@@ -455,7 +455,7 @@ class RagShortCircuitTests(unittest.TestCase):
 
     def test_hitl_result_includes_only_current_resume_state(self):
         def retrieve(query, top_k=5):
-            return {"docs": [_doc("丹瑾和丹恒都可能相关", "candidate")], "meta": _meta(1)}
+            return {"docs": [_doc("Both Danjin and Dan Heng could be relevant", "candidate")], "meta": _meta(1)}
 
         def grade(schema, prompt):
             return {
@@ -464,9 +464,9 @@ class RagShortCircuitTests(unittest.TestCase):
                 "ambiguity": "missing_slot",
                 "route": "clarify",
                 "confidence": 0.7,
-                "missing_slots": ["角色名"],
-                "hitl_prompt": "请补充角色名",
-                "hitl_options": ["丹瑾", "丹恒"],
+                "missing_slots": ["character name"],
+                "hitl_prompt": "Please specify the character name",
+                "hitl_options": ["Danjin", "Dan Heng"],
             }
 
         pipeline = load_pipeline(retrieve_documents=retrieve)
@@ -477,13 +477,13 @@ class RagShortCircuitTests(unittest.TestCase):
 
         ctx = self._ctx()
         try:
-            result = pipeline.run_rag_graph("这个角色的属性是什么？", ctx)
+            result = pipeline.run_rag_graph("What is this character's element?", ctx)
         finally:
             ctx.close()
 
         resume_state = result.get("hitl_resume_state")
         self.assertIsInstance(resume_state, dict)
-        self.assertEqual("这个角色的属性是什么？", resume_state.get("question"))
+        self.assertEqual("What is this character's element?", resume_state.get("question"))
         self.assertEqual("needs_clarification", resume_state.get("retrieval_status"))
         self.assertEqual({
             "question",
@@ -500,7 +500,7 @@ class RagShortCircuitTests(unittest.TestCase):
 
         def retrieve(query, top_k=5):
             calls["retrieve"].append(query)
-            return {"docs": [_doc("丹瑾是湮灭属性", "retrieved")], "meta": _meta(1)}
+            return {"docs": [_doc("Danjin is the Imaginary element", "retrieved")], "meta": _meta(1)}
 
         def grade(schema, prompt):
             return {
@@ -514,18 +514,18 @@ class RagShortCircuitTests(unittest.TestCase):
         pipeline = load_pipeline(retrieve_documents=retrieve)
         pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
         resume_state = {
-            "question": "这个角色的属性是什么？",
+            "question": "What is this character's element?",
             "route": "clarify",
             "retrieval_status": "needs_clarification",
         }
 
         ctx = self._ctx()
         try:
-            result = pipeline.resume_rag_from_hitl(resume_state, "丹瑾", ctx)
+            result = pipeline.resume_rag_from_hitl(resume_state, "Danjin", ctx)
         finally:
             ctx.close()
 
-        self.assertEqual(["丹瑾：这个角色的属性是什么？"], calls["retrieve"])
+        self.assertEqual(["Danjin: What is this character's element?"], calls["retrieve"])
         self.assertEqual("answerable", result.get("retrieval_status"))
         self.assertEqual(1, len(result.get("docs", [])))
         self.assertTrue(result.get("rag_trace", {}).get("hitl_resumed"))
@@ -621,8 +621,8 @@ class RagShortCircuitTests(unittest.TestCase):
                 "ambiguity": "missing_slot",
                 "route": "clarify",
                 "confidence": 0.4,
-                "missing_slots": ["指代对象"],
-                "hitl_prompt": "请说明你说的它具体指什么。",
+                "missing_slots": ["referent"],
+                "hitl_prompt": "Please clarify exactly what it refers to.",
             }
 
         pipeline = load_pipeline(retrieve_documents=retrieve)
@@ -631,14 +631,14 @@ class RagShortCircuitTests(unittest.TestCase):
 
         ctx = self._ctx()
         try:
-            result = pipeline.run_rag_graph("它的主要特征和成因是什么？", ctx)
+            result = pipeline.run_rag_graph("What are its main characteristics and causes?", ctx)
         finally:
             ctx.close()
 
         self.assertEqual([], result.get("docs"))
         self.assertEqual("needs_clarification", result.get("retrieval_status"))
         self.assertEqual("clarify", result.get("route"))
-        self.assertIn("具体指什么", result.get("hitl_prompt", ""))
+        self.assertIn("what it refers to", result.get("hitl_prompt", ""))
 
 
 if __name__ == "__main__":

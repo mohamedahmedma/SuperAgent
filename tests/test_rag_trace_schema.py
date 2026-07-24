@@ -14,7 +14,7 @@ class RagTraceSchemaTests(unittest.TestCase):
         trace = normalize_rag_trace({
             "query": "main",
             "rewrite_method": "hyde",
-            "hyde_document": "用于检索的假设性答案",
+            "hyde_document": "A hypothetical answer used for retrieval",
             "unsupported_field": True,
             "sub_traces": [{
                 "query": "sub",
@@ -25,14 +25,14 @@ class RagTraceSchemaTests(unittest.TestCase):
 
         self.assertEqual("main", trace["query"])
         self.assertEqual("hyde", trace["rewrite_method"])
-        self.assertIn("假设性答案", trace["hyde_document"])
+        self.assertIn("hypothetical answer", trace["hyde_document"])
         self.assertNotIn("unsupported_field", trace)
         self.assertEqual([{"query": "sub", "route": "answer"}], trace["sub_traces"])
 
     def test_resume_state_rejects_unknown_fields(self):
         with self.assertRaises(ValidationError):
             HitlResumeState.model_validate({
-                "question": "问题",
+                "question": "question",
                 "route": "clarify",
                 "retrieval_status": "needs_clarification",
                 "unsupported_field": True,

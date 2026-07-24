@@ -5,8 +5,8 @@
   >
     <details ref="detailsRef" class="references-details">
       <summary class="references-title">
-        <span><i class="fa-regular fa-bookmark"></i> 引用来源</span>
-        <small>{{ msg.ragTrace.retrieved_chunks.length }} 个证据片段</small>
+        <span><i class="fa-regular fa-bookmark"></i> Cited sources</span>
+        <small>{{ msg.ragTrace.retrieved_chunks.length }} evidence chunks</small>
       </summary>
       <ul class="sources-list references-list">
         <li
@@ -27,7 +27,7 @@
           <div class="source-content">
             <div class="source-title-line">
               <span class="source-file"><i class="fa-regular fa-file-lines"></i>{{ chunk.filename }}</span>
-              <span v-if="chunk.page_number" class="source-page">第 {{ chunk.page_number }} 页</span>
+              <span v-if="chunk.page_number" class="source-page">Page {{ chunk.page_number }}</span>
             </div>
             <div class="source-meta-line">
               <span>RRF #{{ chunk.rrf_rank || (cIdx + 1) }}</span>

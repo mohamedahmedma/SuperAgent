@@ -38,8 +38,8 @@ def _hitl_prompt_from_trace(rag_trace: dict) -> str:
         return prompt
     route = _hitl_route_from_trace(rag_trace)
     if route == "scope_select":
-        return "我找到了多个可能相关的知识库方向，请选择你想继续查询的方向。"
-    return "我找到了相关知识，但还缺少一个关键信息，请补充后我继续查询。"
+        return "I found several knowledge base scopes that might be relevant. Please choose which one you'd like to continue querying."
+    return "I found relevant knowledge, but I'm still missing one key piece of information. Please provide it so I can continue."
 
 
 def _hitl_options_from_trace(rag_trace: dict) -> list[str]:
@@ -55,7 +55,7 @@ def _format_hitl_message(prompt: str, options: list[str] | None = None) -> str:
     if not clean_options:
         return clean_prompt
     option_lines = "\n".join(f"- {item}" for item in clean_options)
-    return f"{clean_prompt}\n\n可选方向：\n{option_lines}"
+    return f"{clean_prompt}\n\nAvailable options:\n{option_lines}"
 
 
 def _existing_hitl_answers(pending_hitl: dict | None) -> list[str]:
@@ -108,18 +108,18 @@ def _build_hitl_resume_query(pending_hitl: dict, user_text: str) -> str:
     previous_answers = _existing_hitl_answers(pending_hitl)
 
     lines = [
-        "这是上一轮 RAG 流程中 HITL 澄清后的继续请求。",
-        "不要把用户补充单独当成新问题；请回到原始问题继续完成回答。",
-        f"原始问题：{original_question}",
+        "This is a continuation request after HITL clarification in the previous RAG flow.",
+        "Do not treat the user's follow-up as a standalone new question; return to the original question and continue answering it.",
+        f"Original question: {original_question}",
     ]
     if prompt:
-        lines.append(f"HITL 问题：{prompt}")
+        lines.append(f"HITL question: {prompt}")
     if previous_answers:
-        lines.append("此前用户已补充：")
+        lines.append("The user has previously provided:")
         lines.extend(f"- {answer}" for answer in previous_answers)
     lines.extend([
-        f"本轮用户补充：{user_text}",
-        "请基于以上补充形成完整查询，并按原来的 Agent/RAG 流程继续。",
+        f"User's input this round: {user_text}",
+        "Please form a complete query based on the above and continue with the original Agent/RAG flow.",
     ])
     return "\n".join(lines)
 
@@ -184,22 +184,22 @@ def _build_resume_answer_messages(
     )
     human = HumanMessage(
         content=(
-            "原始问题：\n"
+            "Original question:\n"
             f"{original_question}\n\n"
-            "HITL 补充问题：\n"
+            "HITL follow-up question:\n"
             f"{prompt}\n\n"
-            "用户补充：\n"
+            "User's answer:\n"
             f"{user_answer}\n\n"
-            "检索片段：\n"
+            "Retrieved chunks:\n"
             f"{context}\n\n"
-            "请基于检索片段回答原始问题，并使用 [1]、[2] 这样的引用。"
+            "Please answer the original question based on the retrieved chunks, and cite them using [1], [2], etc."
         )
     )
     return [system, human]
 
 
 def _no_knowledge_response() -> str:
-    return "知识库中没有找到可靠的相关信息，暂时无法基于知识库回答这个问题。"
+    return "The knowledge base does not contain reliable relevant information, so this question can't be answered from it right now."
 
 
 def _resume_rag_from_hitl_sync(pending_hitl: dict, user_answer: str, ctx: ChatRequestContext) -> dict:
@@ -233,9 +233,9 @@ def _build_context_messages(
         context_messages.append(
             SystemMessage(
                 content=(
-                    "【对话持久化笔记（你的工作记忆）】\n"
+                    "[Persistent conversation note (your working memory)]\n"
                     f"{persistent_note}\n"
-                    "请参考以上笔记保持对话连贯性，避免重复回答已解决的问题。"
+                    "Refer to the note above to keep the conversation coherent, and avoid re-answering questions that have already been resolved."
                 )
             )
         )
@@ -269,7 +269,7 @@ async def update_persistent_note(
 
 def generate_session_title(user_text: str) -> str:
     compact_title = " ".join(user_text.split()).strip(" \t\r\n。！？!?，,；;：:")
-    return compact_title[:16] or "新会话"
+    return compact_title[:16] or "New session"
 
 
 def _update_persistent_note_sync(
@@ -284,24 +284,24 @@ def _update_persistent_note_sync(
         if history_messages:
             history_lines = []
             for message in history_messages:
-                role = "用户" if isinstance(message, HumanMessage) else "AI"
-                history_lines.append(f"{role}：{_extract_ai_content(message)}")
+                role = "User" if isinstance(message, HumanMessage) else "AI"
+                history_lines.append(f"{role}: {_extract_ai_content(message)}")
             history_text = (
-                "\n\n▼ 首次建立笔记时需要一并概括的此前对话：\n"
+                "\n\n▼ Prior conversation to summarize together when the note is first created:\n"
                 + "\n".join(history_lines)
                 + "\n\n"
             )
         prompt = (
-            "你是一个【Context Manager Agent】(上下文管理器)，负责维护多轮对话中的「持久化笔记」。\n"
-            "笔记是模型在有限上下文窗口下的长效工作记忆，记录已解决的问题与关键事实。\n\n"
-            "更新规则：\n"
-            "1. 将新信息与现有笔记智能合并，不要简单拼接。\n"
-            "2. 过滤噪音，控制在 500 字以内，用简明条目输出。\n"
-            "3. 若信息冲突，保留最可靠或最新版本。\n\n"
-            f"▼ 现有笔记：\n{current_note if current_note else '无'}\n\n"
+            "You are a [Context Manager Agent], responsible for maintaining the \"persistent note\" across multi-turn conversations.\n"
+            "The note is the model's long-term working memory under a limited context window, recording resolved questions and key facts.\n\n"
+            "Update rules:\n"
+            "1. Intelligently merge new information into the existing note; do not simply append it.\n"
+            "2. Filter out noise and keep it under 500 characters, using concise bullet points.\n"
+            "3. If information conflicts, keep the most reliable or most recent version.\n\n"
+            f"▼ Existing note:\n{current_note if current_note else 'None'}\n\n"
             f"{history_text}"
-            f"▼ 最新一轮对话：\n用户：{user_text}\nAI：{ai_response}\n\n"
-            "请直接输出更新后的笔记（纯文本，不要解释或 Markdown 代码块）："
+            f"▼ Latest turn:\nUser: {user_text}\nAI: {ai_response}\n\n"
+            "Output the updated note directly (plain text, no explanations or Markdown code blocks):"
         )
         res = fast_model.invoke([HumanMessage(content=prompt)])
         return (res.content or "").strip()
@@ -446,7 +446,7 @@ async def chat_with_agent_stream(
         "type": "rag_step",
         "step": {
             "icon": "📨",
-            "label": "请求已接收，正在准备回答",
+            "label": "Request received, preparing response",
             "detail": "",
             "elapsed_ms": 0,
             "stage_elapsed_ms": 0,

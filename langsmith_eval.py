@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from langsmith import evaluate
 
-# 项目根目录加入 sys.path，以便使用 backend 包导入
+# Add the project root to sys.path so the backend package can be imported
 project_root = os.path.dirname(__file__)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -20,7 +20,7 @@ chat_with_agent = importlib.import_module("backend.chat.service").chat_with_agen
 
 def _extract_answer(outputs: Any) -> str:
     if isinstance(outputs, dict):
-        # 优先取真实最终回复字段
+        # Prefer the field that holds the actual final response
         answer = outputs.get("response") or outputs.get("answer") or outputs.get("output")
         return str(answer or "").strip()
     if hasattr(outputs, "outputs") and isinstance(outputs.outputs, dict):
@@ -45,7 +45,7 @@ def _extract_reference(reference_outputs: Optional[dict]) -> str:
 # 1. Select your dataset
 dataset_name = "RAG"
 
-# 2. Define an evaluator (评估最终答案，不评估检索块)
+# 2. Define an evaluator (evaluates the final answer, not the retrieved chunks)
 def custom_evaluator(run_outputs: dict, reference_outputs: dict) -> bool:
     answer = _extract_answer(run_outputs)
     if not answer:
@@ -57,7 +57,8 @@ def custom_evaluator(run_outputs: dict, reference_outputs: dict) -> bool:
     if not reference:
         return True
 
-    # 有参考答案时，至少保证存在一定语义重合（使用字符集合重合率做轻量检查）
+    # When a reference answer exists, at least ensure some semantic overlap
+    # (using a lightweight character-set overlap ratio as a rough check)
     answer_chars = {ch for ch in answer if not ch.isspace()}
     ref_chars = {ch for ch in reference if not ch.isspace()}
     if not answer_chars or not ref_chars:
@@ -66,10 +67,10 @@ def custom_evaluator(run_outputs: dict, reference_outputs: dict) -> bool:
     overlap = len(answer_chars & ref_chars) / max(1, len(ref_chars))
     return overlap >= 0.2
 
-# 直接调用你现有的完整 Agent 流程作为评估对象
+# Directly invoke your existing full Agent flow as the evaluation target
 def target_function(inputs: dict) -> dict:
     question = inputs["question"]
-    # 每条评估样本使用独立会话，避免上下文串扰
+    # Use a separate session for each evaluation sample to avoid context bleed
     session_id = f"langsmith_eval_{uuid4().hex}"
     result = chat_with_agent(
         user_text=question,

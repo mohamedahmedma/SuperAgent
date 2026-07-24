@@ -46,8 +46,8 @@ async def delete_session(session_id: str, current_user: User = Depends(get_curre
     try:
         deleted = storage.delete_session(current_user.username, session_id)
         if not deleted:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        return SessionDeleteResponse(session_id=session_id, message="成功删除会话")
+            raise HTTPException(status_code=404, detail="Session does not exist")
+        return SessionDeleteResponse(session_id=session_id, message="Session deleted successfully")
     except HTTPException:
         raise
     except Exception as e:

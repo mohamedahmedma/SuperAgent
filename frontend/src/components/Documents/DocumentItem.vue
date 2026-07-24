@@ -7,7 +7,7 @@
         </span>
         <span class="document-details">
           <strong class="document-name">{{ doc.filename }}</strong>
-          <small>{{ doc.file_type }} · 已建立混合索引</small>
+          <small>{{ doc.file_type }} · Hybrid index built</small>
         </span>
       </div>
 
@@ -20,7 +20,7 @@
       <button
         type="button"
         class="btn-danger"
-        :title="deleteJob?.status === 'failed' ? '重试删除' : '删除文档'"
+        :title="deleteJob?.status === 'failed' ? 'Retry delete' : 'Delete document'"
         :disabled="documentStore.isDeleteActionLocked(doc.filename)"
         @click="onDelete"
       >
@@ -34,11 +34,11 @@
     >
       <button type="button" class="upload-progress-header" @click="onToggleCollapse">
         <span>
-          <strong>{{ deleteJob.message || '删除进度' }}</strong>
-          <small>{{ deleteJob.status === 'completed' ? '清理完成' : '正在同步各存储层' }}</small>
+          <strong>{{ deleteJob.message || 'Delete progress' }}</strong>
+          <small>{{ deleteJob.status === 'completed' ? 'Cleanup complete' : 'Syncing storage layers' }}</small>
         </span>
         <span class="upload-toggle">
-          {{ deleteJob.collapsed ? '展开' : '收起' }}
+          {{ deleteJob.collapsed ? 'Expand' : 'Collapse' }}
           <i :class="deleteJob.collapsed ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-up'"></i>
         </span>
       </button>
@@ -90,10 +90,10 @@ const fileTone = computed(() => {
 });
 
 const statusLabel = computed(() => {
-  if (deleteJob.value?.status === 'running') return '删除中';
-  if (deleteJob.value?.status === 'completed') return '已删除';
-  if (deleteJob.value?.status === 'failed') return '删除失败';
-  return '可检索';
+  if (deleteJob.value?.status === 'running') return 'Deleting';
+  if (deleteJob.value?.status === 'completed') return 'Deleted';
+  if (deleteJob.value?.status === 'failed') return 'Delete failed';
+  return 'Searchable';
 });
 
 const statusIcon = computed(() => {

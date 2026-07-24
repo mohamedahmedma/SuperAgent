@@ -24,7 +24,7 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      // 代理后端接口，方便开发联调
+      // Proxy backend API endpoints for local dev integration
       '/auth': 'http://localhost:8000',
       '/chat': 'http://localhost:8000',
       '/sessions': 'http://localhost:8000',

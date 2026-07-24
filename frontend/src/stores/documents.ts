@@ -21,20 +21,20 @@ export const useDocumentStore = defineStore('documents', {
   actions: {
     createUploadSteps(): UploadStep[] {
       return [
-        { key: 'upload', label: '文档上传', percent: 0, status: 'pending', message: '' },
-        { key: 'cleanup', label: '清理旧版本', percent: 0, status: 'pending', message: '' },
-        { key: 'parse', label: '解析与分块', percent: 0, status: 'pending', message: '' },
-        { key: 'parent_store', label: '父级分块入库', percent: 0, status: 'pending', message: '' },
-        { key: 'vector_store', label: '向量化入库', percent: 0, status: 'pending', message: '' },
+        { key: 'upload', label: 'Document upload', percent: 0, status: 'pending', message: '' },
+        { key: 'cleanup', label: 'Clean up old version', percent: 0, status: 'pending', message: '' },
+        { key: 'parse', label: 'Parse & chunk', percent: 0, status: 'pending', message: '' },
+        { key: 'parent_store', label: 'Store parent chunks', percent: 0, status: 'pending', message: '' },
+        { key: 'vector_store', label: 'Vectorize & store', percent: 0, status: 'pending', message: '' },
       ];
     },
 
     createDeleteSteps(): DeleteStep[] {
       return [
-        { key: 'prepare', label: '准备删除', percent: 0, status: 'pending', message: '' },
-        { key: 'bm25', label: '同步 BM25 统计', percent: 0, status: 'pending', message: '' },
-        { key: 'milvus', label: '删除向量数据', percent: 0, status: 'pending', message: '' },
-        { key: 'parent_store', label: '删除父级分块', percent: 0, status: 'pending', message: '' },
+        { key: 'prepare', label: 'Prepare deletion', percent: 0, status: 'pending', message: '' },
+        { key: 'bm25', label: 'Sync BM25 stats', percent: 0, status: 'pending', message: '' },
+        { key: 'milvus', label: 'Delete vector data', percent: 0, status: 'pending', message: '' },
+        { key: 'parent_store', label: 'Delete parent chunks', percent: 0, status: 'pending', message: '' },
       ];
     },
 
@@ -74,7 +74,7 @@ export const useDocumentStore = defineStore('documents', {
         const response = await api.get('/documents');
         this.documents = this.mergeDocumentsWithActiveDeletes(response.data.documents || []);
       } catch (error: any) {
-        const errMsg = error.response?.data?.detail || error.message || '加载文档列表失败';
+        const errMsg = error.response?.data?.detail || error.message || 'Failed to load document list';
         throw new Error(errMsg);
       } finally {
         this.documentsLoading = false;
@@ -83,14 +83,14 @@ export const useDocumentStore = defineStore('documents', {
 
     async uploadDocument() {
       if (!this.selectedFile) {
-        throw new Error('请先选择文件');
+        throw new Error('Please select a file first');
       }
 
       this.isUploading = true;
-      this.uploadProgress = '正在上传...';
+      this.uploadProgress = 'Uploading...';
       this.uploadSteps = this.createUploadSteps();
       this.uploadProgressCollapsed = false;
-      this.updateUploadStep('upload', 0, 'running', '准备上传');
+      this.updateUploadStep('upload', 0, 'running', 'Preparing upload');
 
       const formData = new FormData();
       formData.append('file', this.selectedFile);
@@ -103,19 +103,19 @@ export const useDocumentStore = defineStore('documents', {
           onUploadProgress: (progressEvent) => {
             if (!progressEvent.total) return;
             const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
-            this.updateUploadStep('upload', percent, 'running', `已上传 ${percent}%`);
+            this.updateUploadStep('upload', percent, 'running', `Uploaded ${percent}%`);
           },
         });
 
         const data = response.data;
-        this.updateUploadStep('upload', 100, 'completed', '文档上传完成');
+        this.updateUploadStep('upload', 100, 'completed', 'Document upload complete');
         this.uploadProgress = data.message;
         this.activeUploadJobId = data.job_id;
         this.startUploadJobPolling(data.job_id);
       } catch (error: any) {
-        const errMsg = error.response?.data?.detail || error.message || '上传失败';
+        const errMsg = error.response?.data?.detail || error.message || 'Upload failed';
         this.updateUploadStep('upload', 100, 'failed', errMsg);
-        this.uploadProgress = '上传失败：' + errMsg;
+        this.uploadProgress = 'Upload failed: ' + errMsg;
         this.isUploading = false;
         throw new Error(errMsg);
       }
@@ -157,7 +157,7 @@ export const useDocumentStore = defineStore('documents', {
             this.isUploading = false;
           }
         } catch (error: any) {
-          this.uploadProgress = '进度查询失败：' + (error.response?.data?.detail || error.message);
+          this.uploadProgress = 'Failed to check progress: ' + (error.response?.data?.detail || error.message);
           this.stopUploadJobPolling();
           this.isUploading = false;
         }
@@ -229,18 +229,18 @@ export const useDocumentStore = defineStore('documents', {
       if (this.isDeletingDocument(filename)) {
         return;
       }
-      if (!confirm(`确定要删除文档 "${filename}" 吗？这将同时删除 Milvus 中的所有相关向量。`)) {
+      if (!confirm(`Delete document "${filename}"? This will also remove all related vectors from Milvus.`)) {
         return;
       }
 
       this.clearDeleteRemovalTimer(filename);
       this.setDeleteJob(filename, {
         status: 'running',
-        message: '正在提交删除任务...',
+        message: 'Submitting delete job...',
         collapsed: false,
         steps: this.createDeleteSteps().map((step) =>
           step.key === 'prepare'
-            ? { ...step, percent: 1, status: 'running' as const, message: '正在提交删除任务' }
+            ? { ...step, percent: 1, status: 'running' as const, message: 'Submitting delete job' }
             : step
         ),
       });
@@ -251,15 +251,15 @@ export const useDocumentStore = defineStore('documents', {
         this.setDeleteJob(filename, {
           jobId: data.job_id,
           status: 'running',
-          message: data.message || `正在删除 ${filename}`,
+          message: data.message || `Deleting ${filename}`,
           collapsed: false,
         });
         this.startDeleteJobPolling(filename, data.job_id);
       } catch (error: any) {
-        const errMsg = error.response?.data?.detail || error.message || '删除请求失败';
+        const errMsg = error.response?.data?.detail || error.message || 'Delete request failed';
         this.setDeleteJob(filename, {
           status: 'failed',
-          message: '删除文档失败：' + errMsg,
+          message: 'Failed to delete document: ' + errMsg,
           collapsed: false,
           steps: this.deleteJobs[filename]?.steps || this.createDeleteSteps(),
         });
@@ -282,10 +282,10 @@ export const useDocumentStore = defineStore('documents', {
             this.stopDeleteJobPolling(filename);
           }
         } catch (error: any) {
-          const errMsg = error.response?.data?.detail || error.message || '查询失败';
+          const errMsg = error.response?.data?.detail || error.message || 'Query failed';
           this.setDeleteJob(filename, {
             status: 'failed',
-            message: '删除进度查询失败：' + errMsg,
+            message: 'Failed to check delete progress: ' + errMsg,
             collapsed: false,
             steps: this.deleteJobs[filename]?.steps || this.createDeleteSteps(),
           });

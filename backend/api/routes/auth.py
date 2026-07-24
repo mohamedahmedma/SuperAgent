@@ -20,11 +20,11 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     username = (request.username or "").strip()
     password = (request.password or "").strip()
     if not username or not password:
-        raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+        raise HTTPException(status_code=400, detail="Username and password cannot be empty")
 
     exists = db.query(User).filter(User.username == username).first()
     if exists:
-        raise HTTPException(status_code=409, detail="用户名已存在")
+        raise HTTPException(status_code=409, detail="Username already exists")
 
     role = resolve_role(request.role, request.admin_code)
     user = User(username=username, password_hash=get_password_hash(password), role=role)
@@ -39,7 +39,7 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
     user = authenticate_user(db, request.username, request.password)
     if not user:
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
     token = create_access_token(username=user.username, role=user.role)
     return AuthResponse(access_token=token, username=user.username, role=user.role)
 

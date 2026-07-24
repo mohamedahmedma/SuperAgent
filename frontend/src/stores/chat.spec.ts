@@ -134,13 +134,13 @@ describe('chat store streaming sessions', () => {
     const previousSessionId = chatStore.sessionId;
 
     chatStore.messagesBySession.session_current = [
-      { text: '上一个账号的消息', isUser: true },
+      { text: "Previous account's message", isUser: true },
     ];
     chatStore.messages = chatStore.messagesBySession.session_current;
-    chatStore.userInput = '未发送的草稿';
+    chatStore.userInput = 'Unsent draft';
     chatStore.activeNav = 'settings';
     chatStore.pendingHitlBySession.session_current = {
-      prompt: '请补充信息',
+      prompt: 'Please provide more information',
       options: [],
     };
 
@@ -159,7 +159,7 @@ describe('chat store streaming sessions', () => {
     vi.stubGlobal('fetch', stream.fetchMock);
     const { chatStore, sessionStore } = setupStores();
 
-    chatStore.userInput = '帮我总结一下文档';
+    chatStore.userInput = 'Help me summarize the document';
     const sendPromise = chatStore.handleSend();
     await flushPromises();
 
@@ -169,7 +169,7 @@ describe('chat store streaming sessions', () => {
     });
     expect(chatStore.messagesBySession.session_current).toHaveLength(2);
     expect(chatStore.messagesBySession.session_current[0]).toMatchObject({
-      text: '帮我总结一下文档',
+      text: 'Help me summarize the document',
       isUser: true,
     });
     expect(chatStore.messagesBySession.session_current[1]).toMatchObject({
@@ -190,12 +190,12 @@ describe('chat store streaming sessions', () => {
         messages: [
           {
             type: 'human',
-            content: '旧问题',
+            content: 'Old question',
             timestamp: '2026-07-08T00:00:00',
           },
           {
             type: 'ai',
-            content: '旧回答',
+            content: 'Old answer',
             timestamp: '2026-07-08T00:00:01',
           },
         ],
@@ -203,28 +203,28 @@ describe('chat store streaming sessions', () => {
     });
 
     const { chatStore } = setupStores();
-    chatStore.userInput = '新的问题';
+    chatStore.userInput = 'New question';
     const sendPromise = chatStore.handleSend();
     await flushPromises();
 
     await chatStore.loadSession('session_old');
     expect(chatStore.sessionId).toBe('session_old');
-    expect(chatStore.messages.map((msg) => msg.text)).toEqual(['旧问题', '旧回答']);
+    expect(chatStore.messages.map((msg) => msg.text)).toEqual(['Old question', 'Old answer']);
 
-    stream.pushEvent({ type: 'rag_step', step: { label: '检索中', group: null } });
+    stream.pushEvent({ type: 'rag_step', step: { label: 'Retrieving', group: null } });
     await flushPromises();
 
-    stream.pushEvent({ type: 'content', content: '正在回答' });
+    stream.pushEvent({ type: 'content', content: 'Answering' });
     await flushPromises();
 
     expect(chatStore.messagesBySession.session_current[1]).toMatchObject({
-      text: '正在回答',
+      text: 'Answering',
       isThinking: false,
     });
     expect(chatStore.messagesBySession.session_current[1].ragSteps?.[0]).toMatchObject({
-      label: '检索中',
+      label: 'Retrieving',
     });
-    expect(chatStore.messages.map((msg) => msg.text)).toEqual(['旧问题', '旧回答']);
+    expect(chatStore.messages.map((msg) => msg.text)).toEqual(['Old question', 'Old answer']);
 
     vi.mocked(api.get).mockClear();
     await chatStore.loadSession('session_current');
@@ -232,7 +232,7 @@ describe('chat store streaming sessions', () => {
     expect(api.get).not.toHaveBeenCalled();
     expect(chatStore.sessionId).toBe('session_current');
     expect(chatStore.messages[1]).toMatchObject({
-      text: '正在回答',
+      text: 'Answering',
       isThinking: false,
     });
 
@@ -248,7 +248,7 @@ describe('chat store streaming sessions', () => {
         messages: [
           {
             type: 'human',
-            content: '另一个会话',
+            content: 'Another session',
             timestamp: '2026-07-08T00:00:00',
           },
         ],
@@ -256,7 +256,7 @@ describe('chat store streaming sessions', () => {
     });
 
     const { chatStore } = setupStores();
-    chatStore.userInput = '要被终止的问题';
+    chatStore.userInput = 'A question that will be stopped';
     const sendPromise = chatStore.handleSend();
     await flushPromises();
 
@@ -265,11 +265,11 @@ describe('chat store streaming sessions', () => {
     await sendPromise;
 
     expect(chatStore.messagesBySession.session_current[1]).toMatchObject({
-      text: '(已终止回答)',
+      text: '(Response stopped)',
       isThinking: false,
     });
     expect(chatStore.messagesBySession.session_other.map((msg) => msg.text)).toEqual([
-      '另一个会话',
+      'Another session',
     ]);
     expect(chatStore.sessionId).toBe('session_other');
     expect(chatStore.isLoading).toBe(false);
@@ -281,7 +281,7 @@ describe('chat store streaming sessions', () => {
     vi.stubGlobal('fetch', stream.fetchMock);
     const { chatStore } = setupStores();
 
-    chatStore.userInput = '这个角色的属性是什么？';
+    chatStore.userInput = "What are this character's attributes?";
     const sendPromise = chatStore.handleSend();
     await flushPromises();
 
@@ -290,8 +290,8 @@ describe('chat store streaming sessions', () => {
       rag_trace: {
         retrieval_status: 'needs_clarification',
         route: 'clarify',
-        hitl_prompt: '请补充角色名',
-        hitl_options: ['丹瑾', '丹恒'],
+        hitl_prompt: 'Please provide the character name',
+        hitl_options: ['Danjin', 'Dan Heng'],
       },
     });
     await flushPromises();
@@ -300,11 +300,11 @@ describe('chat store streaming sessions', () => {
       type: 'hitl_request',
       hitl: {
         id: 'hitl-1',
-        prompt: '请补充角色名',
-        options: ['丹瑾', '丹恒'],
+        prompt: 'Please provide the character name',
+        options: ['Danjin', 'Dan Heng'],
         route: 'clarify',
         retrieval_status: 'needs_clarification',
-        original_question: '这个角色的属性是什么？',
+        original_question: "What are this character's attributes?",
       },
     });
     stream.close();
@@ -313,14 +313,14 @@ describe('chat store streaming sessions', () => {
     expect(chatStore.messagesBySession.session_current[1]).toMatchObject({
       isThinking: false,
       isHitlRequest: true,
-      hitlPrompt: '请补充角色名',
-      hitlOptions: ['丹瑾', '丹恒'],
+      hitlPrompt: 'Please provide the character name',
+      hitlOptions: ['Danjin', 'Dan Heng'],
     });
     expect(chatStore.pendingHitlBySession.session_current).toMatchObject({
-      prompt: '请补充角色名',
-      options: ['丹瑾', '丹恒'],
+      prompt: 'Please provide the character name',
+      options: ['Danjin', 'Dan Heng'],
     });
-    expect(chatStore.inputPlaceholder).toBe('输入自定义补充，或选择上方选项后发送...');
+    expect(chatStore.inputPlaceholder).toBe('Type your own answer, or pick an option above and send...');
   });
 
   it('marks the next user message as a HITL answer and clears pending state after content streams', async () => {
@@ -329,33 +329,33 @@ describe('chat store streaming sessions', () => {
     const { chatStore } = setupStores();
     chatStore.pendingHitlBySession.session_current = {
       id: 'hitl-1',
-      prompt: '请补充角色名',
-      options: ['丹瑾'],
+      prompt: 'Please provide the character name',
+      options: ['Danjin'],
     };
 
-    chatStore.userInput = '丹瑾';
+    chatStore.userInput = 'Danjin';
     const sendPromise = chatStore.handleSend();
     await flushPromises();
 
     expect(chatStore.messagesBySession.session_current[0]).toMatchObject({
-      text: '丹瑾',
+      text: 'Danjin',
       isUser: true,
       isHitlAnswer: true,
     });
     expect(chatStore.messagesBySession.session_current[1]).toMatchObject({
       isUser: false,
-      hitlResumeText: '丹瑾',
+      hitlResumeText: 'Danjin',
     });
     expect(chatStore.pendingHitlBySession.session_current).toBeUndefined();
 
-    stream.pushEvent({ type: 'content', content: '丹瑾是湮灭属性。' });
+    stream.pushEvent({ type: 'content', content: 'Danjin has the Nihility element.' });
     stream.close();
     await sendPromise;
 
     expect(chatStore.messagesBySession.session_current[1]).toMatchObject({
-      text: '丹瑾是湮灭属性。',
+      text: 'Danjin has the Nihility element.',
       isThinking: false,
-      hitlResumeText: '丹瑾',
+      hitlResumeText: 'Danjin',
     });
     expect(chatStore.pendingHitlBySession.session_current).toBeUndefined();
   });
@@ -364,25 +364,25 @@ describe('chat store streaming sessions', () => {
     const { chatStore } = setupStores();
 
     const messages = chatStore.mapServerMessages([
-      { type: 'human', content: '这个角色的属性是什么？' },
+      { type: 'human', content: "What are this character's attributes?" },
       {
         type: 'ai',
-        content: '请补充角色名',
+        content: 'Please provide the character name',
         rag_trace: {
           retrieval_status: 'needs_clarification',
           route: 'clarify',
-          hitl_prompt: '请补充角色名',
+          hitl_prompt: 'Please provide the character name',
         },
       },
-      { type: 'human', content: '丹瑾' },
-      { type: 'ai', content: '丹瑾是湮灭属性。' },
+      { type: 'human', content: 'Danjin' },
+      { type: 'ai', content: 'Danjin has the Nihility element.' },
     ]);
 
     expect(messages[1]).toMatchObject({ isHitlRequest: true });
     expect(messages[2]).toMatchObject({ isHitlAnswer: true });
     expect(messages[3]).toMatchObject({
-      text: '丹瑾是湮灭属性。',
-      hitlResumeText: '丹瑾',
+      text: 'Danjin has the Nihility element.',
+      hitlResumeText: 'Danjin',
     });
   });
 });

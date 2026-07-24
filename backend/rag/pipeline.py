@@ -43,7 +43,7 @@ def _get_grader_model():
 
 
 def _get_complexity_model():
-    """FAST_MODEL 用于问题复杂度分类和子问题分解。"""
+    """FAST_MODEL is used for question-complexity classification and sub-question decomposition."""
     global _complexity_model
     if not API_KEY or not FAST_MODEL:
         return None
@@ -60,41 +60,41 @@ def _get_complexity_model():
 
 
 EVIDENCE_GRADE_PROMPT = (
-    "你是 RAG 证据评分器。请只根据检索片段判断它们是否足以回答用户问题，"
-    "不要补充片段里没有的信息。\n\n"
-    "用户问题：\n{question}\n\n"
-    "检索片段：\n{context}\n\n"
-    "请按以下规则给出结构化结果：\n"
-    "- relevance: none 表示主题不相关；weak 表示主题接近但证据弱；strong 表示主题明确相关。\n"
-    "- answerability: none 表示不能回答；partial 表示有部分线索但不足以给确定答案；"
-    "sufficient 表示片段能直接或组合支撑答案。\n"
-    "- ambiguity: missing_slot 表示缺少角色名、版本、文件类型、模块名、产品线等关键条件；"
-    "multiple_candidates 表示多个候选方向都可能相关；none 表示无明显歧义。\n"
-    "- route 只能选择：answer、rewrite、clarify、scope_select、no_knowledge。\n"
-    "  answer: relevance=strong 且 answerability=sufficient。\n"
-    "  rewrite: 有相关信号，但像是问法、别名或泛化程度导致证据不足。\n"
-    "  clarify: 缺少关键条件，需要用户补充。\n"
-    "  scope_select: 多个候选方向都相关，需要用户选择。\n"
-    "  no_knowledge: 无召回或主题不相关。\n"
-    "- 如果 route 是 clarify 或 scope_select，请给 hitl_prompt；如果能列出选项，请给 hitl_options。"
+    "You are a RAG evidence grader. Based only on the retrieved snippets, judge whether "
+    "they are sufficient to answer the user's question. Do not add information that is not in the snippets.\n\n"
+    "User question:\n{question}\n\n"
+    "Retrieved snippets:\n{context}\n\n"
+    "Give a structured result following these rules:\n"
+    "- relevance: none means the topic is unrelated; weak means the topic is close but the evidence is weak; strong means the topic is clearly relevant.\n"
+    "- answerability: none means it cannot be answered; partial means there are some clues but not enough for a definitive answer; "
+    "sufficient means the snippets can directly or jointly support an answer.\n"
+    "- ambiguity: missing_slot means a key condition is missing (e.g. role name, version, file type, module name, product line); "
+    "multiple_candidates means several candidate directions could all be relevant; none means there is no clear ambiguity.\n"
+    "- route may only be one of: answer, rewrite, clarify, scope_select, no_knowledge.\n"
+    "  answer: relevance=strong and answerability=sufficient.\n"
+    "  rewrite: there is a relevant signal, but the evidence is insufficient, likely due to phrasing, aliasing, or generalization level.\n"
+    "  clarify: a key condition is missing and the user needs to provide it.\n"
+    "  scope_select: multiple candidate directions are relevant and the user needs to choose one.\n"
+    "  no_knowledge: no recall, or the topic is unrelated.\n"
+    "- If route is clarify or scope_select, provide hitl_prompt; if options can be listed, provide hitl_options."
 )
 
 
 class EvidenceGrade(BaseModel):
-    """结构化证据评分：同时判断相关性、可回答性与下一步路由。"""
+    """Structured evidence grade: judges relevance, answerability, and the next routing step together."""
 
     relevance: Literal["none", "weak", "strong"] = Field(
-        description="检索片段与问题的主题相关性"
+        description="Topical relevance between the retrieved snippets and the question"
     )
     answerability: Literal["none", "partial", "sufficient"] = Field(
-        description="检索片段是否足以回答问题"
+        description="Whether the retrieved snippets are sufficient to answer the question"
     )
     ambiguity: Literal["none", "missing_slot", "multiple_candidates"] = Field(
         default="none",
-        description="问题是否缺条件或存在多个候选方向"
+        description="Whether the question is missing a condition or has multiple candidate directions"
     )
     route: Literal["answer", "rewrite", "clarify", "scope_select", "no_knowledge"] = Field(
-        description="下一步路由"
+        description="The next routing step"
     )
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     missing_slots: List[str] = Field(default_factory=list)
@@ -104,15 +104,15 @@ class EvidenceGrade(BaseModel):
 
 
 class ComplexityResult(BaseModel):
-    """问题复杂度分类结果。"""
+    """Question complexity classification result."""
 
     complexity: Literal["simple", "complex"] = Field(
-        description="问题复杂度：'simple' 为简单问题，'complex' 为复杂问题"
+        description="Question complexity: 'simple' for simple questions, 'complex' for complex questions"
     )
-    reason: str = Field(default="", description="分类理由")
+    reason: str = Field(default="", description="Classification reason")
     sub_questions: List[str] = Field(
         default_factory=list,
-        description="复杂问题对应的 2-4 个可独立检索子问题；简单问题留空",
+        description="2-4 independently retrievable sub-questions for a complex question; left empty for a simple question",
         max_length=4,
     )
 
@@ -137,7 +137,7 @@ class RAGState(TypedDict):
     step_back_question: Optional[str]
     hyde_document: Optional[str]
     rag_trace: Optional[dict]
-    # 复杂度路由新增字段
+    # Fields added for complexity routing
     complexity: Optional[str]
     complexity_reason: Optional[str]
     sub_questions: Optional[List[str]]
@@ -208,7 +208,7 @@ def _refined_question_for_hitl(resume_state: dict, user_answer: str) -> str:
         return answer
     if answer and answer in question:
         return question
-    return f"{answer}：{question}" if answer else question
+    return f"{answer}: {question}" if answer else question
 
 
 def _emit(state: RAGState, icon: str, label: str, detail: str = "") -> None:
@@ -263,7 +263,7 @@ def _initial_state(
 
 def retrieve_initial(state: RAGState) -> RAGState:
     query = state["question"]
-    _emit(state, "🔍", "正在检索知识库...", "初始检索")
+    _emit(state, "🔍", "Searching the knowledge base...", "Initial retrieval")
     retrieved = retrieve_documents(query, top_k=RETRIEVAL_TOP_K)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
@@ -271,25 +271,25 @@ def retrieve_initial(state: RAGState) -> RAGState:
     _emit(
         state,
         "🧱",
-        "三级分块检索",
+        "Three-tier chunk retrieval",
         (
-            f"叶子层 L{retrieve_meta.get('leaf_retrieve_level', 3)} 召回，"
-            f"候选 {retrieve_meta.get('candidate_k', 0)}"
+            f"Leaf level L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
+            f"candidates {retrieve_meta.get('candidate_k', 0)}"
         ),
     )
     _emit(
         state,
         "🧩",
-        "Auto-merging 合并",
+        "Auto-merging",
         (
-            f"启用: {bool(retrieve_meta.get('auto_merge_enabled'))}，"
-            f"应用: {bool(retrieve_meta.get('auto_merge_applied'))}，"
-            f"替换片段: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
+            f"Enabled: {bool(retrieve_meta.get('auto_merge_enabled'))}, "
+            f"Applied: {bool(retrieve_meta.get('auto_merge_applied'))}, "
+            f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
         ),
     )
-    _emit(state, "✅", f"检索完成，找到 {len(results)} 个片段", f"模式: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
+    _emit(state, "✅", f"Retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
     if not results:
-        _emit(state, "⚠️", "无可用片段，将进入证据评分短路判断")
+        _emit(state, "⚠️", "No snippets available, proceeding to the evidence-grading short-circuit check")
     rag_trace = {
         "tool_used": True,
         "tool_name": "search_knowledge_base",
@@ -337,10 +337,10 @@ def _default_hitl_prompt(route: str, grade: EvidenceGrade) -> str:
     if grade.hitl_prompt:
         return grade.hitl_prompt
     if route == "scope_select":
-        return "我在知识库中找到了多个可能相关的方向。你想问的是哪一个？"
+        return "I found several possibly relevant directions in the knowledge base. Which one are you asking about?"
     if grade.missing_slots:
-        return "我找到了相关内容，但还缺少关键信息：" + "、".join(grade.missing_slots)
-    return "我找到了相关内容，但证据不足以确定答案。请补充一下你具体想问的条件。"
+        return "I found relevant content, but key information is still missing: " + ", ".join(grade.missing_slots)
+    return "I found relevant content, but the evidence isn't enough to determine an answer. Please provide more detail about what you're asking."
 
 
 def _grade_for_no_docs() -> EvidenceGrade:
@@ -372,7 +372,7 @@ def _resolve_route(grade: EvidenceGrade, state: RAGState) -> str:
     if route == "answer" and answer_is_supported:
         return "answer"
 
-    # 子问题不做二次纠错。partial 证据交给 synthesis 合并，完全不可回答则停止。
+    # Sub-questions don't get a second correction pass. Partial evidence is left for synthesis to merge; fully unanswerable stops here.
     if is_sub_agent:
         if grade.answerability in ("partial", "sufficient"):
             return "answer"
@@ -415,7 +415,7 @@ def _grade_update(grade: EvidenceGrade, route: str) -> dict:
 
 
 def grade_documents_node(state: RAGState) -> RAGState:
-    _emit(state, "📊", "正在评估证据质量...")
+    _emit(state, "📊", "Evaluating evidence quality...")
     docs = state.get("docs") or []
     if not docs:
         grade = _grade_for_no_docs()
@@ -437,15 +437,15 @@ def grade_documents_node(state: RAGState) -> RAGState:
 
     if route == "answer":
         if grade.answerability == "partial":
-            _emit(state, "🟡", "保留部分相关证据", f"置信度: {grade.confidence:.2f}")
+            _emit(state, "🟡", "Keeping partially relevant evidence", f"Confidence: {grade.confidence:.2f}")
         else:
-            _emit(state, "✅", "证据足够，返回检索片段", f"置信度: {grade.confidence:.2f}")
+            _emit(state, "✅", "Evidence sufficient, returning retrieved snippets", f"Confidence: {grade.confidence:.2f}")
     elif route == "rewrite":
-        _emit(state, "⚠️", "证据不足，将改写查询一次", f"置信度: {grade.confidence:.2f}")
+        _emit(state, "⚠️", "Evidence insufficient, will rewrite the query once", f"Confidence: {grade.confidence:.2f}")
     elif route in ("clarify", "scope_select"):
-        _emit(state, "❓", "需要用户补充信息", grade_update["hitl_prompt"])
+        _emit(state, "❓", "Needs more information from the user", grade_update["hitl_prompt"])
     else:
-        _emit(state, "⛔", "知识库中未找到可用证据", grade.reason or "no_knowledge")
+        _emit(state, "⛔", "No usable evidence found in the knowledge base", grade.reason or "no_knowledge")
 
     update = {
         "route": route,
@@ -470,7 +470,7 @@ def grade_documents_node(state: RAGState) -> RAGState:
 
 def rewrite_question_node(state: RAGState) -> RAGState:
     question = state["question"]
-    _emit(state, "✏️", "正在重写查询...")
+    _emit(state, "✏️", "Rewriting the query...")
 
     rewrite_count = int(state.get("rewrite_count") or 0)
     if rewrite_count >= 1:
@@ -480,7 +480,7 @@ def rewrite_question_node(state: RAGState) -> RAGState:
             "route": "no_knowledge",
             "evidence_reason": "rewrite_budget_exhausted",
         })
-        _emit(state, "⛔", "改写预算已用完，停止检索")
+        _emit(state, "⛔", "Rewrite budget exhausted, stopping retrieval")
         return {
             "route": "no_knowledge",
             "retrieval_status": "no_knowledge",
@@ -489,7 +489,7 @@ def rewrite_question_node(state: RAGState) -> RAGState:
             "rag_trace": rag_trace,
         }
 
-    _emit(state, "🧠", "选择 Step-back / HyDE 重写方式")
+    _emit(state, "🧠", "Choosing between Step-back / HyDE rewrite")
     rewrite = rewrite_query_once(question)
     rewrite_method = (rewrite.get("rewrite_method") or "").strip()
     step_back_question = (rewrite.get("step_back_question") or "").strip()
@@ -503,7 +503,7 @@ def rewrite_question_node(state: RAGState) -> RAGState:
         raise ValueError("HyDE rewriting returned an invalid result")
 
     method_label = "Step-back" if rewrite_method == "step_back" else "HyDE"
-    _emit(state, "✅", f"已选择 {method_label} 重写", "本轮只执行这一种重写检索")
+    _emit(state, "✅", f"Selected {method_label} rewrite", "Only this rewrite method will run this round")
 
     rag_trace = state.get("rag_trace", {}) or {}
     rag_trace.update({
@@ -534,7 +534,7 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
     if not rewritten_query:
         raise ValueError("rewritten_query is required for rewritten retrieval")
     method_label = "Step-back" if rewrite_method == "step_back" else "HyDE"
-    _emit(state, "🔄", f"使用 {method_label} 查询重新检索...")
+    _emit(state, "🔄", f"Re-retrieving with the {method_label} query...")
     retrieved = retrieve_documents(rewritten_query, top_k=RETRIEVAL_TOP_K)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
@@ -542,14 +542,14 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
     _emit(
         state,
         "🧱",
-        f"{method_label} 三级检索",
+        f"{method_label} three-tier retrieval",
         (
-            f"L{retrieve_meta.get('leaf_retrieve_level', 3)} 召回，"
-            f"候选 {retrieve_meta.get('candidate_k', 0)}，"
-            f"合并替换 {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
+            f"L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
+            f"candidates {retrieve_meta.get('candidate_k', 0)}, "
+            f"merge-replaced {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
         ),
     )
-    _emit(state, "✅", f"重写检索完成，共 {len(results)} 个片段")
+    _emit(state, "✅", f"Rewritten retrieval complete, {len(results)} snippets total")
     rag_trace = state.get("rag_trace", {}) or {}
     rag_trace.update({
         "rewrite_method": rewrite_method,
@@ -567,18 +567,18 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
 
 
 # ---------------------------------------------------------------------------
-# 复杂度分类 & 子问题分解
+# Complexity classification & sub-question decomposition
 # ---------------------------------------------------------------------------
 
 COMPLEXITY_PROMPT = (
-    "你是一个问题复杂度规划器。请判断用户问题的复杂度。\n\n"
-    "【简单问题】：事实查询、定义查询、单一信息点查询、明确的二选一问题、"
-    "某个具体属性/参数/规格的查询。\n"
-    "【复杂问题】：需要跨文档综合、多角度分析、比较对比、多步骤推理、"
-    "需要综合多个信息源才能完整回答的问题。\n\n"
-    "用户问题：{question}\n\n"
-    "如果是复杂问题，请同时给出 2-4 个互不重叠、可独立检索的子问题；"
-    "如果是简单问题，sub_questions 留空。"
+    "You are a question complexity planner. Determine the complexity of the user's question.\n\n"
+    "[Simple question]: factual lookups, definition lookups, single-information-point queries, clear "
+    "either/or questions, or queries about a specific attribute/parameter/spec.\n"
+    "[Complex question]: questions that need cross-document synthesis, multi-angle analysis, comparisons, "
+    "multi-step reasoning, or that require multiple information sources to be fully answered.\n\n"
+    "User question: {question}\n\n"
+    "If it's a complex question, also provide 2-4 non-overlapping, independently retrievable sub-questions; "
+    "if it's a simple question, leave sub_questions empty."
 )
 
 _SIMPLE_QUERY_MARKERS = (
@@ -665,7 +665,7 @@ def _simple_question_fast_path_reason(question: str) -> Optional[str]:
         return None
     if "、" in normalized:
         return None
-    if re.search(r"[\u4e00-\u9fff]", normalized) and normalized.count(" ") >= 2:
+    if re.search(r"[一-鿿]", normalized) and normalized.count(" ") >= 2:
         return None
     if sum(marker in normalized for marker in _QUERY_DIMENSION_MARKERS) >= 2:
         return None
@@ -679,13 +679,13 @@ def _simple_question_fast_path_reason(question: str) -> Optional[str]:
 
 
 def classify_complexity(state: RAGState) -> RAGState:
-    """使用 FAST_MODEL 判断问题复杂度。"""
+    """Uses FAST_MODEL to determine question complexity."""
     question = state["question"]
-    _emit(state, "🧭", "正在分析问题复杂度...")
+    _emit(state, "🧭", "Analyzing question complexity...")
 
     fast_path_reason = _simple_question_fast_path_reason(question)
     if fast_path_reason:
-        _emit(state, "⚡", "快速判断为简单问题 → 走标准 RAG 流程")
+        _emit(state, "⚡", "Fast-classified as a simple question → using the standard RAG flow")
         return {"complexity": "simple", "complexity_reason": fast_path_reason}
 
     model = _get_complexity_model()
@@ -709,9 +709,9 @@ def classify_complexity(state: RAGState) -> RAGState:
         raise ValueError("Complexity planner returned no sub-questions")
 
     if complexity == "simple":
-        _emit(state, "✅", "简单问题 → 走标准 RAG 流程", f"理由: {reason[:60]}")
+        _emit(state, "✅", "Simple question → using the standard RAG flow", f"Reason: {reason[:60]}")
     else:
-        _emit(state, "🔀", "复杂问题 → 将分解为子问题并行检索", f"理由: {reason[:60]}")
+        _emit(state, "🔀", "Complex question → decomposing into sub-questions for parallel retrieval", f"Reason: {reason[:60]}")
 
     return {
         "complexity": complexity,
@@ -728,19 +728,19 @@ def prepare_sub_questions(state: RAGState) -> RAGState:
         if item and item.strip()
     ]
     for i, sq in enumerate(planned_sub_questions, 1):
-        _emit(state, "📌", f"子问题 {i}", f"{sq[:80]} 已加入并行检索")
+        _emit(state, "📌", f"Sub-question {i}", f"{sq[:80]} added to parallel retrieval")
     return {"sub_questions": planned_sub_questions}
 
 
 def _route_after_complexity(state: RAGState):
-    """简单问题直接检索，复杂问题并行检索规划出的子问题。"""
+    """Simple questions go straight to retrieval; complex questions retrieve the planned sub-questions in parallel."""
     if state.get("complexity") == "complex":
         return "prepare_sub_questions"
     return "retrieve_initial"
 
 
 def _fanout_sub_questions(state: RAGState):
-    """将规划出的子问题通过 Send API 并行分发到 rag_sub_agent。"""
+    """Dispatches the planned sub-questions to rag_sub_agent in parallel via the Send API."""
     sub_qs = state.get("sub_questions") or []
     ctx = state["request_context"]
     return [
@@ -750,7 +750,7 @@ def _fanout_sub_questions(state: RAGState):
                 sq,
                 ctx,
                 is_sub_agent=True,
-                rag_step_group=f"子问题 {i}",
+                rag_step_group=f"Sub-question {i}",
                 rag_step_group_label=sq,
             ),
         )
@@ -759,9 +759,9 @@ def _fanout_sub_questions(state: RAGState):
 
 
 def synthesis(state: RAGState) -> RAGState:
-    """合并所有子 Agent 检索到的文档，去重排序后输出最终上下文。"""
+    """Merges all documents retrieved by the sub-agents, dedupes and ranks them, and outputs the final context."""
     sub_results = state.get("sub_results", [])
-    _emit(state, "🔬", f"正在合成 {len(sub_results)} 个子问题的检索结果...")
+    _emit(state, "🔬", f"Synthesizing retrieval results from {len(sub_results)} sub-questions...")
 
     all_docs: List[dict] = []
     for result in sub_results:
@@ -777,11 +777,11 @@ def synthesis(state: RAGState) -> RAGState:
 
     context = _format_docs(deduped)
     if deduped:
-        _emit(state, "✅", f"合成完成，共 {len(deduped)} 个去重片段")
+        _emit(state, "✅", f"Synthesis complete, {len(deduped)} deduplicated snippets total")
     else:
-        _emit(state, "⛔", "所有子问题都没有可用证据")
+        _emit(state, "⛔", "None of the sub-questions had usable evidence")
 
-    # 合并所有子 Agent 的 rag_trace
+    # Merge rag_trace from all sub-agents
     sub_traces = []
     for result in sub_results:
         trace = result.get("rag_trace")
@@ -815,7 +815,7 @@ def synthesis(state: RAGState) -> RAGState:
             for trace in hitl_traces
             if trace.get("hitl_prompt")
         ]
-        hitl_prompt = "；".join(dict.fromkeys(prompts))
+        hitl_prompt = "; ".join(dict.fromkeys(prompts))
         for trace in hitl_traces:
             for option in trace.get("hitl_options") or []:
                 if option not in hitl_options:
@@ -873,13 +873,13 @@ def rag_sub_agent(state: RAGState) -> RAGState:
 
 
 # ---------------------------------------------------------------------------
-# 主 RAG 图
+# Main RAG graph
 # ---------------------------------------------------------------------------
 
 def build_rag_graph():
     graph = StateGraph(RAGState)
 
-    # 节点注册
+    # Register nodes
     graph.add_node("classify_complexity", classify_complexity)
     graph.add_node("prepare_sub_questions", prepare_sub_questions)
     graph.add_node("retrieve_initial", retrieve_initial)
@@ -889,10 +889,10 @@ def build_rag_graph():
     graph.add_node("rag_sub_agent", rag_sub_agent)
     graph.add_node("synthesis", synthesis)
 
-    # 入口：复杂度分类
+    # Entry point: complexity classification
     graph.set_entry_point("classify_complexity")
 
-    # 简单问题直接检索；复杂问题使用规划器一次产出的子问题。
+    # Simple questions go straight to retrieval; complex questions use the sub-questions the planner produced in one pass.
     graph.add_conditional_edges(
         "classify_complexity",
         _route_after_complexity,
@@ -904,7 +904,7 @@ def build_rag_graph():
 
     graph.add_conditional_edges("prepare_sub_questions", _fanout_sub_questions)
 
-    # 简单问题路径
+    # Simple-question path
     graph.add_edge("retrieve_initial", "grade_documents")
     graph.add_conditional_edges(
         "grade_documents",
@@ -917,7 +917,7 @@ def build_rag_graph():
     graph.add_edge("rewrite_question", "retrieve_rewritten")
     graph.add_edge("retrieve_rewritten", "grade_documents")
 
-    # 并行子 Agent → 合成
+    # Parallel sub-agents → synthesis
     graph.add_edge("rag_sub_agent", "synthesis")
     graph.add_edge("synthesis", END)
 
@@ -962,7 +962,7 @@ def _state_from_resume(
 
 
 def _retrieve_resume_query(state: dict) -> dict:
-    _emit(state, "🔎", "使用 HITL 补充进行针对性检索", "跳过复杂度判断与子问题分解")
+    _emit(state, "🔎", "Running targeted retrieval using the HITL follow-up", "Skipping complexity classification and sub-question decomposition")
     query = state["question"]
     retrieved = retrieve_documents(query, top_k=RETRIEVAL_TOP_K)
     results = retrieved.get("docs", [])
@@ -971,23 +971,23 @@ def _retrieve_resume_query(state: dict) -> dict:
     _emit(
         state,
         "🧱",
-        "HITL 三级分块检索",
+        "HITL three-tier chunk retrieval",
         (
-            f"叶子层 L{retrieve_meta.get('leaf_retrieve_level', 3)} 召回，"
-            f"候选 {retrieve_meta.get('candidate_k', 0)}"
+            f"Leaf level L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
+            f"candidates {retrieve_meta.get('candidate_k', 0)}"
         ),
     )
     _emit(
         state,
         "🧩",
-        "Auto-merging 合并",
+        "Auto-merging",
         (
-            f"启用: {bool(retrieve_meta.get('auto_merge_enabled'))}，"
-            f"应用: {bool(retrieve_meta.get('auto_merge_applied'))}，"
-            f"替换片段: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
+            f"Enabled: {bool(retrieve_meta.get('auto_merge_enabled'))}, "
+            f"Applied: {bool(retrieve_meta.get('auto_merge_applied'))}, "
+            f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
         ),
     )
-    _emit(state, "✅", f"HITL 针对性检索完成，找到 {len(results)} 个片段", f"模式: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
+    _emit(state, "✅", f"HITL targeted retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
     rag_trace = state.get("rag_trace") or {}
     rag_trace.update({
         "tool_used": True,
@@ -1017,7 +1017,7 @@ def resume_rag_from_hitl(
 ) -> dict:
     """Resume a paused RAG run from the HITL breakpoint without re-entering the main graph."""
     state = _state_from_resume(resume_state, user_answer, ctx)
-    _emit(state, "▶️", "收到 HITL 补充，继续原 RAG 流程", user_answer)
+    _emit(state, "▶️", "Received HITL follow-up, continuing the original RAG flow", user_answer)
 
     state = _retrieve_resume_query(state)
     if _is_hitl_result(state):

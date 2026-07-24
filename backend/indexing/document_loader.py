@@ -1,4 +1,4 @@
-"""文档加载和分片服务"""
+"""Document loading and chunking service"""
 import os
 import re
 import unicodedata
@@ -7,34 +7,38 @@ from typing import Dict, List
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, UnstructuredExcelLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# 编译非打印 C0/C1 控制字符的正则（保留常规排版字：\t, \n, \r）
+# Regex for non-printable C0/C1 control characters (keeps common formatting characters: \t, \n, \r)
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-# 编译零宽字符和不可见格式化控制字符（零宽空白、BOM 标记、左右强排标志等）
+# Regex for zero-width characters and invisible formatting control characters (zero-width space, BOM marker, left-to-right/right-to-left override marks, etc.)
 _INVISIBLE_CHAR_RE = re.compile(r"[\u200b-\u200d\ufeff\u200f\u202a-\u202e]")
 
 
 def sanitize_text(text: str) -> str:
     """
-    企业级标准文本净化器 (Text Sanitizer)。
-    1. 规范化 (Normalization)：统一转换为标准 NFC 格式，合并分离变音符和音调，确保多端字符表示合一。
-    2. 剔除/替换不合法及不可见字节：过滤 NUL (0x00) 空字节、零宽字符、BOM 标签和不可见强排标记。
-    3. 清洗非打印字符及乱码：剔除 C0/C1 控制符号，剥离 Unicode PUA 私有使用区乱码符号。
-    4. 编码收敛防爆：利用 utf-8 ignore 安全剥离任何不完整的、孤立的 UTF-16 代理项（Surrogates）。
+    Enterprise-grade text sanitizer.
+    1. Normalization: converts uniformly to standard NFC form, merging decomposed diacritics and
+       accents to ensure consistent character representation across sources.
+    2. Removes/replaces invalid and invisible bytes: filters out NUL (0x00) bytes, zero-width
+       characters, BOM markers, and invisible bidi override marks.
+    3. Cleans non-printable characters and garbled glyphs: strips C0/C1 control characters and
+       Unicode PUA (Private Use Area) placeholder glyphs.
+    4. Encoding convergence safeguard: uses utf-8 ignore to safely strip any incomplete, orphaned
+       UTF-16 surrogate pairs.
     """
     if not text:
         return ""
     
-    # 1. 规范化为 Unicode NFC 格式
+    # 1. Normalize to Unicode NFC form
     text = unicodedata.normalize("NFC", text)
     
-    # 2. 清除不可见零宽字符、BOM 及格式控制符
+    # 2. Remove invisible zero-width characters, BOM, and format control characters
     text = _INVISIBLE_CHAR_RE.sub("", text)
     
-    # 3. 清洗非打印控制符及 PUA 乱码框区字符
+    # 3. Clean non-printable control characters and PUA placeholder glyphs
     text = _CONTROL_CHAR_RE.sub("", text)
     text = re.sub(r"[\ue000-\uf8ff]", "", text)
     
-    # 4. 彻底擦除孤立代理项 (Surrogates)，收敛至 100% 合规的 UTF-8 (对应 PostgreSQL 的 utf8mb4 标准)
+    # 4. Fully strip orphaned surrogate pairs, converging to 100% compliant UTF-8 (matching PostgreSQL's utf8mb4 standard)
     try:
         cleaned = text.encode("utf-8", "ignore").decode("utf-8", "ignore")
     except Exception:
@@ -49,7 +53,7 @@ def sanitize_text(text: str) -> str:
 
 
 class DocumentLoader:
-    """文档加载和分片服务"""
+    """Document loading and chunking service"""
 
     def __init__(self, chunk_size: int = 800, chunk_overlap: int = 100):
         level_1_size = max(2000, chunk_size * 3)
@@ -211,13 +215,13 @@ class DocumentLoader:
             raw_docs = load_html_for_document_loader(file_path, filename)
             return self._load_from_langchain_docs(raw_docs, file_path, filename, doc_type)
         else:
-            raise ValueError(f"不支持的文件类型: {filename}")
+            raise ValueError(f"Unsupported file type: {filename}")
 
         try:
             raw_docs = loader.load()
             return self._load_from_langchain_docs(raw_docs, file_path, filename, doc_type)
         except Exception as e:
-            raise Exception(f"处理文档失败: {str(e)}") from e
+            raise Exception(f"Failed to process document: {str(e)}") from e
 
     def load_documents_from_folder(self, folder_path: str) -> list[dict]:
         all_documents = []

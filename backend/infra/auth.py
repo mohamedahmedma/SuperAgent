@@ -100,7 +100,7 @@ def authenticate_user(db: Session, username: str, password: str) -> User | None:
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="无效或过期的认证令牌",
+        detail="Invalid or expired authentication token",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
@@ -119,7 +119,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="管理员权限不足")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient administrator privileges")
     return current_user
 
 
@@ -129,4 +129,4 @@ def resolve_role(requested_role: str | None, admin_code: str | None) -> str:
         return "user"
     if ADMIN_INVITE_CODE and admin_code == ADMIN_INVITE_CODE:
         return "admin"
-    raise HTTPException(status_code=403, detail="管理员邀请码错误")
+    raise HTTPException(status_code=403, detail="Incorrect administrator invite code")

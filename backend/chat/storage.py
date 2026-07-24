@@ -9,7 +9,7 @@ from backend.schemas.chat import normalize_rag_trace
 
 
 class ConversationStorage:
-    """对话存储（PostgreSQL + Redis）。"""
+    """Conversation storage (PostgreSQL + Redis)."""
 
     @staticmethod
     def _messages_cache_key(user_id: str, session_id: str) -> str:
@@ -115,7 +115,7 @@ class ConversationStorage:
         return self._to_langchain_messages(records)
 
     def load_with_meta(self, user_id: str, session_id: str) -> tuple[list, dict]:
-        """加载对话消息及会话元数据（标题、持久化笔记等）。"""
+        """Load conversation messages and session metadata (title, persistent note, etc.)."""
         messages = self.load(user_id, session_id)
         db = SessionLocal()
         try:

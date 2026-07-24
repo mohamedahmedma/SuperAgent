@@ -4,6 +4,6 @@ embedding = HuggingFaceEmbeddings(
     model_name="BAAI/bge-m3"
 )
 
-# 测试
-vec = embedding.embed_query("测试RAG")
-print("向量维度:", len(vec))  # 输出 1024 就是成功！
+# Test
+vec = embedding.embed_query("test RAG")
+print("Vector dimension:", len(vec))  # Output of 1024 means success!

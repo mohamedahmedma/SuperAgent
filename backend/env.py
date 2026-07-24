@@ -1,4 +1,4 @@
-"""从项目根目录加载 .env；由应用入口或独立脚本在 import 其它 backend 模块前调用一次。"""
+"""Load .env from the project root; called once by the app entry point or a standalone script before importing other backend modules."""
 from pathlib import Path
 
 from dotenv import load_dotenv

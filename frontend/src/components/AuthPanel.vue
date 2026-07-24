@@ -5,10 +5,10 @@
         <i class="fa-solid fa-sparkles"></i>
         <span>SuperMew Knowledge Copilot</span>
       </div>
-      <h2>让每一份知识<br />都有清晰的回声。</h2>
+      <h2>Every piece of knowledge<br />deserves a clear echo.</h2>
       <p>
-        混合检索、并行 Agent、证据精排与可追溯引用，
-        现在都汇聚在同一个工作台里。
+        Hybrid retrieval, parallel agents, evidence reranking, and traceable
+        citations — now all in one workspace.
       </p>
       <div class="auth-feature-list">
         <div>
@@ -17,11 +17,11 @@
         </div>
         <div>
           <i class="fa-solid fa-diagram-project"></i>
-          <span><strong>并行 Agent</strong><small>复杂问题自动拆解与合成</small></span>
+          <span><strong>Parallel Agents</strong><small>Automatically breaks down and synthesizes complex questions</small></span>
         </div>
         <div>
           <i class="fa-regular fa-file-lines"></i>
-          <span><strong>可信引用</strong><small>答案与原始证据一一对齐</small></span>
+          <span><strong>Trusted Citations</strong><small>Every answer aligned to its source evidence</small></span>
         </div>
       </div>
     </div>
@@ -31,44 +31,44 @@
         <span class="auth-mini-logo"><i class="fa-solid fa-cat"></i></span>
         <div>
           <span class="auth-eyebrow">{{ authStore.authMode === 'login' ? 'Welcome back' : 'Create account' }}</span>
-          <h1>{{ authStore.authMode === 'login' ? '登录喵喵助手' : '注册喵喵助手' }}</h1>
+          <h1>{{ authStore.authMode === 'login' ? 'Log in to Mew Assistant' : 'Sign up for Mew Assistant' }}</h1>
         </div>
       </div>
       <p class="auth-description">
         {{ authStore.authMode === 'login'
-          ? '进入你的私有知识空间，继续上一次对话。'
-          : '创建账号后即可开始对话和保存历史记录。' }}
+          ? 'Enter your private knowledge space and pick up where you left off.'
+          : 'Create an account to start chatting and save your conversation history.' }}
       </p>
 
       <form class="auth-form" @submit.prevent="onSubmit">
         <label class="form-field">
-          <span>用户名</span>
+          <span>Username</span>
           <span class="field-input">
             <i class="fa-regular fa-user"></i>
-            <input v-model="authStore.authForm.username" type="text" autocomplete="username" placeholder="请输入用户名" />
+            <input v-model="authStore.authForm.username" type="text" autocomplete="username" placeholder="Enter your username" />
           </span>
         </label>
 
         <label class="form-field">
-          <span>密码</span>
+          <span>Password</span>
           <span class="field-input">
             <i class="fa-solid fa-lock"></i>
             <input
               v-model="authStore.authForm.password"
               type="password"
               :autocomplete="authStore.authMode === 'login' ? 'current-password' : 'new-password'"
-              placeholder="请输入密码"
+              placeholder="Enter your password"
             />
           </span>
         </label>
 
         <label v-if="authStore.authMode === 'register'" class="form-field">
-          <span>账号角色</span>
+          <span>Account role</span>
           <span class="field-input">
             <i class="fa-regular fa-id-badge"></i>
             <select v-model="authStore.authForm.role">
-              <option value="user">普通用户</option>
-              <option value="admin">管理员</option>
+              <option value="user">Standard user</option>
+              <option value="admin">Administrator</option>
             </select>
           </span>
         </label>
@@ -77,29 +77,29 @@
           v-if="authStore.authMode === 'register' && authStore.authForm.role === 'admin'"
           class="form-field"
         >
-          <span>管理员邀请码</span>
+          <span>Admin invite code</span>
           <span class="field-input">
             <i class="fa-solid fa-key"></i>
             <input
               v-model="authStore.authForm.admin_code"
               type="password"
               autocomplete="off"
-              placeholder="请输入管理员邀请码"
+              placeholder="Enter the admin invite code"
             />
           </span>
         </label>
 
         <button class="auth-submit" type="submit" :disabled="authStore.authLoading">
-          <span>{{ authStore.authLoading ? '正在连接...' : (authStore.authMode === 'login' ? '进入工作台' : '创建账号') }}</span>
+          <span>{{ authStore.authLoading ? 'Connecting...' : (authStore.authMode === 'login' ? 'Enter workspace' : 'Create account') }}</span>
           <i :class="authStore.authLoading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-arrow-right'"></i>
         </button>
       </form>
 
-      <div class="auth-divider"><span>或者</span></div>
+      <div class="auth-divider"><span>or</span></div>
       <button class="auth-switch" type="button" @click="toggleAuthMode">
-        {{ authStore.authMode === 'login' ? '还没有账号？创建一个' : '已有账号？返回登录' }}
+        {{ authStore.authMode === 'login' ? "Don't have an account? Create one" : 'Already have an account? Back to login' }}
       </button>
-      <p class="auth-footnote">登录即表示你理解 AI 输出需要经过必要的人工复核。</p>
+      <p class="auth-footnote">By logging in, you acknowledge that AI output should go through the necessary human review.</p>
     </div>
   </section>
 </template>

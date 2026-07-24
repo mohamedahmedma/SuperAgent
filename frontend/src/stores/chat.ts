@@ -33,9 +33,9 @@ export const useChatStore = defineStore('chat', {
     inputPlaceholder(state): string {
       const pendingHitl = state.pendingHitlBySession[state.sessionId];
       if (pendingHitl) {
-        return '输入自定义补充，或选择上方选项后发送...';
+        return 'Type your own answer, or pick an option above and send...';
       }
-      return '和喵喵说点什么吧... (Shift+Enter 换行)';
+      return 'Say something to Mew... (Shift+Enter for a new line)';
     },
   },
 
@@ -63,7 +63,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     normalizeHitlRequest(hitl: any, trace?: RagTrace | null): HitlRequest {
-      const prompt = String(hitl?.prompt || trace?.hitl_prompt || '请补充一个关键信息后我继续查询。');
+      const prompt = String(hitl?.prompt || trace?.hitl_prompt || 'Please provide one more key detail so I can continue the search.');
       const rawOptions = hitl?.options || trace?.hitl_options || [];
       const options = Array.isArray(rawOptions)
         ? rawOptions.map((item) => String(item).trim()).filter(Boolean)
@@ -81,7 +81,7 @@ export const useChatStore = defineStore('chat', {
     formatHitlText(hitl: HitlRequest): string {
       const options = hitl.options || [];
       if (!options.length) return hitl.prompt;
-      return `${hitl.prompt}\n\n可选方向：\n${options.map((item) => `- ${item}`).join('\n')}`;
+      return `${hitl.prompt}\n\nOptions:\n${options.map((item) => `- ${item}`).join('\n')}`;
     },
 
     derivePendingHitl(messages: Message[]): HitlRequest | null {
@@ -255,10 +255,10 @@ export const useChatStore = defineStore('chat', {
 
     handleClearChat() {
       if (this.streamingSessionId === this.sessionId) {
-        alert('当前会话正在生成回答，请先终止或等待完成后再清空');
+        alert('This chat is still generating a response. Stop it or wait for it to finish before clearing.');
         return;
       }
-      if (confirm('确定要清空当前对话吗？喵？')) {
+      if (confirm('Clear the current conversation? Meow?')) {
         this.messagesBySession[this.sessionId] = [];
         this.messages = this.messagesBySession[this.sessionId];
         delete this.pendingHitlBySession[this.sessionId];
@@ -288,7 +288,7 @@ export const useChatStore = defineStore('chat', {
         }
         this.mergeCachedSessionsIntoHistory();
       } catch (error: any) {
-        const errMsg = error.response?.data?.detail || error.message || '加载会话失败';
+        const errMsg = error.response?.data?.detail || error.message || 'Failed to load session';
         if (!cachedMessages && this.sessionId === sessionId) {
           this.messages = [];
         }
@@ -307,14 +307,14 @@ export const useChatStore = defineStore('chat', {
       const sessionStore = useSessionStore();
 
       if (!authStore.isAuthenticated) {
-        alert('请先登录');
+        alert('Please log in first');
         return;
       }
 
       const text = this.userInput.trim();
       if (!text) return;
       if (this.isLoading) {
-        alert('当前已有回答正在生成，请先等待完成或回到该会话终止回答');
+        alert('A response is already being generated. Wait for it to finish, or go back to that session to stop it.');
         return;
       }
 
@@ -391,13 +391,13 @@ export const useChatStore = defineStore('chat', {
         if (!response.ok) {
           if (response.status === 401) {
             authStore.handleLogout();
-            throw new Error('登录已过期，请重新登录');
+            throw new Error('Your session has expired, please log in again');
           }
           throw new Error(`HTTP ${response.status}`);
         }
 
         const reader = response.body?.getReader();
-        if (!reader) throw new Error('无法读取响应流');
+        if (!reader) throw new Error('Unable to read the response stream');
 
         const decoder = new TextDecoder();
         let buffer = '';
@@ -488,13 +488,13 @@ export const useChatStore = defineStore('chat', {
         if (error.name === 'AbortError') {
           botMsg.isThinking = false;
           if (!botMsg.text) {
-            botMsg.text = '(已终止回答)';
+            botMsg.text = '(Response stopped)';
           } else {
-            botMsg.text += '\n\n_(回答已被终止)_';
+            botMsg.text += '\n\n_(Response was stopped)_';
           }
         } else {
           botMsg.isThinking = false;
-          botMsg.text = `喵呜... 出了点问题：${error.message}`;
+          botMsg.text = `Meow... something went wrong: ${error.message}`;
         }
       } finally {
         if (streamHadError && pendingHitlAtSend && !receivedHitlRequest) {

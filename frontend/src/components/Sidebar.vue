@@ -5,7 +5,7 @@
         <i class="fa-solid fa-cat"></i>
       </div>
       <div class="brand-copy">
-        <h1>喵喵助手</h1>
+        <h1>Mew Assistant</h1>
         <span>Knowledge Copilot</span>
       </div>
     </div>
@@ -13,30 +13,30 @@
     <div class="workspace-switcher">
       <span class="workspace-orb" aria-hidden="true"></span>
       <span class="workspace-copy">
-        <strong>SuperMew 知识空间</strong>
+        <strong>SuperMew Knowledge Space</strong>
         <small>{{ workspaceMeta }}</small>
       </span>
       <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
     </div>
 
-    <nav class="sidebar-nav" aria-label="主导航">
+    <nav class="sidebar-nav" aria-label="Main navigation">
       <button
         type="button"
         :class="['nav-btn', { active: chatStore.activeNav === 'newChat' }]"
-        aria-label="智能对话"
+        aria-label="Chat"
         @click="onNewChat"
       >
         <i class="fa-regular fa-message"></i>
-        <span>智能对话</span>
+        <span>Chat</span>
       </button>
       <button
         type="button"
         :class="['nav-btn', { active: chatStore.activeNav === 'history' }]"
-        aria-label="历史会话"
+        aria-label="History"
         @click="onHistory"
       >
         <i class="fa-solid fa-clock-rotate-left"></i>
-        <span>历史会话</span>
+        <span>History</span>
         <small v-if="sessionStore.sessions.length" class="nav-count">
           {{ sessionStore.sessions.length }}
         </small>
@@ -45,16 +45,16 @@
         v-if="authStore.isAdmin"
         type="button"
         :class="['nav-btn', { active: chatStore.activeNav === 'settings' }]"
-        aria-label="知识库"
+        aria-label="Knowledge base"
         @click="onSettings"
       >
         <i class="fa-regular fa-bookmark"></i>
-        <span>知识库</span>
+        <span>Knowledge base</span>
       </button>
     </nav>
 
     <template v-if="authStore.isAuthenticated">
-      <div class="sidebar-section-label">最近会话</div>
+      <div class="sidebar-section-label">Recent sessions</div>
       <div class="sidebar-recents">
         <button
           v-for="session in recentSessions"
@@ -65,16 +65,16 @@
         >
           <span class="recent-dot" aria-hidden="true"></span>
           <span class="recent-copy">
-            <strong>{{ session.title || '未命名会话' }}</strong>
+            <strong>{{ session.title || 'Untitled session' }}</strong>
             <small>
-              {{ session.isStreaming ? '生成中' : session.message_count + ' 条消息' }}
+              {{ session.isStreaming ? 'Generating' : session.message_count + ' messages' }}
               · {{ formatRelativeTime(session.updated_at) }}
             </small>
           </span>
         </button>
 
         <div v-if="!recentSessions.length" class="recent-empty">
-          还没有历史会话，问喵喵一个问题吧。
+          No conversations yet — ask Mew a question.
         </div>
       </div>
     </template>
@@ -83,7 +83,7 @@
       <div class="theme-control">
         <span class="theme-control-label">
           <i :class="theme === 'light' ? 'fa-regular fa-sun' : 'fa-regular fa-moon'"></i>
-          <span>{{ theme === 'light' ? '浅色模式' : '深色模式' }}</span>
+          <span>{{ theme === 'light' ? 'Light mode' : 'Dark mode' }}</span>
         </span>
         <ThemeToggle :theme="theme" @toggle="$emit('toggle-theme')" />
       </div>
@@ -95,10 +95,10 @@
           <small>{{ roleLabel }}</small>
         </span>
         <span class="user-actions">
-          <button type="button" title="清空当前对话" aria-label="清空当前对话" @click="chatStore.handleClearChat">
+          <button type="button" title="Clear current chat" aria-label="Clear current chat" @click="chatStore.handleClearChat">
             <i class="fa-regular fa-trash-can"></i>
           </button>
-          <button type="button" title="退出登录" aria-label="退出登录" @click="onLogout">
+          <button type="button" title="Log out" aria-label="Log out" @click="onLogout">
             <i class="fa-solid fa-arrow-right-from-bracket"></i>
           </button>
         </span>
@@ -129,11 +129,11 @@ const sessionStore = useSessionStore();
 const recentSessions = computed(() => sessionStore.sessions.slice(0, 4));
 
 const workspaceMeta = computed(() => {
-  if (!authStore.isAuthenticated) return '登录后连接私有知识';
-  return (sessionStore.sessions.length || 0) + ' 个会话 · 私有';
+  if (!authStore.isAuthenticated) return 'Log in to connect your private knowledge';
+  return (sessionStore.sessions.length || 0) + ' sessions · Private';
 });
 
-const roleLabel = computed(() => authStore.currentUser?.role === 'admin' ? '管理员' : '普通用户');
+const roleLabel = computed(() => authStore.currentUser?.role === 'admin' ? 'Administrator' : 'Standard user');
 
 const userInitials = computed(() => {
   const name = authStore.currentUser?.username || 'ME';
@@ -146,7 +146,7 @@ const refreshSessions = async () => {
     await sessionStore.fetchSessions();
     chatStore.mergeCachedSessionsIntoHistory();
   } catch (error) {
-    console.warn('加载历史会话失败', error);
+    console.warn('Failed to load conversation history', error);
   }
 };
 
@@ -177,7 +177,7 @@ const onHistory = async () => {
 
 const onSettings = () => {
   if (!authStore.isAdmin) {
-    alert('仅管理员可访问文档管理');
+    alert('Only administrators can access document management');
     return;
   }
   chatStore.activeNav = 'settings';
@@ -188,7 +188,7 @@ const onLoadSession = async (sessionId: string) => {
   try {
     await chatStore.loadSession(sessionId);
   } catch (error: any) {
-    alert('加载会话失败：' + error.message);
+    alert('Failed to load session: ' + error.message);
   }
 };
 
@@ -199,14 +199,14 @@ const onLogout = () => {
 
 const formatRelativeTime = (value: string) => {
   const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return '刚刚';
+  if (!Number.isFinite(timestamp)) return 'Just now';
   const diffMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
-  if (diffMinutes < 1) return '刚刚';
-  if (diffMinutes < 60) return diffMinutes + ' 分钟前';
+  if (diffMinutes < 1) return 'Just now';
+  if (diffMinutes < 60) return diffMinutes + ' minutes ago';
   const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return diffHours + ' 小时前';
+  if (diffHours < 24) return diffHours + ' hours ago';
   const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return diffDays + ' 天前';
+  if (diffDays < 7) return diffDays + ' days ago';
   return new Date(value).toLocaleDateString();
 };
 </script>

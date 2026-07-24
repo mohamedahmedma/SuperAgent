@@ -1,4 +1,4 @@
-"""Milvus 访问层：无状态 Store + 短生命周期 gRPC 连接（避免长期持有失效 channel）。"""
+"""Milvus access layer: stateless Store + short-lived gRPC connections (avoids holding stale channels long-term)."""
 from __future__ import annotations
 
 import os
@@ -37,7 +37,7 @@ class MilvusSettings:
 
 @contextmanager
 def milvus_client_session(settings: MilvusSettings | None = None) -> Iterator[MilvusClient]:
-    """一次 RPC 会话：创建连接，用完后关闭，不缓存 gRPC channel。"""
+    """A single RPC session: opens a connection, closes it when done, and does not cache the gRPC channel."""
     cfg = settings or MilvusSettings.from_env()
     client = MilvusClient(uri=cfg.uri, timeout=cfg.timeout)
     try:
@@ -51,7 +51,7 @@ def _normalize_filter(filter_expr: str) -> str:
 
 
 class MilvusStore:
-    """Milvus 集合读写；本身不持有连接，所有 IO 经 milvus_client_session。"""
+    """Milvus collection read/write; holds no connection itself -- all IO goes through milvus_client_session."""
 
     def __init__(self, settings: MilvusSettings | None = None):
         self._settings = settings or MilvusSettings.from_env()
@@ -66,7 +66,7 @@ class MilvusStore:
 
     @contextmanager
     def session(self) -> Iterator[MilvusClient]:
-        """同一业务流（如整次上传）内复用一条连接，用毕即关。"""
+        """Reuses a single connection within one business flow (e.g., an entire upload), closing it when done."""
         with milvus_client_session(self._settings) as client:
             yield client
 
@@ -158,7 +158,7 @@ class MilvusStore:
         return self._run(_query)
 
     def query_all(self, filter_expr: str = "", output_fields: list[str] | None = None) -> list:
-        """分页拉取；单次 session 内完成，避免每页新建连接。"""
+        """Paginated fetch; completed within a single session to avoid opening a new connection per page."""
         fields = output_fields or ["filename", "file_type"]
         expr = _normalize_filter(filter_expr)
 

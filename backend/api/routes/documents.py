@@ -33,33 +33,33 @@ router = APIRouter(tags=["documents"])
 def _process_upload_job(job_id: str, file_path: str, filename: str) -> None:
     failed_step = "cleanup"
     try:
-        upload_job_manager.complete_step(job_id, "upload", "文件已保存到服务器")
+        upload_job_manager.complete_step(job_id, "upload", "File saved to server")
 
         failed_step = "cleanup"
-        upload_job_manager.update_step(job_id, "cleanup", 10, "running", "正在清理同名旧文档")
+        upload_job_manager.update_step(job_id, "cleanup", 10, "running", "Cleaning up old document with the same name")
         delete_document_transactionally(filename)
-        upload_job_manager.complete_step(job_id, "cleanup", "旧版本清理完成")
+        upload_job_manager.complete_step(job_id, "cleanup", "Old version cleanup complete")
 
         failed_step = "parse"
-        upload_job_manager.update_step(job_id, "parse", 5, "running", "正在解析文档并执行三级分块")
+        upload_job_manager.update_step(job_id, "parse", 5, "running", "Parsing document and performing three-level chunking")
         new_docs = loader.load_document(file_path, filename)
         if not new_docs:
-            raise ValueError("文档处理失败，未能提取内容")
+            raise ValueError("Document processing failed: could not extract content")
 
         parent_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) in (1, 2)]
         leaf_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) == 3]
         if not leaf_docs:
-            raise ValueError("文档处理失败，未生成可检索叶子分块")
+            raise ValueError("Document processing failed: no retrievable leaf chunks were generated")
         upload_job_manager.complete_step(
             job_id,
             "parse",
-            f"解析完成：父级分块 {len(parent_docs)} 个，叶子分块 {len(leaf_docs)} 个",
+            f"Parsing complete: {len(parent_docs)} parent chunks, {len(leaf_docs)} leaf chunks",
         )
 
         failed_step = "parent_store"
-        upload_job_manager.update_step(job_id, "parent_store", 20, "running", "正在写入父级分块")
+        upload_job_manager.update_step(job_id, "parent_store", 20, "running", "Writing parent chunks")
         parent_chunk_store.upsert_documents(parent_docs)
-        upload_job_manager.complete_step(job_id, "parent_store", f"父级分块已入库：{len(parent_docs)} 个")
+        upload_job_manager.complete_step(job_id, "parent_store", f"Parent chunks stored: {len(parent_docs)}")
 
         failed_step = "vector_store"
         total_leaf = len(leaf_docs)
@@ -68,7 +68,7 @@ def _process_upload_job(job_id: str, file_path: str, filename: str) -> None:
             "vector_store",
             0,
             "running",
-            f"正在向量化入库：0 / {total_leaf}",
+            f"Vectorizing and storing: 0 / {total_leaf}",
             total_chunks=total_leaf,
             processed_chunks=0,
         )
@@ -80,14 +80,14 @@ def _process_upload_job(job_id: str, file_path: str, filename: str) -> None:
                 "vector_store",
                 percent,
                 "running",
-                f"正在向量化入库：{processed} / {total}",
+                f"Vectorizing and storing: {processed} / {total}",
                 total_chunks=total,
                 processed_chunks=processed,
             )
 
         milvus_writer.write_documents(leaf_docs, progress_callback=_on_vector_progress)
-        upload_job_manager.complete_step(job_id, "vector_store", f"向量化入库完成：{total_leaf} 个叶子分块")
-        upload_job_manager.complete_job(job_id, f"成功上传并处理 {filename}")
+        upload_job_manager.complete_step(job_id, "vector_store", f"Vectorization and storage complete: {total_leaf} leaf chunks")
+        upload_job_manager.complete_job(job_id, f"Successfully uploaded and processed {filename}")
     except Exception as e:
         upload_job_manager.fail_job(job_id, failed_step, str(e))
 
@@ -96,7 +96,7 @@ def _process_delete_job(job_id: str, filename: str) -> None:
     failed_step = "prepare"
     try:
         chunks_deleted = delete_document_transactionally(filename, delete_job_manager, job_id)
-        delete_job_manager.complete_job(job_id, f"已删除 {filename}，向量数据 {chunks_deleted} 条")
+        delete_job_manager.complete_job(job_id, f"Deleted {filename}, {chunks_deleted} vector records removed")
     except Exception as e:
         job = delete_job_manager.get_job(job_id)
         current_step = job.get("current_step", "prepare") if job else "prepare"
@@ -127,7 +127,7 @@ async def list_documents(_: User = Depends(require_admin)):
         documents = [DocumentInfo(**stats) for stats in file_stats.values()]
         return DocumentListResponse(documents=documents)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取文档列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve document list: {str(e)}")
 
 
 @router.post("/documents/upload/async", response_model=DocumentUploadStartResponse)
@@ -138,27 +138,27 @@ async def upload_document_async(
 ):
     filename = file.filename or ""
     if not filename:
-        raise HTTPException(status_code=400, detail="文件名不能为空")
+        raise HTTPException(status_code=400, detail="Filename cannot be empty")
     if not is_supported_document(filename):
-        raise HTTPException(status_code=400, detail="仅支持 PDF、Word 和 Excel 文档")
+        raise HTTPException(status_code=400, detail="Only PDF, Word, and Excel documents are supported")
 
     ensure_upload_dir()
     job = upload_job_manager.create_job(filename)
     file_path = UPLOAD_DIR / filename
 
     try:
-        upload_job_manager.update_step(job["job_id"], "upload", 1, "running", "正在保存文件到服务器")
+        upload_job_manager.update_step(job["job_id"], "upload", 1, "running", "Saving file to server")
         await save_upload_file(file, file_path)
-        upload_job_manager.complete_step(job["job_id"], "upload", "文件已上传，等待后台处理")
+        upload_job_manager.complete_step(job["job_id"], "upload", "File uploaded, waiting for background processing")
     except Exception as e:
-        upload_job_manager.fail_job(job["job_id"], "upload", f"文件保存失败: {e}")
-        raise HTTPException(status_code=500, detail=f"文件保存失败: {e}")
+        upload_job_manager.fail_job(job["job_id"], "upload", f"Failed to save file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
 
     background_tasks.add_task(_process_upload_job, job["job_id"], str(file_path), filename)
     return DocumentUploadStartResponse(
         job_id=job["job_id"],
         filename=filename,
-        message="文件已上传，正在后台解析和向量化入库",
+        message="File uploaded, parsing and vectorization in progress in the background",
     )
 
 
@@ -166,7 +166,7 @@ async def upload_document_async(
 async def get_upload_job(job_id: str, _: User = Depends(require_admin)):
     job = upload_job_manager.get_job(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="上传任务不存在或已过期")
+        raise HTTPException(status_code=404, detail="Upload job does not exist or has expired")
     return DocumentUploadJobResponse(**job)
 
 
@@ -187,15 +187,15 @@ async def delete_document_async(
         filename,
         steps=DELETE_STEPS,
         current_step="prepare",
-        message="等待删除",
+        message="Waiting to delete",
         completion_step="parent_store",
     )
-    delete_job_manager.update_step(job["job_id"], "prepare", 1, "running", "删除任务已提交")
+    delete_job_manager.update_step(job["job_id"], "prepare", 1, "running", "Delete job submitted")
     background_tasks.add_task(_process_delete_job, job["job_id"], filename)
     return DocumentDeleteStartResponse(
         job_id=job["job_id"],
         filename=filename,
-        message=f"正在删除 {filename}",
+        message=f"Deleting {filename}",
     )
 
 
@@ -203,7 +203,7 @@ async def delete_document_async(
 async def get_delete_job(job_id: str, _: User = Depends(require_admin)):
     job = delete_job_manager.get_job(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="删除任务不存在或已过期")
+        raise HTTPException(status_code=404, detail="Delete job does not exist or has expired")
     return DocumentDeleteJobResponse(**job)
 
 
@@ -212,13 +212,13 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
     try:
         filename = file.filename or ""
         if not filename:
-            raise HTTPException(status_code=400, detail="文件名不能为空")
+            raise HTTPException(status_code=400, detail="Filename cannot be empty")
         if not is_supported_document(filename):
-            raise HTTPException(status_code=400, detail="仅支持 PDF、Word 和 Excel 文档")
+            raise HTTPException(status_code=400, detail="Only PDF, Word, and Excel documents are supported")
 
         ensure_upload_dir()
-        
-        # Cleanup existing同名文档以保证一致性
+
+        # Clean up existing document with the same name to preserve consistency
         delete_document_transactionally(filename)
 
         file_path = UPLOAD_DIR / filename
@@ -229,15 +229,15 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
         try:
             new_docs = loader.load_document(str(file_path), filename)
         except Exception as doc_err:
-            raise HTTPException(status_code=500, detail=f"文档处理失败: {doc_err}")
+            raise HTTPException(status_code=500, detail=f"Document processing failed: {doc_err}")
 
         if not new_docs:
-            raise HTTPException(status_code=500, detail="文档处理失败，未能提取内容")
+            raise HTTPException(status_code=500, detail="Document processing failed: could not extract content")
 
         parent_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) in (1, 2)]
         leaf_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) == 3]
         if not leaf_docs:
-            raise HTTPException(status_code=500, detail="文档处理失败，未生成可检索叶子分块")
+            raise HTTPException(status_code=500, detail="Document processing failed: no retrievable leaf chunks were generated")
 
         parent_chunk_store.upsert_documents(parent_docs)
         milvus_writer.write_documents(leaf_docs)
@@ -246,14 +246,14 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
             filename=filename,
             chunks_processed=len(leaf_docs),
             message=(
-                f"成功上传并处理 {filename}，叶子分块 {len(leaf_docs)} 个，"
-                f"父级分块 {len(parent_docs)} 个（存入 PostgreSQL）"
+                f"Successfully uploaded and processed {filename}: {len(leaf_docs)} leaf chunks, "
+                f"{len(parent_docs)} parent chunks (stored in PostgreSQL)"
             ),
         )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"文档上传失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Document upload failed: {str(e)}")
 
 
 @router.delete("/documents/{filename}", response_model=DocumentDeleteResponse)
@@ -264,7 +264,7 @@ async def delete_document(filename: str, _: User = Depends(require_admin)):
         return DocumentDeleteResponse(
             filename=filename,
             chunks_deleted=chunks_deleted,
-            message=f"成功删除文档 {filename} 的向量数据（本地文件已保留）",
+            message=f"Successfully deleted vector data for document {filename} (local file retained)",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"删除文档失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")

@@ -1,7 +1,9 @@
-"""上传任务进度管理。
+"""Upload job progress management.
 
-轻量版先使用进程内存保存任务状态，适合当前单进程开发部署。
-如果后续要支持多进程或服务重启恢复，可以把同样的数据结构迁移到 Redis/PostgreSQL。
+The lightweight version currently stores job state in process memory, which is
+suitable for the current single-process development deployment.
+If multi-process support or recovery after a service restart is needed later,
+the same data structure can be migrated to Redis/PostgreSQL.
 """
 from __future__ import annotations
 
@@ -17,18 +19,18 @@ JobStatus = Literal["pending", "running", "completed", "failed"]
 
 
 DEFAULT_STEPS = [
-    ("upload", "文档上传"),
-    ("cleanup", "清理旧版本"),
-    ("parse", "解析与分块"),
-    ("parent_store", "父级分块入库"),
-    ("vector_store", "向量化入库"),
+    ("upload", "Document upload"),
+    ("cleanup", "Clean up old version"),
+    ("parse", "Parsing and chunking"),
+    ("parent_store", "Storing parent chunks"),
+    ("vector_store", "Vectorizing and storing"),
 ]
 
 DELETE_STEPS = [
-    ("prepare", "准备删除"),
-    ("bm25", "同步 BM25 统计"),
-    ("milvus", "删除向量数据"),
-    ("parent_store", "删除父级分块"),
+    ("prepare", "Preparing deletion"),
+    ("bm25", "Syncing BM25 statistics"),
+    ("milvus", "Deleting vector data"),
+    ("parent_store", "Deleting parent chunks"),
 ]
 
 
@@ -37,7 +39,7 @@ def _now_iso() -> str:
 
 
 class UploadJobManager:
-    """线程安全的上传任务状态容器。"""
+    """Thread-safe container for upload job state."""
 
     def __init__(self):
         self._jobs: dict[str, dict] = {}
@@ -49,7 +51,7 @@ class UploadJobManager:
         *,
         steps: list[tuple[str, str]] | None = None,
         current_step: str = "upload",
-        message: str = "等待上传",
+        message: str = "Waiting to upload",
         completion_step: str = "vector_store",
     ) -> dict:
         steps = steps or DEFAULT_STEPS
@@ -61,7 +63,7 @@ class UploadJobManager:
             "status": "pending",
             "current_step": current_step,
             "message": message,
-            # 完成节点用于区分上传和删除，避免 complete_job 写死最后一步。
+            # The completion step distinguishes upload from delete jobs, avoiding a hardcoded final step in complete_job.
             "completion_step": completion_step,
             "total_chunks": 0,
             "processed_chunks": 0,
@@ -127,7 +129,7 @@ class UploadJobManager:
     def complete_step(self, job_id: str, step_key: str, message: str = "") -> dict | None:
         return self.update_step(job_id, step_key, 100, "completed", message)
 
-    def complete_job(self, job_id: str, message: str = "文档入库完成") -> dict | None:
+    def complete_job(self, job_id: str, message: str = "Document ingestion complete") -> dict | None:
         with self._lock:
             job = self._jobs.get(job_id)
             if not job:

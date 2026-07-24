@@ -82,52 +82,54 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         fake_model = Mock()
         fake_model.invoke.return_value = Mock(content="summary")
         history = [
-            HumanMessage(content="第一轮问题"),
-            AIMessage(content="第一轮回答"),
+            HumanMessage(content="first round question"),
+            AIMessage(content="first round answer"),
         ]
 
         with patch.object(service, "fast_model", fake_model):
             note = service._update_persistent_note_sync(
                 "",
-                "最新问题",
-                "最新回答",
+                "latest question",
+                "latest answer",
                 history_messages=history,
             )
 
         prompt = fake_model.invoke.call_args.args[0][0].content
         self.assertEqual("summary", note)
-        self.assertIn("用户：第一轮问题", prompt)
-        self.assertIn("AI：第一轮回答", prompt)
+        self.assertIn("User: first round question", prompt)
+        self.assertIn("AI: first round answer", prompt)
 
     async def test_stream_immediately_reports_progress_and_skips_note_for_short_chat(self):
         fake_storage = FakeStorage()
         update_note = AsyncMock(return_value="updated note")
 
         def make_agent(ctx):
-            return FakeStreamAgent(ctx, chunks=["直接回答"])
+            return FakeStreamAgent(ctx, chunks=["direct answer"])
 
         with (
             patch.object(service, "storage", fake_storage),
             patch.object(service, "create_agent_for_request", make_agent),
-            patch.object(service, "generate_session_title", Mock(return_value="短问题")),
+            patch.object(service, "generate_session_title", Mock(return_value="short question")),
             patch.object(service, "update_persistent_note", update_note),
         ):
-            chunks = await _collect_stream("你好", "u", "s")
+            chunks = await _collect_stream("Hello", "u", "s")
 
         events = _parse_sse_events(chunks)
         self.assertEqual("rag_step", events[0].get("type"))
-        self.assertEqual("请求已接收，正在准备回答", events[0]["step"]["label"])
+        # NOTE: this label is a hardcoded string in backend/chat/service.py and must
+        # stay in sync with that file.
+        self.assertEqual("Request received, preparing response", events[0]["step"]["label"])
         update_note.assert_not_called()
 
     async def test_stream_hitl_request_persists_pending_state_without_content(self):
         trace = {
             "retrieval_status": "needs_clarification",
             "route": "clarify",
-            "hitl_prompt": "请补充角色名",
-            "hitl_options": ["丹瑾", "丹恒"],
+            "hitl_prompt": "Please specify the character name",
+            "hitl_options": ["Danjin", "Dan Heng"],
         }
         resume_state = {
-            "question": "这个角色的属性是什么？",
+            "question": "What is this character's element?",
             "route": "clarify",
             "retrieval_status": "needs_clarification",
             "rewrite_count": 0,
@@ -142,45 +144,48 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             return FakeStreamAgent(
                 ctx,
                 trace=trace,
-                chunks=["请补充角色名"],
+                chunks=["Please specify the character name"],
                 resume_state=resume_state,
             )
 
         with (
             patch.object(service, "storage", fake_storage),
             patch.object(service, "create_agent_for_request", make_agent),
-            patch.object(service, "generate_session_title", Mock(return_value="角色问题")),
+            patch.object(service, "generate_session_title", Mock(return_value="character question")),
             patch.object(service, "update_persistent_note", update_note),
         ):
-            chunks = await _collect_stream("这个角色的属性是什么？", "u", "s")
+            chunks = await _collect_stream("What is this character's element?", "u", "s")
 
         events = _parse_sse_events(chunks)
         self.assertFalse([event for event in events if event.get("type") == "content"])
         hitl_events = [event for event in events if event.get("type") == "hitl_request"]
         self.assertEqual(1, len(hitl_events))
-        self.assertEqual("请补充角色名", hitl_events[0]["hitl"]["prompt"])
-        self.assertEqual(["丹瑾", "丹恒"], hitl_events[0]["hitl"]["options"])
+        self.assertEqual("Please specify the character name", hitl_events[0]["hitl"]["prompt"])
+        self.assertEqual(["Danjin", "Dan Heng"], hitl_events[0]["hitl"]["options"])
 
         pending_hitl = fake_storage.metadata.get(service.PENDING_HITL_KEY)
         self.assertIsInstance(pending_hitl, dict)
-        self.assertEqual("这个角色的属性是什么？", pending_hitl["original_question"])
-        self.assertEqual("请补充角色名", pending_hitl["prompt"])
+        self.assertEqual("What is this character's element?", pending_hitl["original_question"])
+        self.assertEqual("Please specify the character name", pending_hitl["prompt"])
         self.assertEqual(resume_state, pending_hitl["resume_state"])
-        self.assertEqual("请补充角色名\n\n可选方向：\n- 丹瑾\n- 丹恒", fake_storage.messages[-1].content)
+        self.assertEqual(
+            "Please specify the character name\n\nAvailable options:\n- Danjin\n- Dan Heng",
+            fake_storage.messages[-1].content,
+        )
         update_note.assert_not_called()
 
     async def test_stream_resume_uses_saved_rag_state_without_reentering_agent(self):
         pending_hitl = {
             "id": "hitl-1",
-            "original_question": "这个角色的属性是什么？",
-            "prompt": "请补充角色名",
-            "options": ["丹瑾", "丹恒"],
+            "original_question": "What is this character's element?",
+            "prompt": "Please specify the character name",
+            "options": ["Danjin", "Dan Heng"],
             "route": "clarify",
             "retrieval_status": "needs_clarification",
             "answers": [],
             "created_at": "2026-07-11T00:00:00+00:00",
             "resume_state": {
-                "question": "这个角色的属性是什么？",
+                "question": "What is this character's element?",
                 "route": "clarify",
                 "retrieval_status": "needs_clarification",
                 "rewrite_count": 0,
@@ -191,14 +196,14 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         }
         fake_storage = FakeStorage(
             messages=[
-                HumanMessage(content="这个角色的属性是什么？"),
-                AIMessage(content="请补充角色名"),
+                HumanMessage(content="What is this character's element?"),
+                AIMessage(content="Please specify the character name"),
             ],
             metadata={service.PENDING_HITL_KEY: pending_hitl},
         )
-        fake_model = FakeDirectModel(["丹瑾是湮灭属性。[1]"])
+        fake_model = FakeDirectModel(["Danjin is the Imaginary element.[1]"])
         resume_mock = Mock(return_value={
-            "docs": [{"filename": "chars.pdf", "page_number": 1, "text": "丹瑾是湮灭属性。"}],
+            "docs": [{"filename": "chars.pdf", "page_number": 1, "text": "Danjin is the Imaginary element."}],
             "retrieval_status": "answerable",
             "route": "answer",
             "rag_trace": {"retrieval_status": "answerable", "route": "answer"},
@@ -212,20 +217,20 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(service, "model", fake_model),
             patch.object(service, "update_persistent_note", AsyncMock(return_value="updated note")),
         ):
-            chunks = await _collect_stream("丹瑾", "u", "s")
+            chunks = await _collect_stream("Danjin", "u", "s")
 
         events = _parse_sse_events(chunks)
-        self.assertEqual(["丹瑾是湮灭属性。[1]"], [
+        self.assertEqual(["Danjin is the Imaginary element.[1]"], [
             event["content"] for event in events if event.get("type") == "content"
         ])
         self.assertFalse([event for event in events if event.get("type") == "hitl_request"])
         self.assertIsNone(fake_storage.metadata.get(service.PENDING_HITL_KEY))
-        self.assertEqual("丹瑾", fake_storage.messages[-2].content)
-        self.assertEqual("丹瑾是湮灭属性。[1]", fake_storage.messages[-1].content)
+        self.assertEqual("Danjin", fake_storage.messages[-2].content)
+        self.assertEqual("Danjin is the Imaginary element.[1]", fake_storage.messages[-1].content)
         resume_mock.assert_called_once()
         create_agent_mock.assert_not_called()
-        self.assertIn("原始问题：\n这个角色的属性是什么？", fake_model.messages[-1][-1].content)
-        self.assertIn("用户补充：\n丹瑾", fake_model.messages[-1][-1].content)
+        self.assertIn("Original question:\nWhat is this character's element?", fake_model.messages[-1][-1].content)
+        self.assertIn("User's answer:\nDanjin", fake_model.messages[-1][-1].content)
 
 
 if __name__ == "__main__":

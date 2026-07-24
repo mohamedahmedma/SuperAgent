@@ -3,8 +3,8 @@
     <div class="upload-section-head">
       <span class="upload-title-icon"><i class="fa-solid fa-cloud-arrow-up"></i></span>
       <div>
-        <h2>快速入库</h2>
-        <p>解析结构、三级分块并写入混合索引。</p>
+        <h2>Quick upload</h2>
+        <p>Parses structure, splits into three-tier chunks, and writes to the hybrid index.</p>
       </div>
     </div>
 
@@ -24,11 +24,11 @@
       @drop.prevent="onFileDrop"
     >
       <span class="dropzone-icon"><i class="fa-solid fa-arrow-up-from-bracket"></i></span>
-      <strong>{{ documentStore.selectedFile ? documentStore.selectedFile.name : '拖放文件到这里' }}</strong>
+      <strong>{{ documentStore.selectedFile ? documentStore.selectedFile.name : 'Drag and drop a file here' }}</strong>
       <span>
         {{ documentStore.selectedFile
           ? formatFileSize(documentStore.selectedFile.size)
-          : '或点击选择 PDF、Word、Excel、HTML 文件' }}
+          : 'or click to choose a PDF, Word, Excel, or HTML file' }}
       </span>
     </button>
 
@@ -36,7 +36,7 @@
       <span class="selected-file-icon"><i class="fa-regular fa-file-lines"></i></span>
       <span class="selected-file-copy">
         <strong>{{ documentStore.selectedFile.name }}</strong>
-        <small>{{ formatFileSize(documentStore.selectedFile.size) }} · 等待上传</small>
+        <small>{{ formatFileSize(documentStore.selectedFile.size) }} · Waiting to upload</small>
       </span>
       <button
         type="button"
@@ -45,7 +45,7 @@
         @click="onUpload"
       >
         <i :class="documentStore.isUploading ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-arrow-up'"></i>
-        {{ documentStore.isUploading ? '处理中' : '开始上传' }}
+        {{ documentStore.isUploading ? 'Processing' : 'Start upload' }}
       </button>
     </div>
 
@@ -55,11 +55,11 @@
     >
       <button type="button" class="upload-progress-header" @click="onToggleCollapse">
         <span>
-          <strong>{{ documentStore.uploadProgress || '上传进度' }}</strong>
-          <small>{{ completedSteps }} / {{ documentStore.uploadSteps.length }} 个阶段完成</small>
+          <strong>{{ documentStore.uploadProgress || 'Upload progress' }}</strong>
+          <small>{{ completedSteps }} / {{ documentStore.uploadSteps.length }} stages complete</small>
         </span>
         <span class="upload-toggle">
-          {{ documentStore.uploadProgressCollapsed ? '展开' : '收起' }}
+          {{ documentStore.uploadProgressCollapsed ? 'Expand' : 'Collapse' }}
           <i :class="documentStore.uploadProgressCollapsed ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-up'"></i>
         </span>
       </button>
@@ -86,9 +86,9 @@
     </div>
 
     <div class="upload-pipeline-note">
-      <div><span>01</span><p><strong>结构解析</strong><small>识别章节、表格与页面</small></p></div>
-      <div><span>02</span><p><strong>三级分块</strong><small>保留父子上下文关系</small></p></div>
-      <div><span>03</span><p><strong>混合索引</strong><small>Dense + BM25 同步写入</small></p></div>
+      <div><span>01</span><p><strong>Structure parsing</strong><small>Detects sections, tables, and pages</small></p></div>
+      <div><span>02</span><p><strong>Three-tier chunking</strong><small>Preserves parent-child context</small></p></div>
+      <div><span>03</span><p><strong>Hybrid indexing</strong><small>Dense + BM25 written in sync</small></p></div>
     </div>
   </section>
 </template>
@@ -131,7 +131,7 @@ const onUpload = async () => {
   try {
     await documentStore.uploadDocument();
   } catch (error: any) {
-    alert('上传文档失败：' + error.message);
+    alert('Failed to upload document: ' + error.message);
   }
 };
 

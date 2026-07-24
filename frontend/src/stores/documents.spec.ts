@@ -20,13 +20,13 @@ const flushPromises = async () => {
 const createUploadJob = (overrides: Record<string, any> = {}) => ({
   job_id: 'job_upload_1',
   status: 'running',
-  message: '正在向量化入库：450 / 770',
+  message: 'Vectorizing: 450 / 770',
   steps: [
-    { key: 'upload', label: '文档上传', percent: 100, status: 'completed', message: '文档上传完成' },
-    { key: 'cleanup', label: '清理旧版本', percent: 100, status: 'completed', message: '清理完成' },
-    { key: 'parse', label: '解析与分块', percent: 100, status: 'completed', message: '解析完成' },
-    { key: 'parent_store', label: '父级分块入库', percent: 100, status: 'completed', message: '父级分块入库完成' },
-    { key: 'vector_store', label: '向量化入库', percent: 58, status: 'running', message: '450 / 770' },
+    { key: 'upload', label: 'Document upload', percent: 100, status: 'completed', message: 'Document upload complete' },
+    { key: 'cleanup', label: 'Clean up old version', percent: 100, status: 'completed', message: 'Cleanup complete' },
+    { key: 'parse', label: 'Parse & chunk', percent: 100, status: 'completed', message: 'Parsing complete' },
+    { key: 'parent_store', label: 'Store parent chunks', percent: 100, status: 'completed', message: 'Parent chunk storage complete' },
+    { key: 'vector_store', label: 'Vectorize & store', percent: 58, status: 'running', message: '450 / 770' },
   ],
   ...overrides,
 });
@@ -61,10 +61,10 @@ describe('document upload polling', () => {
     const runningJob = createUploadJob();
     const completedJob = createUploadJob({
       status: 'completed',
-      message: '文档处理完成',
+      message: 'Document processing complete',
       steps: [
         ...runningJob.steps.slice(0, 4),
-        { key: 'vector_store', label: '向量化入库', percent: 100, status: 'completed', message: '770 / 770' },
+        { key: 'vector_store', label: 'Vectorize & store', percent: 100, status: 'completed', message: '770 / 770' },
       ],
     });
     const jobResponses = [runningJob, completedJob];
@@ -90,7 +90,7 @@ describe('document upload polling', () => {
     await flushPromises();
 
     expect(store.activeUploadJobId).toBe('job_upload_1');
-    expect(store.uploadProgress).toBe('正在向量化入库：450 / 770');
+    expect(store.uploadProgress).toBe('Vectorizing: 450 / 770');
     expect(store.uploadSteps.find((step) => step.key === 'vector_store')).toMatchObject({
       percent: 58,
       status: 'running',
@@ -100,7 +100,7 @@ describe('document upload polling', () => {
     await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
 
-    expect(store.uploadProgress).toBe('文档处理完成');
+    expect(store.uploadProgress).toBe('Document processing complete');
     expect(store.uploadSteps.find((step) => step.key === 'vector_store')).toMatchObject({
       percent: 100,
       status: 'completed',

@@ -75,7 +75,7 @@ class RagTraceFields(StrictSchema):
     retrieved_chunks: Optional[List[RetrievedChunk]] = None
     initial_retrieved_chunks: Optional[List[RetrievedChunk]] = None
     rewrite_retrieved_chunks: Optional[List[RetrievedChunk]] = None
-    # 复杂度路由新增字段
+    # Fields added for complexity-based routing
     complexity: Optional[str] = None
     complexity_reason: Optional[str] = None
     sub_questions: Optional[List[str]] = None

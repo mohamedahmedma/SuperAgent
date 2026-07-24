@@ -21,48 +21,49 @@ milvus_writer = MilvusWriter(embedding_service=embedding_service, milvus_manager
 
 def delete_document_transactionally(filename: str, job_manager=None, job_id=None) -> int:
     """
-    一致性且事务性地删除文档的所有关联数据（Milvus 2.5+ 新版由服务端自动维护 BM25 索引统计）。
-    包含以下步骤：
-    1. 初始化 Milvus 集合。
-    2. 删除 Milvus 向量数据。
-    3. 删除 PostgreSQL 中的 L1/L2 父级分块以及对应的 Redis 缓存。
+    Consistently and transactionally delete all data associated with a document
+    (Milvus 2.5+ maintains BM25 index statistics automatically on the server side).
+    Steps:
+    1. Initialize the Milvus collection.
+    2. Delete the Milvus vector data.
+    3. Delete the L1/L2 parent chunks in PostgreSQL and the corresponding Redis cache.
     """
     if job_manager and job_id:
-        job_manager.update_step(job_id, "prepare", 50, "running", "正在初始化 Milvus 集合")
-    
+        job_manager.update_step(job_id, "prepare", 50, "running", "Initializing Milvus collection")
+
     milvus_manager.init_collection()
     delete_expr = f'filename == "{filename}"'
-    
-    if job_manager and job_id:
-        job_manager.complete_step(job_id, "prepare", "准备完成")
-        # 兼容已有前端删除步骤
-        job_manager.update_step(job_id, "bm25", 100, "completed", "BM25 全文检索统计已自动同步（Milvus 服务端自动维护）")
 
-    # 删除 Milvus 向量
     if job_manager and job_id:
-        job_manager.update_step(job_id, "milvus", 20, "running", "正在物理删除 Milvus 中的向量分块")
-    
+        job_manager.complete_step(job_id, "prepare", "Preparation complete")
+        # Kept for compatibility with the existing frontend deletion steps
+        job_manager.update_step(job_id, "bm25", 100, "completed", "BM25 full-text search statistics synced automatically (maintained server-side by Milvus)")
+
+    # Delete Milvus vectors
+    if job_manager and job_id:
+        job_manager.update_step(job_id, "milvus", 20, "running", "Physically deleting vector chunks in Milvus")
+
     chunks_deleted = 0
     try:
         result = milvus_manager.delete(delete_expr)
         chunks_deleted = result.get("delete_count", 0) if isinstance(result, dict) else 0
     except Exception as e:
-        raise RuntimeError(f"删除 Milvus 向量失败: {str(e)}") from e
+        raise RuntimeError(f"Failed to delete Milvus vectors: {str(e)}") from e
 
     if job_manager and job_id:
-        job_manager.complete_step(job_id, "milvus", f"向量数据清理完成，共删除 {chunks_deleted} 条记录")
+        job_manager.complete_step(job_id, "milvus", f"Vector data cleanup complete, {chunks_deleted} records deleted")
 
-    # 删除 Postgres 中的 ParentChunk 和 Redis 缓存
+    # Delete ParentChunk rows in Postgres and the Redis cache
     if job_manager and job_id:
-        job_manager.update_step(job_id, "parent_store", 20, "running", "正在清理 PostgreSQL 数据库和 Redis 中的父级分块")
-    
+        job_manager.update_step(job_id, "parent_store", 20, "running", "Cleaning up parent chunks in the PostgreSQL database and Redis")
+
     try:
         parent_chunk_store.delete_by_filename(filename)
     except Exception as e:
-        raise RuntimeError(f"清理 PostgreSQL 父级分块及缓存失败: {str(e)}") from e
+        raise RuntimeError(f"Failed to clean up PostgreSQL parent chunks and cache: {str(e)}") from e
 
     if job_manager and job_id:
-        job_manager.complete_step(job_id, "parent_store", "父级分块及 Redis 缓存已清空")
+        job_manager.complete_step(job_id, "parent_store", "Parent chunks and Redis cache cleared")
 
     return chunks_deleted
 

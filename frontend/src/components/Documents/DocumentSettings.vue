@@ -3,8 +3,8 @@
     <header class="settings-header">
       <div>
         <span class="panel-eyebrow">Mew memory</span>
-        <h1>知识库</h1>
-        <p>管理喵喵可以检索的文档、索引与数据源。</p>
+        <h1>Knowledge Base</h1>
+        <p>Manage the documents, indexes, and data sources Mew can search.</p>
       </div>
       <button
         type="button"
@@ -13,28 +13,28 @@
         @click="onRefresh"
       >
         <i class="fa-solid fa-rotate" :class="{ 'fa-spin': documentStore.documentsLoading }"></i>
-        刷新数据
+        Refresh data
       </button>
     </header>
 
     <section class="settings-stats">
       <article>
-        <span>文档总数</span>
+        <span>Total documents</span>
         <strong>{{ documentStore.documents.length }}</strong>
-        <small>当前知识空间</small>
+        <small>Current knowledge space</small>
       </article>
       <article>
-        <span>可检索片段</span>
+        <span>Searchable chunks</span>
         <strong>{{ totalChunks.toLocaleString() }}</strong>
-        <small>Milvus 叶子分块</small>
+        <small>Milvus leaf chunks</small>
       </article>
       <article>
-        <span>索引状态</span>
-        <strong>{{ documentStore.documentsLoading ? '同步中' : '正常' }}</strong>
-        <small>{{ documentStore.isUploading ? '正在处理新文档' : '服务已连接' }}</small>
+        <span>Index status</span>
+        <strong>{{ documentStore.documentsLoading ? 'Syncing' : 'Normal' }}</strong>
+        <small>{{ documentStore.isUploading ? 'Processing new document' : 'Service connected' }}</small>
       </article>
       <article>
-        <span>支持格式</span>
+        <span>Supported formats</span>
         <strong>5</strong>
         <small>PDF · Word · Excel · HTML</small>
       </article>
@@ -44,32 +44,32 @@
       <section class="documents-section">
         <div class="documents-section-head">
           <div>
-            <h2>全部文档</h2>
-            <p>{{ filteredDocuments.length }} 份资料可供喵喵检索</p>
+            <h2>All documents</h2>
+            <p>{{ filteredDocuments.length }} files available for Mew to search</p>
           </div>
           <label class="document-search">
             <i class="fa-solid fa-magnifying-glass"></i>
-            <input v-model="searchQuery" type="search" placeholder="搜索文档名称…" />
+            <input v-model="searchQuery" type="search" placeholder="Search document names…" />
           </label>
         </div>
 
         <div class="document-table-head">
-          <span>名称</span>
-          <span>片段</span>
-          <span>状态</span>
+          <span>Name</span>
+          <span>Chunks</span>
+          <span>Status</span>
           <span></span>
         </div>
 
         <div v-if="documentStore.documentsLoading" class="loading-indicator">
           <span class="loading-orb"><i class="fa-solid fa-spinner fa-spin"></i></span>
-          <strong>正在同步知识库</strong>
-          <p>从 Milvus 读取文档与片段统计。</p>
+          <strong>Syncing knowledge base</strong>
+          <p>Reading document and chunk stats from Milvus.</p>
         </div>
 
         <div v-else-if="filteredDocuments.length === 0" class="empty-documents">
           <span class="empty-icon"><i class="fa-regular fa-folder-open"></i></span>
-          <h3>{{ searchQuery ? '没有匹配的文档' : '知识库还是空的' }}</h3>
-          <p>{{ searchQuery ? '换一个关键词试试。' : '从右侧上传第一份资料，让喵喵开始学习。' }}</p>
+          <h3>{{ searchQuery ? 'No matching documents' : 'Your knowledge base is empty' }}</h3>
+          <p>{{ searchQuery ? 'Try a different keyword.' : 'Upload your first file on the right to get Mew started.' }}</p>
         </div>
 
         <div v-else class="documents-list">

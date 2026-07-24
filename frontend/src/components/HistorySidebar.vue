@@ -4,26 +4,26 @@
       <div class="history-header">
         <div>
           <span class="panel-eyebrow">Conversation memory</span>
-          <h2>历史会话</h2>
+          <h2>Conversation History</h2>
         </div>
-        <button type="button" class="close-btn" aria-label="关闭历史会话" @click="closeHistory">
+        <button type="button" class="close-btn" aria-label="Close conversation history" @click="closeHistory">
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
 
       <div class="history-summary">
-        <span><strong>{{ sessionStore.sessions.length }}</strong> 个会话</span>
+        <span><strong>{{ sessionStore.sessions.length }}</strong> sessions</span>
         <button type="button" @click="refreshSessions">
           <i class="fa-solid fa-rotate" :class="{ 'fa-spin': refreshing }"></i>
-          刷新
+          Refresh
         </button>
       </div>
 
       <div class="history-list">
         <div v-if="sessionStore.sessions.length === 0" class="empty-history">
           <span class="empty-icon"><i class="fa-regular fa-comments"></i></span>
-          <h3>暂无历史记录</h3>
-          <p>开始一段新对话后，喵喵会在这里替你保存。</p>
+          <h3>No history yet</h3>
+          <p>Start a new conversation and Mew will save it here for you.</p>
         </div>
 
         <article
@@ -34,10 +34,10 @@
           <button type="button" class="session-body" @click="onLoadSession(session.session_id)">
             <span class="session-state-dot" aria-hidden="true"></span>
             <span class="session-info">
-              <strong class="session-title">{{ session.title || '未命名会话' }}</strong>
+              <strong class="session-title">{{ session.title || 'Untitled session' }}</strong>
               <span class="session-meta">
-                <span>{{ session.message_count }} 条消息</span>
-                <span v-if="session.isStreaming" class="session-status">生成中</span>
+                <span>{{ session.message_count }} messages</span>
+                <span v-if="session.isStreaming" class="session-status">Generating</span>
                 <span>{{ formatDate(session.updated_at) }}</span>
               </span>
             </span>
@@ -45,8 +45,8 @@
           <button
             type="button"
             class="history-delete-btn"
-            title="删除会话"
-            aria-label="删除会话"
+            title="Delete session"
+            aria-label="Delete session"
             @click.stop="onDeleteSession(session.session_id)"
           >
             <i class="fa-regular fa-trash-can"></i>
@@ -89,18 +89,18 @@ const onLoadSession = async (sessionId: string) => {
   try {
     await chatStore.loadSession(sessionId);
   } catch (error: any) {
-    alert('加载会话失败：' + error.message);
+    alert('Failed to load session: ' + error.message);
   }
 };
 
 const onDeleteSession = async (sessionId: string) => {
   if (chatStore.streamingSessionId === sessionId) {
-    alert('该会话正在生成回答，请先终止或等待完成后再删除');
+    alert('This session is still generating a response. Stop it or wait for it to finish before deleting.');
     return;
   }
 
   const sessionLabel = sessionStore.sessions.find((session) => session.session_id === sessionId)?.title || sessionId;
-  if (!confirm('确定要删除会话“' + sessionLabel + '”吗？')) {
+  if (!confirm('Delete session "' + sessionLabel + '"?')) {
     return;
   }
 
@@ -113,14 +113,14 @@ const onDeleteSession = async (sessionId: string) => {
       chatStore.mergeCachedSessionsIntoHistory();
     }
   } catch (error: any) {
-    alert('删除会话失败：' + error.message);
+    alert('Failed to delete session: ' + error.message);
   }
 };
 
 const formatDate = (value: string) => {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '刚刚';
-  return new Intl.DateTimeFormat('zh-CN', {
+  if (Number.isNaN(date.getTime())) return 'Just now';
+  return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',

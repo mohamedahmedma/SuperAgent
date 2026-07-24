@@ -1,4 +1,4 @@
-"""父级分块文档存储（用于 Auto-merging Retriever）"""
+"""Parent chunk document store (used for the Auto-merging Retriever)"""
 from datetime import datetime
 from typing import List
 
@@ -8,7 +8,7 @@ from backend.db.models import ParentChunk
 
 
 class ParentChunkStore:
-    """基于 PostgreSQL + Redis 的父级分块存储。"""
+    """Parent chunk store backed by PostgreSQL + Redis."""
 
     @staticmethod
     def _to_dict(item: ParentChunk) -> dict:
@@ -30,7 +30,7 @@ class ParentChunkStore:
         return f"parent_chunk:{chunk_id}"
 
     def upsert_documents(self, docs: List[dict]) -> int:
-        """写入/更新父级分块，返回写入条数。"""
+        """Inserts/updates parent chunks, returning the number of records written."""
         if not docs:
             return 0
 
@@ -112,7 +112,7 @@ class ParentChunkStore:
         return [ordered_results[item] for item in chunk_ids if item in ordered_results]
 
     def delete_by_filename(self, filename: str) -> int:
-        """按文件名删除父级分块，返回删除条数。"""
+        """Deletes parent chunks by filename, returning the number of records deleted."""
         if not filename:
             return 0
 

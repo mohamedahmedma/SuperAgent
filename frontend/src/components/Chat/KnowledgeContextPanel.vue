@@ -3,7 +3,7 @@
     <div class="context-header">
       <div>
         <span class="panel-eyebrow">Live evidence</span>
-        <h2>知识脉络</h2>
+        <h2>Knowledge Trail</h2>
       </div>
       <span :class="['context-status', { running: isRunning }]">
         <i :class="isRunning ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-circle-check'"></i>
@@ -13,15 +13,15 @@
 
     <div v-if="!latestMessage" class="context-empty">
       <span class="context-empty-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
-      <h3>等待一次提问</h3>
-      <p>检索步骤、证据置信度和引用来源会实时出现在这里。</p>
+      <h3>Waiting for a question</h3>
+      <p>Retrieval steps, evidence confidence, and citation sources will appear here in real time.</p>
     </div>
 
     <template v-else>
       <section class="context-card run-card">
         <div class="context-card-heading">
           <div>
-            <strong>本次 Agent 运行</strong>
+            <strong>This agent run</strong>
             <small>{{ shortSessionId }}</small>
           </div>
           <span v-if="totalDuration">{{ totalDuration }}</span>
@@ -49,14 +49,14 @@
           <strong>{{ confidence === null ? '—' : confidence + '%' }}</strong>
         </div>
         <div>
-          <strong>证据置信度</strong>
+          <strong>Evidence confidence</strong>
           <p>{{ confidenceDescription }}</p>
         </div>
       </section>
 
       <div class="context-section-heading">
-        <strong>引用来源</strong>
-        <span>{{ sources.length ? sources.length + ' 个片段' : '暂无引用' }}</span>
+        <strong>Cited sources</strong>
+        <span>{{ sources.length ? sources.length + ' chunks' : 'No citations yet' }}</span>
       </div>
 
       <div v-if="sources.length" class="context-sources">
@@ -78,7 +78,7 @@
 
       <div v-else class="context-no-sources">
         <i class="fa-solid fa-route"></i>
-        <span>{{ trace?.tool_used === false ? '本次为直接回答，未调用知识库。' : '正在等待可引用证据。' }}</span>
+        <span>{{ trace?.tool_used === false ? "This was a direct answer — the knowledge base wasn't used." : 'Waiting for citable evidence.' }}</span>
       </div>
     </template>
   </aside>
@@ -121,9 +121,9 @@ const isRunning = computed(() => Boolean(latestMessage.value?.isThinking || chat
 const shortSessionId = computed(() => chatStore.sessionId.replace('session_', '').slice(-8));
 
 const statusLabel = computed(() => {
-  if (isRunning.value) return '运行中';
-  if (latestMessage.value?.isHitlRequest) return '等待补充';
-  return latestMessage.value ? '已完成' : '待命';
+  if (isRunning.value) return 'Running';
+  if (latestMessage.value?.isHitlRequest) return 'Waiting for input';
+  return latestMessage.value ? 'Completed' : 'Standing by';
 });
 
 const runSteps = computed<RunStepView[]>(() => {
@@ -141,8 +141,8 @@ const runSteps = computed<RunStepView[]>(() => {
   if (!currentTrace) {
     return [{
       key: 'answer',
-      label: isRunning.value ? '正在连接喵喵 Agent' : '直接回答已完成',
-      detail: isRunning.value ? '准备理解问题与选择工具' : '本次未产生检索轨迹',
+      label: isRunning.value ? 'Connecting to Mew agent' : 'Direct answer completed',
+      detail: isRunning.value ? 'Understanding the question and choosing a tool' : 'No retrieval trace was produced this time',
     }];
   }
 
@@ -150,35 +150,35 @@ const runSteps = computed<RunStepView[]>(() => {
   if (currentTrace.complexity) {
     result.push({
       key: 'complexity',
-      label: '意图与复杂度判断',
-      detail: currentTrace.complexity === 'complex' ? '复杂问题 · 多步处理' : '简单问题 · 快速路径',
+      label: 'Intent & complexity check',
+      detail: currentTrace.complexity === 'complex' ? 'Complex question · multi-step processing' : 'Simple question · fast path',
     });
   }
   if (currentTrace.sub_agent_count) {
     result.push({
       key: 'sub-agents',
-      label: '子问题并行处理',
-      detail: currentTrace.sub_agent_count + ' 路 Agent',
+      label: 'Parallel sub-question processing',
+      detail: currentTrace.sub_agent_count + ' agents',
     });
   }
   if (currentTrace.tool_used || currentTrace.retrieval_mode) {
     result.push({
       key: 'retrieve',
-      label: currentTrace.retrieval_mode || '知识库检索',
+      label: currentTrace.retrieval_mode || 'Knowledge base retrieval',
       detail: formatRetrievalFunnel(currentTrace),
     });
   }
   if (currentTrace.rerank_applied || currentTrace.rerank_enabled) {
     result.push({
       key: 'rerank',
-      label: '证据精排',
+      label: 'Evidence reranking',
       detail: currentTrace.rerank_model || 'Rerank',
     });
   }
   result.push({
     key: 'synthesis',
-    label: '证据合成',
-    detail: sources.value.length ? sources.value.length + ' 个来源已对齐' : '回答生成完成',
+    label: 'Evidence synthesis',
+    detail: sources.value.length ? sources.value.length + ' sources aligned' : 'Answer generation complete',
   });
   return result;
 });
@@ -192,11 +192,11 @@ const confidence = computed<number | null>(() => {
 
 const confidenceDescription = computed(() => {
   if (confidence.value === null) {
-    return sources.value.length ? '已找到引用来源，等待证据评分。' : '本次回答没有可用的证据评分。';
+    return sources.value.length ? 'Citations found — waiting for an evidence score.' : 'No evidence score is available for this answer.';
   }
-  if (confidence.value >= 85) return '来源相关性较高，证据之间未发现明显冲突。';
-  if (confidence.value >= 60) return '证据基本可用，建议同时查看原始引用。';
-  return '证据支撑较弱，请谨慎使用并进一步核验。';
+  if (confidence.value >= 85) return 'Sources are highly relevant, with no obvious conflicts between them.';
+  if (confidence.value >= 60) return "Evidence is generally usable — it's worth checking the original citations too.";
+  return 'Evidence support is weak — use with caution and verify further.';
 });
 
 const totalDuration = computed(() => {
@@ -215,13 +215,13 @@ const formatMilliseconds = (milliseconds: number) => {
 const formatRetrievalFunnel = (currentTrace: any) => {
   const recall = currentTrace.recall_count;
   const output = currentTrace.retrieved_chunks?.length;
-  if (recall != null && output != null) return recall + ' → ' + output + ' 个片段';
-  return currentTrace.retrieval_pipeline || '混合召回';
+  if (recall != null && output != null) return recall + ' → ' + output + ' chunks';
+  return currentTrace.retrieval_pipeline || 'Hybrid recall';
 };
 
 const sourceLocation = (source: RetrievedChunk, index: number) => {
   const parts: string[] = [];
-  if (source.page_number) parts.push('第 ' + source.page_number + ' 页');
+  if (source.page_number) parts.push('Page ' + source.page_number);
   parts.push('RRF #' + (source.rrf_rank || index + 1));
   return parts.join(' · ');
 };
