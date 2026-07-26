@@ -3,10 +3,12 @@ from typing import List, Tuple, Dict, Any, Literal, Optional
 import os
 import json
 import requests
+from langsmith import traceable
 
 from backend.indexing.milvus_client import get_milvus_store
 from backend.indexing.embedding import embedding_service as _embedding_service
 from backend.indexing.parent_chunk_store import ParentChunkStore
+from backend.text_normalization import normalize_query
 from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
 
@@ -36,6 +38,10 @@ try:
     RERANK_TIMEOUT_SECONDS = max(float(os.getenv("RERANK_TIMEOUT_SECONDS", "5")), 0.1)
 except ValueError:
     RERANK_TIMEOUT_SECONDS = 5.0
+try:
+    RERANK_DOC_CHAR_LIMIT = max(int(os.getenv("RERANK_DOC_CHAR_LIMIT", "2000")), 200)
+except ValueError:
+    RERANK_DOC_CHAR_LIMIT = 2000
 AUTO_MERGE_ENABLED = os.getenv("AUTO_MERGE_ENABLED", "true").lower() != "false"
 AUTO_MERGE_THRESHOLD = int(os.getenv("AUTO_MERGE_THRESHOLD", "2"))
 LEAF_RETRIEVE_LEVEL = int(os.getenv("LEAF_RETRIEVE_LEVEL", "3"))
@@ -65,6 +71,7 @@ RERANK_MIN_SCORE = _read_float_env("RERANK_MIN_SCORE", 0.0)
 RETRIEVAL_TRACE_FIELDS = (
     "retrieval_pipeline",
     "retrieval_mode",
+    "retrieval_error",
     "candidate_k",
     "candidate_k_source",
     "candidate_k_config_error",
@@ -221,6 +228,7 @@ def _empty_merge_meta() -> Dict[str, Any]:
     }
 
 
+@traceable(name="auto_merge_candidates", run_type="tool")
 def _auto_merge_candidates(docs: List[dict]) -> Tuple[List[dict], Dict[str, Any]]:
     """Perform L3→L2→L1 merging over the full set of recall candidates; order is unchanged, reranking is handled by a later step."""
     meta = _empty_merge_meta()
@@ -260,6 +268,7 @@ def dedupe_documents(docs: List[dict]) -> List[dict]:
     return [by_key[key] for key in order]
 
 
+@traceable(name="rerank_documents", run_type="tool")
 def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[dict], Dict[str, Any]]:
     docs_with_rank = [{**doc, "rrf_rank": i} for i, doc in enumerate(docs, 1)]
     meta: Dict[str, Any] = {
@@ -277,7 +286,9 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
     payload = {
         "model": RERANK_MODEL,
         "query": query,
-        "documents": [doc.get("text", "") for doc in docs_with_rank],
+        # Truncated: rerank providers bill per ~500-token document unit, and the
+        # relevance signal sits in the opening span of a chunk anyway.
+        "documents": [doc.get("text", "")[:RERANK_DOC_CHAR_LIMIT] for doc in docs_with_rank],
         "top_n": min(top_k, len(docs_with_rank)),
         "return_documents": False,
     }
@@ -430,7 +441,13 @@ def _finalize_retrieval(
     return {"docs": final_docs, "meta": meta}
 
 
+@traceable(name="retrieve_documents", run_type="retriever")
 def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, Any]:
+    # Normalize the query with the SAME rules applied to indexed text. Arabic
+    # pasted from a PDF arrives as presentation forms / tatweel / zero-width
+    # marks, which is a different character sequence from the indexed chunk —
+    # without this the BM25 side cannot match and the dense side degrades.
+    query = normalize_query(query) or query
     candidate_k, candidate_config = resolve_candidate_k(top_k)
     filter_expr = f"chunk_level == {LEAF_RETRIEVE_LEVEL}"
     try:
@@ -446,6 +463,7 @@ def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, An
                 "rerank_endpoint": _get_rerank_endpoint(),
                 "rerank_error": "embedding_failed",
                 "rerank_timeout_seconds": RERANK_TIMEOUT_SECONDS,
+                "retrieval_error": "embedding_failed",
                 "retrieval_mode": "failed",
                 "retrieval_pipeline": "recall_merge_rerank",
                 "candidate_k": candidate_k,
@@ -502,6 +520,7 @@ def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, An
                     "rerank_endpoint": _get_rerank_endpoint(),
                     "rerank_error": "retrieve_failed",
                     "rerank_timeout_seconds": RERANK_TIMEOUT_SECONDS,
+                    "retrieval_error": "retrieve_failed",
                     "retrieval_mode": "failed",
                     "retrieval_pipeline": "recall_merge_rerank",
                     "candidate_k": candidate_k,

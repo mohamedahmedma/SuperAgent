@@ -11,6 +11,14 @@ from pymilvus import AnnSearchRequest, DataType, MilvusClient, RRFRanker, Functi
 QUERY_MAX_LIMIT = 16384
 T = TypeVar("T")
 
+# Analyzer driving BM25 tokenization of the `text` field (the sparse half of
+# hybrid retrieval). "standard" uses Unicode word-boundary segmentation, which is
+# correct for Arabic, English, and most scripts; "chinese" (jieba) is only right
+# for a CJK corpus and tokenizes Arabic poorly, degrading keyword recall.
+# NOTE: this is schema-level — changing it only affects NEWLY created
+# collections; an existing collection must be rebuilt for the change to apply.
+TEXT_ANALYZER_TYPE = os.getenv("MILVUS_TEXT_ANALYZER", "standard").strip() or "standard"
+
 
 @dataclass(frozen=True)
 class MilvusSettings:
@@ -84,7 +92,7 @@ class MilvusStore:
             DataType.VARCHAR,
             max_length=65535,
             enable_analyzer=True,
-            analyzer_params={"type": "chinese"},
+            analyzer_params={"type": TEXT_ANALYZER_TYPE},
             enable_match=True,
         )
         schema.add_field("filename", DataType.VARCHAR, max_length=255)
@@ -233,7 +241,9 @@ class MilvusStore:
         sparse_search = AnnSearchRequest(
             data=[query],
             anns_field="sparse_embedding",
-            param={"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}},
+            # drop_ratio_search=0 keeps low-weight sparse terms: rare/exact
+            # keywords are precisely the ones a 0.2 ratio discards.
+            param={"metric_type": "BM25", "params": {"drop_ratio_search": 0.0}},
             limit=top_k * 2,
             expr=filter_expr,
         )

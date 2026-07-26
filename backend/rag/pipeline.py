@@ -124,6 +124,7 @@ class RAGState(TypedDict):
     docs: List[dict]
     route: Optional[str]
     retrieval_status: Optional[str]
+    retrieval_failed: Optional[bool]
     evidence_relevance: Optional[str]
     evidence_answerability: Optional[str]
     evidence_ambiguity: Optional[str]
@@ -237,6 +238,7 @@ def _initial_state(
         "docs": [],
         "route": None,
         "retrieval_status": None,
+        "retrieval_failed": False,
         "evidence_relevance": None,
         "evidence_answerability": None,
         "evidence_ambiguity": None,
@@ -267,29 +269,38 @@ def retrieve_initial(state: RAGState) -> RAGState:
     retrieved = retrieve_documents(query, top_k=RETRIEVAL_TOP_K)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
+    retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
     context = _format_docs(results)
-    _emit(
-        state,
-        "🧱",
-        "Three-tier chunk retrieval",
-        (
-            f"Leaf level L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
-            f"candidates {retrieve_meta.get('candidate_k', 0)}"
-        ),
-    )
-    _emit(
-        state,
-        "🧩",
-        "Auto-merging",
-        (
-            f"Enabled: {bool(retrieve_meta.get('auto_merge_enabled'))}, "
-            f"Applied: {bool(retrieve_meta.get('auto_merge_applied'))}, "
-            f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
-        ),
-    )
-    _emit(state, "✅", f"Retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
-    if not results:
-        _emit(state, "⚠️", "No snippets available, proceeding to the evidence-grading short-circuit check")
+    if retrieval_failed:
+        _emit(
+            state,
+            "🚧",
+            "Knowledge base temporarily unreachable",
+            retrieve_meta.get("retrieval_error") or "retrieval backend error",
+        )
+    else:
+        _emit(
+            state,
+            "🧱",
+            "Three-tier chunk retrieval",
+            (
+                f"Leaf level L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
+                f"candidates {retrieve_meta.get('candidate_k', 0)}"
+            ),
+        )
+        _emit(
+            state,
+            "🧩",
+            "Auto-merging",
+            (
+                f"Enabled: {bool(retrieve_meta.get('auto_merge_enabled'))}, "
+                f"Applied: {bool(retrieve_meta.get('auto_merge_applied'))}, "
+                f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
+            ),
+        )
+        _emit(state, "✅", f"Retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
+        if not results:
+            _emit(state, "⚠️", "No snippets available, proceeding to the evidence-grading short-circuit check")
     rag_trace = {
         "tool_used": True,
         "tool_name": "search_knowledge_base",
@@ -305,6 +316,7 @@ def retrieve_initial(state: RAGState) -> RAGState:
         "query": query,
         "docs": results,
         "context": context,
+        "retrieval_failed": retrieval_failed,
         "rag_trace": rag_trace,
     }
 
@@ -415,6 +427,24 @@ def _grade_update(grade: EvidenceGrade, route: str) -> dict:
 
 
 def grade_documents_node(state: RAGState) -> RAGState:
+    if state.get("retrieval_failed"):
+        # A backend outage says nothing about what the KB contains, so this must not
+        # reach the grader LLM or surface as no_knowledge. Static short-circuit only.
+        rag_trace = state.get("rag_trace", {}) or {}
+        rag_trace.update({
+            "retrieval_status": "retrieval_error",
+            "route": "retrieval_error",
+            "evidence_reason": "knowledge_base_unreachable",
+        })
+        _emit(state, "🚧", "Retrieval failed, returning a static retry notice", "Not treated as missing knowledge")
+        return {
+            "route": "retrieval_error",
+            "retrieval_status": "retrieval_error",
+            "docs": [],
+            "context": "",
+            "rag_trace": rag_trace,
+        }
+
     _emit(state, "📊", "Evaluating evidence quality...")
     docs = state.get("docs") or []
     if not docs:
@@ -538,18 +568,27 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
     retrieved = retrieve_documents(rewritten_query, top_k=RETRIEVAL_TOP_K)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
+    retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
     context = _format_docs(results)
-    _emit(
-        state,
-        "🧱",
-        f"{method_label} three-tier retrieval",
-        (
-            f"L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
-            f"candidates {retrieve_meta.get('candidate_k', 0)}, "
-            f"merge-replaced {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
-        ),
-    )
-    _emit(state, "✅", f"Rewritten retrieval complete, {len(results)} snippets total")
+    if retrieval_failed:
+        _emit(
+            state,
+            "🚧",
+            "Knowledge base temporarily unreachable during rewritten retrieval",
+            retrieve_meta.get("retrieval_error") or "retrieval backend error",
+        )
+    else:
+        _emit(
+            state,
+            "🧱",
+            f"{method_label} three-tier retrieval",
+            (
+                f"L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
+                f"candidates {retrieve_meta.get('candidate_k', 0)}, "
+                f"merge-replaced {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
+            ),
+        )
+        _emit(state, "✅", f"Rewritten retrieval complete, {len(results)} snippets total")
     rag_trace = state.get("rag_trace", {}) or {}
     rag_trace.update({
         "rewrite_method": rewrite_method,
@@ -563,7 +602,7 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
         rag_trace["step_back_question"] = state["step_back_question"]
     if state.get("hyde_document"):
         rag_trace["hyde_document"] = state["hyde_document"]
-    return {"docs": results, "context": context, "rag_trace": rag_trace}
+    return {"docs": results, "context": context, "retrieval_failed": retrieval_failed, "rag_trace": rag_trace}
 
 
 # ---------------------------------------------------------------------------
@@ -601,6 +640,21 @@ _SIMPLE_QUERY_MARKERS = (
     "when is",
     "how many",
     "which",
+    # Arabic single-fact interrogatives (this corpus is Arabic-first).
+    "ما هو",
+    "ما هي",
+    "من هو",
+    "من هي",
+    "أين",
+    "اين",
+    "متى",
+    "متي",
+    "كم",
+    "هل",
+    "أي ",
+    "اي ",
+    "تعريف",
+    "معنى",
 )
 
 _COMPLEX_QUERY_MARKERS = (
@@ -637,7 +691,38 @@ _COMPLEX_QUERY_MARKERS = (
     "pros and cons",
     "why ",
     "how ",
+    " and ",
     "complex",
+    # Arabic multi-part / analytical markers. Without these, an Arabic comparison
+    # question short enough to hit the length rule (e.g. "قارن الرسوم") is
+    # fast-pathed as simple and never decomposed into sub-questions.
+    "قارن",
+    "مقارنة",
+    "الفرق",
+    "الفروق",
+    "فرق بين",
+    "بين ",
+    "مقابل",
+    "لماذا",
+    "كيف",
+    "اشرح",
+    "وضح",
+    "حلل",
+    "تحليل",
+    "لخص",
+    "ملخص",
+    "مميزات",
+    "عيوب",
+    "إيجابيات",
+    "سلبيات",
+    "أسباب",
+    "اسباب",
+    "خطوات",
+    "وأيضا",
+    " و ",
+    "أم ",
+    "ام ",
+    "كذلك",
 )
 
 _QUERY_DIMENSION_MARKERS = (
@@ -653,6 +738,14 @@ _QUERY_DIMENSION_MARKERS = (
     "优点",
     "缺点",
     "作用",
+    # Arabic attribute dimensions.
+    "الرسوم",
+    "المواعيد",
+    "الشروط",
+    "المستندات",
+    "المناهج",
+    "الأنشطة",
+    "النقل",
 )
 
 
@@ -673,7 +766,13 @@ def _simple_question_fast_path_reason(question: str) -> Optional[str]:
         return None
     if any(marker in normalized for marker in _SIMPLE_QUERY_MARKERS):
         return "obvious_simple_fast_path:single_fact_marker"
-    if len(normalized.rstrip("?？。.!！")) <= 18:
+    # Wh-word + attribute + copula ("what element is X") is a single-fact lookup even
+    # though the bare "what is" marker doesn't match it.
+    if re.match(r"^(what|which|who|where|when)\s+\w+\s+(is|are|was|were|does|do)\b", normalized):
+        return "obvious_simple_fast_path:wh_attribute_question"
+    # Terminators include Arabic ؟ and ۔ — otherwise an Arabic question keeps its
+    # mark and measures one character longer against the length rule below.
+    if len(normalized.rstrip("?？。.!！؟۔،")) <= 18:
         return "obvious_simple_fast_path:short_single_intent"
     return None
 
@@ -775,9 +874,17 @@ def synthesis(state: RAGState) -> RAGState:
     for idx, item in enumerate(deduped, 1):
         item["rrf_rank"] = idx
 
+    # An outage on any sub-question with zero merged docs means the empty result reflects
+    # backend availability, not corpus coverage — surface retry, not no_knowledge.
+    retrieval_outage = (not deduped) and any(
+        result.get("retrieval_status") == "retrieval_error" for result in sub_results
+    )
+
     context = _format_docs(deduped)
     if deduped:
         _emit(state, "✅", f"Synthesis complete, {len(deduped)} deduplicated snippets total")
+    elif retrieval_outage:
+        _emit(state, "🚧", "Knowledge base temporarily unreachable for the sub-questions", "Returning a static retry notice")
     else:
         _emit(state, "⛔", "None of the sub-questions had usable evidence")
 
@@ -795,6 +902,8 @@ def synthesis(state: RAGState) -> RAGState:
     retrieval_status = "answerable" if has_docs else "no_knowledge"
     if has_docs and any(result.get("retrieval_status") == "partial" for result in sub_results):
         retrieval_status = "partial"
+    if retrieval_outage:
+        retrieval_status = "retrieval_error"
     hitl_traces = [
         trace for trace in sub_traces
         if trace.get("retrieval_status") in ("needs_clarification", "needs_scope_selection")
@@ -802,7 +911,8 @@ def synthesis(state: RAGState) -> RAGState:
     hitl_route = None
     hitl_prompt = ""
     hitl_options: List[str] = []
-    if not has_docs and hitl_traces:
+    # Outage outranks HITL: asking the user to clarify can't fix an unreachable backend.
+    if not has_docs and not retrieval_outage and hitl_traces:
         scope_trace = next(
             (trace for trace in hitl_traces if trace.get("retrieval_status") == "needs_scope_selection"),
             None,
@@ -821,6 +931,7 @@ def synthesis(state: RAGState) -> RAGState:
                 if option not in hitl_options:
                     hitl_options.append(option)
 
+    fallback_route = "retrieval_error" if retrieval_outage else "no_knowledge"
     rag_trace = {
         **original_trace,
         "tool_used": True,
@@ -838,7 +949,7 @@ def synthesis(state: RAGState) -> RAGState:
         "evidence_relevance": "strong" if has_docs else "none",
         "evidence_answerability": "partial" if retrieval_status == "partial" else ("sufficient" if has_docs else "none"),
         "evidence_confidence": None,
-        "route": "answer" if has_docs else (hitl_route or "no_knowledge"),
+        "route": "answer" if has_docs else (hitl_route or fallback_route),
         "hitl_prompt": hitl_prompt,
         "hitl_options": hitl_options,
     }
@@ -846,7 +957,7 @@ def synthesis(state: RAGState) -> RAGState:
     return {
         "docs": deduped,
         "context": context,
-        "route": "answer" if has_docs else (hitl_route or "no_knowledge"),
+        "route": "answer" if has_docs else (hitl_route or fallback_route),
         "retrieval_status": retrieval_status,
         "hitl_prompt": hitl_prompt,
         "hitl_options": hitl_options,
@@ -967,27 +1078,36 @@ def _retrieve_resume_query(state: dict) -> dict:
     retrieved = retrieve_documents(query, top_k=RETRIEVAL_TOP_K)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
+    retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
     context = _format_docs(results)
-    _emit(
-        state,
-        "🧱",
-        "HITL three-tier chunk retrieval",
-        (
-            f"Leaf level L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
-            f"candidates {retrieve_meta.get('candidate_k', 0)}"
-        ),
-    )
-    _emit(
-        state,
-        "🧩",
-        "Auto-merging",
-        (
-            f"Enabled: {bool(retrieve_meta.get('auto_merge_enabled'))}, "
-            f"Applied: {bool(retrieve_meta.get('auto_merge_applied'))}, "
-            f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
-        ),
-    )
-    _emit(state, "✅", f"HITL targeted retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
+    if retrieval_failed:
+        _emit(
+            state,
+            "🚧",
+            "Knowledge base temporarily unreachable during HITL retrieval",
+            retrieve_meta.get("retrieval_error") or "retrieval backend error",
+        )
+    else:
+        _emit(
+            state,
+            "🧱",
+            "HITL three-tier chunk retrieval",
+            (
+                f"Leaf level L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
+                f"candidates {retrieve_meta.get('candidate_k', 0)}"
+            ),
+        )
+        _emit(
+            state,
+            "🧩",
+            "Auto-merging",
+            (
+                f"Enabled: {bool(retrieve_meta.get('auto_merge_enabled'))}, "
+                f"Applied: {bool(retrieve_meta.get('auto_merge_applied'))}, "
+                f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
+            ),
+        )
+        _emit(state, "✅", f"HITL targeted retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
     rag_trace = state.get("rag_trace") or {}
     rag_trace.update({
         "tool_used": True,
@@ -1004,6 +1124,7 @@ def _retrieve_resume_query(state: dict) -> dict:
         "query": query,
         "docs": results,
         "context": context,
+        "retrieval_failed": retrieval_failed,
         "rag_trace": rag_trace,
     })
     state.update(grade_documents_node(state))

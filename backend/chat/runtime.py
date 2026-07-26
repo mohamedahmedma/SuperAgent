@@ -20,6 +20,7 @@ SYSTEM_PROMPT = (
     "After receiving search_knowledge_base result, you MUST NOT call any tool again (including get_current_weather or search_knowledge_base). "
     "If the tool result starts with NEEDS_CLARIFICATION or NEEDS_SCOPE_SELECTION, ask the user the requested question directly and do not answer from retrieved context. "
     "If the tool result starts with NO_KNOWLEDGE, say the knowledge base does not contain reliable relevant information. "
+    "If the tool result starts with RETRIEVAL_ERROR, tell the user a temporary technical issue prevented searching the knowledge base and to try again shortly; do NOT claim the knowledge base lacks the information. "
     "If the retrieved context is insufficient, answer honestly that you don't know instead of making up facts. "
     "When answering based on retrieved chunks, you MUST cite the source chunks using their index numbers inline, for example [1] or [2][3]. "
     "Step-back questions and HyDE documents are retrieval aids only, not factual evidence. "

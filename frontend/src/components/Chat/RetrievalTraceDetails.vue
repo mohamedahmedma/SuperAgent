@@ -228,6 +228,7 @@ const formatRetrievalStatus = (status: string) => {
     needs_clarification: 'Needs clarification',
     needs_scope_selection: 'Needs scope selection',
     no_knowledge: 'No knowledge available',
+    retrieval_error: 'Retrieval temporarily unavailable',
   };
   return labels[status] || status;
 };

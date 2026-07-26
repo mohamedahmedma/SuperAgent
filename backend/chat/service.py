@@ -202,6 +202,10 @@ def _no_knowledge_response() -> str:
     return "The knowledge base does not contain reliable relevant information, so this question can't be answered from it right now."
 
 
+def _retrieval_error_response() -> str:
+    return "A temporary technical issue prevented searching the knowledge base. Please try again in a moment."
+
+
 def _resume_rag_from_hitl_sync(pending_hitl: dict, user_answer: str, ctx: ChatRequestContext) -> dict:
     from backend.rag.pipeline import resume_rag_from_hitl
 
@@ -216,6 +220,8 @@ def _answer_resumed_rag_sync(pending_hitl: dict, user_answer: str, rag_result: d
     trace = rag_result.get("rag_trace") or {}
     status = rag_result.get("retrieval_status") or trace.get("retrieval_status")
     route = rag_result.get("route") or trace.get("route")
+    if status == "retrieval_error" or route == "retrieval_error":
+        return _retrieval_error_response()
     if status == "no_knowledge" or route == "no_knowledge" or not docs:
         return _no_knowledge_response()
     res = model.invoke(_build_resume_answer_messages(pending_hitl, user_answer, docs))

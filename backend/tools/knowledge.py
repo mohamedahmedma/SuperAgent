@@ -40,6 +40,14 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
                 prompt = f"{prompt}\nOptions: " + "; ".join(str(item) for item in options)
             return f"NEEDS_SCOPE_SELECTION: {prompt}"
 
+        if status == "retrieval_error" or route == "retrieval_error":
+            return (
+                "RETRIEVAL_ERROR: The knowledge base could not be searched right now due to a "
+                "temporary technical issue. Tell the user a brief technical problem interrupted "
+                "the search and to try again in a moment. Do NOT claim the knowledge base lacks "
+                "this information, and do not answer from your own knowledge."
+            )
+
         if status == "no_knowledge" or route == "no_knowledge":
             return "NO_KNOWLEDGE: No reliable relevant documents were found in the knowledge base."
 

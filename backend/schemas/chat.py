@@ -32,6 +32,7 @@ class RagTraceFields(StrictSchema):
     retrieval_stage: Optional[str] = None
     route: Optional[str] = None
     retrieval_status: Optional[str] = None
+    retrieval_error: Optional[str] = None
     evidence_relevance: Optional[str] = None
     evidence_answerability: Optional[str] = None
     evidence_ambiguity: Optional[str] = None
