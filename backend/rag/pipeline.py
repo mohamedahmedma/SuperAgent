@@ -673,6 +673,13 @@ def _simple_question_fast_path_reason(question: str) -> Optional[str]:
         return None
     if any(marker in normalized for marker in _SIMPLE_QUERY_MARKERS):
         return "obvious_simple_fast_path:single_fact_marker"
+    # Wh-word + attribute + copula ("what element is X", "which weapon does X use")
+    # is a single-fact lookup, but the contiguous "what is" marker cannot match it
+    # and such questions are usually longer than the short-intent rule allows.
+    # Checked AFTER the complex markers, so comparisons ("what is the difference
+    # between ...") are already excluded before reaching here.
+    if re.match(r"^(what|which|who|where|when)\s+\w+\s+(is|are|was|were|does|do)\b", normalized):
+        return "obvious_simple_fast_path:wh_attribute_question"
     if len(normalized.rstrip("?？。.!！")) <= 18:
         return "obvious_simple_fast_path:short_single_intent"
     return None

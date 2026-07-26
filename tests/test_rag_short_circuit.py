@@ -5,7 +5,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+# Pre-import pipeline.py's heavy third-party dependencies so they are already in
+# sys.modules when load_pipeline's patch.dict snapshots it. patch.dict restores
+# the snapshot on exit, which would otherwise EVICT anything first imported
+# inside the block; re-importing then re-initializes native extension modules,
+# and uuid_utils (pulled in by langchain_core) is a PyO3 module that refuses a
+# second initialization per process:
+#   ImportError: PyO3 modules compiled for CPython 3.8 or older may only be
+#   initialized once per interpreter process
+from langchain.chat_models import init_chat_model  # noqa: F401
+from langgraph.graph import StateGraph  # noqa: F401
+from langgraph.types import Send  # noqa: F401
+
 from backend.chat.request_context import ChatRequestContext
+from backend.schemas.chat import HitlResumeState  # noqa: F401
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
