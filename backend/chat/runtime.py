@@ -38,10 +38,21 @@ fast_model = init_chat_model(
 )
 
 
-def create_agent_for_request(ctx: ChatRequestContext):
+def create_agent_for_request(ctx: ChatRequestContext, tool_names: list[str] | None = None):
+    """Build the agent for one turn.
+
+    `tool_names` narrows what is bound for this turn — the turn planner passes a
+    shorter list when signals say a capability cannot apply, and every tool schema
+    omitted is tokens saved on a call that is paid on every turn.
+
+    None means "whatever the profile allows", which is what any uncertainty produces:
+    narrowing is an optimisation, so it must never be the reason a capability is out
+    of reach.
+    """
     profile = get_profile()
+    allowed = profile.agent.tools if tool_names is None else tool_names
     return create_agent(
         model=model,
-        tools=build_tools(profile.agent.tools, ctx),
+        tools=build_tools(allowed, ctx),
         system_prompt=profile.render_system_prompt(),
     )

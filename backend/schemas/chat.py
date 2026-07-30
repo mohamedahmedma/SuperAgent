@@ -59,6 +59,22 @@ class RagTraceFields(StrictSchema):
     context_trimmed: Optional[bool] = None
     context_coverage: Optional[float] = None
     context_selection_reason: Optional[str] = None
+    # Set by the turn planner, before the agent runs. Present on every turn it
+    # touched — including the ones it ended without a model, where these are the only
+    # trace fields there are.
+    turn_short_circuit: Optional[bool] = None
+    turn_exposed_tools: Optional[List[str]] = None
+    turn_retrieval_sections: Optional[List[str]] = None
+    turn_capture_user_info: Optional[bool] = None
+    turn_reason: Optional[str] = None
+    request_scope: Optional[str] = None
+    request_scope_certainty: Optional[str] = None
+    request_language: Optional[str] = None
+    request_is_social: Optional[bool] = None
+    request_personal_data: Optional[List[str]] = None
+    request_candidate_sections: Optional[List[str]] = None
+    request_assessed_by: Optional[List[str]] = None
+    request_reason: Optional[str] = None
     missing_slots: Optional[List[str]] = None
     hitl_prompt: Optional[str] = None
     hitl_options: Optional[List[str]] = None

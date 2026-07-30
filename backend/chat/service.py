@@ -15,6 +15,7 @@ from backend.chat.assets_bridge import (
     load_asset_state,
     save_asset_state,
 )
+from backend.chat.orchestrator import plan_turn
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.runtime import create_agent_for_request, fast_model, model
 from backend.chat.storage import storage
@@ -204,6 +205,52 @@ def _build_resume_answer_messages(
     return [system, human]
 
 
+async def _stream_static_reply(
+    turn_plan,
+    turn_signals,
+    user_text: str,
+    user_id: str,
+    session_id: str,
+    messages: list,
+    metadata: dict,
+    persistent_note: str,
+    asset_state,
+    is_first_message: bool,
+):
+    """Emit a planned reply that no model composed, and persist the turn.
+
+    Streamed through the same event shapes as an agent reply — `session_title`,
+    `content`, `trace`, `[DONE]` — because a client must not need to know which path
+    produced its answer. The saving is that no agent was built: no system prompt, no
+    tool schemas, no search.
+    """
+    if is_first_message:
+        title = generate_session_title(user_text)
+        yield f"data: {json.dumps({'type': 'session_title', 'title': title, 'session_id': session_id})}\n\n"
+
+    reply = turn_plan.static_reply or ""
+    yield f"data: {json.dumps({'type': 'content', 'content': reply})}\n\n"
+
+    rag_trace = normalize_rag_trace({**turn_plan.as_trace(), **turn_signals.as_trace()})
+    yield f"data: {json.dumps({'type': 'trace', 'rag_trace': rag_trace})}\n\n"
+
+    save_meta = dict(metadata)
+    save_asset_state(save_meta, asset_state)
+    # A turn the corpus never saw contributes nothing worth summarising, so the
+    # persistent note is deliberately left alone — updating it would spend a model
+    # call on the one path whose whole point is not making one.
+    save_meta[PENDING_HITL_KEY] = None
+    if is_first_message:
+        save_meta.setdefault("title", generate_session_title(user_text))
+
+    messages.append(AIMessage(content=reply))
+    extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
+    storage.save(user_id, session_id, messages, metadata=save_meta,
+                 extra_message_data=extra_message_data)
+
+    yield "data: [DONE]\n\n"
+
+
 def _no_knowledge_response() -> str:
     return _COPY.no_knowledge
 
@@ -378,42 +425,51 @@ def chat_with_agent(
             else:
                 response_content = _answer_resumed_rag_sync(pending_hitl, user_text, rag_result)
         else:
-            request_agent = create_agent_for_request(ctx)
-            context_messages = _build_context_messages(messages[:-1], persistent_note, effective_user_text)
-            result = request_agent.invoke(
-                {"messages": context_messages},
-                config={"recursion_limit": _PROFILE.agent.recursion_limit},
-            )
+            turn_plan, _ = plan_turn(effective_user_text, messages[:-1], ctx)
+            if turn_plan.short_circuit:
+                # A confirmed out-of-domain question, or a social turn a profile
+                # answers statically. The agent is never built, so this costs neither
+                # the system prompt nor a single tool schema.
+                response_content = turn_plan.static_reply
+                rag_trace = normalize_rag_trace(turn_plan.as_trace())
+                next_pending_hitl = None
+            else:
+                request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools)
+                context_messages = _build_context_messages(messages[:-1], persistent_note, effective_user_text)
+                result = request_agent.invoke(
+                    {"messages": context_messages},
+                    config={"recursion_limit": _PROFILE.agent.recursion_limit},
+                )
 
-            response_content = ""
-            if isinstance(result, dict):
-                if "output" in result:
-                    response_content = result["output"]
-                elif "messages" in result and result["messages"]:
-                    msg = result["messages"][-1]
-                    response_content = getattr(msg, "content", str(msg))
+                response_content = ""
+                if isinstance(result, dict):
+                    if "output" in result:
+                        response_content = result["output"]
+                    elif "messages" in result and result["messages"]:
+                        msg = result["messages"][-1]
+                        response_content = getattr(msg, "content", str(msg))
+                    else:
+                        response_content = str(result)
+                elif hasattr(result, "content"):
+                    response_content = result.content
                 else:
                     response_content = str(result)
-            elif hasattr(result, "content"):
-                response_content = result.content
-            else:
-                response_content = str(result)
 
-            stored_trace = ctx.take_rag_trace()
-            rag_trace = normalize_rag_trace(stored_trace.get("rag_trace") if stored_trace else None)
-            resume_state_from_trace = stored_trace.get("hitl_resume_state") if stored_trace else None
-            next_pending_hitl = None
-            if _is_hitl_trace(rag_trace):
-                next_pending_hitl = _build_pending_hitl(
-                    rag_trace,
-                    original_question or user_text,
-                    previous_answers=hitl_answers,
-                    resume_state=resume_state_from_trace,
-                )
-                response_content = _format_hitl_message(
-                    next_pending_hitl["prompt"],
-                    next_pending_hitl["options"],
-                )
+                stored_trace = ctx.take_rag_trace()
+                rag_trace = normalize_rag_trace(stored_trace.get("rag_trace") if stored_trace else None)
+                resume_state_from_trace = stored_trace.get("hitl_resume_state") if stored_trace else None
+                next_pending_hitl = None
+                if _is_hitl_trace(rag_trace):
+                    next_pending_hitl = _build_pending_hitl(
+                        rag_trace,
+                        original_question or user_text,
+                        previous_answers=hitl_answers,
+                        resume_state=resume_state_from_trace,
+                    )
+                    response_content = _format_hitl_message(
+                        next_pending_hitl["prompt"],
+                        next_pending_hitl["options"],
+                    )
 
         # Assets this turn surfaced, rendered for whatever the caller can display.
         capabilities = effective_capabilities(client_capabilities, _PROFILE.assets.delivery)
@@ -624,7 +680,18 @@ async def chat_with_agent_stream(
             )
             return
 
-        request_agent = create_agent_for_request(ctx)
+        # Plan the turn before building the agent. A confirmed out-of-domain question
+        # ends here, having cost neither the system prompt nor a single tool schema.
+        turn_plan, turn_signals = plan_turn(effective_user_text, messages[:-1], ctx)
+        if turn_plan.short_circuit:
+            async for chunk in _stream_static_reply(
+                turn_plan, turn_signals, user_text, user_id, session_id,
+                messages, metadata, persistent_note, asset_state, is_first_message,
+            ):
+                yield chunk
+            return
+
+        request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools)
         context_messages = _build_context_messages(messages[:-1], persistent_note, effective_user_text)
 
         session_title = None

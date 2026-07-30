@@ -17,10 +17,7 @@ from backend.rag.evidence import (
     build_ladder,
 )
 from backend.rag.policy import decide_route, select_context_indices
-from backend.rag.domain_gate import classify, reference_store, should_run
 from backend.rag.rerank_assessor import CrossEncoderAssessor
-from backend.indexing.embedding import embed_query
-from backend.text_normalization import normalize_query
 from backend.profiles import get_profile
 from backend.schemas.chat import HitlResumeState, normalize_rag_sub_trace
 from backend.rag.utils import (
@@ -157,10 +154,9 @@ class RAGState(TypedDict):
     request_context: ChatRequestContext
     rag_step_group: Optional[str]
     rag_step_group_label: Optional[str]
-    # Set by the domain gate: the corpus sections this question matched, used to narrow
-    # retrieval. None means the gate did not run or abstained.
-    domain_topics: Optional[List[str]]
-    has_history: Optional[bool]
+    # Corpus sections the turn planner matched, forwarded as a retrieval hint. None
+    # means no planner ran or it abstained. Never a filter — see chat/turn_policy.
+    retrieval_sections: Optional[List[str]]
 
 
 def _format_docs(docs: List[dict]) -> str:
@@ -276,11 +272,7 @@ def _initial_state(
         "request_context": ctx,
         "rag_step_group": rag_step_group,
         "rag_step_group_label": rag_step_group_label,
-        "domain_topics": None,
-        # Sub-agents inherit admission from the parent question, so the gate must not
-        # re-judge a decomposed fragment — a sub-question is a fragment by construction
-        # and would score like a follow-up.
-        "has_history": is_sub_agent or bool(getattr(ctx, "has_history", False)),
+        "retrieval_sections": list(getattr(ctx, "retrieval_sections", None) or []),
     }
 
 
@@ -447,67 +439,6 @@ def _assess_evidence(state: RAGState) -> EvidenceReport:
             config=_RAG,
         )
     )
-
-
-def domain_gate_node(state: RAGState) -> RAGState:
-    """Graph entry: reject questions this corpus cannot answer, before searching.
-
-    Sits inside the RAG graph rather than in front of the agent on purpose. In front, it
-    would intercept "thanks", "what did you just say", and every conversational turn that
-    was never a knowledge-base question — the agent's own tool choice already handles
-    those correctly.
-    """
-    question = state["question"]
-    eligible, why = should_run(
-        question,
-        has_history=bool(state.get("has_history")),
-        config=_RAG,
-    )
-    if not eligible:
-        return {"domain_topics": None, "rag_trace": state.get("rag_trace")}
-
-    # normalize_query first: the reference vectors were built from indexed text, which
-    # went through the same normalisation.
-    normalized = normalize_query(question) or question
-    try:
-        vector = embed_query(normalized)
-    except Exception:
-        logger.warning("domain gate could not embed the question; letting it through", exc_info=True)
-        vector = None
-
-    verdict = classify(vector, reference_store.get(), _RAG)
-    rag_trace = dict(state.get("rag_trace") or {})
-    rag_trace.update(verdict.as_trace())
-
-    if verdict.in_domain:
-        if not verdict.abstained:
-            _emit(state, "🧭", f"Question matches {len(verdict.topics)} knowledge-base section(s)", verdict.reason)
-        return {"domain_topics": verdict.topics, "rag_trace": rag_trace}
-
-    _emit(state, "🚪", "Question is outside this knowledge base", verdict.reason)
-    rag_trace.update({
-        "tool_used": True,
-        "tool_name": "search_knowledge_base",
-        "query": question,
-        "retrieved_chunks": [],
-        "retrieval_status": "no_knowledge",
-        "route": "no_knowledge",
-        "evidence_relevance": "none",
-        "evidence_answerability": "none",
-        "evidence_reason": "out_of_domain",
-    })
-    return {
-        "route": "no_knowledge",
-        "retrieval_status": "no_knowledge",
-        "docs": [],
-        "context": "",
-        "domain_topics": [],
-        "rag_trace": rag_trace,
-    }
-
-
-def _route_after_domain_gate(state: RAGState) -> Literal["classify_complexity", "end"]:
-    return "end" if state.get("route") == "no_knowledge" else "classify_complexity"
 
 
 def _report_update(report: EvidenceReport, route: str) -> dict:
@@ -1053,7 +984,6 @@ def build_rag_graph():
     graph = StateGraph(RAGState)
 
     # Register nodes
-    graph.add_node("domain_gate", domain_gate_node)
     graph.add_node("classify_complexity", classify_complexity)
     graph.add_node("prepare_sub_questions", prepare_sub_questions)
     graph.add_node("retrieve_initial", retrieve_initial)
@@ -1063,14 +993,10 @@ def build_rag_graph():
     graph.add_node("rag_sub_agent", rag_sub_agent)
     graph.add_node("synthesis", synthesis)
 
-    # Entry point: the cheapest possible check first. An out-of-domain question ends
-    # here, before the search, the complexity call and the grader call it would have cost.
-    graph.set_entry_point("domain_gate")
-    graph.add_conditional_edges(
-        "domain_gate",
-        _route_after_domain_gate,
-        {"classify_complexity": "classify_complexity", "end": END},
-    )
+    # Entry point: complexity classification. Domain scope is decided one layer up, in
+    # backend/chat/orchestrator.py — by the time this graph runs, the agent has already
+    # chosen to search, so a gate here could no longer save the call it was meant to.
+    graph.set_entry_point("classify_complexity")
 
     # Simple questions go straight to retrieval; complex questions use the sub-questions the planner produced in one pass.
     graph.add_conditional_edges(

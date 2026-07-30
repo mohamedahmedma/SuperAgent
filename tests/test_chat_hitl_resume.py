@@ -103,7 +103,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         fake_storage = FakeStorage()
         update_note = AsyncMock(return_value="updated note")
 
-        def make_agent(ctx):
+        def make_agent(ctx, tool_names=None):
             return FakeStreamAgent(ctx, chunks=["direct answer"])
 
         with (
@@ -140,7 +140,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         fake_storage = FakeStorage()
         update_note = AsyncMock(return_value="updated note")
 
-        def make_agent(ctx):
+        def make_agent(ctx, tool_names=None):
             return FakeStreamAgent(
                 ctx,
                 trace=trace,
