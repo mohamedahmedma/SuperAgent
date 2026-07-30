@@ -5,12 +5,26 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 
+from backend.assets.delivery import ClientCapabilities
+from backend.chat.assets_bridge import (
+    asset_ids_for_answer,
+    asset_ids_for_turn,
+    attach_assets_to_trace,
+    build_asset_references,
+    effective_capabilities,
+    load_asset_state,
+    save_asset_state,
+)
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.runtime import create_agent_for_request, fast_model, model
 from backend.chat.storage import storage
+from backend.profiles import get_profile
 from backend.schemas.chat import PendingHitlState, normalize_rag_trace
 
-CONTEXT_WINDOW_MESSAGES = 6
+_PROFILE = get_profile()
+_COPY = _PROFILE.user_copy
+
+CONTEXT_WINDOW_MESSAGES = _PROFILE.agent.context_window_messages
 PENDING_HITL_KEY = "pending_hitl"
 HITL_STATUSES = {"needs_clarification", "needs_scope_selection"}
 HITL_ROUTES = {"clarify", "scope_select"}
@@ -38,8 +52,8 @@ def _hitl_prompt_from_trace(rag_trace: dict) -> str:
         return prompt
     route = _hitl_route_from_trace(rag_trace)
     if route == "scope_select":
-        return "I found several knowledge base scopes that might be relevant. Please choose which one you'd like to continue querying."
-    return "I found relevant knowledge, but I'm still missing one key piece of information. Please provide it so I can continue."
+        return _COPY.hitl_scope_agent
+    return _COPY.hitl_clarify_agent
 
 
 def _hitl_options_from_trace(rag_trace: dict) -> list[str]:
@@ -173,15 +187,7 @@ def _build_resume_answer_messages(
     original_question = pending_hitl.get("original_question") or ""
     prompt = pending_hitl.get("prompt") or ""
     context = _format_retrieved_chunks(docs)
-    system = SystemMessage(
-        content=(
-            "You are a helpful knowledge-base assistant. "
-            "Answer the user's original question using only the retrieved chunks. "
-            "You MUST cite source chunks inline with [1], [2], etc. "
-            "If the chunks are insufficient, say so honestly. "
-            "Do not mention internal HITL or RAG implementation details."
-        )
-    )
+    system = SystemMessage(content=_PROFILE.agent.resume_answer_prompt)
     human = HumanMessage(
         content=(
             "Original question:\n"
@@ -199,11 +205,11 @@ def _build_resume_answer_messages(
 
 
 def _no_knowledge_response() -> str:
-    return "The knowledge base does not contain reliable relevant information, so this question can't be answered from it right now."
+    return _COPY.no_knowledge
 
 
 def _retrieval_error_response() -> str:
-    return "A temporary technical issue prevented searching the knowledge base. Please try again in a moment."
+    return _COPY.retrieval_error
 
 
 def _resume_rag_from_hitl_sync(pending_hitl: dict, user_answer: str, ctx: ChatRequestContext) -> dict:
@@ -275,7 +281,7 @@ async def update_persistent_note(
 
 def generate_session_title(user_text: str) -> str:
     compact_title = " ".join(user_text.split()).strip(" \t\r\n。！？!?，,；;：:")
-    return compact_title[:16] or "New session"
+    return compact_title[:16] or _COPY.new_session_title
 
 
 def _update_persistent_note_sync(
@@ -297,13 +303,11 @@ def _update_persistent_note_sync(
                 + "\n".join(history_lines)
                 + "\n\n"
             )
+        instructions = _PROFILE.agent.persistent_note_prompt.replace(
+            "{max_chars}", str(_PROFILE.agent.persistent_note_max_chars)
+        )
         prompt = (
-            "You are a [Context Manager Agent], responsible for maintaining the \"persistent note\" across multi-turn conversations.\n"
-            "The note is the model's long-term working memory under a limited context window, recording resolved questions and key facts.\n\n"
-            "Update rules:\n"
-            "1. Intelligently merge new information into the existing note; do not simply append it.\n"
-            "2. Filter out noise and keep it under 500 characters, using concise bullet points.\n"
-            "3. If information conflicts, keep the most reliable or most recent version.\n\n"
+            f"{instructions}\n\n"
             f"▼ Existing note:\n{current_note if current_note else 'None'}\n\n"
             f"{history_text}"
             f"▼ Latest turn:\nUser: {user_text}\nAI: {ai_response}\n\n"
@@ -320,8 +324,10 @@ def chat_with_agent(
     user_text: str,
     user_id: str = "default_user",
     session_id: str = "default_session",
+    client_capabilities: ClientCapabilities | None = None,
 ):
     messages, metadata = storage.load_with_meta(user_id, session_id)
+    asset_state = load_asset_state(metadata)
     persistent_note = metadata.get("persistent_note", "")
     is_first_message = len(messages) == 0
     stored_pending_hitl = metadata.get(PENDING_HITL_KEY)
@@ -343,7 +349,9 @@ def chat_with_agent(
         else user_text
     )
 
-    ctx = ChatRequestContext.for_sync(user_id=user_id, session_id=session_id)
+    ctx = ChatRequestContext.for_sync(
+        user_id=user_id, session_id=session_id, asset_state=asset_state
+    )
     ctx.reset_knowledge_tool_budget()
 
     try:
@@ -374,7 +382,7 @@ def chat_with_agent(
             context_messages = _build_context_messages(messages[:-1], persistent_note, effective_user_text)
             result = request_agent.invoke(
                 {"messages": context_messages},
-                config={"recursion_limit": 8},
+                config={"recursion_limit": _PROFILE.agent.recursion_limit},
             )
 
             response_content = ""
@@ -407,7 +415,17 @@ def chat_with_agent(
                     next_pending_hitl["options"],
                 )
 
+        # Assets this turn surfaced, rendered for whatever the caller can display.
+        capabilities = effective_capabilities(client_capabilities, _PROFILE.assets.delivery)
+        asset_references = build_asset_references(
+            asset_ids_for_answer(response_content, ctx, rag_trace, _PROFILE.assets.delivery),
+            capabilities,
+            _PROFILE.assets.delivery,
+        )
+        rag_trace = attach_assets_to_trace(rag_trace, asset_references)
+
         save_meta = dict(metadata)
+        save_asset_state(save_meta, asset_state)
         if invalid_pending_hitl:
             save_meta[PENDING_HITL_KEY] = None
         if is_first_message:
@@ -438,6 +456,10 @@ def chat_with_agent(
         return {
             "response": response_content,
             "rag_trace": rag_trace,
+            "assets": [
+                reference.model_dump(mode="json", exclude_none=True)
+                for reference in asset_references
+            ],
         }
     finally:
         ctx.close()
@@ -447,6 +469,7 @@ async def chat_with_agent_stream(
     user_text: str,
     user_id: str = "default_user",
     session_id: str = "default_session",
+    client_capabilities: ClientCapabilities | None = None,
 ):
     initial_step = {
         "type": "rag_step",
@@ -461,6 +484,8 @@ async def chat_with_agent_stream(
     yield f"data: {json.dumps(initial_step)}\n\n"
 
     messages, metadata = storage.load_with_meta(user_id, session_id)
+    asset_state = load_asset_state(metadata)
+    capabilities = effective_capabilities(client_capabilities, _PROFILE.assets.delivery)
     persistent_note = metadata.get("persistent_note", "")
     is_first_message = len(messages) == 0
     stored_pending_hitl = metadata.get(PENDING_HITL_KEY)
@@ -487,6 +512,7 @@ async def chat_with_agent_stream(
         user_id=user_id,
         session_id=session_id,
         output_queue=output_queue,
+        asset_state=asset_state,
     )
     ctx.reset_knowledge_tool_budget()
 
@@ -545,6 +571,21 @@ async def chat_with_agent_stream(
                         full_response += content
                         yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
 
+            # Assets get their own event, ahead of the trace, so a client can render
+            # images without parsing the trace — which is diagnostic and may change.
+            asset_references = build_asset_references(
+                asset_ids_for_answer(full_response, ctx, rag_trace, _PROFILE.assets.delivery),
+                capabilities,
+                _PROFILE.assets.delivery,
+            )
+            if asset_references:
+                payload = [
+                    reference.model_dump(mode="json", exclude_none=True)
+                    for reference in asset_references
+                ]
+                yield f"data: {json.dumps({'type': 'assets', 'assets': payload})}\n\n"
+            rag_trace = attach_assets_to_trace(rag_trace, asset_references)
+
             if rag_trace:
                 yield f"data: {json.dumps({'type': 'trace', 'rag_trace': rag_trace})}\n\n"
 
@@ -554,6 +595,7 @@ async def chat_with_agent_stream(
             yield "data: [DONE]\n\n"
 
             save_meta = dict(metadata)
+            save_asset_state(save_meta, asset_state)
             if invalid_pending_hitl:
                 save_meta[PENDING_HITL_KEY] = None
             if next_pending_hitl:
@@ -599,7 +641,7 @@ async def chat_with_agent_stream(
                 async for msg, _metadata in request_agent.astream(
                     {"messages": context_messages},
                     stream_mode="messages",
-                    config={"recursion_limit": 8},
+                    config={"recursion_limit": _PROFILE.agent.recursion_limit},
                 ):
                     if not isinstance(msg, AIMessageChunk):
                         continue
@@ -667,6 +709,19 @@ async def chat_with_agent_stream(
                 next_pending_hitl["options"],
             )
 
+        asset_references = build_asset_references(
+            asset_ids_for_answer(full_response, ctx, rag_trace, _PROFILE.assets.delivery),
+            capabilities,
+            _PROFILE.assets.delivery,
+        )
+        if asset_references:
+            payload = [
+                reference.model_dump(mode="json", exclude_none=True)
+                for reference in asset_references
+            ]
+            yield f"data: {json.dumps({'type': 'assets', 'assets': payload})}\n\n"
+        rag_trace = attach_assets_to_trace(rag_trace, asset_references)
+
         if rag_trace:
             yield f"data: {json.dumps({'type': 'trace', 'rag_trace': rag_trace})}\n\n"
 
@@ -676,6 +731,7 @@ async def chat_with_agent_stream(
         yield "data: [DONE]\n\n"
 
         save_meta = dict(metadata)
+        save_asset_state(save_meta, asset_state)
         if invalid_pending_hitl:
             save_meta[PENDING_HITL_KEY] = None
         if session_title:

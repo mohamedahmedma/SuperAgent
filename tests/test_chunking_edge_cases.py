@@ -100,7 +100,7 @@ class PackUnitsBoundaryTests(unittest.TestCase):
 
     def test_isolated_table_between_texts_produces_three_windows(self):
         units = [self._unit(10), self._unit(10, kind="table"), self._unit(10)]
-        windows = DocumentLoader._pack_units(units, budget=100, isolate_tables=True)
+        windows = DocumentLoader._pack_units(units, budget=100, isolate_atomic=True)
         self.assertEqual(3, len(windows))
         self.assertEqual("table", windows[1][0]["kind"])
 
@@ -756,6 +756,65 @@ class WriterDedupFlowTests(unittest.TestCase):
         writer.write_documents([self._doc(0, "first"), self._doc(1, "near first"), self._doc(2, "far away")])
         inserts = [e for e in events if e[0] == "insert"]
         self.assertEqual([("insert", ["c0", "c2"])], inserts)
+
+
+class BM25SectionPrefixTests(unittest.TestCase):
+    """The BM25 field drops the document-root heading. Indexing it put the same
+    terms on every chunk of a document, flattening BM25 scores so the sparse half
+    contributed noise to RRF and outvoted strong dense matches."""
+
+    @staticmethod
+    def _prefix(text, sections):
+        from backend.indexing.document_loader import DocumentLoader
+
+        return DocumentLoader._apply_bm25_section_prefix(text, sections)
+
+    def test_document_root_heading_is_dropped(self):
+        out = self._prefix("Pricing: 250,000 EGP.", ["GS1 Egypt Guide", "Services", "One Trace"])
+        self.assertNotIn("GS1 Egypt Guide", out)
+        self.assertTrue(out.startswith("Services > One Trace\n"))
+
+    def test_specific_section_names_are_kept(self):
+        """They are per-chunk signal: a keyword query for a section name must
+        still match that section's body chunks."""
+        out = self._prefix("Annual renewal 20,000 EGP.", ["Doc", "Renewal", "Annual Renewal"])
+        self.assertIn("Renewal > Annual Renewal", out)
+
+    def test_single_root_section_yields_no_prefix(self):
+        self.assertEqual("Body text.", self._prefix("Body text.", ["Doc Title Only"]))
+
+    def test_prefix_skipped_when_heading_already_in_body(self):
+        out = self._prefix("One Trace\n\nA traceability system.", ["Doc", "Services", "One Trace"])
+        self.assertEqual("One Trace\n\nA traceability system.", out)
+
+    def test_empty_inputs_pass_through(self):
+        self.assertEqual("", self._prefix("", ["Doc", "Services"]))
+        self.assertEqual("Body.", self._prefix("Body.", []))
+
+    def test_writer_falls_back_to_text_when_chunker_supplies_no_bm25_text(self):
+        """The flat fallback splitter carries no section path."""
+        import backend.indexing.milvus_writer as module
+
+        events = []
+
+        class _Service:
+            def get_embeddings(self, texts):
+                return [[0.1, 0.2] for _ in texts]
+
+        captured = {}
+
+        class _Store:
+            def init_collection(self, dim):
+                pass
+
+            def insert(self, data):
+                captured["rows"] = data
+
+        writer = module.MilvusWriter(embedding_service=_Service(), milvus_manager=_Store())
+        writer.write_documents([
+            {"text": "no sections here", "filename": "f", "file_type": "Word", "chunk_id": "c0"},
+        ])
+        self.assertEqual("no sections here", captured["rows"][0]["bm25_text"])
 
 
 if __name__ == "__main__":

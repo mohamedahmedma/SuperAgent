@@ -723,6 +723,11 @@ class QueryIndexSymmetryTests(unittest.TestCase):
                 return [[0.1, 0.2]]
 
         fake_embedding.embedding_service = _Embed()
+        # Both the domain gate and retrieval ask for the query vector; the real module
+        # memoizes so only one forward pass happens. The stub delegates so tests that
+        # assert on what was embedded still see the call.
+        fake_embedding.embed_query = lambda text: fake_embedding.embedding_service.get_embeddings([text])[0]
+        fake_embedding.reset_query_vector_cache = lambda: None
 
         fake_parent = types.ModuleType("backend.indexing.parent_chunk_store")
 
@@ -833,14 +838,49 @@ class MilvusAnalyzerTests(unittest.TestCase):
             self.assertEqual("chinese", milvus_client.TEXT_ANALYZER_TYPE)
         importlib.reload(milvus_client)
 
-    def test_schema_uses_the_configured_analyzer(self):
+    def test_analyzer_params_follow_the_configured_type(self):
+        import importlib
+        import os as _os
+
+        import backend.indexing.milvus_client as milvus_client
+
+        params = milvus_client.build_analyzer_params()
+        self.assertEqual("standard", params["tokenizer"])
+        self.assertIn("lowercase", params["filter"])
+
+        with patch.dict(_os.environ, {"MILVUS_TEXT_ANALYZER": "chinese"}):
+            importlib.reload(milvus_client)
+            self.assertEqual({"type": "chinese"}, milvus_client.build_analyzer_params())
+        importlib.reload(milvus_client)
+
+    def test_analyzer_strips_stop_words_and_stems(self):
+        """Query terms must survive tokenization; function words must not."""
+        import backend.indexing.milvus_client as milvus_client
+
+        stop = next(
+            f for f in milvus_client.build_analyzer_params()["filter"]
+            if isinstance(f, dict) and f.get("type") == "stop"
+        )
+        self.assertIn("_english_", stop["stop_words"])
+        # Interrogatives open nearly every RAG query and carry no signal.
+        for word in ("what", "how", "can", "my"):
+            self.assertIn(word, stop["stop_words"])
+
+        stemmer = next(
+            f for f in milvus_client.build_analyzer_params()["filter"]
+            if isinstance(f, dict) and f.get("type") == "stemmer"
+        )
+        self.assertEqual("english", stemmer["language"])
+
+    def test_bm25_reads_the_dedicated_field_not_the_display_text(self):
+        """The section-path prefix repeats across a document's chunks; indexing it
+        flattens BM25 scoring, so the sparse half must read `bm25_text`."""
         import inspect
 
         import backend.indexing.milvus_client as milvus_client
 
         source = inspect.getsource(milvus_client.MilvusStore.ensure_collection)
-        self.assertIn('analyzer_params={"type": TEXT_ANALYZER_TYPE}', source)
-        self.assertNotIn('"type": "chinese"', source)
+        self.assertIn('input_field_names=["bm25_text"]', source)
 
 
 if __name__ == "__main__":

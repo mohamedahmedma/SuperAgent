@@ -12,8 +12,12 @@ HTML has no pages: page_number is always 0 and `top` is a document-order surroga
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import unquote
 
 import backend.indexing.html_processor as html_processor
 from backend.indexing.pdf_layout import (
@@ -24,7 +28,65 @@ from backend.indexing.pdf_layout import (
 )
 
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
-_BLOCK_TAGS = list(_HEADING_TAGS) + ["p", "li", "pre", "table"]
+_BLOCK_TAGS = list(_HEADING_TAGS) + ["p", "li", "pre", "table", "img", "figure"]
+
+_DATA_URI_RE = re.compile(r"^data:(?P<mime>image/[\w.+-]+)?;?(?P<encoding>base64)?,(?P<payload>.*)$", re.S)
+_LOCAL_IMAGE_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".webp": "image/webp",
+    ".tiff": "image/tiff",
+}
+# Ingest never dereferences a remote src. Fetching URLs out of an uploaded document
+# would turn document upload into a server-side request forge, and would make ingest
+# depend on the network. Remote images contribute their alt text and nothing else.
+MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024
+
+
+def _decode_data_uri(src: str) -> Optional[Tuple[bytes, str]]:
+    match = _DATA_URI_RE.match(src.strip())
+    if not match or not match.group("encoding"):
+        return None
+    try:
+        data = base64.b64decode(match.group("payload"), validate=False)
+    except (ValueError, binascii.Error):
+        return None
+    if not data or len(data) > MAX_INLINE_IMAGE_BYTES:
+        return None
+    return data, match.group("mime") or "image/png"
+
+
+def _read_local_image(src: str, base_dir: Path) -> Optional[Tuple[bytes, str]]:
+    """Load an image referenced by a relative path, confined to the document's own
+    directory tree so a crafted `src` cannot read arbitrary files."""
+    candidate = (base_dir / unquote(src.split("?", 1)[0].split("#", 1)[0])).resolve()
+    try:
+        candidate.relative_to(base_dir.resolve())
+    except ValueError:
+        return None
+    content_type = _LOCAL_IMAGE_TYPES.get(candidate.suffix.lower())
+    if not content_type or not candidate.is_file():
+        return None
+    try:
+        if candidate.stat().st_size > MAX_INLINE_IMAGE_BYTES:
+            return None
+        return candidate.read_bytes(), content_type
+    except OSError:
+        return None
+
+
+def _image_payload(src: str, base_dir: Path) -> Optional[Tuple[bytes, str]]:
+    src = (src or "").strip()
+    if not src:
+        return None
+    if src.startswith("data:"):
+        return _decode_data_uri(src)
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", src) or src.startswith("//"):
+        return None  # remote — see MAX_INLINE_IMAGE_BYTES comment above
+    return _read_local_image(src, base_dir)
 
 
 def _table_rows(table_el) -> List[List[str]]:
@@ -50,7 +112,9 @@ def parse_html_blocks(file_path: str) -> List[Dict[str, Any]]:
     unreadable files — the caller decides whether to fall back to the flat path."""
     from bs4 import BeautifulSoup
 
-    html = html_processor._read_html_text(Path(file_path))
+    source_path = Path(file_path)
+    base_dir = source_path.parent
+    html = html_processor._read_html_text(source_path)
     soup = BeautifulSoup(html, "html.parser")
     html_processor._strip_noise(soup)
     root = html_processor._pick_root(soup)
@@ -78,6 +142,42 @@ def parse_html_blocks(file_path: str) -> List[Dict[str, Any]]:
             continue
         # A <p> inside a list item would duplicate the <li> text.
         if el.name == "p" and el.find_parent("li"):
+            continue
+
+        if el.name == "figure":
+            # <figure> is a wrapper; its <img> and <figcaption> are visited on their
+            # own. Skipping it here avoids emitting the caption text twice.
+            continue
+
+        if el.name == "img":
+            alt = (el.get("alt") or "").strip()
+            payload = _image_payload(el.get("src") or "", base_dir)
+            if payload is None:
+                # No decodable bytes. Alt text is still real, human-authored signal,
+                # so it is kept as ordinary text rather than discarded.
+                if alt:
+                    blocks.append({
+                        "type": "text",
+                        "content": alt,
+                        "page_number": 0,
+                        "top": order,
+                    })
+                    order += 1.0
+                continue
+            data, content_type = payload
+            blocks.append({
+                "type": "image",
+                "content": "",
+                "data": data,
+                "content_type": content_type,
+                "alt_text": alt,
+                # An explicitly empty alt is the HTML author declaring the image
+                # decorative; triage honours that rather than second-guessing it.
+                "declared_decorative": el.has_attr("alt") and not alt,
+                "page_number": 0,
+                "top": order,
+            })
+            order += 1.0
             continue
 
         if el.name == "table":

@@ -17,16 +17,39 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import router
 from backend.infra.database import init_db
+from backend.profiles import get_profile
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Cute Cat Bot API")
+    profile = get_profile()
+
+    # LangSmith reads LANGSMITH_PROJECT from the environment itself, so the profile
+    # can only supply it as a default — an explicit env var still wins.
+    os.environ.setdefault("LANGSMITH_PROJECT", profile.identity.langsmith_project)
+
+    app = FastAPI(
+        title=profile.identity.api_title,
+        description=profile.identity.description,
+    )
 
     @app.on_event("startup")
     async def _startup_init_db():
         init_db()
+        # create_all() creates missing TABLES but never adds columns to existing ones,
+        # so a model change ships silently and surfaces as UndefinedColumn partway
+        # through a user's upload. Report it at boot instead.
+        from backend.db.migrate import check_and_report
+
+        check_and_report()
+        # Vision misconfiguration is otherwise silent: a profile can ask for it, the
+        # credentials can be missing, and extraction quietly degrades forever. One
+        # line at boot makes the state visible.
+        if profile.assets.enabled:
+            from backend.assets.vision import log_vision_status
+
+            log_vision_status(profile)
 
     app.add_middleware(
         CORSMiddleware,

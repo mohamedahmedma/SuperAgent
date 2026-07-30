@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -8,6 +9,9 @@ from backend.indexing import (
     embedding_service,
 )
 from backend.indexing.milvus_client import get_milvus_store
+from backend.profiles import get_profile
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR.parent / "data"
@@ -62,20 +66,44 @@ def delete_document_transactionally(filename: str, job_manager=None, job_id=None
     except Exception as e:
         raise RuntimeError(f"Failed to clean up PostgreSQL parent chunks and cache: {str(e)}") from e
 
+    # Asset occurrences and their orphaned blobs. Reported inside the existing
+    # parent_store step rather than as a new one, so the delete job's step contract
+    # (DELETE_STEPS, rendered by the frontend) stays unchanged.
+    asset_summary = ""
+    profile = get_profile()
+    if profile.assets.enabled:
+        try:
+            from backend.assets.store import get_asset_store
+
+            deleted = get_asset_store().delete_by_filename(
+                filename, gc_orphan_blobs=profile.assets.gc_orphan_blobs
+            )
+            if deleted.assets_deleted:
+                asset_summary = (
+                    f", {deleted.assets_deleted} assets removed "
+                    f"({deleted.blobs_deleted} blobs freed, {deleted.blobs_retained} still shared)"
+                )
+        except Exception as e:
+            # Vectors and parent chunks are already gone, so retrieval is consistent.
+            # Losing asset rows here is storage housekeeping, not a correctness
+            # problem, and must not fail a delete the user already saw succeed.
+            logger.exception("Asset cleanup failed for %s", filename)
+            asset_summary = f", asset cleanup deferred ({e})"
+
     if job_manager and job_id:
-        job_manager.complete_step(job_id, "parent_store", "Parent chunks and Redis cache cleared")
+        job_manager.complete_step(
+            job_id, "parent_store", f"Parent chunks and Redis cache cleared{asset_summary}"
+        )
 
     return chunks_deleted
 
 
 def is_supported_document(filename: str) -> bool:
+    """Accepted upload extensions come from the profile: an e-commerce catalogue and a
+    document KB do not necessarily ingest the same file types."""
     file_lower = filename.lower()
-    return (
-        file_lower.endswith(".pdf")
-        or file_lower.endswith((".docx", ".doc"))
-        or file_lower.endswith((".xlsx", ".xls"))
-        or file_lower.endswith((".html", ".htm"))
-    )
+    extensions = tuple(get_profile().ingest.supported_extensions)
+    return bool(extensions) and file_lower.endswith(extensions)
 
 
 async def save_upload_file(file, file_path: Path) -> None:

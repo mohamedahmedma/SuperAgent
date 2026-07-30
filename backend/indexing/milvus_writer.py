@@ -13,11 +13,14 @@ Dedup scope is one write_documents call (one document upload) — cross-file ded
 would require querying the store and belongs to a future compaction job.
 """
 import hashlib
+import json
 import logging
 import os
 
+from backend.env import env_bool, env_float
 from backend.indexing.embedding import EmbeddingService, embedding_service as _default_embedding_service
 from backend.indexing.milvus_client import MilvusStore, get_milvus_store
+from backend.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +53,11 @@ class MilvusWriter:
     def __init__(self, embedding_service: EmbeddingService = None, milvus_manager: MilvusStore = None):
         self.embedding_service = embedding_service or _default_embedding_service
         self.milvus_manager = milvus_manager or get_milvus_store()
-        self.semantic_dedup_enabled = os.getenv("SEMANTIC_DEDUP_ENABLED", "false").lower() == "true"
-        try:
-            self.semantic_dedup_threshold = float(os.getenv("SEMANTIC_DEDUP_THRESHOLD", "0.97"))
-        except ValueError:
-            self.semantic_dedup_threshold = 0.97
+        chunking = get_profile().chunking
+        self.semantic_dedup_enabled = env_bool("SEMANTIC_DEDUP_ENABLED", chunking.semantic_dedup_enabled)
+        self.semantic_dedup_threshold = env_float(
+            "SEMANTIC_DEDUP_THRESHOLD", chunking.semantic_dedup_threshold
+        )
 
     def write_documents(self, documents: list[dict], batch_size: int = 50, progress_callback=None):
         if not documents:
@@ -103,6 +106,9 @@ class MilvusWriter:
                         {
                             "dense_embedding": dense_emb,
                             "text": doc["text"],
+                            # Chunkers that carry no section path (the flat
+                            # fallback splitter) index the body as-is.
+                            "bm25_text": doc.get("bm25_text") or doc["text"],
                             "filename": doc["filename"],
                             "file_type": doc["file_type"],
                             "file_path": doc.get("file_path", ""),
@@ -112,6 +118,12 @@ class MilvusWriter:
                             "parent_chunk_id": doc.get("parent_chunk_id", ""),
                             "root_chunk_id": doc.get("root_chunk_id", ""),
                             "chunk_level": doc.get("chunk_level", 0),
+                            "modality": doc.get("modality", "text"),
+                            # JSON, not a Python list: the column is VARCHAR so the
+                            # value must be self-describing on the way back out.
+                            "asset_ids": json.dumps(
+                                list(doc.get("asset_ids") or []), ensure_ascii=False
+                            ),
                         }
                         for doc, dense_emb in insert_pairs
                     ]

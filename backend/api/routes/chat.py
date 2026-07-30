@@ -16,7 +16,12 @@ router = APIRouter(tags=["chat"])
 async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_current_user)):
     try:
         session_id = request.session_id or "default_session"
-        resp = chat_with_agent(request.message, current_user.username, session_id)
+        resp = chat_with_agent(
+            request.message,
+            current_user.username,
+            session_id,
+            client_capabilities=request.client_capabilities,
+        )
         if isinstance(resp, dict):
             return ChatResponse(**resp)
         return ChatResponse(response=resp)
@@ -49,6 +54,7 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: User = Depend
                 request.message,
                 current_user.username,
                 session_id,
+                client_capabilities=request.client_capabilities,
             ):
                 yield chunk
         except Exception as e:

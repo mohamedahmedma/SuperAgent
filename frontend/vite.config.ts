@@ -29,6 +29,7 @@ export default defineConfig({
       '/chat': 'http://localhost:8000',
       '/sessions': 'http://localhost:8000',
       '/documents': 'http://localhost:8000',
+      '/media': 'http://localhost:8000',
     },
   },
 });

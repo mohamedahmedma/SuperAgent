@@ -1,0 +1,70 @@
+# SuperMew — the original deployment identity, and the default active profile.
+#
+# This profile is currently the FULL-FEATURE test bed: every optional capability is
+# switched on so the whole system can be exercised end to end. That is a deliberate
+# testing posture, not a production default — see the cost notes on each block. A
+# production deployment should start from `document_kb` and enable only what it needs.
+
+extends: base
+name: supermew
+
+identity:
+  name: "SuperMew"
+  display_name: "SuperMew"
+  api_title: "Cute Cat Bot API"
+  description: "Self-reflective RAG knowledge-base assistant"
+  persona: "You are a cute cat bot that loves to help users."
+  redis_key_prefix: "supermew"
+  langsmith_project: "supermew-rag"
+
+agent:
+  tools:
+    - get_current_weather
+    - search_knowledge_base
+    - view_figure
+    - search_products
+
+assets:
+  enabled: true
+
+  figures:
+    enabled: true
+    # Reads charts, calendars, and scanned pages into text. Costs one vision call per
+    # surviving image at ingest, cached by content hash so repeats are free.
+    vision_enabled: true
+    # Sized for a Groq on-demand quota (8k tokens/minute): a ~3k-token image plus this
+    # reservation fits inside one window. Raising it does not buy more room — the
+    # provider reserves it against the same quota and rejects the request outright.
+    vision_max_output_tokens: 4096
+    # Turns off the qwen3 scratchpad. Measured on this deployment: 85 output tokens
+    # down to 14 for the same transcription. On a reasoning model the scratchpad
+    # routinely consumes the entire budget before any answer is written, so this
+    # matters far more than the token ceiling does.
+    vision_extra_params:
+      reasoning_effort: none
+
+  # Entity extraction is on so search_products is exercisable. A document knowledge
+  # base would normally leave this off — with role_strategy: figure the pipeline still
+  # treats document images as figures, so this only activates the tool and the
+  # attribute index, not a different ingest path.
+  entities:
+    enabled: true
+    vision_enabled: true
+    role_strategy: figure
+    attributes:
+      - name: category
+        type: string
+        description: "What kind of thing the image shows"
+        values: [calendar, timetable, chart, diagram, form, photo, logo, map, other]
+      - name: topic
+        type: string
+        multi: true
+        description: "Subjects the image covers"
+      - name: has_dates
+        type: boolean
+        description: "Whether the image contains specific dates"
+
+  delivery:
+    attach_to_response: true
+    max_assets_per_response: 8
+    max_pixel_reads_per_asset: 2

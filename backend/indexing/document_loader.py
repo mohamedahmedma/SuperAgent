@@ -8,12 +8,19 @@ from typing import Dict, List, Optional
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, UnstructuredExcelLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from backend.env import env_bool
 from backend.indexing.docx_layout import parse_docx_blocks
 from backend.indexing.html_layout import parse_html_blocks
 from backend.indexing.pdf_layout import parse_pdf_blocks
 from backend.indexing.xlsx_layout import parse_xlsx_blocks
+from backend.profiles import get_profile
 
 logger = logging.getLogger(__name__)
+
+# Chunking defaults come from the active domain profile; the CHUNK_* environment
+# variables below still override them, and an explicit DocumentLoader(...) argument
+# overrides both. Effective order: constructor arg > env > profile > schema default.
+_CHUNKING = get_profile().chunking
 
 
 def _read_positive_int_env(name: str, default: int) -> int:
@@ -31,15 +38,13 @@ def _read_positive_int_env(name: str, default: int) -> int:
 # LAYOUT_PARSER_ENABLED is the master switch; PDF_LAYOUT_PARSER_ENABLED is kept as a
 # PDF-specific override for backward compatibility. Any layout-parser failure falls
 # back to the legacy flat loader per file.
-LAYOUT_PARSER_ENABLED = os.getenv("LAYOUT_PARSER_ENABLED", "true").lower() != "false"
-PDF_LAYOUT_PARSER_ENABLED = (
-    os.getenv("PDF_LAYOUT_PARSER_ENABLED", "true" if LAYOUT_PARSER_ENABLED else "false").lower() != "false"
-)
+LAYOUT_PARSER_ENABLED = env_bool("LAYOUT_PARSER_ENABLED", _CHUNKING.layout_parser_enabled)
+PDF_LAYOUT_PARSER_ENABLED = env_bool("PDF_LAYOUT_PARSER_ENABLED", LAYOUT_PARSER_ENABLED)
 
 # Leaf chunks merge small neighbors up to ~level_3_size / divisor (a topic-sized
 # retrieval granule), while level_3_size stays only a hard cap — mirrors
 # MERGE_TARGET_DIVISOR in the DataProcessing reference (chunk_merger.py).
-MERGE_TARGET_DIVISOR = 4
+MERGE_TARGET_DIVISOR = _CHUNKING.merge_target_divisor
 
 # Chunking configuration (tune without code changes). CHUNK_SIZE / CHUNK_OVERLAP are
 # the leaf (L3) budgets in CHARACTERS for every strategy — the token strategy
@@ -95,13 +100,23 @@ class DocumentLoader:
     """Document loading and chunking service"""
 
     def __init__(self, chunk_size: int = None, chunk_overlap: int = None):
-        chunk_size = chunk_size or _read_positive_int_env("CHUNK_SIZE", 800)
-        chunk_overlap = chunk_overlap if chunk_overlap is not None else _read_positive_int_env("CHUNK_OVERLAP", 100)
+        chunk_size = chunk_size or _read_positive_int_env("CHUNK_SIZE", _CHUNKING.chunk_size)
+        chunk_overlap = (
+            chunk_overlap
+            if chunk_overlap is not None
+            else _read_positive_int_env("CHUNK_OVERLAP", _CHUNKING.chunk_overlap)
+        )
         self._strategy = self._resolve_strategy()
 
-        level_1_size = _read_positive_int_env("CHUNK_L1_SIZE", max(2000, chunk_size * 3))
+        # A null l1_size/l2_size in the profile keeps the original derivation from the
+        # leaf size, so tuning CHUNK_SIZE alone still scales the whole hierarchy.
+        level_1_size = _read_positive_int_env(
+            "CHUNK_L1_SIZE", _CHUNKING.l1_size or max(2000, chunk_size * 3)
+        )
         level_1_overlap = max(400, chunk_overlap * 3)
-        level_2_size = _read_positive_int_env("CHUNK_L2_SIZE", max(1000, chunk_size * 2))
+        level_2_size = _read_positive_int_env(
+            "CHUNK_L2_SIZE", _CHUNKING.l2_size or max(1000, chunk_size * 2)
+        )
         level_2_overlap = max(200, chunk_overlap * 2)
         level_3_size = max(600, chunk_size)
         level_3_overlap = max(100, chunk_overlap)
@@ -115,7 +130,7 @@ class DocumentLoader:
 
     @staticmethod
     def _resolve_strategy() -> str:
-        strategy = (os.getenv("CHUNK_STRATEGY") or "recursive").strip().lower()
+        strategy = (os.getenv("CHUNK_STRATEGY") or _CHUNKING.strategy).strip().lower()
         if strategy not in CHUNK_STRATEGIES:
             logger.warning(
                 "Unknown CHUNK_STRATEGY=%r (choices: %s) — using 'recursive'",
@@ -136,7 +151,9 @@ class DocumentLoader:
         if self._strategy == "sentence":
             return SentenceSplitter(
                 max_chars=size,
-                overlap_sentences=_read_positive_int_env("CHUNK_SENTENCE_OVERLAP", 1),
+                overlap_sentences=_read_positive_int_env(
+                    "CHUNK_SENTENCE_OVERLAP", _CHUNKING.sentence_overlap
+                ),
             )
         if self._strategy == "token":
             from langchain_text_splitters import TokenTextSplitter
@@ -301,12 +318,23 @@ class DocumentLoader:
         splitter,
         sections: tuple = (),
         page: int = 0,
+        asset_ids: tuple = (),
+        kind: str = "text",
     ) -> List[Dict]:
+        """`kind="figure"` marks a unit built from an image's text surrogate. Every
+        piece of a split surrogate keeps the asset reference, so a figure that had to
+        be divided still points at the image it describes."""
         units: List[Dict] = []
         for piece in splitter.split_text(text):
             piece = (piece or "").strip()
             if piece:
-                units.append({"kind": "text", "text": piece, "sections": sections, "page": page})
+                units.append({
+                    "kind": kind,
+                    "text": piece,
+                    "sections": sections,
+                    "page": page,
+                    "asset_ids": tuple(asset_ids),
+                })
         return units
 
     def _refine_units(
@@ -325,15 +353,29 @@ class DocumentLoader:
             if unit["kind"] == "table":
                 refined.extend(self._table_units(unit["rows"], table_budget, sections, page))
             else:
-                refined.extend(self._text_units(unit["text"], splitter, sections, page))
+                refined.extend(
+                    self._text_units(
+                        unit["text"],
+                        splitter,
+                        sections,
+                        page,
+                        asset_ids=unit.get("asset_ids", ()),
+                        kind=unit.get("kind", "text"),
+                    )
+                )
         return refined
+
+    # Unit kinds that must never share a leaf chunk with anything else: a table stays
+    # a pure grid, and a figure surrogate stays attached to exactly its own image
+    # rather than diluting an unrelated paragraph's embedding.
+    _ATOMIC_LEAF_KINDS = ("table", "figure")
 
     @staticmethod
     def _pack_units(
         units: List[Dict],
         budget: int,
         target: Optional[int] = None,
-        isolate_tables: bool = False,
+        isolate_atomic: bool = False,
         split_on_section_change: bool = False,
     ) -> List[List[Dict]]:
         """Greedily pack consecutive units into windows, preserving document order.
@@ -361,7 +403,7 @@ class DocumentLoader:
 
         for unit in units:
             unit_len = len(unit["text"])
-            if isolate_tables and unit["kind"] == "table":
+            if isolate_atomic and unit["kind"] in DocumentLoader._ATOMIC_LEAF_KINDS:
                 close()
                 windows.append([unit])
                 continue
@@ -383,15 +425,57 @@ class DocumentLoader:
         return list(window[0].get("sections", ())) if window else []
 
     @staticmethod
+    def _window_modality(window: List[Dict]) -> str:
+        """A window's dominant kind. "figure" wins whenever an image contributed to
+        it, because that is the fact a caller filters on ("show me chunks backed by
+        a picture"); a window of only tables reports "table"; everything else "text"."""
+        kinds = {unit.get("kind", "text") for unit in window}
+        if "figure" in kinds:
+            return "figure"
+        if kinds == {"table"}:
+            return "table"
+        return "text"
+
+    @staticmethod
+    def _window_asset_ids(window: List[Dict]) -> List[str]:
+        """Union of the asset references in a window, in first-seen order, so a parent
+        chunk that swallowed several figures still points at all of them."""
+        seen: List[str] = []
+        for unit in window:
+            for asset_id in unit.get("asset_ids", ()):
+                if asset_id and asset_id not in seen:
+                    seen.append(asset_id)
+        return seen
+
+    @staticmethod
     def _apply_section_prefix(text: str, sections: List[str]) -> str:
         """Prepend the section path ("Admissions > Fees") so the chunk carries its
-        topic into the embedding, BM25 index, and citations. Skipped when the
-        chunk already contains its own heading near the top."""
+        topic into the embedding and citations. Skipped when the chunk already
+        contains its own heading near the top."""
         if not text or not sections:
             return text
         if sections[-1] in text[:200]:
             return text
         prefix = " > ".join(sections[-3:])[:150].strip()
+        return f"{prefix}\n{text}" if prefix else text
+
+    @staticmethod
+    def _apply_bm25_section_prefix(text: str, sections: List[str]) -> str:
+        """Section prefix for the BM25 field, with the document-root heading dropped.
+
+        sections[0] is the document's own title, so it repeats on effectively every
+        chunk. Indexing it gives every chunk the same high-frequency terms, which
+        flattens BM25 scoring across the corpus — the sparse half then contributes
+        near-uniform noise to RRF and outvotes strong dense matches. The specific
+        levels ("Services > One Trace") are genuine per-chunk signal and stay: they
+        are what makes a keyword query for a section name match its body chunks.
+        """
+        if not text or not sections:
+            return text
+        specific = list(sections[1:]) if len(sections) > 1 else []
+        if not specific or specific[-1] in text[:200]:
+            return text
+        prefix = " > ".join(specific[-2:])[:150].strip()
         return f"{prefix}\n{text}" if prefix else text
 
     # Sentence-terminal punctuation: a text block ending with one of these is a
@@ -519,8 +603,18 @@ class DocumentLoader:
             else:
                 content = (block.get("content") or "").strip()
                 if content:
+                    # A block carrying asset references came from the enrichment stage
+                    # (an image's text surrogate); it packs as an atomic leaf.
+                    asset_ids = tuple(block.get("asset_ids") or ())
                     units.extend(
-                        self._text_units(content, self._splitter_level_1, sections, page_number)
+                        self._text_units(
+                            content,
+                            self._splitter_level_1,
+                            sections,
+                            page_number,
+                            asset_ids=asset_ids,
+                            kind="figure" if asset_ids else "text",
+                        )
                     )
         return units
 
@@ -552,8 +646,10 @@ class DocumentLoader:
             return int(window[0].get("page", 0)) if window else 0
 
         for window_1 in self._pack_units(units, self._level_1_size):
-            level_1_text = sanitize_text(self._window_text(window_1)).strip()
-            level_1_text = self._apply_section_prefix(level_1_text, self._window_sections(window_1))
+            level_1_body = sanitize_text(self._window_text(window_1)).strip()
+            level_1_sections = self._window_sections(window_1)
+            level_1_text = self._apply_section_prefix(level_1_body, level_1_sections)
+            level_1_bm25 = self._apply_bm25_section_prefix(level_1_body, level_1_sections)
             if not level_1_text:
                 continue
             level_1_page = window_page(window_1)
@@ -563,18 +659,23 @@ class DocumentLoader:
                 **doc_info,
                 "page_number": level_1_page,
                 "text": level_1_text,
+                "bm25_text": level_1_bm25,
                 "chunk_id": level_1_id,
                 "parent_chunk_id": "",
                 "root_chunk_id": level_1_id,
                 "chunk_level": 1,
                 "chunk_idx": chunk_idx,
+                "asset_ids": self._window_asset_ids(window_1),
+                "modality": self._window_modality(window_1),
             })
             chunk_idx += 1
 
             units_2 = self._refine_units(window_1, self._splitter_level_2, self._level_2_size)
             for window_2 in self._pack_units(units_2, self._level_2_size):
-                level_2_text = sanitize_text(self._window_text(window_2)).strip()
-                level_2_text = self._apply_section_prefix(level_2_text, self._window_sections(window_2))
+                level_2_body = sanitize_text(self._window_text(window_2)).strip()
+                level_2_sections = self._window_sections(window_2)
+                level_2_text = self._apply_section_prefix(level_2_body, level_2_sections)
+                level_2_bm25 = self._apply_bm25_section_prefix(level_2_body, level_2_sections)
                 if not level_2_text:
                     continue
                 level_2_page = window_page(window_2)
@@ -584,11 +685,14 @@ class DocumentLoader:
                     **doc_info,
                     "page_number": level_2_page,
                     "text": level_2_text,
+                    "bm25_text": level_2_bm25,
                     "chunk_id": level_2_id,
                     "parent_chunk_id": level_1_id,
                     "root_chunk_id": level_1_id,
                     "chunk_level": 2,
                     "chunk_idx": chunk_idx,
+                    "asset_ids": self._window_asset_ids(window_2),
+                    "modality": self._window_modality(window_2),
                 })
                 chunk_idx += 1
 
@@ -597,12 +701,17 @@ class DocumentLoader:
                     units_3,
                     self._level_3_size,
                     target=leaf_merge_target,
-                    isolate_tables=True,
+                    isolate_atomic=True,
                     split_on_section_change=True,
                 ):
-                    level_3_text = sanitize_text(self._window_text(window_3)).strip()
-                    level_3_text = self._apply_section_prefix(level_3_text, self._window_sections(window_3))
+                    level_3_body = sanitize_text(self._window_text(window_3)).strip()
+                    level_3_sections = self._window_sections(window_3)
+                    level_3_text = self._apply_section_prefix(level_3_body, level_3_sections)
                     level_3_text = fit_utf8_bytes(level_3_text, self._MILVUS_TEXT_CAP_BYTES).strip()
+                    level_3_bm25 = fit_utf8_bytes(
+                        self._apply_bm25_section_prefix(level_3_body, level_3_sections),
+                        self._MILVUS_TEXT_CAP_BYTES,
+                    ).strip()
                     if not level_3_text:
                         continue
                     level_3_page = window_page(window_3)
@@ -612,11 +721,14 @@ class DocumentLoader:
                         **doc_info,
                         "page_number": level_3_page,
                         "text": level_3_text,
+                        "bm25_text": level_3_bm25,
                         "chunk_id": level_3_id,
                         "parent_chunk_id": level_2_id,
                         "root_chunk_id": level_1_id,
                         "chunk_level": 3,
                         "chunk_idx": chunk_idx,
+                        "asset_ids": self._window_asset_ids(window_3),
+                        "modality": self._window_modality(window_3),
                     })
                     chunk_idx += 1
 
@@ -631,7 +743,8 @@ class DocumentLoader:
     ) -> list[dict]:
         """Shared layout pipeline (pipes-and-filters) behind every format parser:
 
-            <format>_blocks parser → typed heading/text/table blocks (I/O boundary)
+            <format>_blocks parser → typed heading/text/table/image blocks (I/O boundary)
+            enrich_image_blocks   → images become text surrogates (or are dropped)
             _stitch_cross_page_blocks → rejoin paragraphs/tables split by page breaks
             _blocks_to_units      → section-tagged, page-tagged units
             _hierarchy_chunks     → L1/L2/L3 chunks over the whole document
@@ -639,7 +752,12 @@ class DocumentLoader:
         Each stage is a pure transformation of its input, so supporting a new file
         format only means writing a block parser — the rest of the pipeline (and
         every future stage added to it) is shared.
+
+        Enrichment runs FIRST so that everything downstream sees only text and table
+        blocks. That is what let image support land without touching stitching,
+        section tagging, or the hierarchy builder.
         """
+        blocks = self._enrich_assets(blocks, filename, file_path)
         blocks = self._stitch_cross_page_blocks(blocks)
         units = self._blocks_to_units(blocks)
         doc_info = {
@@ -648,6 +766,24 @@ class DocumentLoader:
             "file_type": doc_type,
         }
         return self._hierarchy_chunks(units, doc_info)
+
+    @staticmethod
+    def _enrich_assets(blocks: List[Dict], filename: str, file_path: str) -> List[Dict]:
+        """Turn image blocks into retrievable text, or drop them.
+
+        Disabled by profile (or absent of any images) this is a no-op, and a failure
+        inside it never costs the document its text — see asset_enrichment.
+        """
+        profile = get_profile()
+        if not (profile.assets.enabled and profile.assets.figures.enabled):
+            return [block for block in blocks if block.get("type") != "image"]
+
+        from backend.indexing.asset_enrichment import enrich_image_blocks
+
+        enriched, report = enrich_image_blocks(blocks, filename=filename, file_path=file_path)
+        if report.total:
+            logger.info("Figure enrichment for %s: %s", filename, report.summary())
+        return enriched
 
     def _try_layout_path(self, parse_blocks, file_path: str, filename: str, doc_type: str):
         """Run a format's block parser through the shared pipeline; None means the

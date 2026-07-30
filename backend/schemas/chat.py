@@ -1,6 +1,8 @@
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional  # noqa: F401
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from backend.assets.delivery import AssetReference, ClientCapabilities
 
 
 class StrictSchema(BaseModel):
@@ -10,6 +12,9 @@ class StrictSchema(BaseModel):
 class ChatRequest(StrictSchema):
     message: str
     session_id: Optional[str] = "default_session"
+    # What this client can render. Omitted means "an ordinary browser"; a bot or a
+    # downstream service declares its own limits instead of the server guessing.
+    client_capabilities: Optional[ClientCapabilities] = None
 
 
 class RetrievedChunk(StrictSchema):
@@ -19,6 +24,12 @@ class RetrievedChunk(StrictSchema):
     score: Optional[float] = None
     rrf_rank: Optional[int] = None
     rerank_score: Optional[float] = None
+    chunk_id: Optional[str] = None
+    # "text" | "table" | "figure" — lets a client style or filter a chunk without
+    # parsing its content.
+    modality: Optional[str] = None
+    # Images this chunk was derived from; resolve them via /media/resolve.
+    asset_ids: Optional[List[str]] = None
 
 
 class RagTraceFields(StrictSchema):
@@ -38,6 +49,16 @@ class RagTraceFields(StrictSchema):
     evidence_ambiguity: Optional[str] = None
     evidence_confidence: Optional[float] = None
     evidence_reason: Optional[str] = None
+    grading_skipped: Optional[bool] = None
+    grading_confident: Optional[bool] = None
+    grading_term_coverage: Optional[float] = None
+    grading_chunk_count: Optional[int] = None
+    grading_reason: Optional[str] = None
+    context_chunks_kept: Optional[int] = None
+    context_chunks_available: Optional[int] = None
+    context_trimmed: Optional[bool] = None
+    context_coverage: Optional[float] = None
+    context_selection_reason: Optional[str] = None
     missing_slots: Optional[List[str]] = None
     hitl_prompt: Optional[str] = None
     hitl_options: Optional[List[str]] = None
@@ -71,6 +92,7 @@ class RagTraceFields(StrictSchema):
     auto_merge_enabled: Optional[bool] = None
     auto_merge_applied: Optional[bool] = None
     auto_merge_threshold: Optional[int] = None
+    auto_merge_figure_threshold: Optional[int] = None
     auto_merge_replaced_chunks: Optional[int] = None
     auto_merge_steps: Optional[int] = None
     retrieved_chunks: Optional[List[RetrievedChunk]] = None
@@ -82,6 +104,9 @@ class RagTraceFields(StrictSchema):
     sub_questions: Optional[List[str]] = None
     sub_agent_count: Optional[int] = None
     synthesis_merged_count: Optional[int] = None
+    # Renditions for every asset the retrieved chunks referenced, already adapted to
+    # the calling client's declared capabilities.
+    assets: Optional[List[AssetReference]] = None
 
 
 class RagSubTrace(RagTraceFields):
@@ -168,6 +193,9 @@ def normalize_rag_trace(trace: dict | None) -> Optional[dict]:
 class ChatResponse(StrictSchema):
     response: str
     rag_trace: Optional[RagTrace] = None
+    # Duplicated out of the trace so a client can show images without depending on
+    # the trace's shape, which is diagnostic and may change.
+    assets: List[AssetReference] = Field(default_factory=list)
 
 
 class MessageInfo(StrictSchema):

@@ -25,6 +25,8 @@ import re
 import statistics
 from typing import Any, Dict, List, Optional
 
+from backend.profiles import get_profile
+
 # Max vertical gap (pt) between consecutive lines that still belong to one paragraph.
 PARA_LINE_GAP = 15.0
 # Vertical tolerance (pt) when grouping words into a line.
@@ -53,6 +55,12 @@ FURNITURE_MIN_PAGE_FRAC = 0.6
 FURNITURE_EDGE_BAND_FRAC = 0.15
 FURNITURE_MAX_CHARS = 80
 _DIGIT_RE = re.compile(r"\d+")
+
+# Image extraction is profile-driven and off the hot path when disabled: with it off
+# the parser never renders a page region at all.
+_ASSETS = get_profile().assets
+EXTRACT_PDF_IMAGES = _ASSETS.enabled and _ASSETS.figures.enabled
+IMAGE_RENDER_DPI = _ASSETS.figures.render_dpi
 
 
 def _normalize_cell(cell: Any) -> str:
@@ -416,12 +424,72 @@ def _words_to_line(words: List[dict]) -> Dict[str, Any]:
     }
 
 
+def _crop_image_bytes(page, bbox) -> Optional[bytes]:
+    """Render the page region under `bbox` to PNG bytes.
+
+    Cropping the rendered page rather than pulling the embedded image stream is
+    deliberate: embedded streams arrive in formats with separate masks, exotic colour
+    spaces, and CMYK/JPEG2000 encodings that frequently will not decode, whereas the
+    rendered crop is exactly what a reader sees. Returns None when rendering is
+    unavailable or the region is degenerate — the caller then skips the image rather
+    than failing the document.
+    """
+    try:
+        x0, top, x1, bottom = (float(value) for value in bbox)
+    except (TypeError, ValueError):
+        return None
+    if x1 - x0 < 1 or bottom - top < 1:
+        return None
+
+    # Clamp to the page: a bbox may legitimately overhang the crop box, and
+    # pdfplumber raises rather than clipping.
+    x0 = max(x0, float(page.bbox[0]))
+    top = max(top, float(page.bbox[1]))
+    x1 = min(x1, float(page.bbox[2]))
+    bottom = min(bottom, float(page.bbox[3]))
+    if x1 - x0 < 1 or bottom - top < 1:
+        return None
+
+    try:
+        import io
+
+        cropped = page.crop((x0, top, x1, bottom))
+        image = cropped.to_image(resolution=IMAGE_RENDER_DPI)
+        buffer = io.BytesIO()
+        image.original.save(buffer, format="PNG")
+        return buffer.getvalue()
+    except Exception:
+        return None
+
+
+def _image_blocks_for_page(page, page_number: int) -> List[Dict[str, Any]]:
+    blocks: List[Dict[str, Any]] = []
+    for image in getattr(page, "images", None) or []:
+        bbox = (image.get("x0"), image.get("top"), image.get("x1"), image.get("bottom"))
+        if any(value is None for value in bbox):
+            continue
+        data = _crop_image_bytes(page, bbox)
+        if not data:
+            continue
+        blocks.append({
+            "type": "image",
+            "content": "",
+            "data": data,
+            "content_type": "image/png",
+            "bbox": [float(value) for value in bbox],
+            "page_number": page_number,
+            "top": float(image.get("top") or 0.0),
+        })
+    return blocks
+
+
 def parse_pdf_blocks(file_path: str) -> List[Dict[str, Any]]:
-    """Parse a PDF into ordered heading/text/table blocks. Raises on unreadable
+    """Parse a PDF into ordered heading/text/table/image blocks. Raises on unreadable
     files — the caller decides whether to fall back to flat text extraction."""
     import pdfplumber
 
     pages: List[Dict[str, Any]] = []
+    image_blocks: List[Dict[str, Any]] = []
     with pdfplumber.open(file_path) as pdf:
         for page_number, page in enumerate(pdf.pages):
             found_tables = page.find_tables()
@@ -434,4 +502,14 @@ def parse_pdf_blocks(file_path: str) -> List[Dict[str, Any]]:
                 ],
                 "lines": _extract_page_lines(page),
             })
-    return build_blocks_from_pages(pages)
+            if EXTRACT_PDF_IMAGES:
+                image_blocks.extend(_image_blocks_for_page(page, page_number))
+
+    blocks = build_blocks_from_pages(pages)
+    if not image_blocks:
+        return blocks
+    # Merge into document order so an image lands between the paragraphs that
+    # surround it — which is what lets the enrichment stage find its caption.
+    blocks.extend(image_blocks)
+    blocks.sort(key=lambda block: (int(block.get("page_number", 0)), float(block.get("top", 0.0))))
+    return blocks

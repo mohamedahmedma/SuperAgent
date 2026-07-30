@@ -36,6 +36,9 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "beautifulsoup4>=4.12.0",
     "langsmith>=0.7.22",
+    # Domain profile definitions (backend/profiles/definitions/*.yaml). Previously
+    # available only transitively via langchain-core; imported directly now.
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

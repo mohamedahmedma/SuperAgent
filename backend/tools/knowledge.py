@@ -54,12 +54,25 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         if not docs:
             return "No relevant documents found in the knowledge base."
 
+        # Pin every asset retrieval surfaced, whether or not the model goes on to look
+        # at one. This is what lets a client attach the picture to a response that was
+        # answered entirely from the caption.
+        from backend.assets.delivery import collect_asset_ids
+
+        ctx.note_surfaced_assets(collect_asset_ids(docs))
+
         formatted = []
         for i, result in enumerate(docs, 1):
             source = result.get("filename", "Unknown")
             page = result.get("page_number", "N/A")
             text = result.get("text", "")
-            formatted.append(f"[{i}] {source} (Page {page}):\n{text}")
+            entry = f"[{i}] {source} (Page {page}):\n{text}"
+            # Naming the asset_id inline is what makes view_figure callable at all —
+            # the model can only pass back an id it has actually seen.
+            asset_ids = [item for item in (result.get("asset_ids") or []) if item]
+            if asset_ids:
+                entry += "\n(figure available — view_figure asset_id: " + ", ".join(asset_ids) + ")"
+            formatted.append(entry)
 
         return "Retrieved Chunks:\n" + "\n\n---\n\n".join(formatted)
 

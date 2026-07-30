@@ -169,6 +169,9 @@ export const useChatStore = defineStore('chat', {
           hitlOptions: isHitlRequest ? ragTrace?.hitl_options || [] : undefined,
           hitlResumeText: resumeTextForMessage,
           ragTrace,
+          // Reloading a past session restores its images too: the backend persists
+          // them on the trace, so they survive a page refresh.
+          assets: ragTrace?.assets || [],
         };
       });
     },
@@ -364,6 +367,7 @@ export const useChatStore = defineStore('chat', {
         thinkingStartedAt: Date.now(),
         hitlResumeText: pendingHitlAtSend ? text : undefined,
         ragTrace: null,
+        assets: [],
         ragSteps: [],
         _groupedSteps: [],
       });
@@ -428,6 +432,13 @@ export const useChatStore = defineStore('chat', {
                     continue;
                   }
                   botMsg.text += data.content;
+                } else if (data.type === 'assets') {
+                  // Its own event, ahead of the trace, so images can render without
+                  // depending on the trace payload's shape.
+                  const botMsg = requestMessages[botMsgIdx];
+                  if (botMsg) {
+                    botMsg.assets = data.assets || [];
+                  }
                 } else if (data.type === 'trace') {
                   const botMsg = requestMessages[botMsgIdx];
                   if (botMsg) {

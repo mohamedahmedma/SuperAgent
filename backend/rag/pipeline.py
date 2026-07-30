@@ -1,4 +1,5 @@
 from typing import Annotated, Any, Literal, TypedDict, List, Optional
+import logging
 import operator
 import os
 import re
@@ -8,6 +9,19 @@ from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from backend.chat.request_context import ChatRequestContext
+from backend.rag.evidence import (
+    AssessmentContext,
+    Certainty,
+    ChunkAssessment,
+    EvidenceReport,
+    build_ladder,
+)
+from backend.rag.policy import decide_route, select_context_indices
+from backend.rag.domain_gate import classify, reference_store, should_run
+from backend.rag.rerank_assessor import CrossEncoderAssessor
+from backend.indexing.embedding import embed_query
+from backend.text_normalization import normalize_query
+from backend.profiles import get_profile
 from backend.schemas.chat import HitlResumeState, normalize_rag_sub_trace
 from backend.rag.utils import (
     RETRIEVAL_TOP_K,
@@ -17,10 +31,17 @@ from backend.rag.utils import (
     retrieval_trace_fields,
 )
 
+logger = logging.getLogger(__name__)
+
 API_KEY = os.getenv("ARK_API_KEY")
 BASE_URL = os.getenv("BASE_URL")
 FAST_MODEL = os.getenv("FAST_MODEL")
 GRADE_MODEL = os.getenv("GRADE_MODEL")
+
+# Prompts, routing budgets, and the fast-path vocabulary are all profile data.
+_PROFILE = get_profile()
+_RAG = _PROFILE.rag
+_COPY = _PROFILE.user_copy
 
 _grader_model = None
 _complexity_model = None
@@ -36,7 +57,7 @@ def _get_grader_model():
             model_provider="openai",
             api_key=API_KEY,
             base_url=BASE_URL,
-            temperature=0,
+            temperature=_PROFILE.models.grade_temperature,
             stream_usage=True,
         )
     return _grader_model
@@ -53,31 +74,13 @@ def _get_complexity_model():
             model_provider="openai",
             api_key=API_KEY,
             base_url=BASE_URL,
-            temperature=0,
+            temperature=_PROFILE.models.planner_temperature,
             stream_usage=True,
         )
     return _complexity_model
 
 
-EVIDENCE_GRADE_PROMPT = (
-    "You are a RAG evidence grader. Based only on the retrieved snippets, judge whether "
-    "they are sufficient to answer the user's question. Do not add information that is not in the snippets.\n\n"
-    "User question:\n{question}\n\n"
-    "Retrieved snippets:\n{context}\n\n"
-    "Give a structured result following these rules:\n"
-    "- relevance: none means the topic is unrelated; weak means the topic is close but the evidence is weak; strong means the topic is clearly relevant.\n"
-    "- answerability: none means it cannot be answered; partial means there are some clues but not enough for a definitive answer; "
-    "sufficient means the snippets can directly or jointly support an answer.\n"
-    "- ambiguity: missing_slot means a key condition is missing (e.g. role name, version, file type, module name, product line); "
-    "multiple_candidates means several candidate directions could all be relevant; none means there is no clear ambiguity.\n"
-    "- route may only be one of: answer, rewrite, clarify, scope_select, no_knowledge.\n"
-    "  answer: relevance=strong and answerability=sufficient.\n"
-    "  rewrite: there is a relevant signal, but the evidence is insufficient, likely due to phrasing, aliasing, or generalization level.\n"
-    "  clarify: a key condition is missing and the user needs to provide it.\n"
-    "  scope_select: multiple candidate directions are relevant and the user needs to choose one.\n"
-    "  no_knowledge: no recall, or the topic is unrelated.\n"
-    "- If route is clarify or scope_select, provide hitl_prompt; if options can be listed, provide hitl_options."
-)
+EVIDENCE_GRADE_PROMPT = _RAG.evidence_grade_prompt
 
 
 class EvidenceGrade(BaseModel):
@@ -101,6 +104,13 @@ class EvidenceGrade(BaseModel):
     hitl_prompt: str = ""
     hitl_options: List[str] = Field(default_factory=list)
     reason: str = ""
+    supporting_chunks: List[int] = Field(
+        default_factory=list,
+        description=(
+            "1-based numbers of the retrieved snippets that actually carry the evidence, "
+            "as shown in the [n] markers. Leave empty if every snippet contributes."
+        ),
+    )
 
 
 class ComplexityResult(BaseModel):
@@ -113,7 +123,7 @@ class ComplexityResult(BaseModel):
     sub_questions: List[str] = Field(
         default_factory=list,
         description="2-4 independently retrievable sub-questions for a complex question; left empty for a simple question",
-        max_length=4,
+        max_length=_RAG.max_sub_questions,
     )
 
 
@@ -147,6 +157,10 @@ class RAGState(TypedDict):
     request_context: ChatRequestContext
     rag_step_group: Optional[str]
     rag_step_group_label: Optional[str]
+    # Set by the domain gate: the corpus sections this question matched, used to narrow
+    # retrieval. None means the gate did not run or abstained.
+    domain_topics: Optional[List[str]]
+    has_history: Optional[bool]
 
 
 def _format_docs(docs: List[dict]) -> str:
@@ -172,6 +186,8 @@ def _copy_jsonable_doc(doc: dict) -> dict:
         "rerank_score",
         "chunk_id",
         "doc_id",
+        "asset_ids",
+        "modality",
     }
     return {key: value for key, value in doc.items() if key in allowed}
 
@@ -260,6 +276,11 @@ def _initial_state(
         "request_context": ctx,
         "rag_step_group": rag_step_group,
         "rag_step_group_label": rag_step_group_label,
+        "domain_topics": None,
+        # Sub-agents inherit admission from the parent question, so the gate must not
+        # re-judge a decomposed fragment — a sub-question is a fragment by construction
+        # and would score like a follow-up.
+        "has_history": is_sub_agent or bool(getattr(ctx, "has_history", False)),
     }
 
 
@@ -331,9 +352,9 @@ def _route_after_grade(state: RAGState) -> Literal["rewrite_question", "end"]:
     return "end"
 
 
-def _retrieval_status_for_route(route: str, grade: EvidenceGrade) -> str:
+def _retrieval_status_for_route(route: str, report: EvidenceReport) -> str:
     if route == "answer":
-        if grade.answerability == "partial":
+        if report.sufficiency == "partial":
             return "partial"
         return "answerable"
     if route == "rewrite":
@@ -342,101 +363,184 @@ def _retrieval_status_for_route(route: str, grade: EvidenceGrade) -> str:
         return "needs_clarification"
     if route == "scope_select":
         return "needs_scope_selection"
+    if route == "retrieval_error":
+        return "retrieval_error"
     return "no_knowledge"
 
 
-def _default_hitl_prompt(route: str, grade: EvidenceGrade) -> str:
-    if grade.hitl_prompt:
-        return grade.hitl_prompt
+def _default_hitl_prompt(route: str, report: EvidenceReport) -> str:
+    if report.hitl_prompt:
+        return report.hitl_prompt
     if route == "scope_select":
-        return "I found several possibly relevant directions in the knowledge base. Which one are you asking about?"
-    if grade.missing_slots:
-        return "I found relevant content, but key information is still missing: " + ", ".join(grade.missing_slots)
-    return "I found relevant content, but the evidence isn't enough to determine an answer. Please provide more detail about what you're asking."
+        return _COPY.hitl_scope_default
+    if report.missing_slots:
+        return _COPY.hitl_clarify_missing_slots + ", ".join(report.missing_slots)
+    return _COPY.hitl_clarify_default
 
 
-def _grade_for_no_docs() -> EvidenceGrade:
-    return EvidenceGrade(
-        relevance="none",
-        answerability="none",
-        ambiguity="none",
-        route="no_knowledge",
-        confidence=1.0,
-        reason="no_retrieved_documents",
+class LLMGraderAssessor:
+    """The top rung: a model reads the question and the chunks together.
+
+    The only rung that can judge meaning, spot an under-specified question, or name
+    which snippets actually carry the answer — and the only one that costs a call. It
+    lives here rather than in evidence.py because the model factory and the prompt do.
+
+    It is also asked to do double duty. Naming its supporting chunks costs a handful of
+    output tokens on a call already being made, and it turns context trimming from a
+    lexical guess into a consequence of the same judgement that approved the answer.
+    """
+
+    name = "llm_grader"
+    certainty = Certainty.HIGH
+
+    def assess(self, ctx: AssessmentContext) -> Optional[EvidenceReport]:
+        grader = _get_grader_model()
+        if not grader:
+            raise RuntimeError("GRADE_MODEL is required for evidence grading")
+
+        prompt = EVIDENCE_GRADE_PROMPT.format(
+            question=ctx.question,
+            context=_format_docs(ctx.docs),
+        )
+        grade = grader.with_structured_output(EvidenceGrade).invoke(
+            [{"role": "user", "content": prompt}]
+        )
+
+        total = len(ctx.docs)
+        cited = {n for n in (grade.supporting_chunks or []) if 1 <= n <= total}
+        chunks = []
+        for index in range(1, total + 1):
+            # supported stays None when the grader named nothing, because "it did not
+            # tell us" and "it excluded this chunk" are different facts.
+            chunks.append(ChunkAssessment(index=index, supported=(index in cited) if cited else None))
+
+        return EvidenceReport(
+            question=ctx.question,
+            chunks=chunks,
+            certainty=Certainty.HIGH,
+            relevance=grade.relevance,
+            sufficiency=grade.answerability,
+            ambiguity=grade.ambiguity,
+            confidence=grade.confidence,
+            preferred_route=grade.route,
+            missing_slots=list(grade.missing_slots),
+            hitl_prompt=grade.hitl_prompt,
+            hitl_options=list(grade.hitl_options),
+            assessed_by=[self.name],
+            reasons=[grade.reason or f"grader routed to {grade.route}"],
+        )
+
+
+def _assess_evidence(state: RAGState) -> EvidenceReport:
+    """Climb the ladder for this retrieval, once.
+
+    Rungs are ordered by the certainty each can establish, which is also their cost, so
+    the grader is reached only when the cheaper rungs cannot conclude.
+    """
+    docs = state.get("docs") or []
+    ladder = build_ladder(_RAG, extra=[CrossEncoderAssessor(), LLMGraderAssessor()])
+    return ladder.run(
+        AssessmentContext(
+            question=state["question"],
+            docs=docs,
+            retrieval_meta=state.get("rag_trace") or {},
+            config=_RAG,
+        )
     )
 
 
-def _resolve_route(grade: EvidenceGrade, state: RAGState) -> str:
-    docs = state.get("docs") or []
-    rewrite_count = int(state.get("rewrite_count") or 0)
-    is_sub_agent = bool(state.get("is_sub_agent"))
-    route = grade.route
+def domain_gate_node(state: RAGState) -> RAGState:
+    """Graph entry: reject questions this corpus cannot answer, before searching.
 
-    if not docs or grade.relevance == "none":
-        return "no_knowledge"
+    Sits inside the RAG graph rather than in front of the agent on purpose. In front, it
+    would intercept "thanks", "what did you just say", and every conversational turn that
+    was never a knowledge-base question — the agent's own tool choice already handles
+    those correctly.
+    """
+    question = state["question"]
+    eligible, why = should_run(
+        question,
+        has_history=bool(state.get("has_history")),
+        config=_RAG,
+    )
+    if not eligible:
+        return {"domain_topics": None, "rag_trace": state.get("rag_trace")}
 
-    if grade.ambiguity == "missing_slot":
-        return "clarify"
-    if grade.ambiguity == "multiple_candidates":
-        return "scope_select"
+    # normalize_query first: the reference vectors were built from indexed text, which
+    # went through the same normalisation.
+    normalized = normalize_query(question) or question
+    try:
+        vector = embed_query(normalized)
+    except Exception:
+        logger.warning("domain gate could not embed the question; letting it through", exc_info=True)
+        vector = None
 
-    answer_is_supported = grade.relevance == "strong" and grade.answerability == "sufficient"
-    if route == "answer" and answer_is_supported:
-        return "answer"
+    verdict = classify(vector, reference_store.get(), _RAG)
+    rag_trace = dict(state.get("rag_trace") or {})
+    rag_trace.update(verdict.as_trace())
 
-    # Sub-questions don't get a second correction pass. Partial evidence is left for synthesis to merge; fully unanswerable stops here.
-    if is_sub_agent:
-        if grade.answerability in ("partial", "sufficient"):
-            return "answer"
-        return "no_knowledge"
+    if verdict.in_domain:
+        if not verdict.abstained:
+            _emit(state, "🧭", f"Question matches {len(verdict.topics)} knowledge-base section(s)", verdict.reason)
+        return {"domain_topics": verdict.topics, "rag_trace": rag_trace}
 
-    if route == "rewrite" and rewrite_count < 1:
-        return "rewrite"
-
-    if route == "rewrite" and rewrite_count >= 1:
-        if grade.answerability == "partial":
-            return "clarify"
-        return "no_knowledge"
-
-    if grade.answerability == "partial":
-        if rewrite_count < 1:
-            return "rewrite"
-        return "clarify"
-
-    if answer_is_supported:
-        return "answer"
-
-    return "no_knowledge"
-
-
-def _grade_update(grade: EvidenceGrade, route: str) -> dict:
-    status = _retrieval_status_for_route(route, grade)
-    hitl_prompt = _default_hitl_prompt(route, grade) if route in ("clarify", "scope_select") else ""
+    _emit(state, "🚪", "Question is outside this knowledge base", verdict.reason)
+    rag_trace.update({
+        "tool_used": True,
+        "tool_name": "search_knowledge_base",
+        "query": question,
+        "retrieved_chunks": [],
+        "retrieval_status": "no_knowledge",
+        "route": "no_knowledge",
+        "evidence_relevance": "none",
+        "evidence_answerability": "none",
+        "evidence_reason": "out_of_domain",
+    })
     return {
-        "retrieval_status": status,
-        "evidence_relevance": grade.relevance,
-        "evidence_answerability": grade.answerability,
-        "evidence_ambiguity": grade.ambiguity,
-        "evidence_confidence": grade.confidence,
-        "evidence_reason": grade.reason,
-        "missing_slots": grade.missing_slots,
+        "route": "no_knowledge",
+        "retrieval_status": "no_knowledge",
+        "docs": [],
+        "context": "",
+        "domain_topics": [],
+        "rag_trace": rag_trace,
+    }
+
+
+def _route_after_domain_gate(state: RAGState) -> Literal["classify_complexity", "end"]:
+    return "end" if state.get("route") == "no_knowledge" else "classify_complexity"
+
+
+def _report_update(report: EvidenceReport, route: str) -> dict:
+    """Flatten a report plus its route into the trace fields the rest of the system
+    already reads. Names are unchanged so the frontend and any integrating client keep
+    working; `evidence_certainty` and `evidence_assessed_by` are additive."""
+    hitl_prompt = _default_hitl_prompt(route, report) if route in ("clarify", "scope_select") else ""
+    return {
+        **report.as_trace(),
+        "retrieval_status": _retrieval_status_for_route(route, report),
         "hitl_prompt": hitl_prompt,
-        "hitl_options": grade.hitl_options,
+        "hitl_options": list(report.hitl_options),
         "route": route,
     }
 
 
 def grade_documents_node(state: RAGState) -> RAGState:
+    """Assess the retrieved evidence once, then apply the policies that read it.
+
+    This node orchestrates and nothing more: it holds no thresholds, computes no
+    signals, and does not know which assessors exist. Assessment produces one report;
+    routing and context sizing are pure functions over it.
+    """
     if state.get("retrieval_failed"):
         # A backend outage says nothing about what the KB contains, so this must not
-        # reach the grader LLM or surface as no_knowledge. Static short-circuit only.
+        # reach an assessor or surface as no_knowledge. Static short-circuit only.
         rag_trace = state.get("rag_trace", {}) or {}
         rag_trace.update({
             "retrieval_status": "retrieval_error",
             "route": "retrieval_error",
             "evidence_reason": "knowledge_base_unreachable",
         })
-        _emit(state, "🚧", "Retrieval failed, returning a static retry notice", "Not treated as missing knowledge")
+        _emit(state, "\U0001f6a7", "Retrieval failed, returning a static retry notice", "Not treated as missing knowledge")
         return {
             "route": "retrieval_error",
             "retrieval_status": "retrieval_error",
@@ -445,55 +549,78 @@ def grade_documents_node(state: RAGState) -> RAGState:
             "rag_trace": rag_trace,
         }
 
-    _emit(state, "📊", "Evaluating evidence quality...")
     docs = state.get("docs") or []
-    if not docs:
-        grade = _grade_for_no_docs()
-    else:
-        grader = _get_grader_model()
-        if not grader:
-            raise RuntimeError("GRADE_MODEL is required for evidence grading")
-        question = state["question"]
-        context = state.get("context", "")
-        prompt = EVIDENCE_GRADE_PROMPT.format(question=question, context=context)
-        grade = grader.with_structured_output(EvidenceGrade).invoke(
-            [{"role": "user", "content": prompt}]
-        )
+    if docs:
+        _emit(state, "\U0001f4ca", "Evaluating evidence quality...")
 
-    route = _resolve_route(grade, state)
-    grade_update = _grade_update(grade, route)
+    report = _assess_evidence(state)
+    route, route_reason = decide_route(
+        report,
+        has_docs=bool(docs),
+        rewrite_count=int(state.get("rewrite_count") or 0),
+        is_sub_agent=bool(state.get("is_sub_agent")),
+        config=_RAG,
+    )
+
+    report_update = _report_update(report, route)
     rag_trace = state.get("rag_trace", {}) or {}
-    rag_trace.update(grade_update)
+    rag_trace.update(report_update)
+    rag_trace["route_reason"] = route_reason
 
     if route == "answer":
-        if grade.answerability == "partial":
-            _emit(state, "🟡", "Keeping partially relevant evidence", f"Confidence: {grade.confidence:.2f}")
+        if report.sufficiency == "partial":
+            _emit(state, "\U0001f7e1", "Keeping partially relevant evidence", f"Confidence: {report.confidence:.2f}")
         else:
-            _emit(state, "✅", "Evidence sufficient, returning retrieved snippets", f"Confidence: {grade.confidence:.2f}")
+            _emit(state, "\u2705", "Evidence sufficient, returning retrieved snippets", f"Confidence: {report.confidence:.2f}")
     elif route == "rewrite":
-        _emit(state, "⚠️", "Evidence insufficient, will rewrite the query once", f"Confidence: {grade.confidence:.2f}")
+        _emit(state, "\u26a0\ufe0f", "Evidence insufficient, will rewrite the query once", f"Confidence: {report.confidence:.2f}")
     elif route in ("clarify", "scope_select"):
-        _emit(state, "❓", "Needs more information from the user", grade_update["hitl_prompt"])
+        _emit(state, "\u2753", "Needs more information from the user", report_update["hitl_prompt"])
+    elif route == "retrieval_error":
+        # Retrieval worked but assessment could not reach the required standard, so
+        # neither answering nor denying would be honest. Say "try again" instead.
+        _emit(state, "\U0001f6a7", "Evidence could not be assessed", route_reason)
     else:
-        _emit(state, "⛔", "No usable evidence found in the knowledge base", grade.reason or "no_knowledge")
+        _emit(state, "\u26d4", "No usable evidence found in the knowledge base", route_reason)
 
     update = {
         "route": route,
-        "retrieval_status": grade_update["retrieval_status"],
-        "evidence_relevance": grade.relevance,
-        "evidence_answerability": grade.answerability,
-        "evidence_ambiguity": grade.ambiguity,
-        "evidence_confidence": grade.confidence,
-        "missing_slots": grade.missing_slots,
-        "hitl_prompt": grade_update["hitl_prompt"],
-        "hitl_options": grade.hitl_options,
+        "retrieval_status": report_update["retrieval_status"],
+        "evidence_relevance": report.relevance,
+        "evidence_answerability": report.sufficiency,
+        "evidence_ambiguity": report.ambiguity,
+        "evidence_confidence": report.confidence,
+        "missing_slots": list(report.missing_slots),
+        "hitl_prompt": report_update["hitl_prompt"],
+        "hitl_options": list(report.hitl_options),
         "rag_trace": rag_trace,
     }
 
-    if route in ("no_knowledge", "clarify", "scope_select"):
+    if route in ("no_knowledge", "clarify", "scope_select", "retrieval_error"):
         if route in ("clarify", "scope_select") and docs:
             rag_trace["retrieved_chunks"] = []
         update.update({"docs": [], "context": ""})
+        return update
+
+    if route == "answer" and docs:
+        keep, reason = select_context_indices(report, docs, _RAG)
+        rag_trace["context_selection_reason"] = reason
+        rag_trace["context_chunks_available"] = len(docs)
+        if keep:
+            kept = [docs[i - 1] for i in keep]
+            _emit(
+                state, "\u2702\ufe0f", f"Sending {len(kept)} of {len(docs)} chunks to the model", reason,
+            )
+            update.update({"docs": kept, "context": _format_docs(kept)})
+            # retrieved_chunks has to match what the answer was built from: citation
+            # markers and asset attribution both index into it. The full set stays in
+            # initial_retrieved_chunks for the trace panel.
+            rag_trace["retrieved_chunks"] = kept
+            rag_trace["context_trimmed"] = True
+            rag_trace["context_chunks_kept"] = len(kept)
+        else:
+            rag_trace["context_trimmed"] = False
+            rag_trace["context_chunks_kept"] = len(docs)
 
     return update
 
@@ -503,7 +630,7 @@ def rewrite_question_node(state: RAGState) -> RAGState:
     _emit(state, "✏️", "Rewriting the query...")
 
     rewrite_count = int(state.get("rewrite_count") or 0)
-    if rewrite_count >= 1:
+    if rewrite_count >= _RAG.max_rewrites:
         rag_trace = state.get("rag_trace", {}) or {}
         rag_trace.update({
             "retrieval_status": "no_knowledge",
@@ -521,16 +648,29 @@ def rewrite_question_node(state: RAGState) -> RAGState:
 
     _emit(state, "🧠", "Choosing between Step-back / HyDE rewrite")
     rewrite = rewrite_query_once(question)
+    if not rewrite:
+        # The rewrite is a bonus retry, not a requirement. When the planner cannot
+        # produce one, stop here with what the first pass found instead of failing
+        # the user's turn — this is the same terminal state as an exhausted budget.
+        rag_trace = state.get("rag_trace", {}) or {}
+        rag_trace.update({
+            "retrieval_status": "no_knowledge",
+            "route": "no_knowledge",
+            "evidence_reason": "rewrite_unavailable",
+        })
+        _emit(state, "⚠️", "Could not plan a rewrite, stopping retrieval", "Answering from the first pass only")
+        return {
+            "route": "no_knowledge",
+            "retrieval_status": "no_knowledge",
+            "docs": [],
+            "context": "",
+            "rag_trace": rag_trace,
+        }
+
     rewrite_method = (rewrite.get("rewrite_method") or "").strip()
     step_back_question = (rewrite.get("step_back_question") or "").strip()
     hyde_document = (rewrite.get("hyde_document") or "").strip()
     rewritten_query = (rewrite.get("rewritten_query") or "").strip()
-    if rewrite_method not in ("step_back", "hyde") or not rewritten_query:
-        raise ValueError("Query rewriting returned an incomplete result")
-    if rewrite_method == "step_back" and (not step_back_question or hyde_document):
-        raise ValueError("Step-back rewriting returned an invalid result")
-    if rewrite_method == "hyde" and (not hyde_document or step_back_question):
-        raise ValueError("HyDE rewriting returned an invalid result")
 
     method_label = "Step-back" if rewrite_method == "step_back" else "HyDE"
     _emit(state, "✅", f"Selected {method_label} rewrite", "Only this rewrite method will run this round")
@@ -609,151 +749,30 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
 # Complexity classification & sub-question decomposition
 # ---------------------------------------------------------------------------
 
-COMPLEXITY_PROMPT = (
-    "You are a question complexity planner. Determine the complexity of the user's question.\n\n"
-    "[Simple question]: factual lookups, definition lookups, single-information-point queries, clear "
-    "either/or questions, or queries about a specific attribute/parameter/spec.\n"
-    "[Complex question]: questions that need cross-document synthesis, multi-angle analysis, comparisons, "
-    "multi-step reasoning, or that require multiple information sources to be fully answered.\n\n"
-    "User question: {question}\n\n"
-    "If it's a complex question, also provide 2-4 non-overlapping, independently retrievable sub-questions; "
-    "if it's a simple question, leave sub_questions empty."
-)
+COMPLEXITY_PROMPT = _RAG.complexity_prompt
 
-_SIMPLE_QUERY_MARKERS = (
-    "是什么",
-    "是谁",
-    "哪里",
-    "何时",
-    "多少",
-    "是否",
-    "哪个",
-    "哪种",
-    "属性",
-    "参数",
-    "规格",
-    "定义",
-    "含义",
-    "what is",
-    "who is",
-    "where is",
-    "when is",
-    "how many",
-    "which",
-    # Arabic single-fact interrogatives (this corpus is Arabic-first).
-    "ما هو",
-    "ما هي",
-    "من هو",
-    "من هي",
-    "أين",
-    "اين",
-    "متى",
-    "متي",
-    "كم",
-    "هل",
-    "أي ",
-    "اي ",
-    "تعريف",
-    "معنى",
-)
+# Fast-path classification vocabulary. These are language- AND domain-specific, so
+# they are profile data: an e-commerce catalogue needs product-attribute markers where
+# a school corpus needs admissions vocabulary. Tuples keep the original membership-test
+# semantics at the call sites below.
+_SIMPLE_OVERRIDE_MARKERS = tuple(_RAG.simple_override_markers)
+_SIMPLE_QUERY_MARKERS = tuple(_RAG.simple_query_markers)
+_COMPLEX_QUERY_MARKERS = tuple(_RAG.complex_query_markers)
+_QUERY_DIMENSION_MARKERS = tuple(_RAG.query_dimension_markers)
 
-_COMPLEX_QUERY_MARKERS = (
-    "比较",
-    "对比",
-    "区别",
-    "差异",
-    "优缺点",
-    "优势",
-    "劣势",
-    "分析",
-    "总结",
-    "综合",
-    "原因",
-    "成因",
-    "影响",
-    "方案",
-    "步骤",
-    "如何",
-    "为什么",
-    "以及",
-    "同时",
-    "并且",
-    "和",
-    "与",
-    "谁更",
-    "compare",
-    "versus",
-    "difference",
-    "different",
-    "analyze",
-    "summarize",
-    "trade-off",
-    "pros and cons",
-    "why ",
-    "how ",
-    " and ",
-    "complex",
-    # Arabic multi-part / analytical markers. Without these, an Arabic comparison
-    # question short enough to hit the length rule (e.g. "قارن الرسوم") is
-    # fast-pathed as simple and never decomposed into sub-questions.
-    "قارن",
-    "مقارنة",
-    "الفرق",
-    "الفروق",
-    "فرق بين",
-    "بين ",
-    "مقابل",
-    "لماذا",
-    "كيف",
-    "اشرح",
-    "وضح",
-    "حلل",
-    "تحليل",
-    "لخص",
-    "ملخص",
-    "مميزات",
-    "عيوب",
-    "إيجابيات",
-    "سلبيات",
-    "أسباب",
-    "اسباب",
-    "خطوات",
-    "وأيضا",
-    " و ",
-    "أم ",
-    "ام ",
-    "كذلك",
-)
-
-_QUERY_DIMENSION_MARKERS = (
-    "属性",
-    "武器",
-    "定位",
-    "技能",
-    "机制",
-    "参数",
-    "规格",
-    "性能",
-    "价格",
-    "优点",
-    "缺点",
-    "作用",
-    # Arabic attribute dimensions.
-    "الرسوم",
-    "المواعيد",
-    "الشروط",
-    "المستندات",
-    "المناهج",
-    "الأنشطة",
-    "النقل",
-)
 
 
 def _simple_question_fast_path_reason(question: str) -> Optional[str]:
     """Return a reason only when a local rule can confidently classify a simple query."""
     normalized = re.sub(r"\s+", " ", (question or "").strip()).lower()
-    if not normalized or len(normalized) > 48:
+    if not normalized or len(normalized) > _RAG.fast_path_max_chars:
         return None
+    # Overrides run FIRST. "how many students" is a single-fact lookup, but it contains
+    # "how ", which also opens genuinely analytical questions. Without this the complex
+    # marker wins and a plain lookup is sent to the planner — which may decompose it
+    # into several sub-questions, each paying its own retrieval and grader call.
+    if any(marker in normalized for marker in _SIMPLE_OVERRIDE_MARKERS):
+        return "obvious_simple_fast_path:single_fact_override"
     if any(marker in normalized for marker in _COMPLEX_QUERY_MARKERS):
         return None
     if "、" in normalized:
@@ -766,13 +785,18 @@ def _simple_question_fast_path_reason(question: str) -> Optional[str]:
         return None
     if any(marker in normalized for marker in _SIMPLE_QUERY_MARKERS):
         return "obvious_simple_fast_path:single_fact_marker"
-    # Wh-word + attribute + copula ("what element is X") is a single-fact lookup even
-    # though the bare "what is" marker doesn't match it.
-    if re.match(r"^(what|which|who|where|when)\s+\w+\s+(is|are|was|were|does|do)\b", normalized):
+    # A wh-question opening directly onto a copula ("what are the partners") or with an
+    # attribute in between ("what element is X"). Both are single-fact lookups that the
+    # literal markers miss, and the first form is common enough that missing it sent
+    # ordinary plural questions down the decomposition path.
+    if re.match(
+        r"^(what|which|who|where|when)\s+(?:\w+\s+)?(is|are|was|were|does|do)\b",
+        normalized,
+    ):
         return "obvious_simple_fast_path:wh_attribute_question"
     # Terminators include Arabic ؟ and ۔ — otherwise an Arabic question keeps its
     # mark and measures one character longer against the length rule below.
-    if len(normalized.rstrip("?？。.!！؟۔،")) <= 18:
+    if len(normalized.rstrip("?？。.!！؟۔،")) <= _RAG.fast_path_short_intent_chars:
         return "obvious_simple_fast_path:short_single_intent"
     return None
 
@@ -801,7 +825,7 @@ def classify_complexity(state: RAGState) -> RAGState:
         item.strip()
         for item in (result.sub_questions or [])
         if item and item.strip()
-    ][:4]
+    ][: _RAG.max_sub_questions]
     if complexity not in ("simple", "complex"):
         raise ValueError(f"Unsupported complexity result: {complexity}")
     if complexity == "complex" and not sub_questions:
@@ -855,6 +879,45 @@ def _fanout_sub_questions(state: RAGState):
         )
         for i, sq in enumerate(sub_qs, 1)
     ]
+
+
+def _synthesis_report(
+    docs: List[dict],
+    retrieval_status: str,
+    sub_results: List[dict],
+) -> EvidenceReport:
+    """The merged evidence report for a decomposed question.
+
+    Synthesis does not assess anything itself — every document here was already graded by
+    the sub-agent that retrieved it. So the report inherits HIGH certainty and records
+    that provenance, rather than restating conclusions in its own words. Before this, this
+    function hand-wrote `relevance="strong" if has_docs else "none"`, which is the same
+    fabricated-grade pattern the ladder exists to remove.
+    """
+    assessed_by = ["synthesis"]
+    for result in sub_results:
+        for name in (result.get("rag_trace") or {}).get("evidence_assessed_by") or []:
+            if name not in assessed_by:
+                assessed_by.append(name)
+
+    if not docs:
+        return EvidenceReport(
+            certainty=Certainty.HIGH,
+            relevance="none",
+            sufficiency="none",
+            assessed_by=assessed_by,
+            reasons=[f"no sub-question produced usable evidence ({retrieval_status})"],
+        )
+
+    return EvidenceReport(
+        chunks=[ChunkAssessment(index=i) for i, _ in enumerate(docs, 1)],
+        certainty=Certainty.HIGH,
+        relevance="strong",
+        sufficiency="partial" if retrieval_status == "partial" else "sufficient",
+        preferred_route="answer",
+        assessed_by=assessed_by,
+        reasons=[f"merged {len(docs)} graded chunk(s) from {len(sub_results)} sub-question(s)"],
+    )
 
 
 def synthesis(state: RAGState) -> RAGState:
@@ -932,6 +995,7 @@ def synthesis(state: RAGState) -> RAGState:
                     hitl_options.append(option)
 
     fallback_route = "retrieval_error" if retrieval_outage else "no_knowledge"
+    route = "answer" if has_docs else (hitl_route or fallback_route)
     rag_trace = {
         **original_trace,
         "tool_used": True,
@@ -946,18 +1010,16 @@ def synthesis(state: RAGState) -> RAGState:
         "synthesis_merged_count": len(all_docs),
         "sub_traces": sub_traces,
         "retrieval_status": retrieval_status,
-        "evidence_relevance": "strong" if has_docs else "none",
-        "evidence_answerability": "partial" if retrieval_status == "partial" else ("sufficient" if has_docs else "none"),
-        "evidence_confidence": None,
-        "route": "answer" if has_docs else (hitl_route or fallback_route),
+        "route": route,
         "hitl_prompt": hitl_prompt,
         "hitl_options": hitl_options,
+        **_synthesis_report(deduped, retrieval_status, sub_results).as_trace(),
     }
 
     return {
         "docs": deduped,
         "context": context,
-        "route": "answer" if has_docs else (hitl_route or fallback_route),
+        "route": route,
         "retrieval_status": retrieval_status,
         "hitl_prompt": hitl_prompt,
         "hitl_options": hitl_options,
@@ -991,6 +1053,7 @@ def build_rag_graph():
     graph = StateGraph(RAGState)
 
     # Register nodes
+    graph.add_node("domain_gate", domain_gate_node)
     graph.add_node("classify_complexity", classify_complexity)
     graph.add_node("prepare_sub_questions", prepare_sub_questions)
     graph.add_node("retrieve_initial", retrieve_initial)
@@ -1000,8 +1063,14 @@ def build_rag_graph():
     graph.add_node("rag_sub_agent", rag_sub_agent)
     graph.add_node("synthesis", synthesis)
 
-    # Entry point: complexity classification
-    graph.set_entry_point("classify_complexity")
+    # Entry point: the cheapest possible check first. An out-of-domain question ends
+    # here, before the search, the complexity call and the grader call it would have cost.
+    graph.set_entry_point("domain_gate")
+    graph.add_conditional_edges(
+        "domain_gate",
+        _route_after_domain_gate,
+        {"classify_complexity": "classify_complexity", "end": END},
+    )
 
     # Simple questions go straight to retrieval; complex questions use the sub-questions the planner produced in one pass.
     graph.add_conditional_edges(
