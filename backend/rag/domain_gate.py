@@ -129,21 +129,29 @@ class DomainReferenceStore:
             self._failed = False
 
 
-def milvus_reference_provider(level: int = 2, section_field: str = "root_chunk_id") -> DomainReference:
+def milvus_reference_provider(level: Optional[int] = None, section_field: str = "root_chunk_id") -> DomainReference:
     """Build the reference set from the vectors already sitting in Milvus.
 
-    Reads mid-level chunks rather than leaves: a leaf is a sentence or two and drifts
-    off-topic, while a mid-level chunk is close to a coherent section. Nothing is
-    embedded here — these vectors were computed at index time.
+    Reads the LEAF level, because that is the only level Milvus has — the parent tiers
+    live in Postgres, and their vectors were never written here. Querying a mid-level
+    chunk_level returns zero rows, which makes the gate abstain on every turn: safe,
+    silent, and useless. The level is therefore taken from the retriever rather than
+    guessed.
 
-    Grouped by `root_chunk_id` because that is the only section-shaped field the
-    collection actually has; the human-readable heading path lives inside the chunk text,
-    not in a filterable column.
+    Nothing is embedded here; these vectors were computed at index time.
+
+    Grouped by `root_chunk_id` because it is the only section-shaped field the
+    collection has. The readable heading path lives inside the chunk text, not in a
+    filterable column — so a section is identified, not named. That is enough for
+    scoring, and `best_matches` keeps only the strongest leaf per section, so a section
+    with many leaves does not out-vote a focused one.
     """
     from backend.api.resources import milvus_manager
+    from backend.rag.utils import LEAF_RETRIEVE_LEVEL
 
+    effective_level = LEAF_RETRIEVE_LEVEL if level is None else level
     rows = milvus_manager.query_all(
-        filter_expr=f"chunk_level == {level}",
+        filter_expr=f"chunk_level == {effective_level}",
         output_fields=["dense_embedding", section_field],
     )
     vectors: List[Tuple[str, Sequence[float]]] = []
@@ -152,8 +160,10 @@ def milvus_reference_provider(level: int = 2, section_field: str = "root_chunk_i
         label = row.get(section_field) or "unknown"
         if vector is not None and len(vector):
             vectors.append((str(label), list(vector)))
-    logger.info("domain reference built: %d vectors over %d sections",
-                len(vectors), len({label for label, _ in vectors}))
+    logger.info(
+        "domain reference built from chunk_level=%s: %d vectors over %d sections",
+        effective_level, len(vectors), len({label for label, _ in vectors}),
+    )
     return DomainReference(vectors=vectors)
 
 
