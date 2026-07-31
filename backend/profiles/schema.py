@@ -124,6 +124,13 @@ class RagConfig(_Section):
     max_rewrites: int = 1
     max_sub_questions: int = 4
 
+    # How many times one question may be handed back to the user.
+    #
+    # One. After they have answered, asking again spends their patience on a system
+    # that is not converging — retrieval still ambiguous after a clarification will not
+    # be rescued by a second one. 0 disables human-in-the-loop entirely.
+    max_hitl_rounds: int = 1
+
     # Waiting out a provider's per-minute quota on the graph's model calls.
     #
     # A 429 is transient by definition, but nothing here retried one: the grader call

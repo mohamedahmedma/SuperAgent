@@ -138,6 +138,10 @@ class HitlResumeState(StrictSchema):
     route: Literal["clarify", "scope_select"]
     retrieval_status: Literal["needs_clarification", "needs_scope_selection"]
     rewrite_count: int = Field(default=0, ge=0)
+    # How many times this question has already been handed back. Carried across the
+    # resume boundary because the graph starts fresh there: without it, "ask once" would
+    # mean "ask once per graph run", which is every run.
+    hitl_rounds: int = Field(default=0, ge=0)
     complexity: Optional[Literal["simple", "complex"]] = None
     complexity_reason: Optional[str] = None
     sub_questions: List[str] = Field(default_factory=list, max_length=4)

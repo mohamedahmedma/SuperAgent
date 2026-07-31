@@ -380,7 +380,7 @@ class RagShortCircuitTests(unittest.TestCase):
         self.assertEqual(1, calls["retrieve"])
         self.assertEqual(0, calls["step_back"])
 
-    def test_weak_evidence_rewrites_once_then_clarifies(self):
+    def test_weak_evidence_rewrites_once_then_answers_from_what_it_has(self):
         calls = {"retrieve": [], "step_back": 0}
 
         def retrieve(query, top_k=5):
@@ -421,8 +421,11 @@ class RagShortCircuitTests(unittest.TestCase):
 
         self.assertEqual(["weak question", "rewritten weak question"], calls["retrieve"])
         self.assertEqual(1, calls["step_back"])
-        self.assertEqual("needs_clarification", result.get("retrieval_status"))
-        self.assertEqual([], result.get("docs"))
+        # The grader named no missing slot, so there is nothing specific to ask for and
+        # partial evidence is answered from rather than handed back with "please provide
+        # more detail" — a request the user cannot usefully act on.
+        self.assertEqual("partial", result.get("retrieval_status"))
+        self.assertEqual(1, len(result.get("docs")))
 
     def test_hyde_rewrite_runs_only_selected_retrieval(self):
         calls = {"retrieve": [], "rewrite": 0, "grade": 0}
@@ -559,6 +562,7 @@ class RagShortCircuitTests(unittest.TestCase):
             "route",
             "retrieval_status",
             "rewrite_count",
+            "hitl_rounds",
             "complexity",
             "complexity_reason",
             "sub_questions",

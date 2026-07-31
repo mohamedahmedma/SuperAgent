@@ -338,6 +338,23 @@ class PipelineBehaviourTests(ProfileTestCase):
             preferred_route="rewrite",
         )
 
+    @staticmethod
+    def _rewrite_report_with_named_gap():
+        """As above, but with something specific to ask the user for. Without a named
+        slot the policy answers from partial evidence rather than asking — see
+        HumanInTheLoopTests."""
+        from backend.rag.evidence import Certainty, ChunkAssessment, EvidenceReport
+
+        return EvidenceReport(
+            chunks=[ChunkAssessment(index=1)],
+            certainty=Certainty.HIGH,
+            relevance="weak",
+            sufficiency="partial",
+            preferred_route="rewrite",
+            ambiguity="missing_slot",
+            missing_slots=["grade"],
+        )
+
     def test_rewrite_budget_is_profile_driven(self):
         from backend.rag.policy import decide_route
 
@@ -347,8 +364,11 @@ class PipelineBehaviourTests(ProfileTestCase):
         report = self._rewrite_report()
         kwargs = {"has_docs": True, "is_sub_agent": False, "config": pipeline._RAG}
         self.assertEqual("rewrite", decide_route(report, rewrite_count=2, **kwargs)[0])
-        # Budget exhausted at 3.
-        self.assertEqual("clarify", decide_route(report, rewrite_count=3, **kwargs)[0])
+        # Budget exhausted at 3: with a named gap the user is asked, without one the
+        # partial evidence is answered from.
+        named = self._rewrite_report_with_named_gap()
+        self.assertEqual("clarify", decide_route(named, rewrite_count=3, **kwargs)[0])
+        self.assertEqual("answer", decide_route(report, rewrite_count=3, **kwargs)[0])
 
     def test_zero_rewrite_budget_never_rewrites(self):
         from backend.rag.policy import decide_route
@@ -357,7 +377,7 @@ class PipelineBehaviourTests(ProfileTestCase):
             pipeline = self._pipeline()
 
         route, _ = decide_route(
-            self._rewrite_report(),
+            self._rewrite_report_with_named_gap(),
             has_docs=True,
             rewrite_count=0,
             is_sub_agent=False,

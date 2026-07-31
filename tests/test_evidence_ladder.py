@@ -236,11 +236,17 @@ class RoutePolicyTests(unittest.TestCase):
         route, _ = decide_route(report_at(Certainty.MEDIUM), **{**self.kwargs, "config": config})
         self.assertEqual("answer", route)
 
-    def test_ambiguity_routes_to_a_human(self):
-        route, _ = decide_route(report_at(Certainty.HIGH, ambiguity="missing_slot"), **self.kwargs)
+    def test_ambiguity_routes_to_a_human_when_it_can_be_specific(self):
+        """A named slot or named options. See HumanInTheLoopTests for why the unnamed
+        forms are answered from instead."""
+        route, _ = decide_route(
+            report_at(Certainty.HIGH, ambiguity="missing_slot", missing_slots=["grade"]),
+            **self.kwargs)
         self.assertEqual("clarify", route)
         route, _ = decide_route(
-            report_at(Certainty.HIGH, ambiguity="multiple_candidates"), **self.kwargs)
+            report_at(Certainty.HIGH, ambiguity="multiple_candidates",
+                      hitl_options=["Grade 5", "Grade 6"]),
+            **self.kwargs)
         self.assertEqual("scope_select", route)
 
     def test_a_sub_agent_keeps_partial_evidence_for_synthesis(self):
@@ -401,3 +407,86 @@ class GraderAssessorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HumanInTheLoopTests(unittest.TestCase):
+    """When it is worth interrupting the user, and when answering is better.
+
+    The behaviour these replace: partial evidence produced "I found relevant content,
+    but the evidence isn't enough to determine an answer. Please provide more detail
+    about what you're asking." That asks the user to guess what the system wants, is
+    unanswerable in any useful way, and was raised on evidence good enough to attempt
+    an answer from.
+    """
+
+    def setUp(self):
+        self.config = rag_config()
+        self.kwargs = {"has_docs": True, "rewrite_count": 99, "is_sub_agent": False,
+                       "config": self.config}
+
+    def _report(self, **overrides):
+        fields = {"certainty": Certainty.HIGH, "relevance": "weak",
+                  "sufficiency": "partial", "chunks": [ChunkAssessment(index=1)]}
+        fields.update(overrides)
+        return EvidenceReport(**fields)
+
+    def test_partial_evidence_is_answered_not_queried(self):
+        route, reason = decide_route(self._report(), **self.kwargs)
+        self.assertEqual("answer", route)
+        self.assertIn("partial evidence", reason)
+
+    def test_a_generic_clarify_is_never_asked(self):
+        """`missing_slot` without naming a slot is the generic prompt in disguise."""
+        report = self._report(ambiguity="missing_slot", missing_slots=[])
+        route, _ = decide_route(report, **self.kwargs)
+        self.assertEqual("answer", route)
+
+    def test_a_named_missing_slot_is_worth_asking(self):
+        report = self._report(ambiguity="missing_slot", missing_slots=["grade"])
+        route, reason = decide_route(report, **self.kwargs)
+        self.assertEqual("clarify", route)
+        self.assertIn("grade", reason)
+
+    def test_scope_selection_needs_named_candidates(self):
+        route, _ = decide_route(
+            self._report(ambiguity="multiple_candidates", hitl_options=[]), **self.kwargs)
+        self.assertEqual("answer", route)
+
+        route, _ = decide_route(
+            self._report(ambiguity="multiple_candidates", hitl_options=["Grade 5", "Grade 6"]),
+            **self.kwargs)
+        self.assertEqual("scope_select", route)
+
+    def test_the_user_is_asked_at_most_once_per_question(self):
+        report = self._report(ambiguity="missing_slot", missing_slots=["grade"])
+        self.assertEqual("clarify", decide_route(report, hitl_rounds=0, **self.kwargs)[0])
+        self.assertEqual("answer", decide_route(report, hitl_rounds=1, **self.kwargs)[0])
+
+    def test_the_limit_is_profile_driven(self):
+        report = self._report(ambiguity="missing_slot", missing_slots=["grade"])
+        patient = {**self.kwargs, "config": rag_config(max_hitl_rounds=2)}
+        self.assertEqual("clarify", decide_route(report, hitl_rounds=1, **patient)[0])
+
+        never = {**self.kwargs, "config": rag_config(max_hitl_rounds=0)}
+        self.assertEqual("answer", decide_route(report, hitl_rounds=0, **never)[0])
+
+    def test_a_second_round_with_nothing_usable_stops_rather_than_asking(self):
+        report = self._report(sufficiency="none", ambiguity="missing_slot",
+                              missing_slots=["grade"])
+        self.assertEqual("no_knowledge", decide_route(report, hitl_rounds=1, **self.kwargs)[0])
+
+    def test_sufficient_evidence_is_never_interrupted(self):
+        report = self._report(relevance="strong", sufficiency="sufficient",
+                              preferred_route="answer",
+                              ambiguity="missing_slot", missing_slots=["grade"])
+        # A named slot still yields to a report that says the evidence answers it.
+        route, _ = decide_route(report, hitl_rounds=0, **self.kwargs)
+        self.assertEqual("clarify", route, "the grader's ambiguity verdict still wins")
+
+    def test_the_round_count_survives_the_resume_boundary(self):
+        """Without this, "ask once" would mean "once per graph run", which is every run."""
+        from backend.schemas.chat import HitlResumeState
+
+        state = HitlResumeState(question="q", route="clarify",
+                                retrieval_status="needs_clarification", hitl_rounds=1)
+        self.assertEqual(1, state.model_dump()["hitl_rounds"])

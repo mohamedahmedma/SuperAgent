@@ -178,6 +178,8 @@ class RAGState(TypedDict):
     hitl_prompt: Optional[str]
     hitl_options: Optional[List[str]]
     rewrite_count: int
+    # HITL turns already spent on this question, surviving the resume boundary.
+    hitl_rounds: int
     rewrite_method: Optional[str]
     rewritten_query: Optional[str]
     step_back_question: Optional[str]
@@ -246,6 +248,7 @@ def _build_hitl_resume_state(result: dict) -> dict:
         route=result.get("route") or trace.get("route"),
         retrieval_status=result.get("retrieval_status") or trace.get("retrieval_status"),
         rewrite_count=int(result.get("rewrite_count") or 0),
+        hitl_rounds=int(result.get("hitl_rounds") or 0),
         complexity=result.get("complexity") or trace.get("complexity"),
         complexity_reason=result.get("complexity_reason") or trace.get("complexity_reason"),
         sub_questions=result.get("sub_questions") or trace.get("sub_questions") or [],
@@ -297,6 +300,7 @@ def _initial_state(
         "hitl_prompt": "",
         "hitl_options": [],
         "rewrite_count": 0,
+        "hitl_rounds": 0,
         "rewrite_method": None,
         "rewritten_query": None,
         "step_back_question": None,
@@ -534,6 +538,7 @@ def grade_documents_node(state: RAGState) -> RAGState:
         rewrite_count=int(state.get("rewrite_count") or 0),
         is_sub_agent=bool(state.get("is_sub_agent")),
         config=_RAG,
+        hitl_rounds=int(state.get("hitl_rounds") or 0),
     )
 
     report_update = _report_update(report, route)
@@ -1123,6 +1128,9 @@ def _state_from_resume(
     state.update({
         "query": refined_question,
         "rewrite_count": current_resume_state["rewrite_count"],
+        # The turn being resumed IS a HITL round. Counting it here is what makes the
+        # limit mean "per question" rather than "per graph run".
+        "hitl_rounds": int(current_resume_state.get("hitl_rounds") or 0) + 1,
         "complexity": current_resume_state.get("complexity"),
         "complexity_reason": current_resume_state.get("complexity_reason"),
         "sub_questions": current_resume_state.get("sub_questions") or [],

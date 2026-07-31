@@ -24,6 +24,40 @@ from backend.rag.evidence import Certainty, EvidenceReport, parse_certainty
 CONTEXT_TRIM_MIN_CERTAINTY = Certainty.MEDIUM
 
 
+def can_ask_human(report: EvidenceReport, *, hitl_rounds: int, config) -> Tuple[bool, str]:
+    """Whether it is worth interrupting the user, and why not when it is not.
+
+    Two rules, both learned from what the generic version actually produced.
+
+    **A question must name what it needs.** "I found relevant content, but the evidence
+    isn't enough to determine an answer. Please provide more detail" asks the user to
+    guess what the system wants. It reads as a failure, it is unanswerable in any
+    useful way, and the evidence that prompted it was good enough to attempt an answer
+    from. So a HITL turn now requires named slots or named options — something the user
+    can actually respond to. Without them, answering from partial evidence is better,
+    because the answer prompt already says to be explicit about what it does not know.
+
+    **Once per question.** After the user has answered, asking again spends their
+    patience on a system that is not converging. Retrieval that is still ambiguous
+    after a clarification will not be rescued by a second one.
+    """
+    limit = int(getattr(config, "max_hitl_rounds", 1))
+    if hitl_rounds >= limit:
+        return False, f"already asked {hitl_rounds} time(s), limit {limit}"
+
+    if report.ambiguity == "missing_slot":
+        if not report.missing_slots:
+            return False, "missing_slot without naming which slot"
+        return True, "missing a named condition"
+
+    if report.ambiguity == "multiple_candidates":
+        if not report.hitl_options:
+            return False, "multiple_candidates without naming the candidates"
+        return True, "several named candidates"
+
+    return False, "nothing specific to ask for"
+
+
 def decide_route(
     report: EvidenceReport,
     *,
@@ -31,15 +65,18 @@ def decide_route(
     rewrite_count: int,
     is_sub_agent: bool,
     config,
+    hitl_rounds: int = 0,
 ) -> Tuple[str, str]:
     """The next graph step, and why.
 
     Ported from the original grade-driven routing so behaviour is unchanged when an LLM
-    assessor filled the report. The difference is what happens when one did not: this
-    refuses to invent sufficiency instead of fabricating a grade that claims it.
+    assessor filled the report. Two deliberate departures: it refuses to invent
+    sufficiency where nothing assessed the evidence, and it will not interrupt the user
+    unless it can say what it needs — see `can_ask_human`.
     """
     max_rewrites = int(getattr(config, "max_rewrites", 1))
     required = parse_certainty(getattr(config, "evidence_required_certainty", "high"))
+    ask_allowed, ask_reason = can_ask_human(report, hitl_rounds=hitl_rounds, config=config)
 
     if not has_docs or report.relevance == "none":
         return "no_knowledge", "no evidence retrieved"
@@ -55,10 +92,10 @@ def decide_route(
         )
 
     # Only a language model sets these, so a cheap rung can never route to a human.
-    if report.ambiguity == "missing_slot":
-        return "clarify", "question is missing a required condition"
-    if report.ambiguity == "multiple_candidates":
-        return "scope_select", "several candidate directions in the evidence"
+    if ask_allowed and report.ambiguity == "missing_slot":
+        return "clarify", f"missing: {', '.join(report.missing_slots)}"
+    if ask_allowed and report.ambiguity == "multiple_candidates":
+        return "scope_select", "several named candidates in the evidence"
 
     answer_is_supported = report.relevance == "strong" and report.sufficiency == "sufficient"
     if report.preferred_route == "answer" and answer_is_supported:
@@ -74,19 +111,33 @@ def decide_route(
     if report.preferred_route == "rewrite":
         if rewrite_count < max_rewrites:
             return "rewrite", "evidence insufficient, one rewrite remains"
-        if report.sufficiency == "partial":
-            return "clarify", "rewrites exhausted with only partial evidence"
-        return "no_knowledge", "rewrites exhausted"
+        return _partial_or_nothing(report, ask_allowed, ask_reason, "rewrites exhausted")
 
     if report.sufficiency == "partial":
         if rewrite_count < max_rewrites:
             return "rewrite", "partial evidence, one rewrite remains"
-        return "clarify", "partial evidence and rewrites exhausted"
+        return _partial_or_nothing(report, ask_allowed, ask_reason, "rewrites exhausted")
 
     if answer_is_supported:
         return "answer", "evidence sufficient"
 
     return "no_knowledge", "evidence not sufficient to answer"
+
+
+def _partial_or_nothing(report, ask_allowed: bool, ask_reason: str, context: str) -> Tuple[str, str]:
+    """What to do with partial evidence once rewriting is spent.
+
+    Answer from it, unless there is a specific question worth asking. Partial evidence
+    is still evidence, and the answer prompt already requires the model to be explicit
+    about what the sources do not cover — which is more useful to the user than a
+    request to rephrase.
+    """
+    if ask_allowed:
+        route = "scope_select" if report.ambiguity == "multiple_candidates" else "clarify"
+        return route, f"{context}, {ask_reason}"
+    if report.sufficiency == "partial":
+        return "answer", f"{context}; answering from partial evidence ({ask_reason})"
+    return "no_knowledge", context
 
 
 def select_context_indices(

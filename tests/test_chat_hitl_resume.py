@@ -151,6 +151,9 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             "route": "clarify",
             "retrieval_status": "needs_clarification",
             "rewrite_count": 0,
+            # Carried across the resume boundary so "ask once per question" survives a
+            # graph that starts fresh on every resume.
+            "hitl_rounds": 0,
             "complexity": "simple",
             "complexity_reason": "unit",
             "sub_questions": [],
