@@ -62,6 +62,10 @@ class RequestSignals:
     # whether the profile-management tool is worth binding — never an extraction.
     personal_data: List[str] = field(default_factory=list)
 
+    # Rung 1's evidence, kept so rung 2 can be prompted with it rather than left to
+    # guess from a topic list. Populated by CatalogueScopeDetector.
+    scope_matches: List[Any] = field(default_factory=list)
+
     assessed_by: List[str] = field(default_factory=list)
     reasons: List[str] = field(default_factory=list)
 
@@ -76,6 +80,11 @@ class RequestSignals:
             "request_is_social": self.is_social,
             "request_personal_data": list(self.personal_data),
             "request_candidate_sections": list(self.candidate_sections),
+            "request_top_match": (
+                {"question": self.scope_matches[0].question,
+                 "score": round(self.scope_matches[0].score, 4)}
+                if self.scope_matches else None
+            ),
             "request_assessed_by": list(self.assessed_by),
             "request_reason": "; ".join(self.reasons)[:400] or "n/a",
         }
@@ -358,12 +367,28 @@ class SignalLadder:
 
 
 def build_ladder(config, envelope_invoke=None) -> SignalLadder:
-    """Assemble from profile config. Which rungs exist is deployment data."""
+    """Assemble from profile config. Which rungs exist is deployment data.
+
+    Ordered cheapest-first. The scope rungs are imported lazily because they reach the
+    catalogue store and the embedder, and this module is imported on every request.
+    """
     detectors: List[Detector] = []
     if getattr(config, "social_phrases", None):
         detectors.append(SocialDetector())
-    if getattr(config, "domain_gate_enabled", False):
-        detectors.append(CorpusSimilarityDetector())
-    if getattr(config, "request_envelope_enabled", False):
-        detectors.append(EnvelopeDetector(invoke=envelope_invoke))
+
+    if getattr(config, "scope_index_enabled", False):
+        from backend.rag.scope_detector import CatalogueScopeDetector, ScopeModelDetector
+
+        detectors.append(CatalogueScopeDetector())
+        if getattr(config, "request_envelope_enabled", False):
+            detectors.append(ScopeModelDetector(invoke=envelope_invoke))
+    else:
+        # Superseded by the catalogue index, which separates far better — a chunk is a
+        # fragment, so something is always vaguely near anything. Kept for deployments
+        # that have not built a catalogue yet.
+        if getattr(config, "domain_gate_enabled", False):
+            detectors.append(CorpusSimilarityDetector())
+        if getattr(config, "request_envelope_enabled", False):
+            detectors.append(EnvelopeDetector(invoke=envelope_invoke))
+
     return SignalLadder(detectors, required=Certainty.MEDIUM)

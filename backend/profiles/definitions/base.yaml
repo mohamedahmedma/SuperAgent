@@ -74,6 +74,26 @@ rag:
   rerank_irrelevant_score: 0.05
   rerank_min_supporting_chunks: 1
 
+  # Scope: is an incoming question this corpus's subject at all? Judged against a
+  # catalogue of the questions the corpus can answer, built once per section at ingest
+  # by `python -m backend.indexing.build_scope_index`.
+  #
+  # Off until a catalogue exists — with none, the rung abstains and nothing changes.
+  # The cut point is DERIVED from the corpus at index time, so there is no threshold to
+  # tune here; scope_floor_percentile only says how far into the in-scope distribution
+  # to place it.
+  scope_index_enabled: false
+  scope_section_level: 1
+  scope_summary_model: ""
+  scope_min_questions: 4
+  scope_max_questions: 10
+  scope_question_languages: English and Arabic
+  scope_floor_percentile: 10.0
+  scope_match_count: 3
+  # Frozen so the catalogue cannot drift between re-indexes. Deliberately empty in the
+  # base profile: these labels describe a corpus, and base describes none.
+  scope_topic_vocabulary: []
+
   # Out-of-domain rejection before any search. Off until the threshold is calibrated
   # against a corpus — an uncalibrated gate silently refuses valid questions.
   domain_gate_enabled: false

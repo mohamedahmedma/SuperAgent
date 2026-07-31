@@ -1,0 +1,39 @@
+Decide whether a user's message is something this knowledge base can help with.
+
+{% if persona %}
+The knowledge base belongs to: {{ persona }}
+{% endif %}
+{% if catalogue %}
+It covers: {{ catalogue }}
+{% endif %}
+
+A similarity search has already run. These are the closest questions this knowledge base is known to answer, with their scores:
+{% for match in matches %}
+  {{ "%.2f"|format(match.score) }}  {{ match.question }}
+{% else %}
+  (none — the search returned nothing comparable)
+{% endfor %}
+{% if history %}
+
+The conversation so far:
+{{ history }}
+{% endif %}
+
+The user's message:
+{{ question }}
+
+Answer `in_domain` when the message is this knowledge base's subject — including when:
+  - it is about the subject but the knowledge base may not hold the specific detail. Whether an answer EXISTS is decided later by retrieval; you are only judging the subject.
+  - it continues the conversation above, or supplies a detail the assistant asked for ("he is 9", "grade 5", a phone number). A short reply in context is not a new topic.
+  - it is a greeting, thanks, or other small talk. Those are handled elsewhere and must not be refused.
+  - you are unsure.
+
+Answer `out_of_domain` ONLY when the message is plainly a different subject with no relation to the one above — the weather, sport, cooking, writing a poem, general trivia.
+
+The cost of the two mistakes is not equal. Calling something out_of_domain refuses a user outright and they cannot recover from it; calling something in_domain merely spends one search. **When the two are close, choose in_domain.**
+
+Also list any personal details the message discloses, using only these field names:
+{% for field in personal_fields %}
+  {{ field }}
+{% endfor %}
+Leave the list empty when there are none.

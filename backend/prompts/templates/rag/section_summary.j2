@@ -1,0 +1,36 @@
+You are cataloguing one section of a knowledge base so an assistant can tell, before searching, whether a user's question is something this knowledge base covers at all.
+
+{% if persona %}
+The knowledge base belongs to: {{ persona }}
+{% endif %}
+
+Read the section below and return three things.
+
+1. `summary` — one or two sentences saying what this section is about. Written for a person, not for matching.
+
+2. `answers` — the questions a real user would ask that THIS SECTION can answer. This is the important field, so give it the most care:
+   - Write them the way a user would actually type them, not the way the document phrases them. Users write "how much are the fees for grade 5", not "Tuition Fee Schedule, Elementary".
+   - Cover the section's distinct facts. If it holds four unrelated details, write at least one question per detail rather than four rewordings of the same one.
+   - Include the obvious short forms people really send: "fees?", "uniform?", "when does term start".
+{% if languages %}
+   - Write each question in {{ languages }}. Users ask in whichever they prefer, and a question only matches if the same language is represented.
+{% endif %}
+   - Between {{ min_questions }} and {{ max_questions }} questions.
+   - Only questions this section genuinely answers. A question you invent that the text does not cover will make the assistant accept subjects it cannot help with.
+
+{% if vocabulary %}
+3. `topics` — labels for this section, chosen ONLY from this list:
+{% for topic in vocabulary %}
+   - {{ topic }}
+{% endfor %}
+   Use as many as apply, and none that do not. Do not invent new labels.
+{% else %}
+3. `topics` — one to three short lowercase labels for this section, like `tuition_fees`
+   or `school_uniform`. These are being collected to propose a vocabulary, so prefer
+   the plainest name for the subject over a clever one.
+{% endif %}
+
+Section heading path and text:
+---
+{{ section_text }}
+---

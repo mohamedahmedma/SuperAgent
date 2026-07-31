@@ -181,3 +181,53 @@ class ParentChunk(Base):
     modality: Mapped[str] = mapped_column(String(20), default="text", nullable=False)
     asset_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SectionSummary(Base):
+    """What one corpus section is ABOUT, and which questions it can answer.
+
+    Built once per section at ingest, not per query. Its purpose is a single decision —
+    is an incoming question this corpus's subject at all — which retrieval cannot make
+    cheaply, because answering it with retrieval means running the search you were
+    trying to avoid.
+
+    Keyed by (chunk_id, profile): the same section summarised under a different domain
+    profile is a genuinely different summary, since the profile supplies the topic
+    vocabulary and the persona's idea of what counts as in scope.
+
+    `content_sha256` is what makes re-indexing cheap and behaviour constant. A section
+    whose text has not changed reuses its summary verbatim, so an unchanged corpus
+    re-indexes for free and the same input provably yields the same output — no model
+    re-run, no drift in the scope boundary between deployments.
+
+    `answers` is the field that gets embedded, one vector per question, not the summary
+    prose. Queries arrive as questions; matching a question against a description of a
+    topic throws away most of the signal, and averaging several questions into one
+    vector puts the centroid somewhere near none of them.
+    """
+
+    __tablename__ = "section_summaries"
+    __table_args__ = (
+        Index("ix_section_summaries_profile", "profile"),
+        Index("ix_section_summaries_filename", "filename"),
+    )
+
+    chunk_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    profile: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    content_sha256: Mapped[str] = mapped_column(String(64), default="", nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    chunk_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # One or two sentences. Feeds the scope model's prompt and the corpus catalogue;
+    # deliberately NOT the embedded field.
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # The questions this section can answer. Embedded one vector each.
+    answers: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    # Chosen from the profile's frozen vocabulary rather than invented, so the corpus
+    # catalogue cannot drift between re-indexes.
+    topics: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+
+    model_used: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

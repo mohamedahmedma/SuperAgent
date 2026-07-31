@@ -163,6 +163,38 @@ class RagConfig(_Section):
     rerank_irrelevant_score: float = 0.05
     rerank_min_supporting_chunks: int = 1
 
+    # ---- Scope: is an incoming question this corpus's subject at all? --------------
+    # Judged against a catalogue of the questions the corpus can answer, built once per
+    # section at ingest. Scoring questions against questions is the most homogeneous
+    # comparison available, which is what lets one cut point behave consistently;
+    # scoring against chunk text does not separate (measured: 0.58 in-corpus vs 0.46
+    # for a poem).
+    scope_index_enabled: bool = False
+    # Which level of the chunk hierarchy is a "section". 1 is the top. Document level
+    # is deliberately not used: a single-document corpus would yield one vector.
+    scope_section_level: int = 1
+    # Empty means FAST_MODEL. Summarisation is an ingest cost, paid once per changed
+    # section, so a small model is usually right.
+    scope_summary_model: str = ""
+    scope_min_questions: int = 4
+    scope_max_questions: int = 10
+    # Languages the anticipated questions are written in. A question only matches a
+    # query in the same language, so an Arabic-first corpus must catalogue both.
+    scope_question_languages: str = "English and Arabic"
+    # Frozen so the corpus catalogue cannot drift between re-indexes. The summariser
+    # chooses from this list and invented labels are discarded.
+    scope_topic_vocabulary: List[str] = Field(default_factory=list)
+    # Percentile of in-scope self-similarity used as the escalate-below floor. The cut
+    # point is DERIVED from the corpus at index time, not chosen — a hand-tuned number
+    # is picked against one corpus and silently rots on the next re-index. Low on
+    # purpose: escalating unnecessarily costs one small call, admitting silently costs
+    # a search that would have happened anyway.
+    scope_floor_percentile: float = 10.0
+    # How many matched questions the scope model is shown. It judges evidence rather
+    # than guessing from a topic list, which is the best defence against the one
+    # unrecoverable failure here — refusing a valid question.
+    scope_match_count: int = 3
+
     # Rejecting a question the corpus cannot answer before searching for it. Off by
     # default: the threshold has to be calibrated against a corpus before it can be
     # trusted, and an uncalibrated gate refuses valid questions. Turn it on per profile
