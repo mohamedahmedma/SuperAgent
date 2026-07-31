@@ -515,6 +515,7 @@ def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, An
         # text, so this is a dictionary hit rather than a second forward pass.
         dense_embedding = embed_query(query)
     except Exception:
+        logger.exception("could not embed the query %r", query[:120])
         return {
             "docs": [],
             "meta": {
@@ -572,6 +573,11 @@ def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, An
                 candidate_config=candidate_config,
             )
         except Exception:
+            # Logged, not just counted. Both retrieval paths degrade to the same
+            # "try again" notice, which is right for the user and useless for whoever
+            # has to fix it — the cause has been Milvus not running, an auth failure and
+            # a schema mismatch, and the trace said "failed" for all three.
+            logger.exception("retrieval failed for query %r after dense fallback", query[:120])
             return {
                 "docs": [],
                 "meta": {

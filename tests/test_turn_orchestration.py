@@ -30,11 +30,19 @@ class RecordingContext:
 
 
 def temp_profile(**agent_overrides):
-    """Activate the base profile with the agent section adjusted."""
+    """The base profile with the agent section adjusted.
+
+    Scope detection is force-disabled unless a test asks for it: these tests describe
+    the planner, and a deployment profile that enables the catalogue rung would
+    otherwise pull them onto the network and make them depend on a corpus.
+    """
     profile = load_profile("base")
-    return profile.model_copy(
-        update={"agent": profile.agent.model_copy(update=agent_overrides)}
-    )
+    agent = {"request_envelope_enabled": False, **agent_overrides}
+    return profile.model_copy(update={
+        "agent": profile.agent.model_copy(update=agent),
+        "rag": profile.rag.model_copy(update={"scope_index_enabled": False,
+                                              "domain_gate_enabled": False}),
+    })
 
 
 class ActiveProfile:
@@ -50,6 +58,13 @@ class ActiveProfile:
 
 
 class PlanTurnTests(unittest.TestCase):
+    def setUp(self):
+        self._profile = ActiveProfile(temp_profile())
+        self._profile.__enter__()
+
+    def tearDown(self):
+        self._profile.__exit__(None, None, None)
+
     def test_an_ordinary_question_changes_nothing(self):
         plan, signals = plan_turn("what are the school partners", [], None)
         self.assertFalse(plan.short_circuit)
