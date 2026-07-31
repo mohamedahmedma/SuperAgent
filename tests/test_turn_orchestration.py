@@ -127,7 +127,7 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
 
         built = []
 
-        def spy_create_agent(ctx, tool_names=None):
+        def spy_create_agent(ctx, tool_names=None, language=None):
             built.append(tool_names)
             raise AssertionError("the agent must not be built on a short-circuited turn")
 
@@ -188,7 +188,7 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
                 if False:
                     yield None
 
-        def spy_create_agent(ctx, tool_names=None):
+        def spy_create_agent(ctx, tool_names=None, language=None):
             captured["tools"] = tool_names
             return FakeAgent()
 

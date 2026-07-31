@@ -270,11 +270,13 @@ class ContextPolicyTests(unittest.TestCase):
                   for i in range(1, 5)]
         return report_at(certainty, chunks=chunks)
 
-    def test_off_by_default_sends_everything(self):
+    def test_the_shipped_default_trims_to_the_named_chunks(self):
+        """rag_config() here is the profile UNMODIFIED, so this pins what a deployment
+        actually does — the tests below force adaptive and cover the mechanism."""
         keep, reason = select_context_indices(
             self._report(Certainty.HIGH, supported=(1,)), self.docs, rag_config())
-        self.assertIsNone(keep)
-        self.assertIn("context_selection_mode=off", reason)
+        self.assertEqual([1], keep)
+        self.assertIn("1 of 4", reason)
 
     def test_a_low_certainty_report_can_never_trim(self):
         """This is the rollback encoded as a rule: lexical signals do not license

@@ -32,20 +32,6 @@ from backend.assets.extractors import ExtractionRequest, FigureExtractor, downsc
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ENTITY_PROMPT = (
-    "You are cataloguing a product image for a searchable store.\n\n"
-    "Produce:\n"
-    "- title: a short product name a shopper would recognise.\n"
-    "- summary: one or two sentences describing the item as a listing would.\n"
-    "- attributes: fill in ONLY what is genuinely visible or stated. Leave anything "
-    "you cannot determine empty — a guessed attribute makes the item appear in "
-    "searches it does not belong in, which is worse than it not appearing at all.\n"
-    "- confidence: how certain your reading was, 0 to 1.\n\n"
-    "Attribute vocabulary:\n{attributes}\n\n"
-    "Context:\n{context}"
-)
-
-
 class _EntityCore(BaseModel):
     """The non-attribute half of an entity extraction; the attribute half is
     generated per profile and merged into this at model-build time."""
@@ -143,9 +129,14 @@ class VisionEntityExtractor(FigureExtractor):
         return "\n".join(parts) or "(no surrounding text)"
 
     def extract(self, request: ExtractionRequest) -> ExtractionPayload:
-        prompt = (self._config.extraction_prompt or DEFAULT_ENTITY_PROMPT)
-        prompt = prompt.replace("{attributes}", self._schema.describe())
-        prompt = prompt.replace("{context}", self._context(request))
+        from backend.prompts import resolve as resolve_prompt
+
+        prompt = resolve_prompt(
+            self._config.extraction_prompt,
+            "assets/entity_extraction.j2",
+            attributes=self._schema.describe(),
+            context=self._context(request),
+        )
 
         max_edge = getattr(self._figures, "vision_max_edge", 1024)
         encoded = base64.b64encode(downscale_image(request.data, max_edge)).decode("ascii")
@@ -252,7 +243,6 @@ def resolve_role(strategy: str, declared: Optional[AssetRole] = None) -> AssetRo
 
 
 __all__ = [
-    "DEFAULT_ENTITY_PROMPT",
     "HeuristicEntityExtractor",
     "VisionEntityExtractor",
     "build_entity_extractor",

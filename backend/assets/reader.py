@@ -22,16 +22,6 @@ from backend.assets.vision import strip_reasoning
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_READ_PROMPT = (
-    "Answer the question using ONLY what is visible in this image.\n"
-    "Be specific: quote labels, values, and units exactly as they appear.\n"
-    "If the image does not contain the answer, say so plainly rather than guessing.\n"
-    "Keep the answer under 120 words.\n\n"
-    "{context}\n\n"
-    "Question: {question}"
-)
-
-
 @dataclass
 class ReadRequest:
     data: bytes
@@ -87,7 +77,10 @@ class FigureReader:
             context_parts.append(f"This image is captioned: {request.caption}")
         if request.source:
             context_parts.append(f"It appears in {request.source}.")
-        prompt = DEFAULT_READ_PROMPT.format(
+        from backend.prompts import render as render_prompt
+
+        prompt = render_prompt(
+            "assets/figure_read.j2",
             context="\n".join(context_parts),
             question=request.question or "Describe what this image shows.",
         )

@@ -307,8 +307,8 @@ def build_query_graph() -> Graph:
         "The LangGraph nodes plus the sub-steps that happen inside them.",
     )
     g.cluster("gate", "0. Domain gate — domain_gate_node (entry)")
-    g.cluster("plan", "1. Complexity planning — classify_complexity")
-    g.cluster("subagents", "3. Parallel sub-agents — rag_sub_agent x N via Send()")
+    g.cluster("plan", "1. Complexity planning — classify_complexity (profile.rag.complexity_planning_enabled)")
+    g.cluster("subagents", "3. Parallel sub-agents — rag_sub_agent x N via Send() (planning only)")
     g.cluster("grade", "5. Evidence assessment — grade_documents_node")
     g.cluster("ladder", "The assessor ladder — cheapest rung first, stops at profile.rag.evidence_required_certainty")
     g.cluster("rewrite", "6. Query rewrite — rewrite_question -> retrieve_rewritten, max profile.rag.max_rewrites")

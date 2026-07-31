@@ -22,6 +22,17 @@ TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
 }
 
 
+# Tools whose results are numbered evidence the answer is expected to cite. This is a
+# property of the TOOL, so it lives next to the registry: whoever adds a fifth tool
+# sees both structures together and has to decide which side it falls on.
+#
+# It drives whether the agent's system prompt includes its grounding-and-citation
+# block at all (backend/prompts/templates/agent/system.j2). A deployment binding only
+# get_current_weather has nothing to cite, and paying for citation rules on every one
+# of its turns would be pure waste.
+GROUNDED_TOOLS: frozenset = frozenset({"search_knowledge_base", "search_products"})
+
+
 class UnknownToolError(ValueError):
     """A profile named a tool that is not registered."""
 
@@ -44,6 +55,7 @@ def build_tools(names: List[str], ctx: ChatRequestContext) -> list:
 
 __all__ = [
     "TOOL_BUILDERS",
+    "GROUNDED_TOOLS",
     "UnknownToolError",
     "build_tools",
     "get_current_weather",

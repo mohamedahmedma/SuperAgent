@@ -15,8 +15,9 @@ from backend.rag.context_selection import (
 
 
 def rag_config(**overrides):
-    """Adaptive mode explicitly, since the shipped default is off. These tests cover the
-    mechanism; `test_the_shipped_default_is_off` covers what is actually enabled."""
+    """Adaptive mode explicitly, so these stay tests of the MECHANISM even if the
+    shipped default moves again. `test_the_shipped_default_trims_to_graded_chunks`
+    is the one that pins what is actually enabled."""
     settings = {"context_selection_mode": "adaptive", **overrides}
     return load_profile("base").rag.model_copy(update=settings)
 
@@ -147,12 +148,18 @@ class ConfigurationTests(unittest.TestCase):
                                  rag_config(context_target_coverage=1.01))
         self.assertEqual(4, len(kept))
 
-    def test_the_shipped_default_is_off(self):
-        """Trimming after the grader ruled on the full set answers from narrower
-        evidence than was judged sufficient. Off until the grader reports which chunks
-        carried its judgement."""
+    def test_the_shipped_default_trims_to_graded_chunks(self):
+        """On, because the precondition it was waiting for is met.
+
+        This was held at `off` while trimming meant answering from narrower evidence
+        than the grader had ruled sufficient — the kept set was a lexical guess about
+        which chunks mattered. EvidenceGrade.supporting_chunks now has the grader name
+        the chunks that carried its judgement, so trimming to those follows from the
+        same judgement that approved the answer. A low-certainty report still cannot
+        trim at all; see ContextPolicyTests in test_evidence_ladder.py.
+        """
         config = load_profile("base").rag
-        self.assertEqual("off", config.context_selection_mode)
+        self.assertEqual("adaptive", config.context_selection_mode)
         self.assertEqual(1, config.context_min_chunks)
         self.assertEqual(1.0, config.context_target_coverage)
         self.assertEqual(120, config.context_min_chunk_chars)

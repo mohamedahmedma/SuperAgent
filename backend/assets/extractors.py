@@ -194,8 +194,12 @@ class VisionExtractor(FigureExtractor):
         return f"data:{content_type};base64,{encoded}"
 
     def extract(self, request: ExtractionRequest) -> ExtractionPayload:
-        prompt = (self._config.extraction_prompt or "").replace(
-            "{context}", self._context_block(request)
+        from backend.prompts import resolve as resolve_prompt
+
+        prompt = resolve_prompt(
+            self._config.extraction_prompt,
+            "assets/figure_extraction.j2",
+            context=self._context_block(request),
         )
         message = {
             "role": "user",

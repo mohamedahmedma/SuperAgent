@@ -6,7 +6,13 @@ import unittest
 from unittest.mock import patch
 
 from backend.chat.request_context import ChatRequestContext
-from tests.test_rag_short_circuit import FakeStructuredModel, load_pipeline, _doc, _meta
+from tests.test_rag_short_circuit import (
+    FakeStructuredModel,
+    enable_complexity_planning,
+    load_pipeline,
+    _doc,
+    _meta,
+)
 
 
 def _failed_meta(reason="retrieve_failed"):
@@ -118,7 +124,7 @@ class RetrievalOutageTests(unittest.TestCase):
                 "sub_questions": ["first sub", "second sub"],
             }
 
-        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline = enable_complexity_planning(load_pipeline(retrieve_documents=retrieve))
         pipeline._get_complexity_model = lambda: FakeStructuredModel(complexity)
         pipeline._get_grader_model = lambda: FakeStructuredModel(_forbidden_grader)
 
@@ -154,7 +160,7 @@ class RetrievalOutageTests(unittest.TestCase):
                 "confidence": 0.9,
             }
 
-        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline = enable_complexity_planning(load_pipeline(retrieve_documents=retrieve))
         pipeline._get_complexity_model = lambda: FakeStructuredModel(complexity)
         pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
 

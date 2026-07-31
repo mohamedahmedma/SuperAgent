@@ -323,11 +323,28 @@ class NoDriftTests(ProfileTestCase):
         self.assertEqual(0.3, models.answer_temperature)
 
     def test_prompt_placeholders_are_preserved(self):
-        rag = load_profile("base").rag
-        self.assertIn("{question}", rag.evidence_grade_prompt)
-        self.assertIn("{context}", rag.evidence_grade_prompt)
-        self.assertIn("{question}", rag.complexity_prompt)
-        self.assertIn("{query}", rag.rewrite_prompt)
+        """The prompts moved to backend/prompts/templates/, so the placeholders that
+        must survive are the templates' — a template that stopped substituting its
+        payload would render a grader prompt with no snippets in it and still look
+        perfectly well-formed."""
+        from backend.prompts import render
+
+        marker = "PLACEHOLDER_MARKER"
+        graded = render("rag/evidence_grade.j2", question=marker, context=marker)
+        self.assertEqual(2, graded.count(marker))
+        self.assertIn(marker, render("rag/complexity.j2", question=marker))
+        self.assertIn(marker, render("rag/rewrite.j2", query=marker))
+
+    def test_the_shipped_profiles_carry_no_prompt_text(self):
+        """Prompts live in templates now. A non-empty key here is an override, and an
+        accidental one would silently pin that deployment to stale wording."""
+        profile = load_profile("base")
+        self.assertEqual("", profile.rag.evidence_grade_prompt)
+        self.assertEqual("", profile.rag.complexity_prompt)
+        self.assertEqual("", profile.rag.rewrite_prompt)
+        self.assertEqual("", profile.agent.resume_answer_prompt)
+        self.assertEqual("", profile.agent.persistent_note_prompt)
+        self.assertEqual("", profile.assets.figures.extraction_prompt)
 
     def test_arabic_fast_path_markers_survived_the_move_to_yaml(self):
         """The Arabic vocabulary is easy to mangle in transit; these entries are load

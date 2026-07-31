@@ -11,6 +11,7 @@ from backend.indexing.embedding import embed_query, embedding_service as _embedd
 from backend.env import env_bool, env_float, env_int, env_value
 from backend.indexing.parent_chunk_store import ParentChunkStore
 from backend.profiles import get_profile
+from backend.prompts import resolve as resolve_prompt
 from backend.text_normalization import normalize_query
 from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
@@ -430,7 +431,7 @@ def rewrite_query_once(query: str) -> Optional[dict]:
 
     try:
         result = model.with_structured_output(RewritePlan).invoke(
-            [{"role": "user", "content": REWRITE_PROMPT.format(query=query)}]
+            [{"role": "user", "content": resolve_prompt(REWRITE_PROMPT, "rag/rewrite.j2", query=query)}]
         )
     except Exception:
         logger.exception("Query-rewrite planning failed; continuing without a rewrite")

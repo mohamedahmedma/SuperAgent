@@ -20,6 +20,7 @@ from backend.chat.request_context import ChatRequestContext
 from backend.chat.runtime import create_agent_for_request, fast_model, model
 from backend.chat.storage import storage
 from backend.profiles import get_profile
+from backend.prompts import resolve as resolve_prompt
 from backend.schemas.chat import PendingHitlState, normalize_rag_trace
 
 _PROFILE = get_profile()
@@ -188,7 +189,9 @@ def _build_resume_answer_messages(
     original_question = pending_hitl.get("original_question") or ""
     prompt = pending_hitl.get("prompt") or ""
     context = _format_retrieved_chunks(docs)
-    system = SystemMessage(content=_PROFILE.agent.resume_answer_prompt)
+    system = SystemMessage(
+        content=resolve_prompt(_PROFILE.agent.resume_answer_prompt, "agent/resume_answer.j2")
+    )
     human = HumanMessage(
         content=(
             "Original question:\n"
@@ -198,8 +201,10 @@ def _build_resume_answer_messages(
             "User's answer:\n"
             f"{user_answer}\n\n"
             "Retrieved chunks:\n"
-            f"{context}\n\n"
-            "Please answer the original question based on the retrieved chunks, and cite them using [1], [2], etc."
+            f"{context}"
+            # No trailing "answer from the chunks and cite them" instruction: the
+            # system message above (agent.resume_answer_prompt) already says exactly
+            # that, and repeating it here paid for the same rule twice per resume.
         )
     )
     return [system, human]
@@ -350,8 +355,10 @@ def _update_persistent_note_sync(
                 + "\n".join(history_lines)
                 + "\n\n"
             )
-        instructions = _PROFILE.agent.persistent_note_prompt.replace(
-            "{max_chars}", str(_PROFILE.agent.persistent_note_max_chars)
+        instructions = resolve_prompt(
+            _PROFILE.agent.persistent_note_prompt,
+            "agent/persistent_note.j2",
+            max_chars=_PROFILE.agent.persistent_note_max_chars,
         )
         prompt = (
             f"{instructions}\n\n"
@@ -361,7 +368,11 @@ def _update_persistent_note_sync(
             "Output the updated note directly (plain text, no explanations or Markdown code blocks):"
         )
         res = fast_model.invoke([HumanMessage(content=prompt)])
-        return (res.content or "").strip()
+        # Enforced here, not merely asked for in the prompt. Models cannot count
+        # characters, and this note is injected into the context of every later turn —
+        # so a note that overruns its budget is not a one-off, it is a permanent
+        # per-turn tax for the rest of the session.
+        return (res.content or "").strip()[: _PROFILE.agent.persistent_note_max_chars]
     except Exception as e:
         print(f"Context Manager Error: {e}")
         return current_note
@@ -425,7 +436,7 @@ def chat_with_agent(
             else:
                 response_content = _answer_resumed_rag_sync(pending_hitl, user_text, rag_result)
         else:
-            turn_plan, _ = plan_turn(effective_user_text, messages[:-1], ctx)
+            turn_plan, _turn_signals = plan_turn(effective_user_text, messages[:-1], ctx)
             if turn_plan.short_circuit:
                 # A confirmed out-of-domain question, or a social turn a profile
                 # answers statically. The agent is never built, so this costs neither
@@ -434,7 +445,7 @@ def chat_with_agent(
                 rag_trace = normalize_rag_trace(turn_plan.as_trace())
                 next_pending_hitl = None
             else:
-                request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools)
+                request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools, turn_plan.language)
                 context_messages = _build_context_messages(messages[:-1], persistent_note, effective_user_text)
                 result = request_agent.invoke(
                     {"messages": context_messages},
@@ -691,7 +702,7 @@ async def chat_with_agent_stream(
                 yield chunk
             return
 
-        request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools)
+        request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools, turn_plan.language)
         context_messages = _build_context_messages(messages[:-1], persistent_note, effective_user_text)
 
         session_title = None

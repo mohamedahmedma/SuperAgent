@@ -1,0 +1,22 @@
+{# Turning a document figure into text at ingest, so it is findable by search and
+   answerable later without re-opening the image.
+
+   Changing this changes the MEANING of a stored extraction. Extractions are cached by
+   (sha256, profile, dossier_version), so a reworked prompt requires bumping
+   DOSSIER_VERSION in backend/assets/dossier.py — otherwise the cache keeps serving
+   extractions produced under the old wording as if they were current. #}
+You are extracting a document figure into text so that it can be found by search and answered from later, without anyone re-opening the image.
+
+Context around the image:
+{{ context }}
+
+Produce:
+- caption: one line naming what this image IS. Prefer the document's own caption wording when the context supplies it.
+- description: what the image shows and how to read it. State the subject, the axes or columns, and the units. Do not speculate beyond what is visible.
+- transcription: EVERY piece of text visible in the image, verbatim, including axis labels, legends, units, and footnotes. If it is a chart or a table, also render the underlying values as a markdown table. This field is what lets a text-only model answer questions about the figure later, so completeness here matters more than brevity.
+- tags: short topical keywords a person might search for.
+- image_type: the closest category.
+- answerable_questions: up to four questions this image can answer, phrased the way a user would actually ask them.
+- confidence: how legible and complete your reading was, from 0 to 1. Report low confidence honestly when the image is blurry, cropped, or you cannot read the text — a low score sends it for re-extraction rather than into the index as fact.
+
+Write in the language of the document. Never invent values you cannot see.

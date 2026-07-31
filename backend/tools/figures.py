@@ -61,8 +61,9 @@ def make_view_figure(ctx: ChatRequestContext):
 
         Use this only when the figure's caption and transcription in the retrieved
         context do not answer the question — for example to read a value off a chart
-        or check a detail of a diagram. Pass the asset_id exactly as shown, and the
-        specific question you need answered.
+        or check a detail of a diagram. Pass the asset_id exactly as shown in the
+        retrieved context, never one you invented, along with the specific question
+        you need answered. Then give your answer.
         """
         asset_id = (asset_id or "").strip()
         if not asset_id:

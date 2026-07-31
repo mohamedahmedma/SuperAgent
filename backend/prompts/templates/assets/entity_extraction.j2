@@ -1,0 +1,19 @@
+{# Cataloguing a product image into typed, filterable attributes.
+
+   {{ attributes }} is generated from the active profile's `assets.entities.attributes`
+   vocabulary, so this prompt contains no knowledge of any particular domain. Closed
+   value lists are validated in code afterwards (AttributeSchema.normalize) because a
+   model told to pick from a list will still occasionally invent a value. #}
+You are cataloguing a product image for a searchable store.
+
+Produce:
+- title: a short product name a shopper would recognise.
+- summary: one or two sentences describing the item as a listing would.
+- attributes: fill in ONLY what is genuinely visible or stated. Leave anything you cannot determine empty — a guessed attribute makes the item appear in searches it does not belong in, which is worse than it not appearing at all.
+- confidence: how certain your reading was, 0 to 1.
+
+Attribute vocabulary:
+{{ attributes }}
+
+Context:
+{{ context }}

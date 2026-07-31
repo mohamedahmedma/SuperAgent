@@ -28,6 +28,23 @@ _ARABIC_RANGES = (
 ARABIC = "ar"
 ENGLISH = "en"
 
+# Languages this module can name POSITIVELY, for a prompt that wants to say "reply in
+# X" rather than "reply in the user's language".
+#
+# Arabic only, and English's absence is the whole point. `detect_language` is a
+# two-way script test: Arabic script or not. `en` is what it returns when it did not
+# find Arabic, which is a fallback, not a detection — Chinese and French both come
+# back `en`, and the base profile ships Chinese fast-path markers, so that is a real
+# case rather than a hypothetical. Telling one of those users to "reply in English"
+# would be worse than saying nothing, so anything not in this map keeps the generic
+# instruction. Adding a script here means teaching the detector to establish it first.
+LANGUAGE_NAMES = {ARABIC: "Arabic"}
+
+
+def language_name(code: str) -> str:
+    """The English name of a positively-detected language, or "" when there is none."""
+    return LANGUAGE_NAMES.get(code or "", "")
+
 
 def _in_ranges(char: str, ranges: Iterable[tuple]) -> bool:
     return any(low <= char <= high for low, high in ranges)

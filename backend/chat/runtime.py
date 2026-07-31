@@ -14,11 +14,6 @@ BASE_URL = os.getenv("BASE_URL")
 
 _profile = get_profile()
 
-# Persona, tool contract, and citation rules all come from the active profile.
-# See backend/profiles/definitions/*.yaml.
-SYSTEM_PROMPT = _profile.render_system_prompt()
-
-
 model = init_chat_model(
     model=MODEL,
     model_provider="openai",
@@ -38,7 +33,11 @@ fast_model = init_chat_model(
 )
 
 
-def create_agent_for_request(ctx: ChatRequestContext, tool_names: list[str] | None = None):
+def create_agent_for_request(
+    ctx: ChatRequestContext,
+    tool_names: list[str] | None = None,
+    language: str | None = None,
+):
     """Build the agent for one turn.
 
     `tool_names` narrows what is bound for this turn — the turn planner passes a
@@ -54,5 +53,7 @@ def create_agent_for_request(ctx: ChatRequestContext, tool_names: list[str] | No
     return create_agent(
         model=model,
         tools=build_tools(allowed, ctx),
-        system_prompt=profile.render_system_prompt(),
+        # Same list drives both, so the prompt can never describe a capability this
+        # turn did not bind, or stay silent about one it did.
+        system_prompt=profile.render_system_prompt(allowed, language),
     )

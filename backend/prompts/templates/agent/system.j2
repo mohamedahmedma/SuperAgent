@@ -1,0 +1,39 @@
+{# The agent's system prompt. Paid on EVERY turn, so it carries only what is true on
+   every turn; see backend/prompts/__init__.py for where the rest lives.
+
+   `grounded` is true when at least one bound tool returns citable evidence. It is
+   computed in backend/tools (GROUNDED_TOOLS) and passed in — this template must not
+   inspect the tool list itself, or the prompt and the tool binding become two
+   independent decisions that can disagree. A prompt describing a tool that was not
+   bound produces a call for a tool that does not exist.
+
+   To specialise this for a domain, add templates/packs/<name>/system.j2 containing
+   `{% extends "agent/system.j2" %}` and override a single block, rather than copying
+   the file. Blocks exist for exactly that.
+
+   Whitespace: the environment sets trim_blocks, so the newline immediately after any
+   {% %} tag is swallowed. A blank line between two sections therefore needs TWO blank
+   lines in the source to survive. test_prompt_composition.py asserts the rendered
+   shape, so if you reflow this, that test tells you what you changed. #}
+{% block persona %}{{ persona }}{% endblock %}
+
+
+{% block grounding %}
+{% if grounded %}
+Search once, then answer from what comes back.
+
+Grounding rules:
+- Base every factual claim on the retrieved chunks.
+- Cite the chunk behind each claim inline by its index: [1], or [2][3].
+- Say plainly when the retrieved context does not answer the question.
+
+{% endif %}
+{% endblock %}
+{% block style %}
+{% if language_name %}
+Reply in {{ language_name }}.
+{% else %}
+Reply in the language the user wrote in.
+{% endif %}
+Keep answers to a few short paragraphs or a bulleted list. Markdown is supported.
+{% endblock %}

@@ -83,6 +83,20 @@ def load_pipeline(
     return module
 
 
+def enable_complexity_planning(pipeline):
+    """Recompile the loaded pipeline with the planning branch registered.
+
+    The profile ships with `complexity_planning_enabled: false`, so a freshly loaded
+    module has no classify_complexity node. Tests covering the planner have to ask for
+    it explicitly. The module global is set as well as the graph rebuilt, because
+    `_initial_state` reads it — leaving the two disagreeing would seed a state that
+    claims planning is off into a graph that plans.
+    """
+    pipeline.COMPLEXITY_PLANNING_ENABLED = True
+    pipeline.rag_graph = pipeline.build_rag_graph(complexity_planning_enabled=True)
+    return pipeline
+
+
 def _doc(text, chunk_id="chunk-1", filename="doc.md"):
     return {
         "filename": filename,
@@ -191,7 +205,7 @@ class RagShortCircuitTests(unittest.TestCase):
                 "confidence": 0.95,
             }
 
-        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline = enable_complexity_planning(load_pipeline(retrieve_documents=retrieve))
         complexity_model = Mock(return_value=FakeStructuredModel(
             lambda schema, prompt: {"complexity": "simple", "reason": "model"}
         ))
@@ -228,7 +242,7 @@ class RagShortCircuitTests(unittest.TestCase):
                 "confidence": 0.9,
             }
 
-        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline = enable_complexity_planning(load_pipeline(retrieve_documents=retrieve))
         complexity_model_calls = {"count": 0}
 
         def get_complexity_model():
@@ -271,7 +285,7 @@ class RagShortCircuitTests(unittest.TestCase):
                 "confidence": 0.9,
             }
 
-        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline = enable_complexity_planning(load_pipeline(retrieve_documents=retrieve))
         pipeline._get_complexity_model = lambda: FakeStructuredModel(plan)
         pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
 
@@ -283,6 +297,52 @@ class RagShortCircuitTests(unittest.TestCase):
 
         self.assertEqual(["ComplexityResult"], model_schemas)
         self.assertEqual(2, result.get("rag_trace", {}).get("sub_agent_count"))
+
+    def test_planning_disabled_removes_the_node_and_the_call(self):
+        """With planning off the planner is not skipped — it is absent.
+
+        Asserting only "the model was not called" would also pass if the node ran and
+        took its fast path, which is a different (and still billable) system. So the
+        graph's own node list is checked too."""
+        def retrieve(query, top_k=5):
+            return {"docs": [_doc("direct answer evidence")], "meta": _meta(1)}
+
+        def grade(schema, prompt):
+            return {
+                "relevance": "strong",
+                "answerability": "sufficient",
+                "ambiguity": "none",
+                "route": "answer",
+                "confidence": 0.9,
+            }
+
+        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline.COMPLEXITY_PLANNING_ENABLED = False
+        pipeline.rag_graph = pipeline.build_rag_graph(complexity_planning_enabled=False)
+        complexity_model = Mock(side_effect=AssertionError("planner must not be reached"))
+        pipeline._get_complexity_model = complexity_model
+        pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
+
+        nodes = set(pipeline.rag_graph.get_graph().nodes)
+        for absent in ("classify_complexity", "prepare_sub_questions", "rag_sub_agent", "synthesis"):
+            self.assertNotIn(absent, nodes)
+        self.assertIn("retrieve_initial", nodes)
+
+        ctx = self._ctx()
+        try:
+            # A question the fast path would NOT classify: long, comparative, and
+            # multi-dimension, so it is the planner's own case. It still must not run.
+            result = pipeline.run_rag_graph(
+                "Compare the combat roles of Danjin and Kakaro across weapon type and element", ctx
+            )
+        finally:
+            ctx.close()
+
+        complexity_model.assert_not_called()
+        self.assertIsNone(result.get("complexity"))
+        self.assertEqual("complexity_planning_disabled", result.get("complexity_reason"))
+        self.assertEqual("answerable", result.get("retrieval_status"))
+        self.assertEqual(1, len(result.get("docs", [])))
 
     def test_strong_evidence_returns_after_initial_grade(self):
         calls = {"retrieve": 0, "step_back": 0}
@@ -566,10 +626,10 @@ class RagShortCircuitTests(unittest.TestCase):
                 "confidence": 0.5,
             }
 
-        pipeline = load_pipeline(
+        pipeline = enable_complexity_planning(load_pipeline(
             retrieve_documents=retrieve,
             rewrite_query_once=lambda query: calls.__setitem__("step_back", calls["step_back"] + 1) or {},
-        )
+        ))
         pipeline._get_complexity_model = lambda: FakeStructuredModel(complexity)
         pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
 
@@ -598,7 +658,7 @@ class RagShortCircuitTests(unittest.TestCase):
                 "sub_questions": ["missing one", "missing two"],
             }
 
-        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline = enable_complexity_planning(load_pipeline(retrieve_documents=retrieve))
         pipeline._get_complexity_model = lambda: FakeStructuredModel(complexity)
         pipeline._get_grader_model = lambda: FakeStructuredModel(lambda schema, prompt: {})
 
@@ -634,7 +694,7 @@ class RagShortCircuitTests(unittest.TestCase):
                 "hitl_prompt": "Please clarify exactly what it refers to.",
             }
 
-        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline = enable_complexity_planning(load_pipeline(retrieve_documents=retrieve))
         pipeline._get_complexity_model = lambda: FakeStructuredModel(complexity)
         pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
 

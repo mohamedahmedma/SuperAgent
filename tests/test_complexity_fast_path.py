@@ -131,9 +131,9 @@ class ProfileWiringTests(unittest.TestCase):
     def test_the_planner_prompt_tells_the_model_to_prefer_simple(self):
         """Decomposition costs a retrieval and a grader call per sub-question, so the
         prompt has to say that rather than leaving it to taste."""
-        from backend.profiles.registry import load_profile
+        from backend.prompts import render
 
-        prompt = load_profile("base").rag.complexity_prompt.lower()
+        prompt = render("rag/complexity.j2", question="q").lower()
         self.assertIn("default to simple", prompt)
         self.assertIn("still simple when its answer happens to be a list", prompt)
 

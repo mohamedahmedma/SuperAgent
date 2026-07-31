@@ -39,6 +39,10 @@ dependencies = [
     # Domain profile definitions (backend/profiles/definitions/*.yaml). Previously
     # available only transitively via langchain-core; imported directly now.
     "pyyaml>=6.0",
+    # Prompt templates (backend/prompts/templates/**/*.j2). Same story as pyyaml: it
+    # arrives transitively via fastapi/langchain today, but backend.prompts imports it
+    # directly, so it is declared rather than relied on as someone else's dependency.
+    "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +55,12 @@ study = [
 [tool.setuptools.packages.find]
 include = ["backend*"]
 exclude = ["frontend*", "tests*"]
+
+# Templates and profile definitions are data, not modules, so packages.find alone does
+# not ship them — an installed build would import fine and then fail at first render.
+[tool.setuptools.package-data]
+"backend.prompts" = ["templates/**/*.j2"]
+"backend.profiles" = ["definitions/*.yaml"]
 
 [dependency-groups]
 dev = [

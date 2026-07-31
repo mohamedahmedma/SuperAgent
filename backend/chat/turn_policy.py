@@ -55,6 +55,10 @@ class TurnPlan:
     exposed_tools: Optional[List[str]] = None
     # Sections to search first. A hint; never a filter.
     retrieval_sections: List[str] = field(default_factory=list)
+    # Language to answer in, as a detector code. Carried on the plan rather than read
+    # from the signals downstream because the agent is built from the plan, and the
+    # prompt has to be able to say it.
+    language: str = ENGLISH
     # Whether this turn is worth a post-turn profile extraction.
     capture_user_info: bool = False
     reasons: List[str] = field(default_factory=list)
@@ -68,6 +72,7 @@ class TurnPlan:
             "turn_short_circuit": self.short_circuit,
             "turn_exposed_tools": list(self.exposed_tools) if self.exposed_tools is not None else None,
             "turn_retrieval_sections": list(self.retrieval_sections),
+            "turn_language": self.language,
             "turn_capture_user_info": self.capture_user_info,
             "turn_reason": "; ".join(self.reasons) or "n/a",
         }
@@ -110,6 +115,7 @@ def resolve_turn(
     # Independent of scope: someone can disclose their phone number in the middle of
     # an off-topic message, and that is still worth keeping.
     plan.capture_user_info = bool(signals.personal_data)
+    plan.language = signals.language
 
     if signals.is_social:
         return _plan_social(signals, plan, agent_config, copy_config)

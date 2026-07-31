@@ -1,0 +1,42 @@
+{# Everything search_knowledge_base says back to the model.
+
+   This is the Class B half of prompt routing: instructions that depend on what
+   retrieval actually RETURNED, which the system prompt cannot know because it is
+   fixed before the tool runs. Each branch below is paid only on the turns where its
+   condition is real, which is why the system prompt can stay silent about all of it.
+
+   `outcome` is DECIDED in backend/tools/knowledge.py and merely rendered here. The
+   template selects wording; it does not inspect the trace or apply policy. Keep it
+   that way — a condition richer than "which outcome" belongs in the tool.
+
+   The sentence lines below run long ON PURPOSE. A model reads what is rendered, not
+   the source, and hard-wrapping a sentence here puts real newlines mid-phrase in the
+   prompt — extra tokens, and it breaks any downstream match on a phrase that now
+   straddles a line break. Let the editor soft-wrap; do not reflow these by hand.
+
+   Whitespace: trim_blocks is on, so the newline after every {% %} tag is swallowed. #}
+{% if outcome == "call_limit" %}
+TOOL_CALL_LIMIT_REACHED: search_knowledge_base has already been called once in this turn. Use the existing retrieval result and provide the final answer directly.
+{% elif outcome == "needs_clarification" %}
+NEEDS_CLARIFICATION: {{ prompt }}
+Put this question to the user directly. Do not answer from the retrieved context.
+{% elif outcome == "needs_scope_selection" %}
+NEEDS_SCOPE_SELECTION: {{ prompt }}
+{% if options %}
+Options: {{ options | join("; ") }}
+{% endif %}
+Ask the user to choose. Do not answer from the retrieved context.
+{% elif outcome == "retrieval_error" %}
+RETRIEVAL_ERROR: The knowledge base could not be searched right now due to a temporary technical issue. Tell the user a brief technical problem interrupted the search and to try again in a moment. Do NOT claim the knowledge base lacks this information, and do not answer from your own knowledge.
+{% elif outcome == "no_knowledge" %}
+NO_KNOWLEDGE: No reliable relevant documents were found in the knowledge base. Tell the user it does not contain reliable information on this, and do not answer from your own knowledge.
+{% elif outcome == "empty" %}
+No relevant documents found in the knowledge base.
+{% else %}
+Retrieved Chunks:
+{{ chunks }}
+{% if rewritten %}
+
+Note: this turn re-queried using a step-back question or a HyDE document. Those are retrieval aids, not evidence — cite only the chunks above.
+{% endif %}
+{% endif %}

@@ -16,6 +16,7 @@ from backend.rag.evidence import (
     EvidenceReport,
     build_ladder,
 )
+from backend.prompts import resolve as resolve_prompt
 from backend.rag.policy import decide_route, select_context_indices
 from backend.rag.rerank_assessor import CrossEncoderAssessor
 from backend.profiles import get_profile
@@ -79,19 +80,43 @@ def _get_complexity_model():
 
 EVIDENCE_GRADE_PROMPT = _RAG.evidence_grade_prompt
 
+# Whether the complexity planner and the decomposition branch exist at all this
+# process. Read once here rather than at each call site so the graph shape and the
+# state it starts from can never disagree about it.
+COMPLEXITY_PLANNING_ENABLED = _RAG.complexity_planning_enabled
+
 
 class EvidenceGrade(BaseModel):
-    """Structured evidence grade: judges relevance, answerability, and the next routing step together."""
+    """Structured evidence grade: judges relevance, answerability, and the next routing step together.
+
+    These descriptions are the ONLY definition of what each value means. They are
+    serialized into the JSON schema and sent on the same call as the prompt, so stating
+    the semantics in `evidence_grade_prompt` as well was paying for them twice. The
+    prompt now defines only the route decision, which reads across these fields.
+    """
 
     relevance: Literal["none", "weak", "strong"] = Field(
-        description="Topical relevance between the retrieved snippets and the question"
+        description=(
+            "Topical relevance of the snippets to the question. none: the topic is "
+            "unrelated. weak: the topic is close but the evidence is thin. strong: "
+            "clearly relevant."
+        )
     )
     answerability: Literal["none", "partial", "sufficient"] = Field(
-        description="Whether the retrieved snippets are sufficient to answer the question"
+        description=(
+            "Whether the snippets can answer the question. none: they cannot. partial: "
+            "some clues, but not enough to be definitive. sufficient: they support an "
+            "answer, directly or jointly."
+        )
     )
     ambiguity: Literal["none", "missing_slot", "multiple_candidates"] = Field(
         default="none",
-        description="Whether the question is missing a condition or has multiple candidate directions"
+        description=(
+            "Whether the question under-specifies what to look for. missing_slot: a key "
+            "condition is absent (role name, version, file type, module name, product "
+            "line). multiple_candidates: several directions could all be relevant. "
+            "none: no clear ambiguity."
+        )
     )
     route: Literal["answer", "rewrite", "clarify", "scope_select", "no_knowledge"] = Field(
         description="The next routing step"
@@ -265,7 +290,10 @@ def _initial_state(
         "hyde_document": None,
         "rag_trace": None,
         "complexity": None,
-        "complexity_reason": None,
+        # Left unset when planning is off, because nothing classified this question and
+        # writing "simple" would be the fabricated-grade pattern evidence.py exists to
+        # prevent. The reason still says so, so a trace shows absence, not silence.
+        "complexity_reason": None if COMPLEXITY_PLANNING_ENABLED else "complexity_planning_disabled",
         "sub_questions": None,
         "is_sub_agent": is_sub_agent,
         "sub_results": [],
@@ -390,7 +418,9 @@ class LLMGraderAssessor:
         if not grader:
             raise RuntimeError("GRADE_MODEL is required for evidence grading")
 
-        prompt = EVIDENCE_GRADE_PROMPT.format(
+        prompt = resolve_prompt(
+            EVIDENCE_GRADE_PROMPT,
+            "rag/evidence_grade.j2",
             question=ctx.question,
             context=_format_docs(ctx.docs),
         )
@@ -746,7 +776,7 @@ def classify_complexity(state: RAGState) -> RAGState:
     if not model:
         raise RuntimeError("FAST_MODEL is required for complexity planning")
 
-    prompt = COMPLEXITY_PROMPT.format(question=question)
+    prompt = resolve_prompt(COMPLEXITY_PROMPT, "rag/complexity.j2", question=question)
     result = model.with_structured_output(ComplexityResult).invoke(
         [{"role": "user", "content": prompt}]
     )
@@ -980,35 +1010,60 @@ def rag_sub_agent(state: RAGState) -> RAGState:
 # Main RAG graph
 # ---------------------------------------------------------------------------
 
-def build_rag_graph():
+def build_rag_graph(complexity_planning_enabled: Optional[bool] = None):
+    """Compile the retrieval graph for this process.
+
+    The planning branch is registered or not, rather than registered and skipped. A
+    disabled node that still exists costs a trace span, an edge to reason about, and a
+    reader's attention every time they follow the graph; a node that was never added
+    costs none of those. The argument exists so a caller can compile the other shape
+    without reloading the module — production passes nothing and takes the profile's.
+    """
+    planning = (
+        COMPLEXITY_PLANNING_ENABLED
+        if complexity_planning_enabled is None
+        else complexity_planning_enabled
+    )
     graph = StateGraph(RAGState)
 
     # Register nodes
-    graph.add_node("classify_complexity", classify_complexity)
-    graph.add_node("prepare_sub_questions", prepare_sub_questions)
     graph.add_node("retrieve_initial", retrieve_initial)
     graph.add_node("grade_documents", grade_documents_node)
     graph.add_node("rewrite_question", rewrite_question_node)
     graph.add_node("retrieve_rewritten", retrieve_rewritten)
-    graph.add_node("rag_sub_agent", rag_sub_agent)
-    graph.add_node("synthesis", synthesis)
 
-    # Entry point: complexity classification. Domain scope is decided one layer up, in
-    # backend/chat/orchestrator.py — by the time this graph runs, the agent has already
-    # chosen to search, so a gate here could no longer save the call it was meant to.
-    graph.set_entry_point("classify_complexity")
+    if planning:
+        graph.add_node("classify_complexity", classify_complexity)
+        graph.add_node("prepare_sub_questions", prepare_sub_questions)
+        graph.add_node("rag_sub_agent", rag_sub_agent)
+        graph.add_node("synthesis", synthesis)
 
-    # Simple questions go straight to retrieval; complex questions use the sub-questions the planner produced in one pass.
-    graph.add_conditional_edges(
-        "classify_complexity",
-        _route_after_complexity,
-        {
-            "retrieve_initial": "retrieve_initial",
-            "prepare_sub_questions": "prepare_sub_questions",
-        },
-    )
+        # Entry point: complexity classification. Domain scope is decided one layer up,
+        # in backend/chat/orchestrator.py — by the time this graph runs, the agent has
+        # already chosen to search, so a gate here could no longer save the call it was
+        # meant to.
+        graph.set_entry_point("classify_complexity")
 
-    graph.add_conditional_edges("prepare_sub_questions", _fanout_sub_questions)
+        # Simple questions go straight to retrieval; complex questions use the sub-questions the planner produced in one pass.
+        graph.add_conditional_edges(
+            "classify_complexity",
+            _route_after_complexity,
+            {
+                "retrieve_initial": "retrieve_initial",
+                "prepare_sub_questions": "prepare_sub_questions",
+            },
+        )
+
+        graph.add_conditional_edges("prepare_sub_questions", _fanout_sub_questions)
+
+        # Parallel sub-agents → synthesis
+        graph.add_edge("rag_sub_agent", "synthesis")
+        graph.add_edge("synthesis", END)
+    else:
+        # No planner, so nothing to classify and nothing to decompose: every question
+        # takes what used to be the simple path, which is also the path the fast path
+        # was already sending most of them down for free.
+        graph.set_entry_point("retrieve_initial")
 
     # Simple-question path
     graph.add_edge("retrieve_initial", "grade_documents")
@@ -1022,10 +1077,6 @@ def build_rag_graph():
     )
     graph.add_edge("rewrite_question", "retrieve_rewritten")
     graph.add_edge("retrieve_rewritten", "grade_documents")
-
-    # Parallel sub-agents → synthesis
-    graph.add_edge("rag_sub_agent", "synthesis")
-    graph.add_edge("synthesis", END)
 
     return graph.compile()
 

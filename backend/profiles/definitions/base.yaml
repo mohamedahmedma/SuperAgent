@@ -36,65 +36,36 @@ agent:
   context_window_messages: 6
   persistent_note_max_chars: 500
 
-  # Direct-answer path used when a HITL clarification is resumed (bypasses the agent).
-  resume_answer_prompt: >-
-    You are a helpful knowledge-base assistant.
-    Answer the user's original question using only the retrieved chunks.
-    You MUST cite source chunks inline with [1], [2], etc.
-    If the chunks are insufficient, say so honestly.
-    Do not mention internal HITL or RAG implementation details.
-
-  # Rolling conversation summary. {max_chars} is substituted from
-  # agent.persistent_note_max_chars.
-  persistent_note_prompt: |-
-    You are a [Context Manager Agent], responsible for maintaining the "persistent note" across multi-turn conversations.
-    The note is the model's long-term working memory under a limited context window, recording resolved questions and key facts.
-
-    Update rules:
-    1. Intelligently merge new information into the existing note; do not simply append it.
-    2. Filter out noise and keep it under {max_chars} characters, using concise bullet points.
-    3. If information conflicts, keep the most reliable or most recent version.
-  # {persona} is substituted from identity.persona. Everything after it is the
-  # tool-and-citation contract, which is domain-independent.
-  system_prompt: >-
-    {persona}
-    When responding, you may use tools to assist.
-    Use search_knowledge_base when users ask document/knowledge questions.
-    Do not call the same tool repeatedly in one turn. At most one knowledge tool call per turn.
-    After receiving a search_knowledge_base result you MUST NOT call search_knowledge_base
-    or get_current_weather again in that turn.
-    The one exception is view_figure. If a retrieved chunk references a figure and its
-    caption and transcription do not answer the question, call view_figure with that
-    asset_id and the specific question, then answer. Do not call view_figure when the
-    retrieved text already answers the question, and never invent an asset_id.
-    Once you have what you need, produce the Final Answer immediately.
-    If the tool result starts with NEEDS_CLARIFICATION or NEEDS_SCOPE_SELECTION, ask the user
-    the requested question directly and do not answer from retrieved context.
-    If the tool result starts with NO_KNOWLEDGE, say the knowledge base does not contain
-    reliable relevant information.
-    If the tool result starts with RETRIEVAL_ERROR, tell the user a temporary technical issue
-    prevented searching the knowledge base and to try again shortly; do NOT claim the knowledge
-    base lacks the information.
-    If the retrieved context is insufficient, answer honestly that you don't know instead of
-    making up facts.
-    When answering based on retrieved chunks, you MUST cite the source chunks using their index
-    numbers inline, for example [1] or [2][3].
-    Step-back questions and HyDE documents are retrieval aids only, not factual evidence.
-    Base factual claims only on retrieved source chunks and do not reveal chain-of-thought.
-    If you don't know the answer, admit it honestly.
+  # No prompt text here. Prompts live in backend/prompts/templates/ and a profile sets
+  # one of these keys only to OVERRIDE the shipped template — which is why the shipped
+  # profiles leave them all empty:
+  #
+  #   system_prompt          -> agent/system.j2      (composed per turn; see below)
+  #   resume_answer_prompt   -> agent/resume_answer.j2
+  #   persistent_note_prompt -> agent/persistent_note.j2
+  #
+  # system_prompt is the one worth understanding before setting: the template composes
+  # it from the tools the turn actually bound, so a turn narrowed to search-only does
+  # not pay for the rest. Setting it here replaces the whole thing and opts this
+  # profile out of that narrowing. See AgentConfig.system_prompt.
 
 rag:
   max_rewrites: 1
   max_sub_questions: 4
 
-  # The grader is one synchronous LLM call per retrieval — and one per sub-agent on a
-  # decomposed question — so it is usually the dominant latency in a turn. In
-  # uncertain_only it runs unless retrieval is clearly on target. Every threshold below
-  # must hold before it is skipped: skipping wrongly means answering from weak
-  # evidence, while grading unnecessarily only costs time.
-  #   always | uncertain_only | never   (never also disables rewrite and HITL)
+  # Complexity planning and sub-question decomposition. OFF: the planner is one
+  # FAST_MODEL call on every knowledge turn, and the local fast path below already
+  # settles most questions as simple without spending it. What it buys — parallel
+  # sub-agents for a genuinely multi-part question — costs a retrieval and a grader
+  # call per sub-question, so it only pays for itself on a corpus where cross-document
+  # comparisons are the common case rather than the exception.
+  # With this off, classify_complexity is not registered as a node: a turn goes
+  # straight to retrieve_initial and the decomposition branch is unreachable.
+  complexity_planning_enabled: false
+
   # The ladder's semantic rung. Off until its latency is measured on target hardware;
-  # turning it on is also what makes `evidence_required_certainty: medium` meaningful.
+  # turning it on is also what makes `evidence_required_certainty: medium` meaningful,
+  # and it is the precondition for moving `grading_mode` off `always` (see below).
   rerank_cross_encoder_enabled: false
   rerank_cross_encoder_model: BAAI/bge-reranker-v2-m3
   rerank_cross_encoder_device: cpu
@@ -116,11 +87,19 @@ rag:
   evidence_required_certainty: high
   evidence_lexical_enabled: true
 
+  # The grader is one synchronous LLM call per retrieval — and one per sub-agent on a
+  # decomposed question — so it is usually the dominant latency in a turn. In
+  # uncertain_only it runs unless retrieval is clearly on target; every skip_grading_*
+  # threshold below must hold before it is skipped, because skipping wrongly means
+  # answering from weak evidence while grading unnecessarily only costs time.
+  #   always | uncertain_only | never   (never also disables rewrite and HITL)
+  #
   # Held at `always` until a semantic assessor exists. The skip decision used to rest
   # on lexical term coverage, which reads 0 whenever the question and the corpus differ
   # in language or vocabulary — so it could not tell "retrieval missed" from "retrieval
   # hit but worded it differently", and it never measured meaning at all. Move this to
-  # uncertain_only once the reranker supplies calibrated per-chunk scores.
+  # uncertain_only once the reranker supplies calibrated per-chunk scores, which means
+  # after `rerank_cross_encoder_enabled` is on and measured.
   grading_mode: always
   skip_grading_min_chunks: 3
   skip_grading_term_coverage: 0.75
@@ -133,65 +112,28 @@ rag:
   # asking for a complete set are never trimmed, and a chunk shorter than
   # context_min_chunk_chars can never be the one that ends selection.
   #   adaptive | off
-  # Off for the same reason, plus a sharper one: trimming after the grader has ruled on
-  # the full set means answering from narrower evidence than was judged sufficient. Once
-  # the grader reports WHICH chunks carried its judgement, trimming to those is not
-  # narrowing and this can go back to adaptive.
-  context_selection_mode: "off"
+  # On, and the precondition for it is now met. This was held at `off` while trimming
+  # meant answering from narrower evidence than the grader had ruled sufficient — a
+  # lexical guess about which chunks mattered. EvidenceGrade.supporting_chunks now has
+  # the grader name the chunks that carried its judgement, so trimming to those is a
+  # consequence of the same judgement that approved the answer, not a second guess.
+  context_selection_mode: "adaptive"
   context_min_chunks: 1
   context_target_coverage: 1.0
   context_min_chunk_chars: 120
   fast_path_max_chars: 48
   fast_path_short_intent_chars: 18
 
-  evidence_grade_prompt: |-
-    You are a RAG evidence grader. Based only on the retrieved snippets, judge whether they are sufficient to answer the user's question. Do not add information that is not in the snippets.
-
-    User question:
-    {question}
-
-    Retrieved snippets:
-    {context}
-
-    Give a structured result following these rules:
-    - relevance: none means the topic is unrelated; weak means the topic is close but the evidence is weak; strong means the topic is clearly relevant.
-    - answerability: none means it cannot be answered; partial means there are some clues but not enough for a definitive answer; sufficient means the snippets can directly or jointly support an answer.
-    - ambiguity: missing_slot means a key condition is missing (e.g. role name, version, file type, module name, product line); multiple_candidates means several candidate directions could all be relevant; none means there is no clear ambiguity.
-    - route may only be one of: answer, rewrite, clarify, scope_select, no_knowledge.
-      answer: relevance=strong and answerability=sufficient.
-      rewrite: there is a relevant signal, but the evidence is insufficient, likely due to phrasing, aliasing, or generalization level.
-      clarify: a key condition is missing and the user needs to provide it.
-      scope_select: multiple candidate directions are relevant and the user needs to choose one.
-      no_knowledge: no recall, or the topic is unrelated.
-    - If route is clarify or scope_select, provide hitl_prompt; if options can be listed, provide hitl_options.
-
-  complexity_prompt: |-
-    You are a question complexity planner. Determine the complexity of the user's question.
-
-    [Simple question]: factual lookups, definition lookups, single-information-point queries, clear either/or questions, or queries about a specific attribute/parameter/spec.
-    A question is STILL simple when its answer happens to be a list — "what are the partners", "which subjects are taught", "what does the uniform include". Retrieving one passage answers all of those.
-    [Complex question]: questions that need cross-document synthesis, multi-angle analysis, comparisons between two or more named things, multi-step reasoning, or several genuinely independent information needs.
-
-    Default to simple. Decomposition costs one retrieval and one grading call per sub-question, so only choose complex when a single retrieval genuinely cannot answer the question. If you are unsure, answer simple.
-
-    User question: {question}
-
-    If it's a complex question, also provide 2-4 non-overlapping, independently retrievable sub-questions; if it's a simple question, leave sub_questions empty.
-
-  rewrite_prompt: |-
-    You are a RAG query-rewrite planner. The initial retrieval already found a relevant signal, but the evidence is insufficient. Choose exactly one rewrite method — step_back or hyde — and generate the content that method needs.
-
-    Selection rules:
-    - step_back: the original question is too specific, containing entity names, model numbers, dates, conditions, or details; it needs to be raised to a more general concept, mechanism, or principle before retrieving again.
-    - hyde: the original question is vague, highly conceptual, or lacks terminology commonly used in the knowledge base; it's better to first generate a plausible answer-like document, then use that document to retrieve real evidence.
-
-    Constraints:
-    - ALWAYS return all three fields. Providers that enforce strict JSON schemas reject a response with a field omitted, so the unused field must be present as an empty string "" — never left out.
-    - When method=step_back, put your question in step_back_question and set hyde_document to "".
-    - When method=hyde, put your document in hyde_document and set step_back_question to "".
-    - The HyDE document is for retrieval only and does not represent real evidence — do not fabricate citations or sources.
-
-    User question: {query}
+  # The RAG prompts live in backend/prompts/templates/rag/ — evidence_grade.j2,
+  # complexity.j2, rewrite.j2 — and the matching keys here exist only to override one.
+  #
+  # The marker vocabularies below, by contrast, stay: they are domain vocabulary rather
+  # than prompt text, and a domain profile is expected to replace them wholesale.
+  #
+  # DORMANT, all four of them. They are read only on the complexity fast path, which
+  # runs only when `complexity_planning_enabled` is true — and no shipped profile turns
+  # it on. Kept so enabling the flag does not require rewriting them, but nothing here
+  # affects a running deployment, so do not tune them expecting an effect.
 
   # Single-fact phrasings that must beat the complex markers below. "how many" and
   # "how much" both contain "how ", which also opens an analytical question; without
@@ -335,23 +277,6 @@ assets:
     max_tags: 8
     max_answerable_questions: 4
     escalate_below_confidence: 0.45
-    extraction_prompt: |-
-      You are extracting a document figure into text so that it can be found by search and answered from later, without anyone re-opening the image.
-
-      Context around the image:
-      {context}
-
-      Produce:
-      - caption: one line naming what this image IS. Prefer the document's own caption wording when the context supplies it.
-      - description: what the image shows and how to read it. State the subject, the axes or columns, and the units. Do not speculate beyond what is visible.
-      - transcription: EVERY piece of text visible in the image, verbatim, including axis labels, legends, units, and footnotes. If it is a chart or a table, also render the underlying values as a markdown table. This field is what lets a text-only model answer questions about the figure later, so completeness here matters more than brevity.
-      - tags: short topical keywords a person might search for.
-      - image_type: the closest category.
-      - answerable_questions: up to four questions this image can answer, phrased the way a user would actually ask them.
-      - confidence: how legible and complete your reading was, from 0 to 1. Report low confidence honestly when the image is blurry, cropped, or you cannot read the text — a low score sends it for re-extraction rather than into the index as fact.
-
-      Write in the language of the document. Never invent values you cannot see.
-
 ingest:
   supported_extensions: [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".html", ".htm"]
   asset_pipelines: []

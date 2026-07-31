@@ -15,7 +15,7 @@ Design rules that the rest of the codebase relies on:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -60,7 +60,15 @@ class ModelConfig(_Section):
 class AgentConfig(_Section):
     """The tool-calling agent's contract."""
 
-    # {persona} is substituted from IdentityConfig.persona at render time.
+    # Empty means "use the shipped template", which is the normal case — the agent
+    # prompt is composed from backend/prompts/templates/agent/system.j2 so that a turn
+    # pays only for the capabilities it actually bound.
+    #
+    # Setting it is an escape hatch: the string is used verbatim (with {persona}
+    # substituted) and NOTHING is composed, so a profile that sets it also opts out of
+    # per-turn narrowing. Worth it for a deployment that needs total control of the
+    # wording; a domain that only wants to change part of the prompt should add a
+    # template pack and override one block instead.
     system_prompt: str = ""
     # System prompt for the direct-answer path taken when a HITL clarification is
     # resumed — that path bypasses the agent, so it needs its own instructions.
@@ -115,6 +123,19 @@ class RagConfig(_Section):
 
     max_rewrites: int = 1
     max_sub_questions: int = 4
+
+    # Complexity planning: one FAST_MODEL call that classifies the question and, when it
+    # is genuinely multi-part, decomposes it into sub-questions retrieved in parallel.
+    #
+    # It is a whole subsystem behind one switch, and its cost is not the planner call —
+    # that is the cheap part. Each sub-question pays its own retrieval AND its own grader
+    # call, so a decomposed turn costs a multiple of a plain one.
+    #
+    # When False the node is not registered at all: the graph starts at retrieve_initial,
+    # and prepare_sub_questions / rag_sub_agent / synthesis become unreachable rather than
+    # merely unused. Nothing downstream fabricates a classification to compensate —
+    # `complexity` stays unset, because nothing classified anything.
+    complexity_planning_enabled: bool = True
 
     # When to spend a GRADE_MODEL call on the retrieved evidence.
     #
@@ -534,13 +555,45 @@ class DomainProfile(BaseModel):
     user_copy: CopyConfig = Field(default_factory=CopyConfig)
     ingest: IngestConfig = Field(default_factory=IngestConfig)
 
-    def render_system_prompt(self) -> str:
-        """Agent system prompt with the profile's persona substituted in.
+    def render_system_prompt(
+        self,
+        tools: Optional[Sequence[str]] = None,
+        language: Optional[str] = None,
+    ) -> str:
+        """Agent system prompt for a turn binding `tools`, answered in `language`.
 
-        Uses str.replace rather than str.format: prompts routinely contain literal
-        braces (JSON examples, citation markers), and format() would raise on them.
+        `tools=None` means "everything the profile allows", which is both the default
+        and what any uncertainty produces: narrowing is an optimisation, so it must
+        never be the reason a capability goes unmentioned while its tool is bound.
+
+        The tool list is passed rather than read from the profile because the caller
+        decides it per turn (see backend/chat/runtime.py). Prompt and binding must come
+        from ONE decision — a prompt describing an unbound tool invites a call for a
+        tool that does not exist, and a bound tool whose instructions were dropped gets
+        used wrongly or not at all.
+
+        A profile that sets `agent.system_prompt` takes that verbatim. Uses str.replace
+        rather than str.format because prompts routinely contain literal braces (JSON
+        examples, citation markers) that format() would raise on.
         """
-        return self.agent.system_prompt.replace("{persona}", self.identity.persona).strip()
+        if self.agent.system_prompt:
+            return self.agent.system_prompt.replace("{persona}", self.identity.persona).strip()
+
+        # Imported here, not at module scope: backend.tools pulls in the request context
+        # and every tool module, and the profile package is imported by several of them.
+        from backend.chat.language import language_name
+        from backend.prompts import render
+        from backend.tools import GROUNDED_TOOLS
+
+        bound = list(self.agent.tools if tools is None else tools)
+        return render(
+            "agent/system.j2",
+            persona=self.identity.persona,
+            grounded=any(name in GROUNDED_TOOLS for name in bound),
+            # "" for anything the detector cannot positively name, which keeps the
+            # generic instruction. See LANGUAGE_NAMES for why that matters.
+            language_name=language_name(language) if language else "",
+        )
 
     def as_dict(self) -> Dict[str, Any]:
         return self.model_dump(mode="python")
