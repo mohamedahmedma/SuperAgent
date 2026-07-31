@@ -206,10 +206,21 @@ class PipelineIntegrationTests(unittest.TestCase):
             "rag_trace": {"retrieved_chunks": docs, "initial_retrieved_chunks": docs},
             "request_context": SilentContext(),
         }
-        # grading_mode=never keeps the node offline; the trimming path is what is under
-        # test here, not the grader.
-        config = rag_config(grading_mode="never")
-        with patch.object(pipeline, "_RAG", config):
+        # The grader is stubbed rather than disabled by config: the ladder climbs to it
+        # whenever the profile requires HIGH certainty, so a config flag no longer keeps
+        # this node offline. Trimming is what is under test, not grading.
+        class StubGrader:
+            def with_structured_output(self, schema):
+                return self
+
+            def invoke(self, _messages):
+                return pipeline.EvidenceGrade(
+                    relevance="strong", answerability="sufficient", route="answer",
+                    confidence=0.9, supporting_chunks=[1],
+                )
+
+        config = rag_config()
+        with patch.object(pipeline, "_RAG", config),              patch.object(pipeline, "_get_grader_model", lambda: StubGrader()):
             update = pipeline.grade_documents_node(state)
 
         self.assertEqual("answer", update["route"])
