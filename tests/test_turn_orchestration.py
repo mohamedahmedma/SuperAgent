@@ -257,3 +257,99 @@ class RagGraphTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
+    """Once retrieval concludes there is nothing to say, the model is not asked to say it.
+
+    The reply is profile copy either way. Letting the agent loop continue spends a whole
+    generation call — with the conversation and the tool result as input — to paraphrase
+    a string already in hand.
+    """
+
+    def _tool_message(self, name, content="NO_KNOWLEDGE: nothing found"):
+        from langchain_core.messages import ToolMessage
+
+        return ToolMessage(content=content, tool_call_id="c1", name=name)
+
+    async def _run(self, stream_items, trace, plan=None):
+        import backend.chat.service as service
+        from backend.chat.turn_policy import TurnPlan
+
+        generated = []
+
+        class FakeAgent:
+            async def astream(self, *a, **k):
+                for item in stream_items:
+                    if isinstance(item, str):
+                        chunk = AIMessageChunk(content=item)
+                        generated.append(item)
+                        yield chunk, {}
+                    else:
+                        yield item, {}
+
+        class Ctx:
+            def peek_rag_trace(self):
+                return {"rag_trace": trace}
+
+        chunks = []
+        with patch.object(service, "plan_turn",
+                          lambda *a, **k: (plan or TurnPlan(), RequestSignals())), \
+             patch.object(service, "create_agent_for_request", lambda ctx, tools=None: FakeAgent()), \
+             patch.object(service, "ChatRequestContext", Ctx), \
+             patch.object(service.storage, "load_with_meta", lambda *a: ([], {})), \
+             patch.object(service.storage, "save", lambda *a, **k: None), \
+             patch.object(service, "generate_session_title", lambda _t: "T"):
+            async for chunk in service.chat_with_agent_stream("what is partner", "u", "s"):
+                chunks.append(chunk)
+        return chunks, generated
+
+    def test_terminal_statuses_are_named(self):
+        import backend.chat.service as service
+
+        self.assertEqual({"no_knowledge", "retrieval_error"}, service.TERMINAL_STATUSES)
+
+    def test_the_reply_comes_from_profile_copy_in_the_right_language(self):
+        import backend.chat.service as service
+
+        english = service._terminal_reply("no_knowledge", "en")
+        arabic = service._terminal_reply("no_knowledge", "ar")
+        self.assertTrue(english)
+        self.assertTrue(arabic)
+        self.assertEqual(english, service._terminal_reply("no_knowledge", "de"),
+                         "an unknown language falls back rather than blanking")
+
+    def test_retrieval_error_and_no_knowledge_read_differently(self):
+        import backend.chat.service as service
+
+        self.assertNotEqual(
+            service._terminal_reply("no_knowledge", "en"),
+            service._terminal_reply("retrieval_error", "en"),
+        )
+
+    def test_a_non_terminal_status_is_not_short_circuited(self):
+        import backend.chat.service as service
+
+        class Ctx:
+            def peek_rag_trace(self):
+                return {"rag_trace": {"retrieval_status": "answerable"}}
+
+        self.assertIsNone(service._terminal_status(Ctx()))
+
+    def test_a_terminal_status_is_recognised(self):
+        import backend.chat.service as service
+
+        class Ctx:
+            def peek_rag_trace(self):
+                return {"rag_trace": {"retrieval_status": "no_knowledge"}}
+
+        self.assertEqual("no_knowledge", service._terminal_status(Ctx()))
+
+    def test_a_missing_trace_is_not_terminal(self):
+        import backend.chat.service as service
+
+        class Ctx:
+            def peek_rag_trace(self):
+                return None
+
+        self.assertIsNone(service._terminal_status(Ctx()))

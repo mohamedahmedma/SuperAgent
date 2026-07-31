@@ -1,9 +1,16 @@
 import asyncio
 import json
+from typing import Optional
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from backend.assets.delivery import ClientCapabilities
 from backend.chat.assets_bridge import (
@@ -208,6 +215,27 @@ def _build_resume_answer_messages(
         )
     )
     return [system, human]
+
+
+# Tool results whose outcome is already the final answer. The model adds nothing to
+# these but a rewording of profile copy, and it is charged for the whole conversation
+# plus the tool result to do it.
+TERMINAL_STATUSES = {"no_knowledge", "retrieval_error"}
+
+
+def _terminal_reply(status: str, language: str) -> str:
+    """The profile's own wording for an outcome the model does not need to compose."""
+    from backend.chat.turn_policy import localized
+
+    copy = _COPY.retrieval_error if status == "retrieval_error" else _COPY.no_knowledge
+    return localized(copy, language)
+
+
+def _terminal_status(ctx) -> Optional[str]:
+    stored = ctx.peek_rag_trace()
+    trace = (stored or {}).get("rag_trace") or {}
+    status = trace.get("retrieval_status")
+    return status if status in TERMINAL_STATUSES else None
 
 
 async def _stream_static_reply(
@@ -712,15 +740,33 @@ async def chat_with_agent_stream(
 
         full_response = ""
         agent_error = None
+        terminal_status = None
 
         async def _agent_worker():
-            nonlocal full_response, agent_error
+            nonlocal full_response, agent_error, terminal_status
             try:
+                tools_seen: list[str] = []
                 async for msg, _metadata in request_agent.astream(
                     {"messages": context_messages},
                     stream_mode="messages",
                     config={"recursion_limit": _PROFILE.agent.recursion_limit},
                 ):
+                    if isinstance(msg, ToolMessage):
+                        tools_seen.append(getattr(msg, "name", "") or "")
+                        # Break BEFORE the model is asked to compose. Once retrieval has
+                        # concluded there is no knowledge, the reply is profile copy, and
+                        # letting the loop continue spends a whole generation call — with
+                        # the conversation and the tool result as input — to paraphrase a
+                        # string we already have.
+                        #
+                        # Only when this is the sole tool that ran. On a turn that also
+                        # called, say, the weather tool, the model still has material to
+                        # answer from and cutting it would throw that away.
+                        status = _terminal_status(ctx)
+                        if status and len(tools_seen) == 1:
+                            terminal_status = status
+                            break
+                        continue
                     if not isinstance(msg, AIMessageChunk):
                         continue
                     if getattr(msg, "tool_call_chunks", None):
@@ -749,6 +795,10 @@ async def chat_with_agent_stream(
                 agent_error = str(e)
                 await output_queue.put({"type": "error", "content": str(e)})
             finally:
+                if terminal_status:
+                    reply = _terminal_reply(terminal_status, turn_plan.language)
+                    full_response = reply
+                    await output_queue.put({"type": "content", "content": reply})
                 await output_queue.put(None)
 
         agent_task = asyncio.create_task(_agent_worker())
