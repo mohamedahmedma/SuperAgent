@@ -378,3 +378,96 @@ class CatalogueTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompletenessTests(unittest.TestCase):
+    """A partial catalogue fails silently by nature.
+
+    A section that did not summarise leaves no error behind once the run ends. The gate
+    simply has a hole: questions about that part of the corpus score low and escalate
+    forever, which looks like the model being cautious rather than like a missing row.
+    So completeness is asserted explicitly rather than assumed.
+    """
+
+    def _verify(self, records, expected):
+        from backend.indexing.build_scope_index import verify
+
+        return verify(records, expected)
+
+    def _complete(self, chunk_id="s1"):
+        return SectionRecord(
+            chunk_id=chunk_id,
+            answers=["what is it?", "how much?"],
+            question_vectors=[unit(0), unit(1)],
+        )
+
+    def test_a_full_catalogue_is_complete(self):
+        report = self._verify([self._complete("s1"), self._complete("s2")], expected=2)
+        self.assertTrue(report["complete"])
+        self.assertEqual(4, report["questions"])
+
+    def test_a_missing_section_is_reported(self):
+        report = self._verify([self._complete("s1")], expected=3)
+        self.assertFalse(report["complete"])
+        self.assertIn("2 section(s) have no catalogue entry", report["problems"][0])
+
+    def test_a_section_without_questions_is_reported(self):
+        report = self._verify([self._complete("s1"), SectionRecord(chunk_id="s2")], expected=2)
+        self.assertFalse(report["complete"])
+        self.assertTrue(any("no questions: s2" in p for p in report["problems"]))
+
+    def test_questions_without_stored_vectors_are_reported(self):
+        """The case that actually happened: a transient failure left the previous
+        summary in place, so the content hash said "nothing to do" while the vectors
+        were never written."""
+        stale = SectionRecord(chunk_id="s2", answers=["what is it?"], question_vectors=[])
+        report = self._verify([self._complete("s1"), stale], expected=2)
+        self.assertFalse(report["complete"])
+        self.assertTrue(any("no stored vectors: s2" in p for p in report["problems"]))
+
+    def test_a_partial_vector_list_is_not_treated_as_present(self):
+        """Positional pairing means a short list would misalign questions with other
+        questions' vectors."""
+        partial = SectionRecord(
+            chunk_id="s2", answers=["a?", "b?"], question_vectors=[unit(0)],
+        )
+        self.assertFalse(self._verify([partial], expected=1)["complete"])
+
+
+class VectorReuseTests(unittest.TestCase):
+    def test_stored_vectors_are_used_without_re_embedding(self):
+        def never(questions):
+            raise AssertionError(f"re-embedded {len(questions)} question(s)")
+
+        records = [SectionRecord(chunk_id="s1", answers=["a?", "b?"],
+                                 question_vectors=[unit(0), unit(1)])]
+        index = build_index(records, embed=never)
+        self.assertEqual(2, len(index.vectors))
+
+    def test_only_the_records_missing_vectors_are_embedded(self):
+        seen = []
+
+        def embed(questions):
+            seen.extend(questions)
+            return [unit(2) for _ in questions]
+
+        records = [
+            SectionRecord(chunk_id="s1", answers=["stored?"], question_vectors=[unit(0)]),
+            SectionRecord(chunk_id="s2", answers=["fresh?"]),
+        ]
+        build_index(records, embed=embed)
+        self.assertEqual(["fresh?"], seen)
+
+    def test_a_stale_vector_list_is_discarded_whole(self):
+        """Rather than pairing the first N questions with vectors and leaving the rest
+        unmatched, which would silently score a question against another's vector."""
+        seen = []
+
+        def embed(questions):
+            seen.extend(questions)
+            return [unit(3) for _ in questions]
+
+        records = [SectionRecord(chunk_id="s1", answers=["a?", "b?"],
+                                 question_vectors=[unit(0)])]
+        build_index(records, embed=embed)
+        self.assertEqual(["a?", "b?"], seen)

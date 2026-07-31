@@ -155,17 +155,84 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
     written = save_records(profile.name, records)
     removed = delete_missing(profile.name, [item["chunk_id"] for item in sections])
 
+    # Over EVERY stored record, not just the ones summarised this run. A section can be
+    # current by content hash and still have no vectors — a transient failure on one run
+    # leaves the old summary in place, and the hash then says "nothing to do" forever.
+    # Vector coverage is its own precondition and has to be checked on its own terms.
+    repaired = _repair_missing_vectors(profile.name)
+
     stored = load_records(profile.name)
+    report = verify(stored, expected=len(sections))
     logger.info(
-        "catalogue now %d section(s), %d question(s); topics: %s",
-        len(stored), sum(len(item.answers) for item in stored), corpus_catalogue(stored) or "none",
+        "catalogue: %d/%d section(s), %d question(s); topics: %s",
+        report["with_questions"], len(sections), report["questions"],
+        corpus_catalogue(stored) or "none",
     )
+    for problem in report["problems"]:
+        logger.error("INCOMPLETE: %s", problem)
+
     return {
         "sections": len(sections),
         "summarised": written,
         "reused": len(plan["reuse"]),
         "removed": removed,
+        "repaired": repaired,
+        "complete": report["complete"],
+        "problems": report["problems"],
     }
+
+
+def verify(records, expected: int) -> dict:
+    """Is this catalogue actually usable, and if not, exactly which sections are not.
+
+    Worth being explicit about because the failure is silent by nature: a section that
+    did not summarise leaves no error behind once the run ends, and the gate simply has
+    a hole in it — questions about that part of the corpus score low and get escalated
+    forever, which looks like the model being cautious rather than like a missing row.
+    """
+    problems = []
+    with_questions = [record for record in records if record.answers]
+    without = [record.chunk_id for record in records if not record.answers]
+    unvectored = [
+        record.chunk_id for record in with_questions
+        if len(record.question_vectors) != len(record.answers)
+    ]
+
+    if len(with_questions) < expected:
+        missing = expected - len(with_questions)
+        problems.append(f"{missing} section(s) have no catalogue entry")
+    for chunk_id in without:
+        problems.append(f"no questions: {chunk_id}")
+    for chunk_id in unvectored:
+        problems.append(f"no stored vectors: {chunk_id}")
+
+    return {
+        "complete": not problems,
+        "sections": len(records),
+        "with_questions": len(with_questions),
+        "questions": sum(len(record.answers) for record in with_questions),
+        "problems": problems,
+    }
+
+
+def _repair_missing_vectors(profile_name: str) -> int:
+    """Embed and store vectors for any catalogued section that lacks them."""
+    import os
+
+    stored = load_records(profile_name)
+    model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    stale = [
+        record for record in stored
+        if record.answers
+        and (len(record.question_vectors) != len(record.answers)
+             or record.embedding_model != model_name)
+    ]
+    if not stale:
+        return 0
+    logger.info("repairing vectors for %d section(s)", len(stale))
+    _embed_questions(stale)
+    save_records(profile_name, stale)
+    return len(stale)
 
 
 def _embed_questions(records: List[SectionRecord]) -> None:
@@ -219,6 +286,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="report what would change, call nothing")
     parser.add_argument("--force", action="store_true", help="re-summarise every section, ignoring the cache")
+    parser.add_argument("--check", action="store_true",
+                        help="report catalogue completeness and exit; calls nothing")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -226,12 +295,32 @@ def main(argv=None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(message)s",
     )
+    if args.check:
+        stored = load_records(get_profile().name)
+        expected = len(load_sections(int(getattr(get_profile().rag, "scope_section_level", 1))))
+        report = verify(stored, expected)
+        print(f"sections={report['with_questions']}/{expected} questions={report['questions']}")
+        for problem in report["problems"]:
+            print(f"  INCOMPLETE: {problem}")
+        print("catalogue complete" if report["complete"] else "catalogue INCOMPLETE")
+        return 0 if report["complete"] else 2
+
     result = build(dry_run=args.dry_run, force=args.force)
     print(
         f"sections={result['sections']} summarised={result['summarised']} "
-        f"reused={result['reused']} removed={result['removed']}"
+        f"reused={result['reused']} repaired={result.get('repaired', 0)} "
+        f"removed={result['removed']}"
     )
-    return 0 if result["sections"] else 1
+    if args.dry_run:
+        return 0
+    if result.get("complete"):
+        print("catalogue complete")
+        return 0
+    # Non-zero so a CI step or a deploy script cannot pass over a partial catalogue.
+    for problem in result.get("problems", []):
+        print(f"  INCOMPLETE: {problem}")
+    print("re-run to fill the gaps — summaries already built are reused")
+    return 2
 
 
 if __name__ == "__main__":
