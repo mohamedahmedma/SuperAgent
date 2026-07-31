@@ -124,6 +124,23 @@ class RagConfig(_Section):
     max_rewrites: int = 1
     max_sub_questions: int = 4
 
+    # Waiting out a provider's per-minute quota on the graph's model calls.
+    #
+    # A 429 is transient by definition, but nothing here retried one: the grader call
+    # failed, the ladder recorded that nothing had assessed the evidence, and the
+    # policy correctly refused to act on it — so a passing quota spike surfaced to the
+    # user as "temporary technical issue" on a question the corpus could answer.
+    #
+    # Deliberately much shorter than the ingest-side budget, because this waits inside
+    # a live request. Providers state their own delay and it is not always small: a
+    # DAILY quota returns "try again in 2m8s", and honouring that would hold a user for
+    # minutes to avoid a message that says "try again". Short retries absorb a
+    # per-minute spike; anything longer is a quota problem that waiting cannot fix, and
+    # failing fast is the better answer.
+    model_retry_attempts: int = 2
+    model_retry_base_seconds: float = 2.0
+    model_retry_max_seconds: float = 6.0
+
     # Complexity planning: one FAST_MODEL call that classifies the question and, when it
     # is genuinely multi-part, decomposes it into sub-questions retrieved in parallel.
     #

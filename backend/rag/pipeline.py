@@ -19,6 +19,7 @@ from backend.rag.evidence import (
 from backend.prompts import resolve as resolve_prompt
 from backend.rag.policy import decide_route, select_context_indices
 from backend.rag.rerank_assessor import CrossEncoderAssessor
+from backend.assets.vision import call_with_rate_limit_retry
 from backend.profiles import get_profile
 from backend.schemas.chat import HitlResumeState, normalize_rag_sub_trace
 from backend.rag.utils import (
@@ -43,6 +44,18 @@ _COPY = _PROFILE.user_copy
 
 _grader_model = None
 _complexity_model = None
+
+
+class _RetryBudget:
+    """Adapts the rag section to the retry helper's attribute names, which were coined
+    for the vision path. One helper, two callers, no duplicated backoff logic."""
+
+    vision_retry_attempts = _RAG.model_retry_attempts
+    vision_retry_base_seconds = _RAG.model_retry_base_seconds
+    vision_retry_max_seconds = _RAG.model_retry_max_seconds
+
+
+_RETRY = _RetryBudget()
 
 
 def _get_grader_model():

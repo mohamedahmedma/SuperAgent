@@ -196,7 +196,7 @@ def _default_scope_invoke(ctx, signals: RequestSignals) -> Optional[Dict[str, An
     from pydantic import BaseModel, Field
     from typing import List as _List, Literal as _Literal
 
-    from backend.assets.vision import invoke_structured
+    from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
     from backend.prompts import render
     from backend.profiles import get_profile
 
@@ -226,7 +226,20 @@ def _default_scope_invoke(ctx, signals: RequestSignals) -> Optional[Dict[str, An
         base_url=os.getenv("BASE_URL"),
         temperature=0.0,
     )
-    result = invoke_structured(model, ScopeVerdict, [{"role": "user", "content": prompt}])
+    # Same quota as everything else in the turn, so the same treatment: a 429 here
+    # would make this rung abstain, and abstaining leaves the tentative rejection from
+    # the rung below — which cannot end a turn, so the question proceeds. Safe, but it
+    # spends the search this rung existed to avoid.
+    class _Retry:
+        vision_retry_attempts = int(getattr(ctx.config, "model_retry_attempts", 3))
+        vision_retry_base_seconds = float(getattr(ctx.config, "model_retry_base_seconds", 5.0))
+        vision_retry_max_seconds = float(getattr(ctx.config, "model_retry_max_seconds", 60.0))
+
+    result = call_with_rate_limit_retry(
+        lambda: invoke_structured(model, ScopeVerdict, [{"role": "user", "content": prompt}]),
+        config=_Retry(),
+        description="scope check",
+    )
     return result if isinstance(result, dict) else result.model_dump()
 
 
