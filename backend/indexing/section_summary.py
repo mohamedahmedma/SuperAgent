@@ -48,6 +48,10 @@ class SectionRecord:
     summary: str = ""
     answers: List[str] = field(default_factory=list)
     topics: List[str] = field(default_factory=list)
+    # Parallel to `answers`. Empty until the build step embeds them; the index treats
+    # a record without vectors as needing re-embedding rather than as having none.
+    question_vectors: List[Sequence[float]] = field(default_factory=list)
+    embedding_model: str = ""
     model_used: str = ""
 
     @property

@@ -27,6 +27,8 @@ def _to_record(row: SectionSummary) -> SectionRecord:
         summary=row.summary,
         answers=list(row.answers or []),
         topics=list(row.topics or []),
+        question_vectors=[list(v) for v in (row.question_vectors or [])],
+        embedding_model=row.embedding_model or "",
         model_used=row.model_used,
     )
 
@@ -84,6 +86,8 @@ def save_records(
             row.summary = record.summary
             row.answers = list(record.answers)
             row.topics = list(record.topics)
+            row.question_vectors = [list(v) for v in record.question_vectors]
+            row.embedding_model = record.embedding_model
             row.model_used = record.model_used
             row.updated_at = datetime.utcnow()
             written += 1

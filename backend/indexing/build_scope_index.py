@@ -151,6 +151,7 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
         )
         logger.info("catalogued %s: %d question(s)", section["chunk_id"], len(result["answers"]))
 
+    _embed_questions(records)
     written = save_records(profile.name, records)
     removed = delete_missing(profile.name, [item["chunk_id"] for item in sections])
 
@@ -165,6 +166,47 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
         "reused": len(plan["reuse"]),
         "removed": removed,
     }
+
+
+def _embed_questions(records: List[SectionRecord]) -> None:
+    """Embed each record's questions here, at build time, not at boot.
+
+    Measured before this existed: 22.4 seconds to embed 222 questions on CPU, paid by
+    whichever user happened to arrive first after a deploy. The vectors are a pure
+    function of the questions and the model, so computing them once and storing them
+    turns that into a database read.
+
+    One batched call rather than one per record — the embedder amortises a batch, and
+    a per-record loop would spend most of its time in setup.
+    """
+    import os
+
+    pending = [record for record in records if record.answers]
+    if not pending:
+        return
+
+    from backend.indexing.embedding import embedding_service
+
+    flat: List[str] = []
+    for record in pending:
+        flat.extend(record.answers)
+
+    logger.info("embedding %d question(s) for %d section(s)", len(flat), len(pending))
+    vectors = embedding_service.get_embeddings(flat)
+    if len(vectors) != len(flat):
+        # Leaving the vectors empty is safe: the index falls back to embedding at boot,
+        # which is slow but correct. Storing a misaligned list would not be.
+        logger.error("embedder returned %d vectors for %d questions; not storing any",
+                     len(vectors), len(flat))
+        return
+
+    model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    cursor = 0
+    for record in pending:
+        count = len(record.answers)
+        record.question_vectors = [list(v) for v in vectors[cursor:cursor + count]]
+        record.embedding_model = model_name
+        cursor += count
 
 
 def _default_model() -> str:

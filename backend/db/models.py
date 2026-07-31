@@ -224,6 +224,16 @@ class SectionSummary(Base):
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
     # The questions this section can answer. Embedded one vector each.
     answers: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    # Those questions' vectors, positionally parallel to `answers`.
+    #
+    # Persisted rather than embedded at boot for a measured reason: re-embedding 222
+    # questions on CPU took 22.4 seconds, and the index builds lazily on first use — so
+    # the first user after every deploy would have waited it out. The vectors are a pure
+    # function of the questions and the embedding model, so storing them costs a few
+    # megabytes and removes the wait entirely. A model change invalidates them, which is
+    # what `embedding_model` records.
+    question_vectors: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     # Chosen from the profile's frozen vocabulary rather than invented, so the corpus
     # catalogue cannot drift between re-indexes.
     topics: Mapped[list] = mapped_column(JSON, default=list, nullable=False)

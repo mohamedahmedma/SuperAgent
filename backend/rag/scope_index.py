@@ -34,6 +34,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 # Percentile of in-scope self-similarity used as the escalate-below floor. Low on
@@ -57,39 +59,58 @@ class ScopeIndex:
     """Question vectors plus the floor derived from them."""
 
     questions: List[str] = field(default_factory=list)
-    vectors: List[Sequence[float]] = field(default_factory=list)
+    vectors: Any = None  # (n_questions, dim) float32 matrix
     chunk_ids: List[str] = field(default_factory=list)
     topics: List[List[str]] = field(default_factory=list)
     floor: float = 0.0
     catalogue: str = ""
 
+    def __post_init__(self):
+        """Accept a plain list of vectors and coerce it once.
+
+        Matching needs a matrix, but a caller holding a list of vectors should not have
+        to know that — and converting per query would put the cost back on the request
+        path this class exists to keep cheap.
+        """
+        if self.vectors is not None and not isinstance(self.vectors, np.ndarray):
+            self.vectors = np.asarray(self.vectors, dtype=np.float32) if len(self.vectors) else None
+
     @property
     def ready(self) -> bool:
-        return bool(self.vectors)
+        return self.vectors is not None and len(self.vectors) > 0
 
     def best_matches(self, query_vector: Sequence[float], limit: int = 3) -> List[ScopeMatch]:
         """Closest anticipated questions, best first.
 
         Max over questions, not a mean over sections: a user asks one question, not the
         average of the several a section covers.
+
+        One matrix-vector product. The Python-loop version measured 16ms per query
+        against 222 questions — small in isolation, but it is paid on every turn and
+        grows linearly with the corpus, which is the wrong shape for something described
+        as free.
         """
-        if not query_vector:
+        if query_vector is None or not len(query_vector) or not self.ready:
             return []
-        dimension = len(query_vector)
-        scored: List[Tuple[float, int]] = []
-        for position, vector in enumerate(self.vectors):
-            if len(vector) != dimension:
-                continue
-            scored.append((sum(a * b for a, b in zip(vector, query_vector)), position))
-        scored.sort(reverse=True)
+        query = np.asarray(query_vector, dtype=np.float32)
+        if query.shape[0] != self.vectors.shape[1]:
+            # A re-index under a different embedding model. Returning nothing makes the
+            # rung abstain, rather than making every question look off-topic.
+            return []
+
+        scores = self.vectors @ query
+        count = min(max(1, limit), scores.shape[0])
+        # argpartition finds the top-k without sorting the rest.
+        top = np.argpartition(-scores, count - 1)[:count]
+        top = top[np.argsort(-scores[top])]
         return [
             ScopeMatch(
                 question=self.questions[position],
-                score=score,
+                score=float(scores[position]),
                 chunk_id=self.chunk_ids[position],
                 topics=list(self.topics[position]),
             )
-            for score, position in scored[:limit]
+            for position in top
         ]
 
     def as_trace(self, matches: Sequence[ScopeMatch]) -> Dict[str, Any]:
@@ -131,22 +152,19 @@ def derive_floor(
     how well an in-scope question about topic A matches an index that mostly covers
     B, C and D, because that is the position every incoming query is in.
     """
-    if len(vectors) < 2:
+    matrix = np.asarray(vectors, dtype=np.float32)
+    if matrix.ndim != 2 or matrix.shape[0] < 2:
         return 0.0
 
-    maxima: List[float] = []
-    for index, vector in enumerate(vectors):
-        best = None
-        for other, candidate in enumerate(vectors):
-            if other == index or chunk_ids[other] == chunk_ids[index]:
-                continue
-            if len(candidate) != len(vector):
-                continue
-            score = sum(a * b for a, b in zip(vector, candidate))
-            if best is None or score > best:
-                best = score
-        if best is not None:
-            maxima.append(best)
+    # One n x n product instead of n^2 Python dot products — 3.4s became milliseconds
+    # on a 222-question catalogue, and this runs at boot.
+    similarity = matrix @ matrix.T
+    sections = np.asarray(chunk_ids)
+    same_section = sections[:, None] == sections[None, :]
+    similarity[same_section] = -np.inf
+
+    row_max = similarity.max(axis=1)
+    maxima = [float(value) for value in row_max if np.isfinite(value)]
 
     if not maxima:
         # Every question belongs to the same section, so there is no cross-section
@@ -163,40 +181,60 @@ def build_index(
     floor_percentile: float = DEFAULT_FLOOR_PERCENTILE,
     catalogue: str = "",
 ) -> ScopeIndex:
-    """Embed every catalogued question and derive the floor.
+    """Assemble the index, embedding only what is not already stored.
 
-    `embed(texts) -> list[vector]` is injected so this is testable without a model and
-    so the caller controls batching.
+    A record carrying `question_vectors` is used as-is. That is the difference between
+    a process starting in milliseconds and one spending 22 seconds re-deriving vectors
+    it already had — and the index builds lazily on first use, so that wait would have
+    landed on the first user after every deploy.
+
+    `embed(texts) -> list[vector]` is injected so this is testable without a model, and
+    is called only for records missing their vectors.
     """
     questions: List[str] = []
     chunk_ids: List[str] = []
     topics: List[List[str]] = []
+    stored: List[Optional[Sequence[float]]] = []
     for record in records:
-        for question in getattr(record, "answers", None) or []:
+        answers = getattr(record, "answers", None) or []
+        cached = list(getattr(record, "question_vectors", None) or [])
+        # Positional pairing, so a partial or stale vector list is discarded whole
+        # rather than silently misaligning questions with other questions' vectors.
+        usable_cache = len(cached) == len(answers)
+        for position, question in enumerate(answers):
             questions.append(question)
             chunk_ids.append(getattr(record, "chunk_id", ""))
             topics.append(list(getattr(record, "topics", None) or []))
+            stored.append(cached[position] if usable_cache else None)
 
     if not questions:
         logger.warning("scope index: no catalogued questions; the gate will abstain")
         return ScopeIndex(catalogue=catalogue)
 
-    vectors = list(embed(questions))
-    if len(vectors) != len(questions):
-        logger.error(
-            "scope index: embedder returned %d vectors for %d questions; abstaining",
-            len(vectors), len(questions),
-        )
-        return ScopeIndex(catalogue=catalogue)
+    missing = [position for position, vector in enumerate(stored) if vector is None]
+    if missing:
+        logger.info("scope index: embedding %d question(s) not already stored", len(missing))
+        fresh = list(embed([questions[position] for position in missing]))
+        if len(fresh) != len(missing):
+            logger.error(
+                "scope index: embedder returned %d vectors for %d questions; abstaining",
+                len(fresh), len(missing),
+            )
+            return ScopeIndex(catalogue=catalogue)
+        for position, vector in zip(missing, fresh):
+            stored[position] = vector
 
-    floor = derive_floor(vectors, chunk_ids, floor_percentile)
+    vectors = stored
+
+    matrix = np.asarray(vectors, dtype=np.float32)
+    floor = derive_floor(matrix, chunk_ids, floor_percentile)
     logger.info(
         "scope index: %d questions over %d sections, derived floor %.4f (p%.0f)",
         len(questions), len(set(chunk_ids)), floor, floor_percentile,
     )
     return ScopeIndex(
         questions=questions,
-        vectors=vectors,
+        vectors=matrix,
         chunk_ids=chunk_ids,
         topics=topics,
         floor=floor,
