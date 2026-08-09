@@ -22,6 +22,7 @@ from backend.chat.assets_bridge import (
     load_asset_state,
     save_asset_state,
 )
+from backend.chat.caller_identity import CallerIdentity
 from backend.chat.orchestrator import plan_turn
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.runtime import create_agent_for_request, fast_model, model
@@ -406,12 +407,40 @@ def _update_persistent_note_sync(
         return current_note
 
 
+def _resolve_caller(
+    caller: CallerIdentity | None, user_id: str
+) -> tuple[CallerIdentity, str]:
+    """Settle identity once, at the top of a turn, for both entry points.
+
+    Returns `(caller, user_id)` guaranteed to agree. A provided `caller` wins, because
+    it came from a verified token while the positional `user_id` is only a convenience
+    default; deriving one from the other here means no code further down has to wonder
+    which is authoritative.
+    """
+    if caller is not None:
+        return caller, caller.user_id
+    return CallerIdentity.for_user(user_id), user_id
+
+
 def chat_with_agent(
     user_text: str,
     user_id: str = "default_user",
     session_id: str = "default_session",
     client_capabilities: ClientCapabilities | None = None,
+    *,
+    caller: CallerIdentity | None = None,
 ):
+    """Serve one turn.
+
+    `caller` carries the verified identity — including, for a signed-in parent, the
+    token the records tool relays. Keyword-only and optional so every existing caller
+    (tests, jobs, any integration) keeps working and simply serves a turn that is not
+    a parent session.
+
+    When given, it is authoritative: `user_id` is taken from it rather than from the
+    positional argument, so the storage key and the identity can never disagree.
+    """
+    caller, user_id = _resolve_caller(caller, user_id)
     messages, metadata = storage.load_with_meta(user_id, session_id)
     asset_state = load_asset_state(metadata)
     persistent_note = metadata.get("persistent_note", "")
@@ -436,7 +465,7 @@ def chat_with_agent(
     )
 
     ctx = ChatRequestContext.for_sync(
-        user_id=user_id, session_id=session_id, asset_state=asset_state
+        user_id=user_id, session_id=session_id, asset_state=asset_state, caller=caller
     )
     ctx.reset_knowledge_tool_budget()
 
@@ -565,7 +594,16 @@ async def chat_with_agent_stream(
     user_id: str = "default_user",
     session_id: str = "default_session",
     client_capabilities: ClientCapabilities | None = None,
+    *,
+    caller: CallerIdentity | None = None,
 ):
+    """Serve one turn, streaming. See `chat_with_agent` for `caller`.
+
+    The two entry points take identity the same way on purpose: a parameter present on
+    one and missing on the other is how a feature ends up working in the sync path and
+    silently dead in the streaming one that users actually hit.
+    """
+    caller, user_id = _resolve_caller(caller, user_id)
     initial_step = {
         "type": "rag_step",
         "step": {
@@ -608,6 +646,7 @@ async def chat_with_agent_stream(
         session_id=session_id,
         output_queue=output_queue,
         asset_state=asset_state,
+        caller=caller,
     )
     ctx.reset_knowledge_tool_budget()
 

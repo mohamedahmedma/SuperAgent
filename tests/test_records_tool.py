@@ -8,6 +8,7 @@ covers the relay and the wording it hands back to the model.
 import pytest
 import requests
 
+from backend.chat.caller_identity import CallerIdentity
 from backend.chat.request_context import ChatRequestContext
 from backend.tools.records import make_get_student_records
 
@@ -25,7 +26,11 @@ class _Response:
 
 def _ctx(guardian_id: str = "G-1", token: str = PARENT_TOKEN) -> ChatRequestContext:
     return ChatRequestContext(
-        user_id="user-1", session_id="turn-1", guardian_id=guardian_id, guardian_token=token
+        user_id="user-1",
+        session_id="turn-1",
+        caller=CallerIdentity(
+            user_id="user-1", guardian_id=guardian_id, guardian_token=token
+        ),
     )
 
 

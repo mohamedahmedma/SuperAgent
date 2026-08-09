@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from backend.chat.asset_context import SessionAssetState
+from backend.chat.caller_identity import CallerIdentity
 from backend.schemas.chat import HitlResumeState, normalize_rag_trace
 
 logger = logging.getLogger(__name__)
@@ -24,15 +25,17 @@ class ChatRequestContext:
     loop: Optional[asyncio.AbstractEventLoop] = None
 
     # Verified identity for this turn, set by the HTTP layer from the caller's bearer
-    # token and never by anything downstream. Both are OPAQUE to the agent: no prompt
-    # renders them, no tool takes them as an argument, and the model has no way to
-    # read or influence either. The records tool relays the token; the records facade
-    # checks its signature and decides what it authorises.
+    # token and never by anything downstream. OPAQUE to the agent: no prompt renders
+    # it, no tool takes it as an argument, and the model has no way to read or
+    # influence it. The records tool relays the token; the records facade checks its
+    # signature and decides what it authorises.
     #
-    # Empty is the correct default. A staff session, a test, or an unauthenticated
-    # turn carries no guardian, and the records tool refuses rather than guessing.
-    guardian_id: str = ""
-    guardian_token: str = ""
+    # One object rather than loose fields, so guardian id and token cannot drift apart
+    # — a context holding one without the other is not a state any code has to handle.
+    # Defaults to a bare identity derived from `user_id`, which is the correct and safe
+    # shape for a staff session, a background job or a test: not a parent, reads
+    # nothing.
+    caller: Optional[CallerIdentity] = None
 
     # Assets surfaced and read during this conversation. Carried on the context (not
     # a module global) so concurrent requests cannot see each other's state.
@@ -48,6 +51,37 @@ class ChatRequestContext:
     _started_at: float = field(default_factory=time.monotonic)
     _last_step_at: Optional[float] = None
 
+    def __post_init__(self) -> None:
+        """Settle the caller, and refuse a context whose identity contradicts itself.
+
+        `user_id` remains the storage key, so a `caller` naming someone else would
+        write one user's conversation under another's name while reading a third
+        party's records. That is a silent, serious bug, and it is cheap to make
+        impossible here rather than plausible everywhere downstream.
+        """
+        if self.caller is None:
+            self.caller = CallerIdentity.for_user(self.user_id)
+        elif self.caller.user_id != self.user_id:
+            raise ValueError(
+                f"caller.user_id {self.caller.user_id!r} does not match "
+                f"user_id {self.user_id!r}"
+            )
+
+    # Read-only views onto the caller. Properties rather than fields so there is
+    # exactly one place the identity lives; a tool cannot assign to these and change
+    # whose records the turn may read.
+    @property
+    def guardian_id(self) -> str:
+        return self.caller.guardian_id if self.caller else ""
+
+    @property
+    def guardian_token(self) -> str:
+        return self.caller.guardian_token if self.caller else ""
+
+    @property
+    def is_parent(self) -> bool:
+        return bool(self.caller and self.caller.is_parent)
+
     @classmethod
     def for_stream(
         cls,
@@ -56,6 +90,7 @@ class ChatRequestContext:
         session_id: str,
         output_queue: asyncio.Queue,
         asset_state: Optional[SessionAssetState] = None,
+        caller: Optional[CallerIdentity] = None,
     ) -> ChatRequestContext:
         return cls(
             user_id=user_id,
@@ -63,6 +98,7 @@ class ChatRequestContext:
             output_queue=output_queue,
             loop=asyncio.get_running_loop(),
             asset_state=asset_state or SessionAssetState(),
+            caller=caller,
         )
 
     @classmethod
@@ -72,11 +108,13 @@ class ChatRequestContext:
         user_id: str,
         session_id: str,
         asset_state: Optional[SessionAssetState] = None,
+        caller: Optional[CallerIdentity] = None,
     ) -> ChatRequestContext:
         return cls(
             user_id=user_id,
             session_id=session_id,
             asset_state=asset_state or SessionAssetState(),
+            caller=caller,
         )
 
     def emit_rag_step(
@@ -214,3 +252,9 @@ class ChatRequestContext:
             self._active = False
             self.output_queue = None
             self.loop = None
+            # Drop the bearer token when the turn ends. The context can outlive the
+            # request that authorised it — held by a queue, a traceback, a retained
+            # reference in a test — and a live credential should not outlive the reason
+            # it was handed over. Who the caller was stays readable.
+            if self.caller is not None:
+                self.caller = self.caller.without_credentials()

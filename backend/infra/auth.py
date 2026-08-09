@@ -68,16 +68,35 @@ class AuthenticatedUser:
     coupling this refactor removed.
     """
 
-    __slots__ = ("username", "role", "guardian_id", "display_name")
+    __slots__ = ("username", "role", "guardian_id", "display_name", "access_token")
 
-    def __init__(self, username: str, role: str, guardian_id: str = "", display_name: str = ""):
+    def __init__(
+        self,
+        username: str,
+        role: str,
+        guardian_id: str = "",
+        display_name: str = "",
+        access_token: str = "",
+    ):
         self.username = username
         self.role = role
         self.guardian_id = guardian_id
         self.display_name = display_name
+        # The verified token, kept so it can be relayed to the records facade on this
+        # user's behalf. The chat backend cannot forge one and cannot alter whose
+        # records it authorises — it only passes along what the caller already proved.
+        self.access_token = access_token
 
-    def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return f"AuthenticatedUser(username={self.username!r}, role={self.role!r})"
+    def __repr__(self) -> str:
+        """Redacted. `access_token` is a live bearer credential.
+
+        Reprs reach log lines, tracebacks and captured test output, none of which are
+        audited for secrets.
+        """
+        return (
+            f"AuthenticatedUser(username={self.username!r}, role={self.role!r}, "
+            f"guardian_id={self.guardian_id!r})"
+        )
 
 
 def _ensure_projection_row(db: Session, username: str) -> None:
@@ -145,6 +164,7 @@ def get_current_user(
         role=claims.get("role") or "user",
         guardian_id=claims.get("guardian_id") or "",
         display_name=claims.get("name") or "",
+        access_token=token,
     )
 
 

@@ -5,15 +5,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.chat import chat_with_agent, chat_with_agent_stream
-from backend.db.models import User
-from backend.infra.auth import get_current_user
+from backend.chat.caller_identity import CallerIdentity
+from backend.infra.auth import AuthenticatedUser, get_current_user
 from backend.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(tags=["chat"])
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_current_user)):
+async def chat_endpoint(
+    request: ChatRequest, current_user: AuthenticatedUser = Depends(get_current_user)
+):
     try:
         session_id = request.session_id or "default_session"
         resp = chat_with_agent(
@@ -21,6 +23,10 @@ async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_c
             current_user.username,
             session_id,
             client_capabilities=request.client_capabilities,
+            # Identity is assembled HERE, at the HTTP boundary, from a token whose
+            # signature has been verified — and nowhere else. Everything downstream
+            # receives it and cannot change it.
+            caller=CallerIdentity.from_principal(current_user),
         )
         if isinstance(resp, dict):
             return ChatResponse(**resp)
@@ -46,7 +52,15 @@ async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_c
 
 
 @router.post("/chat/stream")
-async def chat_stream_endpoint(request: ChatRequest, current_user: User = Depends(get_current_user)):
+async def chat_stream_endpoint(
+    request: ChatRequest, current_user: AuthenticatedUser = Depends(get_current_user)
+):
+    # Built once, outside the generator. The generator body runs after the response has
+    # started, by which point the dependency-injected principal is no longer something
+    # to be reaching into — capturing the value up front keeps the streaming path
+    # identical to the sync one rather than subtly different.
+    caller = CallerIdentity.from_principal(current_user)
+
     async def event_generator():
         try:
             session_id = request.session_id or "default_session"
@@ -55,6 +69,7 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: User = Depend
                 current_user.username,
                 session_id,
                 client_capabilities=request.client_capabilities,
+                caller=caller,
             ):
                 yield chunk
         except Exception as e:
