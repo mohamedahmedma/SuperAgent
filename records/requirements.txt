@@ -17,5 +17,10 @@ pydantic>=2.8.0
 # the service runs with no infrastructure while the Moodle adapter is still a stub.
 psycopg2-binary>=2.9.10
 
-# Required by MoodleAdapter once it is implemented; unused by FakeLms.
+# Required by MoodleAdapter once it is implemented, and by the JWKS fetch in
+# records.identity when IDENTITY_PUBLIC_KEY_PEM is not pinned.
 httpx>=0.27.0
+
+# Verifying RS256 identity tokens. Public key only — this service holds nothing that
+# could mint a token. See records/identity.py.
+python-jose[cryptography]>=3.3.0

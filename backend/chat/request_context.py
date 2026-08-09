@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,6 +23,17 @@ class ChatRequestContext:
     output_queue: Optional[asyncio.Queue] = None
     loop: Optional[asyncio.AbstractEventLoop] = None
 
+    # Verified identity for this turn, set by the HTTP layer from the caller's bearer
+    # token and never by anything downstream. Both are OPAQUE to the agent: no prompt
+    # renders them, no tool takes them as an argument, and the model has no way to
+    # read or influence either. The records tool relays the token; the records facade
+    # checks its signature and decides what it authorises.
+    #
+    # Empty is the correct default. A staff session, a test, or an unauthenticated
+    # turn carries no guardian, and the records tool refuses rather than guessing.
+    guardian_id: str = ""
+    guardian_token: str = ""
+
     # Assets surfaced and read during this conversation. Carried on the context (not
     # a module global) so concurrent requests cannot see each other's state.
     asset_state: SessionAssetState = field(default_factory=SessionAssetState)
@@ -31,6 +43,7 @@ class ChatRequestContext:
     _rag_trace: Optional[dict] = None
     _knowledge_tool_slots_used: int = 0
     _figure_tool_slots_used: int = 0
+    _records_tool_slots_used: int = 0
     _surfaced_asset_ids: list = field(default_factory=list)
     _started_at: float = field(default_factory=time.monotonic)
     _last_step_at: Optional[float] = None
@@ -135,6 +148,23 @@ class ChatRequestContext:
         with self._lock:
             self._knowledge_tool_slots_used = 0
             self._figure_tool_slots_used = 0
+
+    def acquire_records_tool_slot(self) -> bool:
+        """Budget for get_student_records, separate from the other tool budgets.
+
+        A parent asking about two children in one turn is a legitimate three-call
+        sequence — list the children, then read each one's grades — so the ceiling is
+        higher than retrieval's. It exists at all because every call is a network
+        round trip to another service and an audited read of a minor's records; a
+        model that loops here is expensive in a way that shows up in a compliance
+        report, not just a bill.
+        """
+        limit = int(os.getenv("RECORDS_MAX_CALLS_PER_TURN") or 4)
+        with self._lock:
+            if self._records_tool_slots_used >= limit:
+                return False
+            self._records_tool_slots_used += 1
+            return True
 
     def acquire_figure_tool_slot(self) -> bool:
         """Budget for view_figure, separate from the knowledge-tool budget: looking at

@@ -19,6 +19,7 @@ and the LMS is never asked about a student that check excluded.
 """
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 from datetime import datetime, timezone
@@ -26,8 +27,11 @@ from datetime import datetime, timezone
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from records import identity
 from records.db import get_db
 from records.models import AccessAudit, ApiKey, Guardian, GuardianStudent, Student
+
+logger = logging.getLogger(__name__)
 
 KEY_PREFIX_LENGTH = 8
 _KEY_BYTES = 32
@@ -173,6 +177,95 @@ def _require_scope(required: str):
 
 require_agent_key = _require_scope("agent")
 require_admin_key = _require_scope("admin")
+
+
+class ParentSubject:
+    """A verified (system, parent) pair. Both halves proved, neither assumed."""
+
+    def __init__(self, caller: Caller, guardian_id: str):
+        self.caller = caller
+        self.guardian_id = guardian_id
+
+
+def require_parent_subject(
+    guardian_id: str,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    caller: Caller = Depends(require_agent_key),
+    db: Session = Depends(get_db),
+) -> ParentSubject:
+    """Both credentials, checked together. Every parent-facing route depends on this.
+
+    The API key has already proved which system is calling. This adds the second,
+    independent proof: a token signed by the identity service naming the guardian.
+    The `guardian_id` in the path must equal the `guardian_id` in the signed claim.
+
+    That equality check is the point. It means the calling system cannot choose whose
+    records it reads — it can only relay a parent's own identity, because it has no
+    way to produce a signature for a different one. A fully compromised chat backend
+    still cannot read a family it does not hold a token for.
+
+    FastAPI supplies `guardian_id` from the path, so a route that declares this
+    dependency without a `{guardian_id}` segment fails at startup rather than
+    silently skipping the comparison.
+    """
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+
+    try:
+        claims = identity.verify_token(token)
+        claimed_guardian = identity.guardian_id_from_claims(claims)
+    except identity.IdentityNotConfigured as exc:
+        # Fail closed. No verification material means no reads, not unverified reads.
+        logger.error("Identity verification is not configured: %s", exc)
+        write_audit(
+            db,
+            endpoint=str(request.url.path),
+            allowed=False,
+            reason="identity_not_configured",
+            guardian_external_id=guardian_id,
+            api_key_prefix=caller.prefix,
+            request_id=caller.request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "not_configured", "message": "Identity verification unavailable."},
+        )
+    except identity.IdentityError:
+        write_audit(
+            db,
+            endpoint=str(request.url.path),
+            allowed=False,
+            reason="invalid_identity",
+            guardian_external_id=guardian_id,
+            api_key_prefix=caller.prefix,
+            request_id=caller.request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "not_authorized", "message": "Missing or invalid identity token."},
+        )
+
+    if claimed_guardian != guardian_id:
+        # The signature was valid but named someone else. This is the signal that a
+        # caller is relaying one parent's token while asking about another, and it is
+        # audited under its own reason so it can be alerted on.
+        write_audit(
+            db,
+            endpoint=str(request.url.path),
+            allowed=False,
+            reason="guardian_mismatch",
+            guardian_external_id=guardian_id,
+            api_key_prefix=caller.prefix,
+            request_id=caller.request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "not_authorized", "message": "Token does not authorise this guardian."},
+        )
+
+    return ParentSubject(caller=caller, guardian_id=claimed_guardian)
 
 
 def resolve_permitted_student(

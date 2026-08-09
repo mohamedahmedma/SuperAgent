@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "School Academic Records Facade",
-    "description": "Read-only academic records for the school assistant agent, plus the guardian authorisation and audit trail that govern them.\n\n**Two credentials are required for every parent-facing read.** The `X-API-Key` header proves which *system* is calling; the `guardian_id` in the path names the *person* on whose behalf it asks. A key alone grants nothing — the permitted student set is resolved server-side from the guardian link table on every request and is never supplied by the caller.\n\n**On failure, do not improvise.** A 503 with `code: lms_unavailable` means the system of record could not be reached. The correct response to a parent is that records are temporarily unavailable, never a remembered or inferred figure.",
+    "description": "Read-only academic records for the school assistant agent, plus the guardian authorisation and audit trail that govern them.\n\n**Two independent credentials are required for every parent-facing read.** The `X-API-Key` header proves which *system* is calling. An `Authorization: Bearer` identity token, signed by the identity service, proves *which parent* it asks on behalf of — and its `guardian_id` claim must match the `guardian_id` in the path. Neither alone grants anything: a leaked API key cannot choose a guardian, and a parent's token cannot be presented without a valid system key. The permitted student set is then resolved server-side from the link table on every request, and is never supplied by the caller.\n\n**On failure, do not improvise.** A 503 with `code: lms_unavailable` means the system of record could not be reached. The correct response to a parent is that records are temporarily unavailable, never a remembered or inferred figure.",
     "version": "0.1.0"
   },
   "paths": {
@@ -95,6 +95,22 @@
             }
           },
           {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "name": "X-API-Key",
             "in": "header",
             "required": false,
@@ -139,7 +155,17 @@
             }
           },
           "401": {
-            "description": "Missing or invalid API key.",
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
             "content": {
               "application/json": {
                 "schema": {
@@ -227,6 +253,22 @@
             "description": "Term code; defaults to the current term."
           },
           {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "name": "X-API-Key",
             "in": "header",
             "required": false,
@@ -271,7 +313,17 @@
             }
           },
           "401": {
-            "description": "Missing or invalid API key.",
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
             "content": {
               "application/json": {
                 "schema": {
@@ -366,6 +418,22 @@
             }
           },
           {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "name": "X-API-Key",
             "in": "header",
             "required": false,
@@ -410,7 +478,17 @@
             }
           },
           "401": {
-            "description": "Missing or invalid API key.",
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
             "content": {
               "application/json": {
                 "schema": {
@@ -496,6 +574,22 @@
             }
           },
           {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "name": "X-API-Key",
             "in": "header",
             "required": false,
@@ -540,7 +634,17 @@
             }
           },
           "401": {
-            "description": "Missing or invalid API key.",
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
             "content": {
               "application/json": {
                 "schema": {
@@ -619,6 +723,22 @@
             }
           },
           {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "name": "X-API-Key",
             "in": "header",
             "required": false,
@@ -663,7 +783,17 @@
             }
           },
           "401": {
-            "description": "Missing or invalid API key.",
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
             "content": {
               "application/json": {
                 "schema": {

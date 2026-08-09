@@ -1,0 +1,14 @@
+# Six packages. A service that holds credentials should have the smallest attack
+# surface in the estate, and every dependency here is one someone else audits.
+#
+#   pip install -r identity/requirements.txt
+#   uvicorn identity.app:app --port 8200
+
+fastapi>=0.115.0
+uvicorn>=0.30.0
+sqlalchemy>=2.0.36
+pydantic>=2.8.0
+psycopg2-binary>=2.9.10
+
+# RS256 signing and verification. `cryptography` arrives with the extra.
+python-jose[cryptography]>=3.3.0

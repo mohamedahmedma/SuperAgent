@@ -47,7 +47,8 @@ admin_router = APIRouter(prefix="/v1/admin", tags=["admin"])
 # Documented once and attached to every parent-facing route, so the generated OpenAPI
 # tells an integrator what the failure modes are without reading this file.
 _AGENT_RESPONSES = {
-    401: {"model": ErrorOut, "description": "Missing or invalid API key."},
+    401: {"model": ErrorOut, "description": "Missing or invalid API key, or missing/invalid identity token."},
+    403: {"model": ErrorOut, "description": "Identity token does not authorise the guardian named in the path."},
     404: {"model": ErrorOut, "description": "No such student record for this guardian."},
     503: {"model": ErrorOut, "description": "System of record unreachable. Do not answer from memory."},
 }
@@ -185,15 +186,17 @@ def list_terms(
 def list_students(
     guardian_id: str,
     db: Session = Depends(get_db),
-    caller: auth.Caller = Depends(auth.require_agent_key),
+    subject: auth.ParentSubject = Depends(auth.require_parent_subject),
 ) -> StudentListOut:
     """Children this guardian may ask about.
 
     The agent's first call in any conversation. An unknown guardian and a guardian
     with no visible children both return an empty list — see `permitted_students`.
     """
-    students = auth.permitted_students(db, guardian_external_id=guardian_id)
-    return StudentListOut(guardian_id=guardian_id, students=[_student_ref(s) for s in students])
+    students = auth.permitted_students(db, guardian_external_id=subject.guardian_id)
+    return StudentListOut(
+        guardian_id=subject.guardian_id, students=[_student_ref(s) for s in students]
+    )
 
 
 @agent_router.get(
@@ -207,14 +210,14 @@ def get_grades(
     request: Request,
     term: str | None = Query(default=None, description="Term code; defaults to the current term."),
     db: Session = Depends(get_db),
-    caller: auth.Caller = Depends(auth.require_agent_key),
+    subject: auth.ParentSubject = Depends(auth.require_parent_subject),
 ) -> StudentGradesOut:
     """Every subject's rollup for one student in one term."""
     student = auth.resolve_permitted_student(
         db,
-        guardian_external_id=guardian_id,
+        guardian_external_id=subject.guardian_id,
         student_external_id=student_id,
-        caller=caller,
+        caller=subject.caller,
         endpoint=str(request.url.path),
     )
     resolved_term = _resolve_term(db, term)
@@ -234,7 +237,7 @@ def get_grades(
                 )
                 courses.append(_course_grade(binding, assignments, policy))
         except lms.LmsUnavailable:
-            _raise_unavailable(db, caller, request, guardian_id, student_id)
+            _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
 
     return StudentGradesOut(
         student=_student_ref(student),
@@ -256,14 +259,14 @@ def get_course_detail(
     request: Request,
     term: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    caller: auth.Caller = Depends(auth.require_agent_key),
+    subject: auth.ParentSubject = Depends(auth.require_parent_subject),
 ) -> CourseGradeDetailOut:
     """Assignment-level breakdown behind one subject — "why is her maths grade 72"."""
     student = auth.resolve_permitted_student(
         db,
-        guardian_external_id=guardian_id,
+        guardian_external_id=subject.guardian_id,
         student_external_id=student_id,
-        caller=caller,
+        caller=subject.caller,
         endpoint=str(request.url.path),
     )
     resolved_term = _resolve_term(db, term)
@@ -286,7 +289,7 @@ def get_course_detail(
             lms_user_id=student.lms_user_id, course_id=binding.lms_course_id
         )
     except lms.LmsUnavailable:
-        _raise_unavailable(db, caller, request, guardian_id, student_id)
+        _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
 
     return CourseGradeDetailOut(
         student=_student_ref(student),
@@ -308,14 +311,14 @@ def get_attendance(
     request: Request,
     term: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    caller: auth.Caller = Depends(auth.require_agent_key),
+    subject: auth.ParentSubject = Depends(auth.require_parent_subject),
 ) -> AttendanceSummaryOut:
     """Attendance totals for a term, with the recent days behind them."""
     student = auth.resolve_permitted_student(
         db,
-        guardian_external_id=guardian_id,
+        guardian_external_id=subject.guardian_id,
         student_external_id=student_id,
-        caller=caller,
+        caller=subject.caller,
         endpoint=str(request.url.path),
     )
     resolved_term = _resolve_term(db, term)
@@ -331,7 +334,7 @@ def get_attendance(
                 since=resolved_term.starts_on,
             )
         except lms.LmsUnavailable:
-            _raise_unavailable(db, caller, request, guardian_id, student_id)
+            _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
 
     counts = {"present": 0, "absent": 0, "late": 0, "excused": 0}
     for day in days:
@@ -369,14 +372,14 @@ def get_report_card(
     term_id: str,
     request: Request,
     db: Session = Depends(get_db),
-    caller: auth.Caller = Depends(auth.require_agent_key),
+    subject: auth.ParentSubject = Depends(auth.require_parent_subject),
 ) -> ReportCardOut:
     """The published snapshot for a term. Served frozen — never recomputed."""
     student = auth.resolve_permitted_student(
         db,
-        guardian_external_id=guardian_id,
+        guardian_external_id=subject.guardian_id,
         student_external_id=student_id,
-        caller=caller,
+        caller=subject.caller,
         endpoint=str(request.url.path),
     )
     term = _resolve_term(db, term_id)

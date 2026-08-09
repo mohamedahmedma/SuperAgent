@@ -1,0 +1,76 @@
+{# Everything get_student_records says back to the model.
+
+   Same split as tools/knowledge_result.j2: backend/tools/records.py DECIDES which
+   outcome occurred, this file renders it. Each branch is paid only on the turns where
+   its condition is real, so the system prompt stays silent about all of it.
+
+   The rule running through every failure branch: a records answer is about a real
+   child, and a plausible invention is worse than an admission. The wording below
+   closes the gap the model would otherwise fill — "temporarily unavailable" and "no
+   grades recorded" are different sentences and must never be swapped.
+
+   Field access is via .get() throughout. The environment uses StrictUndefined, and a
+   facade that adds or drops an optional field should degrade to a blank in one line,
+   never raise mid-turn and take the whole answer down. `any_in_progress` and
+   `any_excused` arrive precomputed for the same reason the outcome does: deciding
+   them is the tool's job, and doing it in Jinja means a filter chain that explodes on
+   the first row missing a key.
+
+   Long sentence lines are deliberate; see the note in knowledge_result.j2.
+
+   Whitespace: trim_blocks is on, so the newline after every {% %} tag is swallowed. #}
+{% if outcome == "call_limit" %}
+TOOL_CALL_LIMIT_REACHED: get_student_records has been called the maximum number of times this turn. Answer from what it already returned; do not call it again.
+{% elif outcome == "not_a_parent" %}
+NOT_A_PARENT_SESSION: this conversation is not signed in as a parent, so no student records can be looked up. Tell the user that viewing a student's records requires signing in as their registered parent or guardian, and offer to help with general school information instead. Do not ask them to type a student name, ID or date of birth — those cannot authorise anything and collecting them here is pointless.
+{% elif outcome == "not_authorized" %}
+NOT_AUTHORIZED: the school records system did not accept this session's identity — most likely the sign-in has expired. Tell the user to sign in again and retry. Do NOT say the student has no records, and do not answer from anything earlier in the conversation.
+{% elif outcome == "unavailable" %}
+RECORDS_UNAVAILABLE: the school records system could not be reached. Tell the user briefly that records are temporarily unavailable and to try again shortly. Do NOT state, estimate or infer any grade, mark, average or attendance figure — not from earlier in this conversation, not from the knowledge base, and not from your own reasoning. An invented figure about a real child is the worst possible outcome here.
+{% elif outcome == "no_students" %}
+NO_STUDENTS_LINKED: this parent's account is not linked to any student the school will release records for. Tell them their account has no student linked to it yet and that the school office can arrange this. Do not speculate about why, and do not name any student.
+{% elif outcome == "which_student" %}
+NEEDS_STUDENT_CHOICE: more than one child is linked to this parent, and it is not clear which one they mean.
+{% if options %}
+Children: {{ options | join("; ") }}
+{% endif %}
+Ask the parent which child they are asking about. Do not pick one, and do not show any figures until they answer.
+{% elif outcome == "which_subject" %}
+NEEDS_SUBJECT_CHOICE: the subject was not clear from the question.
+{% if options %}
+Subjects recorded this term: {{ options | join("; ") }}
+{% endif %}
+Ask which subject they mean. Do not guess.
+{% elif outcome == "no_records" %}
+NO_RECORDS: the school records system has nothing recorded for this request. Tell the user plainly that nothing is recorded yet for that. This means the record is absent, NOT that the student scored zero or was absent — do not describe it as a poor result.
+{% elif outcome == "grades" %}
+STUDENT_GRADES for {{ student_label }}{% if term_label %} — {{ term_label }}{% endif %}:
+{% if courses %}
+{% for course in courses %}
+- {{ course.get('subject_name_ar') or course.get('subject_name_en') }}: {% if course.get('computed_percentage') is not none %}{{ course.get('computed_percentage') }}%{% if course.get('letter_grade') %} ({{ course.get('letter_grade') }}){% endif %}{% else %}no grade recorded yet{% endif %}{% if course.get('excused_count') %} — {{ course.get('excused_count') }} excused{% endif %}{% if course.get('missing_count') %} — {{ course.get('missing_count') }} not submitted{% endif %}{% if not course.get('is_complete') %} — still in progress{% endif %}
+
+{% endfor %}
+
+Report these figures as they stand. Do not recalculate, average across subjects, or convert to a different scale — the school's own weighting has already been applied and a second calculation will disagree with the report card.
+{% if any_in_progress %}
+Some subjects are marked still in progress: their figure is the result so far, not a final grade. Say so rather than presenting it as settled.
+{% endif %}
+{% if any_excused %}
+"Excused" means the school exempted that work; it is not counted against the student and is not a zero. If the parent asks about it, say so — do not describe excused work as missed or as a bad mark.
+{% endif %}
+{% else %}
+No subjects are recorded for this student this term. Say that nothing is recorded yet — not that the student is failing or has no marks.
+{% endif %}
+{% elif outcome == "subject" %}
+SUBJECT_DETAIL for {{ student_label }} — {{ subject_label }}{% if subject_percentage is not none %} ({{ subject_percentage }}%{% if subject_letter %}, {{ subject_letter }}{% endif %}){% endif %}:
+{% for item in assignments %}
+- {{ item.get('title') or item.get('assignment_id') }}: {% if item.get('status') == "graded" %}{{ item.get('score') }}/{{ item.get('max_score') }}{% elif item.get('status') == "excused" %}excused — exempted by the school, not counted{% elif item.get('status') == "missing" %}not submitted — counts as zero{% elif item.get('status') == "submitted_ungraded" %}submitted, not marked yet{% else %}not due yet{% endif %}
+
+{% endfor %}
+
+Explain the subject total using these items when the parent asks why it is what it is. Excused work is excluded from the calculation entirely; work marked not submitted is included as a zero. Do not recompute the total yourself.
+{% elif outcome == "attendance" %}
+ATTENDANCE for {{ student_label }}{% if term_label %} — {{ term_label }}{% endif %}: present {{ data.get('present_count', 0) }}, absent {{ data.get('absent_count', 0) }}, late {{ data.get('late_count', 0) }}, excused {{ data.get('excused_count', 0) }}, out of {{ data.get('total_sessions', 0) }} sessions{% if data.get('attendance_rate') is not none %} ({{ data.get('attendance_rate') }}%){% endif %}.
+
+Excused absences are authorised by the school and are counted as attended in that percentage. If the parent asks how many days were missed, distinguish unexcused absences from excused ones rather than adding them together.
+{% endif %}

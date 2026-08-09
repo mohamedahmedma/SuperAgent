@@ -26,9 +26,25 @@ time. Copying them is how two systems start disagreeing about a child's transcri
 > An API key proves **which system** is calling. It never proves **which parent** is
 > asking. Both are required before a single grade is returned.
 
-A leaked agent key is therefore worth nothing on its own. The permitted-student set is
-resolved server-side from `guardian_students` on every request, from the guardian id in
-the URL path — never from anything the caller supplies, and never as a filter applied
+So every parent-facing read carries two independent credentials:
+
+| Header | Proves | Issued by |
+| --- | --- | --- |
+| `X-API-Key` | which system is calling | this service's admin routes |
+| `Authorization: Bearer` | which parent it asks for | the [identity service](../identity/) |
+
+The token's `guardian_id` claim **must match** the `guardian_id` in the URL path. That
+equality check is what stops the calling system choosing whose records it reads — it
+relays a parent's token and cannot produce a signature for a different one. A fully
+compromised chat backend still cannot read a family it holds no token for.
+
+Verification is offline against a public key, so this service holds nothing that could
+mint a token, and identity being down does not take records down. It **fails closed**:
+with no public key configured every parent-facing read returns 503 rather than falling
+back to trusting the path.
+
+The permitted-student set is then resolved server-side from `guardian_students` on
+every request — never from anything the caller supplies, and never as a filter applied
 to results after the fact.
 
 This matters more than usual because the caller is a language model. No prompt, no
@@ -49,6 +65,9 @@ pytest records/tests -q
 | `RECORDS_DATABASE_URL` | `sqlite:///./records.db` | Point at Postgres for real data. |
 | `RECORDS_LMS` | `fake` | `fake` or `moodle`. |
 | `RECORDS_BOOTSTRAP_ADMIN_KEY` | — | Mints the first admin key, once. |
+| `IDENTITY_JWKS_URL` | — | **Required.** e.g. `http://localhost:8200/.well-known/jwks.json`. |
+| `IDENTITY_PUBLIC_KEY_PEM` | — | A pinned key instead of JWKS. Takes precedence. |
+| `IDENTITY_ISSUER` / `IDENTITY_AUDIENCE` | `school-identity` / `school-services` | Must match the identity service. |
 | `MOODLE_BASE_URL` / `MOODLE_TOKEN` | — | Required when `RECORDS_LMS=moodle`. |
 
 ## The contract

@@ -11,6 +11,7 @@ from backend.chat.request_context import ChatRequestContext
 from backend.tools.figures import make_view_figure
 from backend.tools.knowledge import make_search_knowledge_base
 from backend.tools.products import make_search_products
+from backend.tools.records import make_get_student_records
 from backend.tools.weather import get_current_weather_tool as get_current_weather
 
 # name -> builder(ctx) -> tool
@@ -19,6 +20,10 @@ TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
     "search_knowledge_base": make_search_knowledge_base,
     "view_figure": make_view_figure,
     "search_products": make_search_products,
+    # Reads a student's academic record from the records facade. Registered but not
+    # bound by any profile yet — a deployment opts in by naming it, which keeps every
+    # existing profile's behaviour unchanged.
+    "get_student_records": make_get_student_records,
 }
 
 
@@ -62,4 +67,5 @@ __all__ = [
     "make_search_knowledge_base",
     "make_view_figure",
     "make_search_products",
+    "make_get_student_records",
 ]
