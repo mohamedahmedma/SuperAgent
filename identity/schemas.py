@@ -9,6 +9,22 @@ class LoginIn(BaseModel):
     password: str
 
 
+class RegisterIn(BaseModel):
+    """Self-registration, ported from the old chat backend's `/auth/register`.
+
+    `role` may only be "user" or "admin", and "admin" requires `admin_code`. There is
+    deliberately no way to self-register as a parent: that role is paired with a
+    guardian binding, and both are an administrator's decision.
+    """
+
+    username: str
+    password: str
+    role: str = Field(default="user", description="user | admin")
+    admin_code: str | None = None
+    display_name: str = ""
+    preferred_language: str = "ar"
+
+
 class TokenOut(BaseModel):
     """What a successful login returns.
 
@@ -21,6 +37,9 @@ class TokenOut(BaseModel):
     refresh_token: str
     token_type: str = "Bearer"
     expires_at: datetime
+    # Echoed so a client can render the signed-in user without decoding the token.
+    # The old backend's AuthResponse carried it and its front end relied on it.
+    username: str
     role: str
     guardian_id: str | None = None
     display_name: str = ""
@@ -37,7 +56,9 @@ class AccessTokenOut(BaseModel):
 
 
 class MeOut(BaseModel):
-    subject: str
+    # `username`, not `sub` — JWT vocabulary should not leak into the API a front end
+    # codes against.
+    username: str
     role: str
     guardian_id: str | None = None
     display_name: str = ""
@@ -47,7 +68,7 @@ class MeOut(BaseModel):
 class AccountIn(BaseModel):
     username: str
     password: str
-    role: str = Field(default="parent", description="parent | staff")
+    role: str = Field(default="parent", description="user | admin | parent | staff")
     phone: str = ""
     display_name: str = ""
     preferred_language: str = "ar"

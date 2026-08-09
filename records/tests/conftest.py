@@ -97,6 +97,24 @@ def admin_headers() -> dict:
     return {"X-API-Key": ADMIN_KEY}
 
 
+@pytest.fixture(autouse=True)
+def _pin_verification_key():
+    """Re-pin this suite's public key for every test.
+
+    It is set at import as well, but `tests/test_e2e_api.py` boots a real identity
+    service and legitimately points the whole process at *its* key. Whichever module
+    runs second would otherwise verify tokens against the other one's key and fail with
+    a signature error that looks nothing like a test-ordering problem.
+    """
+    previous = os.environ.get("IDENTITY_PUBLIC_KEY_PEM")
+    os.environ["IDENTITY_PUBLIC_KEY_PEM"] = PUBLIC_PEM
+    yield
+    if previous is None:
+        os.environ.pop("IDENTITY_PUBLIC_KEY_PEM", None)
+    else:
+        os.environ["IDENTITY_PUBLIC_KEY_PEM"] = previous
+
+
 @pytest.fixture()
 def db():
     Base.metadata.drop_all(bind=engine)

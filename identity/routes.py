@@ -21,6 +21,7 @@ from identity.schemas import (
     LoginIn,
     MeOut,
     RefreshIn,
+    RegisterIn,
     TokenOut,
 )
 
@@ -100,6 +101,9 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)) -> Tok
         )
 
     auth.register_success(db, account)
+    # The plaintext is in hand and proven correct — the only moment a legacy bcrypt
+    # hash imported from the old backend can be upgraded. See identity/auth.py.
+    auth.upgrade_hash_if_needed(db, account, body.password)
 
     access_token, expires_at = tokens.mint_access_token(
         subject=account.username,
@@ -117,8 +121,69 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)) -> Tok
         access_token=access_token,
         refresh_token=raw_refresh,
         expires_at=expires_at,
+        username=account.username,
         role=account.role,
         guardian_id=account.guardian_external_id,
+        display_name=account.display_name,
+    )
+
+
+@public_router.post("/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
+def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)) -> TokenOut:
+    """Self-registration, ported from the old chat backend.
+
+    Produces an account that can sign in and read no student records whatsoever: the
+    guardian binding is a separate, admin-only write, and nothing on this path can
+    reach it. That is what makes leaving self-registration open acceptable — the worst
+    a stranger gets is a chat account.
+    """
+    username = (body.username or "").strip()
+    password = (body.password or "").strip()
+    if not username or not password:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "bad_request", "message": "Username and password cannot be empty."},
+        )
+
+    if db.query(Account).filter(Account.username == username).first():
+        raise HTTPException(
+            status_code=409, detail={"code": "conflict", "message": "Username already exists."}
+        )
+
+    # Raises 403 on a wrong invite code rather than silently downgrading the role.
+    role = auth.resolve_registration_role(body.role, body.admin_code)
+
+    account = Account(
+        username=username,
+        password_hash=auth.hash_password(password),
+        role=role,
+        display_name=body.display_name,
+        preferred_language=body.preferred_language,
+    )
+    db.add(account)
+    db.commit()
+
+    access_token, expires_at = tokens.mint_access_token(
+        subject=account.username,
+        role=account.role,
+        guardian_external_id=None,
+        display_name=account.display_name,
+    )
+    raw_refresh, refresh_hash, refresh_expires = tokens.mint_refresh_token()
+    db.add(RefreshToken(account_id=account.id, token_hash=refresh_hash, expires_at=refresh_expires))
+    db.commit()
+
+    auth.write_audit(
+        db, username=username, event="register", reason="ok", succeeded=True, client_ip=_client_ip(request)
+    )
+
+    return TokenOut(
+        access_token=access_token,
+        refresh_token=raw_refresh,
+        expires_at=expires_at,
+        username=account.username,
+        role=account.role,
+        guardian_id=None,
         display_name=account.display_name,
     )
 
@@ -205,7 +270,7 @@ def me(authorization: str | None = Header(default=None)) -> MeOut:
         )
 
     return MeOut(
-        subject=claims.get("sub", ""),
+        username=claims.get("sub", ""),
         role=claims.get("role", ""),
         guardian_id=claims.get("guardian_id"),
         display_name=claims.get("name", ""),
@@ -237,7 +302,7 @@ def create_account(
         username=body.username,
         phone=body.phone,
         password_hash=auth.hash_password(body.password),
-        role=body.role if body.role in ("parent", "staff") else "parent",
+        role=body.role if body.role in auth.ASSIGNABLE_ROLES else "parent",
         display_name=body.display_name,
         preferred_language=body.preferred_language,
     )

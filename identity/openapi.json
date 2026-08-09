@@ -92,6 +92,48 @@
         }
       }
     },
+    "/v1/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Register",
+        "description": "Self-registration, ported from the old chat backend.\n\nProduces an account that can sign in and read no student records whatsoever: the\nguardian binding is a separate, admin-only write, and nothing on this path can\nreach it. That is what makes leaving self-registration open acceptable — the worst\na stranger gets is a chat account.",
+        "operationId": "register_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/refresh": {
       "post": {
         "tags": [
@@ -523,7 +565,7 @@
           "role": {
             "type": "string",
             "title": "Role",
-            "description": "parent | staff",
+            "description": "user | admin | parent | staff",
             "default": "parent"
           },
           "phone": {
@@ -615,9 +657,9 @@
       },
       "MeOut": {
         "properties": {
-          "subject": {
+          "username": {
             "type": "string",
-            "title": "Subject"
+            "title": "Username"
           },
           "role": {
             "type": "string",
@@ -647,7 +689,7 @@
         },
         "type": "object",
         "required": [
-          "subject",
+          "username",
           "role",
           "expires_at"
         ],
@@ -665,6 +707,52 @@
           "refresh_token"
         ],
         "title": "RefreshIn"
+      },
+      "RegisterIn": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "description": "user | admin",
+            "default": "user"
+          },
+          "admin_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Code"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          },
+          "preferred_language": {
+            "type": "string",
+            "title": "Preferred Language",
+            "default": "ar"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "RegisterIn",
+        "description": "Self-registration, ported from the old chat backend's `/auth/register`.\n\n`role` may only be \"user\" or \"admin\", and \"admin\" requires `admin_code`. There is\ndeliberately no way to self-register as a parent: that role is paired with a\nguardian binding, and both are an administrator's decision."
       },
       "TokenOut": {
         "properties": {
@@ -685,6 +773,10 @@
             "type": "string",
             "format": "date-time",
             "title": "Expires At"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
           },
           "role": {
             "type": "string",
@@ -712,6 +804,7 @@
           "access_token",
           "refresh_token",
           "expires_at",
+          "username",
           "role"
         ],
         "title": "TokenOut",

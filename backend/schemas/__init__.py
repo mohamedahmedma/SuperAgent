@@ -1,9 +1,3 @@
-from backend.schemas.auth import (
-    AuthResponse,
-    CurrentUserResponse,
-    LoginRequest,
-    RegisterRequest,
-)
 from backend.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -30,11 +24,9 @@ from backend.schemas.documents import (
     UploadStepInfo,
 )
 
+# Auth request/response shapes are gone: login, registration and "who am I" are the
+# identity service's routes now, and their schemas live with them in identity/.
 __all__ = [
-    "RegisterRequest",
-    "LoginRequest",
-    "AuthResponse",
-    "CurrentUserResponse",
     "ChatRequest",
     "RetrievedChunk",
     "RagTrace",
