@@ -1,0 +1,4 @@
+# Local SQLite created by the default RECORDS_DATABASE_URL. Never commit one —
+# it would carry real student records into git history.
+*.db
+*.db-journal

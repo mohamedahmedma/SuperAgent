@@ -1,0 +1,21 @@
+# Deliberately tiny, and deliberately separate from the root pyproject.
+#
+# The whole dependency set is five packages. That is the isolation made concrete:
+# this service carries no LangChain, no Milvus, no sentence-transformers, no model
+# clients. It can be built, deployed and restarted without any of the machinery the
+# chat backend needs, and its container image is a fraction of the size.
+#
+#   pip install -r records/requirements.txt
+#   uvicorn records.app:app --port 8100
+
+fastapi>=0.115.0
+uvicorn>=0.30.0
+sqlalchemy>=2.0.36
+pydantic>=2.8.0
+
+# Postgres for anything holding real student records. SQLite is the default only so
+# the service runs with no infrastructure while the Moodle adapter is still a stub.
+psycopg2-binary>=2.9.10
+
+# Required by MoodleAdapter once it is implemented; unused by FakeLms.
+httpx>=0.27.0
