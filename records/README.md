@@ -124,18 +124,30 @@ These are the ones that are cheap now and brutal to retrofit once real data land
 
 ## What is not built yet
 
-**`MoodleAdapter` is a skeleton** — its methods raise. It is the one piece that must be
-written against a live Moodle rather than from documentation. Before writing it, verify
-on the school's actual instance:
+**`MoodleAdapter` is a skeleton** — its methods raise. The questions it was blocked on
+have now been answered against a real Moodle 5.1.6 with mod_attendance 2026042100; the
+full findings and a reproducible local instance live in `d:/Work/moodle-dev/`, and the
+implementation notes are in the `MoodleAdapter` docstring in [lms.py](lms.py).
 
-- Whether `gradereport_user_get_grade_items` is exposed and carries the **exemption
-  flag**. If it does not, the excused/missing distinction has to come from
-  `mod_assign_get_grades` and the adapter gets considerably chattier.
-- That the **`mod_attendance` plugin** is installed with its web-service functions
-  exposed, and what its configured status codes actually are — schools customise them,
-  so the mapping onto present/absent/late/excused is per-deployment.
-- That the token belongs to a **dedicated web-service user** with only those functions
-  whitelisted. Not an admin token.
+Two results change this service's design.
+
+**Grades: read Moodle's computed total, do not re-aggregate.** The web service exposes
+no exclusion flag — an excused assignment is indistinguishable from a counted one. But
+the course-total row's `percentageformatted` is correct, because Moodle applies
+exclusions, weights and drop-lowest itself. Measured on a student with 90/100, an
+excluded 10/100 and one ungraded item, the three candidate approaches give **50 %**,
+**30 %** and **90 %** — only the last is right.
+
+So [grading.py](grading.py)'s per-course arithmetic should be replaced by reading that
+figure. Its term-level rollup stays: Moodle still has no concept of a term. The
+`EXCUSED` status survives in the contract because a future SIS may report it, but
+Moodle will never populate it.
+
+**Attendance: the core web services are unusable for this.** Reading one child's
+attendance returns every classmate's name and status, requires write-capable
+permissions, and requires the service account to be enrolled as a teacher in every
+course. A `local_` Moodle plugin exposing a read-only per-student endpoint is the
+supported path.
 
 Build caching and a hard timeout into that adapter from the first line. These calls are
 chatty; a parent asking three questions should not trigger thirty round trips, and a

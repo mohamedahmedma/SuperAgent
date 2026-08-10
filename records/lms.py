@@ -106,24 +106,72 @@ class FakeLms:
 class MoodleAdapter:
     """Moodle web services, wrapped.
 
-    NOT YET IMPLEMENTED — the method bodies raise. This is the one piece of the plan
-    that must be written against a live Moodle rather than from documentation, because
-    the call shapes depend on the school's Moodle version and installed plugins.
+    NOT YET IMPLEMENTED — the method bodies raise. What follows is no longer a list of
+    things to check: it was verified against a real Moodle 5.1.6 with mod_attendance
+    2026042100 installed. See `d:/Work/moodle-dev/README.md` for the spike itself.
 
-    What needs verifying on the school's actual instance before writing these:
+    GRADES — read the course total, never re-aggregate
+    --------------------------------------------------
+    `gradereport_user_get_grade_items` returns 29 fields per item and **none of them is
+    the exclusion flag**. An excluded assignment comes back looking exactly like a
+    counted one, so the excused/missing distinction cannot be recovered from the
+    per-assignment payload at all.
 
-    * `gradereport_user_get_grade_items` is the richest read — it returns grade items
-      with per-user grades and category structure in one call, which is far cheaper
-      than walking `mod_assign_get_assignments` plus `mod_assign_get_grades`. Confirm
-      it is enabled in the external service and that it exposes the exemption flag;
-      if it does not, the excused/missing distinction has to come from
-      `mod_assign_get_grades` and this whole adapter gets chattier.
-    * Attendance comes from the `mod_attendance` plugin, not from core. Confirm the
-      plugin is installed, that its web-service functions are exposed, and what its
-      configured status codes actually are — schools customise them, and the mapping
-      onto present/absent/late/excused is per-deployment.
-    * The token must belong to a dedicated web-service user with only the functions
-      above whitelisted. Not an admin token.
+    The fix is to stop trying. Read the row where `itemtype == 'course'` and take
+    **`percentageformatted`**. Moodle has already applied exclusions, weights and
+    drop-lowest to it. Measured on a student with 90/100, an excluded 10/100 and one
+    ungraded item:
+
+        sum of assignments   (90+10)/200  -> 50 %   WRONG
+        course graderaw/max  90/300       -> 30 %   WRONG (denominator keeps both)
+        course percentageformatted        -> 90 %   CORRECT
+
+    Both intuitive approaches produce plausible, badly wrong grades in front of a
+    parent. Never compute a percentage in this adapter.
+
+    `grade_grades.excluded` is a TIMESTAMP, not a boolean — a real row reads
+    `1786347956`. Irrelevant over the API, but it matters if anyone ever reads the
+    database directly: the test is `!= 0`.
+
+    ATTENDANCE — do not use the core web services for this
+    ------------------------------------------------------
+    Four independent problems, each verified:
+
+    1. No per-student read exists. `get_sessions` takes an *activity instance* id, so
+       finding one child's attendance means walking courses -> activities -> sessions.
+    2. `get_session` returns EVERY student in the class — names and statuses. Asking
+       about one child returned both seeded children. The facade would receive records
+       for students the guardian may not see, which no client-side filtering undoes.
+    3. Reading requires `manageattendances`, `takeattendances` or
+       `changeattendances` — all write-capable. A token that reads one child's
+       attendance can alter attendance for the whole school.
+    4. Capabilities are not enough: `get_session` calls `require_login($course, ...,
+       $cm)`, so the service account must be ENROLLED in the course. Across a school
+       that means enrolled as a teacher in every course.
+
+    Grades need none of this — system-level capabilities and no enrolment. The two
+    subsystems are not comparable, and attendance should go through a `local_` plugin
+    exposing a genuinely read-only, per-student endpoint.
+
+    Status codes default to P/A/L/E (Present/Absent/Late/Excused) and carry grade
+    weights, but each activity may override them, so read the set rather than
+    hardcoding it.
+
+    SERVICE ACCOUNT — the capabilities that are easy to miss
+    --------------------------------------------------------
+    Each of these fails with a different, misleading error while the token and the
+    external service look perfectly correct:
+
+        moodle/course:view        else requireloginerror "Not enrolled"
+        gradereport/user:view     else nopermissions "View user report"
+        moodle/grade:viewall      else grades silently absent
+        moodle/grade:viewhidden   else hidden grades silently absent
+
+    Not an admin token. Allow-list only the functions actually called.
+
+    Moodle 302/303-redirects any request whose host is not `$CFG->wwwroot`, returning
+    an HTML page instead of JSON — which looks exactly like a broken endpoint. Match
+    the configured host exactly.
 
     Two things to build in from the first line, because retrofitting them hurts:
     caching (these calls are chatty and a parent asking three questions should not
