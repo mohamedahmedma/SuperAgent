@@ -33,3 +33,10 @@ rag_pipeline_graph.png
 # does not belong in the repository.
 *.docx
 !docs/**/*.docx
+
+# Local dev artifacts generated at the repo root by the identity service when
+# IDENTITY_PRIVATE_KEY_PEM / IDENTITY_DATABASE_URL are unset (see identity/keys.py,
+# identity/db.py). identity/.gitignore only covers these filenames inside identity/,
+# not here.
+/identity-dev-key.pem
+/identity.db
