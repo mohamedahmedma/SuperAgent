@@ -183,6 +183,50 @@ class ParentChunk(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class CorpusDigest(Base):
+    """What the WHOLE corpus is about, in prose, plus the scope floor derived from it.
+
+    One row per profile. It exists because the scope prompt previously described the
+    corpus by joining up to 24 topic labels with commas — "admissions, fees, transport"
+    — which tells a model the shelf headings and nothing about what is on them. The
+    decision it supports is "is this question this corpus's subject", and labels are
+    thin evidence for it. A paragraph is not.
+
+    **Built at ingest, from every section.** Not assembled per request from whatever
+    rows happen to be loaded, which is what let the old description drift: it silently
+    described the sections it could see rather than the corpus. Regenerated whenever
+    `sections_sha256` stops matching, so it cannot describe a corpus that no longer
+    exists.
+
+    `floor` is cached here for a different reason. Deriving it is leave-one-out over
+    every catalogued question — quadratic in their number, and measured at 64 seconds
+    for 40,000 questions even after the blocked rewrite. It is a pure function of the
+    question vectors, so recomputing it on every process start bills that to whichever
+    user arrives first after a deploy. `floor_sha256` covers the vectors, the embedding
+    model and the percentile, so any change to the inputs invalidates it.
+    """
+
+    __tablename__ = "corpus_digests"
+
+    profile: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    # The paragraph shown to the scope model. Prose, not labels.
+    paragraph: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Identity of the section set the paragraph was written from, so staleness is a
+    # fact rather than a guess about how long ago the corpus changed.
+    sections_sha256: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    section_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    floor: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    # Covers the question vectors, the embedding model and the percentile — every input
+    # to the floor. A mismatch means recompute, never "use it anyway".
+    floor_sha256: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    question_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    model_used: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class SectionSummary(Base):
     """What one corpus section is ABOUT, and which questions it can answer.
 
