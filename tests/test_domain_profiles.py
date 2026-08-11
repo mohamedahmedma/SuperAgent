@@ -136,9 +136,11 @@ class EnvPrecedenceTests(ProfileTestCase):
         profile = load_profile("base")
         for env_name, dotted in registry.ENV_OVERRIDES.items():
             with self.subTest(env=env_name):
-                section_name, _, field_name = dotted.partition(".")
-                section = getattr(profile, section_name, None)
-                self.assertIsNotNone(section, f"{dotted} has no section {section_name}")
+                *parents, field_name = dotted.split(".")
+                section = profile
+                for part in parents:
+                    section = getattr(section, part, None)
+                    self.assertIsNotNone(section, f"{dotted} has no section {part}")
                 self.assertTrue(hasattr(section, field_name), f"{dotted} missing field")
 
 
@@ -330,8 +332,16 @@ class NoDriftTests(ProfileTestCase):
         from backend.prompts import render
 
         marker = "PLACEHOLDER_MARKER"
-        graded = render("rag/evidence_grade.j2", question=marker, context=marker)
+        graded = render("rag/evidence_grade.j2", question=marker, context=marker, constraints=[])
         self.assertEqual(2, graded.count(marker))
+        # Carried conditions are a third payload, and they must reach the grader as
+        # their own section rather than folded into the question — see AssessmentContext.
+        with_conditions = render(
+            "rag/evidence_grade.j2", question=marker, context=marker,
+            constraints=["CONDITION_MARKER"],
+        )
+        self.assertIn("CONDITION_MARKER", with_conditions)
+        self.assertIn("constraints_discriminate", with_conditions)
         self.assertIn(marker, render("rag/complexity.j2", question=marker))
         self.assertIn(marker, render("rag/rewrite.j2", query=marker))
 

@@ -27,9 +27,11 @@ DEFINITIONS_DIR = Path(__file__).resolve().parent / "definitions"
 DEFAULT_PROFILE = "supermew"
 PROFILE_ENV_VAR = "ACTIVE_PROFILE"
 
-# Existing environment variable -> dotted path in the profile. Every entry here is a
-# variable that already existed before profiles, so this table is also the
-# backward-compatibility contract: removing a row silently changes a live deployment.
+# Environment variable -> dotted path in the profile. The retrieval and chunking rows
+# predate profiles, which makes this table a backward-compatibility contract as well as
+# a convenience: removing one of those rows silently changes a live deployment. Later
+# rows are values a deployment is expected to tune per environment rather than per
+# domain — model sampling above all, since it is what a turn costs.
 ENV_OVERRIDES: Dict[str, str] = {
     # Identity
     "REDIS_KEY_PREFIX": "identity.redis_key_prefix",
@@ -44,6 +46,40 @@ ENV_OVERRIDES: Dict[str, str] = {
     "RERANK_MIN_SCORE": "retrieval.rerank_min_score",
     "RERANK_DOC_CHAR_LIMIT": "retrieval.rerank_doc_char_limit",
     "RERANK_TIMEOUT_SECONDS": "retrieval.rerank_timeout_seconds",
+    # Models — sampling per role. Effort and the output ceiling are the two knobs that
+    # decide what a turn costs on a reasoning model, so they are dialled per deployment
+    # rather than baked into the domain profile.
+    "ANSWER_TEMPERATURE": "models.answer_temperature",
+    "FAST_TEMPERATURE": "models.fast_temperature",
+    "PLANNER_TEMPERATURE": "models.planner_temperature",
+    "GRADE_TEMPERATURE": "models.grade_temperature",
+    "REWRITE_TEMPERATURE": "models.rewrite_temperature",
+    "SCOPE_TEMPERATURE": "models.scope_temperature",
+    "RESOLVE_TEMPERATURE": "models.resolve_temperature",
+    "ANSWER_REASONING_EFFORT": "models.answer_reasoning_effort",
+    "FAST_REASONING_EFFORT": "models.fast_reasoning_effort",
+    "PLANNER_REASONING_EFFORT": "models.planner_reasoning_effort",
+    "GRADE_REASONING_EFFORT": "models.grade_reasoning_effort",
+    "REWRITE_REASONING_EFFORT": "models.rewrite_reasoning_effort",
+    "SCOPE_REASONING_EFFORT": "models.scope_reasoning_effort",
+    "RESOLVE_REASONING_EFFORT": "models.resolve_reasoning_effort",
+    "ANSWER_MAX_TOKENS": "models.answer_max_tokens",
+    "FAST_MAX_TOKENS": "models.fast_max_tokens",
+    "PLANNER_MAX_TOKENS": "models.planner_max_tokens",
+    "GRADE_MAX_TOKENS": "models.grade_max_tokens",
+    "REWRITE_MAX_TOKENS": "models.rewrite_max_tokens",
+    "SCOPE_MAX_TOKENS": "models.scope_max_tokens",
+    "RESOLVE_MAX_TOKENS": "models.resolve_max_tokens",
+    # Agent
+    "CONTEXT_WINDOW_MESSAGES": "agent.context_window_messages",
+    # Contextual query resolution. Reachable from the environment because it is the one
+    # switch worth flipping without a redeploy: it costs a small call per referential
+    # turn, and a deployment hitting a quota wall needs to be able to stop paying it.
+    "QUERY_RESOLUTION_ENABLED": "agent.query_resolution_enabled",
+    # Vision — the figure-reading model, reachable from a turn via the view_figure
+    # tool. Its effort belongs with the other vision settings rather than in
+    # ModelConfig, but it is tuned per deployment for the same reason as the rest.
+    "VISION_REASONING_EFFORT": "assets.figures.vision_reasoning_effort",
     # Chunking
     "CHUNK_STRATEGY": "chunking.strategy",
     "CHUNK_SIZE": "chunking.chunk_size",
@@ -167,8 +203,15 @@ def _apply_env_overrides(data: Dict[str, Any], profile: DomainProfile) -> Dict[s
         if raw is None or not raw.strip():
             continue
 
-        section_name, _, field_name = dotted.partition(".")
-        section = getattr(profile, section_name, None)
+        # Paths are walked to arbitrary depth rather than split once: nested sections
+        # are real (assets.figures.*), and a two-level-only resolver would silently
+        # ignore an override rather than fail, which is the worst of both outcomes.
+        *parents, field_name = dotted.split(".")
+        section = profile
+        for part in parents:
+            section = getattr(section, part, None)
+            if section is None:
+                break
         if section is None or not hasattr(section, field_name):
             logger.warning("ENV_OVERRIDES maps %s to unknown path %r — ignoring", env_name, dotted)
             continue
@@ -178,7 +221,18 @@ def _apply_env_overrides(data: Dict[str, Any], profile: DomainProfile) -> Dict[s
             # Unset Optional: fall back to the declared annotation via the field default
             # of a fresh section instance, then to string.
             current = type(section).model_fields[field_name].default
-        result.setdefault(section_name, {})[field_name] = _coerce(raw, current, env_name)
+
+        bucket = result
+        for part in parents:
+            existing = bucket.get(part)
+            if not isinstance(existing, dict):
+                # The YAML omitted the section, or holds a scalar where the schema
+                # declares one. Either way the override still has to land, and
+                # validation downstream is what reports a genuinely malformed profile.
+                existing = {}
+                bucket[part] = existing
+            bucket = existing
+        bucket[field_name] = _coerce(raw, current, env_name)
     return result
 
 

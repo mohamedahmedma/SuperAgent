@@ -17,9 +17,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.assets.attributes import AttributeSpec
+
+# Effort levels the gpt-oss family exposes. Kept here rather than in the LLM helper so
+# that a bad value in a hand-edited profile is caught during validation, before any
+# model is constructed.
+_REASONING_EFFORTS = ("low", "medium", "high")
 
 
 class _Section(BaseModel):
@@ -44,7 +49,13 @@ class IdentityConfig(_Section):
 
 class ModelConfig(_Section):
     """Sampling settings per model role. Model IDs stay in env — they are deployment
-    credentials, not domain behaviour, and belong with the API key that reaches them."""
+    credentials, not domain behaviour, and belong with the API key that reaches them.
+
+    Roles map to pipeline nodes, and each node is dialled separately because they are
+    not the same kind of work: `planner`, `grade`, `rewrite`, `scope` and `resolve` emit
+    a fixed structured shape, while `answer` is the only role doing open-ended
+    generation.
+    """
 
     answer_temperature: float = 0.3
     # FAST_MODEL is used for two different jobs at two different temperatures:
@@ -55,6 +66,75 @@ class ModelConfig(_Section):
     planner_temperature: float = 0.0
     grade_temperature: float = 0.0
     rewrite_temperature: float = 0.0
+    scope_temperature: float = 0.0
+    # Contextual query resolution. Zero for the same reason as the rest: the output is a
+    # rewrite of something the user already said, and sampling it would make the same
+    # follow-up resolve differently on two identical conversations.
+    resolve_temperature: float = 0.0
+
+    # Reasoning effort per role, for models that expose one (gpt-oss: low|medium|high).
+    #
+    # This is the dominant cost and latency control on a reasoning model, and the
+    # reason it is per-role rather than global. Output tokens bill several times input
+    # and are generated serially, while the whole prompt prefills in one parallel pass
+    # — so a classifier left at the default effort spends most of a turn's wall-clock
+    # deliberating over a three-way label that carries no reasoning payoff. Trimming
+    # conversation history moves a fraction of what moving this does.
+    #
+    # Empty means "send no effort parameter", which is both the pre-profile behaviour
+    # and what a non-reasoning model behind BASE_URL requires — providers reject the
+    # field rather than ignoring it. The shipped values live in base.yaml.
+    answer_reasoning_effort: str = ""
+    fast_reasoning_effort: str = ""
+    planner_reasoning_effort: str = ""
+    grade_reasoning_effort: str = ""
+    rewrite_reasoning_effort: str = ""
+    scope_reasoning_effort: str = ""
+    resolve_reasoning_effort: str = ""
+
+    # Output ceilings per role. 0 means no ceiling, which is the default everywhere on
+    # purpose: a cap that truncates a structured response turns a priced call into a
+    # parse failure, so this is a knob to set from an observed p99 output length rather
+    # than a value to guess. Suggested starting points are in .env.example.
+    answer_max_tokens: int = 0
+    fast_max_tokens: int = 0
+    planner_max_tokens: int = 0
+    grade_max_tokens: int = 0
+    rewrite_max_tokens: int = 0
+    scope_max_tokens: int = 0
+    resolve_max_tokens: int = 0
+
+    @field_validator(
+        "answer_reasoning_effort",
+        "fast_reasoning_effort",
+        "planner_reasoning_effort",
+        "grade_reasoning_effort",
+        "rewrite_reasoning_effort",
+        "scope_reasoning_effort",
+        "resolve_reasoning_effort",
+    )
+    @classmethod
+    def _validate_effort(cls, value: str) -> str:
+        """Normalise to a value the provider accepts, or fail at startup.
+
+        Fatal rather than warn-and-continue because the alternative is a 400 on every
+        single call this role makes — a startup message naming the bad value is a much
+        cheaper way to find that out than a production incident.
+
+        `none` and `off` exist because a blank environment variable counts as *unset*
+        and falls through to the profile. Without a sentinel there would be no way for
+        a deployment running a non-reasoning model to switch off an effort that
+        base.yaml turns on.
+        """
+        text = (value or "").strip().lower()
+        if text in ("", "none", "off"):
+            return ""
+        if text not in _REASONING_EFFORTS:
+            raise ValueError(
+                f"reasoning effort must be one of {', '.join(_REASONING_EFFORTS)} "
+                f"(or none/off to send no effort parameter), got {value!r}"
+            )
+        return text
 
 
 class AgentConfig(_Section):
@@ -77,8 +157,12 @@ class AgentConfig(_Section):
     persistent_note_prompt: str = ""
 
     tools: List[str] = Field(default_factory=lambda: ["get_current_weather", "search_knowledge_base"])
+
     recursion_limit: int = 8
     max_knowledge_calls_per_turn: int = 1
+
+
+
     # view_figure gets its own budget, carved explicitly out of the single-knowledge-
     # call rule. Sharing that budget would make looking at a figure cost the turn its
     # only retrieval, which is the opposite of what the tool is for.
@@ -112,6 +196,70 @@ class AgentConfig(_Section):
     # Without it the corpus-similarity rung can only ever ADMIT a question — it is
     # never permitted to end a turn on its own.
     request_envelope_enabled: bool = False
+
+    # ---- Contextual query resolution ---------------------------------------------
+    # Rewriting a follow-up into a question that stands on its own, once per turn, so
+    # that scope detection, retrieval and the resume path all read ONE subject instead
+    # of each deriving their own. See backend/chat/resolution.py.
+    #
+    # On by default, unlike the other switches in this section, because it is a
+    # correctness fix rather than an optimisation: with it off, "and what about the
+    # fees?" is measured as the average of two subjects and the older one wins. It also
+    # fails safe — an unconfigured FAST_MODEL, a provider error, a response that fails
+    # validation all abstain, and abstention is exactly the behaviour that preceded it.
+    query_resolution_enabled: bool = True
+    query_resolution_prompt: str = ""
+    # Messages of conversation shown to the resolver. Both sides: a follow-up often
+    # points at something only the assistant said ("the fees you mentioned").
+    query_resolution_history_messages: int = 6
+    # At or below this length a message is assumed to be carrying its subject in the
+    # conversation rather than in its own words, even with no marker to prove it. Above
+    # it, a message with no anaphora and no leading conjunction is left alone.
+    #
+    # This is the rule that catches "grade 5", "Primary", "he is 9" — bare replies that
+    # name no referent for a marker list to find, and that are exactly what a
+    # clarification gets answered with. It is deliberately short: at 80 it also
+    # swallowed ordinary self-contained questions ("what documents does a new student
+    # need to submit"), which is a resolver call spent to be told nothing changed.
+    # Some short standalone questions still reach the model, and that is the accepted
+    # cost — a short message arriving mid-conversation genuinely often depends on it.
+    query_resolution_max_chars: int = 40
+    # Conditions carried forward from earlier turns. Capped because these are appended
+    # to the retrieval query and stated in the answer prompt, and a resolver having a
+    # bad turn must not be able to bury either.
+    carried_constraint_limit: int = 4
+
+    # Words that make a message depend on the conversation. Language- and domain-
+    # specific, hence profile data. Single-word markers are matched on word boundaries
+    # ("it" must not fire inside "admission"); anything containing a space is matched
+    # as a plain substring.
+    followup_markers: List[str] = Field(
+        default_factory=lambda: [
+            "this", "these", "those", "that", "it", "they", "them", "their",
+            "there", "then", "same", "also", "too", "instead", "as well",
+            "what about", "how about", "and what", "and how", "and the",
+            "i mean", "i meant", "not that", "rather than",
+            # Personal pronouns. A question about a person already introduced carries
+            # that person only in the conversation: "what documents to transfer him"
+            # names no child, no age and no year, and reads as a complete standalone
+            # question to every test but this one.
+            "he", "him", "his", "she", "her", "hers", "me", "us", "one of", "both",
+            "هذا", "هذه", "ذلك", "تلك", "هؤلاء", "دي", "ده", "دول", "نفس",
+            "كمان", "ايضا", "أيضا", "برضه", "بردو", "اقصد", "أقصد", "يعني",
+            "بدل", "ماذا عن", "وماذا عن", "طيب",
+            "له", "لها", "عنه", "عنها", "ابني", "ابنتي", "طفلي", "ولدي",
+        ]
+    )
+    # Openings that mark a message as a continuation of the previous one. Matched as a
+    # PREFIX, which is what makes the bare Arabic conjunction "و" usable here — it is
+    # written joined to the following word, so it cannot be matched as a token.
+    followup_openers: List[str] = Field(
+        default_factory=lambda: [
+            "and ", "and, ", "but ", "so ", "ok and", "okay and", "also ",
+            "what about", "how about", "no i mean", "no, i mean", "no i meant",
+            "و", "وما", "وكم", "وهل", "طب ", "طيب ", "لا اقصد", "لا أقصد",
+        ]
+    )
 
 
 class RagConfig(_Section):
@@ -201,7 +349,9 @@ class RagConfig(_Section):
     # section, so a small model is usually right.
     scope_summary_model: str = ""
     scope_min_questions: int = 4
-    scope_max_questions: int = 10
+    # Shared across the languages in scope_question_languages, so this is roughly twice
+    # the number of distinct things a section can be matched on. See base.yaml.
+    scope_max_questions: int = 20
     # Languages the anticipated questions are written in. A question only matches a
     # query in the same language, so an Arabic-first corpus must catalogue both.
     scope_question_languages: str = "English and Arabic"
@@ -218,6 +368,22 @@ class RagConfig(_Section):
     # than guessing from a topic list, which is the best defence against the one
     # unrecoverable failure here — refusing a valid question.
     scope_match_count: int = 3
+
+    # ---- Which matches are worth OFFERING the user as a choice ---------------------
+    # Matching is recall. Offering is a question put to a person, and it has to survive
+    # two extra tests that a match does not.
+    #
+    # Cosine between two catalogued questions above which they are treated as one
+    # direction. "What subjects are taught IN Years 3 to 6?" and "What subjects are
+    # taught FOR Years 3 to 6?" are one choice presented twice — and because the
+    # once-per-question ask is unlocked by having two or more directions, a pair of
+    # paraphrases was enough on its own to interrupt the user.
+    scope_option_duplicate_similarity: float = 0.92
+    # How far behind the best match a direction may sit and still be offered. A clear
+    # leader is not an ambiguity: if the top question is this much stronger than the
+    # next, the query picked one, and asking which of them was meant is a question
+    # whose answer is already visible.
+    scope_option_max_score_gap: float = 0.06
 
     # Rejecting a question the corpus cannot answer before searching for it. Off by
     # default: the threshold has to be calibrated against a corpus before it can be
@@ -249,6 +415,7 @@ class RagConfig(_Section):
     # Lexical overlap is kept as a cheap negative signal and a trace breadcrumb. It can
     # never conclude on its own, so disabling it changes reporting, not routing.
     evidence_lexical_enabled: bool = True
+
 
     # The grader is one synchronous call per retrieval — and one per sub-agent on a
     # decomposed question — so it is usually the dominant latency in a turn. Much of
@@ -454,9 +621,19 @@ class FigurePipelineConfig(_Section):
     # quota before generating anything, so `input + this` must fit inside the quota or
     # the request is rejected outright — and a reasoning model spends much of it on a
     # scratchpad, so the value has to clear the truncation floor AND the quota ceiling
-    # at once. On a small quota, disabling reasoning (vision_extra_params) buys far
+    # at once. On a small quota, disabling reasoning (vision_reasoning_effort) buys far
     # more room than raising this does.
     vision_max_output_tokens: int = 4096
+
+    # Reasoning effort for the vision call — the same per-node knob the text roles get
+    # in ModelConfig, kept here because every other vision setting is here too.
+    #
+    # It earns a typed field rather than living in vision_extra_params because on a
+    # small quota it is the single most useful thing to turn down: the scratchpad is
+    # reserved against the tokens-per-minute allowance before generation starts, so
+    # `none` reclaims output budget that raising vision_max_output_tokens cannot.
+    # Empty sends no effort parameter, which is what a vision model without one needs.
+    vision_reasoning_effort: str = ""
 
     # Rate limits are transient, but without a retry a single 429 permanently demotes
     # an image to the heuristic path and the document silently loses its figures.
@@ -465,10 +642,23 @@ class FigurePipelineConfig(_Section):
     vision_retry_max_seconds: float = 90.0
 
     # Provider-specific parameters passed straight through to the model, for knobs
-    # this schema should not try to enumerate. The one that matters on a small quota
-    # is turning the scratchpad off — {"reasoning_effort": "none"} on Groq — which
-    # reclaims the output budget it would otherwise consume.
+    # this schema should not try to enumerate. `reasoning_effort` set here still works
+    # and still wins, so an existing profile keeps behaving as it did — but prefer
+    # vision_reasoning_effort, which is validated and reachable from the environment.
     vision_extra_params: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("vision_reasoning_effort")
+    @classmethod
+    def _validate_vision_effort(cls, value: str) -> str:
+        text = (value or "").strip().lower()
+        if text in ("", "none", "off"):
+            return ""
+        if text not in _REASONING_EFFORTS:
+            raise ValueError(
+                f"reasoning effort must be one of {', '.join(_REASONING_EFFORTS)} "
+                f"(or none/off to send no effort parameter), got {value!r}"
+            )
+        return text
 
     # DPI used when rendering a PDF page region to an image. 150 is legible for chart
     # labels without producing megabyte crops.

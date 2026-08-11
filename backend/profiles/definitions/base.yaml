@@ -24,6 +24,32 @@ models:
   planner_temperature: 0.0    # FAST_MODEL for complexity classification (deterministic)
   grade_temperature: 0.0      # GRADE_MODEL evidence grading (deterministic)
   rewrite_temperature: 0.0    # FAST_MODEL for Step-back / HyDE planning (deterministic)
+  scope_temperature: 0.0      # FAST_MODEL for the in-domain / out-of-domain check
+  resolve_temperature: 0.0    # FAST_MODEL rewriting a follow-up into a standalone question
+
+  # Reasoning effort per role. On a reasoning model this is the largest cost and
+  # latency control there is: output tokens bill several times input and are generated
+  # one after another, while the whole prompt prefills in a single parallel pass.
+  #
+  # Only `answer` does open-ended work. The other four emit a fixed structured shape —
+  # a label, a grade, a rewritten query — and deliberating over it changes the answer
+  # not at all while spending most of the turn's wall-clock. Hence `low` everywhere the
+  # output shape is known in advance.
+  #
+  # Set a role to `none` for a deployment whose model has no effort parameter;
+  # providers reject the field rather than ignoring it. Overridable per deployment via
+  # <ROLE>_REASONING_EFFORT (see .env.example).
+  answer_reasoning_effort: medium
+  fast_reasoning_effort: low
+  planner_reasoning_effort: low
+  grade_reasoning_effort: low
+  rewrite_reasoning_effort: low
+  scope_reasoning_effort: low
+  resolve_reasoning_effort: low
+
+  # Output ceilings stay off (0) by default. A ceiling that truncates a structured
+  # response converts a paid call into a parse failure, so it is worth setting only
+  # from an observed p99 output length — per deployment, via <ROLE>_MAX_TOKENS.
 
 agent:
   tools:
@@ -33,8 +59,66 @@ agent:
   recursion_limit: 8
   max_knowledge_calls_per_turn: 1
   max_figure_calls_per_turn: 3
-  context_window_messages: 6
+  # 14 messages = 7 user/assistant turns. Counted in MESSAGES, not turns, because that
+  # is what the slice operates on — halving it silently drops the assistant side of
+  # every exchange, and the assistant's own replies are what later follow-ups refer
+  # back to ("the fees you mentioned earlier").
+  #
+  # Only this role ever sees the history: the planner, grader, and rewriter are given
+  # the question or the documents alone, and the scope check gets a single previous
+  # line. So widening this costs one node's prompt, not the pipeline's.
+  #
+  # Trimming here is also the smallest cost lever available — the window prefills in
+  # parallel and is the cheap half of the token bill. Prefer the effort settings above.
+  context_window_messages: 14
   persistent_note_max_chars: 500
+
+  # Contextual query resolution: one FAST_MODEL call that rewrites a follow-up into a
+  # question standing on its own, and names the conditions carried over from earlier
+  # turns. Its output is what scope detection embeds, what retrieval searches for, and
+  # what a resumed clarification continues from — one subject per turn instead of three
+  # components each guessing at one.
+  #
+  # ON, unlike the other switches in this file, because it is a correctness fix. With it
+  # off, "and what is the fees for this years" is embedded as the average of itself and
+  # the previous turn, and the previous turn wins.
+  #
+  # It is gated, not paid per turn: a first message, or one long enough to carry its own
+  # subject with no anaphora and no leading conjunction, never reaches the model. On the
+  # turns that do reach it, the call routinely pays for itself — a resolved question
+  # matches the scope catalogue above its floor, so the scope model does not run, and it
+  # does not trigger the clarification round-trip an under-specified one does.
+  query_resolution_enabled: true
+  query_resolution_history_messages: 6
+  # Short enough to mean "this is a bare reply" — "grade 5", "Primary", "he is 9" —
+  # rather than "this is a question". A higher ceiling also caught ordinary
+  # self-contained questions, spending a call to be told nothing changed.
+  query_resolution_max_chars: 40
+  carried_constraint_limit: 4
+
+  # Markers that make a message depend on the conversation. Multilingual by default
+  # (English + Arabic); a domain profile replaces them wholesale. Single words are
+  # matched on word boundaries, phrases as substrings, and `followup_openers` as a
+  # prefix — which is what makes the bare Arabic conjunction "و" usable, since it is
+  # written joined to the word that follows it.
+  # Personal pronouns earn their place here: "what documents to transfer him" names no
+  # child, no age and no year — it reads as a complete standalone question, and the only
+  # thing marking it as dependent is the pronoun.
+  followup_markers:
+    ["this", "these", "those", "that", "it", "they", "them", "their",
+     "there", "then", "same", "also", "too", "instead", "as well",
+     "what about", "how about", "and what", "and how", "and the",
+     "i mean", "i meant", "not that", "rather than",
+     "he", "him", "his", "she", "her", "hers", "me", "us", "one of", "both",
+     "هذا", "هذه", "ذلك", "تلك", "هؤلاء", "دي", "ده", "دول", "نفس",
+     "كمان", "ايضا", "أيضا", "برضه", "بردو", "اقصد", "أقصد", "يعني",
+     "بدل", "ماذا عن", "وماذا عن", "طيب",
+     "له", "لها", "عنه", "عنها", "ابني", "ابنتي", "طفلي", "ولدي"]
+
+  followup_openers:
+    ["and ", "and, ", "but ", "so ", "ok and", "okay and", "also ",
+     "what about", "how about", "no i mean", "no, i mean", "no i meant",
+     "و", "وما", "وكم", "وهل", "طب ", "طيب ", "لا اقصد", "لا أقصد"]
 
   # No prompt text here. Prompts live in backend/prompts/templates/ and a profile sets
   # one of these keys only to OVERRIDE the shipped template — which is why the shipped
@@ -86,10 +170,23 @@ rag:
   scope_section_level: 1
   scope_summary_model: ""
   scope_min_questions: 4
-  scope_max_questions: 10
+  # The ceiling on rung 1's coverage, and so on how often the cheap rung can admit a
+  # question without a model call. It is shared across languages: with
+  # scope_question_languages set, 20 questions is about 10 distinct things a section
+  # can be asked about, not 20. Raised from 10 for exactly that reason — at 10, a
+  # bilingual catalogue covered roughly five ideas per section and everything else
+  # escalated. More questions cost one vector each and a slightly longer ingest call.
+  scope_max_questions: 20
   scope_question_languages: English and Arabic
   scope_floor_percentile: 10.0
   scope_match_count: 3
+  # Matching is recall; OFFERING a match to the user is a question put to a person, and
+  # it has to survive two tests a match does not. Paraphrases of one catalogued question
+  # collapse into one direction — otherwise a pair of them was, on its own, enough to
+  # unlock the once-per-question ask. And a direction far behind the leader is dropped,
+  # because a clear winner is not an ambiguity worth interrupting anyone over.
+  scope_option_duplicate_similarity: 0.92
+  scope_option_max_score_gap: 0.06
   # Frozen so the catalogue cannot drift between re-indexes. Deliberately empty in the
   # base profile: these labels describe a corpus, and base describes none.
   scope_topic_vocabulary: []
