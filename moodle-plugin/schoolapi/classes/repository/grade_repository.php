@@ -41,14 +41,20 @@ final class grade_repository implements grade_repository_interface {
             return [];
         }
 
-        // One extra query for ALL courses at once rather than one per course. The
-        // difference between this and the obvious loop is the difference between 2
-        // queries and 2N.
-        $counts = $this->fetch_item_counts($userid, array_keys($totals));
+        // Two extra queries for ALL courses at once rather than per course. The
+        // difference between this and the obvious loop is the difference between a
+        // constant number of queries and 3N.
+        $courseids = array_keys($totals);
+        $counts = $this->fetch_item_aggregates($userid, $courseids);
+        $categories = $this->fetch_category_subtotals($userid, $courseids);
 
         $grades = [];
         foreach ($totals as $courseid => $row) {
-            $grades[$courseid] = subject_grade::from_row($row, $counts[$courseid] ?? []);
+            $grades[$courseid] = subject_grade::from_row(
+                $row,
+                $counts[$courseid] ?? [],
+                $categories[$courseid] ?? []
+            );
         }
         return $grades;
     }
@@ -82,10 +88,15 @@ final class grade_repository implements grade_repository_interface {
                        c.fullname,
                        gg.finalgrade,
                        gg.rawgrademax,
-                       gg.rawgrademin
+                       gg.rawgrademin,
+                       gc.aggregation
                   FROM {grade_items} gi
                   JOIN {course} c ON c.id = gi.courseid
                   JOIN {grade_grades} gg ON gg.itemid = gi.id AND gg.userid = :userid
+                  -- The course's own grade category carries the aggregation method.
+                  -- Needed because an academic subtotal may only be derived by summing
+                  -- points when that method is Natural; see subject_grade.
+                  JOIN {grade_categories} gc ON gc.id = gi.iteminstance
                  WHERE gi.itemtype = 'course'
                        AND c.visible = 1
                        AND EXISTS (
@@ -110,31 +121,81 @@ final class grade_repository implements grade_repository_interface {
     }
 
     /**
-     * Graded / excluded / pending counts per course, in one grouped query.
+     * Activity modules that are not assessments.
+     *
+     * An attendance activity puts a gradeable item in the course, so at a school that
+     * grades attendance the course total is partly a measure of turning up. That figure
+     * is legitimate and is still returned as `percentage` — but a parent asking how
+     * their child is doing in Mathematics usually means the academic work, so the items
+     * listed here are subtracted to produce the `academic` figure alongside it.
+     *
+     * Deliberately a small, explicit list rather than a guess at what "an assessment"
+     * is. Everything not named here counts, so a module the school does grade
+     * academically is never silently dropped. Should become an admin setting once a
+     * second school disagrees with it.
+     */
+    private const NON_ASSESSMENT_MODULES = ['attendance'];
+
+    /**
+     * Counts and academic sums per course, in one grouped query.
      *
      * `excluded <> 0` is not a style choice. `grade_grades.excluded` stores the
      * TIMESTAMP at which the grade was excluded — a real row reads 1786347956 — so
      * `excluded = 1` matches nothing and would report every excluded grade as counted.
+     *
+     * `itemtype` excludes both 'course' and 'category': those rows are Moodle's own
+     * subtotals, not things a teacher marks. Counting a category row as a pending item
+     * would tell a parent there is work outstanding that does not exist.
      */
-    private function fetch_item_counts(int $userid, array $courseids): array {
+    private function fetch_item_aggregates(int $userid, array $courseids): array {
         if (!$courseids) {
             return [];
         }
 
         [$insql, $inparams] = $this->db->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'cid');
-        $params = array_merge($inparams, ['userid' => $userid]);
+        [$modsql, $modparams] = $this->db->get_in_or_equal(
+            self::NON_ASSESSMENT_MODULES, SQL_PARAMS_NAMED, 'mod', false
+        );
+        $params = array_merge($inparams, $modparams, ['userid' => $userid]);
 
-        $sql = "SELECT gi.courseid,
-                       SUM(CASE WHEN gg.excluded <> 0 THEN 1 ELSE 0 END) AS excluded,
-                       SUM(CASE WHEN gg.excluded = 0 AND gg.finalgrade IS NOT NULL
+        // The academic flag is computed ONCE per row in a derived table, then
+        // aggregated outside it.
+        //
+        // Not merely tidier: Moodle's fix_sql_params() counts placeholder OCCURRENCES,
+        // not distinct names, so repeating `:mod1` across three CASE expressions makes
+        // it expect five parameters where three were supplied and fail with
+        // `invalidqueryparam`. Referencing it once sidesteps that entirely.
+        //
+        // COALESCE because a module item carries an itemmodule and a manual one does
+        // not — and NULL would fail the NOT IN comparison rather than pass it, quietly
+        // dropping every manually created assessment from the subtotal.
+        $sql = "SELECT courseid,
+                       SUM(CASE WHEN isexcluded <> 0 THEN 1 ELSE 0 END) AS excluded,
+                       SUM(CASE WHEN isexcluded = 0 AND finalgrade IS NOT NULL
                                 THEN 1 ELSE 0 END) AS graded,
-                       SUM(CASE WHEN gg.excluded = 0 AND gg.finalgrade IS NULL
-                                THEN 1 ELSE 0 END) AS pending
-                  FROM {grade_items} gi
-                  JOIN {grade_grades} gg ON gg.itemid = gi.id AND gg.userid = :userid
-                 WHERE gi.itemtype <> 'course'
-                       AND gi.courseid {$insql}
-              GROUP BY gi.courseid";
+                       SUM(CASE WHEN isexcluded = 0 AND finalgrade IS NULL
+                                THEN 1 ELSE 0 END) AS pending,
+                       SUM(CASE WHEN isacademic = 1 THEN finalgrade ELSE 0 END)
+                           AS academicpoints,
+                       SUM(CASE WHEN isacademic = 1 THEN rawgrademax ELSE 0 END)
+                           AS academicmax,
+                       SUM(CASE WHEN isacademic = 1 THEN 1 ELSE 0 END) AS academiccount
+                  FROM (
+                        SELECT gi.courseid,
+                               gg.excluded AS isexcluded,
+                               gg.finalgrade,
+                               gg.rawgrademax,
+                               CASE WHEN gg.excluded = 0
+                                         AND gg.finalgrade IS NOT NULL
+                                         AND COALESCE(gi.itemmodule, '') {$modsql}
+                                    THEN 1 ELSE 0 END AS isacademic
+                          FROM {grade_items} gi
+                          JOIN {grade_grades} gg
+                               ON gg.itemid = gi.id AND gg.userid = :userid
+                         WHERE gi.itemtype NOT IN ('course', 'category')
+                               AND gi.courseid {$insql}
+                       ) items
+              GROUP BY courseid";
 
         $counts = [];
         foreach ($this->db->get_records_sql($sql, $params) as $row) {
@@ -142,8 +203,69 @@ final class grade_repository implements grade_repository_interface {
                 'graded' => (int)$row->graded,
                 'excluded' => (int)$row->excluded,
                 'pending' => (int)$row->pending,
+                'academicpoints' => (float)$row->academicpoints,
+                'academicmax' => (float)$row->academicmax,
+                'academiccount' => (int)$row->academiccount,
             ];
         }
         return $counts;
+    }
+
+    /**
+     * Moodle's own subtotal for each gradebook category in the course.
+     *
+     * This is the general answer to "the grade for part of a subject". Moodle stores a
+     * computed grade for every category exactly as it does for the course total, with
+     * that category's real aggregation already applied — weights, drop-lowest,
+     * exclusions and all. So a school whose weighting makes the derived `academic`
+     * figure underivable can group its assessments into a category and read an exact
+     * number here instead.
+     *
+     * The percentage uses `rawgrademax` for the same reason the course total does: it
+     * is the PER-STUDENT bound, with excused and ungraded items already removed.
+     */
+    private function fetch_category_subtotals(int $userid, array $courseids): array {
+        if (!$courseids) {
+            return [];
+        }
+
+        [$insql, $inparams] = $this->db->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'cid');
+        $params = array_merge($inparams, ['userid' => $userid]);
+
+        $sql = "SELECT gi.id,
+                       gi.courseid,
+                       gi.itemname,
+                       gc.aggregation,
+                       gg.finalgrade,
+                       gg.rawgrademax,
+                       gg.rawgrademin
+                  FROM {grade_items} gi
+                  JOIN {grade_grades} gg ON gg.itemid = gi.id AND gg.userid = :userid
+                  JOIN {grade_categories} gc ON gc.id = gi.iteminstance
+                 WHERE gi.itemtype = 'category'
+                       AND gi.courseid {$insql}
+              ORDER BY gi.sortorder";
+
+        $categories = [];
+        foreach ($this->db->get_records_sql($sql, $params) as $row) {
+            $final = $row->finalgrade === null ? null : (float)$row->finalgrade;
+            $max = $row->rawgrademax === null ? null : (float)$row->rawgrademax;
+            $min = $row->rawgrademin === null ? 0.0 : (float)$row->rawgrademin;
+
+            $percentage = null;
+            if ($final !== null && $max !== null && ($max - $min) > 0) {
+                $percentage = round((($final - $min) / ($max - $min)) * 100, 2);
+            }
+
+            $categories[(int)$row->courseid][] = [
+                // A category with no explicit name renders as the course name in
+                // Moodle; empty is more honest than repeating the subject.
+                'name' => (string)($row->itemname ?? ''),
+                'percentage' => $percentage,
+                'finalgrade' => $final,
+                'maxgrade' => $max,
+            ];
+        }
+        return $categories;
     }
 }

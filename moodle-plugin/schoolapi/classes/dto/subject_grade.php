@@ -41,8 +41,33 @@ final class subject_grade {
         public readonly int $gradedcount,
         public readonly int $excludedcount,
         public readonly int $pendingcount,
+        /** Assessments only — see `academic_percentage()`. Null when not derivable. */
+        public readonly ?float $academicpercentage = null,
+        public readonly ?float $academicpoints = null,
+        public readonly ?float $academicmaxpoints = null,
+        public readonly int $academicitemcount = 0,
+        /** Why the academic figure is null, when it is. Empty when it is present. */
+        public readonly string $academicunavailable = '',
+        /** Moodle's OWN category subtotals. Always exact; see to_array(). */
+        public readonly array $categories = [],
     ) {
     }
+
+    /**
+     * Aggregation methods under which summing points is EXACT.
+     *
+     * Only GRADE_AGGREGATE_SUM (13, "Natural" in the UI, and Moodle's default). Under
+     * that method a course total genuinely is points-earned over points-available, so
+     * taking a subset of the items and summing them the same way is arithmetically the
+     * same operation Moodle performs.
+     *
+     * Under any other method it is NOT. A weighted mean applies per-category weights, a
+     * simple weighted mean normalises differently, drop-lowest removes items after
+     * ranking them — none of which survive being re-derived from points. Producing a
+     * plausible-looking number there is how a parent is shown 50% for a child on 90%,
+     * which this codebase has already demonstrated once.
+     */
+    private const EXACT_AGGREGATIONS = [13];
 
     /**
      * Build from one joined row of the course-total query.
@@ -60,7 +85,7 @@ final class subject_grade {
      * `$grade_item->grademax` with `$grade_grade->get_grade_max()` before formatting,
      * which is why the figure here matches the gradebook a teacher sees.
      */
-    public static function from_row(\stdClass $row, array $counts): self {
+    public static function from_row(\stdClass $row, array $counts, array $categories = []): self {
         $final = $row->finalgrade === null ? null : (float)$row->finalgrade;
         $max = $row->rawgrademax === null ? null : (float)$row->rawgrademax;
         $min = $row->rawgrademin === null ? 0.0 : (float)$row->rawgrademin;
@@ -74,6 +99,13 @@ final class subject_grade {
             $percentage = round((($final - $min) / ($max - $min)) * 100, 2);
         }
 
+        [$academicpct, $reason] = self::academic_percentage(
+            (int)($row->aggregation ?? -1),
+            (float)($counts['academicpoints'] ?? 0),
+            (float)($counts['academicmax'] ?? 0),
+            (int)($counts['academiccount'] ?? 0)
+        );
+
         return new self(
             courseid: (string)$row->courseid,
             idnumber: (string)($row->courseidnumber ?? ''),
@@ -85,7 +117,54 @@ final class subject_grade {
             gradedcount: (int)($counts['graded'] ?? 0),
             excludedcount: (int)($counts['excluded'] ?? 0),
             pendingcount: (int)($counts['pending'] ?? 0),
+            academicpercentage: $academicpct,
+            academicpoints: isset($counts['academicpoints']) ? (float)$counts['academicpoints'] : null,
+            academicmaxpoints: isset($counts['academicmax']) ? (float)$counts['academicmax'] : null,
+            academicitemcount: (int)($counts['academiccount'] ?? 0),
+            academicunavailable: $reason,
+            categories: $categories,
         );
+    }
+
+    /**
+     * The subject grade with attendance and other non-assessment activities removed.
+     *
+     * `percentage` above is Moodle's course total, and it includes EVERYTHING in the
+     * gradebook — so at a school that grades attendance, a parent asking "how is she
+     * doing in maths" gets a figure partly determined by whether she turned up. Both
+     * numbers are legitimate and they answer different questions, which is why both are
+     * returned rather than one being chosen on the school's behalf.
+     *
+     * Returns `[percentage, reason]`. The percentage is null whenever it cannot be
+     * derived exactly, and the reason says why — never an approximation. Summing points
+     * reproduces Moodle's arithmetic only under Natural aggregation; under a weighted
+     * mean or drop-lowest it produces a plausible, wrong number, and a consumer that
+     * ignores an `is_exact` flag would put that in front of a parent.
+     *
+     * A school needing an academic subtotal under a weighted scheme should group its
+     * assessments into a gradebook CATEGORY. Moodle then computes that subtotal itself,
+     * applying the weights, and it is returned verbatim in `categories`.
+     */
+    private static function academic_percentage(
+        int $aggregation, float $points, float $maxpoints, int $itemcount
+    ): array {
+        if ($itemcount === 0) {
+            // No assessment items at all — a course that is purely attendance, or one
+            // where nothing has been marked yet.
+            return [null, 'no_assessment_items'];
+        }
+
+        if (!in_array($aggregation, self::EXACT_AGGREGATIONS, true)) {
+            return [null, 'aggregation_not_summable'];
+        }
+
+        if ($maxpoints <= 0) {
+            // Everything excused, or nothing graded. Same reasoning as the course
+            // total: null, never zero.
+            return [null, 'nothing_gradeable'];
+        }
+
+        return [round(($points / $maxpoints) * 100, 2), ''];
     }
 
     /**
@@ -102,6 +181,8 @@ final class subject_grade {
             'fullname' => $this->fullname,
             'finalgrade' => $this->finalgrade,
             'maxgrade' => $this->maxgrade,
+            // Moodle's course total. Includes EVERY gradeable item in the course —
+            // attendance among them, if the school grades it.
             'percentage' => $this->percentage,
             'gradedcount' => $this->gradedcount,
             'excludedcount' => $this->excludedcount,
@@ -109,6 +190,21 @@ final class subject_grade {
             // "Nothing is still awaiting a decision", which is what lets the assistant
             // say "final" rather than "so far".
             'iscomplete' => $this->pendingcount === 0 && $this->gradedcount > 0,
+
+            // The same subject with non-assessment activities removed.
+            'academic' => [
+                'percentage' => $this->academicpercentage,
+                'points' => $this->academicpoints,
+                'maxpoints' => $this->academicmaxpoints,
+                'itemcount' => $this->academicitemcount,
+                'unavailable' => $this->academicunavailable,
+            ],
+
+            // Moodle's own subtotals for any gradebook categories in this course.
+            // Computed by Moodle with the course's real aggregation, so these are exact
+            // whatever the scheme — the answer for a school whose weighting makes the
+            // `academic` figure above underivable.
+            'categories' => array_values($this->categories),
         ];
     }
 }

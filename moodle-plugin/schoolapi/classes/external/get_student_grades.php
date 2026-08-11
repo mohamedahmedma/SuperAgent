@@ -124,8 +124,9 @@ final class get_student_grades extends external_api {
                     ),
                     'percentage' => new external_value(
                         PARAM_FLOAT,
-                        'The figure to show a parent. Null when nothing is gradeable '
-                            . 'yet — which is NOT the same as zero.',
+                        "Moodle's course total. Includes EVERY gradeable item in the "
+                            . 'course, attendance among them if the school grades it. '
+                            . 'Null when nothing is gradeable yet — NOT the same as zero.',
                         VALUE_OPTIONAL
                     ),
                     'gradedcount' => new external_value(PARAM_INT, 'Items that counted.'),
@@ -139,6 +140,44 @@ final class get_student_grades extends external_api {
                         PARAM_BOOL,
                         'True when nothing is outstanding — lets the assistant say '
                             . '"final" rather than "so far".'
+                    ),
+
+                    'academic' => new external_single_structure([
+                        'percentage' => new external_value(
+                            PARAM_FLOAT,
+                            'The same subject with non-assessment activities removed. '
+                                . 'NULL rather than an approximation whenever it cannot '
+                                . 'be derived exactly — see `unavailable`.',
+                            VALUE_OPTIONAL
+                        ),
+                        'points' => new external_value(PARAM_FLOAT, 'Assessment points earned.',
+                            VALUE_OPTIONAL),
+                        'maxpoints' => new external_value(PARAM_FLOAT, 'Assessment points available.',
+                            VALUE_OPTIONAL),
+                        'itemcount' => new external_value(PARAM_INT, 'Assessment items counted.'),
+                        'unavailable' => new external_value(
+                            PARAM_ALPHAEXT,
+                            'Empty when `percentage` is present. Otherwise: '
+                                . '"aggregation_not_summable" — the course uses a weighted '
+                                . 'or drop-lowest scheme that cannot be re-derived from '
+                                . 'points, so read `categories` instead; '
+                                . '"no_assessment_items"; "nothing_gradeable".'
+                        ),
+                    ], 'Assessments only, excluding attendance and similar activities.'),
+
+                    'categories' => new external_multiple_structure(
+                        new external_single_structure([
+                            'name' => new external_value(PARAM_RAW, 'Category name.'),
+                            'percentage' => new external_value(PARAM_FLOAT, 'Subtotal.',
+                                VALUE_OPTIONAL),
+                            'finalgrade' => new external_value(PARAM_FLOAT, 'Points.',
+                                VALUE_OPTIONAL),
+                            'maxgrade' => new external_value(PARAM_FLOAT,
+                                'Per-student maximum.', VALUE_OPTIONAL),
+                        ]),
+                        "Moodle's own gradebook category subtotals, computed with the "
+                            . 'course\'s real aggregation. Exact under every scheme, so '
+                            . 'this is the reliable route to a partial subject grade.'
                     ),
                 ])
             ),
