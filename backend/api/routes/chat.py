@@ -12,8 +12,17 @@ from backend.schemas import ChatRequest, ChatResponse
 router = APIRouter(tags=["chat"])
 
 
+# Deliberately `def`, not `async def`. `chat_with_agent` is synchronous from end to
+# end — the embedder's forward pass, the scope model call, retrieval, and every LLM
+# call in the turn. Declared `async`, all of that ran on the event loop, so one turn
+# blocked every other request in the process for its entire duration: a second user
+# asking a question waited out the first user's answer before being looked at.
+#
+# A plain `def` hands the whole thing to Starlette's worker threadpool instead, which
+# is what that pool is for. Concurrent turns then overlap, and the loop stays free to
+# accept connections and stream other responses.
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(
+def chat_endpoint(
     request: ChatRequest, current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     try:

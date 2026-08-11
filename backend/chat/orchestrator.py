@@ -28,6 +28,7 @@ import logging
 from typing import Any, Optional, Sequence
 
 from backend.chat.request_context import ChatRequestContext
+from backend.chat.resolution import ResolvedQuestion, resolve_question, unresolved
 from backend.chat.signals import RequestSignals, SignalContext, build_ladder
 from backend.chat.turn_policy import TurnPlan, resolve_turn
 from backend.profiles import get_profile
@@ -41,11 +42,19 @@ def plan_turn(
     ctx: Optional[ChatRequestContext] = None,
     *,
     envelope_invoke=None,
+    resolve_invoke=None,
+    resolution: Optional[ResolvedQuestion] = None,
 ) -> tuple:
     """Decide how this turn should run. Returns `(plan, signals)`.
 
     Both are returned because they answer different questions: the plan is what to do,
     the signals are why — and the trace wants both.
+
+    Resolution runs FIRST, before any detector, because every rung below it measures
+    words and a follow-up's own words do not name its subject. `resolution` may be
+    passed in by a caller that already resolved the message — the HITL resume path
+    does, since it has to know whether the reply is a correction before it can decide
+    whether to resume at all, and resolving twice would pay for the same call twice.
 
     Never raises. A planner that fails must cost the savings it would have produced,
     never the turn, so anything unexpected returns the empty plan, which is exactly the
@@ -54,9 +63,21 @@ def plan_turn(
     profile = get_profile()
     try:
         config = _LadderConfig(profile.agent, profile.rag)
-        signals = build_ladder(config, envelope_invoke=envelope_invoke).run(
-            SignalContext(question=question, history=list(history or []), config=config)
+        messages = list(history or [])
+        resolved = resolution or resolve_question(
+            question, messages, config, invoke=resolve_invoke
         )
+        signals = build_ladder(config, envelope_invoke=envelope_invoke).run(
+            SignalContext(
+                question=question,
+                history=messages,
+                config=config,
+                resolved_question=resolved.question if resolved.resolved else "",
+                carried_constraints=list(resolved.constraints),
+                followup_intent=resolved.intent,
+            )
+        )
+        signals.reasons.insert(0, f"resolution: {resolved.reason}")
         plan = resolve_turn(
             signals,
             agent_config=profile.agent,
@@ -67,8 +88,60 @@ def plan_turn(
         logger.warning("turn planning failed; running the turn unchanged", exc_info=True)
         return TurnPlan(reasons=["planner error — defaults applied"]), RequestSignals(question=question)
 
+    _hand_to_graph(ctx, plan)
     _emit(ctx, signals, plan)
     return plan, signals
+
+
+def resolve_turn_question(
+    question: str,
+    history: Optional[Sequence[Any]] = None,
+    *,
+    invoke=None,
+    hitl_prompt: str = "",
+    hitl_options: Sequence[str] = (),
+) -> ResolvedQuestion:
+    """Resolve a message against the conversation, using the active profile's settings.
+
+    Exposed separately from `plan_turn` for the one caller that has to act on the
+    result before planning anything: a resumed clarification needs to know whether the
+    reply corrects the question or answers it, and those go down different paths.
+    Never raises, for the same reason `plan_turn` does not.
+    """
+    try:
+        profile = get_profile()
+        return resolve_question(
+            question,
+            list(history or []),
+            _LadderConfig(profile.agent, profile.rag),
+            invoke=invoke,
+            hitl_prompt=hitl_prompt,
+            hitl_options=hitl_options,
+        )
+    except Exception:  # pragma: no cover - resolution must never break a turn
+        logger.warning("query resolution failed; using the message as written", exc_info=True)
+        return unresolved(question, "resolver error")
+
+
+def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
+    """Put the plan's retrieval hints where the RAG graph reads them.
+
+    Guarded for the same reason `_emit` is, and it is the same class of thing: both are
+    hints the turn is better off without than dead for. This function's failure mode
+    would otherwise be the one this module promises cannot happen — a planner fault
+    costing the turn rather than the saving.
+    """
+    if ctx is None:
+        return
+    try:
+        ctx.note_turn_plan(
+            plan.retrieval_sections,
+            plan.scope_options,
+            carried_constraints=plan.carried_constraints,
+            is_followup=plan.is_followup,
+        )
+    except Exception:  # pragma: no cover - a hint must never break a turn
+        logger.debug("could not hand the turn plan to the graph", exc_info=True)
 
 
 class _LadderConfig:

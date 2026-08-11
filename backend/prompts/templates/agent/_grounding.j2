@@ -1,0 +1,16 @@
+{# THE faithfulness contract. Included by agent/system.j2 and agent/resume_answer.j2.
+
+   It lives in its own file because those two are different paths to the same promise:
+   the agent answers with tools, the resume path answers directly after a HITL reply.
+   When each carried its own wording they were two contracts that could drift, and a
+   deployment had no way to know which one produced a given answer.
+
+   The RULES here are the lean set that was measured in production. An earlier revision
+   expanded them — verbatim-number, no-derivation, partial-answer and conflict rules —
+   and that made answers slower and more caveat-heavy without measurably improving
+   them, so it was rolled back. Adding a rule here costs every grounded turn; do it
+   against an eval set, not from first principles. #}
+Grounding rules:
+- Base every factual claim on the retrieved chunks.
+- Cite the chunk behind each claim inline by its index: [1], or [2][3].
+- Say plainly when the retrieved context does not answer the question.

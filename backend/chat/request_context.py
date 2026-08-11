@@ -47,9 +47,23 @@ class ChatRequestContext:
     _knowledge_tool_slots_used: int = 0
     _figure_tool_slots_used: int = 0
     _records_tool_slots_used: int = 0
+    _short_circuit_status: Optional[str] = None
     _surfaced_asset_ids: list = field(default_factory=list)
     _started_at: float = field(default_factory=time.monotonic)
     _last_step_at: Optional[float] = None
+
+    # What the turn planner worked out before the agent ran, for the RAG graph to read.
+    # Public because the graph reads them positionally through `getattr` and there is
+    # nothing to guard: both are hints, and an empty list is the correct default for a
+    # turn that was never planned (a sync call, a test).
+    retrieval_sections: list = field(default_factory=list)
+    scope_options: list = field(default_factory=list)
+    # Conditions carried over from earlier turns ("grades up to Year 6"). The graph
+    # appends them to the retrieval query and states them in the answer prompt.
+    carried_constraints: list = field(default_factory=list)
+    # Whether this turn's subject came from the conversation. Routing reads it to
+    # decide whether offering the user a choice of subjects could possibly help.
+    is_followup: bool = False
 
     def __post_init__(self) -> None:
         """Settle the caller, and refuse a context whose identity contradicts itself.
@@ -117,6 +131,33 @@ class ChatRequestContext:
             caller=caller,
         )
 
+    def note_turn_plan(
+        self,
+        retrieval_sections,
+        scope_options,
+        *,
+        carried_constraints=(),
+        is_followup: bool = False,
+    ) -> None:
+        """Hand the planner's findings to the RAG graph.
+
+        Plain values rather than the `TurnPlan` itself, so this module keeps knowing
+        nothing about turn policy. Without this call the planner computed
+        `retrieval_sections` for nobody: `_initial_state` read it off the context, the
+        context never had it, and the hint had been inert since it was written.
+
+        The later arguments are keyword-only and defaulted so that a caller written
+        against the two-argument form — a test double, an integrating deployment —
+        keeps working and simply carries nothing forward.
+        """
+        with self._lock:
+            if not self._active:
+                return
+            self.retrieval_sections = list(retrieval_sections or [])
+            self.scope_options = list(scope_options or [])
+            self.carried_constraints = list(carried_constraints or [])
+            self.is_followup = bool(is_followup)
+
     def emit_rag_step(
         self,
         icon: str,
@@ -181,6 +222,22 @@ class ChatRequestContext:
     def peek_rag_trace(self) -> Optional[dict]:
         with self._lock:
             return self._rag_trace
+
+    def note_short_circuit(self, status: str) -> None:
+        """Record that the graph ended itself rather than calling the model again.
+
+        Written by the agent middleware that makes the call, read by the streamer that
+        has to put a reply on the wire. One decision point: the two cannot disagree
+        about whether the model was skipped, which is what makes it safe for the
+        streamer to treat an empty response as intentional rather than as a failure.
+        """
+        with self._lock:
+            if self._active:
+                self._short_circuit_status = status
+
+    def short_circuit_status(self) -> Optional[str]:
+        with self._lock:
+            return self._short_circuit_status
 
     def reset_knowledge_tool_budget(self) -> None:
         with self._lock:

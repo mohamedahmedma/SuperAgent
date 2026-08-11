@@ -7,6 +7,14 @@
    independent decisions that can disagree. A prompt describing a tool that was not
    bound produces a call for a tool that does not exist.
 
+   ORDER IS FOR CACHING. Most-static first, most-variable last:
+     persona    — fixed per deployment
+     grounding  — fixed, identical for every deployment
+     style      — carries `language_name`, which varies per turn
+   Providers cache on a shared prefix, so moving a turn-varying line upward would
+   invalidate everything after it on every turn. Keep new content in the block that
+   matches how often it changes.
+
    To specialise this for a domain, add templates/packs/<name>/system.j2 containing
    `{% extends "agent/system.j2" %}` and override a single block, rather than copying
    the file. Blocks exist for exactly that.
@@ -22,10 +30,7 @@
 {% if grounded %}
 Search once, then answer from what comes back.
 
-Grounding rules:
-- Base every factual claim on the retrieved chunks.
-- Cite the chunk behind each claim inline by its index: [1], or [2][3].
-- Say plainly when the retrieved context does not answer the question.
+{% include "agent/_grounding.j2" %}
 
 {% endif %}
 {% endblock %}

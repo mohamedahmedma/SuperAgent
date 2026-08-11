@@ -55,6 +55,24 @@ class TurnPlan:
     exposed_tools: Optional[List[str]] = None
     # Sections to search first. A hint; never a filter.
     retrieval_sections: List[str] = field(default_factory=list)
+    # The turn's subject in words that stand on their own, when a resolver produced
+    # them. Empty means the message was already standalone or nothing resolved it —
+    # every reader falls back to the message itself, which is what happened before.
+    resolved_question: str = ""
+    # Conditions inherited from earlier turns that still bind this answer. Reaches the
+    # retrieval query, the answer prompt, and the resume path, because narrowing the
+    # search is only half of it: the right chunks still produce an answer about every
+    # year group unless the answer prompt is told which years were asked about.
+    carried_constraints: List[str] = field(default_factory=list)
+    # Whether this turn's subject came from the conversation rather than its own words.
+    # Read by routing: a subject settled one message ago must not be handed back to the
+    # user as a choice between subjects.
+    is_followup: bool = False
+    # Catalogued questions the query resembled, one per section. Routing may offer these
+    # as a scope_select when the evidence comes back short — see `decide_route`. Carried
+    # on the plan rather than re-derived in the graph because the embedding and the
+    # match were already paid for here.
+    scope_options: List[str] = field(default_factory=list)
     # Language to answer in, as a detector code. Carried on the plan rather than read
     # from the signals downstream because the agent is built from the plan, and the
     # prompt has to be able to say it.
@@ -72,6 +90,10 @@ class TurnPlan:
             "turn_short_circuit": self.short_circuit,
             "turn_exposed_tools": list(self.exposed_tools) if self.exposed_tools is not None else None,
             "turn_retrieval_sections": list(self.retrieval_sections),
+            "turn_scope_options": list(self.scope_options),
+            "turn_resolved_question": self.resolved_question or None,
+            "turn_carried_constraints": list(self.carried_constraints),
+            "turn_is_followup": self.is_followup,
             "turn_language": self.language,
             "turn_capture_user_info": self.capture_user_info,
             "turn_reason": "; ".join(self.reasons) or "n/a",
@@ -116,6 +138,12 @@ def resolve_turn(
     # an off-topic message, and that is still worth keeping.
     plan.capture_user_info = bool(signals.personal_data)
     plan.language = signals.language
+    # Carried onto every plan, including the short-circuited ones. A turn that ends
+    # without the agent still has to be able to say what it thought was being asked,
+    # or an out-of-domain refusal becomes impossible to argue with from the trace.
+    plan.resolved_question = signals.resolved_question
+    plan.carried_constraints = list(signals.carried_constraints)
+    plan.is_followup = signals.followup_intent in ("followup", "correction")
 
     if signals.is_social:
         return _plan_social(signals, plan, agent_config, copy_config)
@@ -132,8 +160,15 @@ def resolve_turn(
         )
 
     plan.retrieval_sections = list(signals.candidate_sections)
+    plan.scope_options = list(signals.scope_options)
+    if plan.resolved_question and plan.resolved_question != signals.question:
+        plan.reasons.append(f"resolved as {signals.followup_intent}")
+    if plan.carried_constraints:
+        plan.reasons.append(f"carrying {len(plan.carried_constraints)} condition(s) forward")
     if plan.retrieval_sections:
         plan.reasons.append(f"search {len(plan.retrieval_sections)} section(s) first")
+    if len(plan.scope_options) > 1:
+        plan.reasons.append(f"{len(plan.scope_options)} corpus direction(s) available to offer")
     if not plan.reasons:
         plan.reasons.append("no signal changed the default plan")
     return plan

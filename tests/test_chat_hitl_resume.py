@@ -157,6 +157,9 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             "complexity": "simple",
             "complexity_reason": "unit",
             "sub_questions": [],
+            # Conditions set before the clarification, carried across the resume
+            # boundary for the same reason `hitl_rounds` is.
+            "carried_constraints": [],
         }
         fake_storage = FakeStorage()
         update_note = AsyncMock(return_value="updated note")

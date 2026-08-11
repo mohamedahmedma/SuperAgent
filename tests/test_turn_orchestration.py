@@ -24,9 +24,15 @@ class RecordingContext:
 
     def __init__(self):
         self.steps = []
+        self.retrieval_sections = []
+        self.scope_options = []
 
     def emit_rag_step(self, icon, label, detail="", **kwargs):
         self.steps.append((icon, label, detail))
+
+    def note_turn_plan(self, retrieval_sections, scope_options):
+        self.retrieval_sections = list(retrieval_sections or [])
+        self.scope_options = list(scope_options or [])
 
 
 def temp_profile(**agent_overrides):
@@ -305,9 +311,9 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         return chunks, generated
 
     def test_terminal_statuses_are_named(self):
-        import backend.chat.service as service
+        import backend.chat.runtime as runtime
 
-        self.assertEqual({"no_knowledge", "retrieval_error"}, service.TERMINAL_STATUSES)
+        self.assertEqual({"no_knowledge", "retrieval_error"}, runtime.TERMINAL_STATUSES)
 
     def test_the_reply_comes_from_profile_copy_in_the_right_language(self):
         import backend.chat.service as service
@@ -328,28 +334,186 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_a_non_terminal_status_is_not_short_circuited(self):
-        import backend.chat.service as service
+        import backend.chat.runtime as runtime
 
         class Ctx:
             def peek_rag_trace(self):
                 return {"rag_trace": {"retrieval_status": "answerable"}}
 
-        self.assertIsNone(service._terminal_status(Ctx()))
+        self.assertIsNone(runtime.terminal_status(Ctx()))
 
     def test_a_terminal_status_is_recognised(self):
-        import backend.chat.service as service
+        import backend.chat.runtime as runtime
 
         class Ctx:
             def peek_rag_trace(self):
                 return {"rag_trace": {"retrieval_status": "no_knowledge"}}
 
-        self.assertEqual("no_knowledge", service._terminal_status(Ctx()))
+        self.assertEqual("no_knowledge", runtime.terminal_status(Ctx()))
 
     def test_a_missing_trace_is_not_terminal(self):
-        import backend.chat.service as service
+        import backend.chat.runtime as runtime
 
         class Ctx:
             def peek_rag_trace(self):
                 return None
 
-        self.assertIsNone(service._terminal_status(Ctx()))
+        self.assertIsNone(runtime.terminal_status(Ctx()))
+
+
+class TerminalShortCircuitMiddlewareTests(unittest.TestCase):
+    """The loop is cut inside the graph, not by abandoning its stream.
+
+    Breaking out of `astream` from the consumer side left the generator suspended for
+    the garbage collector to close, which threw GeneratorExit into LangGraph at its
+    `yield` and reported every short-circuited turn as a failed run.
+    """
+
+    class Ctx:
+        def __init__(self, status):
+            self._status = status
+            self.noted = None
+
+        def peek_rag_trace(self):
+            return {"rag_trace": {"retrieval_status": self._status}}
+
+        def note_short_circuit(self, status):
+            self.noted = status
+
+    def _state(self, tool_results):
+        from langchain_core.messages import HumanMessage, ToolMessage
+
+        messages = [HumanMessage(content="what is partner")]
+        messages += [
+            ToolMessage(content="NO_KNOWLEDGE", tool_call_id=f"c{i}", name=f"tool_{i}")
+            for i in range(tool_results)
+        ]
+        return {"messages": messages}
+
+    def _decide(self, status, tool_results):
+        import backend.chat.runtime as runtime
+
+        ctx = self.Ctx(status)
+        middleware = runtime._end_turn_on_terminal_retrieval(ctx)
+        return middleware.before_model(self._state(tool_results), None), ctx
+
+    def test_a_terminal_result_ends_the_graph_before_the_second_model_call(self):
+        verdict, ctx = self._decide("no_knowledge", 1)
+        self.assertEqual({"jump_to": "end"}, verdict)
+        self.assertEqual("no_knowledge", ctx.noted)
+
+    def test_the_first_model_call_is_never_cut(self):
+        """Nothing has retrieved yet, so there is no trace and nothing to short-circuit."""
+        verdict, ctx = self._decide(None, 0)
+        self.assertIsNone(verdict)
+        self.assertIsNone(ctx.noted)
+
+    def test_a_usable_result_leaves_the_loop_alone(self):
+        verdict, ctx = self._decide("answerable", 1)
+        self.assertIsNone(verdict)
+        self.assertIsNone(ctx.noted)
+
+    def test_a_second_tool_keeps_the_model_call(self):
+        """A turn that also called, say, the weather tool still has material to answer
+        from, and cutting it there would throw that away."""
+        verdict, ctx = self._decide("no_knowledge", 2)
+        self.assertIsNone(verdict)
+        self.assertIsNone(ctx.noted)
+
+    def test_the_jump_target_is_declared_to_the_graph(self):
+        """`can_jump_to` is what builds the conditional edge. Without it the returned
+        `jump_to` is silently ignored and the model call happens anyway."""
+        import backend.chat.runtime as runtime
+
+        middleware = runtime._end_turn_on_terminal_retrieval(self.Ctx("no_knowledge"))
+        self.assertEqual(["end"], getattr(middleware.before_model, "__can_jump_to__", None))
+
+    def test_the_agent_is_built_with_the_short_circuit_bound(self):
+        import backend.chat.runtime as runtime
+
+        captured = {}
+        with patch.object(runtime, "build_tools", lambda names, ctx: []), \
+             patch.object(runtime, "create_agent", lambda **kw: captured.update(kw)):
+            runtime.create_agent_for_request(self.Ctx("no_knowledge"), [])
+
+        self.assertEqual(1, len(captured["middleware"]))
+
+
+class ShortCircuitedStreamTests(unittest.IsolatedAsyncioTestCase):
+    """The whole point, on a real graph: the loop is cut without abandoning the stream.
+
+    Asserted on a real `create_agent` rather than a stand-in, because what broke was the
+    interaction with LangGraph's own generator. The stream is consumed to exhaustion
+    here — no `break` — so a saved model call can only mean the graph ended itself.
+    Without the middleware the same exhausted stream costs two model calls, which is
+    what makes this assertion worth making.
+    """
+
+    async def test_the_stream_completes_without_a_second_model_call(self):
+        from langchain.agents import create_agent
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.messages import AIMessage, HumanMessage
+        from langchain_core.outputs import ChatGeneration, ChatResult
+        from langchain_core.tools import tool
+
+        from backend.chat.runtime import _end_turn_on_terminal_retrieval
+
+        calls = {"model": 0}
+
+        class FakeToolCaller(BaseChatModel):
+            @property
+            def _llm_type(self) -> str:
+                return "fake-tool-caller"
+
+            def bind_tools(self, tools, **kw):
+                return self
+
+            def _generate(self, messages, stop=None, run_manager=None, **kw):
+                calls["model"] += 1
+                message = (
+                    AIMessage(content="", tool_calls=[{
+                        "name": "search_knowledge_base",
+                        "args": {"query": "partner"},
+                        "id": "c1",
+                        "type": "tool_call",
+                    }])
+                    if calls["model"] == 1
+                    else AIMessage(content="a reworded fallback nobody asked for")
+                )
+                return ChatResult(generations=[ChatGeneration(message=message)])
+
+        class Ctx:
+            trace = None
+            short = None
+
+            def peek_rag_trace(self):
+                return {"rag_trace": self.trace} if self.trace else None
+
+            def note_short_circuit(self, status):
+                self.short = status
+
+        ctx = Ctx()
+
+        @tool
+        def search_knowledge_base(query: str) -> str:
+            """Search the knowledge base."""
+            ctx.trace = {"retrieval_status": "retrieval_error"}
+            return "RETRIEVAL_ERROR: the knowledge base could not be searched right now."
+
+        agent = create_agent(
+            model=FakeToolCaller(),
+            tools=[search_knowledge_base],
+            middleware=[_end_turn_on_terminal_retrieval(ctx)],
+        )
+
+        # Consumed to exhaustion, with no `break`. Nothing is left suspended for the
+        # garbage collector to close, which is what threw GeneratorExit into LangGraph.
+        async for _msg, _meta in agent.astream(
+            {"messages": [HumanMessage(content="what is partner")]},
+            stream_mode="messages",
+        ):
+            pass
+
+        self.assertEqual(1, calls["model"], "the composing call was supposed to be skipped")
+        self.assertEqual("retrieval_error", ctx.short)
+

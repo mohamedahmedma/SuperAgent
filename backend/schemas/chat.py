@@ -49,6 +49,11 @@ class RagTraceFields(StrictSchema):
     evidence_ambiguity: Optional[str] = None
     evidence_confidence: Optional[float] = None
     evidence_reason: Optional[str] = None
+    evidence_constraints_discriminate: Optional[str] = None
+    # Why `route` was chosen. Written by grade_documents_node since routing began, but
+    # never declared here — so `normalize_rag_trace` dropped it and the single most
+    # useful field for diagnosing an unexpected denial never reached a client.
+    route_reason: Optional[str] = None
     grading_skipped: Optional[bool] = None
     grading_confident: Optional[bool] = None
     grading_term_coverage: Optional[float] = None
@@ -65,14 +70,31 @@ class RagTraceFields(StrictSchema):
     turn_short_circuit: Optional[bool] = None
     turn_exposed_tools: Optional[List[str]] = None
     turn_retrieval_sections: Optional[List[str]] = None
+    # Declared here or dropped: `normalize_rag_trace` keeps only the keys this model
+    # names, so a field the planner emits but this does not never reaches a client.
+    # These three were emitted and discarded, which is why a turn that ended in
+    # "which one are you asking about?" carried no record of where the options came
+    # from — the one question a trace of that turn has to be able to answer.
+    turn_scope_options: Optional[List[str]] = None
+    turn_language: Optional[str] = None
     turn_capture_user_info: Optional[bool] = None
     turn_reason: Optional[str] = None
+    # What the turn was taken to be about, once references were resolved against the
+    # conversation, and the conditions inherited with it.
+    turn_resolved_question: Optional[str] = None
+    turn_carried_constraints: Optional[List[str]] = None
+    turn_is_followup: Optional[bool] = None
     request_scope: Optional[str] = None
     request_scope_certainty: Optional[str] = None
     request_language: Optional[str] = None
     request_is_social: Optional[bool] = None
     request_personal_data: Optional[List[str]] = None
     request_candidate_sections: Optional[List[str]] = None
+    request_scope_options: Optional[List[str]] = None
+    request_top_match: Optional[dict] = None
+    request_resolved_question: Optional[str] = None
+    request_carried_constraints: Optional[List[str]] = None
+    request_followup_intent: Optional[str] = None
     request_assessed_by: Optional[List[str]] = None
     request_reason: Optional[str] = None
     missing_slots: Optional[List[str]] = None
@@ -121,8 +143,13 @@ class RagTraceFields(StrictSchema):
     sub_agent_count: Optional[int] = None
     synthesis_merged_count: Optional[int] = None
     # Renditions for every asset the retrieved chunks referenced, already adapted to
-    # the calling client's declared capabilities.
+    # the calling client's declared capabilities. What goes on the wire.
     assets: Optional[List[AssetReference]] = None
+    # The same assets as ids alone — what a STORED trace keeps instead. A rendition is a
+    # copy of what the asset store already holds, and in inline mode that copy is the
+    # image itself, base64'd into a conversation row once per message that showed it.
+    # Ids cost a few dozen bytes, cannot go stale, and resolve by primary key on load.
+    asset_ids: Optional[List[str]] = None
 
 
 class RagSubTrace(RagTraceFields):
@@ -145,6 +172,11 @@ class HitlResumeState(StrictSchema):
     complexity: Optional[Literal["simple", "complex"]] = None
     complexity_reason: Optional[str] = None
     sub_questions: List[str] = Field(default_factory=list, max_length=4)
+    # Conditions set before the clarification was asked ("grades up to Year 6").
+    # Carried across the resume boundary for the same reason as `hitl_rounds`: the graph
+    # starts fresh there, and the turn that established them is several messages back by
+    # the time the user answers.
+    carried_constraints: List[str] = Field(default_factory=list, max_length=8)
 
 
 class PendingHitlState(StrictSchema):
@@ -219,6 +251,9 @@ class ChatResponse(StrictSchema):
 
 
 class MessageInfo(StrictSchema):
+    # The row id, and the cursor a client scrolls back from. Optional because a message
+    # cached before ids were stored has none; such a page simply cannot be paged from.
+    id: Optional[int] = None
     type: str
     content: str
     timestamp: str
@@ -226,7 +261,11 @@ class MessageInfo(StrictSchema):
 
 
 class SessionMessagesResponse(StrictSchema):
+    # Oldest-first: reading order, whichever batch this is.
     messages: List[MessageInfo]
+    # Whether anything older than `messages[0]` exists. A client scrolling back stops
+    # asking when this is false, rather than probing until it gets an empty page.
+    has_more: bool = False
 
 
 class SessionInfo(StrictSchema):

@@ -50,6 +50,19 @@ class RequestSignals:
     question: str = ""
     language: str = "en"
 
+    # The question with its references resolved against the conversation, when a
+    # resolver ran. Empty means nothing resolved it and `question` is the whole truth —
+    # which is why this is not defaulted to `question`: "nobody looked" and "a resolver
+    # read the conversation and found nothing to change" are different facts, and only
+    # the second is evidence.
+    resolved_question: str = ""
+    # Conditions set in earlier turns that still bind this answer ("grades up to Year
+    # 6"). These narrow an answer, not just a search: retrieval can return the right
+    # fee tables and the answer still list every year unless something says otherwise.
+    carried_constraints: List[str] = field(default_factory=list)
+    # standalone | followup | correction | new_topic. See backend/chat/resolution.py.
+    followup_intent: str = "standalone"
+
     scope: Scope = Scope.UNKNOWN
     scope_certainty: Certainty = Certainty.NONE
     # Corpus sections the question resembles. A HINT for retrieval, never a filter —
@@ -66,20 +79,36 @@ class RequestSignals:
     # guess from a topic list. Populated by CatalogueScopeDetector.
     scope_matches: List[Any] = field(default_factory=list)
 
+    # Catalogued questions this query resembled, one per corpus section, best first —
+    # the DIRECTIONS the corpus could take this question in. Two or more means the
+    # question did not pick between them, and routing may put that choice to the user
+    # instead of guessing. These are real questions written at index time, which is what
+    # makes a scope_select answerable rather than "please provide more detail".
+    scope_options: List[str] = field(default_factory=list)
+
     assessed_by: List[str] = field(default_factory=list)
     reasons: List[str] = field(default_factory=list)
 
     def meets(self, floor: Certainty) -> bool:
         return self.scope_certainty >= floor
 
+    @property
+    def effective_question(self) -> str:
+        """What the turn is actually about: the resolved form when there is one."""
+        return self.resolved_question or self.question
+
     def as_trace(self) -> Dict[str, Any]:
         return {
             "request_scope": self.scope.value,
             "request_scope_certainty": self.scope_certainty.name.lower(),
             "request_language": self.language,
+            "request_resolved_question": self.resolved_question or None,
+            "request_carried_constraints": list(self.carried_constraints),
+            "request_followup_intent": self.followup_intent,
             "request_is_social": self.is_social,
             "request_personal_data": list(self.personal_data),
             "request_candidate_sections": list(self.candidate_sections),
+            "request_scope_options": list(self.scope_options),
             "request_top_match": (
                 {"question": self.scope_matches[0].question,
                  "score": round(self.scope_matches[0].score, 4)}
@@ -98,10 +127,34 @@ class SignalContext:
     question: str
     history: Sequence[Any] = ()
     config: Any = None
+    # Set by the turn planner before any detector runs — see backend/chat/resolution.py.
+    # Detectors read `text_to_score` rather than either field directly, so that "which
+    # words describe this turn" is answered in one place instead of once per rung.
+    resolved_question: str = ""
+    carried_constraints: Sequence[str] = ()
+    followup_intent: str = "standalone"
 
     @property
     def has_history(self) -> bool:
         return bool(self.history)
+
+    @property
+    def text_to_score(self) -> str:
+        """The words that describe this turn, for anything measuring it.
+
+        The resolved question when a resolver produced one, because it names the
+        subject in full. Otherwise the message prefixed by the previous user turn,
+        which is the fallback this system used everywhere before resolution existed: a
+        blunt instrument — it averages two subjects and the longer one wins — but still
+        better than scoring a bare "and what about those?" on its own, which measures
+        nothing and looks identical to being off-topic.
+        """
+        if self.resolved_question:
+            return self.resolved_question
+        if not self.has_history:
+            return self.question
+        previous = _last_user_text(self.history)
+        return f"{previous}\n{self.question}" if previous else self.question
 
 
 class Detector(Protocol):
@@ -180,8 +233,8 @@ class CorpusSimilarityDetector:
     this something else". Rejecting on that alone is how a working system starts
     silently refusing valid questions.
 
-    A follow-up is scored together with the turn before it, so "what about grade 6?"
-    inherits its subject instead of scoring like noise.
+    A follow-up is scored by its RESOLVED wording, so "what about grade 6?" inherits its
+    subject instead of scoring like noise — see `SignalContext.text_to_score`.
     """
 
     name = "corpus_similarity"
@@ -192,7 +245,7 @@ class CorpusSimilarityDetector:
         from backend.indexing.embedding import embed_query
         from backend.rag.domain_gate import classify, reference_store
 
-        text = self._text_to_score(ctx)
+        text = ctx.text_to_score
         normalized = normalize_query(text) or text
         try:
             vector = embed_query(normalized)
@@ -216,19 +269,6 @@ class CorpusSimilarityDetector:
             signals.scope_certainty = Certainty.LOW
             signals.reasons.append(f"no corpus match ({verdict.reason})")
         return signals
-
-    @staticmethod
-    def _text_to_score(ctx: SignalContext) -> str:
-        """The current message, prefixed by the previous user turn when there is one.
-
-        A bare follow-up carries its topic in the conversation rather than in its own
-        words. Scoring it alone measures nothing, and measuring nothing looks exactly
-        like being off-topic.
-        """
-        if not ctx.has_history:
-            return ctx.question
-        previous = _last_user_text(ctx.history)
-        return f"{previous}\n{ctx.question}" if previous else ctx.question
 
 
 def _last_user_text(history: Sequence[Any]) -> str:
@@ -330,6 +370,9 @@ class SignalLadder:
         signals = RequestSignals(
             question=ctx.question,
             language=detect_language(ctx.question),
+            resolved_question=ctx.resolved_question,
+            carried_constraints=list(ctx.carried_constraints or []),
+            followup_intent=ctx.followup_intent,
         )
 
         for detector in self._detectors:

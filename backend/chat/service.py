@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Optional
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -21,10 +21,12 @@ from backend.chat.assets_bridge import (
     effective_capabilities,
     load_asset_state,
     save_asset_state,
+    trace_for_storage,
 )
 from backend.chat.caller_identity import CallerIdentity
-from backend.chat.orchestrator import plan_turn
+from backend.chat.orchestrator import plan_turn, resolve_turn_question
 from backend.chat.request_context import ChatRequestContext
+from backend.chat.resolution import ResolvedQuestion, conversation_text
 from backend.chat.runtime import create_agent_for_request, fast_model, model
 from backend.chat.storage import storage
 from backend.profiles import get_profile
@@ -148,6 +150,67 @@ def _build_hitl_resume_query(pending_hitl: dict, user_text: str) -> str:
     return "\n".join(lines)
 
 
+@dataclass
+class _TurnEntry:
+    """How this message relates to a clarification the assistant is still waiting on.
+
+    Computed once, before anything expensive, because the answer changes which of two
+    paths the turn takes — and both entry points need the same answer.
+    """
+
+    pending_hitl: dict | None = None
+    invalid_pending_hitl: bool = False
+    is_hitl_resume: bool = False
+    resume_state: dict | None = None
+    resolution: ResolvedQuestion | None = None
+    superseded: bool = False
+    effective_user_text: str = ""
+    hitl_answers: list = field(default_factory=list)
+    original_question: str = ""
+
+
+def _enter_turn(user_text: str, messages: list, metadata: dict) -> _TurnEntry:
+    """Decide whether this message answers the pending clarification or replaces it.
+
+    The resume path assumes the reply either picks one of the offered options or fills
+    a named slot. A reply that does neither — "no, I meant the fees", or a change of
+    subject entirely — is not something to fold into the old query, because folding is
+    concatenation and concatenation retrieves both readings. Those replies abandon the
+    pending clarification and start a fresh turn from the resolved question instead.
+
+    The resolution computed here is handed to `plan_turn`, so a turn that takes the
+    fresh path pays for exactly one resolver call rather than two.
+    """
+    entry = _TurnEntry(effective_user_text=user_text, original_question=user_text)
+
+    stored = metadata.get(PENDING_HITL_KEY)
+    entry.pending_hitl = _current_pending_hitl(stored)
+    entry.invalid_pending_hitl = stored is not None and entry.pending_hitl is None
+    if not isinstance(entry.pending_hitl, dict):
+        return entry
+
+    entry.resolution = resolve_turn_question(
+        user_text,
+        messages,
+        hitl_prompt=entry.pending_hitl.get("prompt") or "",
+        hitl_options=entry.pending_hitl.get("options") or [],
+    )
+    entry.superseded = entry.resolution.supersedes_pending_question
+    entry.is_hitl_resume = not entry.superseded
+    entry.resume_state = _pending_resume_state(entry.pending_hitl)
+    entry.hitl_answers = [*_existing_hitl_answers(entry.pending_hitl), user_text]
+
+    if entry.superseded:
+        # A fresh turn: the pending state is dropped rather than resumed, and the
+        # question this turn is about is the one the user has just corrected it to.
+        entry.original_question = entry.resolution.question or user_text
+        return entry
+
+    entry.effective_user_text = _build_hitl_resume_query(entry.pending_hitl, user_text)
+    entry.original_question = entry.pending_hitl.get("original_question") or user_text
+    return entry
+
+
 def _current_pending_hitl(value: dict | None) -> dict | None:
     if not isinstance(value, dict):
         return None
@@ -193,35 +256,59 @@ def _build_resume_answer_messages(
     pending_hitl: dict,
     user_answer: str,
     docs: list[dict],
+    *,
+    resolved_question: str = "",
+    constraints: list[str] | None = None,
+    history: list | None = None,
 ) -> list:
+    """The direct-answer call taken when a clarification is resumed.
+
+    This path bypasses the agent, so everything the agent would have had must be handed
+    over explicitly — and three things were not. The conversation, without which the
+    model cannot honour a condition set before the clarification. The resolved question,
+    so it answers what was asked rather than reassembling it from three fragments. And
+    the conditions themselves, because retrieval returning the right chunks does not
+    stop an answer from covering every year group in them.
+    """
     original_question = pending_hitl.get("original_question") or ""
     prompt = pending_hitl.get("prompt") or ""
     context = _format_retrieved_chunks(docs)
+    conditions = [str(item) for item in (constraints or []) if str(item).strip()]
     system = SystemMessage(
         content=resolve_prompt(_PROFILE.agent.resume_answer_prompt, "agent/resume_answer.j2")
     )
-    human = HumanMessage(
-        content=(
-            "Original question:\n"
-            f"{original_question}\n\n"
-            "HITL follow-up question:\n"
-            f"{prompt}\n\n"
-            "User's answer:\n"
-            f"{user_answer}\n\n"
-            "Retrieved chunks:\n"
-            f"{context}"
-            # No trailing "answer from the chunks and cite them" instruction: the
-            # system message above (agent.resume_answer_prompt) already says exactly
-            # that, and repeating it here paid for the same rule twice per resume.
+
+    sections = []
+    dialogue = conversation_text(history or [], limit=_PROFILE.agent.query_resolution_history_messages)
+    if dialogue:
+        sections.append(f"The conversation so far:\n{dialogue}")
+    sections.append(f"Original question:\n{original_question}")
+    sections.append(f"HITL follow-up question:\n{prompt}")
+    sections.append(f"User's answer:\n{user_answer}")
+    if resolved_question:
+        sections.append(
+            "Read in context, the question to answer is:\n"
+            f"{resolved_question}"
         )
-    )
-    return [system, human]
-
-
-# Tool results whose outcome is already the final answer. The model adds nothing to
-# these but a rewording of profile copy, and it is charged for the whole conversation
-# plus the tool result to do it.
-TERMINAL_STATUSES = {"no_knowledge", "retrieval_error"}
+    if conditions:
+        # Same three-way rule as tools/knowledge_result.j2, and for the same reason: a
+        # condition the material does not vary by must not be able to suppress an answer
+        # that is sitting in the chunks below.
+        sections.append(
+            "Conditions the user set earlier and has not withdrawn: "
+            + "; ".join(conditions)
+            + "\nWhere the material below distinguishes by them, answer for their case. "
+            "Where it states one rule for everyone, give that rule in full and say it "
+            "applies regardless of "
+            + " or ".join(conditions)
+            + ". A general rule IS the answer to a specific question — never refuse "
+            "because the conditions are not named in the material."
+        )
+    sections.append(f"Retrieved chunks:\n{context}")
+    # No trailing "answer from the chunks and cite them" instruction: the system
+    # message above (agent.resume_answer_prompt) already says exactly that, and
+    # repeating it here paid for the same rule twice per resume.
+    return [system, HumanMessage(content="\n\n".join(sections))]
 
 
 def _terminal_reply(status: str, language: str) -> str:
@@ -232,11 +319,14 @@ def _terminal_reply(status: str, language: str) -> str:
     return localized(copy, language)
 
 
-def _terminal_status(ctx) -> Optional[str]:
-    stored = ctx.peek_rag_trace()
-    trace = (stored or {}).get("rag_trace") or {}
-    status = trace.get("retrieval_status")
-    return status if status in TERMINAL_STATUSES else None
+def _message_data_for_save(messages: list, rag_trace: dict | None) -> list:
+    """Per-message extras for the save: the finished turn's trace, on its answer.
+
+    The stored copy keeps its assets as ids rather than renditions — the renditions on
+    the wire were built for the client that asked, and rebuilding them on load is a
+    keyed lookup. Every save path goes through here so the two cannot drift.
+    """
+    return [None] * (len(messages) - 1) + [{"rag_trace": trace_for_storage(rag_trace)}]
 
 
 async def _stream_static_reply(
@@ -278,7 +368,7 @@ async def _stream_static_reply(
         save_meta.setdefault("title", generate_session_title(user_text))
 
     messages.append(AIMessage(content=reply))
-    extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
+    extra_message_data = _message_data_for_save(messages, rag_trace)
     storage.save(user_id, session_id, messages, metadata=save_meta,
                  extra_message_data=extra_message_data)
 
@@ -293,16 +383,40 @@ def _retrieval_error_response() -> str:
     return _COPY.retrieval_error
 
 
-def _resume_rag_from_hitl_sync(pending_hitl: dict, user_answer: str, ctx: ChatRequestContext) -> dict:
+def _resume_rag_from_hitl_sync(
+    pending_hitl: dict,
+    user_answer: str,
+    ctx: ChatRequestContext,
+    resolved: ResolvedQuestion | None = None,
+) -> dict:
     from backend.rag.pipeline import resume_rag_from_hitl
 
     resume_state = _pending_resume_state(pending_hitl)
     if not resume_state:
         return {}
-    return resume_rag_from_hitl(resume_state, user_answer, ctx)
+    return resume_rag_from_hitl(
+        resume_state,
+        user_answer,
+        ctx,
+        resolved=resolved,
+        # The USER's question, not the query the agent wrote for the tool. The resume
+        # state carries the latter, so anything the user said and the agent did not
+        # repeat was already lost before this call.
+        original_question=pending_hitl.get("original_question") or "",
+    )
 
 
-def _answer_resumed_rag_sync(pending_hitl: dict, user_answer: str, rag_result: dict) -> str:
+def _resume_constraints(rag_result: dict) -> list[str]:
+    trace = rag_result.get("rag_trace") or {}
+    return [str(item) for item in (trace.get("turn_carried_constraints") or [])]
+
+
+def _answer_resumed_rag_sync(
+    pending_hitl: dict,
+    user_answer: str,
+    rag_result: dict,
+    history: list | None = None,
+) -> str:
     docs = rag_result.get("docs") or []
     trace = rag_result.get("rag_trace") or {}
     status = rag_result.get("retrieval_status") or trace.get("retrieval_status")
@@ -311,14 +425,47 @@ def _answer_resumed_rag_sync(pending_hitl: dict, user_answer: str, rag_result: d
         return _retrieval_error_response()
     if status == "no_knowledge" or route == "no_knowledge" or not docs:
         return _no_knowledge_response()
-    res = model.invoke(_build_resume_answer_messages(pending_hitl, user_answer, docs))
+    res = model.invoke(
+        _build_resume_answer_messages(
+            pending_hitl,
+            user_answer,
+            docs,
+            resolved_question=rag_result.get("question") or "",
+            constraints=_resume_constraints(rag_result),
+            history=history,
+        )
+    )
     return _extract_ai_content(res)
+
+
+def _turn_context_message(turn_plan) -> SystemMessage | None:
+    """What the planner worked out about this message, or nothing to say.
+
+    Rendered next to the user's message rather than into the system prompt, which is
+    ordered most-static-first for prompt caching — a per-turn line placed there would
+    invalidate the cached prefix on every turn. A message that stands on its own and
+    carries no inherited conditions renders empty and produces no message at all.
+    """
+    if turn_plan is None:
+        return None
+    resolved = (getattr(turn_plan, "resolved_question", "") or "").strip()
+    constraints = [str(item) for item in (getattr(turn_plan, "carried_constraints", None) or [])]
+    if not resolved and not constraints:
+        return None
+    rendered = resolve_prompt(
+        "",
+        "agent/turn_context.j2",
+        resolved_question=resolved,
+        constraints=constraints,
+    )
+    return SystemMessage(content=rendered) if rendered else None
 
 
 def _build_context_messages(
     messages: list,
     persistent_note: str,
     user_text: str,
+    turn_plan=None,
 ) -> list:
     short_term = messages[-CONTEXT_WINDOW_MESSAGES:] if len(messages) > CONTEXT_WINDOW_MESSAGES else messages
     context_messages: list = []
@@ -333,6 +480,12 @@ def _build_context_messages(
             )
         )
     context_messages.extend(short_term)
+    # After the history and before the message it describes, so the model reads the
+    # conversation, then what that conversation makes this message mean, then the
+    # message itself.
+    turn_context = _turn_context_message(turn_plan)
+    if turn_context is not None:
+        context_messages.append(turn_context)
     context_messages.append(HumanMessage(content=user_text))
     return context_messages
 
@@ -445,24 +598,15 @@ def chat_with_agent(
     asset_state = load_asset_state(metadata)
     persistent_note = metadata.get("persistent_note", "")
     is_first_message = len(messages) == 0
-    stored_pending_hitl = metadata.get(PENDING_HITL_KEY)
-    pending_hitl = _current_pending_hitl(stored_pending_hitl)
-    invalid_pending_hitl = stored_pending_hitl is not None and pending_hitl is None
-    is_hitl_resume = isinstance(pending_hitl, dict)
-    resume_state = _pending_resume_state(pending_hitl)
-    effective_user_text = (
-        _build_hitl_resume_query(pending_hitl, user_text)
-        if is_hitl_resume
-        else user_text
-    )
-    hitl_answers = _existing_hitl_answers(pending_hitl)
-    if is_hitl_resume:
-        hitl_answers = [*hitl_answers, user_text]
-    original_question = (
-        pending_hitl.get("original_question")
-        if is_hitl_resume
-        else user_text
-    )
+    entry = _enter_turn(user_text, messages, metadata)
+    pending_hitl = entry.pending_hitl
+    invalid_pending_hitl = entry.invalid_pending_hitl
+    is_hitl_resume = entry.is_hitl_resume
+    resume_state = entry.resume_state
+    effective_user_text = entry.effective_user_text
+    hitl_answers = entry.hitl_answers
+    original_question = entry.original_question
+    history_for_answer = list(messages)
 
     ctx = ChatRequestContext.for_sync(
         user_id=user_id, session_id=session_id, asset_state=asset_state, caller=caller
@@ -474,7 +618,9 @@ def chat_with_agent(
         storage.save(user_id, session_id, messages)
 
         if is_hitl_resume and resume_state:
-            rag_result = _resume_rag_from_hitl_sync(pending_hitl, user_text, ctx)
+            rag_result = _resume_rag_from_hitl_sync(
+                pending_hitl, user_text, ctx, entry.resolution
+            )
             rag_trace = normalize_rag_trace(
                 rag_result.get("rag_trace") if isinstance(rag_result, dict) else None
             )
@@ -491,9 +637,13 @@ def chat_with_agent(
                     next_pending_hitl["options"],
                 )
             else:
-                response_content = _answer_resumed_rag_sync(pending_hitl, user_text, rag_result)
+                response_content = _answer_resumed_rag_sync(
+                    pending_hitl, user_text, rag_result, history_for_answer
+                )
         else:
-            turn_plan, _turn_signals = plan_turn(effective_user_text, messages[:-1], ctx)
+            turn_plan, _turn_signals = plan_turn(
+                effective_user_text, messages[:-1], ctx, resolution=entry.resolution
+            )
             if turn_plan.short_circuit:
                 # A confirmed out-of-domain question, or a social turn a profile
                 # answers statically. The agent is never built, so this costs neither
@@ -503,7 +653,9 @@ def chat_with_agent(
                 next_pending_hitl = None
             else:
                 request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools, turn_plan.language)
-                context_messages = _build_context_messages(messages[:-1], persistent_note, effective_user_text)
+                context_messages = _build_context_messages(
+                    messages[:-1], persistent_note, effective_user_text, turn_plan
+                )
                 result = request_agent.invoke(
                     {"messages": context_messages},
                     config={"recursion_limit": _PROFILE.agent.recursion_limit},
@@ -557,7 +709,9 @@ def chat_with_agent(
         if next_pending_hitl:
             save_meta[PENDING_HITL_KEY] = next_pending_hitl
         else:
-            if is_hitl_resume:
+            # `superseded` clears it too: the user replaced the question rather than
+            # answering it, so the clarification is spent whichever path ran.
+            if is_hitl_resume or entry.superseded:
                 save_meta[PENDING_HITL_KEY] = None
             if _should_update_persistent_note(messages, persistent_note):
                 save_meta["persistent_note"] = _update_persistent_note_sync(
@@ -568,7 +722,7 @@ def chat_with_agent(
                 )
 
         messages.append(AIMessage(content=response_content))
-        extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
+        extra_message_data = _message_data_for_save(messages, rag_trace)
         storage.save(
             user_id,
             session_id,
@@ -621,24 +775,18 @@ async def chat_with_agent_stream(
     capabilities = effective_capabilities(client_capabilities, _PROFILE.assets.delivery)
     persistent_note = metadata.get("persistent_note", "")
     is_first_message = len(messages) == 0
-    stored_pending_hitl = metadata.get(PENDING_HITL_KEY)
-    pending_hitl = _current_pending_hitl(stored_pending_hitl)
-    invalid_pending_hitl = stored_pending_hitl is not None and pending_hitl is None
-    is_hitl_resume = isinstance(pending_hitl, dict)
-    resume_state = _pending_resume_state(pending_hitl)
-    effective_user_text = (
-        _build_hitl_resume_query(pending_hitl, user_text)
-        if is_hitl_resume
-        else user_text
-    )
-    hitl_answers = _existing_hitl_answers(pending_hitl)
-    if is_hitl_resume:
-        hitl_answers = [*hitl_answers, user_text]
-    original_question = (
-        pending_hitl.get("original_question")
-        if is_hitl_resume
-        else user_text
-    )
+    # On a worker thread: deciding whether this message answers the pending
+    # clarification or replaces it may cost a small model call, and the event loop is
+    # already streaming tokens to other requests.
+    entry = await asyncio.to_thread(_enter_turn, user_text, list(messages), metadata)
+    pending_hitl = entry.pending_hitl
+    invalid_pending_hitl = entry.invalid_pending_hitl
+    is_hitl_resume = entry.is_hitl_resume
+    resume_state = entry.resume_state
+    effective_user_text = entry.effective_user_text
+    hitl_answers = entry.hitl_answers
+    original_question = entry.original_question
+    history_for_answer = list(messages)
 
     output_queue = asyncio.Queue()
     ctx = ChatRequestContext.for_stream(
@@ -658,7 +806,9 @@ async def chat_with_agent_stream(
             loop = asyncio.get_running_loop()
             resume_future = loop.run_in_executor(
                 None,
-                lambda: _resume_rag_from_hitl_sync(pending_hitl, user_text, ctx),
+                lambda: _resume_rag_from_hitl_sync(
+                    pending_hitl, user_text, ctx, entry.resolution
+                ),
             )
 
             while not resume_future.done():
@@ -698,6 +848,9 @@ async def chat_with_agent_stream(
                     pending_hitl,
                     user_text,
                     rag_result.get("docs") or [],
+                    resolved_question=rag_result.get("question") or "",
+                    constraints=_resume_constraints(rag_result),
+                    history=history_for_answer,
                 )
                 async for msg in model.astream(answer_messages):
                     content = _extract_ai_content(msg)
@@ -748,7 +901,7 @@ async def chat_with_agent_stream(
                         print(f"Update persistent note error: {e}")
 
             messages.append(AIMessage(content=full_response))
-            extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
+            extra_message_data = _message_data_for_save(messages, rag_trace)
             storage.save(
                 user_id,
                 session_id,
@@ -760,7 +913,17 @@ async def chat_with_agent_stream(
 
         # Plan the turn before building the agent. A confirmed out-of-domain question
         # ends here, having cost neither the system prompt nor a single tool schema.
-        turn_plan, turn_signals = plan_turn(effective_user_text, messages[:-1], ctx)
+        #
+        # On a worker thread, because planning is the one blocking stretch left in this
+        # generator and it is not a short one: rung 1 runs a bge-m3 forward pass (~91 ms
+        # of saturated CPU) and rung 2, when it runs, is a round trip to the scope model.
+        # Left on the event loop that time is stolen from every other request in the
+        # process — including tokens already streaming to users who asked earlier.
+        turn_plan, turn_signals = await asyncio.to_thread(
+            lambda: plan_turn(
+                effective_user_text, messages[:-1], ctx, resolution=entry.resolution
+            )
+        )
         if turn_plan.short_circuit:
             async for chunk in _stream_static_reply(
                 turn_plan, turn_signals, user_text, user_id, session_id,
@@ -770,7 +933,9 @@ async def chat_with_agent_stream(
             return
 
         request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools, turn_plan.language)
-        context_messages = _build_context_messages(messages[:-1], persistent_note, effective_user_text)
+        context_messages = _build_context_messages(
+            messages[:-1], persistent_note, effective_user_text, turn_plan
+        )
 
         session_title = None
         if is_first_message:
@@ -779,32 +944,16 @@ async def chat_with_agent_stream(
 
         full_response = ""
         agent_error = None
-        terminal_status = None
 
         async def _agent_worker():
-            nonlocal full_response, agent_error, terminal_status
+            nonlocal full_response, agent_error
             try:
-                tools_seen: list[str] = []
                 async for msg, _metadata in request_agent.astream(
                     {"messages": context_messages},
                     stream_mode="messages",
                     config={"recursion_limit": _PROFILE.agent.recursion_limit},
                 ):
                     if isinstance(msg, ToolMessage):
-                        tools_seen.append(getattr(msg, "name", "") or "")
-                        # Break BEFORE the model is asked to compose. Once retrieval has
-                        # concluded there is no knowledge, the reply is profile copy, and
-                        # letting the loop continue spends a whole generation call — with
-                        # the conversation and the tool result as input — to paraphrase a
-                        # string we already have.
-                        #
-                        # Only when this is the sole tool that ran. On a turn that also
-                        # called, say, the weather tool, the model still has material to
-                        # answer from and cutting it would throw that away.
-                        status = _terminal_status(ctx)
-                        if status and len(tools_seen) == 1:
-                            terminal_status = status
-                            break
                         continue
                     if not isinstance(msg, AIMessageChunk):
                         continue
@@ -834,6 +983,10 @@ async def chat_with_agent_stream(
                 agent_error = str(e)
                 await output_queue.put({"type": "error", "content": str(e)})
             finally:
+                # The graph ends itself on a terminal tool result rather than spending a
+                # model call to reword profile copy — see `_end_turn_on_terminal_retrieval`.
+                # It leaves no assistant content behind, so the copy is put on the wire here.
+                terminal_status = ctx.short_circuit_status()
                 if terminal_status:
                     reply = _terminal_reply(terminal_status, turn_plan.language)
                     full_response = reply
@@ -908,7 +1061,9 @@ async def chat_with_agent_stream(
             save_meta[PENDING_HITL_KEY] = next_pending_hitl
             full_response = hitl_response_content
         else:
-            if is_hitl_resume and not agent_error:
+            # `superseded` clears it too: the user replaced the question rather than
+            # answering it, so the clarification is spent whichever path ran.
+            if (is_hitl_resume or entry.superseded) and not agent_error:
                 save_meta[PENDING_HITL_KEY] = None
             if _should_update_persistent_note(messages, persistent_note):
                 try:
@@ -922,7 +1077,7 @@ async def chat_with_agent_stream(
                     print(f"Update persistent note error: {e}")
 
         messages.append(AIMessage(content=full_response))
-        extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
+        extra_message_data = _message_data_for_save(messages, rag_trace)
         storage.save(
             user_id,
             session_id,

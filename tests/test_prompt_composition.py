@@ -24,6 +24,11 @@ from backend.tools import GROUNDED_TOOLS, TOOL_BUILDERS
 # The prompt is paid on every turn. ~4 chars/token for English, so this is roughly a
 # 150-token ceiling — well above the ~96 it renders at today, but low enough that
 # re-adding one of the paragraphs deleted in the cleanup trips it.
+#
+# It was briefly raised to 1200 to admit an expanded grounding contract. That rewrite
+# was rolled back for making answers slower and more caveat-heavy, and the budget came
+# back with it. Raising this is the signal that a per-turn cost is growing; if you need
+# to raise it, say why here.
 SYSTEM_PROMPT_CHAR_BUDGET = 600
 
 
@@ -145,7 +150,7 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual("Grade Q against C", out)
 
     def test_no_override_falls_through_to_the_template(self):
-        out = resolve("", "rag/evidence_grade.j2", question="Q", context="C")
+        out = resolve("", "rag/evidence_grade.j2", question="Q", context="C", constraints=[])
         self.assertIn("RAG evidence grader", out)
         self.assertIn("Q", out)
 
@@ -163,7 +168,8 @@ class MigratedTemplateTests(unittest.TestCase):
     """Every prompt that moved out of profile YAML still substitutes its payload."""
 
     CASES = [
-        ("rag/evidence_grade.j2", {"question": "Q", "context": "C"}),
+        ("rag/evidence_grade.j2",
+         {"question": "Q", "context": "C", "constraints": ["CONDITION"]}),
         ("rag/complexity.j2", {"question": "Q"}),
         ("rag/rewrite.j2", {"query": "Q"}),
         ("agent/persistent_note.j2", {"max_chars": 500}),
@@ -179,7 +185,10 @@ class MigratedTemplateTests(unittest.TestCase):
                 out = render(name, **context)
                 self.assertTrue(out.strip(), f"{name} rendered empty")
                 for value in context.values():
-                    self.assertIn(str(value), out)
+                    # A list payload is joined into the prompt, never repr'd, so it is
+                    # its ELEMENTS that have to survive substitution.
+                    for expected in (value if isinstance(value, list) else [value]):
+                        self.assertIn(str(expected), out)
 
     def test_none_leaks_an_unrendered_placeholder(self):
         """A `{name}` surviving into output means a template kept the old str.format
@@ -262,12 +271,67 @@ class ToolResultEnvelopeTests(unittest.TestCase):
         self.assertIn("temporary technical issue", out)
         self.assertIn("Do NOT claim the knowledge base lacks this information", out)
 
+    def _chunks(self, **flags):
+        fields = {
+            "outcome": "chunks",
+            "chunks": "[1] a",
+            "rewritten": False,
+            "partial": False,
+            "constraints": [],
+            "discriminate": "unknown",
+        }
+        fields.update(flags)
+        return render(self.TEMPLATE, **fields)
+
+    def test_carried_conditions_are_stated_only_when_the_turn_has_any(self):
+        """Retrieval widens the query with a condition but cannot enforce it — a search
+        for fees "up to Year 6" still returns the whole fee table. So the narrowing has
+        to reach the model that writes the answer, and only on the turns that carry one."""
+        without = self._chunks(constraints=[])
+        with_scope = self._chunks(constraints=["grades up to Year 6"], discriminate="yes")
+        self.assertNotIn("SCOPE OF THE ANSWER", without)
+        self.assertIn("SCOPE OF THE ANSWER", with_scope)
+        self.assertIn("grades up to Year 6", with_scope)
+        self.assertIn("leave the other cases out", with_scope)
+
+    def test_material_that_does_not_vary_is_answered_in_full(self):
+        """The failure this branch exists for: a single admissions document list does
+        not vary by year group, and telling the model to answer "only for what the
+        conditions cover" made it refuse an answer sitting in chunk 1."""
+        out = self._chunks(constraints=["grades up to Year 6"], discriminate="no")
+        self.assertIn("does not vary by them", out)
+        self.assertIn("Give it in full", out)
+        self.assertIn("Do NOT withhold it", out)
+        self.assertNotIn("leave the other cases out", out)
+
+    def test_an_undecided_verdict_still_forbids_refusing(self):
+        out = self._chunks(constraints=["grades up to Year 6"], discriminate="unknown")
+        self.assertIn("Answer either way", out)
+        self.assertIn("never refuse", out)
+
+    def test_every_verdict_names_the_conditions(self):
+        for verdict in ("yes", "no", "unknown"):
+            with self.subTest(discriminate=verdict):
+                out = self._chunks(constraints=["girls only"], discriminate=verdict)
+                self.assertIn("girls only", out)
+
     def test_the_rewrite_caveat_is_paid_only_when_a_rewrite_happened(self):
-        without = render(self.TEMPLATE, outcome="chunks", chunks="[1] a", rewritten=False)
-        with_caveat = render(self.TEMPLATE, outcome="chunks", chunks="[1] a", rewritten=True)
+        without = self._chunks(rewritten=False)
+        with_caveat = self._chunks(rewritten=True)
         self.assertNotIn("retrieval aids", without)
         self.assertIn("retrieval aids, not evidence", with_caveat)
         self.assertLess(len(without), len(with_caveat))
+
+    def test_partial_evidence_is_told_to_answer_rather_than_refuse(self):
+        """The model cannot see the grade, and its default reading of "this doesn't
+        fully answer the question" is to refuse. Paid only when the grader said
+        partial, which is why it is here and not in the system prompt."""
+        without = self._chunks(partial=False)
+        with_guidance = self._chunks(partial=True)
+        self.assertNotIn("PARTIAL_EVIDENCE", without)
+        self.assertIn("PARTIAL_EVIDENCE", with_guidance)
+        self.assertIn("Answer anyway, from what they do establish", with_guidance)
+        self.assertIn("Refusing here is the wrong outcome", with_guidance)
 
     def test_scope_options_appear_only_when_there_are_any(self):
         with_options = render(self.TEMPLATE, outcome="needs_scope_selection",
@@ -290,6 +354,120 @@ class ToolResultEnvelopeTests(unittest.TestCase):
             "view_figure",
             _format_chunk(1, {"filename": "kb.pdf", "page_number": 2, "text": "t"}),
         )
+
+
+class CachingContractTests(unittest.TestCase):
+    """Static text before variable text, in every prompt that has both.
+
+    Providers cache on a shared prefix. A variable placed above the instructions
+    invalidates everything after it on every call, which silently turns the whole
+    instruction block into tokens paid in full every time.
+    """
+
+    # template -> the variables it substitutes.
+    #
+    # complexity.j2 and figure_extraction.j2 are deliberately absent. Both interleave
+    # their payload with instructions, so neither holds this property today. Fixing
+    # that is a pure reordering, but reordering changes the prompt the model receives,
+    # and prompt wording is currently frozen pending an eval set — so they are excluded
+    # rather than quietly rewritten. Add them here when their wording is next revisited.
+    PAYLOADS = {
+        "rag/evidence_grade.j2": {"question": "Q", "context": "C", "constraints": []},
+        "rag/rewrite.j2": {"query": "Q"},
+        "assets/figure_read.j2": {"context": "C", "question": "Q"},
+        "assets/entity_extraction.j2": {"attributes": "A", "context": "C"},
+    }
+
+    # Distinctive on purpose. Single letters collide with the instruction text itself —
+    # "Q" matches the "QUESTION" in the grader's procedure — which makes a naive
+    # .index() report a variable far earlier than it really appears.
+    SENTINEL = "ZZPAYLOADZZ"
+
+    def _filled(self, context, suffix=""):
+        """Sentinel-fill the string payloads, pass anything else through.
+
+        A non-string value here selects a BRANCH rather than carrying payload —
+        `constraints` decides whether the grader is told about carried conditions at
+        all. Filling it with a sentinel string would both take the wrong branch and
+        make the list render as its own characters.
+        """
+        return {
+            key: (f"{self.SENTINEL}{key}{suffix}" if isinstance(value, str) else value)
+            for key, value in context.items()
+        }
+
+    def test_nothing_static_follows_the_variable_payload(self):
+        """Rendered twice with different payloads, the shared prefix must cover
+        everything up to the first substitution."""
+        for name, context in self.PAYLOADS.items():
+            with self.subTest(template=name):
+                short = render(name, **self._filled(context))
+                long = render(name, **self._filled(context, "y" * 40))
+                prefix = 0
+                while prefix < min(len(short), len(long)) and short[prefix] == long[prefix]:
+                    prefix += 1
+                tail = short[prefix:]
+                # Whatever follows the first difference is payload plus its labels; no
+                # instruction paragraph should be stranded down there.
+                self.assertLess(
+                    len(tail), 150,
+                    f"{name}: {len(tail)} chars sit after the first variable",
+                )
+
+    def test_the_instruction_block_is_the_bulk_of_the_prefix(self):
+        for name, context in self.PAYLOADS.items():
+            with self.subTest(template=name):
+                out = render(name, **self._filled(context))
+                self.assertGreater(out.index(self.SENTINEL), len(out) // 2)
+
+    def test_the_grader_keeps_the_contract_when_conditions_are_carried(self):
+        """The conditions branch adds ~1.5K of instruction. Placed below the question —
+        where it started — every one of those characters sits under the cache boundary
+        and is paid in full on each constrained turn. The instruction belongs in the
+        prefix; only the condition VALUES belong with the payload."""
+        payload = {"question": "Q", "context": "C", "constraints": ["grades up to Year 6"]}
+        short = render("rag/evidence_grade.j2", **self._filled(payload))
+        long = render("rag/evidence_grade.j2", **self._filled(payload, "y" * 40))
+        prefix = 0
+        while prefix < min(len(short), len(long)) and short[prefix] == long[prefix]:
+            prefix += 1
+        self.assertLess(len(short[prefix:]), 150, short[prefix:])
+        self.assertIn("constraints_discriminate", short[:prefix],
+                      "the conditions instruction must sit inside the cacheable prefix")
+
+
+class GroundingContractTests(unittest.TestCase):
+    """One faithfulness contract, two consumers.
+
+    The agent path and the HITL-resume path answer the same kind of question from the
+    same kind of evidence. When each carried its own wording they were two contracts
+    that could drift, and nothing downstream could tell which produced an answer.
+    """
+
+    RULES = [
+        "Base every factual claim on the retrieved chunks",
+        "Cite the chunk behind each claim",
+        "Say plainly when the retrieved context does not answer",
+    ]
+
+    def test_both_paths_carry_the_identical_contract(self):
+        fragment = render("agent/_grounding.j2")
+        agent = load_profile("base").render_system_prompt(["search_knowledge_base"])
+        resume = render("agent/resume_answer.j2")
+        for surface, label in ((agent, "system.j2"), (resume, "resume_answer.j2")):
+            with self.subTest(prompt=label):
+                self.assertIn(fragment, surface)
+
+    def test_every_rule_survives_rendering(self):
+        fragment = render("agent/_grounding.j2")
+        for rule in self.RULES:
+            with self.subTest(rule=rule):
+                self.assertIn(rule, fragment)
+
+    def test_an_ungrounded_turn_carries_no_contract(self):
+        """Nothing to cite, so the rules would be noise on every one of its turns."""
+        prompt = load_profile("base").render_system_prompt(["get_current_weather"])
+        self.assertNotIn("Cite the chunk", prompt)
 
 
 class RegistryDriftTests(unittest.TestCase):
