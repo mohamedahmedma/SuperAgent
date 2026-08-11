@@ -22,7 +22,7 @@ from backend.rag.evidence import (
     build_ladder,
     parse_certainty,
 )
-from backend.rag.policy import decide_route, select_context_indices
+from backend.rag.policy import can_ask_human, decide_route, select_context_indices
 
 
 def rag_config(**overrides):
@@ -255,16 +255,119 @@ class RoutePolicyTests(unittest.TestCase):
         route, _ = decide_route(report, **{**self.kwargs, "is_sub_agent": True})
         self.assertEqual("answer", route)
 
-    def test_a_sub_agent_with_nothing_usable_stops(self):
+    def test_a_sub_agent_keeps_on_subject_evidence_that_answers_nothing_alone(self):
+        """A sibling sub-question may carry the half this one is missing, and only
+        synthesis can see both. Dropping it here decides that before anything looked."""
         report = report_at(Certainty.HIGH, relevance="weak", sufficiency="none",
                            preferred_route="rewrite")
+        route, _ = decide_route(report, **{**self.kwargs, "is_sub_agent": True})
+        self.assertEqual("answer", route)
+
+    def test_a_sub_agent_stops_when_nothing_placed_the_evidence_on_the_subject(self):
+        report = report_at(Certainty.HIGH, relevance="unknown", sufficiency="none")
         route, _ = decide_route(report, **{**self.kwargs, "is_sub_agent": True})
         self.assertEqual("no_knowledge", route)
 
     def test_relevance_none_overrides_a_route_the_grader_asked_for(self):
         report = report_at(Certainty.HIGH, relevance="none", preferred_route="answer")
-        route, _ = decide_route(report, **self.kwargs)
+        route, reason = decide_route(report, **self.kwargs)
         self.assertEqual("no_knowledge", route)
+        self.assertIn("different subject", reason)
+
+    def test_on_subject_evidence_is_never_denied(self):
+        """The "what is partner" failure: the partner section and the figure listing
+        every partner were retrieved, the grader said they do not DEFINE the term, and
+        the turn denied having any relevant information — with the partner image
+        attached to the denial. A denial now requires evidence about another subject."""
+        report = report_at(Certainty.HIGH, relevance="strong", sufficiency="none",
+                           preferred_route="no_knowledge")
+        route, _ = decide_route(report, **{**self.kwargs, "rewrite_count": 99})
+        self.assertEqual("answer", route)
+
+    def test_evidence_below_sufficient_spends_its_rewrite_before_answering(self):
+        """The rewrite is the cheap chance to close the gap — but only a chance."""
+        report = report_at(Certainty.HIGH, relevance="weak", sufficiency="none",
+                           preferred_route="no_knowledge")
+        self.assertEqual("rewrite", decide_route(report, **self.kwargs)[0])
+        self.assertEqual(
+            "answer", decide_route(report, **{**self.kwargs, "rewrite_count": 1})[0])
+
+
+class ScopeDirectionTests(unittest.TestCase):
+    """Asking the user beats guessing, when the corpus can say what the choices are.
+
+    Measured on the deployment: "what is partner" routed to rewrite spent 38 seconds and
+    12.3K tokens — a FAST_MODEL rewrite plan, a second retrieval, a second grader call,
+    then an answer over both passes merged. The same turn asked as a scope_select comes
+    back in one exchange with the direction named, and asks the same way every time
+    because a dot product decided it rather than a sampled verdict.
+    """
+
+    def setUp(self):
+        self.config = rag_config()
+        self.kwargs = {"has_docs": True, "rewrite_count": 0, "is_sub_agent": False,
+                       "config": self.config}
+        self.directions = ["What is a partnership?", "Which organizations are partners?"]
+
+    def _below_sufficient(self, **overrides):
+        fields = {"relevance": "strong", "sufficiency": "partial"}
+        fields.update(overrides)
+        return report_at(Certainty.HIGH, **fields)
+
+    def test_directions_are_offered_instead_of_a_rewrite(self):
+        route, reason = decide_route(
+            self._below_sufficient(), scope_options=self.directions, **self.kwargs)
+        self.assertEqual("scope_select", route)
+        self.assertIn("asking before rewriting", reason)
+
+    def test_one_direction_is_not_a_choice(self):
+        """A menu of one is not a question. It rewrites, exactly as before."""
+        route, _ = decide_route(
+            self._below_sufficient(), scope_options=["What is a partnership?"], **self.kwargs)
+        self.assertEqual("rewrite", route)
+
+    def test_sufficient_evidence_is_answered_not_offered(self):
+        """Directions exist on most turns. They must only matter when the evidence
+        fell short — otherwise every good answer becomes a question first."""
+        route, _ = decide_route(
+            report_at(Certainty.HIGH), scope_options=self.directions, **self.kwargs)
+        self.assertEqual("answer", route)
+
+    def test_the_user_is_still_asked_only_once(self):
+        """The limit the user set, enforced where every other ask is enforced."""
+        route, _ = decide_route(
+            self._below_sufficient(), scope_options=self.directions,
+            hitl_rounds=1, **self.kwargs)
+        self.assertNotEqual("scope_select", route)
+        self.assertEqual("rewrite", route)
+
+    def test_a_second_round_answers_rather_than_rewriting_again(self):
+        """Round two, rewrite spent: the turn ends in an answer, not another question
+        and not a denial."""
+        route, _ = decide_route(
+            self._below_sufficient(), scope_options=self.directions,
+            hitl_rounds=1, **{**self.kwargs, "rewrite_count": 1})
+        self.assertEqual("answer", route)
+
+    def test_catalogued_directions_rescue_an_ask_the_grader_left_unnamed(self):
+        """`multiple_candidates` with no list was vetoed as a generic clarify in
+        disguise. The corpus supplies the list the grader failed to write."""
+        report = self._below_sufficient(ambiguity="multiple_candidates", hitl_options=[])
+        allowed, reason = can_ask_human(
+            report, hitl_rounds=0, config=self.config, scope_options=self.directions)
+        self.assertTrue(allowed)
+        self.assertIn("catalogued directions", reason)
+
+        vetoed, _ = can_ask_human(report, hitl_rounds=0, config=self.config)
+        self.assertFalse(vetoed)
+
+    def test_the_graders_own_options_win_when_it_wrote_them(self):
+        report = self._below_sufficient(ambiguity="multiple_candidates",
+                                        hitl_options=["Grade 5", "Grade 6"])
+        allowed, reason = can_ask_human(
+            report, hitl_rounds=0, config=self.config, scope_options=self.directions)
+        self.assertTrue(allowed)
+        self.assertIn("named candidates", reason)
 
 
 class ContextPolicyTests(unittest.TestCase):
@@ -470,10 +573,17 @@ class HumanInTheLoopTests(unittest.TestCase):
         never = {**self.kwargs, "config": rag_config(max_hitl_rounds=0)}
         self.assertEqual("answer", decide_route(report, hitl_rounds=0, **never)[0])
 
-    def test_a_second_round_with_nothing_usable_stops_rather_than_asking(self):
+    def test_a_second_round_answers_from_the_evidence_rather_than_asking_again(self):
+        """Refusing the second question does not turn on-subject evidence into nothing.
+
+        This used to deny. The user had already answered one clarification, the corpus
+        had chunks on the subject, and the reply was that it holds no relevant
+        information — which is both a contradiction and the least recoverable thing to
+        tell someone who has just co-operated.
+        """
         report = self._report(sufficiency="none", ambiguity="missing_slot",
                               missing_slots=["grade"])
-        self.assertEqual("no_knowledge", decide_route(report, hitl_rounds=1, **self.kwargs)[0])
+        self.assertEqual("answer", decide_route(report, hitl_rounds=1, **self.kwargs)[0])
 
     def test_sufficient_evidence_is_never_interrupted(self):
         report = self._report(relevance="strong", sufficiency="sufficient",

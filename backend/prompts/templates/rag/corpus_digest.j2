@@ -1,0 +1,27 @@
+{% if partial %}
+Below are summaries of some sections of a larger knowledge base. Write one paragraph describing what THIS PART covers.
+{% else %}
+Below are summaries of every section of a knowledge base. Write one paragraph describing what it covers as a whole.
+{% endif %}
+{% if persona %}
+
+The knowledge base belongs to: {{ persona }}
+{% endif %}
+
+Section summaries:
+{% for summary in summaries %}
+  - {{ summary }}
+{% endfor %}
+
+Write for a reader who has to decide, quickly, whether an incoming question is something this knowledge base can help with. That decision is the paragraph's only job, so:
+
+  - Name the concrete subjects covered — the things a user would ask about — rather than characterising the document ("a comprehensive guide to...").
+  - Include the specific nouns a question would contain: the kinds of dates, fees, procedures, people, places and rules that appear. A reader matching a question against this paragraph needs those words to match against.
+  - Prefer the corpus's own vocabulary over generic paraphrase.
+  - State the boundaries where they are clear — who or what the material is about, and any period or population it applies to.
+  - Do not invent coverage. If something is absent from the summaries, it is absent from the corpus.
+{% if languages %}
+  - Where the material uses more than one language, keep the key terms in {{ languages }}, so questions in either one have something to match.
+{% endif %}
+
+One paragraph. No preamble, no heading, no bullet points — return the paragraph itself and nothing else.

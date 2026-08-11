@@ -246,6 +246,67 @@ class CatalogueRungTests(unittest.TestCase):
         self.assertEqual("what is the uniform?", signals.scope_matches[0].question)
         self.assertEqual(["s1", "s2"], signals.candidate_sections)
 
+    def test_a_query_near_two_catalogued_questions_offers_both(self):
+        """The shape of "what is partner": near two questions the corpus can answer,
+        decisively nearer neither. Those two become the scope_select the user is
+        offered, so the choice is made once by them instead of guessed at by a rewrite."""
+        between = [0.7071, 0.7071, 0.0, 0.0]  # ~0.71 against both, floor 0.5
+        signals = self._detect(self._index(floor=0.5), between)
+        self.assertEqual(
+            ["what is the uniform?", "what are the fees?"], signals.scope_options)
+
+    def test_a_decisive_query_offers_only_the_question_it_matched(self):
+        """One direction is not a choice, and routing treats it as none."""
+        signals = self._detect(self._index(floor=0.5), unit(0))
+        self.assertEqual(["what is the uniform?"], signals.scope_options)
+
+    def test_directions_below_the_corpus_floor_are_not_offered(self):
+        """The floor is the corpus's own statistic for "we can answer this". Offering a
+        direction it does not vouch for would put a guess in the user's mouth."""
+        signals = self._detect(self._index(floor=0.9), [0.7071, 0.7071, 0.0, 0.0])
+        self.assertEqual([], signals.scope_options)
+
+    def test_two_readings_kept_in_ONE_section_are_still_two_directions(self):
+        """Measured against the shipped catalogue: "what is partner" matches "Which
+        partner organisations are listed?" and "Who is the contact for partnership
+        enquiries?" at 0.586 and 0.585, both in the same chunk. A section is a unit of
+        the document, not of meaning — deduping by it collapsed a real choice and sent
+        this exact question down the rewrite path it was meant to avoid."""
+        index = ScopeIndex(
+            questions=["which organisations are partners?", "who handles partnership enquiries?"],
+            vectors=[unit(0), unit(1)],
+            chunk_ids=["s1", "s1"],
+            topics=[["partners"], ["partners"]],
+            floor=0.5,
+        )
+        signals = self._detect(index, [0.7071, 0.7071, 0.0, 0.0])
+        self.assertEqual(
+            ["which organisations are partners?", "who handles partnership enquiries?"],
+            signals.scope_options,
+        )
+
+    def test_a_crowded_field_is_noise_and_offers_nothing(self):
+        """Measured across fifteen realistic queries against the shipped catalogue: every
+        field of two was a coherent choice, and every field of three or more was noise.
+
+        "is there a school bus" offered "Does the school have a library" and "Where is
+        the school located"; "what time does school end" offered "What are the school
+        hours", "When does the school open" and "What are the school timings" — one
+        question three times. Both are questions the system should simply answer, and
+        both would have interrupted the user first. When the scores fail to separate,
+        the whole field is disqualified rather than truncated.
+        """
+        index = ScopeIndex(
+            questions=["q one?", "q two?", "q three?", "q four?"],
+            vectors=[unit(0), unit(1), unit(2), unit(3)],
+            chunk_ids=["s1", "s2", "s3", "s4"],
+            topics=[[], [], [], []],
+            floor=0.4,
+        )
+        # Equidistant from all four: the similarity carries no information at all.
+        signals = self._detect(index, [0.5, 0.5, 0.5, 0.5])
+        self.assertEqual([], signals.scope_options)
+
     def test_it_abstains_when_disabled(self):
         signals = RequestSignals(question="q")
         detector = self._detector(self._index())

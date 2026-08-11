@@ -13,6 +13,13 @@ from langchain.chat_models import init_chat_model  # noqa: F401
 from langgraph.graph import StateGraph  # noqa: F401
 from langgraph.types import Send  # noqa: F401
 
+# Same reason, one level closer to home: `load_pipeline` replaces `backend.rag` with a
+# package whose `__path__` is empty, so pipeline.py's own `from backend.rag.evidence
+# import ...` can only resolve if that module is ALREADY in sys.modules. Importing it
+# here is what puts it there. Without these two lines the file passes in a full run —
+# some earlier test file happened to import them — and fails 17 of 18 when run alone.
+import backend.rag.evidence  # noqa: F401
+import backend.rag.policy  # noqa: F401
 from backend.chat.request_context import ChatRequestContext
 from backend.schemas.chat import HitlResumeState  # noqa: F401
 
@@ -136,14 +143,18 @@ class RagShortCircuitTests(unittest.TestCase):
         pipeline.init_chat_model = initialized
 
         self.assertIs(grader, pipeline._get_grader_model())
-        initialized.assert_called_once_with(
-            model="grade-model",
-            model_provider="openai",
-            api_key="test-key",
-            base_url="https://example.test/v1",
-            temperature=0,
-            stream_usage=True,
-        )
+        # Asserted field by field rather than with a full assert_called_once_with: this
+        # test is about WHICH model and credentials the grader reaches for, and pinning
+        # the whole kwargs dict also froze the sampling settings, so every retune of the
+        # grader's effort or ceiling failed here instead of where it belongs.
+        # Sampling has its own coverage in tests/test_model_sampling.py.
+        initialized.assert_called_once()
+        kwargs = initialized.call_args.kwargs
+        self.assertEqual("grade-model", kwargs["model"])
+        self.assertEqual("openai", kwargs["model_provider"])
+        self.assertEqual("test-key", kwargs["api_key"])
+        self.assertEqual("https://example.test/v1", kwargs["base_url"])
+        self.assertTrue(kwargs["stream_usage"])
 
     def test_grader_does_not_use_other_models_when_grade_model_is_missing(self):
         pipeline = load_pipeline(
@@ -425,7 +436,211 @@ class RagShortCircuitTests(unittest.TestCase):
         # partial evidence is answered from rather than handed back with "please provide
         # more detail" — a request the user cannot usefully act on.
         self.assertEqual("partial", result.get("retrieval_status"))
+        # Both passes' evidence survives. A step-back query is a different question by
+        # construction, so it can miss a chunk the literal one found; replacing the set
+        # let a rewrite leave the turn holding less than it started with.
+        self.assertEqual(
+            ["chunk-2", "chunk-1"],
+            [doc.get("chunk_id") for doc in result.get("docs")],
+            "rewritten results lead, first-pass chunks are kept behind them",
+        )
+
+    def test_on_subject_evidence_the_grader_calls_unanswerable_is_still_answered(self):
+        """The reported failure, end to end.
+
+        "what is partner" retrieves the partner section and the figure listing every
+        partner; the grader reads the literal words, decides the snippets do not DEFINE
+        the term, and returns answerability `none` with route `no_knowledge`. That used
+        to end the turn in "the knowledge base does not contain reliable relevant
+        information" — with the partner image attached to it, because the chunks were
+        still in the trace for assets to find.
+
+        The chunks now reach the model, marked `partial` so the tool tells it to answer
+        from what they establish and name what they leave open.
+        """
+        def retrieve(query, top_k=5):
+            return {"docs": [_doc("Our partners include Cairo University and the British Council.",
+                                  "chunk-partners")],
+                    "meta": _meta(1)}
+
+        def grade(schema, prompt):
+            return {
+                "relevance": "strong",
+                "answerability": "none",
+                "ambiguity": "none",
+                "route": "no_knowledge",
+                "confidence": 0.3,
+            }
+
+        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline._get_complexity_model = lambda: FakeStructuredModel(
+            lambda schema, prompt: {"complexity": "simple", "reason": "unit"}
+        )
+        pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
+
+        ctx = self._ctx()
+        try:
+            result = pipeline.run_rag_graph("what is partner", ctx)
+        finally:
+            ctx.close()
+
+        self.assertEqual("answer", result.get("route"))
+        # Not "answerable": the answer rests on less than the question asked for, and
+        # that is what makes the tool add its partial-evidence guidance.
+        self.assertEqual("partial", result.get("retrieval_status"))
         self.assertEqual(1, len(result.get("docs")))
+
+    def test_catalogued_directions_are_asked_instead_of_rewriting(self):
+        """The cheap, repeatable path for an under-specified question.
+
+        No rewrite planned, no second retrieval, no second grader call, no answer over a
+        merged context — one question back to the user, carrying the corpus's own
+        catalogued questions as the options. This is the behaviour that took one
+        exchange instead of 38 seconds and 12.3K tokens.
+        """
+        calls = {"retrieve": 0, "rewrite": 0}
+
+        def retrieve(query, top_k=5):
+            calls["retrieve"] += 1
+            return {"docs": [_doc("Our partners include Cairo University.", "chunk-1")],
+                    "meta": _meta(1)}
+
+        def rewrite(query):
+            calls["rewrite"] += 1
+            return {"rewrite_method": "step_back", "step_back_question": "b",
+                    "hyde_document": "", "rewritten_query": f"rewritten {query}"}
+
+        def grade(schema, prompt):
+            return {
+                "relevance": "strong",
+                "answerability": "partial",
+                "ambiguity": "none",
+                "route": "rewrite",
+                "confidence": 0.4,
+            }
+
+        pipeline = load_pipeline(retrieve_documents=retrieve, rewrite_query_once=rewrite)
+        pipeline._get_complexity_model = lambda: FakeStructuredModel(
+            lambda schema, prompt: {"complexity": "simple", "reason": "unit"}
+        )
+        pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
+
+        directions = ["What is a partnership?", "Which organizations are partners?"]
+        ctx = self._ctx()
+        ctx.note_turn_plan([], directions)
+        try:
+            result = pipeline.run_rag_graph("what is partner", ctx)
+        finally:
+            ctx.close()
+
+        self.assertEqual("scope_select", result.get("route"))
+        self.assertEqual("needs_scope_selection", result.get("retrieval_status"))
+        self.assertEqual(directions, result.get("hitl_options"))
+        self.assertEqual(1, calls["retrieve"], "no second retrieval")
+        self.assertEqual(0, calls["rewrite"], "no rewrite planned")
+
+    def test_partial_status_tells_the_model_to_answer_from_what_there_is(self):
+        """The tool decides the outcome, the template renders it. Without this the model
+        sees chunks it was told nothing about and refuses on its own."""
+        from backend.tools.knowledge import make_search_knowledge_base
+
+        fake_pipeline = types.ModuleType("backend.rag.pipeline")
+        fake_pipeline.run_rag_graph = lambda query, ctx: {
+            "docs": [_doc("Our partners include Cairo University.", "chunk-partners")],
+            "rag_trace": {"retrieval_status": "partial", "route": "answer"},
+        }
+
+        ctx = self._ctx()
+        try:
+            tool = make_search_knowledge_base(ctx)
+            with patch.dict(sys.modules, {"backend.rag.pipeline": fake_pipeline}):
+                message = tool.invoke({"query": "what is partner"})
+        finally:
+            ctx.close()
+
+        self.assertIn("Cairo University", message)
+        self.assertIn("PARTIAL_EVIDENCE", message)
+        self.assertNotIn("NO_KNOWLEDGE", message)
+
+    def test_a_rewrite_that_cannot_be_planned_answers_from_the_first_pass(self):
+        """The planner returning nothing must cost the turn nothing it already had.
+
+        Two failures met here. The node cleared `docs` and returned `no_knowledge`,
+        denying evidence the first pass had retrieved and graded on-subject — while its
+        own step message said "answering from the first pass only". And the edge out of
+        it was unconditional, so it fell into `retrieve_rewritten`, which requires a
+        `rewrite_method` and raises `ValueError` without one: an unconfigured
+        FAST_MODEL or a provider hiccup failed the whole turn.
+        """
+        calls = {"retrieve": 0}
+
+        def retrieve(query, top_k=5):
+            calls["retrieve"] += 1
+            return {"docs": [_doc("the school partners are listed here", "chunk-1")],
+                    "meta": _meta(1)}
+
+        def grade(schema, prompt):
+            return {
+                "relevance": "strong",
+                "answerability": "partial",
+                "ambiguity": "none",
+                "route": "rewrite",
+                "confidence": 0.4,
+            }
+
+        pipeline = load_pipeline(retrieve_documents=retrieve, rewrite_query_once=lambda query: None)
+        pipeline._get_complexity_model = lambda: FakeStructuredModel(
+            lambda schema, prompt: {"complexity": "simple", "reason": "unit"}
+        )
+        pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
+
+        ctx = self._ctx()
+        try:
+            result = pipeline.run_rag_graph("what is partner", ctx)
+        finally:
+            ctx.close()
+
+        self.assertEqual(1, calls["retrieve"], "no second retrieval without a rewrite")
+        self.assertEqual("partial", result.get("retrieval_status"))
+        self.assertEqual("answer", result.get("route"))
+        self.assertEqual(1, len(result.get("docs")))
+        self.assertEqual("rewrite_unavailable", result["rag_trace"]["evidence_reason"])
+
+    def test_a_denial_leaves_no_chunks_for_assets_to_attach_to(self):
+        """Asset attachment falls back to `rag_trace.retrieved_chunks` whenever the
+        knowledge tool pinned nothing, which is exactly what a denial does. Leaving them
+        there is how "the knowledge base has no reliable information on this" arrived
+        with the figure that answers the question attached to it."""
+        def retrieve(query, top_k=5):
+            return {"docs": [{**_doc("a page about something else"), "asset_ids": ["asset-1"]}],
+                    "meta": _meta(1)}
+
+        def grade(schema, prompt):
+            return {
+                "relevance": "none",
+                "answerability": "none",
+                "ambiguity": "none",
+                "route": "no_knowledge",
+                "confidence": 0.9,
+            }
+
+        pipeline = load_pipeline(retrieve_documents=retrieve)
+        pipeline._get_complexity_model = lambda: FakeStructuredModel(
+            lambda schema, prompt: {"complexity": "simple", "reason": "unit"}
+        )
+        pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
+
+        ctx = self._ctx()
+        try:
+            result = pipeline.run_rag_graph("unrelated question", ctx)
+        finally:
+            ctx.close()
+
+        trace = result.get("rag_trace", {})
+        self.assertEqual("no_knowledge", result.get("retrieval_status"))
+        self.assertEqual([], trace.get("retrieved_chunks"))
+        # The trace panel still shows what retrieval actually found.
+        self.assertEqual(1, len(trace.get("initial_retrieved_chunks")))
 
     def test_hyde_rewrite_runs_only_selected_retrieval(self):
         calls = {"retrieve": [], "rewrite": 0, "grade": 0}
@@ -566,6 +781,9 @@ class RagShortCircuitTests(unittest.TestCase):
             "complexity",
             "complexity_reason",
             "sub_questions",
+            # Conditions set before the clarification. They cross the resume boundary
+            # for the same reason `hitl_rounds` does: the graph starts fresh there.
+            "carried_constraints",
         }, set(resume_state))
 
     def test_resume_goes_directly_to_targeted_retrieval_after_hitl_answer(self):

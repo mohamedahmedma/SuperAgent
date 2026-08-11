@@ -30,6 +30,7 @@ safe before anyone has looked at a single score.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -43,6 +44,10 @@ logger = logging.getLogger(__name__)
 # of admitting silently is a search that would have happened anyway.
 DEFAULT_FLOOR_PERCENTILE = 10.0
 
+# Working-set ceiling for the leave-one-out pass, which is the one place in this module
+# whose cost is quadratic in catalogue size. See `derive_floor`.
+FLOOR_BLOCK_BYTES = 64 * 1024 * 1024
+
 
 @dataclass
 class ScopeMatch:
@@ -52,6 +57,11 @@ class ScopeMatch:
     score: float
     chunk_id: str = ""
     topics: List[str] = field(default_factory=list)
+    # The catalogued question's own vector, carried so a caller can compare matches to
+    # EACH OTHER rather than only to the query. That is what separates two paraphrases
+    # of one question from two genuinely different ones, and it costs a row reference —
+    # the matrix is already in memory and the row was already selected.
+    vector: Any = None
 
 
 @dataclass
@@ -64,6 +74,9 @@ class ScopeIndex:
     topics: List[List[str]] = field(default_factory=list)
     floor: float = 0.0
     catalogue: str = ""
+    # Identity of the inputs `floor` was derived from, so the caller can store the pair
+    # and hand it back on the next build instead of paying the derivation again.
+    floor_sha256: str = ""
 
     def __post_init__(self):
         """Accept a plain list of vectors and coerce it once.
@@ -109,6 +122,7 @@ class ScopeIndex:
                 score=float(scores[position]),
                 chunk_id=self.chunk_ids[position],
                 topics=list(self.topics[position]),
+                vector=self.vectors[position],
             )
             for position in top
         ]
@@ -156,15 +170,28 @@ def derive_floor(
     if matrix.ndim != 2 or matrix.shape[0] < 2:
         return 0.0
 
-    # One n x n product instead of n^2 Python dot products — 3.4s became milliseconds
-    # on a 222-question catalogue, and this runs at boot.
-    similarity = matrix @ matrix.T
     sections = np.asarray(chunk_ids)
-    same_section = sections[:, None] == sections[None, :]
-    similarity[same_section] = -np.inf
+    total = matrix.shape[0]
 
-    row_max = similarity.max(axis=1)
-    maxima = [float(value) for value in row_max if np.isfinite(value)]
+    # In row blocks, never as one n x n product. Only the row maxima survive this loop,
+    # so the full matrix never needs to exist at once — and materialising it is what
+    # made this the first thing to fall over as a corpus grows. Measured: 222 questions
+    # cost 2 MB, but 20,000 cost 1.85 GB and 40,000 cost 4.3 GB and five minutes, the
+    # bulk of it swapping. Blocking holds the working set flat at FLOOR_BLOCK_BYTES
+    # regardless of catalogue size, and is faster at every size large enough to notice
+    # because the block stays in cache.
+    #
+    # The arithmetic is unchanged: same products, same -inf masking of same-section
+    # pairs, same row maxima, just accumulated a block at a time.
+    rows = max(1, FLOOR_BLOCK_BYTES // max(1, total * 5))
+    maxima: List[float] = []
+    for start in range(0, total, rows):
+        stop = min(start + rows, total)
+        similarity = matrix[start:stop] @ matrix.T
+        same_section = sections[start:stop, None] == sections[None, :]
+        similarity[same_section] = -np.inf
+        block_max = similarity.max(axis=1)
+        maxima.extend(float(value) for value in block_max if np.isfinite(value))
 
     if not maxima:
         # Every question belongs to the same section, so there is no cross-section
@@ -174,12 +201,34 @@ def derive_floor(
     return percentile(maxima, point)
 
 
+def floor_fingerprint(
+    questions: Sequence[str],
+    chunk_ids: Sequence[str],
+    embedding_model: str,
+    point: float,
+) -> str:
+    """Identity of every input to `derive_floor`.
+
+    Hashes the questions rather than their vectors, which is equivalent and far
+    cheaper: a vector is a pure function of its question and the embedding model, and
+    the model is hashed here too. The percentile is included because it selects a
+    different point on the same distribution — a config change has to invalidate the
+    cached floor as surely as a corpus change does.
+    """
+    parts = [f"{question}\x1f{chunk_id}" for question, chunk_id in zip(questions, chunk_ids)]
+    parts.sort()
+    payload = "\n".join(parts) + f"\x1e{embedding_model}\x1e{point:.6f}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def build_index(
     records: Sequence[Any],
     embed,
     *,
     floor_percentile: float = DEFAULT_FLOOR_PERCENTILE,
     catalogue: str = "",
+    embedding_model: str = "",
+    cached_floor: Optional[Tuple[str, float]] = None,
 ) -> ScopeIndex:
     """Assemble the index, embedding only what is not already stored.
 
@@ -227,16 +276,32 @@ def build_index(
     vectors = stored
 
     matrix = np.asarray(vectors, dtype=np.float32)
-    floor = derive_floor(matrix, chunk_ids, floor_percentile)
-    logger.info(
-        "scope index: %d questions over %d sections, derived floor %.4f (p%.0f)",
-        len(questions), len(set(chunk_ids)), floor, floor_percentile,
-    )
+
+    # Deriving the floor is leave-one-out over every catalogued question, so its cost
+    # grows with the square of the catalogue while everything else here grows linearly.
+    # It is also a pure function of these exact inputs, which is what makes caching it
+    # safe: the fingerprint covers the questions, their sections, the embedding model
+    # and the percentile, and any change to any of them falls through to a fresh
+    # derivation rather than reusing a floor that no longer describes this corpus.
+    fingerprint = floor_fingerprint(questions, chunk_ids, embedding_model, floor_percentile)
+    if cached_floor and cached_floor[0] and cached_floor[0] == fingerprint:
+        floor = float(cached_floor[1])
+        logger.info(
+            "scope index: %d questions over %d sections, floor %.4f from cache",
+            len(questions), len(set(chunk_ids)), floor,
+        )
+    else:
+        floor = derive_floor(matrix, chunk_ids, floor_percentile)
+        logger.info(
+            "scope index: %d questions over %d sections, derived floor %.4f (p%.0f)",
+            len(questions), len(set(chunk_ids)), floor, floor_percentile,
+        )
     return ScopeIndex(
         questions=questions,
         vectors=matrix,
         chunk_ids=chunk_ids,
         topics=topics,
         floor=floor,
+        floor_sha256=fingerprint,
         catalogue=catalogue,
     )

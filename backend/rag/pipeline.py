@@ -9,6 +9,7 @@ from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from backend.chat.request_context import ChatRequestContext
+from backend.llm import sampling
 from backend.rag.evidence import (
     AssessmentContext,
     Certainty,
@@ -17,7 +18,7 @@ from backend.rag.evidence import (
     build_ladder,
 )
 from backend.prompts import resolve as resolve_prompt
-from backend.rag.policy import decide_route, select_context_indices
+from backend.rag.policy import decide_route, offerable_directions, select_context_indices
 from backend.rag.rerank_assessor import CrossEncoderAssessor
 from backend.assets.vision import call_with_rate_limit_retry
 from backend.profiles import get_profile
@@ -68,8 +69,8 @@ def _get_grader_model():
             model_provider="openai",
             api_key=API_KEY,
             base_url=BASE_URL,
-            temperature=_PROFILE.models.grade_temperature,
             stream_usage=True,
+            **sampling("grade"),
         )
     return _grader_model
 
@@ -85,8 +86,8 @@ def _get_complexity_model():
             model_provider="openai",
             api_key=API_KEY,
             base_url=BASE_URL,
-            temperature=_PROFILE.models.planner_temperature,
             stream_usage=True,
+            **sampling("planner"),
         )
     return _complexity_model
 
@@ -106,6 +107,13 @@ class EvidenceGrade(BaseModel):
     serialized into the JSON schema and sent on the same call as the prompt, so stating
     the semantics in `evidence_grade_prompt` as well was paying for them twice. The
     prompt now defines only the route decision, which reads across these fields.
+
+    Field order was briefly changed to put `reason` first, on the theory that a model
+    emitting JSON in declaration order should reason before it commits. That is sound
+    for a non-reasoning model and wrong here: this deployment runs reasoning models,
+    which already think before emitting, so an explicit reason field made them reason
+    twice and put 2-3 sentences of prose on the critical path of every grading call.
+    Latency went up, quality did not. Leave `reason` where it is.
     """
 
     relevance: Literal["none", "weak", "strong"] = Field(
@@ -130,6 +138,15 @@ class EvidenceGrade(BaseModel):
             "line). multiple_candidates: several directions could all be relevant. "
             "none: no clear ambiguity."
         )
+    )
+    constraints_discriminate: Literal["yes", "no", "unknown"] = Field(
+        default="unknown",
+        description=(
+            "Only when conditions carried over from earlier turns were listed. yes: the "
+            "snippets give different answers depending on those conditions, so the answer "
+            "must be narrowed to them. no: the snippets give one answer that applies "
+            "regardless of them. unknown: not enough to tell, or none were listed."
+        ),
     )
     route: Literal["answer", "rewrite", "clarify", "scope_select", "no_knowledge"] = Field(
         description="The next routing step"
@@ -197,6 +214,17 @@ class RAGState(TypedDict):
     # Corpus sections the turn planner matched, forwarded as a retrieval hint. None
     # means no planner ran or it abstained. Never a filter — see chat/turn_policy.
     retrieval_sections: Optional[List[str]]
+    # Catalogued questions the planner matched, one per section. Routing offers these
+    # as a scope_select rather than guessing with a rewrite — see policy.decide_route.
+    scope_options: Optional[List[str]]
+    # Conditions carried over from earlier turns ("grades up to Year 6"). Appended to
+    # the retrieval query and stated to the answering model, because narrowing the
+    # search is only half of it — the right fee tables still yield an answer covering
+    # every year group unless something tells the model which years were asked about.
+    carried_constraints: Optional[List[str]]
+    # Whether this turn inherited its subject from the conversation. Routing reads it to
+    # decide whether a choice of corpus directions could possibly narrow anything.
+    is_followup: Optional[bool]
 
 
 def _format_docs(docs: List[dict]) -> str:
@@ -252,11 +280,40 @@ def _build_hitl_resume_state(result: dict) -> dict:
         complexity=result.get("complexity") or trace.get("complexity"),
         complexity_reason=result.get("complexity_reason") or trace.get("complexity_reason"),
         sub_questions=result.get("sub_questions") or trace.get("sub_questions") or [],
+        # Conditions the user set before the clarification. They survive the resume
+        # boundary or they are lost: the graph starts fresh there, and the turn that
+        # established "up to Year 6" is several messages back by the time the user
+        # answers.
+        carried_constraints=list(result.get("carried_constraints") or []),
     ).model_dump()
 
 
-def _refined_question_for_hitl(resume_state: dict, user_answer: str) -> str:
-    question = resume_state.get("question") or ""
+def _refined_question_for_hitl(
+    resume_state: dict,
+    user_answer: str,
+    resolved=None,
+    original_question: str = "",
+) -> str:
+    """The question a resumed turn should actually search for.
+
+    The resolved form when a resolver produced one, and this is the whole reason the
+    resolver is reachable from here. What it replaced was `f"{answer}: {question}"`,
+    and string formatting cannot express the thing a clarification reply most often
+    does: replace. "no i mean the school fees" concatenated onto the reading it was
+    correcting produces a query containing both readings, retrieves both, and answers
+    from the union — which is exactly what the user was trying to stop.
+
+    The fallback keeps the old shape but anchors on the USER's question rather than
+    `resume_state["question"]`. That field holds the query the AGENT wrote for the tool,
+    so any condition the user set and the agent did not repeat was already gone before
+    this function ever saw it.
+    """
+    if resolved is not None and getattr(resolved, "resolved", False):
+        refined = (getattr(resolved, "question", "") or "").strip()
+        if refined:
+            return refined
+
+    question = (original_question or resume_state.get("question") or "").strip()
     answer = user_answer.strip()
     if not question:
         return answer
@@ -318,12 +375,45 @@ def _initial_state(
         "rag_step_group": rag_step_group,
         "rag_step_group_label": rag_step_group_label,
         "retrieval_sections": list(getattr(ctx, "retrieval_sections", None) or []),
+        "scope_options": list(getattr(ctx, "scope_options", None) or []),
+        "carried_constraints": list(getattr(ctx, "carried_constraints", None) or []),
+        "is_followup": bool(getattr(ctx, "is_followup", False)),
     }
 
 
+def _search_query(state: RAGState) -> str:
+    """The text this state searches for: the question, and nothing appended to it.
+
+    An earlier revision appended the turn's carried conditions here, on the reasoning
+    that the agent's tool query might omit a condition the user set two turns ago.
+    Measured over a twenty-turn conversation (tests/test_conversation_sequence.py) that
+    cost three of twenty turns outright: "what time does the school day start (the child
+    is 5 years old)" ranks the term-dates passage below anything sharing the words
+    "child" or "years", because those terms appear nowhere in a passage about opening
+    hours. Every query term absent from the target passage is dilution, and a condition
+    is absent from every passage the corpus wrote once for everybody.
+
+    The condition still reaches retrieval when it belongs there — the RESOLVED question
+    states it in natural language ("the fees for the years up to Year 6"), which is
+    vocabulary the fee table actually contains. What it must not do is arrive twice, or
+    arrive as bare keywords stapled to a question about something else.
+
+    Constraints now travel to the two stages that can act on them without costing
+    recall: the grader, which reports whether the material varies by them, and the
+    answer prompt, which narrows or does not on that verdict.
+    """
+    return state["question"]
+
+
 def retrieve_initial(state: RAGState) -> RAGState:
-    query = state["question"]
+    query = _search_query(state)
     _emit(state, "🔍", "Searching the knowledge base...", "Initial retrieval")
+    if state.get("carried_constraints"):
+        _emit(
+            state, "🧷", "Conditions carried from earlier turns",
+            "Applied when the answer is written, not to the search — "
+            + "; ".join(state["carried_constraints"]),
+        )
     retrieved = retrieve_documents(query, top_k=RETRIEVAL_TOP_K)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
@@ -389,11 +479,27 @@ def _route_after_grade(state: RAGState) -> Literal["rewrite_question", "end"]:
     return "end"
 
 
+def _route_after_rewrite(state: RAGState) -> Literal["retrieve_rewritten", "end"]:
+    """Only re-retrieve when a rewrite was actually planned.
+
+    This edge used to be unconditional, so a node that gave up on planning one fell
+    into `retrieve_rewritten`, which requires `rewrite_method` and raises `ValueError`
+    without it. A planner that returned nothing — an unconfigured FAST_MODEL, a
+    provider error, a response that failed schema validation — therefore failed the
+    whole turn, and did it on the path meant to degrade gracefully.
+    """
+    return "retrieve_rewritten" if state.get("rewrite_method") else "end"
+
+
 def _retrieval_status_for_route(route: str, report: EvidenceReport) -> str:
     if route == "answer":
-        if report.sufficiency == "partial":
-            return "partial"
-        return "answerable"
+        # Only `sufficient` earns "answerable". Everything else routed to answer rests
+        # on less than the question asked for — including `none`, which reaches this
+        # route now that on-subject evidence is never denied. That distinction is what
+        # the knowledge tool reads to tell the model to answer from what it has and name
+        # the gap, so collapsing it into "answerable" would silently drop the guidance
+        # on exactly the turns that need it.
+        return "answerable" if report.sufficiency == "sufficient" else "partial"
     if route == "rewrite":
         return "needs_rewrite"
     if route == "clarify":
@@ -440,6 +546,8 @@ class LLMGraderAssessor:
             "rag/evidence_grade.j2",
             question=ctx.question,
             context=_format_docs(ctx.docs),
+            # Alongside the question, never folded into it. See AssessmentContext.
+            constraints=list(ctx.constraints),
         )
         grade = grader.with_structured_output(EvidenceGrade).invoke(
             [{"role": "user", "content": prompt}]
@@ -460,6 +568,7 @@ class LLMGraderAssessor:
             relevance=grade.relevance,
             sufficiency=grade.answerability,
             ambiguity=grade.ambiguity,
+            constraints_discriminate=grade.constraints_discriminate,
             confidence=grade.confidence,
             preferred_route=grade.route,
             missing_slots=list(grade.missing_slots),
@@ -480,24 +589,52 @@ def _assess_evidence(state: RAGState) -> EvidenceReport:
     ladder = build_ladder(_RAG, extra=[CrossEncoderAssessor(), LLMGraderAssessor()])
     return ladder.run(
         AssessmentContext(
+            # The QUESTION, not the constrained query. Folding the conditions in was a
+            # mistake with one visible failure mode: a grader asked whether a general
+            # admissions document list answers "what documents are required (grades up
+            # to Year 6)" sees no year mentioned anywhere, honestly returns
+            # `relevance: none`, and `decide_route` denies — which is the one outcome
+            # that policy exists to make impossible while material is in hand.
+            #
+            # The conditions travel beside the question instead, and the grader reports
+            # on them in `constraints_discriminate` rather than scoring against them.
             question=state["question"],
             docs=docs,
             retrieval_meta=state.get("rag_trace") or {},
             config=_RAG,
+            constraints=list(state.get("carried_constraints") or []),
         )
     )
 
 
-def _report_update(report: EvidenceReport, route: str) -> dict:
+def _report_update(
+    report: EvidenceReport,
+    route: str,
+    scope_options: List[str] | None = None,
+    *,
+    is_followup: bool = False,
+) -> dict:
     """Flatten a report plus its route into the trace fields the rest of the system
     already reads. Names are unchanged so the frontend and any integrating client keep
     working; `evidence_certainty` and `evidence_assessed_by` are additive."""
     hitl_prompt = _default_hitl_prompt(route, report) if route in ("clarify", "scope_select") else ""
+    # The grader's own list wins when it wrote one. The catalogued directions are the
+    # fallback, and on a scope_select routed BY those directions they are the only list
+    # there is — a scope_select with no options is never asked, so without this the
+    # route decided in policy would be silently dropped here.
+    #
+    # `offerable_directions` is applied rather than the raw list, so this fallback obeys
+    # the same rule routing does. Without it a follow-up could still be handed the
+    # catalogue neighbours that routing had just refused to ask about, arriving through
+    # a grader-initiated scope_select instead.
+    options = list(report.hitl_options) or offerable_directions(
+        scope_options or [], is_followup=is_followup
+    )
     return {
         **report.as_trace(),
         "retrieval_status": _retrieval_status_for_route(route, report),
         "hitl_prompt": hitl_prompt,
-        "hitl_options": list(report.hitl_options),
+        "hitl_options": options if route == "scope_select" else list(report.hitl_options),
         "route": route,
     }
 
@@ -532,6 +669,7 @@ def grade_documents_node(state: RAGState) -> RAGState:
         _emit(state, "\U0001f4ca", "Evaluating evidence quality...")
 
     report = _assess_evidence(state)
+    scope_options = list(state.get("scope_options") or [])
     route, route_reason = decide_route(
         report,
         has_docs=bool(docs),
@@ -539,9 +677,13 @@ def grade_documents_node(state: RAGState) -> RAGState:
         is_sub_agent=bool(state.get("is_sub_agent")),
         config=_RAG,
         hitl_rounds=int(state.get("hitl_rounds") or 0),
+        scope_options=scope_options,
+        is_followup=bool(state.get("is_followup")),
     )
 
-    report_update = _report_update(report, route)
+    report_update = _report_update(
+        report, route, scope_options, is_followup=bool(state.get("is_followup"))
+    )
     rag_trace = state.get("rag_trace", {}) or {}
     rag_trace.update(report_update)
     rag_trace["route_reason"] = route_reason
@@ -571,18 +713,28 @@ def grade_documents_node(state: RAGState) -> RAGState:
         "evidence_confidence": report.confidence,
         "missing_slots": list(report.missing_slots),
         "hitl_prompt": report_update["hitl_prompt"],
-        "hitl_options": list(report.hitl_options),
+        "hitl_options": list(report_update["hitl_options"]),
         "rag_trace": rag_trace,
     }
 
     if route in ("no_knowledge", "clarify", "scope_select", "retrieval_error"):
-        if route in ("clarify", "scope_select") and docs:
+        # Dropping the chunks from the TRACE too, not just from the state. Asset
+        # attachment falls back to `rag_trace.retrieved_chunks` whenever the knowledge
+        # tool pinned nothing (backend/chat/assets_bridge.py), and on these routes it
+        # pins nothing by design — so leaving them here attached the figures from
+        # chunks this turn just decided not to answer from. "The knowledge base has no
+        # reliable information on this" arriving with the picture that answers the
+        # question is the most confusing thing the system can do. `initial_retrieved_chunks`
+        # still holds the full set for the trace panel.
+        if docs:
             rag_trace["retrieved_chunks"] = []
         update.update({"docs": [], "context": ""})
         return update
 
     if route == "answer" and docs:
-        keep, reason = select_context_indices(report, docs, _RAG)
+        keep, reason = select_context_indices(
+            report, docs, _RAG, answer_ceiling=RETRIEVAL_TOP_K,
+        )
         rag_trace["context_selection_reason"] = reason
         rag_trace["context_chunks_available"] = len(docs)
         if keep:
@@ -604,47 +756,58 @@ def grade_documents_node(state: RAGState) -> RAGState:
     return update
 
 
+def _stop_rewriting(state: RAGState, reason: str, label: str, detail: str) -> RAGState:
+    """End the rewrite branch without re-retrieving, keeping the first pass.
+
+    The rewrite is a bonus second attempt, so failing to plan one must cost the turn
+    nothing it already had. Both callers used to return `no_knowledge` with `docs`
+    cleared — which denied knowledge the first pass had retrieved and graded on-subject,
+    the exact outcome `decide_route` exists to prevent — while their own step message
+    said "answering from the first pass only". The first pass is now what the turn
+    answers from, and only a genuinely empty one still denies.
+    """
+    docs = state.get("docs") or []
+    status = "partial" if docs else "no_knowledge"
+    rag_trace = state.get("rag_trace", {}) or {}
+    rag_trace.update({
+        "retrieval_status": status,
+        "route": "answer" if docs else "no_knowledge",
+        "evidence_reason": reason,
+    })
+    if not docs:
+        rag_trace["retrieved_chunks"] = []
+    _emit(state, "⚠️" if docs else "⛔", label, detail)
+    return {
+        "route": "answer" if docs else "no_knowledge",
+        "retrieval_status": status,
+        "docs": docs,
+        "context": state.get("context") or "",
+        "rag_trace": rag_trace,
+    }
+
+
 def rewrite_question_node(state: RAGState) -> RAGState:
-    question = state["question"]
+    question = _search_query(state)
     _emit(state, "✏️", "Rewriting the query...")
 
     rewrite_count = int(state.get("rewrite_count") or 0)
     if rewrite_count >= _RAG.max_rewrites:
-        rag_trace = state.get("rag_trace", {}) or {}
-        rag_trace.update({
-            "retrieval_status": "no_knowledge",
-            "route": "no_knowledge",
-            "evidence_reason": "rewrite_budget_exhausted",
-        })
-        _emit(state, "⛔", "Rewrite budget exhausted, stopping retrieval")
-        return {
-            "route": "no_knowledge",
-            "retrieval_status": "no_knowledge",
-            "docs": [],
-            "context": "",
-            "rag_trace": rag_trace,
-        }
+        return _stop_rewriting(
+            state,
+            "rewrite_budget_exhausted",
+            "Rewrite budget exhausted, stopping retrieval",
+            "Answering from what the earlier passes found",
+        )
 
     _emit(state, "🧠", "Choosing between Step-back / HyDE rewrite")
     rewrite = rewrite_query_once(question)
     if not rewrite:
-        # The rewrite is a bonus retry, not a requirement. When the planner cannot
-        # produce one, stop here with what the first pass found instead of failing
-        # the user's turn — this is the same terminal state as an exhausted budget.
-        rag_trace = state.get("rag_trace", {}) or {}
-        rag_trace.update({
-            "retrieval_status": "no_knowledge",
-            "route": "no_knowledge",
-            "evidence_reason": "rewrite_unavailable",
-        })
-        _emit(state, "⚠️", "Could not plan a rewrite, stopping retrieval", "Answering from the first pass only")
-        return {
-            "route": "no_knowledge",
-            "retrieval_status": "no_knowledge",
-            "docs": [],
-            "context": "",
-            "rag_trace": rag_trace,
-        }
+        return _stop_rewriting(
+            state,
+            "rewrite_unavailable",
+            "Could not plan a rewrite, stopping retrieval",
+            "Answering from the first pass only",
+        )
 
     rewrite_method = (rewrite.get("rewrite_method") or "").strip()
     step_back_question = (rewrite.get("step_back_question") or "").strip()
@@ -688,7 +851,23 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
-    context = _format_docs(results)
+
+    # The rewrite ADDS to the first pass, it does not replace it. A step-back or HyDE
+    # query is a different question by construction, so its results can easily miss a
+    # chunk the literal question found — and that chunk was already graded on-subject,
+    # or this branch would not be running. Replacing the set meant a rewrite could
+    # leave the turn with less evidence than it started with, and the second grading
+    # pass would then deny knowledge the first pass had in hand.
+    #
+    # Rewritten results lead because they are the targeted retry; the first pass keeps
+    # whatever they did not rediscover. The graded set can reach 2 x top_k on the
+    # minority of turns that rewrite at all, and adaptive context selection trims it
+    # back to the chunks the grader cites before any of it reaches the answer prompt.
+    first_pass = [] if retrieval_failed else list(state.get("docs") or [])
+    merged = dedupe_documents(results + first_pass)
+    for index, item in enumerate(merged, 1):
+        item["rrf_rank"] = index
+    context = _format_docs(merged)
     if retrieval_failed:
         _emit(
             state,
@@ -707,12 +886,20 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
                 f"merge-replaced {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
             ),
         )
-        _emit(state, "✅", f"Rewritten retrieval complete, {len(results)} snippets total")
+        _emit(
+            state,
+            "✅",
+            f"Rewritten retrieval complete, {len(merged)} snippets total",
+            f"{len(results)} from the {method_label} query, "
+            f"{len(merged) - len(results)} kept from the first pass",
+        )
     rag_trace = state.get("rag_trace", {}) or {}
     rag_trace.update({
         "rewrite_method": rewrite_method,
         "rewritten_query": rewritten_query,
-        "retrieved_chunks": results,
+        "retrieved_chunks": merged,
+        # The rewritten pass ALONE, so a trace still shows what the rewrite itself
+        # found rather than the union it was folded into.
         "rewrite_retrieved_chunks": results,
         "retrieval_stage": "rewritten",
         **retrieval_trace_fields(retrieve_meta),
@@ -721,7 +908,7 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
         rag_trace["step_back_question"] = state["step_back_question"]
     if state.get("hyde_document"):
         rag_trace["hyde_document"] = state["hyde_document"]
-    return {"docs": results, "context": context, "retrieval_failed": retrieval_failed, "rag_trace": rag_trace}
+    return {"docs": merged, "context": context, "retrieval_failed": retrieval_failed, "rag_trace": rag_trace}
 
 
 # ---------------------------------------------------------------------------
@@ -1093,7 +1280,14 @@ def build_rag_graph(complexity_planning_enabled: Optional[bool] = None):
             "end": END,
         },
     )
-    graph.add_edge("rewrite_question", "retrieve_rewritten")
+    graph.add_conditional_edges(
+        "rewrite_question",
+        _route_after_rewrite,
+        {
+            "retrieve_rewritten": "retrieve_rewritten",
+            "end": END,
+        },
+    )
     graph.add_edge("retrieve_rewritten", "grade_documents")
 
     return graph.compile()
@@ -1106,9 +1300,22 @@ def _state_from_resume(
     resume_state: dict,
     user_answer: str,
     ctx: ChatRequestContext,
+    *,
+    resolved=None,
+    original_question: str = "",
 ) -> dict:
     current_resume_state = HitlResumeState.model_validate(resume_state).model_dump()
-    refined_question = _refined_question_for_hitl(current_resume_state, user_answer)
+    refined_question = _refined_question_for_hitl(
+        current_resume_state, user_answer, resolved, original_question
+    )
+    # The conditions in force before the clarification, plus anything the reply itself
+    # established. Union rather than replacement: answering "grade 5" narrows further,
+    # it does not withdraw the year the user set two turns ago.
+    constraints = list(current_resume_state.get("carried_constraints") or [])
+    for item in list(getattr(resolved, "constraints", None) or []):
+        if item and item.lower() not in {existing.lower() for existing in constraints}:
+            constraints.append(item)
+
     rag_trace = {
         "tool_used": True,
         "tool_name": "search_knowledge_base",
@@ -1117,6 +1324,8 @@ def _state_from_resume(
         "hitl_answer": user_answer,
         "hitl_resume_from_status": current_resume_state["retrieval_status"],
         "hitl_resume_from_route": current_resume_state["route"],
+        "turn_resolved_question": refined_question,
+        "turn_carried_constraints": constraints,
     }
     if current_resume_state.get("complexity"):
         rag_trace["complexity"] = current_resume_state["complexity"]
@@ -1134,6 +1343,11 @@ def _state_from_resume(
         "complexity": current_resume_state.get("complexity"),
         "complexity_reason": current_resume_state.get("complexity_reason"),
         "sub_questions": current_resume_state.get("sub_questions") or [],
+        "carried_constraints": constraints,
+        # A resumed turn is a continuation by construction — the user is answering a
+        # question about a subject already on the table. Offering them a fresh choice of
+        # corpus directions here would be the second interruption in a row.
+        "is_followup": True,
         "rag_trace": rag_trace,
     })
     return state
@@ -1141,7 +1355,7 @@ def _state_from_resume(
 
 def _retrieve_resume_query(state: dict) -> dict:
     _emit(state, "🔎", "Running targeted retrieval using the HITL follow-up", "Skipping complexity classification and sub-question decomposition")
-    query = state["question"]
+    query = _search_query(state)
     retrieved = retrieve_documents(query, top_k=RETRIEVAL_TOP_K)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
@@ -1202,10 +1416,24 @@ def resume_rag_from_hitl(
     resume_state: dict,
     user_answer: str,
     ctx: ChatRequestContext,
+    *,
+    resolved=None,
+    original_question: str = "",
 ) -> dict:
-    """Resume a paused RAG run from the HITL breakpoint without re-entering the main graph."""
-    state = _state_from_resume(resume_state, user_answer, ctx)
+    """Resume a paused RAG run from the HITL breakpoint without re-entering the main graph.
+
+    `resolved` is the user's reply read against the conversation, and `original_question`
+    is what THEY asked rather than the query the agent wrote for the tool. Both are
+    supplied by the caller because this path used to see neither: it searched for the
+    reply concatenated onto the agent's paraphrase, with no access to the conversation
+    at all, so a condition set before the clarification could not survive it.
+    """
+    state = _state_from_resume(
+        resume_state, user_answer, ctx, resolved=resolved, original_question=original_question
+    )
     _emit(state, "▶️", "Received HITL follow-up, continuing the original RAG flow", user_answer)
+    if state["question"] != user_answer:
+        _emit(state, "🧭", "Read in context, the question is", state["question"][:90])
 
     state = _retrieve_resume_query(state)
     if _is_hitl_result(state):

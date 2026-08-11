@@ -9,7 +9,14 @@
    in backend/rag/pipeline.py. That schema is serialized and sent on the same call
    either way, so stating the semantics here too was paying for them twice. Only the
    route decision and the judging bias, which read across the other fields, are
-   prompt-level guidance. #}
+   prompt-level guidance.
+
+   This wording is deliberately lean. A revision that expanded it to ~900 tokens — an
+   ordered procedure, worked clarify/scope examples, language-neutrality and
+   anti-verbosity rules — made grading slower without behaving better, and was rolled
+   back. This call is a temperature-0 classification against a constrained schema;
+   more instruction surface is not obviously more accuracy. Change it against an eval
+   set. #}
 You are a RAG evidence grader. Judge only whether the retrieved snippets can answer
 the user's question. Never add information that is not in the snippets.
 
@@ -38,9 +45,23 @@ Each field's meaning is defined in the output schema. Choose route by these rule
   scope_select: several candidate directions are relevant and the user must choose one. List them in hitl_options — a scope_select that lists nothing is never asked.
   no_knowledge: nothing was recalled, or the topic is unrelated.
 For clarify and scope_select, write hitl_prompt, plus hitl_options when they can be listed.
+{% if constraints %}
+
+The user set conditions in an EARLIER turn that still apply; they are listed under the question below. Those conditions are a reading of the conversation, not a claim about what the knowledge base contains, and that difference decides two separate fields.
+
+Judge `relevance` and `answerability` against the QUESTION ALONE. Snippets that answer it are relevant whether or not they mention the conditions. Material is very often written once for everyone — a single admissions document list, one transport policy, one set of term dates — and silence about a year group, an age or a gender is not evidence that the snippets are about a different subject. Never grade `none` because a condition went unmentioned.
+
+Then answer `constraints_discriminate` separately:
+  yes     — the snippets give DIFFERENT answers depending on the conditions (a fee table with a row per year, a uniform that differs by gender). The answer must be narrowed to them.
+  no      — the snippets give ONE answer that applies regardless of them. The answer should be given in full, noting that it applies to everyone.
+  unknown — the snippets do not carry enough to tell.
+{% endif %}
 
 User question:
 {{ question }}
+{% if constraints %}
+Conditions in force: {{ constraints | join("; ") }}
+{% endif %}
 
 Retrieved snippets:
 {{ context }}

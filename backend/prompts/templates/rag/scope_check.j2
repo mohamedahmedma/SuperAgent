@@ -4,15 +4,23 @@ Decide whether a user's message is something this knowledge base can help with.
 The knowledge base belongs to: {{ persona }}
 {% endif %}
 {% if catalogue %}
-It covers: {{ catalogue }}
+
+What it covers:
+{{ catalogue }}
 {% endif %}
 
+{% if index_ready %}
 A similarity search has already run. These are the closest questions this knowledge base is known to answer, with their scores:
 {% for match in matches %}
-  {{ "%.2f"|format(match.score) }}  {{ match.question }}
+  {{ "%.2f"|format(match.score) }}  ({{ "above" if match.above_floor else "below" }} this corpus's floor of {{ "%.2f"|format(floor) }})  {{ match.question }}
 {% else %}
   (none — the search returned nothing comparable)
 {% endfor %}
+
+Read those scores against the floor, not against an intuition about what a similarity score ought to look like. The floor is calibrated on THIS corpus: it is the level a question genuinely about this subject typically reaches here. Scores below it mean the catalogue did not anticipate this exact wording — which happens constantly for real questions asked in other words, in another language, or about a detail nobody listed.
+{% else %}
+The similarity search could not run for this message, so there is no match evidence below. That is a fact about the search, not about the message. Judge it on the coverage description alone, and prefer `in_domain` wherever it is plausible.
+{% endif %}
 {% if history %}
 
 The conversation so far:
@@ -26,11 +34,22 @@ Answer `in_domain` when the message is this knowledge base's subject — includi
   - it is about the subject but the knowledge base may not hold the specific detail. Whether an answer EXISTS is decided later by retrieval; you are only judging the subject.
   - it continues the conversation above, or supplies a detail the assistant asked for ("he is 9", "grade 5", a phone number). A short reply in context is not a new topic.
   - it is a greeting, thanks, or other small talk. Those are handled elsewhere and must not be refused.
+  - it uses wording, or a language, that none of the listed questions use.
   - you are unsure.
 
 Answer `out_of_domain` ONLY when the message is plainly a different subject with no relation to the one above — the weather, sport, cooking, writing a poem, general trivia.
 
 The cost of the two mistakes is not equal. Calling something out_of_domain refuses a user outright and they cannot recover from it; calling something in_domain merely spends one search. **When the two are close, choose in_domain.**
+
+Worked examples of that rule, for a knowledge base covering a school:
+
+  "متى يبدأ الفصل الدراسي الثاني؟"           -> in_domain      (the subject, asked in the other language)
+  "Do you take kids with peanut allergies?"  -> in_domain      (plausibly covered; let retrieval decide)
+  "how much"                                 -> in_domain      (a fragment continuing the conversation)
+  "ما هو الطقس اليوم؟"                        -> out_of_domain  (weather — a different subject entirely)
+  "write me a poem about the sea"            -> out_of_domain  (a task unrelated to the material)
+
+Note the second and third: neither is answerable from the listed questions as written, and both are still `in_domain`. Being unable to see the answer is not grounds for refusing the question.
 
 Also list any personal details the message discloses, using only these field names:
 {% for field in personal_fields %}

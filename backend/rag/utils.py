@@ -9,6 +9,7 @@ from langsmith import traceable
 from backend.indexing.milvus_client import get_milvus_store
 from backend.indexing.embedding import embed_query, embedding_service as _embedding_service
 from backend.env import env_bool, env_float, env_int, env_value
+from backend.llm import sampling
 from backend.indexing.parent_chunk_store import ParentChunkStore
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
@@ -404,8 +405,8 @@ def _get_rewrite_model():
             model_provider="openai",
             api_key=ARK_API_KEY,
             base_url=BASE_URL,
-            temperature=_PROFILE.models.rewrite_temperature,
             stream_usage=True,
+            **sampling("rewrite"),
         )
     return _rewrite_model
 

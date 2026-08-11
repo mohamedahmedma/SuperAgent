@@ -7,7 +7,12 @@
    default to "", and rewrite_query_once() infers the method from whichever field came
    back populated, returning None rather than failing the turn. That is why this is one
    line and not the paragraph it used to be: prose cannot fix a provider-side schema
-   rejection, and the code already does. #}
+   rejection, and the code already does.
+
+   A revision that added corpus-language HyDE and proper-noun preservation was rolled
+   back with the rest of the prompt rewrite. Both ideas are still worth testing — they
+   target real cross-lingual recall failures — but they belong behind an eval set, not
+   in a batch of unmeasured changes. #}
 You are a RAG query-rewrite planner. The initial retrieval already found a relevant signal, but the evidence is insufficient. Choose exactly one rewrite method — step_back or hyde — and generate the content that method needs.
 
 Selection rules:

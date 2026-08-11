@@ -102,10 +102,30 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
             chunks="\n\n---\n\n".join(
                 _format_chunk(i, doc) for i, doc in enumerate(docs, 1)
             ),
+            # Conditions the user set in an earlier turn. Retrieval widened the query
+            # with them but cannot enforce them — a search for fees "up to Year 6"
+            # still returns the whole fee table — so the narrowing has to be stated to
+            # the model that writes the answer. Paid only on turns that carry one.
+            constraints=[
+                str(item) for item in (getattr(ctx, "carried_constraints", None) or [])
+            ],
+            # The grader's verdict on whether the material actually varies by those
+            # conditions, from the same call that graded the evidence. It decides
+            # whether the conditions narrow the answer or merely describe who is
+            # asking — see the template.
+            discriminate=str(
+                (rag_trace or {}).get("evidence_constraints_discriminate") or "unknown"
+            ),
             # Only a rewritten retrieval needs the caveat, and only the trace knows
             # whether one happened — which the system prompt could not, being fixed
             # before any of this ran. Paid on the minority of turns that rewrote.
             rewritten=bool(rag_trace.get("rewrite_method")),
+            # These chunks were graded on-subject but short of settling the question.
+            # The model cannot see that grade, and its default reading of "the context
+            # doesn't fully answer this" is to refuse — which is how a question whose
+            # answer was sitting in chunk 3 ended in a denial. Paid only when the
+            # grader actually said partial.
+            partial=status == "partial",
         )
 
     return search_knowledge_base

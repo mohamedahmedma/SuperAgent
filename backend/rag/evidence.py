@@ -92,6 +92,18 @@ class EvidenceReport:
     ambiguity: str = "none"         # none | missing_slot | multiple_candidates
     confidence: float = 0.0
 
+    # Whether the retrieved material actually VARIES by the conditions the turn carried
+    # forward — "grades up to Year 6", "girls only". yes | no | unknown, and `unknown`
+    # is the honest default because only a rung that read the chunks can say.
+    #
+    # This exists because a carried condition is a reading of the CONVERSATION, not a
+    # fact about the corpus, and the two come apart constantly. Per-year fee tables vary
+    # by year, so narrowing to Year 6 is correct and necessary. A single admissions
+    # document list does not vary by anything, so narrowing to Year 6 matches nothing —
+    # and treating that as a failed requirement is how a question with a perfectly good
+    # answer in hand ended in a denial. Nothing but a reader can tell those apart.
+    constraints_discriminate: str = "unknown"
+
     # Set only by an assessor that actually chose a route. Cheap assessors leave it
     # None and let the route policy decide.
     preferred_route: Optional[str] = None
@@ -129,6 +141,7 @@ class EvidenceReport:
             "evidence_certainty": self.certainty.name.lower(),
             "evidence_assessed_by": list(self.assessed_by),
             "evidence_supported_chunks": self.supported_indices(),
+            "evidence_constraints_discriminate": self.constraints_discriminate,
             "missing_slots": list(self.missing_slots),
         }
 
@@ -143,6 +156,13 @@ class AssessmentContext:
     retrieval_meta: Dict[str, Any] = field(default_factory=dict)
     query_embedding: Optional[Any] = None
     config: Any = None
+    # Conditions carried in from earlier turns. Passed ALONGSIDE the question rather
+    # than folded into it, which was the mistake that motivated this field: a grader
+    # asked "do these snippets answer 'what documents are required (grades up to Year
+    # 6)'" reads a general document list, sees no year mentioned, and can honestly say
+    # it is about a different subject. Relevance is judged against the question; the
+    # conditions are reported on separately.
+    constraints: List[str] = field(default_factory=list)
 
 
 class Assessor(Protocol):
@@ -297,6 +317,9 @@ def _merge(base: EvidenceReport, incoming: EvidenceReport) -> EvidenceReport:
     merged.relevance = _prefer(authoritative.relevance, other.relevance, "unknown")
     merged.sufficiency = _prefer(authoritative.sufficiency, other.sufficiency, "unknown")
     merged.ambiguity = _prefer(authoritative.ambiguity, other.ambiguity, "none")
+    merged.constraints_discriminate = _prefer(
+        authoritative.constraints_discriminate, other.constraints_discriminate, "unknown"
+    )
     merged.confidence = authoritative.confidence or other.confidence
     merged.preferred_route = authoritative.preferred_route or other.preferred_route
     merged.missing_slots = authoritative.missing_slots or other.missing_slots

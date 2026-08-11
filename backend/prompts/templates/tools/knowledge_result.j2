@@ -35,6 +35,34 @@ No relevant documents found in the knowledge base.
 {% else %}
 Retrieved Chunks:
 {{ chunks }}
+{# The no-narration rule lives HERE, not in agent/system.j2, for the same reason as
+   everything else in this file: it is only true when chunks came back. It is also the
+   turn where the chunk header (filename, page, "figure available") tempts the model
+   into a closing sentence describing its own sources, which readers see as filler. #}
+
+Answer the question itself. Do not close with a sentence about the material: where in a document it sits, which figure or note it came from, or what it leaves open. The citation markers already carry provenance.
+{% if constraints %}
+{# Three states, because a carried condition and the material can stand in three
+   relations, and the first version of this block assumed only one of them. It told the
+   model to answer within the conditions or else say nothing covered them — which is
+   right for a per-year fee table and catastrophic for a document list written once for
+   everybody: the answer was sitting in chunk 1 and the turn refused. `discriminate` is
+   the grader's verdict, taken on the same call that graded the evidence. #}
+{% if discriminate == "yes" %}
+
+SCOPE OF THE ANSWER: the user set these conditions earlier and has not withdrawn them — {{ constraints | join("; ") }}. The material above gives different answers depending on them, so answer only for what they cover and leave the other cases out rather than listing them as extra detail.
+{% elif discriminate == "no" %}
+
+SCOPE OF THE ANSWER: the user set these conditions earlier — {{ constraints | join("; ") }} — but the material above does not vary by them: it is one answer that applies to everyone. Give it in full, and say plainly that it is the same regardless of {{ constraints | join(" or ") }}. Do NOT withhold it, hedge it, or claim the knowledge base lacks a version for their case — a general rule IS the answer to a specific question, and the user asked because they need the rule.
+{% else %}
+
+SCOPE OF THE ANSWER: the user set these conditions earlier — {{ constraints | join("; ") }}. Where the material distinguishes by them, answer for their case; where it states one rule for everyone, give that rule and say it applies generally. Answer either way — never refuse because the conditions are not named above.
+{% endif %}
+{% endif %}
+{% if partial %}
+
+PARTIAL_EVIDENCE: these chunks are about what the user asked, but they were graded as not settling it on their own. Answer anyway, from what they do establish, and cite it. Read the subject of the question rather than its exact words: chunks that cover partnerships answer "what is partner" even though they never phrase it that way. Refusing here is the wrong outcome — the material is above, and the user cannot see it.
+{% endif %}
 {% if rewritten %}
 
 Note: this turn re-queried using a step-back question or a HyDE document. Those are retrieval aids, not evidence — cite only the chunks above.
