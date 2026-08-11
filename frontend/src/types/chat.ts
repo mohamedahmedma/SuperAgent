@@ -151,6 +151,14 @@ export interface Message {
   _groupedSteps?: GroupedRagStep[];
 }
 
+/** How far back through a conversation the client has read. */
+export interface SessionPaging {
+  /** Id of the oldest message held, and the cursor the next batch is fetched before. */
+  oldestId: number | null;
+  hasMore: boolean;
+  loadingOlder: boolean;
+}
+
 export interface ChatSession {
   session_id: string;
   title?: string;

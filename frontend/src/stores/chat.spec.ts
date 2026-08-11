@@ -386,3 +386,193 @@ describe('chat store streaming sessions', () => {
     });
   });
 });
+
+describe('chat store conversation paging', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.stubGlobal('localStorage', createLocalStorageMock());
+    vi.stubGlobal('alert', vi.fn());
+    vi.stubGlobal('confirm', vi.fn(() => true));
+  });
+
+  const serverMessage = (id: number, content: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    type: id % 2 === 1 ? 'human' : 'ai',
+    content,
+    timestamp: '2026-07-08T00:00:00',
+    ...extra,
+  });
+
+  it('opens a conversation with one batch and remembers where it stopped', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: {
+        messages: [serverMessage(41, 'Recent question'), serverMessage(42, 'Recent answer')],
+        has_more: true,
+      },
+    });
+
+    const { chatStore } = setupStores();
+    await chatStore.loadSession('session_long');
+
+    expect(api.get).toHaveBeenCalledWith('/sessions/session_long?limit=15');
+    expect(chatStore.messages.map((msg) => msg.text)).toEqual([
+      'Recent question',
+      'Recent answer',
+    ]);
+    expect(chatStore.pagingBySession.session_long).toEqual({
+      oldestId: 41,
+      hasMore: true,
+      loadingOlder: false,
+    });
+    expect(chatStore.canLoadOlderMessages).toBe(true);
+  });
+
+  it('prepends the batch before the oldest message held', async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        messages: [serverMessage(41, 'Recent question'), serverMessage(42, 'Recent answer')],
+        has_more: true,
+      },
+    });
+
+    const { chatStore } = setupStores();
+    await chatStore.loadSession('session_long');
+
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        messages: [serverMessage(39, 'Older question'), serverMessage(40, 'Older answer')],
+        has_more: false,
+      },
+    });
+    await chatStore.loadOlderMessages('session_long');
+
+    expect(api.get).toHaveBeenLastCalledWith('/sessions/session_long?limit=15&before=41');
+    expect(chatStore.messages.map((msg) => msg.text)).toEqual([
+      'Older question',
+      'Older answer',
+      'Recent question',
+      'Recent answer',
+    ]);
+    expect(chatStore.pagingBySession.session_long).toEqual({
+      oldestId: 39,
+      hasMore: false,
+      loadingOlder: false,
+    });
+    expect(chatStore.canLoadOlderMessages).toBe(false);
+  });
+
+  it('does not fetch again once the start of the conversation is reached', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: { messages: [serverMessage(1, 'The very first message')], has_more: false },
+    });
+
+    const { chatStore } = setupStores();
+    await chatStore.loadSession('session_short');
+    vi.mocked(api.get).mockClear();
+
+    await chatStore.loadOlderMessages('session_short');
+
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it('joins a clarification exchange split across two batches', async () => {
+    // The reply was mapped by an earlier fetch that could not see the request above it.
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        messages: [
+          serverMessage(43, 'Danjin'),
+          serverMessage(44, 'Danjin has the Nihility element.'),
+        ],
+        has_more: true,
+      },
+    });
+
+    const { chatStore } = setupStores();
+    await chatStore.loadSession('session_hitl');
+    expect(chatStore.messages[0]).toMatchObject({ isUser: true, isHitlAnswer: false });
+
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        messages: [
+          serverMessage(41, 'Which character?'),
+          serverMessage(42, 'Please provide the character name', {
+            rag_trace: {
+              retrieval_status: 'needs_clarification',
+              route: 'clarify',
+              hitl_prompt: 'Please provide the character name',
+            },
+          }),
+        ],
+        has_more: false,
+      },
+    });
+    await chatStore.loadOlderMessages('session_hitl');
+
+    expect(chatStore.messages[1]).toMatchObject({ isHitlRequest: true });
+    expect(chatStore.messages[2]).toMatchObject({ text: 'Danjin', isHitlAnswer: true });
+    expect(chatStore.messages[3]).toMatchObject({ hitlResumeText: 'Danjin' });
+  });
+
+  it('keeps a clarification still awaiting an answer after paging back', async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        messages: [
+          serverMessage(43, 'What about fees?'),
+          serverMessage(44, 'Which year group?', {
+            rag_trace: {
+              retrieval_status: 'needs_clarification',
+              route: 'clarify',
+              hitl_prompt: 'Which year group?',
+            },
+          }),
+        ],
+        has_more: true,
+      },
+    });
+
+    const { chatStore } = setupStores();
+    await chatStore.loadSession('session_pending');
+    expect(chatStore.currentPendingHitl?.prompt).toBe('Which year group?');
+
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: { messages: [serverMessage(41, 'Hello'), serverMessage(42, 'Hi there')], has_more: false },
+    });
+    await chatStore.loadOlderMessages('session_pending');
+
+    expect(chatStore.currentPendingHitl?.prompt).toBe('Which year group?');
+  });
+
+  it('leaves paging alone for a session that is still streaming', async () => {
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+
+    const { chatStore } = setupStores();
+    chatStore.userInput = 'A question';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+
+    vi.mocked(api.get).mockClear();
+    await chatStore.loadSession('session_current');
+
+    expect(api.get).not.toHaveBeenCalled();
+    expect(chatStore.canLoadOlderMessages).toBe(false);
+
+    stream.close();
+    await sendPromise;
+  });
+
+  it('forgets the scroll-back after the conversation is cleared', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: { messages: [serverMessage(41, 'Question')], has_more: true },
+    });
+
+    const { chatStore } = setupStores();
+    await chatStore.loadSession('session_long');
+    expect(chatStore.canLoadOlderMessages).toBe(true);
+
+    chatStore.handleClearChat();
+
+    expect(chatStore.pagingBySession.session_long).toBeUndefined();
+    expect(chatStore.canLoadOlderMessages).toBe(false);
+  });
+});
