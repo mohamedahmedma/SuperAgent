@@ -31,4 +31,18 @@ $definitions = [
         // then one subject's detail — so the in-request cache pays for itself.
         'staticaccelerationsize' => 8,
     ],
+
+    'studentattendance' => [
+        'mode' => cache_store::MODE_APPLICATION,
+        // Keyed by user id alone, for the same reason as grades above.
+        'simplekeys' => true,
+        'simpledata' => false,
+        // Shorter than grades. Attendance invalidation is mostly a whole-cache purge —
+        // `attendance_taken` names a session, not a student — so a briefer TTL bounds
+        // staleness for the cases the events cannot pinpoint. It is also cheaper to
+        // rebuild: two queries over a term's sessions.
+        'ttl' => 180,
+        'staticacceleration' => true,
+        'staticaccelerationsize' => 8,
+    ],
 ];

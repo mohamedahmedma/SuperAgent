@@ -14,3 +14,4 @@ $string['privacy:metadata'] = 'The School records API plugin stores no personal 
     . 'It reads existing grade and enrolment data and returns it to an authorised '
     . 'service; every read is subject to the local/schoolapi:read capability.';
 $string['cachedef_studentgrades'] = 'Computed subject grades per student';
+$string['cachedef_studentattendance'] = 'Computed subject attendance per student';

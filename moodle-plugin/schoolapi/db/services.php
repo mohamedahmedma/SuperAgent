@@ -20,12 +20,24 @@ $functions = [
         // and exposing it to browser sessions would put a school-wide read behind
         // whatever a logged-in user's session can be tricked into doing.
     ],
+
+    'local_schoolapi_get_student_attendance' => [
+        'classname'   => 'local_schoolapi\external\get_student_attendance',
+        'description' => 'Attendance totals for one student in one term, weighted the '
+                       . 'way mod_attendance weights them, without returning classmates.',
+        'type'        => 'read',
+        'capabilities' => 'local/schoolapi:read',
+        'services'    => ['local_schoolapi_records'],
+    ],
 ];
 
 $services = [
     'School records (read-only)' => [
         'shortname' => 'local_schoolapi_records',
-        'functions' => ['local_schoolapi_get_student_grades'],
+        'functions' => [
+            'local_schoolapi_get_student_grades',
+            'local_schoolapi_get_student_attendance',
+        ],
         // Named users only: a token belongs to one service account, not to anyone who
         // happens to hold a login.
         'restrictedusers' => 1,

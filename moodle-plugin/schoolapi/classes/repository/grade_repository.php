@@ -94,7 +94,14 @@ final class grade_repository implements grade_repository_interface {
                              JOIN {enrol} e ON e.id = ue.enrolid
                             WHERE e.courseid = c.id
                                   AND ue.userid = :enroluserid
+                                  -- BOTH statuses. `ue.status` is this student's
+                                  -- enrolment; `e.status` is whether the enrolment
+                                  -- METHOD is still enabled. A school that disables
+                                  -- self-enrolment mid-year leaves active user rows
+                                  -- behind a dead instance, and checking only the
+                                  -- former keeps reporting those students.
                                   AND ue.status = 0
+                                  AND e.status = 0
                        )
                        {$where}
               ORDER BY c.shortname";

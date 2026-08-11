@@ -14,7 +14,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'local_schoolapi';
-$plugin->version   = 2026081000;
+$plugin->version   = 2026081001;
 // Moodle 5.1. Pinned rather than left open because this plugin reads
 // `grade_grades.rawgrademax` directly, and the aggregation semantics behind that
 // column are the one thing that would break silently across a major version.
