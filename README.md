@@ -22,6 +22,8 @@ uv sync
 uv run python backend/app.py
 # or
 uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
+# or 
+.venv\Scripts\uvicorn.exe backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ```bash
