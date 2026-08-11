@@ -13,21 +13,26 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from typing import List
+from typing import List, Sequence
 
 from sqlalchemy import select
 
 from backend.db.models import ParentChunk
 from backend.indexing.section_summary import (
     SectionRecord,
+    build_corpus_digest,
     corpus_catalogue,
     plan_sections,
+    sections_fingerprint,
     summarise_section,
 )
 from backend.indexing.summary_store import (
+    DigestRecord,
     delete_missing,
     existing_hashes,
+    load_digest,
     load_records,
+    save_digest,
     save_records,
 )
 from backend.infra.database import SessionLocal
@@ -171,15 +176,135 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
     for problem in report["problems"]:
         logger.error("INCOMPLETE: %s", problem)
 
+    digested = _refresh_digest(profile, stored, force=force)
+
     return {
         "sections": len(sections),
         "summarised": written,
         "reused": len(plan["reuse"]),
         "removed": removed,
         "repaired": repaired,
+        "digest": digested,
         "complete": report["complete"],
         "problems": report["problems"],
     }
+
+
+def _refresh_digest(profile, records: List[SectionRecord], *, force: bool = False) -> str:
+    """Write the corpus paragraph and the derived floor, if the corpus moved.
+
+    Both belong to the ingest phase for the same reason the question vectors do: they
+    describe the whole corpus, they are expensive, and nothing about them changes
+    between requests. Computing them here means a restart reads two columns instead of
+    calling a model and running a quadratic pass.
+
+    Skipped when the section set is unchanged, so re-running an untouched corpus still
+    costs nothing. `--force` overrides that, which is the way to pick up an edited
+    digest prompt without editing the corpus.
+    """
+    usable = [record for record in records if record.usable]
+    if not usable:
+        logger.warning("no usable sections; leaving any existing digest alone")
+        return "skipped"
+
+    fingerprint = sections_fingerprint(usable)
+    existing = load_digest(profile.name)
+    if not force and existing.paragraph and existing.sections_sha256 == fingerprint:
+        logger.info("corpus digest current (%d section(s)); not rewriting", existing.section_count)
+        paragraph, outcome = existing.paragraph, "reused"
+    else:
+        model_name = getattr(profile.rag, "scope_summary_model", "") or _default_model()
+        invoke = _text_invoke(model_name, profile)
+        logger.info("writing corpus digest from %d section summar(ies)", len(usable))
+        paragraph = build_corpus_digest(
+            usable,
+            invoke=invoke,
+            persona=profile.identity.persona,
+            languages=getattr(profile.rag, "scope_question_languages", ""),
+        )
+        if not paragraph:
+            # Keeping the previous paragraph beats blanking it: one ingest out of date
+            # still describes the corpus far better than the topic-list fallback.
+            logger.error("corpus digest could not be written; keeping the previous one")
+            paragraph, outcome = existing.paragraph, "failed"
+        else:
+            outcome = "written"
+
+    floor, floor_key, questions = _derive_floor_for(profile, usable)
+    save_digest(
+        profile.name,
+        DigestRecord(
+            paragraph=paragraph,
+            sections_sha256=fingerprint,
+            section_count=len(usable),
+            floor=floor,
+            floor_sha256=floor_key,
+            question_count=questions,
+            model_used=getattr(profile.rag, "scope_summary_model", "") or _default_model(),
+        ),
+    )
+    logger.info("corpus digest %s; floor %.4f over %d question(s)", outcome, floor, questions)
+    return outcome
+
+
+def _derive_floor_for(profile, records: List[SectionRecord]):
+    """The scope floor for this catalogue, computed once here rather than at every boot."""
+    import os
+
+    from backend.rag.scope_index import derive_floor, floor_fingerprint
+
+    questions: List[str] = []
+    chunk_ids: List[str] = []
+    vectors: List[Sequence[float]] = []
+    for record in records:
+        if len(record.question_vectors) != len(record.answers):
+            # Positional pairing, exactly as build_index does it: a record whose vectors
+            # do not line up with its questions contributes nothing rather than
+            # contributing a misalignment.
+            continue
+        for question, vector in zip(record.answers, record.question_vectors):
+            questions.append(question)
+            chunk_ids.append(record.chunk_id)
+            vectors.append(vector)
+
+    if len(vectors) < 2:
+        return 0.0, "", len(vectors)
+
+    point = float(getattr(profile.rag, "scope_floor_percentile", 10.0))
+    model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    floor = derive_floor(vectors, chunk_ids, point)
+    return floor, floor_fingerprint(questions, chunk_ids, model_name, point), len(vectors)
+
+
+def _text_invoke(model_name: str, profile):
+    """A callable returning plain text for one prompt, at temperature 0.
+
+    Separate from `_structured_invoke` because the digest wants prose, and asking for it
+    inside a one-field schema buys nothing but a parse step that can fail.
+    """
+    import os
+
+    from langchain.chat_models import init_chat_model
+
+    from backend.assets.vision import call_with_rate_limit_retry
+
+    model = init_chat_model(
+        model=model_name,
+        model_provider="openai",
+        api_key=os.getenv("ARK_API_KEY"),
+        base_url=os.getenv("BASE_URL"),
+        temperature=0.0,
+    )
+
+    def invoke(prompt: str) -> str:
+        response = call_with_rate_limit_retry(
+            lambda: model.invoke([{"role": "user", "content": prompt}]),
+            config=profile.assets,
+            description="corpus digest",
+        )
+        return getattr(response, "content", "") or ""
+
+    return invoke
 
 
 def verify(records, expected: int) -> dict:
@@ -309,7 +434,7 @@ def main(argv=None) -> int:
     print(
         f"sections={result['sections']} summarised={result['summarised']} "
         f"reused={result['reused']} repaired={result.get('repaired', 0)} "
-        f"removed={result['removed']}"
+        f"removed={result['removed']} digest={result.get('digest', 'skipped')}"
     )
     if args.dry_run:
         return 0

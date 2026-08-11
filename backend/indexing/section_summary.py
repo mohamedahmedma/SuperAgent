@@ -224,6 +224,11 @@ def corpus_catalogue(records: Sequence[SectionRecord], limit: int = 24) -> str:
     Topics rather than section headings: headings are internal structure and often
     meaningless out of context ("3. ACTIVITIES"), while topics come from a vocabulary
     written to be read.
+
+    Superseded by `build_corpus_digest` for the scope prompt, and kept for the build
+    log and as the fallback when no digest has been generated yet — a comma list is a
+    poor description but a working one, and the gate must not lose its corpus
+    description because a paragraph could not be written.
     """
     seen: List[str] = []
     for record in records:
@@ -231,3 +236,123 @@ def corpus_catalogue(records: Sequence[SectionRecord], limit: int = 24) -> str:
             if topic not in seen:
                 seen.append(topic)
     return ", ".join(seen[:limit])
+
+
+# How much section-summary prose to put in one digest call. Comfortably inside any
+# modern context window; the point of the bound is that the reduce below stays
+# predictable, not that the model could not take more.
+DIGEST_INPUT_BUDGET = 12_000
+
+
+def sections_fingerprint(records: Sequence[SectionRecord]) -> str:
+    """Identity of the section SET, so a stale digest is detectable rather than assumed.
+
+    Over (chunk_id, content_sha256) sorted: adding, removing or editing any section
+    changes it, while re-running an unchanged corpus does not. Reordering does not
+    either — the digest describes a corpus, not a sequence.
+    """
+    parts = sorted(
+        f"{record.chunk_id}:{record.content_sha256}"
+        for record in records
+        if getattr(record, "chunk_id", "")
+    )
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def _digest_batches(
+    records: Sequence[SectionRecord],
+    budget: int,
+    min_items: int = 1,
+) -> List[List[SectionRecord]]:
+    """Group sections so each batch's prose fits one call.
+
+    `min_items` exists for the reduce rounds. A batch holding one piece summarises that
+    piece into another piece, which is not a reduction — with a budget too small to fit
+    two partials, the loop below would produce the same number of pieces every round
+    and only ever terminate by hitting its round cap. Requiring two per batch during a
+    reduce makes every round at least halve the count, so it converges by construction.
+    Overshooting the budget on a batch of two is the lesser problem: the budget is a
+    guideline about prompt size, while non-convergence spends a model call per section
+    per round.
+    """
+    batches: List[List[SectionRecord]] = []
+    current: List[SectionRecord] = []
+    size = 0
+    for record in records:
+        cost = len(record.summary or "") + 2
+        if len(current) >= min_items and size + cost > budget:
+            batches.append(current)
+            current, size = [], 0
+        current.append(record)
+        size += cost
+    if current:
+        batches.append(current)
+    return batches
+
+
+def build_corpus_digest(
+    records: Sequence[SectionRecord],
+    *,
+    invoke,
+    persona: str = "",
+    languages: str = "",
+    budget: int = DIGEST_INPUT_BUDGET,
+) -> str:
+    """A paragraph describing what the whole corpus covers. `invoke(prompt)` returns text.
+
+    **Every section, not a sample.** The description the scope model reads decides
+    whether a user gets an answer at all, so a corpus whose later half went undescribed
+    would refuse questions about it while looking perfectly healthy. When the summaries
+    do not fit one call they are reduced in batches and the partial paragraphs are
+    reduced again — as many rounds as the corpus needs. Nothing is truncated away.
+
+    Returns "" on failure, which the caller treats as "keep the previous digest": a
+    corpus description that is one ingest out of date is a far smaller problem than no
+    description at all.
+    """
+    usable = [record for record in records if (record.summary or "").strip()]
+    if not usable:
+        return ""
+
+    pieces = [record.summary.strip() for record in usable]
+    round_number = 0
+    while True:
+        batches = _digest_batches(
+            [SectionRecord(chunk_id=str(i), summary=piece) for i, piece in enumerate(pieces)],
+            budget,
+            # The first pass groups whatever fits; a lone oversized section summary
+            # still has to be sent. Every later pass is a reduce and must shrink.
+            min_items=1 if round_number == 0 else 2,
+        )
+        outputs: List[str] = []
+        for batch in batches:
+            prompt = render(
+                "rag/corpus_digest.j2",
+                summaries=[record.summary for record in batch],
+                persona=persona,
+                languages=languages,
+                # A partial round is still describing part of a corpus, and saying so
+                # stops the model writing "this document covers..." about a fragment.
+                partial=len(batches) > 1,
+            )
+            try:
+                text = str(invoke(prompt) or "").strip()
+            except Exception:
+                logger.warning("corpus digest call failed", exc_info=True)
+                text = ""
+            if text:
+                outputs.append(text)
+
+        if not outputs:
+            return ""
+        if len(outputs) == 1:
+            return " ".join(outputs[0].split())
+
+        # More than one partial: reduce again. Every reduce round batches at least two
+        # pieces, so the count at least halves and this terminates in log2(sections)
+        # rounds. The cap is a backstop against a pathological input, not the mechanism.
+        round_number += 1
+        if round_number > 10:
+            logger.warning("corpus digest did not converge; joining %d partials", len(outputs))
+            return " ".join(" ".join(outputs).split())
+        pieces = outputs

@@ -6,16 +6,79 @@ may be reused — live in section_summary.py; this only reads and writes them.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence
 
 from sqlalchemy import select
 
-from backend.db.models import SectionSummary
+from backend.db.models import CorpusDigest, SectionSummary
 from backend.indexing.section_summary import SectionRecord
 from backend.infra.database import SessionLocal
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DigestRecord:
+    """The corpus-level description and the floor derived from the same corpus."""
+
+    paragraph: str = ""
+    sections_sha256: str = ""
+    section_count: int = 0
+    floor: float = 0.0
+    floor_sha256: str = ""
+    question_count: int = 0
+    model_used: str = ""
+
+
+def load_digest(profile: str, session_factory=SessionLocal) -> DigestRecord:
+    """The stored digest, or an empty one.
+
+    Empty on failure for the same reason `load_records` returns []: this feeds the
+    scope gate, and a database hiccup must cost the gate its description, not the
+    request. An empty paragraph makes the caller fall back to the topic list.
+    """
+    try:
+        with session_factory() as session:
+            row = session.get(CorpusDigest, profile)
+            if row is None:
+                return DigestRecord()
+            return DigestRecord(
+                paragraph=row.paragraph or "",
+                sections_sha256=row.sections_sha256 or "",
+                section_count=row.section_count or 0,
+                floor=float(row.floor or 0.0),
+                floor_sha256=row.floor_sha256 or "",
+                question_count=row.question_count or 0,
+                model_used=row.model_used or "",
+            )
+    except Exception:
+        logger.warning("could not load corpus digest for profile %s", profile, exc_info=True)
+        return DigestRecord()
+
+
+def save_digest(profile: str, record: DigestRecord, session_factory=SessionLocal) -> bool:
+    """Upsert the digest. False on failure — the caller logs, the build still counts."""
+    try:
+        with session_factory() as session:
+            row = session.get(CorpusDigest, profile)
+            if row is None:
+                row = CorpusDigest(profile=profile)
+                session.add(row)
+            row.paragraph = record.paragraph
+            row.sections_sha256 = record.sections_sha256
+            row.section_count = record.section_count
+            row.floor = record.floor
+            row.floor_sha256 = record.floor_sha256
+            row.question_count = record.question_count
+            row.model_used = record.model_used
+            row.updated_at = datetime.utcnow()
+            session.commit()
+        return True
+    except Exception:
+        logger.warning("could not save corpus digest for profile %s", profile, exc_info=True)
+        return False
 
 
 def _to_record(row: SectionSummary) -> SectionRecord:
