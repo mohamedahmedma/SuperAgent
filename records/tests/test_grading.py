@@ -1,105 +1,124 @@
-"""Term rollup arithmetic.
+"""School grading policy — classification, not calculation.
 
-The excused-vs-zero tests are the ones that protect a real child's real grade. They
-are written as comparisons rather than as fixed expected numbers, so they still mean
-something if the school's policy changes.
+This file used to test aggregation: turning a list of assignments into a subject
+percentage. That code is gone, and so are those tests. The system of record computes
+the figure now, applying weights, drop-lowest and exclusions, and the equivalent
+assertions live where the arithmetic does — `moodle-plugin/schoolapi/tests/`.
+
+What is left is the half a school owns rather than a gradebook: what a number MEANS.
+Two schools reading 82% will disagree about whether it is a B or a B+, and neither is
+wrong.
 """
-from records.grading import GradingPolicy, compute_rollup
-from records.schemas import AssignmentGrade, SubmissionStatus
+from records.grading import (
+    DEFAULT_POLICY,
+    PRIMARY_ACADEMIC,
+    PRIMARY_OFFICIAL,
+    GradingPolicy,
+    _primary_from_env,
+)
 
 
-def _graded(assignment_id: str, percentage: float, category: str = "homework") -> AssignmentGrade:
-    return AssignmentGrade(
-        assignment_id=assignment_id,
-        status=SubmissionStatus.GRADED,
-        score=percentage,
-        max_score=100.0,
-        percentage=percentage,
-        category=category,
-    )
+class TestClassification:
+    def test_a_percentage_maps_to_its_band(self):
+        assert DEFAULT_POLICY.classify(95.0)[0] == "A"
+        assert DEFAULT_POLICY.classify(85.0)[0] == "B"
+        assert DEFAULT_POLICY.classify(75.0)[0] == "C"
+        assert DEFAULT_POLICY.classify(65.0)[0] == "D"
+        assert DEFAULT_POLICY.classify(10.0)[0] == "F"
+
+    def test_a_boundary_belongs_to_the_higher_band(self):
+        """Exactly 90 is an A. A child on the line is not rounded down."""
+        assert DEFAULT_POLICY.classify(90.0)[0] == "A"
+        assert DEFAULT_POLICY.classify(89.99)[0] == "B"
+
+    def test_the_pass_mark_is_separate_from_the_letter(self):
+        _, passed = DEFAULT_POLICY.classify(60.0)
+        assert passed is True
+
+        _, failed = DEFAULT_POLICY.classify(59.99)
+        assert failed is False
+
+    def test_no_grade_is_not_a_fail(self):
+        """The rule the whole system runs on, at the point it is easiest to lose.
+
+        A child with nothing graded yet has not failed. Returning ("F", False) here
+        would put a fail on a report for a term that has not been marked.
+        """
+        letter, passed = DEFAULT_POLICY.classify(None)
+
+        assert letter == ""
+        assert passed is None
+
+    def test_a_genuine_zero_is_a_fail(self):
+        """The counterpart. Zero is a mark a child can earn, and it is not None."""
+        letter, passed = DEFAULT_POLICY.classify(0.0)
+
+        assert letter == "F"
+        assert passed is False
+
+    def test_a_school_can_set_its_own_bands(self):
+        strict = GradingPolicy(
+            letter_bands=((95.0, "Excellent"), (85.0, "Good"), (0.0, "Needs work")),
+            pass_threshold=85.0,
+        )
+
+        assert strict.classify(90.0) == ("Good", True)
+        assert strict.classify(80.0) == ("Needs work", False)
+
+    def test_a_policy_cannot_be_mutated_after_the_fact(self):
+        """A policy that could change would make a stored figure mean different things
+        on different days."""
+        import dataclasses
+
+        try:
+            DEFAULT_POLICY.pass_threshold = 50.0
+        except dataclasses.FrozenInstanceError:
+            return
+        raise AssertionError("GradingPolicy must be frozen")
+
+    def test_bands_that_do_not_reach_zero_still_return_a_pass_verdict(self):
+        """A misconfigured policy must not crash a parent's request.
+
+        No band matches, so there is no letter — but whether the child passed is still
+        answerable, and answering it is more useful than raising.
+        """
+        gappy = GradingPolicy(letter_bands=((50.0, "P"),), pass_threshold=50.0)
+
+        assert gappy.classify(10.0) == ("", False)
 
 
-def _excused(assignment_id: str, category: str = "homework") -> AssignmentGrade:
-    return AssignmentGrade(
-        assignment_id=assignment_id, status=SubmissionStatus.EXCUSED, category=category
-    )
+class TestPrimaryFigure:
+    """Which of the two figures a school leads with.
 
+    Both are always returned; this only decides which the assistant says first. It is
+    configuration because the right answer is a school decision that can change — and
+    changing it should not mean redeploying the assistant's prompts.
+    """
 
-def _missing(assignment_id: str, category: str = "homework") -> AssignmentGrade:
-    return AssignmentGrade(
-        assignment_id=assignment_id,
-        status=SubmissionStatus.MISSING,
-        max_score=100.0,
-        category=category,
-    )
+    def test_it_defaults_to_academic(self, monkeypatch):
+        monkeypatch.delenv("RECORDS_PRIMARY_GRADE", raising=False)
 
+        assert _primary_from_env() == PRIMARY_ACADEMIC
 
-def test_excused_work_leaves_the_denominator():
-    """90% with an excused assignment is still 90%, not 45%."""
-    rollup = compute_rollup([_graded("a1", 90.0), _excused("a2")])
-    assert rollup.percentage == 90.0
-    assert rollup.excused_count == 1
+    def test_a_school_can_choose_the_official_total(self, monkeypatch):
+        monkeypatch.setenv("RECORDS_PRIMARY_GRADE", "official")
 
+        assert _primary_from_env() == PRIMARY_OFFICIAL
 
-def test_excused_and_missing_are_not_the_same():
-    """The single most consequential distinction in this file."""
-    excused = compute_rollup([_graded("a1", 90.0), _excused("a2")])
-    missing = compute_rollup([_graded("a1", 90.0), _missing("a2")])
-    assert excused.percentage > missing.percentage
+    def test_it_is_case_and_whitespace_tolerant(self, monkeypatch):
+        monkeypatch.setenv("RECORDS_PRIMARY_GRADE", "  OFFICIAL  ")
 
+        assert _primary_from_env() == PRIMARY_OFFICIAL
 
-def test_missing_work_counts_as_zero():
-    """One perfect assignment and one never handed in is 50%, not 100%."""
-    rollup = compute_rollup([_graded("a1", 100.0), _missing("a2")])
-    assert rollup.percentage == 50.0
-    assert rollup.missing_count == 1
+    def test_a_typo_falls_back_loudly_rather_than_silently(self, monkeypatch, caplog):
+        """A typo must not quietly change which number a parent is told."""
+        monkeypatch.setenv("RECORDS_PRIMARY_GRADE", "acadmic")
 
+        with caplog.at_level("WARNING"):
+            resolved = _primary_from_env()
 
-def test_all_excused_yields_no_grade_not_zero():
-    """"No grade yet" is not a grade of zero, and must not be reported as one."""
-    rollup = compute_rollup([_excused("a1"), _excused("a2")])
-    assert rollup.percentage is None
-    assert rollup.letter == ""
-    assert rollup.passed is None
+        assert resolved == PRIMARY_ACADEMIC
+        assert "acadmic" in caplog.text
 
-
-def test_empty_term_yields_no_grade():
-    rollup = compute_rollup([])
-    assert rollup.percentage is None
-    assert rollup.is_complete is False
-
-
-def test_ungraded_submission_does_not_move_the_figure():
-    """Submitted-but-not-marked is undecided; forcing it either way is a lie."""
-    without = compute_rollup([_graded("a1", 80.0)])
-    with_pending = compute_rollup(
-        [
-            _graded("a1", 80.0),
-            AssignmentGrade(assignment_id="a2", status=SubmissionStatus.SUBMITTED_UNGRADED),
-        ]
-    )
-    assert without.percentage == with_pending.percentage
-    assert with_pending.pending_count == 1
-    # But the figure is explicitly not final, which is what lets the agent say "so far".
-    assert with_pending.is_complete is False
-    assert without.is_complete is True
-
-
-def test_weighted_categories_renormalise_over_what_exists():
-    """Mid-term, an unsat final must not be counted as 40% of zero."""
-    policy = GradingPolicy(category_weights={"homework": 0.3, "midterm": 0.3, "final": 0.4})
-    rollup = compute_rollup(
-        [_graded("a1", 80.0, "homework"), _graded("a2", 90.0, "midterm")], policy
-    )
-    # 0.3*80 + 0.3*90 renormalised over the 0.6 of weight actually present = 85.
-    assert rollup.percentage == 85.0
-
-
-def test_letter_bands_and_pass_threshold_apply():
-    rollup = compute_rollup([_graded("a1", 85.0)])
-    assert rollup.letter == "B"
-    assert rollup.passed is True
-
-    failing = compute_rollup([_graded("a1", 41.0)])
-    assert failing.letter == "F"
-    assert failing.passed is False
+    def test_the_policy_carries_it(self):
+        assert GradingPolicy(primary_figure=PRIMARY_OFFICIAL).primary_figure == "official"

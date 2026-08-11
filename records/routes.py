@@ -12,8 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from records import auth, lms
+from records.assembler import AttendanceAssembler, GradeAssembler, term_prefix
 from records.db import get_db
-from records.grading import GradingPolicy, compute_rollup
+from records.grading import DEFAULT_POLICY
 from records.models import (
     AccessAudit,
     ApiKey,
@@ -145,22 +146,17 @@ def _bindings_for(db: Session, student: Student, term: Term) -> list[CourseBindi
     )
 
 
-def _course_grade(binding: CourseBinding, assignments, policy: GradingPolicy) -> CourseGrade:
-    rollup = compute_rollup(assignments, policy)
-    return CourseGrade(
-        course_id=str(binding.lms_course_id),
-        subject_code=binding.subject_code,
-        subject_name_ar=binding.subject_name_ar,
-        subject_name_en=binding.subject_name_en,
-        computed_percentage=rollup.percentage,
-        letter_grade=rollup.letter,
-        passed=rollup.passed,
-        graded_count=rollup.graded_count,
-        excused_count=rollup.excused_count,
-        missing_count=rollup.missing_count,
-        pending_count=rollup.pending_count,
-        is_complete=rollup.is_complete,
-    )
+def _lms_ref(student: Student) -> str:
+    """What the LMS is asked about.
+
+    The school's own student number, never an internal LMS id. Keeping the contract on
+    the identifier a registrar can look up is what lets the system of record be replaced
+    without the facade's data changing.
+
+    Named apart from `_student_ref` above, which builds the API's StudentRef object —
+    two functions with one name is how the wrong one gets called.
+    """
+    return student.external_id
 
 
 # ---------------------------------------------------------------------------
@@ -223,23 +219,30 @@ def get_grades(
     resolved_term = _resolve_term(db, term)
     bindings = _bindings_for(db, student, resolved_term)
 
-    # No LMS account yet, or no published courses: an empty `courses` list is the
-    # honest answer to both, and the agent renders it as "nothing recorded for her
-    # this term" rather than inventing subjects.
+    # No published courses: an empty `courses` list is the honest answer, and the agent
+    # renders it as "nothing recorded for her this term" rather than inventing subjects.
+    #
+    # Asked for BEFORE the LMS call rather than filtered afterwards. If nothing is
+    # published there is nothing a parent may see, so there is no reason to ask the
+    # system of record about this child at all.
     courses: list[CourseGrade] = []
-    if student.lms_user_id is not None and bindings:
+    if bindings:
         adapter = _adapter_or_503()
-        policy = GradingPolicy()
         try:
-            for binding in bindings:
-                assignments = adapter.get_assignment_grades(
-                    lms_user_id=student.lms_user_id, course_id=binding.lms_course_id
-                )
-                courses.append(_course_grade(binding, assignments, policy))
+            # ONE call for the whole term, however many subjects. The per-course loop
+            # this replaces was a round trip per subject, and it aggregated the results
+            # itself — producing a figure that could disagree with the gradebook.
+            subjects = adapter.get_subject_grades(
+                student_ref=_lms_ref(student),
+                term=term_prefix(resolved_term.code),
+            )
         except lms.LmsUnavailable:
             _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
 
+        courses = GradeAssembler(DEFAULT_POLICY).assemble(subjects, bindings)
+
     return StudentGradesOut(
+        primary_figure=DEFAULT_POLICY.primary_figure,
         student=_student_ref(student),
         term=_term_out(resolved_term),
         courses=courses,
@@ -261,7 +264,23 @@ def get_course_detail(
     db: Session = Depends(get_db),
     subject: auth.ParentSubject = Depends(auth.require_parent_subject),
 ) -> CourseGradeDetailOut:
-    """Assignment-level breakdown behind one subject — "why is her maths grade 72"."""
+    """One subject in detail — the figures behind "why is her maths grade 72".
+
+    The per-ASSESSMENT breakdown is not served yet, and returns an empty list rather
+    than a fabricated one. `local_schoolapi` summarises per subject; it has no
+    per-assessment endpoint, and the core Moodle call that would provide one cannot
+    express whether an assessment was excused — so a list built from it would show a
+    counted zero where the child was excused, which is precisely the error this system
+    exists to prevent.
+
+    An empty list is honest but not harmless: the agent must say it does not have the
+    breakdown, NOT that there are no assessments. The template that renders this
+    distinguishes the two.
+
+    The subject-level figures below are complete and correct, so "her maths is 72,
+    with one assessment excused and one still to be marked" is answerable today; only
+    the item-by-item list is missing.
+    """
     student = auth.resolve_permitted_student(
         db,
         guardian_external_id=subject.guardian_id,
@@ -277,7 +296,7 @@ def get_course_detail(
         (b for b in _bindings_for(db, student, resolved_term) if str(b.lms_course_id) == course_id),
         None,
     )
-    if binding is None or student.lms_user_id is None:
+    if binding is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "not_found", "message": "No such subject for this student this term."},
@@ -285,17 +304,25 @@ def get_course_detail(
 
     adapter = _adapter_or_503()
     try:
-        assignments = adapter.get_assignment_grades(
-            lms_user_id=student.lms_user_id, course_id=binding.lms_course_id
+        subjects = adapter.get_subject_grades(
+            student_ref=_lms_ref(student),
+            term=term_prefix(resolved_term.code),
         )
     except lms.LmsUnavailable:
         _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
 
+    courses = GradeAssembler(DEFAULT_POLICY).assemble(subjects, [binding])
+    if not courses:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "not_found", "message": "No such subject for this student this term."},
+        )
+
     return CourseGradeDetailOut(
         student=_student_ref(student),
         term=_term_out(resolved_term),
-        course=_course_grade(binding, assignments, GradingPolicy()),
-        assignments=assignments,
+        course=courses[0],
+        assignments=[],
         as_of=_now(),
     )
 
@@ -324,28 +351,24 @@ def get_attendance(
     resolved_term = _resolve_term(db, term)
     bindings = _bindings_for(db, student, resolved_term)
 
-    days = []
-    if student.lms_user_id is not None and bindings:
+    subjects: list = []
+    if bindings:
         adapter = _adapter_or_503()
         try:
-            days = adapter.get_attendance(
-                lms_user_id=student.lms_user_id,
-                course_ids=[b.lms_course_id for b in bindings],
-                since=resolved_term.starts_on,
+            # ONE call for the term. The shape this replaces walked every session in
+            # every course, and the system of record handed back the whole class each
+            # time — so the facade received attendance for children this guardian may
+            # not see. That is now impossible rather than filtered.
+            subjects = adapter.get_subject_attendance(
+                student_ref=_lms_ref(student),
+                term=term_prefix(resolved_term.code),
             )
         except lms.LmsUnavailable:
             _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
 
-    counts = {"present": 0, "absent": 0, "late": 0, "excused": 0}
-    for day in days:
-        if day.status in counts:
-            counts[day.status] += 1
-
-    total = sum(counts.values())
-    # Excused absence counts as attended for the rate. A child off school with a
-    # doctor's note has not "missed" school in the sense a parent is asking about,
-    # and reporting otherwise turns a legitimate absence into an accusation.
-    attended = counts["present"] + counts["late"] + counts["excused"]
+    assembler = AttendanceAssembler(bindings)
+    visible = assembler.visible(subjects)
+    counts = assembler.counts(visible)
 
     return AttendanceSummaryOut(
         student=_student_ref(student),
@@ -354,9 +377,12 @@ def get_attendance(
         absent_count=counts["absent"],
         late_count=counts["late"],
         excused_count=counts["excused"],
-        total_sessions=total,
-        attendance_rate=round((attended / total) * 100.0, 2) if total else None,
-        recent_days=sorted(days, key=lambda d: d.date, reverse=True)[:30],
+        total_sessions=sum(s.taken_sessions for s in visible),
+        # The system of record's own weighting, aggregated across subjects by points
+        # rather than by averaging percentages — see AttendanceAssembler. A school
+        # decides what a late arrival or an excused absence costs; this reports it.
+        attendance_rate=assembler.term_percentage(visible),
+        recent_days=assembler.recent_days(visible),
         as_of=_now(),
     )
 

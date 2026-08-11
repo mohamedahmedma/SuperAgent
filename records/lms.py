@@ -5,24 +5,34 @@ never see a web-service function name, never handle a Moodle error type. That is
 makes "replace Moodle later" a real option rather than an intention: the blast radius
 of the swap is this one file.
 
-Three implementations are anticipated:
+THE PROTOCOL CHANGED, AND WHY.
+Its first shape was per-course lists of assignments, which the facade then aggregated
+itself — because that was the only shape core Moodle's web services could produce.
+Measuring against a live instance showed that shape was unusable: the exclusion flag is
+not exposed at all, so an excused assignment is indistinguishable from a counted one,
+and re-deriving a percentage from the numbers that ARE exposed gives 50% or 30% for a
+child genuinely on 90%.
 
-* `FakeLms` — deterministic fixtures. Used by the tests and by local development, so
-  the whole service runs with no Moodle at all.
-* `MoodleAdapter` — the real one. Skeleton below; the web-service call shapes are
-  marked because they must be verified against the school's actual Moodle build and
-  plugin set rather than trusted from documentation.
-* whatever replaces Moodle. It implements this protocol and nothing else changes.
+So `local_schoolapi` was written to answer per student per term, returning a figure
+Moodle itself computed. This protocol now matches that: one call, already correct.
+`records.grading` no longer aggregates anything for the Moodle path — the arithmetic
+it used to do is arithmetic nobody should be doing outside the gradebook.
 
-Failures are normalised to one exception on purpose. `LmsUnavailable` is what makes
-the honest-failure path possible end to end: the route turns it into a 503 with
+Failures are normalised to one exception on purpose. `LmsUnavailable` is what makes the
+honest-failure path possible end to end: the route turns it into a 503 with
 `code: "lms_unavailable"`, and the agent turns that into "I cannot reach the school
 records right now" — never into a plausible-sounding grade.
 """
-from datetime import datetime
-from typing import Protocol
+from __future__ import annotations
 
-from records.schemas import AssignmentGrade, AttendanceDay
+import logging
+import os
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+logger = logging.getLogger(__name__)
 
 
 class LmsUnavailable(RuntimeError):
@@ -34,177 +44,327 @@ class LmsUnavailable(RuntimeError):
     """
 
 
-class LmsCourse:
-    """One course as the adapter reports it, before binding to a subject and term."""
+# ---------------------------------------------------------------------------
+# What an adapter returns
+# ---------------------------------------------------------------------------
 
-    def __init__(self, course_id: int, idnumber: str = "", fullname: str = "", teacher_name: str = ""):
-        self.course_id = course_id
-        self.idnumber = idnumber
-        self.fullname = fullname
-        self.teacher_name = teacher_name
+
+@dataclass(frozen=True)
+class SubjectGrade:
+    """One subject's result, as the system of record already computed it.
+
+    Two percentages, because a school that grades attendance produces two legitimate
+    answers to "how is she doing in maths" and they are not interchangeable:
+
+    `percentage` is the official course total, attendance and all. `academic_percentage`
+    is the assessments alone. A parent almost always means the second; the school's
+    record is the first. Neither is a rounding of the other — measured on a real
+    instance, 65% against 80% for the same child.
+
+    `academic_percentage` is None when it could not be derived EXACTLY — the course uses
+    a weighted or drop-lowest scheme that cannot be reconstructed from points.
+    `academic_unavailable` says which. It is never an approximation, because a consumer
+    that ignores a caveat flag puts the approximation in front of a parent.
+    """
+
+    course_ref: str
+    subject_name: str
+    percentage: float | None
+    academic_percentage: float | None = None
+    academic_unavailable: str = ""
+    graded_count: int = 0
+    excluded_count: int = 0
+    pending_count: int = 0
+    is_complete: bool = False
+    # Moodle's own gradebook-category subtotals. Exact under every aggregation scheme,
+    # so this is the reliable route to a partial subject grade when the derived
+    # `academic_percentage` is unavailable.
+    categories: tuple[dict, ...] = ()
+
+
+@dataclass(frozen=True)
+class SubjectAttendance:
+    """One subject's attendance, as the system of record computed it.
+
+    `percentage` is points-weighted, not a day count: the school's own status values
+    decide what an excused absence or a late arrival costs. A student marked Excused
+    throughout reads 50% on a default status set, where counting present days would say
+    0% and accuse them of missing school they were excused from.
+
+    None when no register has been taken — which is not zero. A child cannot be absent
+    from a class nobody recorded.
+    """
+
+    course_ref: str
+    subject_name: str
+    percentage: float | None
+    taken_sessions: int = 0
+    by_status: tuple[dict, ...] = ()
+    # Carried so a term-level figure can be aggregated CORRECTLY across subjects.
+    # Averaging the per-subject percentages would weight a subject with two registers
+    # the same as one with forty; summing points and maxima is what the LMS itself does
+    # across activities.
+    points: float = 0.0
+    max_points: float = 0.0
 
 
 class LmsAdapter(Protocol):
     """What the facade needs from a system of record. Nothing more.
 
-    Note the shape of these calls: they take an LMS user id and a list of course ids
-    that the *caller has already decided this guardian may see*. The adapter is not an
-    authorisation boundary and must never be asked to be one.
+    Both calls take the SCHOOL's student reference — the number on a letter home — not
+    an internal LMS id. That keeps the contract free of Moodle and lets the facade key
+    everything on the identifier a registrar can actually look up.
+
+    The adapter is not an authorisation boundary and must never be asked to be one. The
+    facade has already decided this guardian may see this student before either method
+    is called.
     """
 
-    def get_courses(self, *, lms_user_id: int) -> list[LmsCourse]:
-        """Courses the student is enrolled in."""
+    def get_subject_grades(self, *, student_ref: str, term: str) -> list[SubjectGrade]:
+        """Every subject's result for one student in one term."""
         ...
 
-    def get_assignment_grades(
-        self, *, lms_user_id: int, course_id: int
-    ) -> list[AssignmentGrade]:
-        """Every assignment in one course for one student, already normalised.
-
-        Normalising here rather than in the routes is what keeps the excused/missing
-        distinction from leaking LMS-specific encodings into the rollup. Whatever
-        Moodle calls an exemption, it arrives at `compute_rollup` as
-        `SubmissionStatus.EXCUSED`.
-        """
-        ...
-
-    def get_attendance(
-        self, *, lms_user_id: int, course_ids: list[int], since: datetime | None = None
-    ) -> list[AttendanceDay]:
-        """Attendance sessions for one student across courses."""
+    def get_subject_attendance(self, *, student_ref: str, term: str) -> list[SubjectAttendance]:
+        """Every subject's attendance for one student in one term."""
         ...
 
 
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@dataclass
 class FakeLms:
     """Deterministic fixtures, so the service and its tests need no Moodle.
 
-    Also the reference for what a correct adapter returns — particularly the presence
-    of an excused assignment, which is the case a real adapter is most likely to get
-    wrong and which the rollup tests depend on.
+    Also the reference for what a correct adapter returns — particularly a subject
+    where `percentage` and `academic_percentage` differ, which is the case a real
+    adapter is most likely to flatten into one number.
     """
 
-    def __init__(self, courses: dict | None = None, grades: dict | None = None, attendance: dict | None = None):
-        self._courses = courses or {}
-        self._grades = grades or {}
-        self._attendance = attendance or {}
+    grades: dict[tuple[str, str], list[SubjectGrade]] = field(default_factory=dict)
+    attendance: dict[tuple[str, str], list[SubjectAttendance]] = field(default_factory=dict)
+    # Set to raise instead of answering, so the honest-failure path can be tested
+    # without taking a real service down.
+    unavailable: bool = False
 
-    def get_courses(self, *, lms_user_id: int) -> list[LmsCourse]:
-        return list(self._courses.get(lms_user_id, []))
+    def get_subject_grades(self, *, student_ref: str, term: str) -> list[SubjectGrade]:
+        if self.unavailable:
+            raise LmsUnavailable("FakeLms configured as unavailable")
+        return list(self.grades.get((student_ref, term), []))
 
-    def get_assignment_grades(self, *, lms_user_id: int, course_id: int) -> list[AssignmentGrade]:
-        return list(self._grades.get((lms_user_id, course_id), []))
+    def get_subject_attendance(self, *, student_ref: str, term: str) -> list[SubjectAttendance]:
+        if self.unavailable:
+            raise LmsUnavailable("FakeLms configured as unavailable")
+        return list(self.attendance.get((student_ref, term), []))
 
-    def get_attendance(
-        self, *, lms_user_id: int, course_ids: list[int], since: datetime | None = None
-    ) -> list[AttendanceDay]:
-        days = list(self._attendance.get(lms_user_id, []))
-        if since is not None:
-            days = [d for d in days if d.date >= since]
-        return days
+
+# ---------------------------------------------------------------------------
+# Moodle
+# ---------------------------------------------------------------------------
 
 
 class MoodleAdapter:
-    """Moodle web services, wrapped.
+    """Talks to `local_schoolapi` on a Moodle instance.
 
-    NOT YET IMPLEMENTED — the method bodies raise. What follows is no longer a list of
-    things to check: it was verified against a real Moodle 5.1.6 with mod_attendance
-    2026042100 installed. See `d:/Work/moodle-dev/README.md` for the spike itself.
+    Deliberately thin. Every figure it returns was computed by Moodle or by the plugin
+    reading Moodle's own aggregates; this class transports and reshapes, and does no
+    arithmetic whatsoever. The moment it starts calculating a percentage is the moment
+    it can disagree with the gradebook a teacher is looking at.
 
-    GRADES — read the course total, never re-aggregate
-    --------------------------------------------------
-    `gradereport_user_get_grade_items` returns 29 fields per item and **none of them is
-    the exclusion flag**. An excluded assignment comes back looking exactly like a
-    counted one, so the excused/missing distinction cannot be recovered from the
-    per-assignment payload at all.
+    Two Moodle behaviours it has to know about, both of which look like bugs elsewhere:
 
-    The fix is to stop trying. Read the row where `itemtype == 'course'` and take
-    **`percentageformatted`**. Moodle has already applied exclusions, weights and
-    drop-lowest to it. Measured on a student with 90/100, an excluded 10/100 and one
-    ungraded item:
+    Moodle signals FAILURE WITH HTTP 200 and an `exception` key in the body. A client
+    that trusts the status code treats every refusal as success and returns an empty
+    result — which the assistant would report to a parent as "no grades recorded".
 
-        sum of assignments   (90+10)/200  -> 50 %   WRONG
-        course graderaw/max  90/300       -> 30 %   WRONG (denominator keeps both)
-        course percentageformatted        -> 90 %   CORRECT
-
-    Both intuitive approaches produce plausible, badly wrong grades in front of a
-    parent. Never compute a percentage in this adapter.
-
-    `grade_grades.excluded` is a TIMESTAMP, not a boolean — a real row reads
-    `1786347956`. Irrelevant over the API, but it matters if anyone ever reads the
-    database directly: the test is `!= 0`.
-
-    ATTENDANCE — do not use the core web services for this
-    ------------------------------------------------------
-    Four independent problems, each verified:
-
-    1. No per-student read exists. `get_sessions` takes an *activity instance* id, so
-       finding one child's attendance means walking courses -> activities -> sessions.
-    2. `get_session` returns EVERY student in the class — names and statuses. Asking
-       about one child returned both seeded children. The facade would receive records
-       for students the guardian may not see, which no client-side filtering undoes.
-    3. Reading requires `manageattendances`, `takeattendances` or
-       `changeattendances` — all write-capable. A token that reads one child's
-       attendance can alter attendance for the whole school.
-    4. Capabilities are not enough: `get_session` calls `require_login($course, ...,
-       $cm)`, so the service account must be ENROLLED in the course. Across a school
-       that means enrolled as a teacher in every course.
-
-    Grades need none of this — system-level capabilities and no enrolment. The two
-    subsystems are not comparable, and attendance should go through a `local_` plugin
-    exposing a genuinely read-only, per-student endpoint.
-
-    Status codes default to P/A/L/E (Present/Absent/Late/Excused) and carry grade
-    weights, but each activity may override them, so read the set rather than
-    hardcoding it.
-
-    SERVICE ACCOUNT — the capabilities that are easy to miss
-    --------------------------------------------------------
-    Each of these fails with a different, misleading error while the token and the
-    external service look perfectly correct:
-
-        moodle/course:view        else requireloginerror "Not enrolled"
-        gradereport/user:view     else nopermissions "View user report"
-        moodle/grade:viewall      else grades silently absent
-        moodle/grade:viewhidden   else hidden grades silently absent
-
-    Not an admin token. Allow-list only the functions actually called.
-
-    Moodle 302/303-redirects any request whose host is not `$CFG->wwwroot`, returning
-    an HTML page instead of JSON — which looks exactly like a broken endpoint. Match
-    the configured host exactly.
-
-    Two things to build in from the first line, because retrofitting them hurts:
-    caching (these calls are chatty and a parent asking three questions should not
-    trigger thirty round trips), and a timeout that raises `LmsUnavailable` rather
-    than hanging a chat turn.
+    Moodle REDIRECTS any request whose host is not `$CFG->wwwroot`, answering with an
+    HTML page instead of JSON. Calling 127.0.0.1 when wwwroot says localhost produces
+    something that parses as neither, and reads exactly like a broken endpoint.
     """
 
-    def __init__(self, base_url: str, token: str, timeout_seconds: float = 10.0):
+    #: How long a student's payload stays cached. Short: the plugin already caches
+    #: server-side and invalidates on the grade event, so this exists only to stop one
+    #: chat turn — list children, then grades, then attendance — making the same call
+    #: three times. Long enough to help, short enough that a corrected mark is not stale
+    #: for a parent already on the phone to the school.
+    CACHE_TTL_SECONDS = 30
+
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        timeout_seconds: float | None = None,
+        cache_ttl_seconds: float | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.token = token
-        self.timeout_seconds = timeout_seconds
-
-    def _call(self, function: str, **params):
-        raise NotImplementedError(
-            "MoodleAdapter is a skeleton. Implement against the school's Moodle instance; "
-            "see the class docstring for what to verify first."
+        # A hung call must not hang a chat turn. The parent is waiting on a streamed
+        # answer, so failing at 15s with "I can't reach the records" beats succeeding
+        # at 90s.
+        self.timeout_seconds = timeout_seconds or float(os.getenv("MOODLE_TIMEOUT_SECONDS") or 15)
+        self.cache_ttl_seconds = (
+            self.CACHE_TTL_SECONDS if cache_ttl_seconds is None else cache_ttl_seconds
         )
 
-    def get_courses(self, *, lms_user_id: int) -> list[LmsCourse]:
-        raise NotImplementedError
+        self._lock = threading.Lock()
+        self._cache: dict[tuple[str, str, str], tuple[float, Any]] = {}
 
-    def get_assignment_grades(self, *, lms_user_id: int, course_id: int) -> list[AssignmentGrade]:
-        raise NotImplementedError
+    # -- transport ----------------------------------------------------------
 
-    def get_attendance(
-        self, *, lms_user_id: int, course_ids: list[int], since: datetime | None = None
-    ) -> list[AttendanceDay]:
-        raise NotImplementedError
+    def _call(self, function: str, **params) -> Any:
+        """One web service call. Every failure becomes LmsUnavailable.
+
+        Including a refusal: a token whose capability was revoked, a function removed
+        from the external service, a student the plugin declined to resolve. From the
+        parent's side these are indistinguishable from the server being down, and
+        distinguishing them in the response would let a caller probe Moodle's
+        configuration through this service.
+        """
+        import requests
+
+        payload = {
+            "wstoken": self.token,
+            "wsfunction": function,
+            "moodlewsrestformat": "json",
+            **params,
+        }
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/webservice/rest/server.php",
+                data=payload,
+                timeout=self.timeout_seconds,
+                # Do NOT follow redirects. Moodle bounces a wrong host to its wwwroot
+                # and answers with HTML; following it turns a configuration error into
+                # a confusing parse failure instead of a clear one.
+                allow_redirects=False,
+            )
+        except Exception as exc:
+            raise LmsUnavailable(f"{function}: transport failure — {exc}") from exc
+
+        if response.status_code in (301, 302, 303, 307, 308):
+            raise LmsUnavailable(
+                f"{function}: Moodle redirected to {response.headers.get('location')!r}. "
+                "MOODLE_BASE_URL must match the site's configured wwwroot exactly."
+            )
+
+        if response.status_code != 200:
+            raise LmsUnavailable(f"{function}: HTTP {response.status_code}")
+
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise LmsUnavailable(f"{function}: response was not JSON") from exc
+
+        # The one that catches people out: HTTP 200, and an error in the body.
+        if isinstance(body, dict) and "exception" in body:
+            logger.warning(
+                "Moodle refused %s: %s — %s",
+                function, body.get("errorcode"), body.get("message"),
+            )
+            raise LmsUnavailable(f"{function}: {body.get('errorcode')}")
+
+        return body
+
+    def _cached(self, function: str, student_ref: str, term: str) -> Any:
+        key = (function, student_ref, term)
+        now = time.monotonic()
+
+        with self._lock:
+            hit = self._cache.get(key)
+            if hit and (now - hit[0]) < self.cache_ttl_seconds:
+                return hit[1]
+
+        # Deliberately outside the lock: a slow Moodle would otherwise block every other
+        # student's request behind this one. The cost is that two concurrent requests
+        # for the same student may both call — which is a wasted call, not a wrong
+        # answer, and far cheaper than serialising the whole service.
+        payload = self._call(function, studentidnumber=student_ref, term=term)
+
+        with self._lock:
+            self._cache[key] = (now, payload)
+            # The cache is per-process and per-request-burst, not a store. Trimming
+            # keeps a long-lived worker from accumulating every student it ever served.
+            if len(self._cache) > 512:
+                cutoff = now - self.cache_ttl_seconds
+                self._cache = {k: v for k, v in self._cache.items() if v[0] >= cutoff}
+
+        return payload
+
+    # -- the protocol -------------------------------------------------------
+
+    def get_subject_grades(self, *, student_ref: str, term: str) -> list[SubjectGrade]:
+        payload = self._cached("local_schoolapi_get_student_grades", student_ref, term)
+
+        # `found: false` means no such active student. That is NOT an error and must not
+        # become one: the facade deliberately makes "no such student", "not your child"
+        # and "records restricted" indistinguishable, and raising here would leak the
+        # difference back to a caller who could then enumerate the school roll.
+        if not isinstance(payload, dict) or not payload.get("found"):
+            return []
+
+        return [self._to_subject_grade(row) for row in payload.get("subjects") or []]
+
+    def get_subject_attendance(self, *, student_ref: str, term: str) -> list[SubjectAttendance]:
+        payload = self._cached("local_schoolapi_get_student_attendance", student_ref, term)
+
+        if not isinstance(payload, dict) or not payload.get("found"):
+            return []
+
+        return [self._to_subject_attendance(row) for row in payload.get("subjects") or []]
+
+    # -- reshaping ----------------------------------------------------------
+
+    @staticmethod
+    def _as_float(value: Any) -> float | None:
+        """None stays None. Zero stays zero.
+
+        The distinction this preserves is the whole point: a null percentage means
+        nothing has been graded, a zero means the child scored nothing. Coercing with
+        `float(value or 0)` collapses them and tells a parent their child got nothing
+        when in truth nothing has been marked.
+        """
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _to_subject_grade(cls, row: dict) -> SubjectGrade:
+        academic = row.get("academic") or {}
+        return SubjectGrade(
+            course_ref=str(row.get("idnumber") or row.get("courseid") or ""),
+            subject_name=str(row.get("fullname") or row.get("shortname") or ""),
+            percentage=cls._as_float(row.get("percentage")),
+            academic_percentage=cls._as_float(academic.get("percentage")),
+            academic_unavailable=str(academic.get("unavailable") or ""),
+            graded_count=int(row.get("gradedcount") or 0),
+            excluded_count=int(row.get("excludedcount") or 0),
+            pending_count=int(row.get("pendingcount") or 0),
+            is_complete=bool(row.get("iscomplete")),
+            categories=tuple(row.get("categories") or ()),
+        )
+
+    @classmethod
+    def _to_subject_attendance(cls, row: dict) -> SubjectAttendance:
+        return SubjectAttendance(
+            course_ref=str(row.get("idnumber") or row.get("courseid") or ""),
+            subject_name=str(row.get("fullname") or row.get("shortname") or ""),
+            percentage=cls._as_float(row.get("percentage")),
+            taken_sessions=int(row.get("takensessions") or 0),
+            by_status=tuple(row.get("bystatus") or ()),
+            points=cls._as_float(row.get("points")) or 0.0,
+            max_points=cls._as_float(row.get("maxpoints")) or 0.0,
+        )
 
 
-# The process-wide adapter. `app.py` sets it at startup; tests override it with a
-# FakeLms. A module-level slot rather than a FastAPI dependency because it is
-# genuinely process configuration, not per-request state.
+# The process-wide adapter. `app.py` sets it at startup; tests override it. A
+# module-level slot rather than a FastAPI dependency because it is genuinely process
+# configuration, not per-request state.
 _adapter: LmsAdapter | None = None
 
 

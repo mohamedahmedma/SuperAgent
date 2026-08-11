@@ -371,7 +371,7 @@
           "records"
         ],
         "summary": "Get Course Detail",
-        "description": "Assignment-level breakdown behind one subject — \"why is her maths grade 72\".",
+        "description": "One subject in detail — the figures behind \"why is her maths grade 72\".\n\nThe per-ASSESSMENT breakdown is not served yet, and returns an empty list rather\nthan a fabricated one. `local_schoolapi` summarises per subject; it has no\nper-assessment endpoint, and the core Moodle call that would provide one cannot\nexpress whether an assessment was excused — so a list built from it would show a\ncounted zero where the child was excused, which is precisely the error this system\nexists to prevent.\n\nAn empty list is honest but not harmless: the agent must say it does not have the\nbreakdown, NOT that there are no assessments. The template that renders this\ndistinguishes the two.\n\nThe subject-level figures below are complete and correct, so \"her maths is 72,\nwith one assessment excused and one still to be marked\" is answerable today; only\nthe item-by-item list is missing.",
         "operationId": "get_course_detail_v1_guardians__guardian_id__students__student_id__grades__course_id__get",
         "parameters": [
           {
@@ -1300,6 +1300,46 @@
   },
   "components": {
     "schemas": {
+      "AcademicGrade": {
+        "properties": {
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage"
+          },
+          "letter_grade": {
+            "type": "string",
+            "title": "Letter Grade",
+            "default": ""
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "unavailable": {
+            "type": "string",
+            "title": "Unavailable",
+            "description": "Empty when `percentage` is present. Otherwise why not: 'aggregation_not_summable' (the course uses a weighted or drop-lowest scheme that cannot be re-derived — read `categories` instead), 'no_assessment_items', 'nothing_gradeable'.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "AcademicGrade",
+        "description": "The subject with non-assessment activities removed.\n\nSeparate from the headline figure rather than replacing it, because a school that\ngrades attendance produces two true answers to \"how is she doing in maths\" and they\nare not interchangeable. Measured on a real instance: 65% official, 80% academic,\nsame child, same subject.\n\n`percentage` is None whenever it could not be derived EXACTLY — never an estimate.\nA consumer that ignores a caveat flag puts the estimate in front of a parent, so\nthere is no estimate to ignore."
+      },
       "ApiKeyIn": {
         "properties": {
           "label": {
@@ -1644,7 +1684,8 @@
                 "type": "null"
               }
             ],
-            "title": "Computed Percentage"
+            "title": "Computed Percentage",
+            "description": "The school's OFFICIAL course total, exactly as the gradebook has it — including attendance and any other graded activity. Null when nothing is gradeable yet, which is not the same as zero."
           },
           "letter_grade": {
             "type": "string",
@@ -1661,6 +1702,18 @@
               }
             ],
             "title": "Passed"
+          },
+          "academic": {
+            "$ref": "#/components/schemas/AcademicGrade",
+            "description": "The same subject counting assessments only."
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/GradeCategory"
+            },
+            "type": "array",
+            "title": "Categories",
+            "description": "The system of record's own category subtotals."
           },
           "graded_count": {
             "type": "integer",
@@ -1693,7 +1746,7 @@
           "course_id"
         ],
         "title": "CourseGrade",
-        "description": "One subject's rollup for one term — the answer to \"how is my child doing in maths\".\n\n`computed_percentage` is calculated by this service, not by Moodle, because Moodle\nhas no term concept to roll up to. `excused_count` is surfaced rather than hidden\nso the figure can be explained: a parent comparing two children's grades deserves\nto know one of them had three assignments excused."
+        "description": "One subject for one term — the answer to \"how is my child doing in maths\".\n\nEvery figure here was computed by the system of record. This service classifies\n(letter, pass/fail) but does not calculate, because a second implementation of the\ngradebook's arithmetic is a second answer waiting to contradict the first.\n\n`excused_count` is surfaced rather than hidden so a figure can be explained: a\nparent comparing two children deserves to know one had three assessments excused."
       },
       "CourseGradeDetailOut": {
         "properties": {
@@ -1749,6 +1802,29 @@
         ],
         "title": "ErrorOut",
         "description": "Machine-readable failure.\n\n`code` exists so the agent branches on a value rather than on prose. The one that\nmatters most is `lms_unavailable`: it must produce \"I cannot reach the school\nrecords right now\", never an answer the model invented to be helpful."
+      },
+      "GradeCategory": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage"
+          }
+        },
+        "type": "object",
+        "title": "GradeCategory",
+        "description": "A gradebook category subtotal, computed by the system of record.\n\nExact under every aggregation scheme, because the LMS applied that scheme itself.\nThis is the dependable route to a partial subject grade when `academic` could not\nbe derived."
       },
       "GuardianIn": {
         "properties": {
@@ -1884,6 +1960,12 @@
             "type": "array",
             "title": "Courses",
             "default": []
+          },
+          "primary_figure": {
+            "type": "string",
+            "title": "Primary Figure",
+            "description": "Which figure this school wants led with: 'academic' (assessments only) or 'official' (the gradebook total, including attendance). BOTH are always present on every course — this only says which to say first when one number is wanted. Set per deployment via RECORDS_PRIMARY_GRADE.",
+            "default": "academic"
           },
           "as_of": {
             "type": "string",

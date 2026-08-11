@@ -48,7 +48,6 @@ from records import auth, lms  # noqa: E402
 from records.app import app  # noqa: E402
 from records.db import Base, SessionLocal, engine  # noqa: E402
 from records.models import ApiKey, CourseBinding, Guardian, GuardianStudent, Student, Term  # noqa: E402
-from records.schemas import AssignmentGrade, SubmissionStatus  # noqa: E402
 
 AGENT_KEY = "agentkey-fixture-0000000000000000"
 ADMIN_KEY = "adminkey-fixture-0000000000000000"
@@ -214,30 +213,49 @@ def seeded(db):
 
 @pytest.fixture()
 def fake_lms():
-    """A course whose assignments include one excused item — the case that matters."""
-    now = datetime.now(timezone.utc)
-    grades = {
-        (501, 9001): [
-            AssignmentGrade(
-                assignment_id="a1",
-                title="Homework 1",
-                status=SubmissionStatus.GRADED,
-                score=90.0,
-                max_score=100.0,
-                percentage=90.0,
-                category="homework",
-                due_date=now - timedelta(days=10),
-            ),
-            AssignmentGrade(
-                assignment_id="a2",
-                title="Homework 2",
-                status=SubmissionStatus.EXCUSED,
-                category="homework",
-                due_date=now - timedelta(days=5),
-            ),
-        ]
-    }
-    adapter = lms.FakeLms(grades=grades)
+    """A subject where the official total and the academic figure DIFFER.
+
+    Keyed by (student reference, term prefix) — the shape the adapter protocol now
+    takes. Using the school's student number rather than an LMS user id is the point:
+    nothing outside the system of record should have to know a Moodle id.
+
+    65% against 80% is the measured real case: a graded attendance item drags the
+    official course total below the mark the child earned on assessments. A fixture
+    where the two coincided would let a bug that returns one for the other pass
+    unnoticed.
+    """
+    adapter = lms.FakeLms(
+        grades={
+            ("S-1001", "2026-T1-"): [
+                lms.SubjectGrade(
+                    course_ref="2026-T1-G7A-MATH",
+                    subject_name="Mathematics",
+                    percentage=65.0,
+                    academic_percentage=80.0,
+                    graded_count=3,
+                    excluded_count=1,
+                    pending_count=1,
+                    is_complete=False,
+                )
+            ]
+        },
+        attendance={
+            ("S-1001", "2026-T1-"): [
+                lms.SubjectAttendance(
+                    course_ref="2026-T1-G7A-MATH",
+                    subject_name="Mathematics",
+                    percentage=87.5,
+                    taken_sessions=4,
+                    by_status=(
+                        {"acronym": "P", "description": "Present", "count": 3},
+                        {"acronym": "L", "description": "Late", "count": 1},
+                    ),
+                    points=7.0,
+                    max_points=8.0,
+                )
+            ]
+        },
+    )
     lms.set_adapter(adapter)
     return adapter
 
