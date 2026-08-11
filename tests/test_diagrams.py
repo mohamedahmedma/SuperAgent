@@ -147,6 +147,26 @@ class DriftGuardTests(unittest.TestCase):
             with self.subTest(node=node_name):
                 self.assertIn(node_name, source)
 
+    def test_the_query_diagram_names_the_pre_agent_turn_planner(self):
+        """The planner is not a LangGraph node — it runs before the agent exists — so
+        the drift guard above cannot see it. It is still where a turn can be ended, and
+        a diagram that omits it describes half the system."""
+        source = self.module.render_mermaid(self.module.build_query_graph())
+        for stage in ["_enter_turn", "needs_resolution", "resolve_question.j2",
+                      "ResolvedQuestion", "SocialDetector", "CatalogueScopeDetector",
+                      "ScopeModelDetector", "distinct_directions", "resolve_turn",
+                      "turn_context.j2", "carried conditions", "is_followup",
+                      "_refined_question_for_hitl"]:
+            with self.subTest(stage=stage):
+                self.assertIn(stage, source)
+
+    def test_the_query_diagram_no_longer_shows_the_removed_domain_gate(self):
+        """It was deleted from the graph; a diagram still drawing it sends a reader
+        looking for a node that is not there."""
+        source = self.module.render_mermaid(self.module.build_query_graph())
+        self.assertNotIn("domain_gate_node", source)
+        self.assertNotIn("gate_classify", source)
+
     def test_the_ingest_diagram_names_the_phase_3_stages(self):
         source = self.module.render_mermaid(self.module.build_ingest_graph())
         for stage in ["triage_image", "find_extraction", "save_extraction",
@@ -209,6 +229,31 @@ class OutputTests(unittest.TestCase):
             page = (out / "index.html").read_text(encoding="utf-8")
             self.assertEqual(4, page.count('<pre class="mermaid">'))
             self.assertIn("mermaid.esm.min.mjs", page)
+
+    def test_the_text_view_lists_every_node_and_edge(self):
+        graph = self.module.build_query_graph()
+        text = self.module.render_text(graph)
+        for node in graph.nodes:
+            with self.subTest(node=node.id):
+                self.assertIn(node.id, text)
+        self.assertIn("NODES", text)
+        self.assertIn("FLOW", text)
+
+    def test_the_text_view_names_the_priced_nodes(self):
+        """The question this view is read to answer is "what does a turn cost", so the
+        model calls have to be countable straight off it."""
+        text = self.module.render_text(self.module.build_query_graph())
+        summary = text.rsplit("MODEL calls on this graph", 1)[-1]
+        for priced in ("resolver", "scope_model", "rung3", "rewriter"):
+            with self.subTest(node=priced):
+                self.assertIn(priced, summary)
+
+    def test_print_mode_writes_nothing(self):
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            exit_code = self.module.main(["--view", "query", "--out", str(out), "--print"])
+            self.assertEqual(0, exit_code)
+            self.assertEqual([], list(out.iterdir()))
 
     def test_missing_graphviz_is_reported_not_raised(self):
         """The dot binary is an OS-level dependency; its absence must not fail a run."""

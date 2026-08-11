@@ -170,6 +170,67 @@ def render_mermaid(graph: Graph) -> str:
     return "\n".join(lines)
 
 
+# Fixed-width tag per kind, for the text renderer. ASCII on purpose: this is printed
+# to a terminal, and a Windows console in a non-UTF-8 codepage turns box-drawing
+# characters into mojibake — which is exactly where someone reads this from.
+TEXT_TAGS = {
+    "entry": "ENTRY ", "step": "STEP  ", "llm": "MODEL ", "decision": "DECIDE",
+    "store": "STORE ", "asset": "ASSET ", "ok": "OK    ", "hitl": "ASK   ",
+    "none": "STOP  ", "profile": "CONF  ",
+}
+
+
+def render_text(graph: Graph, width: int = 96) -> str:
+    """The graph as printable text: nodes grouped by stage, then every edge.
+
+    Exists because the Mermaid and PNG outputs need a viewer, and the question this
+    answers most often — "what actually runs, in what order, and which steps cost a
+    model call" — is asked at a terminal. MODEL-tagged nodes are the priced ones, so a
+    reader can count a turn's calls straight off the node list.
+    """
+    rule = "=" * width
+    lines = [rule, graph.title, rule, "", graph.description, ""]
+
+    by_cluster: Dict[Optional[str], List[Node]] = {}
+    for node in graph.nodes:
+        by_cluster.setdefault(node.cluster, []).append(node)
+
+    def emit(node: Node, indent: str) -> None:
+        head, *rest = node.label.split("\n")
+        lines.append(f"{indent}[{TEXT_TAGS[node.kind]}] {node.id:<18} {head}")
+        for extra in rest:
+            lines.append(f"{indent}{' ' * (len(TEXT_TAGS[node.kind]) + 3)} {'':<18} {extra}")
+
+    lines.append("NODES")
+    lines.append("-" * width)
+    loose = by_cluster.get(None, [])
+    if loose:
+        lines.append("  (top level)")
+        for node in loose:
+            emit(node, "    ")
+        lines.append("")
+    for cluster in graph.clusters:
+        members = by_cluster.get(cluster.id, [])
+        if not members:
+            continue
+        lines.append(f"  {cluster.label}")
+        for node in members:
+            emit(node, "    ")
+        lines.append("")
+
+    lines.append("FLOW")
+    lines.append("-" * width)
+    for edge in graph.edges:
+        arrow = "..>" if edge.dashed else "-->"
+        label = edge.label.replace("\n", " ")
+        suffix = f"   # {label}" if label else ""
+        lines.append(f"  {edge.src:<20} {arrow} {edge.dst:<20}{suffix}")
+
+    priced = [node.id for node in graph.nodes if node.kind == "llm"]
+    lines += ["", "-" * width, f"MODEL calls on this graph ({len(priced)}): " + ", ".join(priced), ""]
+    return "\n".join(lines)
+
+
 def render_graphviz(graph: Graph):
     """Graphviz Digraph, or None when the `graphviz` package is absent."""
     try:
@@ -303,20 +364,52 @@ def _retrieval_cluster(g: Graph, suffix: str, title: str) -> str:
 
 def build_query_graph() -> Graph:
     g = Graph(
-        "query", "Query pipeline — corrective RAG over the LangGraph state machine",
-        "The LangGraph nodes plus the sub-steps that happen inside them.",
+        "query", "Query pipeline — turn planning, then corrective RAG",
+        "Everything a message passes through: the pre-agent turn planner (which can end "
+        "a turn before any agent exists), then the LangGraph RAG nodes and the sub-steps "
+        "hidden inside them.",
     )
-    g.cluster("gate", "0. Domain gate — domain_gate_node (entry)")
-    g.cluster("plan", "1. Complexity planning — classify_complexity (profile.rag.complexity_planning_enabled)")
-    g.cluster("subagents", "3. Parallel sub-agents — rag_sub_agent x N via Send() (planning only)")
-    g.cluster("grade", "5. Evidence assessment — grade_documents_node")
+    # Stage 0 is NOT a LangGraph node and deliberately so — see the module docstring of
+    # backend/chat/orchestrator.py. It runs before the agent is constructed, which is
+    # the only place a turn can still be made cheaper.
+    g.cluster("entrycluster", "0. Turn entry — backend/chat/service.py::_enter_turn")
+    g.cluster("resolution", "1. Contextual resolution — backend/chat/resolution.py")
+    g.cluster("signals", "2. Signal ladder — backend/chat/signals.py (cheapest rung first)")
+    g.cluster("policy", "3. Turn policy — backend/chat/turn_policy.py (pure)")
+    g.cluster("plan", "4. Complexity planning — classify_complexity (profile.rag.complexity_planning_enabled)")
+    g.cluster("subagents", "6. Parallel sub-agents — rag_sub_agent x N via Send() (planning only)")
+    g.cluster("grade", "8. Evidence assessment — grade_documents_node")
     g.cluster("ladder", "The assessor ladder — cheapest rung first, stops at profile.rag.evidence_required_certainty")
-    g.cluster("rewrite", "6. Query rewrite — rewrite_question -> retrieve_rewritten, max profile.rag.max_rewrites")
+    g.cluster("rewrite", "9. Query rewrite — rewrite_question -> retrieve_rewritten, max profile.rag.max_rewrites")
     g.cluster("resume", "HITL resume — resume_rag_from_hitl (separate entry point)")
 
-    g.node("start", "User question\nsearch_knowledge_base tool\n-> run_rag_graph", "entry")
-    g.node("gate_eligible", "gate eligible?\nskipped for follow-ups and short questions", "decision", "gate")
-    g.node("gate_classify", "Shared query embedding\ncosine vs section reference vectors\nno model call, no search", "decision", "gate")
+    g.node("inbound", "User message + session history\nchat_with_agent_stream", "entry")
+
+    # --- 0. turn entry -----------------------------------------------------------
+    g.node("pending", "pending clarification in session metadata?", "decision", "entrycluster")
+    g.node("hitl_resolve", "resolve the reply against the conversation\nAND the question that was asked\nchat/resolve_question.j2 + hitl options", "llm", "entrycluster")
+    g.node("supersede", "correction / new_topic?\nResolvedQuestion.supersedes_pending_question", "decision", "entrycluster")
+
+    # --- 1. resolution -----------------------------------------------------------
+    g.node("resolve_gate", "needs_resolution — local, no model\nfirst message? marker? opener?\nshorter than query_resolution_max_chars?", "decision", "resolution")
+    g.node("resolver", "FAST_MODEL structured call\n-> question + constraints + intent\nabstains to the raw message on any failure", "llm", "resolution")
+    g.node("resolved", "ResolvedQuestion\nthe turn's ONE subject: scoring, retrieval,\nthe agent prompt and the resume path all read this", "step", "resolution")
+
+    # --- 2. signal ladder --------------------------------------------------------
+    g.node("social", "SocialDetector — whole-message lookup\nprofile.agent.social_phrases\ncertainty HIGH, no model", "decision", "signals")
+    g.node("scope_cat", "CatalogueScopeDetector\nembed(text_to_score) vs question catalogue\nscore vs the corpus's DERIVED floor\nmay ADMIT, may never refuse", "decision", "signals")
+    g.node("directions", "distinct_directions\nat/above floor + paraphrases collapsed\n+ trailing options dropped", "step", "signals")
+    g.node("scope_model", "ScopeModelDetector — FAST_MODEL\nshown rung 1's matches and the floor\nthe ONLY rung that may end a turn", "llm", "signals")
+
+    # --- 3. turn policy ----------------------------------------------------------
+    g.node("turnplan", "resolve_turn -> TurnPlan\nstatic_reply · exposed_tools · retrieval_sections\nscope_options · resolved_question · carried_constraints", "decision", "policy")
+    g.node("static_ood", "Out of domain, confirmed by a rung that READ it\nprofile.user_copy.out_of_domain\nno agent, no prompt, no tool schema", "none", "policy")
+    g.node("social_reply", "Social turn — every tool unbound\none lean model call, or static copy", "ok", "policy")
+    g.node("agentbuild", "create_agent_for_request\n+ agent/turn_context.j2 (resolved question\nand carried conditions, only when there are any)", "step", "policy")
+
+    g.node("start", "search_knowledge_base(query)\n-> run_rag_graph", "entry")
+    g.node("constrain", "_search_query = apply_constraints\nappends conditions the agent's query omitted\nadditive — never a filter", "step")
+
     g.node("fastpath", "Local rules — no LLM\n_simple_question_fast_path_reason\nprofile.rag.*_query_markers", "decision", "plan")
     g.node("planner", "FAST_MODEL structured call\n-> ComplexityResult\nsub_questions capped by profile", "llm", "plan")
     g.node("complexity", "simple or complex?", "decision", "plan")
@@ -331,11 +424,12 @@ def build_query_graph() -> Graph:
     g.node("synthesis", "4. Synthesis\ndedupe_documents by chunk_id\nmerge sub_traces, aggregate route\noutage outranks HITL", "step")
 
     g.node("rung0", "Rung 0 — structural\nno documents is conclusive\ncertainty HIGH", "decision", "ladder")
+    g.node("gradeq", "graded against the CONSTRAINED question\nevidence covering every year group does not\nsettle a question about Year 6", "step", "grade")
     g.node("rung1", "Rung 1 — lexical overlap\ncertainty LOW: reports, never concludes", "decision", "ladder")
     g.node("rung2", "Rung 2 — cross-encoder\ncalibrated per-chunk relevance\ncertainty MEDIUM", "decision", "ladder")
     g.node("rung3", "Rung 3 — GRADE_MODEL structured call\n-> EvidenceGrade + supporting_chunks\ncertainty HIGH", "llm", "ladder")
     g.node("report", "EvidenceReport\nper-chunk scores, certainty, provenance\nthe single source of truth", "step", "grade")
-    g.node("route", "decide_route — pure policy\nrefuses to act below the required\ncertainty; max_rewrites governs rewrites", "decision", "grade")
+    g.node("route", "decide_route — pure policy\nrefuses to act below the required certainty\nis_followup suppresses catalogued directions:\na subject settled last turn is not a choice to offer", "decision", "grade")
     g.node("ctxpolicy", "select_context_indices — pure policy\ntrims only to chunks an assessment named\nrequires MEDIUM certainty", "decision", "grade")
 
     g.node("budget", "rewrite budget left?", "decision", "rewrite")
@@ -344,27 +438,52 @@ def build_query_graph() -> Graph:
     g.node("hyde", "HyDE\nhypothetical answer document\nretrieval aid only, never evidence", "step", "rewrite")
     filt_rewritten = _retrieval_cluster(g, "rewritten", "Retrieval pipeline (rewritten query)")
 
-    g.node("answer", "Answer generation\nchunks formatted with [n] citations\nfigure chunks carry asset_ids", "ok")
-    g.node("hitl_pause", "HITL pause\npending_hitl saved to the session\nprompt from profile.user_copy", "hitl")
+    g.node("answer", "Answer generation\nchunks formatted with [n] citations\nknowledge_result.j2 states the carried conditions,\nso they bind the ANSWER and not only the search", "ok")
+    g.node("hitl_pause", "HITL pause\npending_hitl saved to the session\ncarried_constraints ride the resume state", "hitl")
     g.node("nokb", "No usable evidence\nprofile.user_copy.no_knowledge", "none")
     g.node("outage", "Retrieval error\nstatic retry notice — never no_knowledge", "none")
 
-    g.node("hitl_answer", "User's follow-up answer\n+ original question", "entry", "resume")
+    g.node("hitl_answer", "resume_rag_from_hitl\nreceives the resolved reply, the USER's original\nquestion, and the conversation", "entry", "resume")
+    g.node("hitl_refine", "_refined_question_for_hitl\nthe resolved question replaces the old reading\n(concatenation could only ever add to it)", "step", "resume")
     g.node("hitl_targeted", "Targeted retrieval\nskips planning and decomposition", "step", "resume")
     filt_hitl = _retrieval_cluster(g, "hitl", "Retrieval pipeline (HITL targeted)")
 
-    g.edge("start", "gate_eligible")
-    g.edge("gate_eligible", "gate_classify", "first-turn question")
-    g.edge("gate_eligible", "fastpath", "skipped — abstains open", dashed=True)
-    g.edge("gate_classify", "fastpath", "in domain (+ topic hints)")
-    g.edge("gate_classify", "nokb", "out of domain — no search, no LLM", dashed=True)
+    # --- edges: turn entry -------------------------------------------------------
+    g.edge("inbound", "pending")
+    g.edge("pending", "hitl_resolve", "yes")
+    g.edge("pending", "resolve_gate", "no — ordinary turn")
+    g.edge("hitl_resolve", "supersede")
+    g.edge("supersede", "hitl_answer", "no — the reply answers it")
+    g.edge("supersede", "resolved", "yes — abandon it, run a fresh turn", dashed=True)
+
+    # --- edges: resolution -------------------------------------------------------
+    g.edge("resolve_gate", "resolver", "referential or short")
+    g.edge("resolve_gate", "resolved", "stands on its own — no call", dashed=True)
+    g.edge("resolver", "resolved")
+    g.edge("resolved", "social")
+
+    # --- edges: signal ladder ----------------------------------------------------
+    g.edge("social", "social_reply", "whole message is a pleasantry", dashed=True)
+    g.edge("social", "scope_cat", "a real message")
+    g.edge("scope_cat", "directions")
+    g.edge("directions", "turnplan", "at or above floor — ADMIT, no model", dashed=True)
+    g.edge("directions", "scope_model", "below floor — escalate")
+    g.edge("scope_model", "turnplan")
+
+    # --- edges: turn policy ------------------------------------------------------
+    g.edge("turnplan", "static_ood", "out_of_domain at HIGH certainty", dashed=True)
+    g.edge("turnplan", "agentbuild", "anything less — tool stays bound AND working")
+    g.edge("agentbuild", "start")
+    g.edge("start", "constrain")
+    g.edge("constrain", "fastpath")
     g.edge("fastpath", "complexity", "confidently simple")
     g.edge("fastpath", "planner", "not confident")
     g.edge("planner", "complexity")
     g.edge("complexity", "retrieve_initial", "simple")
     g.edge("complexity", "prepare_subs", "complex")
     g.edge("retrieve_initial", "recall_initial")
-    g.edge(filt_initial, "rung0")
+    g.edge(filt_initial, "gradeq")
+    g.edge("gradeq", "rung0")
     g.edge("prepare_subs", "fanout")
     g.edge("fanout", "sub_retrieve")
     g.edge("sub_grade", "synthesis")
@@ -381,20 +500,21 @@ def build_query_graph() -> Graph:
     g.edge("report", "route")
     g.edge("route", "ctxpolicy", "answer")
     g.edge("ctxpolicy", "answer", "sends the chunks that carried the evidence")
-    g.edge("route", "hitl_pause", "clarify / scope_select", dashed=True)
-    g.edge("route", "nokb", "no_knowledge", dashed=True)
+    g.edge("route", "hitl_pause", "clarify / scope_select\ndirections are asked BEFORE a rewrite is spent —\nbut never on a follow-up, and never as paraphrases", dashed=True)
+    g.edge("route", "nokb", "no_knowledge — nothing retrieved, or off-subject", dashed=True)
     g.edge("route", "outage", "retrieval_error", dashed=True)
     g.edge("route", "budget", "rewrite")
-    g.edge("budget", "nokb", "exhausted", dashed=True)
+    g.edge("budget", "answer", "spent or unplannable — answer from what the passes found", dashed=True)
     g.edge("budget", "rewriter", "available")
     g.edge("rewriter", "stepback")
     g.edge("rewriter", "hyde")
     g.edge("stepback", "recall_rewritten")
     g.edge("hyde", "recall_rewritten")
-    g.edge(filt_rewritten, "rung0", "re-assess", dashed=True)
-    g.edge("hitl_answer", "hitl_targeted")
+    g.edge(filt_rewritten, "rung0", "re-assess the union with the first pass", dashed=True)
+    g.edge("hitl_answer", "hitl_refine")
+    g.edge("hitl_refine", "hitl_targeted")
     g.edge("hitl_targeted", "recall_hitl")
-    g.edge(filt_hitl, "rung0", "re-assess", dashed=True)
+    g.edge(filt_hitl, "gradeq", "re-assess", dashed=True)
     return g
 
 
@@ -624,6 +744,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Render only this view (repeatable). Default: all three.")
     parser.add_argument("--out", default="diagrams", type=Path, help="Output directory (default: ./diagrams)")
     parser.add_argument("--no-png", action="store_true", help="Skip Graphviz PNGs even when dot is available.")
+    parser.add_argument("--print", dest="print_only", action="store_true",
+                        help="Print the graph(s) as text to stdout and write no files.")
     args = parser.parse_args(argv)
 
     names = args.view or list(BUILDERS)
@@ -631,6 +753,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     for graph in graphs:
         graph.validate()
+
+    if args.print_only:
+        # A Windows console defaults to a legacy codepage, and these labels carry em
+        # dashes and arrows. Without this the whole point of a printable view — that
+        # you can read it where you already are — is lost to mojibake.
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):  # pragma: no cover - very old or odd stdout
+            pass
+        for graph in graphs:
+            print(render_text(graph))
+        return 0
 
     written = write_outputs(graphs, args.out)
     print(f"Rendered {len(graphs)} view(s) to {args.out}/")
