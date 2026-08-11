@@ -1,0 +1,68 @@
+# School assistant — answers parents about the school, and about their own child.
+#
+# The only profile that binds `get_student_records`, and deliberately so. Every bound
+# tool ships its name, description and argument schema to the model on every single
+# call — that is where the cost sits, not in the system prompt, which varies only by
+# whether any bound tool is grounded. Adding student records to `base` would bill every
+# deployment (a document knowledge base, an e-commerce catalogue) on every turn for a
+# capability it can never serve, and would offer the model a tool it will occasionally
+# try to call.
+#
+# Activate with ACTIVE_PROFILE=school. Nothing else changes by adding this file.
+#
+# Reading records additionally requires the caller to be a signed-in parent whose
+# account an administrator has bound to a guardian. Binding the tool grants nothing on
+# its own: the identity service issues the claim, and the records facade decides what
+# it authorises. See records/README.md.
+
+extends: base
+name: school
+
+identity:
+  name: "School Assistant"
+  display_name: "مساعد المدرسة"
+  api_title: "School Assistant API"
+  description: "Answers parents about school information and their own child's records"
+  # Injected verbatim as {persona}. Two rules earn their place here rather than in a
+  # tool result, because they hold on every turn regardless of what any tool returned:
+  # answer in the parent's language, and never invent a figure about a child.
+  persona: >-
+    You are the school's assistant, helping parents and guardians. You reply in the
+    language the parent wrote in — Arabic when they write Arabic — and you keep
+    answers short, warm and practical. When a parent asks about their own child's
+    grades, attendance or report card, you look the answer up rather than recalling
+    it. You never state, estimate or guess a mark, an average or an attendance figure:
+    if the records cannot be reached, you say so plainly and suggest trying again
+    shortly. For anything you cannot do — changing a record, arranging a meeting — you
+    point the parent to the school office.
+  redis_key_prefix: "school"
+  langsmith_project: "school-assistant"
+
+agent:
+  # Lists replace rather than merge, so this drops the weather tool.
+  #
+  # `get_student_records` covers grades, subject breakdowns and attendance in one tool
+  # rather than three. The model chooses between them with a `record_type` argument, so
+  # the prompt carries one tool description instead of three near-identical ones, and a
+  # parent asking about two children in one turn stays inside a single budget.
+  tools:
+    - search_knowledge_base
+    - view_figure
+    - get_student_records
+
+  # A school assistant is asked plenty that the corpus is not about — homework help,
+  # general knowledge, chat. Without this the catalogue rung can only admit, so those
+  # reach the agent and get answered on general knowledge in the school's voice.
+  request_envelope_enabled: true
+
+  # Two knowledge calls, because a parent question often has a policy half and a
+  # records half ("is she allowed to miss Thursday, and how many days has she
+  # missed?"). The records tool has its own separate budget — see
+  # ChatRequestContext.acquire_records_tool_slot.
+  max_knowledge_calls_per_turn: 2
+
+retrieval:
+  # School corpora are small and repetitive — fee tables, calendars, policy pages
+  # restated per year group — so recall matters more than precision here.
+  top_k: 8
+  candidate_k: 30

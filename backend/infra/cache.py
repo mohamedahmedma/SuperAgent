@@ -4,11 +4,16 @@ from typing import Any, Optional
 
 import redis
 
+from backend.profiles import get_profile
+
 
 class RedisCache:
     def __init__(self):
         self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        self.key_prefix = os.getenv("REDIS_KEY_PREFIX", "supermew")
+        # Profile-scoped so two profiles sharing a Redis instance cannot read each
+        # other's cached parent chunks. REDIS_KEY_PREFIX still overrides (see
+        # profiles/registry.py ENV_OVERRIDES).
+        self.key_prefix = get_profile().identity.redis_key_prefix
         self.default_ttl = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "300"))
         self._client = None
 

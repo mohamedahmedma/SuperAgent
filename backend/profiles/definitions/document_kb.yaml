@@ -1,0 +1,31 @@
+# Document knowledge base — neutral, professional deployment over document corpora.
+#
+# Differences from base are deliberate and few: a plain persona, a slightly wider
+# candidate pool (document corpora reward recall), and no weather tool.
+
+extends: base
+name: document_kb
+
+identity:
+  name: "Document Assistant"
+  display_name: "Document Assistant"
+  api_title: "Document Assistant API"
+  description: "Question answering over an organisation's document corpus"
+  persona: >-
+    You are a precise document assistant. You answer strictly from the organisation's
+    documents and you always show which document supports each claim.
+  redis_key_prefix: "dockb"
+  langsmith_project: "dockb-rag"
+
+agent:
+  # Lists replace rather than merge, so this drops the weather tool entirely.
+  tools:
+    - search_knowledge_base
+    - view_figure
+
+retrieval:
+  top_k: 8
+  candidate_k: 30
+
+ingest:
+  indexes: ["kb_chunks"]

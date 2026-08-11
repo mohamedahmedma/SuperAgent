@@ -78,6 +78,24 @@ async def _collect_stream(*args, **kwargs):
 
 
 class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
+    """HITL streaming, isolated from the turn planner.
+
+    The planner runs before the agent and can end a turn outright, so a deployment that
+    enables scope detection would otherwise short-circuit these fixtures and make a
+    test of the HITL protocol fail for reasons that have nothing to do with it — and
+    reach a live model to do it.
+    """
+
+    def setUp(self):
+        from backend.chat.turn_policy import TurnPlan
+        from backend.chat.signals import RequestSignals
+
+        self._planner = patch.object(
+            service, "plan_turn", lambda *a, **k: (TurnPlan(), RequestSignals()),
+        )
+        self._planner.start()
+        self.addCleanup(self._planner.stop)
+
     def test_first_persistent_note_bootstraps_trimmed_history(self):
         fake_model = Mock()
         fake_model.invoke.return_value = Mock(content="summary")
@@ -103,7 +121,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         fake_storage = FakeStorage()
         update_note = AsyncMock(return_value="updated note")
 
-        def make_agent(ctx):
+        def make_agent(ctx, tool_names=None, language=None):
             return FakeStreamAgent(ctx, chunks=["direct answer"])
 
         with (
@@ -133,14 +151,20 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             "route": "clarify",
             "retrieval_status": "needs_clarification",
             "rewrite_count": 0,
+            # Carried across the resume boundary so "ask once per question" survives a
+            # graph that starts fresh on every resume.
+            "hitl_rounds": 0,
             "complexity": "simple",
             "complexity_reason": "unit",
             "sub_questions": [],
+            # Conditions set before the clarification, carried across the resume
+            # boundary for the same reason `hitl_rounds` is.
+            "carried_constraints": [],
         }
         fake_storage = FakeStorage()
         update_note = AsyncMock(return_value="updated note")
 
-        def make_agent(ctx):
+        def make_agent(ctx, tool_names=None, language=None):
             return FakeStreamAgent(
                 ctx,
                 trace=trace,

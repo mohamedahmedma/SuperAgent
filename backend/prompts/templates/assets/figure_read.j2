@@ -1,0 +1,13 @@
+{# On-demand pixel read: answering ONE question about one image at query time.
+
+   Distinct from figure_extraction.j2, which is exhaustive and runs at ingest. The
+   answer here is recorded as a session observation, so the same pixels are never sent
+   twice in a conversation — which is what makes the word limit worth having. #}
+Answer the question using ONLY what is visible in this image.
+Be specific: quote labels, values, and units exactly as they appear.
+If the image does not contain the answer, say so plainly rather than guessing.
+Keep the answer under 120 words.
+
+{{ context }}
+
+Question: {{ question }}

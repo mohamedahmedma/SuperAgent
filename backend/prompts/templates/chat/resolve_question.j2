@@ -1,0 +1,68 @@
+{# Contextual query resolution: what the user actually asked, in words that stand alone.
+
+   Rendered only on turns the cheap gate in backend/chat/resolution.py could not settle
+   locally — a message that carries its own subject never reaches this prompt.
+
+   The output is consumed as a structured object, so this text defines the JUDGEMENTS
+   only; the field descriptions on the pydantic schema define the shape. Stating the
+   shape here as well would pay for it twice on every call.
+
+   Whitespace: trim_blocks is on, so the newline after every {% %} tag is swallowed. #}
+Rewrite the user's latest message as a question that stands on its own.
+
+{% if persona %}
+The assistant they are talking to: {{ persona }}
+{% endif %}
+
+The conversation so far:
+{{ history }}
+{% if hitl_prompt %}
+
+The assistant then asked the user to clarify:
+{{ hitl_prompt }}
+{% if hitl_options %}
+It offered these options:
+{% for option in hitl_options %}
+  - {{ option }}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+The user's latest message:
+{{ question }}
+
+Produce a `question` that someone with no access to the conversation above could still search for and answer. Everything the message refers to indirectly — "this", "these years", "it", "the same", a bare "and what about...?" — must be replaced by what it actually points at, taken from the conversation.
+
+Keep the user's own subject. You are resolving references, not improving the question: do not widen it, do not add a topic they did not raise, and do not answer it.
+
+Write the question in the same language the user wrote in.
+
+`constraints` are the conditions that carried over from earlier turns and still bind this answer — an age or grade range, a campus, a gender, a year, a document type. List each as a short phrase ("grades up to Year 6", "girls only", "the 2025/2026 year"). These are the difference between an answer about what was asked and an answer about everything the corpus holds, so a condition the user set earlier and has not withdrawn belongs here even when their latest message does not repeat it. Leave the list empty when the question binds nothing.
+
+Classify the message as exactly one `intent`:
+
+  standalone  — it already carries its own subject and needs nothing from the conversation.
+  followup    — it continues the current subject, inheriting it and any conditions still in force. A bare answer to something the assistant asked ("grade 5", "he is 9") is a followup.
+  correction  — it REPLACES how the assistant read the previous message, rather than adding to it. "no, I meant the fees", "not the uniform — the timings". The old reading is wrong and must be discarded, not combined with the new one.
+  new_topic   — it changes the subject. Nothing from the conversation carries over, and `constraints` should be empty.
+
+Worked examples, for a school knowledge base:
+
+  earlier: "what is the uniform for children under year 6"
+  now:     "and what is the fees for this years"
+  -> question: "what are the school fees for children in the years up to Year 6"
+     constraints: ["grades up to Year 6"]
+     intent: followup
+
+  earlier: "what is the uniform for children under year 6"
+  asked:   "Which of these are you asking about?"
+  now:     "no i mean what is the school fees for this years"
+  -> question: "what are the school fees for the years up to Year 6"
+     constraints: ["grades up to Year 6"]
+     intent: correction
+
+  earlier: "what are the fees for grade 3"
+  now:     "who is the principal"
+  -> question: "who is the principal"
+     constraints: []
+     intent: new_topic

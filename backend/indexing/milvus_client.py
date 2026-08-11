@@ -1,6 +1,7 @@
 """Milvus access layer: stateless Store + short-lived gRPC connections (avoids holding stale channels long-term)."""
 from __future__ import annotations
 
+import json
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -10,6 +11,50 @@ from pymilvus import AnnSearchRequest, DataType, MilvusClient, RRFRanker, Functi
 
 QUERY_MAX_LIMIT = 16384
 T = TypeVar("T")
+
+# Analyzer driving BM25 tokenization of the `bm25_text` field (the sparse half of
+# hybrid retrieval). "standard" uses Unicode word-boundary segmentation, which is
+# correct for Arabic, English, and most scripts; "chinese" (jieba) is only right
+# for a CJK corpus and tokenizes Arabic poorly, degrading keyword recall.
+# NOTE: this is schema-level — changing it only affects NEWLY created
+# collections; an existing collection must be rebuilt for the change to apply.
+TEXT_ANALYZER_TYPE = os.getenv("MILVUS_TEXT_ANALYZER", "standard").strip() or "standard"
+
+
+# Interrogative/filler words. The stock "_english_" stop list is built for prose
+# search and keeps every one of these, but in a Q&A system they open almost every
+# query while carrying no signal about which chunk answers it — on a small corpus
+# their IDF stays high enough to pull in unrelated chunks. Stripped from both the
+# index and the query, since one analyzer serves both.
+_QUESTION_STOP_WORDS = [
+    "what", "how", "can", "i", "my", "do", "does", "did", "which", "when",
+    "where", "who", "why", "should", "would", "could", "me", "you", "your",
+    "am", "get", "need", "want", "please", "there", "any", "about", "tell",
+]
+
+
+def build_analyzer_params() -> dict:
+    """BM25 analyzer config.
+
+    The bare "standard" tokenizer indexes every surface form of every word,
+    stop words included: "what", "can", "the" become terms, and on a corpus this
+    small their IDF is not low enough to stop them dragging in unrelated chunks.
+    Adding lowercase + stop-word removal + stemming means "payments" and "pay"
+    hit the same term and function words stop scoring at all.
+
+    The English stemmer/stop list is a no-op on Arabic tokens (it only strips
+    ASCII suffixes), so this stays correct for the mixed-script corpus.
+    """
+    if TEXT_ANALYZER_TYPE == "chinese":
+        return {"type": "chinese"}
+    return {
+        "tokenizer": "standard",
+        "filter": [
+            "lowercase",
+            {"type": "stop", "stop_words": ["_english_"] + _QUESTION_STOP_WORDS},
+            {"type": "stemmer", "language": "english"},
+        ],
+    }
 
 
 @dataclass(frozen=True)
@@ -46,6 +91,20 @@ def milvus_client_session(settings: MilvusSettings | None = None) -> Iterator[Mi
         client.close()
 
 
+def _decode_asset_ids(raw) -> list[str]:
+    """asset_ids is stored as a JSON array in a VARCHAR column. Malformed or legacy
+    values decode to an empty list rather than breaking a search result."""
+    if isinstance(raw, list):
+        return [str(item) for item in raw if item]
+    if not raw:
+        return []
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return [str(item) for item in decoded if item] if isinstance(decoded, list) else []
+
+
 def _normalize_filter(filter_expr: str) -> str:
     return filter_expr.strip() if filter_expr.strip() else "id >= 0"
 
@@ -79,12 +138,20 @@ class MilvusStore:
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field("dense_embedding", DataType.FLOAT_VECTOR, dim=dense_dim)
         schema.add_field("sparse_embedding", DataType.SPARSE_FLOAT_VECTOR)
+        # `text` is what the Agent and citations read: it keeps the section-path
+        # prefix for topical context. It is NOT the BM25 input — that prefix
+        # repeats on nearly every chunk of a document, so indexing it made common
+        # query words match the whole corpus at near-identical scores and swamped
+        # the genuine dense hits during RRF fusion.
+        schema.add_field("text", DataType.VARCHAR, max_length=65535)
+        # `bm25_text` is the sparse half's input: same body, document-root
+        # heading stripped. See DocumentLoader._apply_bm25_section_prefix.
         schema.add_field(
-            "text",
+            "bm25_text",
             DataType.VARCHAR,
             max_length=65535,
             enable_analyzer=True,
-            analyzer_params={"type": "chinese"},
+            analyzer_params=build_analyzer_params(),
             enable_match=True,
         )
         schema.add_field("filename", DataType.VARCHAR, max_length=255)
@@ -96,11 +163,17 @@ class MilvusStore:
         schema.add_field("parent_chunk_id", DataType.VARCHAR, max_length=512)
         schema.add_field("root_chunk_id", DataType.VARCHAR, max_length=512)
         schema.add_field("chunk_level", DataType.INT64)
+        # "text" | "figure" | "table" — lets a query restrict to (or exclude) chunks
+        # that came from an image without inspecting their content.
+        schema.add_field("modality", DataType.VARCHAR, max_length=20)
+        # JSON array of asset_ids. A figure chunk points at the image that produced
+        # it, so retrieval can show the picture beside the text that matched.
+        schema.add_field("asset_ids", DataType.VARCHAR, max_length=2048)
 
         bm25_function = Function(
             name="text_bm25_emb",
             function_type=FunctionType.BM25,
-            input_field_names=["text"],
+            input_field_names=["bm25_text"],
             output_field_names=["sparse_embedding"],
         )
         schema.add_function(bm25_function)
@@ -200,6 +273,8 @@ class MilvusStore:
                 "root_chunk_id",
                 "chunk_level",
                 "chunk_idx",
+                "modality",
+                "asset_ids",
             ],
             limit=len(ids),
         )
@@ -222,6 +297,8 @@ class MilvusStore:
             "root_chunk_id",
             "chunk_level",
             "chunk_idx",
+            "modality",
+            "asset_ids",
         ]
         dense_search = AnnSearchRequest(
             data=[dense_embedding],
@@ -233,7 +310,9 @@ class MilvusStore:
         sparse_search = AnnSearchRequest(
             data=[query],
             anns_field="sparse_embedding",
-            param={"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}},
+            # drop_ratio_search=0 keeps low-weight sparse terms: rare/exact
+            # keywords are precisely the ones a 0.2 ratio discards.
+            param={"metric_type": "BM25", "params": {"drop_ratio_search": 0.0}},
             limit=top_k * 2,
             expr=filter_expr,
         )
@@ -263,6 +342,8 @@ class MilvusStore:
                     "root_chunk_id": hit.get("root_chunk_id", ""),
                     "chunk_level": hit.get("chunk_level", 0),
                     "chunk_idx": hit.get("chunk_idx", 0),
+                    "modality": hit.get("modality", "text"),
+                    "asset_ids": _decode_asset_ids(hit.get("asset_ids")),
                     "score": hit.get("distance", 0.0),
                 })
         return formatted_results
@@ -290,6 +371,8 @@ class MilvusStore:
                     "root_chunk_id",
                     "chunk_level",
                     "chunk_idx",
+                    "modality",
+                    "asset_ids",
                 ],
                 filter=filter_expr,
             )
@@ -309,6 +392,8 @@ class MilvusStore:
                     "root_chunk_id": hit.get("entity", {}).get("root_chunk_id", ""),
                     "chunk_level": hit.get("entity", {}).get("chunk_level", 0),
                     "chunk_idx": hit.get("entity", {}).get("chunk_idx", 0),
+                    "modality": hit.get("entity", {}).get("modality", "text"),
+                    "asset_ids": _decode_asset_ids(hit.get("entity", {}).get("asset_ids")),
                     "score": hit.get("distance", 0.0),
                 })
         return formatted_results

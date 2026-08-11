@@ -15,6 +15,7 @@ from backend.api.resources import (
 )
 from backend.db.models import User
 from backend.infra.auth import require_admin
+from backend.profiles import get_profile
 from backend.jobs import DELETE_STEPS, delete_job_manager, upload_job_manager
 from backend.schemas import (
     DocumentDeleteJobResponse,
@@ -50,10 +51,15 @@ def _process_upload_job(job_id: str, file_path: str, filename: str) -> None:
         leaf_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) == 3]
         if not leaf_docs:
             raise ValueError("Document processing failed: no retrievable leaf chunks were generated")
+        # Figure enrichment happens inside load_document, so its outcome is reported
+        # here rather than as a separate job step — that keeps DELETE_STEPS/DEFAULT_STEPS
+        # (and the progress UI built on them) unchanged.
+        figure_chunks = sum(1 for doc in leaf_docs if doc.get("modality") == "figure")
+        figure_note = f", {figure_chunks} from figures" if figure_chunks else ""
         upload_job_manager.complete_step(
             job_id,
             "parse",
-            f"Parsing complete: {len(parent_docs)} parent chunks, {len(leaf_docs)} leaf chunks",
+            f"Parsing complete: {len(parent_docs)} parent chunks, {len(leaf_docs)} leaf chunks{figure_note}",
         )
 
         failed_step = "parent_store"
@@ -140,7 +146,7 @@ async def upload_document_async(
     if not filename:
         raise HTTPException(status_code=400, detail="Filename cannot be empty")
     if not is_supported_document(filename):
-        raise HTTPException(status_code=400, detail="Only PDF, Word, and Excel documents are supported")
+        raise HTTPException(status_code=400, detail=get_profile().user_copy.unsupported_file_type)
 
     ensure_upload_dir()
     job = upload_job_manager.create_job(filename)
@@ -214,7 +220,7 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
         if not filename:
             raise HTTPException(status_code=400, detail="Filename cannot be empty")
         if not is_supported_document(filename):
-            raise HTTPException(status_code=400, detail="Only PDF, Word, and Excel documents are supported")
+            raise HTTPException(status_code=400, detail=get_profile().user_copy.unsupported_file_type)
 
         ensure_upload_dir()
 

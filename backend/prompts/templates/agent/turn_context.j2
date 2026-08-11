@@ -1,0 +1,25 @@
+{# What the turn planner worked out about THIS message, handed to the agent.
+
+   Deliberately not part of agent/system.j2. That prompt is paid on every turn and is
+   ordered most-static-first for prompt caching, so anything varying per turn placed in
+   it invalidates the cached prefix for every turn after it. This is a separate message
+   appended next to the user's, so it costs nothing on the turns that carry no context —
+   which is most of them, since a message that stands on its own renders nothing here.
+
+   It is also where the "make the tool query self-contained" rule lives, rather than in
+   agent/_grounding.j2. That fragment states the faithfulness contract on every grounded
+   turn and its own header warns against growing it; this rule is only ever true when
+   there is something to resolve, so it belongs on the conditional path. #}
+{% if resolved_question %}
+The user's message continues an earlier one. Read in context, they are asking:
+
+  {{ resolved_question }}
+
+Search for that, not for the words they typed — a query that omits what "this" or "these" refers to retrieves the wrong thing. Answer the user directly; do not tell them their question was rewritten.
+{% endif %}
+{% if constraints %}
+
+Conditions the user set earlier and has not withdrawn: {{ constraints | join("; ") }}.
+
+These bind the answer, not just the search. The knowledge base holds material well outside them and retrieval cannot filter it out, so state only what falls inside these conditions and leave the rest out rather than offering it as extra detail.
+{% endif %}

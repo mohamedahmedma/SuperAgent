@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sys
 import types
 import unittest
@@ -19,6 +20,8 @@ def load_milvus_writer_module():
         pass
 
     fake_embedding.EmbeddingService = EmbeddingService
+    fake_embedding.embed_query = lambda text: [0.1, 0.2, 0.3]
+    fake_embedding.reset_query_vector_cache = lambda: None
     fake_embedding.embedding_service = None
 
     fake_client = types.ModuleType("backend.indexing.milvus_client")
@@ -105,6 +108,56 @@ class MilvusWriterTests(unittest.TestCase):
             ],
         )
         self.assertEqual(progress, [(2, 3), (3, 3)])
+
+    def _doc(self, idx, text):
+        return {"text": text, "filename": "doc.pdf", "file_type": "PDF", "chunk_id": f"chunk-{idx}"}
+
+    def test_exact_duplicates_are_skipped_before_embedding(self):
+        module = load_milvus_writer_module()
+        events = []
+        writer = module.MilvusWriter(
+            embedding_service=FakeEmbeddingService(events),
+            milvus_manager=FakeMilvusStore(events),
+        )
+        documents = [
+            self._doc(0, "Repeated  boilerplate line"),
+            self._doc(1, "repeated boilerplate line"),  # case/whitespace variant
+            self._doc(2, "genuinely unique content"),
+        ]
+
+        writer.write_documents(documents)
+
+        # The duplicate never reaches the embedding service, let alone the insert.
+        self.assertEqual(
+            events,
+            [
+                ("init_collection", 1024),
+                ("embed", ["Repeated  boilerplate line", "genuinely unique content"]),
+                ("insert", ["chunk-0", "chunk-2"]),
+            ],
+        )
+
+    def test_semantic_dedup_is_opt_in_and_drops_near_identical_vectors(self):
+        class NearIdenticalEmbeddings:
+            def get_embeddings(self, texts):
+                return [[1.0, 0.0] for _ in texts]
+
+        module = load_milvus_writer_module()
+
+        for enabled, expected_ids in (("false", ["chunk-0", "chunk-1"]), ("true", ["chunk-0"])):
+            with self.subTest(enabled=enabled):
+                events = []
+                with patch.dict(os.environ, {"SEMANTIC_DEDUP_ENABLED": enabled}):
+                    writer = module.MilvusWriter(
+                        embedding_service=NearIdenticalEmbeddings(),
+                        milvus_manager=FakeMilvusStore(events),
+                    )
+                writer.write_documents([
+                    self._doc(0, "Fees are due in September."),
+                    self._doc(1, "Fees are due in October."),
+                ])
+                inserts = [event for event in events if event[0] == "insert"]
+                self.assertEqual([("insert", expected_ids)], inserts)
 
 
 if __name__ == "__main__":

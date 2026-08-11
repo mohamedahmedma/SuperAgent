@@ -1,0 +1,105 @@
+# E-commerce — catalogue + help-centre deployment.
+#
+# This profile is the reason the schema carries `ingest.indexes` and
+# `ingest.asset_pipelines` from Phase 1: an e-commerce deployment activates stores and
+# extractors that a pure document deployment never touches. Those extra services land
+# in Phase 4-5; the profile already declares the intent so nothing has to be reshaped
+# when they arrive.
+
+extends: base
+name: ecommerce
+
+identity:
+  name: "Shop Assistant"
+  display_name: "Shop Assistant"
+  api_title: "Shop Assistant API"
+  description: "Product discovery and customer support over a product catalogue"
+  persona: >-
+    You are a knowledgeable shopping assistant. You help customers find products and
+    answer questions about policies, shipping, and returns using only the store's own
+    catalogue and help-centre content.
+  redis_key_prefix: "shop"
+  langsmith_project: "shop-rag"
+
+agent:
+  tools:
+    - search_knowledge_base
+    - search_products
+    - view_figure
+
+assets:
+  # Product images ARE the record here, not evidence inside a document.
+  entities:
+    enabled: true
+    role_strategy: entity
+    # Vision extraction fills these in. Left off so the profile is usable without a
+    # vision endpoint: products stay semantically searchable, they just carry no
+    # attributes until it is switched on.
+    vision_enabled: false
+    candidate_pool: 200
+    max_results: 20
+
+    # THE domain vocabulary. The extraction schema, the search_products tool
+    # signature, filter validation, and the attribute index are all generated from
+    # this list — adding a facet is a line here, not a code change or a migration.
+    attributes:
+      - name: category
+        type: string
+        description: "What kind of product this is"
+        values: [shoe, sandal, boot, shirt, trousers, dress, jacket, bag, accessory]
+      - name: color
+        type: string
+        multi: true
+        description: "Dominant colours visible on the product"
+        values: [black, white, grey, red, blue, green, yellow, orange, purple, pink, brown, beige, gold, silver]
+      - name: material
+        type: string
+        multi: true
+        description: "Visible materials"
+        values: [leather, suede, canvas, cotton, denim, wool, synthetic, mesh, rubber]
+      - name: pattern
+        type: string
+        description: "Surface pattern"
+        values: [solid, striped, checked, floral, printed, embroidered]
+      - name: gender
+        type: string
+        values: [men, women, unisex, kids]
+      - name: price
+        type: number
+        unit: EGP
+        description: "Listed price, if shown"
+      - name: in_stock
+        type: boolean
+        description: "Whether the listing shows it as available"
+
+rag:
+  # Catalogue queries are short, attribute-shaped, and rarely need decomposition, so
+  # the simple fast path is widened and the comparison vocabulary is product-oriented.
+  fast_path_max_chars: 64
+  simple_query_markers:
+    ["what is", "who is", "where is", "when is", "how many", "which", "how much",
+     "price of", "cost of", "in stock", "available", "size", "color", "colour",
+     "ما هو", "ما هي", "أين", "اين", "متى", "متي", "كم", "هل", "سعر", "المقاس", "اللون"]
+  complex_query_markers:
+    ["compare", "versus", " vs ", "difference", "different", "better", "best",
+     "recommend", "suggest", "pros and cons", "trade-off", "why ", "how ", " and ",
+     "قارن", "مقارنة", "الفرق", "أفضل", "افضل", "ينصح", "توصية", "لماذا", "كيف", " و "]
+  query_dimension_markers:
+    ["price", "size", "color", "colour", "material", "brand", "warranty", "shipping",
+     "return", "stock", "rating",
+     "السعر", "المقاس", "اللون", "الخامة", "الماركة", "الضمان", "الشحن", "الإرجاع"]
+
+retrieval:
+  # Attribute filtering narrows aggressively after recall, so recall goes wider.
+  top_k: 10
+  candidate_k: 60
+
+user_copy:
+  no_knowledge: "I couldn't find that in our catalogue or help centre. Try rephrasing, or ask me about a specific product."
+  hitl_scope_default: "I found a few product lines that could match. Which one did you mean?"
+
+ingest:
+  supported_extensions: [".pdf", ".docx", ".xlsx", ".html", ".htm"]
+  # Declared for Phase 4-5. Nothing reads these yet.
+  asset_pipelines: ["figure_pipeline", "entity_pipeline"]
+  indexes: ["kb_chunks", "entity_attrs", "entity_images"]

@@ -1,0 +1,5 @@
+# Development signing key, generated on first run when IDENTITY_PRIVATE_KEY_PEM is
+# unset. Committing one would put a working token-minting key in git history.
+*.pem
+*.db
+*.db-journal

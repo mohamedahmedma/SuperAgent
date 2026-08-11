@@ -21,8 +21,19 @@
         </div>
       </header>
 
-      <div class="chat-container" ref="chatContainerRef">
+      <div class="chat-container" ref="chatContainerRef" @scroll.passive="onScroll">
         <WelcomeScreen v-if="chatStore.messages.length === 0" />
+
+        <div v-if="chatStore.isLoadingOlderMessages" class="older-messages-status">
+          <i class="fa-solid fa-spinner fa-spin"></i>
+          <span>Loading earlier messages…</span>
+        </div>
+        <div
+          v-else-if="chatStore.messages.length && !chatStore.canLoadOlderMessages && hasPaged"
+          class="older-messages-status older-messages-start"
+        >
+          <span>Beginning of this conversation</span>
+        </div>
 
         <MessageItem
           v-for="(msg, index) in chatStore.messages"
@@ -74,9 +85,50 @@ onBeforeUpdate(() => {
   messageItemRefs.value = [];
 });
 
+// True once a session has been loaded from the server, so the "beginning of this
+// conversation" marker does not appear above a brand new chat.
+const hasPaged = computed(() => !!chatStore.pagingBySession[chatStore.sessionId]);
+
+// Set while older messages are being spliced in above the viewport. The auto-scroll
+// watcher below honours it: without that, growing the list upwards would be read as new
+// content and throw the reader back down to the newest message.
+const isPrepending = ref(false);
+
+// Far enough from the top that the next batch is usually in place before the user
+// reaches it, close enough that it is not fetched speculatively.
+const LOAD_OLDER_THRESHOLD_PX = 120;
+
 const scrollToBottom = () => {
   if (chatContainerRef.value) {
     chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight;
+  }
+};
+
+const onScroll = async () => {
+  const container = chatContainerRef.value;
+  if (!container || isPrepending.value) return;
+  if (container.scrollTop > LOAD_OLDER_THRESHOLD_PX) return;
+  if (!chatStore.canLoadOlderMessages) return;
+
+  const sessionId = chatStore.sessionId;
+  // Anchor on the distance from the BOTTOM, which the prepend does not change. Restoring
+  // scrollTop directly would put the reader wherever the newly inserted messages pushed
+  // the one they were looking at.
+  const previousBottomOffset = container.scrollHeight - container.scrollTop;
+
+  isPrepending.value = true;
+  try {
+    await chatStore.loadOlderMessages(sessionId);
+    await nextTick();
+    if (chatContainerRef.value && chatStore.sessionId === sessionId) {
+      chatContainerRef.value.scrollTop =
+        chatContainerRef.value.scrollHeight - previousBottomOffset;
+    }
+  } catch (error: any) {
+    console.warn('Could not load earlier messages:', error?.message || error);
+  } finally {
+    await nextTick();
+    isPrepending.value = false;
   }
 };
 
@@ -108,7 +160,10 @@ const openHistory = async () => {
 
 watch(
   () => chatStore.messages,
-  () => nextTick(scrollToBottom),
+  () => {
+    if (isPrepending.value) return;
+    nextTick(scrollToBottom);
+  },
   { deep: true }
 );
 
@@ -119,3 +174,19 @@ watch(
 
 onMounted(scrollToBottom);
 </script>
+
+<style scoped>
+.older-messages-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 0 14px;
+  font-size: 0.78rem;
+  color: var(--text-muted, #8a8a8a);
+}
+
+.older-messages-start {
+  opacity: 0.7;
+}
+</style>

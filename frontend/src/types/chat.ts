@@ -4,6 +4,38 @@ export interface RetrievedChunk {
   rrf_rank?: number;
   rerank_score?: number | null;
   text?: string;
+  chunk_id?: string;
+  modality?: 'text' | 'table' | 'figure' | string;
+  asset_ids?: string[];
+}
+
+/**
+ * An image the backend surfaced for this answer.
+ *
+ * Mirrors backend AssetReference. The backend never sends markup — it sends this
+ * descriptor and lets each client decide how to present it, which is why the same
+ * payload serves this UI, a bot, or a downstream service.
+ *
+ * `mode` says how the bytes arrive:
+ *   reference — fetch `url` (needs the auth header, see useAssetImage)
+ *   inline    — `inline_data` is already a complete data: URI
+ *   metadata  — no bytes at all; caption only
+ */
+export interface AssetReference {
+  asset_id: string;
+  sha256?: string;
+  mode: 'reference' | 'inline' | 'metadata';
+  url?: string | null;
+  inline_data?: string | null;
+  content_type?: string;
+  byte_size?: number;
+  width?: number;
+  height?: number;
+  caption?: string;
+  alt_text?: string;
+  tags?: string[];
+  role?: string;
+  source?: { filename?: string; page_number?: number; bbox?: number[] | null };
 }
 
 export interface RagTraceFields {
@@ -38,6 +70,7 @@ export interface RagTraceFields {
   candidate_count?: number | null;
   retrieval_top_k?: number;
   retrieved_chunks?: RetrievedChunk[];
+  assets?: AssetReference[];
   leaf_retrieve_level?: number;
   auto_merge_enabled?: boolean | null;
   auto_merge_applied?: boolean | null;
@@ -113,8 +146,17 @@ export interface Message {
   hitlOptions?: string[];
   hitlResumeText?: string;
   ragTrace?: RagTrace | null;
+  assets?: AssetReference[];
   ragSteps?: RagStep[];
   _groupedSteps?: GroupedRagStep[];
+}
+
+/** How far back through a conversation the client has read. */
+export interface SessionPaging {
+  /** Id of the oldest message held, and the cursor the next batch is fetched before. */
+  oldestId: number | null;
+  hasMore: boolean;
+  loadingOlder: boolean;
 }
 
 export interface ChatSession {

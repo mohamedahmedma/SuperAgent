@@ -7,9 +7,38 @@ DATABASE_URL = os.getenv(
     "postgresql+psycopg2://postgres:postgres@localhost:5432/langchain_app",
 )
 
+# Sized to the server's worker threads, not left at SQLAlchemy's default.
+#
+# The default is pool_size=5 with max_overflow=10, so fifteen connections. Starlette
+# runs synchronous endpoints on a forty-thread pool, and every turn touches Postgres to
+# load and save the conversation — so past fifteen concurrent turns, threads block in
+# the pool waiting for a connection and then raise TimeoutError after thirty seconds.
+# That ceiling is invisible until it is hit, and then it looks like the database being
+# slow rather than the client refusing to open connections.
+#
+# Overshooting is not free either: every connection is a backend process on the server,
+# and `max_connections` is shared by every replica. Total across the fleet is what has
+# to fit — replicas x (POOL_SIZE + MAX_OVERFLOW) under Postgres's limit.
+_POOL_OPTIONS = {
+    "pool_size": int(os.getenv("DB_POOL_SIZE") or 20),
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW") or 20),
+    # Recycle below the typical idle timeout of a proxy or managed Postgres, so a
+    # connection is retired by us rather than discovered dead by a user's request.
+    "pool_recycle": int(os.getenv("DB_POOL_RECYCLE_SECONDS") or 1800),
+    "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT_SECONDS") or 30),
+}
+
+# SQLite is a normal thing to point DATABASE_URL at while developing, and its pools
+# (SingletonThreadPool, NullPool) reject these arguments outright rather than ignoring
+# them — so sizing a pool it does not have would turn a convenience into an import
+# error. The sizing is for the server dialects that actually pool connections.
+if DATABASE_URL.startswith("sqlite"):
+    _POOL_OPTIONS = {}
+
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
+    **_POOL_OPTIONS,
 )
 
 

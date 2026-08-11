@@ -1,0 +1,400 @@
+# Base profile — the neutral, domain-agnostic defaults every other profile inherits.
+#
+# Values here reproduce the behaviour the system had before profiles existed, so
+# `extends: base` with no overrides is a no-op. Domain profiles override only what
+# their domain actually changes.
+#
+# Precedence: environment variable > this file (and anything extending it) > schema default.
+
+profile_version: 1
+name: base
+
+identity:
+  name: "Knowledge Assistant"
+  display_name: "Knowledge Assistant"
+  api_title: "Knowledge Assistant API"
+  description: "Retrieval-augmented knowledge base assistant"
+  persona: "You are a helpful knowledge-base assistant."
+  redis_key_prefix: "kb"
+  langsmith_project: "kb-rag"
+
+models:
+  answer_temperature: 0.3     # conversational answering
+  fast_temperature: 0.2       # FAST_MODEL for the persistent-note summariser
+  planner_temperature: 0.0    # FAST_MODEL for complexity classification (deterministic)
+  grade_temperature: 0.0      # GRADE_MODEL evidence grading (deterministic)
+  rewrite_temperature: 0.0    # FAST_MODEL for Step-back / HyDE planning (deterministic)
+  scope_temperature: 0.0      # FAST_MODEL for the in-domain / out-of-domain check
+  resolve_temperature: 0.0    # FAST_MODEL rewriting a follow-up into a standalone question
+
+  # Reasoning effort per role. On a reasoning model this is the largest cost and
+  # latency control there is: output tokens bill several times input and are generated
+  # one after another, while the whole prompt prefills in a single parallel pass.
+  #
+  # Only `answer` does open-ended work. The other four emit a fixed structured shape —
+  # a label, a grade, a rewritten query — and deliberating over it changes the answer
+  # not at all while spending most of the turn's wall-clock. Hence `low` everywhere the
+  # output shape is known in advance.
+  #
+  # Set a role to `none` for a deployment whose model has no effort parameter;
+  # providers reject the field rather than ignoring it. Overridable per deployment via
+  # <ROLE>_REASONING_EFFORT (see .env.example).
+  answer_reasoning_effort: medium
+  fast_reasoning_effort: low
+  planner_reasoning_effort: low
+  grade_reasoning_effort: low
+  rewrite_reasoning_effort: low
+  scope_reasoning_effort: low
+  resolve_reasoning_effort: low
+
+  # Output ceilings stay off (0) by default. A ceiling that truncates a structured
+  # response converts a paid call into a parse failure, so it is worth setting only
+  # from an observed p99 output length — per deployment, via <ROLE>_MAX_TOKENS.
+
+agent:
+  tools:
+    - get_current_weather
+    - search_knowledge_base
+    - view_figure
+  recursion_limit: 8
+  max_knowledge_calls_per_turn: 1
+  max_figure_calls_per_turn: 3
+  # 14 messages = 7 user/assistant turns. Counted in MESSAGES, not turns, because that
+  # is what the slice operates on — halving it silently drops the assistant side of
+  # every exchange, and the assistant's own replies are what later follow-ups refer
+  # back to ("the fees you mentioned earlier").
+  #
+  # Only this role ever sees the history: the planner, grader, and rewriter are given
+  # the question or the documents alone, and the scope check gets a single previous
+  # line. So widening this costs one node's prompt, not the pipeline's.
+  #
+  # Trimming here is also the smallest cost lever available — the window prefills in
+  # parallel and is the cheap half of the token bill. Prefer the effort settings above.
+  context_window_messages: 14
+  persistent_note_max_chars: 500
+
+  # Contextual query resolution: one FAST_MODEL call that rewrites a follow-up into a
+  # question standing on its own, and names the conditions carried over from earlier
+  # turns. Its output is what scope detection embeds, what retrieval searches for, and
+  # what a resumed clarification continues from — one subject per turn instead of three
+  # components each guessing at one.
+  #
+  # ON, unlike the other switches in this file, because it is a correctness fix. With it
+  # off, "and what is the fees for this years" is embedded as the average of itself and
+  # the previous turn, and the previous turn wins.
+  #
+  # It is gated, not paid per turn: a first message, or one long enough to carry its own
+  # subject with no anaphora and no leading conjunction, never reaches the model. On the
+  # turns that do reach it, the call routinely pays for itself — a resolved question
+  # matches the scope catalogue above its floor, so the scope model does not run, and it
+  # does not trigger the clarification round-trip an under-specified one does.
+  query_resolution_enabled: true
+  query_resolution_history_messages: 6
+  # Short enough to mean "this is a bare reply" — "grade 5", "Primary", "he is 9" —
+  # rather than "this is a question". A higher ceiling also caught ordinary
+  # self-contained questions, spending a call to be told nothing changed.
+  query_resolution_max_chars: 40
+  carried_constraint_limit: 4
+
+  # Markers that make a message depend on the conversation. Multilingual by default
+  # (English + Arabic); a domain profile replaces them wholesale. Single words are
+  # matched on word boundaries, phrases as substrings, and `followup_openers` as a
+  # prefix — which is what makes the bare Arabic conjunction "و" usable, since it is
+  # written joined to the word that follows it.
+  # Personal pronouns earn their place here: "what documents to transfer him" names no
+  # child, no age and no year — it reads as a complete standalone question, and the only
+  # thing marking it as dependent is the pronoun.
+  followup_markers:
+    ["this", "these", "those", "that", "it", "they", "them", "their",
+     "there", "then", "same", "also", "too", "instead", "as well",
+     "what about", "how about", "and what", "and how", "and the",
+     "i mean", "i meant", "not that", "rather than",
+     "he", "him", "his", "she", "her", "hers", "me", "us", "one of", "both",
+     "هذا", "هذه", "ذلك", "تلك", "هؤلاء", "دي", "ده", "دول", "نفس",
+     "كمان", "ايضا", "أيضا", "برضه", "بردو", "اقصد", "أقصد", "يعني",
+     "بدل", "ماذا عن", "وماذا عن", "طيب",
+     "له", "لها", "عنه", "عنها", "ابني", "ابنتي", "طفلي", "ولدي"]
+
+  followup_openers:
+    ["and ", "and, ", "but ", "so ", "ok and", "okay and", "also ",
+     "what about", "how about", "no i mean", "no, i mean", "no i meant",
+     "و", "وما", "وكم", "وهل", "طب ", "طيب ", "لا اقصد", "لا أقصد"]
+
+  # No prompt text here. Prompts live in backend/prompts/templates/ and a profile sets
+  # one of these keys only to OVERRIDE the shipped template — which is why the shipped
+  # profiles leave them all empty:
+  #
+  #   system_prompt          -> agent/system.j2      (composed per turn; see below)
+  #   resume_answer_prompt   -> agent/resume_answer.j2
+  #   persistent_note_prompt -> agent/persistent_note.j2
+  #
+  # system_prompt is the one worth understanding before setting: the template composes
+  # it from the tools the turn actually bound, so a turn narrowed to search-only does
+  # not pay for the rest. Setting it here replaces the whole thing and opts this
+  # profile out of that narrowing. See AgentConfig.system_prompt.
+
+rag:
+  max_rewrites: 1
+  max_sub_questions: 4
+
+  # Complexity planning and sub-question decomposition. OFF: the planner is one
+  # FAST_MODEL call on every knowledge turn, and the local fast path below already
+  # settles most questions as simple without spending it. What it buys — parallel
+  # sub-agents for a genuinely multi-part question — costs a retrieval and a grader
+  # call per sub-question, so it only pays for itself on a corpus where cross-document
+  # comparisons are the common case rather than the exception.
+  # With this off, classify_complexity is not registered as a node: a turn goes
+  # straight to retrieve_initial and the decomposition branch is unreachable.
+  complexity_planning_enabled: false
+
+  # The ladder's semantic rung. Off until its latency is measured on target hardware;
+  # turning it on is also what makes `evidence_required_certainty: medium` meaningful,
+  # and it is the precondition for moving `grading_mode` off `always` (see below).
+  rerank_cross_encoder_enabled: false
+  rerank_cross_encoder_model: BAAI/bge-reranker-v2-m3
+  rerank_cross_encoder_device: cpu
+  rerank_doc_char_limit: 2000
+  rerank_sufficient_score: 0.6
+  rerank_irrelevant_score: 0.05
+  rerank_min_supporting_chunks: 1
+
+  # Scope: is an incoming question this corpus's subject at all? Judged against a
+  # catalogue of the questions the corpus can answer, built once per section at ingest
+  # by `python -m backend.indexing.build_scope_index`.
+  #
+  # Off until a catalogue exists — with none, the rung abstains and nothing changes.
+  # The cut point is DERIVED from the corpus at index time, so there is no threshold to
+  # tune here; scope_floor_percentile only says how far into the in-scope distribution
+  # to place it.
+  scope_index_enabled: false
+  scope_section_level: 1
+  scope_summary_model: ""
+  scope_min_questions: 4
+  # The ceiling on rung 1's coverage, and so on how often the cheap rung can admit a
+  # question without a model call. It is shared across languages: with
+  # scope_question_languages set, 20 questions is about 10 distinct things a section
+  # can be asked about, not 20. Raised from 10 for exactly that reason — at 10, a
+  # bilingual catalogue covered roughly five ideas per section and everything else
+  # escalated. More questions cost one vector each and a slightly longer ingest call.
+  scope_max_questions: 20
+  scope_question_languages: English and Arabic
+  scope_floor_percentile: 10.0
+  scope_match_count: 3
+  # Matching is recall; OFFERING a match to the user is a question put to a person, and
+  # it has to survive two tests a match does not. Paraphrases of one catalogued question
+  # collapse into one direction — otherwise a pair of them was, on its own, enough to
+  # unlock the once-per-question ask. And a direction far behind the leader is dropped,
+  # because a clear winner is not an ambiguity worth interrupting anyone over.
+  scope_option_duplicate_similarity: 0.92
+  scope_option_max_score_gap: 0.06
+  # Frozen so the catalogue cannot drift between re-indexes. Deliberately empty in the
+  # base profile: these labels describe a corpus, and base describes none.
+  scope_topic_vocabulary: []
+
+  # Out-of-domain rejection before any search. Off until the threshold is calibrated
+  # against a corpus — an uncalibrated gate silently refuses valid questions.
+  domain_gate_enabled: false
+  domain_gate_min_similarity: 0.35
+  domain_gate_topic_count: 3
+  domain_gate_skip_with_history: true
+  domain_gate_min_question_chars: 12
+
+  # How far the assessor ladder must climb before a report may be acted on.
+  #   low | medium | high
+  evidence_required_certainty: high
+  evidence_lexical_enabled: true
+
+  # The grader is one synchronous LLM call per retrieval — and one per sub-agent on a
+  # decomposed question — so it is usually the dominant latency in a turn. In
+  # uncertain_only it runs unless retrieval is clearly on target; every skip_grading_*
+  # threshold below must hold before it is skipped, because skipping wrongly means
+  # answering from weak evidence while grading unnecessarily only costs time.
+  #   always | uncertain_only | never   (never also disables rewrite and HITL)
+  #
+  # Held at `always` until a semantic assessor exists. The skip decision used to rest
+  # on lexical term coverage, which reads 0 whenever the question and the corpus differ
+  # in language or vocabulary — so it could not tell "retrieval missed" from "retrieval
+  # hit but worded it differently", and it never measured meaning at all. Move this to
+  # uncertain_only once the reranker supplies calibrated per-chunk scores, which means
+  # after `rerank_cross_encoder_enabled` is on and measured.
+  grading_mode: always
+  skip_grading_min_chunks: 3
+  skip_grading_term_coverage: 0.75
+  skip_grading_top_chunks: 3
+  skip_grading_min_rerank_score: 0.5
+
+  # Retrieval returns a fixed top_k; answering rarely needs all of it. The retrieved
+  # set is trimmed to its useful prefix AFTER grading, so the grader still judges on
+  # complete evidence and only the answer prompt sees the shorter context. Questions
+  # asking for a complete set are never trimmed, and a chunk shorter than
+  # context_min_chunk_chars can never be the one that ends selection.
+  #   adaptive | off
+  # On, and the precondition for it is now met. This was held at `off` while trimming
+  # meant answering from narrower evidence than the grader had ruled sufficient — a
+  # lexical guess about which chunks mattered. EvidenceGrade.supporting_chunks now has
+  # the grader name the chunks that carried its judgement, so trimming to those is a
+  # consequence of the same judgement that approved the answer, not a second guess.
+  context_selection_mode: "adaptive"
+  context_min_chunks: 1
+  context_target_coverage: 1.0
+  context_min_chunk_chars: 120
+  fast_path_max_chars: 48
+  fast_path_short_intent_chars: 18
+
+  # The RAG prompts live in backend/prompts/templates/rag/ — evidence_grade.j2,
+  # complexity.j2, rewrite.j2 — and the matching keys here exist only to override one.
+  #
+  # The marker vocabularies below, by contrast, stay: they are domain vocabulary rather
+  # than prompt text, and a domain profile is expected to replace them wholesale.
+  #
+  # DORMANT, all four of them. They are read only on the complexity fast path, which
+  # runs only when `complexity_planning_enabled` is true — and no shipped profile turns
+  # it on. Kept so enabling the flag does not require rewriting them, but nothing here
+  # affects a running deployment, so do not tune them expecting an effect.
+
+  # Single-fact phrasings that must beat the complex markers below. "how many" and
+  # "how much" both contain "how ", which also opens an analytical question; without
+  # this override a plain count or price lookup is sent to the planner and can be
+  # decomposed into several sub-questions, each costing a retrieval and a grader call.
+  simple_override_markers:
+    ["how many", "how much", "how long", "how old", "how far",
+     "كم عدد", "كم سعر", "كم تكلفة", "كم مدة"]
+
+  # Local fast-path classification vocabulary. Multilingual by default (English,
+  # Chinese, Arabic); a domain profile replaces these wholesale with its own terms.
+  simple_query_markers:
+    ["是什么", "是谁", "哪里", "何时", "多少", "是否", "哪个", "哪种", "属性", "参数",
+     "规格", "定义", "含义",
+     "what is", "what are", "who is", "who are", "where is", "where are",
+     "when is", "when are", "which is", "which are", "how many", "which",
+     "list of", "name of", "names of",
+     "ما هو", "ما هي", "من هو", "من هي", "أين", "اين", "متى", "متي", "كم", "هل",
+     "أي ", "اي ", "تعريف", "معنى"]
+
+  complex_query_markers:
+    ["比较", "对比", "区别", "差异", "优缺点", "优势", "劣势", "分析", "总结", "综合",
+     "原因", "成因", "影响", "方案", "步骤", "如何", "为什么", "以及", "同时", "并且",
+     "和", "与", "谁更",
+     "compare", "versus", "difference", "different", "analyze", "summarize",
+     "trade-off", "pros and cons", "why ", "how ", " and ", "complex",
+     "قارن", "مقارنة", "الفرق", "الفروق", "فرق بين", "بين ", "مقابل", "لماذا", "كيف",
+     "اشرح", "وضح", "حلل", "تحليل", "لخص", "ملخص", "مميزات", "عيوب", "إيجابيات",
+     "سلبيات", "أسباب", "اسباب", "خطوات", "وأيضا", " و ", "أم ", "ام ", "كذلك"]
+
+  query_dimension_markers:
+    ["属性", "武器", "定位", "技能", "机制", "参数", "规格", "性能", "价格", "优点",
+     "缺点", "作用",
+     "الرسوم", "المواعيد", "الشروط", "المستندات", "المناهج", "الأنشطة", "النقل"]
+
+retrieval:
+  top_k: 8
+  candidate_k: null
+  candidate_multiplier: 3
+  leaf_retrieve_level: 3
+  auto_merge_enabled: true
+  auto_merge_threshold: 2
+  # null = never merge a parent group containing a figure, so one citation points
+  # at one image. Text-only groups still merge at auto_merge_threshold.
+  auto_merge_figure_threshold: null
+  rerank_min_score: 0.0
+  rerank_doc_char_limit: 2000
+  rerank_timeout_seconds: 5.0
+
+chunking:
+  strategy: recursive
+  chunk_size: 800
+  chunk_overlap: 100
+  l1_size: null          # null derives from chunk_size (max(2000, size * 3))
+  l2_size: null          # null derives from chunk_size (max(1000, size * 2))
+  sentence_overlap: 1
+  merge_target_divisor: 4
+  layout_parser_enabled: true
+  semantic_dedup_enabled: false
+  semantic_dedup_threshold: 0.97
+
+user_copy:
+  no_knowledge: "The knowledge base does not contain reliable relevant information, so this question can't be answered from it right now."
+  retrieval_error: "A temporary technical issue prevented searching the knowledge base. Please try again in a moment."
+  hitl_clarify_default: "I found relevant content, but the evidence isn't enough to determine an answer. Please provide more detail about what you're asking."
+  hitl_clarify_missing_slots: "I found relevant content, but key information is still missing: "
+  hitl_scope_default: "I found several possibly relevant directions in the knowledge base. Which one are you asking about?"
+  hitl_clarify_agent: "I found relevant knowledge, but I'm still missing one key piece of information. Please provide it so I can continue."
+  hitl_scope_agent: "I found several knowledge base scopes that might be relevant. Please choose which one you'd like to continue querying."
+  new_session_title: "New session"
+  unsupported_file_type: "Only PDF, Word, Excel, and HTML documents are supported"
+
+assets:
+  enabled: true
+  blob_backend: local          # local | s3 (s3 targets MinIO; credentials come from env)
+  blob_root: "data/assets"     # relative paths resolve against the project root
+  blob_bucket: "kb-assets"     # s3 only — must NOT be the bucket Milvus uses
+  gc_orphan_blobs: true
+  max_images_per_document: 500
+
+  # Entity (product) extraction. Off in base: a document knowledge base has no
+  # catalogue. A domain turns it on and declares its own attribute vocabulary, from
+  # which the extraction schema, the search_products signature, filter validation,
+  # and the attribute index are all generated.
+  entities:
+    enabled: false
+    vision_enabled: false
+    role_strategy: figure     # figure | entity | auto
+    attributes: []
+    candidate_pool: 200
+    max_results: 20
+
+  # How retrieved assets reach a client. Nothing here is UI-specific: the backend
+  # publishes structured references and each consumer declares its own capabilities
+  # per request, so replacing the frontend needs no change on this side.
+  delivery:
+    base_path: "/media"   # not /assets — that collides with Vite's build output
+    attach_to_response: true
+    max_assets_per_response: 8
+    # Show only the figures the answer cited, not every figure retrieval touched.
+    attach_only_cited: true
+    max_inline_bytes: 512000      # ceiling on base64 inlining, whatever a client asks for
+    cache_max_age_seconds: 31536000   # content-addressed, therefore immutable
+    max_pixel_reads_per_asset: 2      # after this, answer from recorded observations
+    max_observations_per_asset: 6
+  # Deterministic pre-filter; every image rejected here is a VLM call never made.
+  triage:
+    min_width: 64
+    min_height: 64
+    min_area: 8000
+    max_aspect_ratio: 12.0
+    min_byte_size: 1024
+    repeat_page_fraction: 0.6
+    complex_min_area: 250000
+
+  # Figure extraction: turning document images into a retrievable text surface.
+  figures:
+    enabled: true
+    # Requires a vision-capable VISION_MODEL (or MODEL). With it off, figures are
+    # still retrievable via alt text and caption lines — no model cost, but scanned
+    # pages and image-only tables stay unreadable.
+    vision_enabled: true
+    vision_temperature: 0.0
+    vision_max_edge: 1024
+    # `input + this` is reserved against the provider's tokens-per-minute quota before
+    # generation starts, so it is a ceiling as much as a floor. 4096 clears the
+    # truncation floor while leaving room for a ~3k-token image inside an 8k quota.
+    vision_max_output_tokens: 4096
+    # A rate limit is transient; without these a single 429 permanently demotes an
+    # image to the heuristic path and the document silently loses its figures.
+    vision_retry_attempts: 4
+    vision_retry_base_seconds: 5.0
+    vision_retry_max_seconds: 90.0
+    # Provider passthrough. On a reasoning model the scratchpad can consume the entire
+    # output budget before any answer is written — turning it off reclaims that far
+    # more effectively than raising the budget (which the quota caps anyway).
+    # Groq/qwen3:  {reasoning_effort: none}
+    vision_extra_params: {}
+    render_dpi: 150
+    context_chars: 600
+    max_tags: 8
+    max_answerable_questions: 4
+    escalate_below_confidence: 0.45
+ingest:
+  supported_extensions: [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".html", ".htm"]
+  asset_pipelines: []
+  indexes: ["kb_chunks"]

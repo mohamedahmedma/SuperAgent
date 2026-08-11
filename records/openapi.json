@@ -1,0 +1,2148 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "School Academic Records Facade",
+    "description": "Read-only academic records for the school assistant agent, plus the guardian authorisation and audit trail that govern them.\n\n**Two independent credentials are required for every parent-facing read.** The `X-API-Key` header proves which *system* is calling. An `Authorization: Bearer` identity token, signed by the identity service, proves *which parent* it asks on behalf of — and its `guardian_id` claim must match the `guardian_id` in the path. Neither alone grants anything: a leaked API key cannot choose a guardian, and a parent's token cannot be presented without a valid system key. The permitted student set is then resolved server-side from the link table on every request, and is never supplied by the caller.\n\n**On failure, do not improvise.** A 503 with `code: lms_unavailable` means the system of record could not be reached. The correct response to a parent is that records are temporarily unavailable, never a remembered or inferred figure.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/v1/terms": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "List Terms",
+        "description": "Terms the school has configured. Carries no student data, so needs no subject.",
+        "operationId": "list_terms_v1_terms_get",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TermOut"
+                  },
+                  "title": "Response List Terms V1 Terms Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/{guardian_id}/students": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "List Students",
+        "description": "Children this guardian may ask about.\n\nThe agent's first call in any conversation. An unknown guardian and a guardian\nwith no visible children both return an empty list — see `permitted_students`.",
+        "operationId": "list_students_v1_guardians__guardian_id__students_get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentListOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such student record for this guardian.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System of record unreachable. Do not answer from memory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/{guardian_id}/students/{student_id}/grades": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "Get Grades",
+        "description": "Every subject's rollup for one student in one term.",
+        "operationId": "get_grades_v1_guardians__guardian_id__students__student_id__grades_get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Term code; defaults to the current term.",
+              "title": "Term"
+            },
+            "description": "Term code; defaults to the current term."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentGradesOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such student record for this guardian.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System of record unreachable. Do not answer from memory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/{guardian_id}/students/{student_id}/grades/{course_id}": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "Get Course Detail",
+        "description": "One subject in detail — the figures behind \"why is her maths grade 72\".\n\nThe per-ASSESSMENT breakdown is not served yet, and returns an empty list rather\nthan a fabricated one. `local_schoolapi` summarises per subject; it has no\nper-assessment endpoint, and the core Moodle call that would provide one cannot\nexpress whether an assessment was excused — so a list built from it would show a\ncounted zero where the child was excused, which is precisely the error this system\nexists to prevent.\n\nAn empty list is honest but not harmless: the agent must say it does not have the\nbreakdown, NOT that there are no assessments. The template that renders this\ndistinguishes the two.\n\nThe subject-level figures below are complete and correct, so \"her maths is 72,\nwith one assessment excused and one still to be marked\" is answerable today; only\nthe item-by-item list is missing.",
+        "operationId": "get_course_detail_v1_guardians__guardian_id__students__student_id__grades__course_id__get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "course_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Course Id"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Term"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CourseGradeDetailOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such student record for this guardian.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System of record unreachable. Do not answer from memory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/{guardian_id}/students/{student_id}/attendance": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "Get Attendance",
+        "description": "Attendance totals for a term, with the recent days behind them.",
+        "operationId": "get_attendance_v1_guardians__guardian_id__students__student_id__attendance_get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Term"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttendanceSummaryOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such student record for this guardian.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System of record unreachable. Do not answer from memory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/{guardian_id}/students/{student_id}/report-cards/{term_id}": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "Get Report Card",
+        "description": "The published snapshot for a term. Served frozen — never recomputed.",
+        "operationId": "get_report_card_v1_guardians__guardian_id__students__student_id__report_cards__term_id__get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "term_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Term Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportCardOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such student record for this guardian.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System of record unreachable. Do not answer from memory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/guardians": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Guardian",
+        "operationId": "create_guardian_v1_admin_guardians_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardianIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Guardian V1 Admin Guardians Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/guardians/{guardian_id}/students": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Link Student",
+        "description": "Link a guardian to a student, and set whether they may see records.\n\nCreating the link and granting records access are one call but two decisions —\n`can_view_records` defaults to False, so an import that omits it grants nothing.",
+        "operationId": "link_student_v1_admin_guardians__guardian_id__students_post",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuardianLinkIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Link Student V1 Admin Guardians  Guardian Id  Students Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/guardians/{guardian_id}/students/{student_id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Unlink Student",
+        "operationId": "unlink_student_v1_admin_guardians__guardian_id__students__student_id__delete",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Unlink Student V1 Admin Guardians  Guardian Id  Students  Student Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/api-keys": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Api Key",
+        "description": "Mint a key. The secret in this response is the only copy that will ever exist.",
+        "operationId": "create_api_key_v1_admin_api_keys_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/audit": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Read Audit",
+        "description": "Read the access log. Read only — there is no write or delete path anywhere.",
+        "operationId": "read_audit_v1_admin_audit_get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuditEntryOut"
+                  },
+                  "title": "Response Read Audit V1 Admin Audit Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Health",
+        "description": "Liveness only.\n\nDeliberately does not probe the LMS. A health check that fails when Moodle is\ndown would take this service out of rotation exactly when it is still perfectly\nable to serve report card snapshots and to tell the agent, honestly, that live\ngrades are unavailable.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AcademicGrade": {
+        "properties": {
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage"
+          },
+          "letter_grade": {
+            "type": "string",
+            "title": "Letter Grade",
+            "default": ""
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "unavailable": {
+            "type": "string",
+            "title": "Unavailable",
+            "description": "Empty when `percentage` is present. Otherwise why not: 'aggregation_not_summable' (the course uses a weighted or drop-lowest scheme that cannot be re-derived — read `categories` instead), 'no_assessment_items', 'nothing_gradeable'.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "AcademicGrade",
+        "description": "The subject with non-assessment activities removed.\n\nSeparate from the headline figure rather than replacing it, because a school that\ngrades attendance produces two true answers to \"how is she doing in maths\" and they\nare not interchangeable. Measured on a real instance: 65% official, 80% academic,\nsame child, same subject.\n\n`percentage` is None whenever it could not be derived EXACTLY — never an estimate.\nA consumer that ignores a caveat flag puts the estimate in front of a parent, so\nthere is no estimate to ignore."
+      },
+      "ApiKeyIn": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "description": "agent | admin",
+            "default": "agent"
+          },
+          "expires_in_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "title": "ApiKeyIn"
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "prefix": {
+            "type": "string",
+            "title": "Prefix"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "Full secret. Shown once, at creation, and never recoverable."
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prefix",
+          "label",
+          "scope"
+        ],
+        "title": "ApiKeyOut",
+        "description": "The only response that ever contains the secret, and only at creation."
+      },
+      "AssignmentGrade": {
+        "properties": {
+          "assignment_id": {
+            "type": "string",
+            "title": "Assignment Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SubmissionStatus"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Score"
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "default": ""
+          },
+          "graded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graded At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assignment_id",
+          "status"
+        ],
+        "title": "AssignmentGrade",
+        "description": "One assignment, as the parent sees it."
+      },
+      "AttendanceDay": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Date"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "present | absent | late | excused"
+          },
+          "course_id": {
+            "type": "string",
+            "title": "Course Id",
+            "default": ""
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "status"
+        ],
+        "title": "AttendanceDay"
+      },
+      "AttendanceSummaryOut": {
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StudentRef"
+          },
+          "term": {
+            "$ref": "#/components/schemas/TermOut"
+          },
+          "present_count": {
+            "type": "integer",
+            "title": "Present Count",
+            "default": 0
+          },
+          "absent_count": {
+            "type": "integer",
+            "title": "Absent Count",
+            "default": 0
+          },
+          "late_count": {
+            "type": "integer",
+            "title": "Late Count",
+            "default": 0
+          },
+          "excused_count": {
+            "type": "integer",
+            "title": "Excused Count",
+            "default": 0
+          },
+          "total_sessions": {
+            "type": "integer",
+            "title": "Total Sessions",
+            "default": 0
+          },
+          "attendance_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attendance Rate"
+          },
+          "recent_days": {
+            "items": {
+              "$ref": "#/components/schemas/AttendanceDay"
+            },
+            "type": "array",
+            "title": "Recent Days",
+            "default": []
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student",
+          "term",
+          "as_of"
+        ],
+        "title": "AttendanceSummaryOut",
+        "description": "Attendance for one student over a window.\n\nCounts first, days second. The agent answers \"how many days has she missed\" far\nmore often than \"list them\", and a summary that forces it to count a list is a\nsummary that will eventually be counted wrong."
+      },
+      "AuditEntryOut": {
+        "properties": {
+          "guardian_id": {
+            "type": "string",
+            "title": "Guardian Id",
+            "default": ""
+          },
+          "student_id": {
+            "type": "string",
+            "title": "Student Id",
+            "default": ""
+          },
+          "endpoint": {
+            "type": "string",
+            "title": "Endpoint",
+            "default": ""
+          },
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed",
+            "default": false
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "api_key_prefix": {
+            "type": "string",
+            "title": "Api Key Prefix",
+            "default": ""
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "default": ""
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at"
+        ],
+        "title": "AuditEntryOut"
+      },
+      "CourseGrade": {
+        "properties": {
+          "course_id": {
+            "type": "string",
+            "title": "Course Id"
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code",
+            "default": ""
+          },
+          "subject_name_ar": {
+            "type": "string",
+            "title": "Subject Name Ar",
+            "default": ""
+          },
+          "subject_name_en": {
+            "type": "string",
+            "title": "Subject Name En",
+            "default": ""
+          },
+          "teacher_name": {
+            "type": "string",
+            "title": "Teacher Name",
+            "default": ""
+          },
+          "computed_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed Percentage",
+            "description": "The school's OFFICIAL course total, exactly as the gradebook has it — including attendance and any other graded activity. Null when nothing is gradeable yet, which is not the same as zero."
+          },
+          "letter_grade": {
+            "type": "string",
+            "title": "Letter Grade",
+            "default": ""
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "academic": {
+            "$ref": "#/components/schemas/AcademicGrade",
+            "description": "The same subject counting assessments only."
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/GradeCategory"
+            },
+            "type": "array",
+            "title": "Categories",
+            "description": "The system of record's own category subtotals."
+          },
+          "graded_count": {
+            "type": "integer",
+            "title": "Graded Count",
+            "default": 0
+          },
+          "excused_count": {
+            "type": "integer",
+            "title": "Excused Count",
+            "default": 0
+          },
+          "missing_count": {
+            "type": "integer",
+            "title": "Missing Count",
+            "default": 0
+          },
+          "pending_count": {
+            "type": "integer",
+            "title": "Pending Count",
+            "default": 0
+          },
+          "is_complete": {
+            "type": "boolean",
+            "title": "Is Complete",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_id"
+        ],
+        "title": "CourseGrade",
+        "description": "One subject for one term — the answer to \"how is my child doing in maths\".\n\nEvery figure here was computed by the system of record. This service classifies\n(letter, pass/fail) but does not calculate, because a second implementation of the\ngradebook's arithmetic is a second answer waiting to contradict the first.\n\n`excused_count` is surfaced rather than hidden so a figure can be explained: a\nparent comparing two children deserves to know one had three assessments excused."
+      },
+      "CourseGradeDetailOut": {
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StudentRef"
+          },
+          "term": {
+            "$ref": "#/components/schemas/TermOut"
+          },
+          "course": {
+            "$ref": "#/components/schemas/CourseGrade"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/AssignmentGrade"
+            },
+            "type": "array",
+            "title": "Assignments",
+            "default": []
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student",
+          "term",
+          "course",
+          "as_of"
+        ],
+        "title": "CourseGradeDetailOut",
+        "description": "The assignment-level breakdown behind one subject's figure."
+      },
+      "ErrorOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "not_authorized | unknown_student | unknown_term | records_restricted | lms_unavailable | not_found"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ErrorOut",
+        "description": "Machine-readable failure.\n\n`code` exists so the agent branches on a value rather than on prose. The one that\nmatters most is `lms_unavailable`: it must produce \"I cannot reach the school\nrecords right now\", never an answer the model invented to be helpful."
+      },
+      "GradeCategory": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage"
+          }
+        },
+        "type": "object",
+        "title": "GradeCategory",
+        "description": "A gradebook category subtotal, computed by the system of record.\n\nExact under every aggregation scheme, because the LMS applied that scheme itself.\nThis is the dependable route to a partial subject grade when `academic` could not\nbe derived."
+      },
+      "GuardianIn": {
+        "properties": {
+          "external_id": {
+            "type": "string",
+            "title": "External Id"
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "default": ""
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "default": ""
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "default": ""
+          },
+          "preferred_language": {
+            "type": "string",
+            "title": "Preferred Language",
+            "default": "ar"
+          }
+        },
+        "type": "object",
+        "required": [
+          "external_id"
+        ],
+        "title": "GuardianIn"
+      },
+      "GuardianLinkIn": {
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "title": "Student Id"
+          },
+          "relationship_type": {
+            "type": "string",
+            "title": "Relationship Type",
+            "default": "parent"
+          },
+          "can_view_records": {
+            "type": "boolean",
+            "title": "Can View Records",
+            "default": false
+          },
+          "restriction_note": {
+            "type": "string",
+            "title": "Restriction Note",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_id"
+        ],
+        "title": "GuardianLinkIn",
+        "description": "Linking a guardian to a student.\n\n`can_view_records` defaults to False so that creating the link is not, by itself,\na grant. Records access is an explicit act with a reason attached."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ReportCardOut": {
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StudentRef"
+          },
+          "term": {
+            "$ref": "#/components/schemas/TermOut"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          },
+          "is_superseded": {
+            "type": "boolean",
+            "title": "Is Superseded",
+            "default": false
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload",
+            "description": "The frozen figures exactly as published."
+          }
+        },
+        "type": "object",
+        "required": [
+          "student",
+          "term",
+          "version",
+          "published_at"
+        ],
+        "title": "ReportCardOut",
+        "description": "A published snapshot. Never recomputed on read."
+      },
+      "StudentGradesOut": {
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StudentRef"
+          },
+          "term": {
+            "$ref": "#/components/schemas/TermOut"
+          },
+          "courses": {
+            "items": {
+              "$ref": "#/components/schemas/CourseGrade"
+            },
+            "type": "array",
+            "title": "Courses",
+            "default": []
+          },
+          "primary_figure": {
+            "type": "string",
+            "title": "Primary Figure",
+            "description": "Which figure this school wants led with: 'academic' (assessments only) or 'official' (the gradebook total, including attendance). BOTH are always present on every course — this only says which to say first when one number is wanted. Set per deployment via RECORDS_PRIMARY_GRADE.",
+            "default": "academic"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student",
+          "term",
+          "as_of"
+        ],
+        "title": "StudentGradesOut",
+        "description": "Every subject for one student in one term."
+      },
+      "StudentListOut": {
+        "properties": {
+          "guardian_id": {
+            "type": "string",
+            "title": "Guardian Id"
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/StudentRef"
+            },
+            "type": "array",
+            "title": "Students",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "guardian_id"
+        ],
+        "title": "StudentListOut",
+        "description": "The students one guardian is permitted to ask about.\n\nAn empty list is a legitimate, non-error answer — it is what a guardian with no\nvisible children gets, and it is deliberately indistinguishable from a guardian\nwhose children are all restricted. Distinguishing them would let a caller probe\nfor the existence of a restriction."
+      },
+      "StudentRef": {
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "title": "Student Id",
+            "description": "The school's student number."
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "default": ""
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En",
+            "default": ""
+          },
+          "grade_level": {
+            "type": "string",
+            "title": "Grade Level",
+            "default": ""
+          },
+          "section": {
+            "type": "string",
+            "title": "Section",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_id"
+        ],
+        "title": "StudentRef",
+        "description": "A student as a parent would recognise them. No LMS ids leak across the seam."
+      },
+      "SubmissionStatus": {
+        "type": "string",
+        "enum": [
+          "graded",
+          "excused",
+          "submitted_ungraded",
+          "missing",
+          "not_due"
+        ],
+        "title": "SubmissionStatus",
+        "description": "Why a grade is or is not a number.\n\n`EXCUSED` is the one that matters and the one most systems get wrong. An excused\nassignment leaves the denominator entirely — it is not a zero, and treating it as\none silently lowers a real child's real grade. It is a distinct member here so the\naggregation cannot collapse it by accident."
+      },
+      "TermOut": {
+        "properties": {
+          "term_id": {
+            "type": "string",
+            "title": "Term Id",
+            "description": "Stable term code, e.g. '2026-T1'."
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "default": ""
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "default": ""
+          },
+          "academic_year": {
+            "type": "string",
+            "title": "Academic Year",
+            "default": ""
+          },
+          "starts_on": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts On"
+          },
+          "ends_on": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ends On"
+          },
+          "is_closed": {
+            "type": "boolean",
+            "title": "Is Closed",
+            "description": "Closed terms are served from frozen report cards, not recomputed."
+          },
+          "is_current": {
+            "type": "boolean",
+            "title": "Is Current",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "term_id",
+          "starts_on",
+          "ends_on",
+          "is_closed"
+        ],
+        "title": "TermOut"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

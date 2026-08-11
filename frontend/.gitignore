@@ -1,0 +1,6 @@
+
+# Compiled output of vite.config.ts — shadows the .ts source and silently
+# reverts config changes (Vite resolves .js before .ts).
+vite.config.js
+vite.config.d.ts
+*.tsbuildinfo

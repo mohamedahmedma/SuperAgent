@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+from backend.chat.asset_context import SessionAssetState
+from backend.chat.caller_identity import CallerIdentity
 from backend.schemas.chat import HitlResumeState, normalize_rag_trace
 
 logger = logging.getLogger(__name__)
@@ -21,12 +24,77 @@ class ChatRequestContext:
     output_queue: Optional[asyncio.Queue] = None
     loop: Optional[asyncio.AbstractEventLoop] = None
 
+    # Verified identity for this turn, set by the HTTP layer from the caller's bearer
+    # token and never by anything downstream. OPAQUE to the agent: no prompt renders
+    # it, no tool takes it as an argument, and the model has no way to read or
+    # influence it. The records tool relays the token; the records facade checks its
+    # signature and decides what it authorises.
+    #
+    # One object rather than loose fields, so guardian id and token cannot drift apart
+    # — a context holding one without the other is not a state any code has to handle.
+    # Defaults to a bare identity derived from `user_id`, which is the correct and safe
+    # shape for a staff session, a background job or a test: not a parent, reads
+    # nothing.
+    caller: Optional[CallerIdentity] = None
+
+    # Assets surfaced and read during this conversation. Carried on the context (not
+    # a module global) so concurrent requests cannot see each other's state.
+    asset_state: SessionAssetState = field(default_factory=SessionAssetState)
+
     _lock: threading.RLock = field(default_factory=threading.RLock)
     _active: bool = True
     _rag_trace: Optional[dict] = None
     _knowledge_tool_slots_used: int = 0
+    _figure_tool_slots_used: int = 0
+    _records_tool_slots_used: int = 0
+    _short_circuit_status: Optional[str] = None
+    _surfaced_asset_ids: list = field(default_factory=list)
     _started_at: float = field(default_factory=time.monotonic)
     _last_step_at: Optional[float] = None
+
+    # What the turn planner worked out before the agent ran, for the RAG graph to read.
+    # Public because the graph reads them positionally through `getattr` and there is
+    # nothing to guard: both are hints, and an empty list is the correct default for a
+    # turn that was never planned (a sync call, a test).
+    retrieval_sections: list = field(default_factory=list)
+    scope_options: list = field(default_factory=list)
+    # Conditions carried over from earlier turns ("grades up to Year 6"). The graph
+    # appends them to the retrieval query and states them in the answer prompt.
+    carried_constraints: list = field(default_factory=list)
+    # Whether this turn's subject came from the conversation. Routing reads it to
+    # decide whether offering the user a choice of subjects could possibly help.
+    is_followup: bool = False
+
+    def __post_init__(self) -> None:
+        """Settle the caller, and refuse a context whose identity contradicts itself.
+
+        `user_id` remains the storage key, so a `caller` naming someone else would
+        write one user's conversation under another's name while reading a third
+        party's records. That is a silent, serious bug, and it is cheap to make
+        impossible here rather than plausible everywhere downstream.
+        """
+        if self.caller is None:
+            self.caller = CallerIdentity.for_user(self.user_id)
+        elif self.caller.user_id != self.user_id:
+            raise ValueError(
+                f"caller.user_id {self.caller.user_id!r} does not match "
+                f"user_id {self.user_id!r}"
+            )
+
+    # Read-only views onto the caller. Properties rather than fields so there is
+    # exactly one place the identity lives; a tool cannot assign to these and change
+    # whose records the turn may read.
+    @property
+    def guardian_id(self) -> str:
+        return self.caller.guardian_id if self.caller else ""
+
+    @property
+    def guardian_token(self) -> str:
+        return self.caller.guardian_token if self.caller else ""
+
+    @property
+    def is_parent(self) -> bool:
+        return bool(self.caller and self.caller.is_parent)
 
     @classmethod
     def for_stream(
@@ -35,12 +103,16 @@ class ChatRequestContext:
         user_id: str,
         session_id: str,
         output_queue: asyncio.Queue,
+        asset_state: Optional[SessionAssetState] = None,
+        caller: Optional[CallerIdentity] = None,
     ) -> ChatRequestContext:
         return cls(
             user_id=user_id,
             session_id=session_id,
             output_queue=output_queue,
             loop=asyncio.get_running_loop(),
+            asset_state=asset_state or SessionAssetState(),
+            caller=caller,
         )
 
     @classmethod
@@ -49,8 +121,42 @@ class ChatRequestContext:
         *,
         user_id: str,
         session_id: str,
+        asset_state: Optional[SessionAssetState] = None,
+        caller: Optional[CallerIdentity] = None,
     ) -> ChatRequestContext:
-        return cls(user_id=user_id, session_id=session_id)
+        return cls(
+            user_id=user_id,
+            session_id=session_id,
+            asset_state=asset_state or SessionAssetState(),
+            caller=caller,
+        )
+
+    def note_turn_plan(
+        self,
+        retrieval_sections,
+        scope_options,
+        *,
+        carried_constraints=(),
+        is_followup: bool = False,
+    ) -> None:
+        """Hand the planner's findings to the RAG graph.
+
+        Plain values rather than the `TurnPlan` itself, so this module keeps knowing
+        nothing about turn policy. Without this call the planner computed
+        `retrieval_sections` for nobody: `_initial_state` read it off the context, the
+        context never had it, and the hint had been inert since it was written.
+
+        The later arguments are keyword-only and defaulted so that a caller written
+        against the two-argument form — a test double, an integrating deployment —
+        keeps working and simply carries nothing forward.
+        """
+        with self._lock:
+            if not self._active:
+                return
+            self.retrieval_sections = list(retrieval_sections or [])
+            self.scope_options = list(scope_options or [])
+            self.carried_constraints = list(carried_constraints or [])
+            self.is_followup = bool(is_followup)
 
     def emit_rag_step(
         self,
@@ -117,13 +223,83 @@ class ChatRequestContext:
         with self._lock:
             return self._rag_trace
 
+    def note_short_circuit(self, status: str) -> None:
+        """Record that the graph ended itself rather than calling the model again.
+
+        Written by the agent middleware that makes the call, read by the streamer that
+        has to put a reply on the wire. One decision point: the two cannot disagree
+        about whether the model was skipped, which is what makes it safe for the
+        streamer to treat an empty response as intentional rather than as a failure.
+        """
+        with self._lock:
+            if self._active:
+                self._short_circuit_status = status
+
+    def short_circuit_status(self) -> Optional[str]:
+        with self._lock:
+            return self._short_circuit_status
+
     def reset_knowledge_tool_budget(self) -> None:
         with self._lock:
             self._knowledge_tool_slots_used = 0
+            self._figure_tool_slots_used = 0
+
+    def acquire_records_tool_slot(self) -> bool:
+        """Budget for get_student_records, separate from the other tool budgets.
+
+        A parent asking about two children in one turn is a legitimate three-call
+        sequence — list the children, then read each one's grades — so the ceiling is
+        higher than retrieval's. It exists at all because every call is a network
+        round trip to another service and an audited read of a minor's records; a
+        model that loops here is expensive in a way that shows up in a compliance
+        report, not just a bill.
+        """
+        limit = int(os.getenv("RECORDS_MAX_CALLS_PER_TURN") or 4)
+        with self._lock:
+            if self._records_tool_slots_used >= limit:
+                return False
+            self._records_tool_slots_used += 1
+            return True
+
+    def acquire_figure_tool_slot(self) -> bool:
+        """Budget for view_figure, separate from the knowledge-tool budget: looking at
+        a figure must not consume the turn's single retrieval."""
+        from backend.profiles import get_profile
+
+        limit = get_profile().agent.max_figure_calls_per_turn
+        with self._lock:
+            if self._figure_tool_slots_used >= limit:
+                return False
+            self._figure_tool_slots_used += 1
+            return True
+
+    def note_surfaced_assets(self, asset_ids) -> None:
+        """Record assets that retrieval put in front of the model.
+
+        Pinning here (rather than when a figure is read) is what lets a client attach
+        images to a response the model never explicitly looked at — the common case,
+        since a caption usually answers the question on its own.
+        """
+        with self._lock:
+            if not self._active:
+                return
+            for asset_id in asset_ids or []:
+                if asset_id and asset_id not in self._surfaced_asset_ids:
+                    self._surfaced_asset_ids.append(asset_id)
+            self.asset_state.pin_many(list(self._surfaced_asset_ids))
+
+    def surfaced_asset_ids(self) -> list:
+        with self._lock:
+            return list(self._surfaced_asset_ids)
 
     def acquire_knowledge_tool_slot(self) -> bool:
+        # Budget comes from the profile: a catalogue deployment may legitimately allow
+        # more knowledge calls per turn than a single-shot document assistant.
+        from backend.profiles import get_profile
+
+        limit = get_profile().agent.max_knowledge_calls_per_turn
         with self._lock:
-            if self._knowledge_tool_slots_used >= 1:
+            if self._knowledge_tool_slots_used >= limit:
                 return False
             self._knowledge_tool_slots_used += 1
             return True
@@ -133,3 +309,9 @@ class ChatRequestContext:
             self._active = False
             self.output_queue = None
             self.loop = None
+            # Drop the bearer token when the turn ends. The context can outlive the
+            # request that authorised it — held by a queue, a traceback, a retained
+            # reference in a test — and a live credential should not outlive the reason
+            # it was handed over. Who the caller was stays readable.
+            if self.caller is not None:
+                self.caller = self.caller.without_credentials()

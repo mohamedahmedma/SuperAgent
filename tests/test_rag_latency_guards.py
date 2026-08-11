@@ -45,6 +45,11 @@ def load_utils(env):
 
     fake_embedding = types.ModuleType("backend.indexing.embedding")
     fake_embedding.embedding_service = embedding_service
+    # Both the domain gate and retrieval ask for the query vector; the real module
+    # memoizes so only one forward pass happens. The stub delegates so tests that
+    # assert on what was embedded still see the call.
+    fake_embedding.embed_query = lambda text: fake_embedding.embedding_service.get_embeddings([text])[0]
+    fake_embedding.reset_query_vector_cache = lambda: None
 
     fake_parent_store = types.ModuleType("backend.indexing.parent_chunk_store")
 

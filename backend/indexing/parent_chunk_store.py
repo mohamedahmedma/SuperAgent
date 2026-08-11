@@ -23,6 +23,8 @@ class ParentChunkStore:
             "root_chunk_id": item.root_chunk_id,
             "chunk_level": item.chunk_level,
             "chunk_idx": item.chunk_idx,
+            "modality": getattr(item, "modality", "text") or "text",
+            "asset_ids": list(getattr(item, "asset_ids", None) or []),
         }
 
     @staticmethod
@@ -53,6 +55,8 @@ class ParentChunkStore:
                     "root_chunk_id": doc.get("root_chunk_id", ""),
                     "chunk_level": int(doc.get("chunk_level", 0) or 0),
                     "chunk_idx": int(doc.get("chunk_idx", 0) or 0),
+                    "modality": doc.get("modality", "text") or "text",
+                    "asset_ids": list(doc.get("asset_ids") or []),
                     "updated_at": datetime.utcnow(),
                 }
                 cache_payload = {
@@ -66,6 +70,8 @@ class ParentChunkStore:
                     "root_chunk_id": payload["root_chunk_id"],
                     "chunk_level": payload["chunk_level"],
                     "chunk_idx": payload["chunk_idx"],
+                    "modality": payload["modality"],
+                    "asset_ids": payload["asset_ids"],
                 }
                 if record:
                     for key, value in payload.items():

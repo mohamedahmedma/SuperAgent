@@ -38,6 +38,7 @@
             :msg-index="msgIndex"
             @cite-click="onCiteClick"
           />
+          <MessageAssets :assets="msg.assets" />
           <References
             ref="referencesRef"
             :msg="msg"
@@ -53,6 +54,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import MessageAssets from './MessageAssets.vue';
 import MessageContent from './MessageContent.vue';
 import ThinkingTrace from './ThinkingTrace.vue';
 import References from './References.vue';

@@ -1,17 +1,51 @@
+"""The search_knowledge_base tool.
+
+What this tool SAYS back to the model lives in
+backend/prompts/templates/tools/knowledge_result.j2, not in this file. That text is
+prompt — it instructs the model — and it is the Class B half of prompt routing: every
+branch of it depends on what retrieval actually returned, which the system prompt
+cannot know because it is built before the tool runs. Keeping it in a template means
+each instruction is paid only on the turns where its condition is real.
+
+This module decides WHICH outcome occurred. The template renders it.
+"""
 from langchain_core.tools import tool
 
 from backend.chat.request_context import ChatRequestContext
+from backend.prompts import render as render_prompt
+
+
+def _format_chunk(index: int, doc: dict) -> str:
+    """One retrieved chunk, as the model sees it.
+
+    Serialization rather than instruction, which is why it is here and not in the
+    template: there is nothing to instruct, and Jinja loop whitespace control would
+    make it harder to read for no gain.
+    """
+    entry = (
+        f"[{index}] {doc.get('filename', 'Unknown')} "
+        f"(Page {doc.get('page_number', 'N/A')}):\n{doc.get('text', '')}"
+    )
+    # Naming the asset_id inline is what makes view_figure callable at all — the model
+    # can only pass back an id it has actually seen.
+    asset_ids = [item for item in (doc.get("asset_ids") or []) if item]
+    if asset_ids:
+        entry += "\n(figure available — view_figure asset_id: " + ", ".join(asset_ids) + ")"
+    return entry
 
 
 def make_search_knowledge_base(ctx: ChatRequestContext):
     @tool("search_knowledge_base")
     def search_knowledge_base(query: str) -> str:
-        """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors)."""
+        """Search the knowledge base for documents that answer the user's question.
+
+        Use this whenever the user asks something the corpus would know. Call it once
+        per turn and answer from what it returns; a second call in the same turn is
+        refused. How the search runs is not your concern — pass the user's information
+        need in your own words.
+        """
         if not ctx.acquire_knowledge_tool_slot():
-            return (
-                "TOOL_CALL_LIMIT_REACHED: search_knowledge_base has already been called once in this turn. "
-                "Use the existing retrieval result and provide the final answer directly."
-            )
+            return render_prompt("tools/knowledge_result.j2", outcome="call_limit")
 
         # Delayed import keeps tests and lightweight imports away from RAG/embedding startup.
         from backend.rag.pipeline import run_rag_graph
@@ -30,29 +64,68 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         status = rag_trace.get("retrieval_status") if isinstance(rag_trace, dict) else None
         route = rag_trace.get("route") if isinstance(rag_trace, dict) else None
         if status == "needs_clarification" or route == "clarify":
-            prompt = rag_trace.get("hitl_prompt") or "I found related knowledge, but need one more detail before answering."
-            return f"NEEDS_CLARIFICATION: {prompt}"
+            return render_prompt(
+                "tools/knowledge_result.j2",
+                outcome="needs_clarification",
+                prompt=rag_trace.get("hitl_prompt")
+                or "I found related knowledge, but need one more detail before answering.",
+            )
 
         if status == "needs_scope_selection" or route == "scope_select":
-            prompt = rag_trace.get("hitl_prompt") or "I found multiple related knowledge-base directions. Ask the user to choose one."
-            options = rag_trace.get("hitl_options") or []
-            if options:
-                prompt = f"{prompt}\nOptions: " + "; ".join(str(item) for item in options)
-            return f"NEEDS_SCOPE_SELECTION: {prompt}"
+            return render_prompt(
+                "tools/knowledge_result.j2",
+                outcome="needs_scope_selection",
+                prompt=rag_trace.get("hitl_prompt")
+                or "I found multiple related knowledge-base directions. Ask the user to choose one.",
+                options=[str(item) for item in (rag_trace.get("hitl_options") or [])],
+            )
+
+        if status == "retrieval_error" or route == "retrieval_error":
+            return render_prompt("tools/knowledge_result.j2", outcome="retrieval_error")
 
         if status == "no_knowledge" or route == "no_knowledge":
-            return "NO_KNOWLEDGE: No reliable relevant documents were found in the knowledge base."
+            return render_prompt("tools/knowledge_result.j2", outcome="no_knowledge")
 
         if not docs:
-            return "No relevant documents found in the knowledge base."
+            return render_prompt("tools/knowledge_result.j2", outcome="empty")
 
-        formatted = []
-        for i, result in enumerate(docs, 1):
-            source = result.get("filename", "Unknown")
-            page = result.get("page_number", "N/A")
-            text = result.get("text", "")
-            formatted.append(f"[{i}] {source} (Page {page}):\n{text}")
+        # Pin every asset retrieval surfaced, whether or not the model goes on to look
+        # at one. This is what lets a client attach the picture to a response that was
+        # answered entirely from the caption.
+        from backend.assets.delivery import collect_asset_ids
 
-        return "Retrieved Chunks:\n" + "\n\n---\n\n".join(formatted)
+        ctx.note_surfaced_assets(collect_asset_ids(docs))
+
+        return render_prompt(
+            "tools/knowledge_result.j2",
+            outcome="chunks",
+            chunks="\n\n---\n\n".join(
+                _format_chunk(i, doc) for i, doc in enumerate(docs, 1)
+            ),
+            # Conditions the user set in an earlier turn. Retrieval widened the query
+            # with them but cannot enforce them — a search for fees "up to Year 6"
+            # still returns the whole fee table — so the narrowing has to be stated to
+            # the model that writes the answer. Paid only on turns that carry one.
+            constraints=[
+                str(item) for item in (getattr(ctx, "carried_constraints", None) or [])
+            ],
+            # The grader's verdict on whether the material actually varies by those
+            # conditions, from the same call that graded the evidence. It decides
+            # whether the conditions narrow the answer or merely describe who is
+            # asking — see the template.
+            discriminate=str(
+                (rag_trace or {}).get("evidence_constraints_discriminate") or "unknown"
+            ),
+            # Only a rewritten retrieval needs the caveat, and only the trace knows
+            # whether one happened — which the system prompt could not, being fixed
+            # before any of this ran. Paid on the minority of turns that rewrote.
+            rewritten=bool(rag_trace.get("rewrite_method")),
+            # These chunks were graded on-subject but short of settling the question.
+            # The model cannot see that grade, and its default reading of "the context
+            # doesn't fully answer this" is to refuse — which is how a question whose
+            # answer was sitting in chunk 3 ended in a denial. Paid only when the
+            # grader actually said partial.
+            partial=status == "partial",
+        )
 
     return search_knowledge_base

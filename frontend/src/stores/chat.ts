@@ -2,7 +2,12 @@ import { defineStore } from 'pinia';
 import { useAuthStore } from './auth';
 import { useSessionStore } from './sessions';
 import api from '@/utils/api';
-import type { Message, RagStep, GroupedRagStep, HitlRequest, RagTrace } from '@/types/chat';
+import type { Message, RagStep, GroupedRagStep, HitlRequest, RagTrace, SessionPaging } from '@/types/chat';
+
+// One scroll-back. Opening a chat loads the last screenful; older batches arrive as the
+// user scrolls up to them, so a conversation with a thousand messages opens as fast as
+// one with ten.
+const PAGE_SIZE = 15;
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -15,6 +20,9 @@ export const useChatStore = defineStore('chat', {
     streamingSessionId: null as string | null,
     abortController: null as AbortController | null,
     pendingHitlBySession: {} as Record<string, HitlRequest | null>,
+    // Where each session's scroll-back has got to. Absent means nothing was loaded from
+    // the server — a brand new chat has no history to page through.
+    pagingBySession: {} as Record<string, SessionPaging>,
   }),
 
   getters: {
@@ -28,6 +36,15 @@ export const useChatStore = defineStore('chat', {
 
     currentPendingHitl(state): HitlRequest | null {
       return state.pendingHitlBySession[state.sessionId] || null;
+    },
+
+    canLoadOlderMessages(state): boolean {
+      const paging = state.pagingBySession[state.sessionId];
+      return !!paging && paging.hasMore && !paging.loadingOlder && paging.oldestId !== null;
+    },
+
+    isLoadingOlderMessages(state): boolean {
+      return !!state.pagingBySession[state.sessionId]?.loadingOlder;
     },
 
     inputPlaceholder(state): string {
@@ -169,6 +186,9 @@ export const useChatStore = defineStore('chat', {
           hitlOptions: isHitlRequest ? ragTrace?.hitl_options || [] : undefined,
           hitlResumeText: resumeTextForMessage,
           ragTrace,
+          // Reloading a past session restores its images too: the backend persists
+          // them on the trace, so they survive a page refresh.
+          assets: ragTrace?.assets || [],
         };
       });
     },
@@ -248,6 +268,7 @@ export const useChatStore = defineStore('chat', {
       const sessionId = this.createSessionId();
       this.messagesBySession[sessionId] = [];
       delete this.pendingHitlBySession[sessionId];
+      delete this.pagingBySession[sessionId];
       this.setViewedSession(sessionId);
       const sessionStore = useSessionStore();
       sessionStore.showHistorySidebar = false;
@@ -262,7 +283,19 @@ export const useChatStore = defineStore('chat', {
         this.messagesBySession[this.sessionId] = [];
         this.messages = this.messagesBySession[this.sessionId];
         delete this.pendingHitlBySession[this.sessionId];
+        // Otherwise scrolling up would pull the cleared conversation back in.
+        delete this.pagingBySession[this.sessionId];
       }
+    },
+
+    recordPaging(sessionId: string, serverMessages: any[], hasMore: boolean) {
+      const oldest = serverMessages[0];
+      this.pagingBySession[sessionId] = {
+        // The cursor for the next batch: everything older than the oldest message held.
+        oldestId: typeof oldest?.id === 'number' ? oldest.id : null,
+        hasMore: !!hasMore,
+        loadingOlder: false,
+      };
     },
 
     async loadSession(sessionId: string) {
@@ -278,10 +311,15 @@ export const useChatStore = defineStore('chat', {
       }
 
       try {
-        const response = await api.get(`/sessions/${encodeURIComponent(sessionId)}`);
+        // The newest batch only. What came before it is fetched when scrolled to.
+        const response = await api.get(
+          `/sessions/${encodeURIComponent(sessionId)}?limit=${PAGE_SIZE}`
+        );
         const data = response.data;
-        const loadedMessages = this.mapServerMessages(data.messages || []);
+        const serverMessages = data.messages || [];
+        const loadedMessages = this.mapServerMessages(serverMessages);
         this.messagesBySession[sessionId] = loadedMessages;
+        this.recordPaging(sessionId, serverMessages, data.has_more);
         this.syncPendingHitlFromMessages(sessionId);
         if (this.sessionId === sessionId) {
           this.messages = loadedMessages;
@@ -293,6 +331,67 @@ export const useChatStore = defineStore('chat', {
           this.messages = [];
         }
         throw new Error(errMsg);
+      }
+    },
+
+    /**
+     * Prepend the batch immediately older than what is on screen.
+     *
+     * Paging by the oldest message's id rather than by an offset: a turn finishing while
+     * someone reads back does not shift the window, so no batch repeats or goes missing.
+     */
+    async loadOlderMessages(requestedSessionId?: string) {
+      const sessionId = requestedSessionId || this.sessionId;
+      const paging = this.pagingBySession[sessionId];
+      if (!paging || !paging.hasMore || paging.loadingOlder || paging.oldestId === null) return;
+
+      paging.loadingOlder = true;
+      try {
+        const response = await api.get(
+          `/sessions/${encodeURIComponent(sessionId)}?limit=${PAGE_SIZE}&before=${paging.oldestId}`
+        );
+        const data = response.data;
+        const serverMessages = data.messages || [];
+        const older = this.mapServerMessages(serverMessages);
+
+        const existing = this.ensureSessionMessages(sessionId);
+        this.stitchHitlAcrossBatches(older, existing);
+        const combined = [...older, ...existing];
+        this.messagesBySession[sessionId] = combined;
+        if (this.sessionId === sessionId) {
+          this.messages = combined;
+        }
+
+        this.recordPaging(sessionId, serverMessages, data.has_more);
+        // Nothing came back, so there is nothing older however the server counted it.
+        if (!older.length) {
+          this.pagingBySession[sessionId] = { oldestId: paging.oldestId, hasMore: false, loadingOlder: false };
+        }
+      } catch (error: any) {
+        const current = this.pagingBySession[sessionId];
+        if (current) current.loadingOlder = false;
+        throw new Error(error.response?.data?.detail || error.message || 'Failed to load older messages');
+      }
+    },
+
+    /**
+     * Repair a clarification exchange split across a batch boundary.
+     *
+     * `mapServerMessages` reads a conversation forwards: a clarification request marks
+     * the reply that follows it as the answer, and those two are hidden as a pair. When
+     * the request is the last message of an older batch, the reply was mapped in an
+     * earlier fetch that could not have known — so it would show as an ordinary message
+     * and the exchange would render twice.
+     */
+    stitchHitlAcrossBatches(older: Message[], existing: Message[]) {
+      const request = older[older.length - 1];
+      const answer = existing[0];
+      if (!request?.isHitlRequest || !answer?.isUser || answer.isHitlAnswer) return;
+
+      answer.isHitlAnswer = true;
+      const nextReply = existing[1];
+      if (nextReply && !nextReply.isUser && !nextReply.isHitlRequest && !nextReply.hitlResumeText) {
+        nextReply.hitlResumeText = answer.text;
       }
     },
 
@@ -364,6 +463,7 @@ export const useChatStore = defineStore('chat', {
         thinkingStartedAt: Date.now(),
         hitlResumeText: pendingHitlAtSend ? text : undefined,
         ragTrace: null,
+        assets: [],
         ragSteps: [],
         _groupedSteps: [],
       });
@@ -428,6 +528,13 @@ export const useChatStore = defineStore('chat', {
                     continue;
                   }
                   botMsg.text += data.content;
+                } else if (data.type === 'assets') {
+                  // Its own event, ahead of the trace, so images can render without
+                  // depending on the trace payload's shape.
+                  const botMsg = requestMessages[botMsgIdx];
+                  if (botMsg) {
+                    botMsg.assets = data.assets || [];
+                  }
                 } else if (data.type === 'trace') {
                   const botMsg = requestMessages[botMsgIdx];
                   if (botMsg) {

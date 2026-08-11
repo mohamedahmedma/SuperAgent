@@ -1,0 +1,24 @@
+# Six packages. A service that holds credentials should have the smallest attack
+# surface in the estate, and every dependency here is one someone else audits.
+#
+#   pip install -r identity/requirements.txt
+#   uvicorn identity.app:app --port 8200
+
+fastapi>=0.115.0
+uvicorn>=0.30.0
+sqlalchemy>=2.0.36
+pydantic>=2.8.0
+psycopg2-binary>=2.9.10
+
+# RS256 signing and verification. `cryptography` arrives with the extra.
+python-jose[cryptography]>=3.3.0
+
+# Verifying legacy bcrypt hashes imported from the old chat backend. Only ever read,
+# never written — a verified legacy password is immediately re-hashed to PBKDF2, so
+# this dependency drains away as users sign in and can eventually be dropped.
+#
+# The bcrypt library directly, NOT passlib. passlib 1.7.4 raises on bcrypt 5.x before
+# it reaches the comparison, so every legacy account would fail to verify — which is
+# what the old backend was silently doing, since it caught the error and returned
+# False. See identity/auth.py.
+bcrypt>=4.0.0

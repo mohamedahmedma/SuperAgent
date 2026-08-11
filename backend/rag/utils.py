@@ -1,14 +1,23 @@
 from collections import defaultdict
 from typing import List, Tuple, Dict, Any, Literal, Optional
+import logging
 import os
 import json
 import requests
+from langsmith import traceable
 
 from backend.indexing.milvus_client import get_milvus_store
-from backend.indexing.embedding import embedding_service as _embedding_service
+from backend.indexing.embedding import embed_query, embedding_service as _embedding_service
+from backend.env import env_bool, env_float, env_int, env_value
+from backend.llm import sampling
 from backend.indexing.parent_chunk_store import ParentChunkStore
+from backend.profiles import get_profile
+from backend.prompts import resolve as resolve_prompt
+from backend.text_normalization import normalize_query
 from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 def _optional_env(name: str) -> Optional[str]:
@@ -28,43 +37,55 @@ def _optional_env(name: str) -> Optional[str]:
 ARK_API_KEY = os.getenv("ARK_API_KEY")
 FAST_MODEL = os.getenv("FAST_MODEL")
 BASE_URL = os.getenv("BASE_URL")
+
+# Retrieval tuning defaults come from the active domain profile; the environment
+# readers below still take precedence, so the effective order is
+# env > profile > schema default. The profile object itself is env-overlaid by
+# backend/profiles/registry.py, so both paths agree on the final value.
+_PROFILE = get_profile()
+_RETRIEVAL = _PROFILE.retrieval
+
 RERANK_MODEL = _optional_env("RERANK_MODEL")
 RERANK_BINDING_HOST = _optional_env("RERANK_BINDING_HOST")
 RERANK_API_KEY = _optional_env("RERANK_API_KEY")
 RERANK_ENABLED = bool(RERANK_MODEL and RERANK_API_KEY and RERANK_BINDING_HOST)
-try:
-    RERANK_TIMEOUT_SECONDS = max(float(os.getenv("RERANK_TIMEOUT_SECONDS", "5")), 0.1)
-except ValueError:
-    RERANK_TIMEOUT_SECONDS = 5.0
-AUTO_MERGE_ENABLED = os.getenv("AUTO_MERGE_ENABLED", "true").lower() != "false"
-AUTO_MERGE_THRESHOLD = int(os.getenv("AUTO_MERGE_THRESHOLD", "2"))
-LEAF_RETRIEVE_LEVEL = int(os.getenv("LEAF_RETRIEVE_LEVEL", "3"))
+RERANK_TIMEOUT_SECONDS = env_float(
+    "RERANK_TIMEOUT_SECONDS", _RETRIEVAL.rerank_timeout_seconds, minimum=0.1
+)
+RERANK_DOC_CHAR_LIMIT = env_int(
+    "RERANK_DOC_CHAR_LIMIT", _RETRIEVAL.rerank_doc_char_limit, minimum=200
+)
+AUTO_MERGE_ENABLED = env_bool("AUTO_MERGE_ENABLED", _RETRIEVAL.auto_merge_enabled)
+AUTO_MERGE_THRESHOLD = env_int("AUTO_MERGE_THRESHOLD", _RETRIEVAL.auto_merge_threshold)
+# None keeps figure-bearing groups unmerged so each image stays individually citable.
+AUTO_MERGE_FIGURE_THRESHOLD = _RETRIEVAL.auto_merge_figure_threshold
+LEAF_RETRIEVE_LEVEL = env_int("LEAF_RETRIEVE_LEVEL", _RETRIEVAL.leaf_retrieve_level)
 
 
-def _read_positive_int_env(name: str, default: int) -> int:
-    try:
-        return max(int(os.getenv(name, str(default))), 1)
-    except ValueError:
-        return default
+RETRIEVAL_CANDIDATE_MULTIPLIER = env_int(
+    "RETRIEVAL_CANDIDATE_MULTIPLIER", _RETRIEVAL.candidate_multiplier, minimum=1
+)
+RETRIEVAL_TOP_K = env_int("RETRIEVAL_TOP_K", _RETRIEVAL.top_k, minimum=1)
+RERANK_MIN_SCORE = env_float("RERANK_MIN_SCORE", _RETRIEVAL.rerank_min_score)
 
-
-RETRIEVAL_CANDIDATE_MULTIPLIER = _read_positive_int_env("RETRIEVAL_CANDIDATE_MULTIPLIER", 3)
-_RETRIEVAL_CANDIDATE_K_RAW = os.getenv("RETRIEVAL_CANDIDATE_K", "").strip()
-RETRIEVAL_TOP_K = _read_positive_int_env("RETRIEVAL_TOP_K", 8)
-
-
-def _read_float_env(name: str, default: float) -> float:
-    try:
-        return float(os.getenv(name, str(default)))
-    except ValueError:
-        return default
-
-
-RERANK_MIN_SCORE = _read_float_env("RERANK_MIN_SCORE", 0.0)
+# An explicit candidate pool size can come from either layer, and the retrieval trace
+# reports WHICH — "env" and "profile" are different operational stories when someone
+# is working out why a deployment recalls more than its profile says it should.
+_CANDIDATE_K_FROM_ENV = env_value("RETRIEVAL_CANDIDATE_K")
+if _CANDIDATE_K_FROM_ENV is not None:
+    _RETRIEVAL_CANDIDATE_K_RAW = _CANDIDATE_K_FROM_ENV
+    _CANDIDATE_K_EXPLICIT_SOURCE = "env"
+elif _RETRIEVAL.candidate_k is not None:
+    _RETRIEVAL_CANDIDATE_K_RAW = str(_RETRIEVAL.candidate_k)
+    _CANDIDATE_K_EXPLICIT_SOURCE = "profile"
+else:
+    _RETRIEVAL_CANDIDATE_K_RAW = ""
+    _CANDIDATE_K_EXPLICIT_SOURCE = "multiplier"
 
 RETRIEVAL_TRACE_FIELDS = (
     "retrieval_pipeline",
     "retrieval_mode",
+    "retrieval_error",
     "candidate_k",
     "candidate_k_source",
     "candidate_k_config_error",
@@ -77,6 +98,7 @@ RETRIEVAL_TRACE_FIELDS = (
     "auto_merge_enabled",
     "auto_merge_applied",
     "auto_merge_threshold",
+    "auto_merge_figure_threshold",
     "auto_merge_replaced_chunks",
     "auto_merge_steps",
     "rerank_enabled",
@@ -111,7 +133,7 @@ def resolve_candidate_k(top_k: int) -> Tuple[int, Dict[str, Any]]:
                 "candidate_k_config_error": "invalid RETRIEVAL_CANDIDATE_K",
             }
         return candidate_k, {
-            "candidate_k_source": "env",
+            "candidate_k_source": _CANDIDATE_K_EXPLICIT_SOURCE,
             "retrieval_candidate_multiplier": RETRIEVAL_CANDIDATE_MULTIPLIER,
         }
     candidate_k = max(top_k * RETRIEVAL_CANDIDATE_MULTIPLIER, top_k)
@@ -170,14 +192,34 @@ def _merge_rank_score_into(target: dict, source: dict) -> None:
         target["score"] = max(float(existing), incoming)
 
 
-def _merge_to_parent_level(docs: List[dict], threshold: int = 2) -> Tuple[List[dict], int]:
+def _is_figure_chunk(doc: dict) -> bool:
+    """Whether a chunk carries an image. `asset_ids` is checked as well as `modality`
+    so a chunk written before the modality field existed is still recognised."""
+    return doc.get("modality") == "figure" or bool(doc.get("asset_ids"))
+
+
+def _merge_to_parent_level(
+    docs: List[dict],
+    threshold: int = 2,
+    figure_threshold: Optional[int] = None,
+) -> Tuple[List[dict], int]:
     groups: Dict[str, List[dict]] = defaultdict(list)
     for doc in docs:
         parent_id = (doc.get("parent_chunk_id") or "").strip()
         if parent_id:
             groups[parent_id].append(doc)
 
-    merge_parent_ids = [parent_id for parent_id, children in groups.items() if len(children) >= threshold]
+    merge_parent_ids: List[str] = []
+    for parent_id, children in groups.items():
+        if any(_is_figure_chunk(child) for child in children):
+            # Merging two figure leaves into one parent makes a single citation point
+            # at several images, which is exactly the ambiguity the citation was
+            # supposed to remove. Text groups keep the normal threshold.
+            if figure_threshold is None or len(children) < figure_threshold:
+                continue
+        elif len(children) < threshold:
+            continue
+        merge_parent_ids.append(parent_id)
     if not merge_parent_ids:
         return docs, 0
 
@@ -215,12 +257,14 @@ def _empty_merge_meta() -> Dict[str, Any]:
         "auto_merge_enabled": AUTO_MERGE_ENABLED,
         "auto_merge_applied": False,
         "auto_merge_threshold": AUTO_MERGE_THRESHOLD,
+        "auto_merge_figure_threshold": AUTO_MERGE_FIGURE_THRESHOLD,
         "auto_merge_replaced_chunks": 0,
         "auto_merge_steps": 0,
         "post_merge_candidate_count": 0,
     }
 
 
+@traceable(name="auto_merge_candidates", run_type="tool")
 def _auto_merge_candidates(docs: List[dict]) -> Tuple[List[dict], Dict[str, Any]]:
     """Perform L3→L2→L1 merging over the full set of recall candidates; order is unchanged, reranking is handled by a later step."""
     meta = _empty_merge_meta()
@@ -228,8 +272,12 @@ def _auto_merge_candidates(docs: List[dict]) -> Tuple[List[dict], Dict[str, Any]
     if not AUTO_MERGE_ENABLED or not docs:
         return docs, meta
 
-    merged_docs, merged_count_l3_l2 = _merge_to_parent_level(docs, threshold=AUTO_MERGE_THRESHOLD)
-    merged_docs, merged_count_l2_l1 = _merge_to_parent_level(merged_docs, threshold=AUTO_MERGE_THRESHOLD)
+    merged_docs, merged_count_l3_l2 = _merge_to_parent_level(
+        docs, threshold=AUTO_MERGE_THRESHOLD, figure_threshold=AUTO_MERGE_FIGURE_THRESHOLD
+    )
+    merged_docs, merged_count_l2_l1 = _merge_to_parent_level(
+        merged_docs, threshold=AUTO_MERGE_THRESHOLD, figure_threshold=AUTO_MERGE_FIGURE_THRESHOLD
+    )
 
     replaced_count = merged_count_l3_l2 + merged_count_l2_l1
     meta.update({
@@ -260,6 +308,7 @@ def dedupe_documents(docs: List[dict]) -> List[dict]:
     return [by_key[key] for key in order]
 
 
+@traceable(name="rerank_documents", run_type="tool")
 def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[dict], Dict[str, Any]]:
     docs_with_rank = [{**doc, "rrf_rank": i} for i, doc in enumerate(docs, 1)]
     meta: Dict[str, Any] = {
@@ -277,7 +326,9 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
     payload = {
         "model": RERANK_MODEL,
         "query": query,
-        "documents": [doc.get("text", "") for doc in docs_with_rank],
+        # Truncated: rerank providers bill per ~500-token document unit, and the
+        # relevance signal sits in the opening span of a chunk anyway.
+        "documents": [doc.get("text", "")[:RERANK_DOC_CHAR_LIMIT] for doc in docs_with_rank],
         "top_n": min(top_k, len(docs_with_rank)),
         "return_documents": False,
     }
@@ -287,7 +338,6 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
         "Authorization": f"Bearer {RERANK_API_KEY}",
     }
     try:
-        meta["rerank_applied"] = True
         response = requests.post(
             meta["rerank_endpoint"],
             headers=headers,
@@ -310,6 +360,11 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
                 reranked.append(doc)
 
         if reranked:
+            # Set here, not before the call: "applied" has to mean these documents
+            # carry reranker scores. Setting it on entry made it mean "attempted",
+            # which stayed true through every failure path below and misreported a
+            # silent RRF fallback as a successful rerank.
+            meta["rerank_applied"] = True
             return reranked[:top_k], meta
 
         meta["rerank_error"] = "empty_rerank_results"
@@ -335,21 +390,9 @@ class RewritePlan(BaseModel):
     )
 
 
-REWRITE_PROMPT = (
-    "You are a RAG query-rewrite planner. The initial retrieval already found a relevant signal, "
-    "but the evidence is insufficient. Choose exactly one rewrite method — step_back or hyde — and "
-    "generate the content that method needs.\n\n"
-    "Selection rules:\n"
-    "- step_back: the original question is too specific, containing entity names, model numbers, dates, "
-    "conditions, or details; it needs to be raised to a more general concept, mechanism, or principle before retrieving again.\n"
-    "- hyde: the original question is vague, highly conceptual, or lacks terminology commonly used in the "
-    "knowledge base; it's better to first generate a plausible answer-like document, then use that document to retrieve real evidence.\n\n"
-    "Constraints:\n"
-    "- When method=step_back, fill in only step_back_question; hyde_document must be left empty.\n"
-    "- When method=hyde, fill in only hyde_document; step_back_question must be left empty.\n"
-    "- The HyDE document is for retrieval only and does not represent real evidence — do not fabricate citations or sources.\n\n"
-    "User question: {query}"
-)
+# Prompt text lives in the active profile (backend/profiles/definitions/*.yaml) so a
+# domain can retune retrieval wording without a code change.
+REWRITE_PROMPT = _PROFILE.rag.rewrite_prompt
 
 
 def _get_rewrite_model():
@@ -362,41 +405,70 @@ def _get_rewrite_model():
             model_provider="openai",
             api_key=ARK_API_KEY,
             base_url=BASE_URL,
-            temperature=0,
             stream_usage=True,
+            **sampling("rewrite"),
         )
     return _rewrite_model
 
 
-def rewrite_query_once(query: str) -> dict:
+def rewrite_query_once(query: str) -> Optional[dict]:
+    """Plan one rewrite, or return None when the plan cannot be produced.
+
+    None rather than an exception. A rewrite is an OPTIONAL second attempt at
+    retrieval that only runs when the first pass graded weak; if the planner fails,
+    the correct outcome is "no rewrite happened", not a failed turn for the user.
+
+    That distinction is not theoretical: providers enforcing OpenAI-style *strict*
+    structured output (Groq among them) require every declared property to be present
+    in the response. A planner told to leave the unused field "empty" tends to omit it
+    instead, which fails schema validation. The prompt now asks for an empty string
+    explicitly, and the field is inferred from whichever one came back populated — but
+    the outer guard is what makes the path safe regardless of provider behaviour.
+    """
     model = _get_rewrite_model()
     if not model:
-        raise RuntimeError("FAST_MODEL is required for query rewriting")
+        logger.warning("FAST_MODEL is not configured; skipping query rewrite")
+        return None
 
-    result = model.with_structured_output(RewritePlan).invoke(
-        [{"role": "user", "content": REWRITE_PROMPT.format(query=query)}]
-    )
-    method = result.method
-    step_back_question = (result.step_back_question or "").strip()
-    hyde_document = (result.hyde_document or "").strip()
+    try:
+        result = model.with_structured_output(RewritePlan).invoke(
+            [{"role": "user", "content": resolve_prompt(REWRITE_PROMPT, "rag/rewrite.j2", query=query)}]
+        )
+    except Exception:
+        logger.exception("Query-rewrite planning failed; continuing without a rewrite")
+        return None
 
-    if method == "step_back":
-        if not step_back_question or hyde_document:
-            raise ValueError("Step-back rewrite plan must contain only step_back_question")
-        rewritten_query = f"{query}\n\nStep-back question: {step_back_question}"
-    elif method == "hyde":
-        if not hyde_document or step_back_question:
-            raise ValueError("HyDE rewrite plan must contain only hyde_document")
-        rewritten_query = f"{query}\n\nHypothetical answer document: {hyde_document}"
-    else:
-        raise ValueError(f"Unsupported rewrite method: {method}")
+    method = (getattr(result, "method", "") or "").strip()
+    step_back_question = (getattr(result, "step_back_question", "") or "").strip()
+    hyde_document = (getattr(result, "hyde_document", "") or "").strip()
 
-    return {
-        "rewrite_method": method,
-        "rewritten_query": rewritten_query,
-        "step_back_question": step_back_question,
-        "hyde_document": hyde_document,
-    }
+    # Trust the populated field over the declared method: a planner that fills in
+    # hyde_document while labelling itself step_back has still expressed a usable
+    # intent, and discarding it would waste the call.
+    if method not in ("step_back", "hyde"):
+        method = "step_back" if step_back_question else ("hyde" if hyde_document else "")
+    if method == "step_back" and not step_back_question and hyde_document:
+        method = "hyde"
+    if method == "hyde" and not hyde_document and step_back_question:
+        method = "step_back"
+
+    if method == "step_back" and step_back_question:
+        return {
+            "rewrite_method": "step_back",
+            "rewritten_query": f"{query}\n\nStep-back question: {step_back_question}",
+            "step_back_question": step_back_question,
+            "hyde_document": "",
+        }
+    if method == "hyde" and hyde_document:
+        return {
+            "rewrite_method": "hyde",
+            "rewritten_query": f"{query}\n\nHypothetical answer document: {hyde_document}",
+            "step_back_question": "",
+            "hyde_document": hyde_document,
+        }
+
+    logger.warning("Query-rewrite plan was empty (method=%r); continuing without a rewrite", method)
+    return None
 
 
 def _finalize_retrieval(
@@ -430,13 +502,21 @@ def _finalize_retrieval(
     return {"docs": final_docs, "meta": meta}
 
 
+@traceable(name="retrieve_documents", run_type="retriever")
 def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, Any]:
+    # Normalize the query with the SAME rules applied to indexed text. Arabic
+    # pasted from a PDF arrives as presentation forms / tatweel / zero-width
+    # marks, which is a different character sequence from the indexed chunk —
+    # without this the BM25 side cannot match and the dense side degrades.
+    query = normalize_query(query) or query
     candidate_k, candidate_config = resolve_candidate_k(top_k)
     filter_expr = f"chunk_level == {LEAF_RETRIEVE_LEVEL}"
     try:
-        dense_embeddings = _embedding_service.get_embeddings([query])
-        dense_embedding = dense_embeddings[0]
+        # Memoized: the domain gate has usually already embedded this exact normalized
+        # text, so this is a dictionary hit rather than a second forward pass.
+        dense_embedding = embed_query(query)
     except Exception:
+        logger.exception("could not embed the query %r", query[:120])
         return {
             "docs": [],
             "meta": {
@@ -446,6 +526,7 @@ def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, An
                 "rerank_endpoint": _get_rerank_endpoint(),
                 "rerank_error": "embedding_failed",
                 "rerank_timeout_seconds": RERANK_TIMEOUT_SECONDS,
+                "retrieval_error": "embedding_failed",
                 "retrieval_mode": "failed",
                 "retrieval_pipeline": "recall_merge_rerank",
                 "candidate_k": candidate_k,
@@ -493,6 +574,11 @@ def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, An
                 candidate_config=candidate_config,
             )
         except Exception:
+            # Logged, not just counted. Both retrieval paths degrade to the same
+            # "try again" notice, which is right for the user and useless for whoever
+            # has to fix it — the cause has been Milvus not running, an auth failure and
+            # a schema mismatch, and the trace said "failed" for all three.
+            logger.exception("retrieval failed for query %r after dense fallback", query[:120])
             return {
                 "docs": [],
                 "meta": {
@@ -502,6 +588,7 @@ def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, An
                     "rerank_endpoint": _get_rerank_endpoint(),
                     "rerank_error": "retrieve_failed",
                     "rerank_timeout_seconds": RERANK_TIMEOUT_SECONDS,
+                    "retrieval_error": "retrieve_failed",
                     "retrieval_mode": "failed",
                     "retrieval_pipeline": "recall_merge_rerank",
                     "candidate_k": candidate_k,
