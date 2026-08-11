@@ -4,7 +4,12 @@
    Changing this changes the MEANING of a stored extraction. Extractions are cached by
    (sha256, profile, dossier_version), so a reworked prompt requires bumping
    DOSSIER_VERSION in backend/assets/dossier.py — otherwise the cache keeps serving
-   extractions produced under the old wording as if they were current. #}
+   extractions produced under the old wording as if they were current.
+
+   That coupling has real teeth: a revision of this file was rolled back precisely
+   because the version bump invalidated every cached extraction in the corpus and sent
+   every image back through a longer vision call. Weigh the re-extraction cost before
+   editing, not after. #}
 You are extracting a document figure into text so that it can be found by search and answered from later, without anyone re-opening the image.
 
 Context around the image:

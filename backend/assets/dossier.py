@@ -27,6 +27,12 @@ from pydantic import BaseModel, ConfigDict, Field
 # Bumped whenever the MEANING of an extraction changes — a new required field, a
 # reworked prompt, a different transcription format. Rows below this version are
 # stale and are picked up by backend/assets/backfill.py.
+#
+# Bumping this is expensive in a way that is easy to underestimate: find_extraction()
+# filters on `dossier_version ==`, so every cached extraction in the corpus misses at
+# once and every image goes back through a vision call. A bump to 2 was reverted for
+# exactly that reason. Change it only alongside a prompt change you have measured, and
+# expect a full re-extraction pass to follow.
 DOSSIER_VERSION = 1
 
 

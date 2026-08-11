@@ -14,7 +14,12 @@ import logging
 import re
 from typing import List, Optional
 
-from backend.assets.delivery import AssetReference, ClientCapabilities, collect_asset_ids
+from backend.assets.delivery import (
+    AssetReference,
+    ClientCapabilities,
+    collect_asset_ids,
+    references_by_id,
+)
 from backend.chat.asset_context import SESSION_ASSET_KEY, SessionAssetState
 
 logger = logging.getLogger(__name__)
@@ -142,8 +147,99 @@ def build_asset_references(
 
 
 def attach_assets_to_trace(rag_trace: Optional[dict], references: List[AssetReference]) -> Optional[dict]:
-    if not rag_trace or not references:
+    """Record the turn's renditions on the trace, which is what persists them.
+
+    A trace is created when there is none but there are references, because the trace
+    is the only place a stored message keeps its images: dropping them here would show
+    the pictures live and lose them on the next reload. That gap is narrow — the
+    knowledge tool stores a trace before it pins anything — but it is the difference
+    between an image that survives a restart and one that does not.
+    """
+    if not references:
         return rag_trace
-    enriched = dict(rag_trace)
+    enriched = dict(rag_trace or {})
     enriched["assets"] = [reference.model_dump(mode="json", exclude_none=True) for reference in references]
     return enriched
+
+
+def trace_for_storage(rag_trace: Optional[dict]) -> Optional[dict]:
+    """The trace as it should be PERSISTED: assets by id, not by value.
+
+    A stored rendition is a second copy of something the asset store already holds — and
+    under inline delivery that copy is the image itself, base64'd into the conversation
+    row, once per message that showed it. A conversation would then grow with the
+    pictures in it rather than with the words, and the copies would go stale the moment
+    a document was re-ingested.
+
+    So only the ids are kept. `asset_id` is the asset table's primary key, which makes
+    restoring a keyed lookup rather than a search, and makes an image stored once serve
+    every message that ever showed it.
+    """
+    if not rag_trace or "assets" not in rag_trace:
+        return rag_trace
+    stored = {key: value for key, value in rag_trace.items() if key != "assets"}
+    asset_ids = [
+        asset["asset_id"]
+        for asset in rag_trace.get("assets") or []
+        if isinstance(asset, dict) and asset.get("asset_id")
+    ]
+    if asset_ids:
+        stored["asset_ids"] = asset_ids
+    return stored
+
+
+def restore_session_assets(
+    records: List[dict],
+    capabilities: Optional[ClientCapabilities] = None,
+    delivery_config=None,
+) -> List[dict]:
+    """Rebuild renditions for a loaded conversation, in ONE lookup for the whole session.
+
+    Stored traces carry ids; a client needs renditions. Resolving them message by message
+    would be a query per message, so every id in the session is collected, looked up
+    once, and handed back to the messages that referenced it — a reloaded conversation
+    costs one indexed `IN` query no matter how many images it showed.
+
+    Messages saved before ids were stored still carry their renditions inline; those are
+    left exactly as they are. An id that no longer resolves — its document deleted or
+    re-ingested — simply yields no image, rather than a card pointing at nothing.
+    """
+    wanted: List[str] = []
+    for record in records:
+        for asset_id in (record.get("rag_trace") or {}).get("asset_ids") or []:
+            if asset_id and asset_id not in wanted:
+                wanted.append(asset_id)
+    if not wanted:
+        return records
+
+    if delivery_config is None:
+        from backend.profiles import get_profile
+
+        delivery_config = get_profile().assets.delivery
+    capabilities = effective_capabilities(capabilities, delivery_config)
+    # The session's whole set is resolved in one call, so the per-response cap must not
+    # truncate the lookup; it is applied per message below, where it means something.
+    lookup = capabilities.model_copy(update={"max_assets": len(wanted)})
+    # No early return when nothing resolves: a message that referenced assets gets an
+    # `assets` list either way, so "none of these are available any more" is a fact a
+    # client can read rather than a missing key it has to interpret.
+    by_id = references_by_id(build_asset_references(wanted, lookup, delivery_config))
+
+    restored = []
+    for record in records:
+        trace = record.get("rag_trace")
+        asset_ids = (trace or {}).get("asset_ids") or []
+        if not trace or not asset_ids:
+            restored.append(record)
+            continue
+        references = [by_id[asset_id] for asset_id in asset_ids if asset_id in by_id]
+        current = dict(record)
+        current["rag_trace"] = {
+            **trace,
+            "assets": [
+                reference.model_dump(mode="json", exclude_none=True)
+                for reference in references[: capabilities.max_assets]
+            ],
+        }
+        restored.append(current)
+    return restored

@@ -170,6 +170,7 @@ class VisionExtractor(FigureExtractor):
                 ),
                 max_tokens=self._config.vision_max_output_tokens,
                 extra_params=self._config.vision_extra_params,
+                reasoning_effort=self._config.vision_reasoning_effort,
             )
         return self._model
 

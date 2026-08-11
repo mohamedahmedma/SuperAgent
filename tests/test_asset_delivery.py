@@ -6,6 +6,7 @@ change, and the way that is enforced is by asserting the backend never emits
 presentation: no HTML, no markdown image syntax, no field named after a component.
 What varies between clients is capability, declared per request.
 """
+import importlib
 import io
 import json
 import random
@@ -47,7 +48,9 @@ from backend.chat.assets_bridge import (
     build_asset_references,
     effective_capabilities,
     load_asset_state,
+    restore_session_assets,
     save_asset_state,
+    trace_for_storage,
 )
 from backend.chat.request_context import ChatRequestContext
 from backend.profiles.registry import load_profile
@@ -570,6 +573,45 @@ class AssetsBridgeTests(unittest.TestCase):
         self.assertIsNone(attach_assets_to_trace(None, []))
         self.assertEqual({"a": 1}, attach_assets_to_trace({"a": 1}, []))
 
+    def test_assets_without_a_trace_still_get_somewhere_to_live(self):
+        """The trace is where a stored message keeps its images. Returning None here
+        would show the pictures live and lose them on the next reload."""
+        enriched = attach_assets_to_trace(None, [AssetReference(asset_id="x")])
+        self.assertEqual(["x"], [asset["asset_id"] for asset in enriched["assets"]])
+
+    def test_what_is_stored_is_the_id_and_not_the_rendition(self):
+        wire = attach_assets_to_trace(
+            {"route": "answer"},
+            [AssetReference(asset_id="x", inline_data="data:image/png;base64,AAAA")],
+        )
+        stored = trace_for_storage(wire)
+
+        self.assertEqual(["x"], stored["asset_ids"])
+        self.assertNotIn("assets", stored)
+        self.assertEqual("answer", stored["route"], "the rest of the trace is untouched")
+
+    def test_storing_a_trace_leaves_the_wire_copy_alone(self):
+        """The client is still holding the renditions it was sent."""
+        wire = attach_assets_to_trace({"route": "answer"}, [AssetReference(asset_id="x")])
+        trace_for_storage(wire)
+        self.assertIn("assets", wire)
+
+    def test_a_trace_without_assets_passes_straight_through(self):
+        self.assertIsNone(trace_for_storage(None))
+        self.assertEqual({"route": "answer"}, trace_for_storage({"route": "answer"}))
+
+    def test_the_service_stores_every_turns_trace_by_id(self):
+        """The wiring, not just the function: a save path that skipped it would put
+        renditions back in the database without any test noticing."""
+        service = importlib.import_module("backend.chat.service")
+        wire = attach_assets_to_trace({"route": "answer"}, [AssetReference(asset_id="x")])
+
+        extra = service._message_data_for_save([1, 2], wire)
+
+        self.assertEqual([None], extra[:1])
+        self.assertEqual(["x"], extra[-1]["rag_trace"]["asset_ids"])
+        self.assertNotIn("assets", extra[-1]["rag_trace"])
+
     def test_attach_does_not_mutate_the_original_trace(self):
         trace = {"route": "answer"}
         reference = AssetReference(asset_id="x")
@@ -585,6 +627,373 @@ class AssetsBridgeTests(unittest.TestCase):
             self.assertEqual(
                 [], build_asset_references(["a"], ClientCapabilities(), self.delivery)
             )
+
+
+class DictCache:
+    """Stands in for Redis. Backed by JSON so the round trip is the real one."""
+
+    def __init__(self):
+        self.store = {}
+
+    def get_json(self, key):
+        value = self.store.get(key)
+        return json.loads(value) if value is not None else None
+
+    def set_json(self, key, value, ttl=None):
+        self.store[key] = json.dumps(value, ensure_ascii=False)
+
+    def delete(self, key):
+        self.store.pop(key, None)
+
+    def clear(self):
+        self.store.clear()
+
+
+class StoredConversationAssetTests(unittest.TestCase):
+    """An answer's images have to survive the next turn, not just the current one.
+
+    Images ride on the message's trace, and a save that rewrote the whole conversation
+    while the caller supplied a trace only for the turn it just finished dropped every
+    other one. An answer's pictures then lived exactly until the user's next message:
+    visible in the tab that received them, gone on reload.
+
+    Saving is an append now, and what it stores is ids rather than renditions — so these
+    also pin the two properties that come with that: rows are not churned, and a
+    conversation does not carry copies of the pictures in it.
+    """
+
+    def setUp(self):
+        import backend.chat.storage as storage_module
+
+        from backend.db.models import ChatMessage, ChatSession, User
+
+        self.engine = create_engine(
+            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+        )
+        for model in (User, ChatSession, ChatMessage):
+            model.__table__.create(self.engine)
+        factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+        db = factory()
+        db.add(User(username="u", password_hash="x"))
+        db.commit()
+        db.close()
+
+        self.factory = factory
+        self.cache = DictCache()
+        self.storage = storage_module.ConversationStorage()
+        self._patches = [
+            patch.object(storage_module, "SessionLocal", factory),
+            patch.object(storage_module, "cache", self.cache),
+        ]
+        for item in self._patches:
+            item.start()
+
+    def tearDown(self):
+        for item in self._patches:
+            item.stop()
+        self.engine.dispose()
+
+    def _trace(self, asset_id, inline=False):
+        """A trace as it goes on the WIRE: renditions in full, inline bytes and all."""
+        reference = AssetReference(
+            asset_id=asset_id,
+            caption="Chart",
+            mode=AssetRenditionMode.INLINE if inline else AssetRenditionMode.REFERENCE,
+            inline_data="data:image/png;base64,AAAA" * 64 if inline else None,
+            url=None if inline else asset_url_path(asset_id),
+        )
+        return {"tool_used": True, "assets": [reference.model_dump(mode="json", exclude_none=True)]}
+
+    def _turn(self, question, answer, trace=None):
+        """One turn, saved the way the chat service saves it: once when the question
+        arrives, once when the answer is complete, with the trace stored by id."""
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        messages = self.storage.load("u", "s")
+        messages.append(HumanMessage(content=question))
+        self.storage.save("u", "s", messages)
+        messages.append(AIMessage(content=answer))
+        self.storage.save(
+            "u", "s", messages,
+            metadata={},
+            extra_message_data=[None] * (len(messages) - 1)
+            + [{"rag_trace": trace_for_storage(trace)}],
+        )
+
+    def _stored_ids(self):
+        return [
+            list((message["rag_trace"] or {}).get("asset_ids") or [])
+            for message in self.storage.get_session_messages("u", "s")
+        ]
+
+    def _rows(self):
+        from backend.db.models import ChatMessage
+
+        db = self.factory()
+        try:
+            return db.query(ChatMessage).order_by(ChatMessage.id.asc()).all()
+        finally:
+            db.close()
+
+    def test_an_answers_images_survive_the_following_turns(self):
+        self._turn("what is the uniform?", "Navy, see the chart. [1]", self._trace("a1"))
+        self._turn("and the bus times?", "Buses run at 07:30.", {"tool_used": True})
+        self._turn("thanks", "Any time.")
+
+        self.assertEqual(
+            [[], ["a1"], [], [], [], []],
+            self._stored_ids(),
+            "the first answer lost its images once the conversation continued",
+        )
+
+    def test_images_survive_a_restart_that_empties_the_cache(self):
+        """The reported bug. A restart drops Redis, so history is rebuilt from
+        Postgres — which is exactly where the traces were being erased."""
+        self._turn("what is the uniform?", "Navy, see the chart. [1]", self._trace("a1"))
+        self._turn("and the bus times?", "Buses run at 07:30.", {"tool_used": True})
+
+        self.cache.clear()
+
+        self.assertEqual([[], ["a1"], [], []], self._stored_ids())
+
+    def test_a_supplied_trace_replaces_the_stored_one(self):
+        """Keeping what is stored must not outrank what this save was actually given."""
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
+        messages = [HumanMessage(content="what is the uniform?"), AIMessage(content="Navy. [1]")]
+        self.storage.save(
+            "u", "s", messages, metadata={},
+            extra_message_data=[None, {"rag_trace": trace_for_storage(self._trace("a2"))}],
+        )
+
+        self.assertEqual([[], ["a2"]], self._stored_ids())
+
+    def test_a_rewritten_conversation_is_replaced_rather_than_appended_to(self):
+        """Position alone is not identity. Roles that disagree mean the conversation was
+        rewritten, and appending to it would splice two conversations together."""
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
+        self.storage.save("u", "s", [AIMessage(content="Navy. [1]"), HumanMessage(content="ok")])
+
+        self.assertEqual([[], []], self._stored_ids())
+        self.assertEqual(["ai", "human"], [row.message_type for row in self._rows()])
+
+    def test_a_shorter_conversation_replaces_what_was_stored(self):
+        from langchain_core.messages import HumanMessage
+
+        self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
+        self.storage.save("u", "s", [HumanMessage(content="starting over")])
+
+        self.assertEqual(1, len(self._rows()))
+
+    def test_the_cached_copy_and_the_database_agree(self):
+        """`get_session_messages` prefers the cache, so a fix that only reached the
+        database would still hand a live client the wrong history."""
+        self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
+        self._turn("and the bus times?", "Buses run at 07:30.", {"tool_used": True})
+
+        cached = self._stored_ids()
+        self.cache.clear()
+        self.assertEqual(cached, self._stored_ids())
+
+    def test_a_turn_appends_rather_than_rewriting_the_conversation(self):
+        """Three turns used to cost three deletes and twelve inserts. The rows that were
+        already right are left alone now, which is what keeps their ids and timestamps."""
+        self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
+        first_pass = [(row.id, row.timestamp) for row in self._rows()]
+
+        self._turn("and the bus times?", "Buses run at 07:30.")
+        self._turn("thanks", "Any time.")
+        second_pass = [(row.id, row.timestamp) for row in self._rows()]
+
+        self.assertEqual(first_pass, second_pass[:2], "existing rows were rewritten")
+        self.assertEqual(6, len(second_pass))
+
+    def _page(self, limit=None, before_id=None, cold=False):
+        if cold:
+            self.cache.clear()
+        return self.storage.get_session_page("u", "s", limit=limit, before_id=before_id)
+
+    def _long_conversation(self, turns=10):
+        for index in range(turns):
+            self._turn(f"question {index}", f"answer {index}")
+
+    def test_opening_a_conversation_reads_a_batch_not_all_of_it(self):
+        self._long_conversation(turns=10)  # 20 messages
+
+        for cold in (False, True):
+            with self.subTest(cache="cold" if cold else "warm"):
+                page = self._page(limit=6, cold=cold)
+                self.assertEqual(
+                    ["question 7", "answer 7", "question 8", "answer 8", "question 9", "answer 9"],
+                    [message["content"] for message in page["messages"]],
+                    "a page must be the NEWEST messages, in reading order",
+                )
+                self.assertTrue(page["has_more"])
+
+    def test_scrolling_back_walks_the_conversation_without_gaps_or_repeats(self):
+        self._long_conversation(turns=10)
+
+        for cold in (False, True):
+            with self.subTest(cache="cold" if cold else "warm"):
+                if cold:
+                    self.cache.clear()
+                seen, cursor, pages = [], None, 0
+                while True:
+                    page = self.storage.get_session_page("u", "s", limit=6, before_id=cursor)
+                    seen = [message["content"] for message in page["messages"]] + seen
+                    pages += 1
+                    if not page["has_more"]:
+                        break
+                    cursor = page["messages"][0]["id"]
+
+                expected = [
+                    text
+                    for index in range(10)
+                    for text in (f"question {index}", f"answer {index}")
+                ]
+                self.assertEqual(expected, seen)
+                self.assertEqual(4, pages, "20 messages in batches of 6")
+
+    def test_the_last_batch_reports_that_there_is_nothing_older(self):
+        self._long_conversation(turns=2)  # 4 messages
+
+        page = self._page(limit=10)
+        self.assertFalse(page["has_more"])
+        self.assertEqual(4, len(page["messages"]))
+
+    def test_a_page_carries_the_cursor_its_own_scroll_back_needs(self):
+        """Ids come from the cache as well as the database, or the first scroll-back
+        after a save would have nothing to page from."""
+        self._long_conversation(turns=3)
+
+        warm = self._page(limit=2)
+        cold = self._page(limit=2, cold=True)
+
+        self.assertEqual(
+            [message["id"] for message in cold["messages"]],
+            [message["id"] for message in warm["messages"]],
+            "the cached page and the database page must agree on the cursor",
+        )
+        self.assertTrue(all(isinstance(message["id"], int) for message in warm["messages"]))
+
+    def test_a_page_never_pollutes_the_whole_conversation_cache(self):
+        """`load` reads that key for the agent's history. A slice left under it would
+        quietly truncate the conversation the model can see."""
+        self._long_conversation(turns=5)
+        self.cache.clear()
+
+        self.storage.get_session_page("u", "s", limit=2)
+
+        self.assertEqual(10, len(self.storage.load("u", "s")))
+
+    def test_an_absent_session_pages_as_empty_rather_than_failing(self):
+        page = self.storage.get_session_page("u", "does-not-exist", limit=5)
+        self.assertEqual({"messages": [], "has_more": False}, page)
+
+    def test_a_page_size_cannot_be_used_to_pull_the_whole_conversation(self):
+        self._long_conversation(turns=3)
+        self.assertLessEqual(
+            len(self.storage.get_session_page("u", "s", limit=10_000)["messages"]),
+            self.storage.MAX_PAGE_SIZE,
+        )
+
+    def test_an_image_on_an_older_message_is_paged_back_with_it(self):
+        """The images have to survive the scroll-back too, not just the first batch."""
+        self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
+        self._long_conversation(turns=8)
+
+        page = self._page(limit=4)
+        self.assertEqual([[], [], [], []], [
+            list((m["rag_trace"] or {}).get("asset_ids") or []) for m in page["messages"]
+        ])
+
+        oldest = self.storage.get_session_page("u", "s", limit=4, before_id=page["messages"][0]["id"])
+        while oldest["has_more"]:
+            oldest = self.storage.get_session_page(
+                "u", "s", limit=4, before_id=oldest["messages"][0]["id"]
+            )
+        self.assertEqual(["a1"], oldest["messages"][1]["rag_trace"]["asset_ids"])
+
+    def test_the_stored_conversation_does_not_carry_a_copy_of_the_image(self):
+        """The point of storing ids. An inline rendition is the picture itself, base64'd
+        — persisting it would grow the conversation with the images in it, once per
+        message that showed them."""
+        self._turn("show me the chart", "Here. [1]", self._trace("a1", inline=True))
+
+        stored = json.dumps([row.rag_trace for row in self._rows()])
+        self.assertNotIn("base64", stored)
+        self.assertIn("a1", stored)
+        self.assertLess(len(stored), 200)
+
+
+class StoredPointerRoundTripTests(ViewFigureToolTestCase):
+    """Storing a pointer is only worth it if loading resolves it — by key, in one call.
+
+    The setUp inherited here registers a real asset store over SQLite with one dossier
+    in it, so this exercises the actual lookup rather than a stub.
+    """
+
+    def _record(self, asset_ids, message_type="ai"):
+        return {
+            "type": message_type,
+            "content": "Here it is. [1]",
+            "timestamp": "2026-01-01T00:00:00",
+            "rag_trace": {"tool_used": True, "asset_ids": list(asset_ids)},
+        }
+
+    def test_an_id_is_resolved_into_something_the_client_can_display(self):
+        restored = restore_session_assets([self._record([self.dossier.asset_id])])
+        asset = restored[0]["rag_trace"]["assets"][0]
+
+        self.assertEqual(self.dossier.asset_id, asset["asset_id"])
+        self.assertEqual(asset_url_path(self.dossier.asset_id), asset["url"])
+        self.assertEqual("reference", asset["mode"])
+
+    def test_a_whole_session_costs_one_lookup(self):
+        """Resolving per message would be a query per message. Ten messages showing the
+        same figure is one `IN` query, and it stays one as the conversation grows."""
+        records = [self._record([self.dossier.asset_id]) for _ in range(10)]
+
+        with patch.object(
+            self.store, "get_many", wraps=self.store.get_many
+        ) as get_many:
+            restored = restore_session_assets(records)
+
+        self.assertEqual(1, get_many.call_count)
+        self.assertTrue(all(item["rag_trace"]["assets"] for item in restored))
+
+    def test_an_id_that_no_longer_resolves_yields_no_image_rather_than_a_broken_one(self):
+        """Its document was deleted or re-ingested under new ids. A card pointing at
+        nothing is worse than no card."""
+        restored = restore_session_assets([self._record(["gone::p1::img0"])])
+        self.assertEqual([], restored[0]["rag_trace"]["assets"])
+
+    def test_messages_stored_before_ids_keep_their_renditions(self):
+        """Conversations saved by the previous shape carry `assets` and no ids. They are
+        left exactly as they are rather than being emptied."""
+        legacy = {
+            "type": "ai",
+            "content": "Here it is.",
+            "timestamp": "2026-01-01T00:00:00",
+            "rag_trace": {"assets": [{"asset_id": "old", "mode": "reference", "url": "/media/old"}]},
+        }
+        restored = restore_session_assets([legacy, self._record([self.dossier.asset_id])])
+
+        self.assertEqual("old", restored[0]["rag_trace"]["assets"][0]["asset_id"])
+        self.assertEqual(self.dossier.asset_id, restored[1]["rag_trace"]["assets"][0]["asset_id"])
+
+    def test_a_conversation_without_images_is_handed_back_untouched(self):
+        records = [{"type": "human", "content": "hello", "timestamp": "t", "rag_trace": None}]
+        self.assertIs(records, restore_session_assets(records))
+
+    def test_a_store_failure_costs_the_pictures_not_the_history(self):
+        with patch("backend.assets.store.get_asset_store", side_effect=RuntimeError("db down")):
+            restored = restore_session_assets([self._record([self.dossier.asset_id])])
+        self.assertEqual("Here it is. [1]", restored[0]["content"])
 
 
 class SchemaContractTests(unittest.TestCase):

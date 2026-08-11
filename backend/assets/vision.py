@@ -110,11 +110,15 @@ def build_vision_model(
     credentials: Optional[VisionCredentials] = None,
     max_tokens: Optional[int] = None,
     extra_params: Optional[dict] = None,
+    reasoning_effort: str = "",
 ):
     """A configured chat model, or None when credentials are incomplete.
 
     None rather than an exception: every caller has a working non-vision fallback, and
     a missing key should degrade the deployment rather than break it.
+
+    `reasoning_effort` is empty by default so that no effort field is sent at all — a
+    vision model without the parameter rejects the key rather than ignoring it.
     """
     resolved = credentials or resolve_vision_credentials()
     if not resolved.available:
@@ -125,9 +129,13 @@ def build_vision_model(
     kwargs = {}
     if max_tokens:
         kwargs["max_tokens"] = max_tokens
+    if reasoning_effort:
+        kwargs["reasoning_effort"] = reasoning_effort
     if extra_params:
         # Passed straight through: these are provider knobs this layer deliberately
-        # does not model, the important one being reasoning suppression.
+        # does not model. Applied last so that a profile already suppressing reasoning
+        # through this dict keeps winning — the typed field above is the preferred
+        # spelling, not a replacement that would silently change existing behaviour.
         kwargs.update(extra_params)
     return init_chat_model(
         model=resolved.model_id,

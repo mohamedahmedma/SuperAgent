@@ -113,6 +113,7 @@ class VisionEntityExtractor(FigureExtractor):
                 ),
                 max_tokens=getattr(self._figures, "vision_max_output_tokens", 4096),
                 extra_params=getattr(self._figures, "vision_extra_params", None),
+                reasoning_effort=getattr(self._figures, "vision_reasoning_effort", ""),
             )
         return self._model
 
