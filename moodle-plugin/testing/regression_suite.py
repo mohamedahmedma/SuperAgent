@@ -93,28 +93,58 @@ class Client:
         self.token = token
         self.calls = 0
         self.total_seconds = 0.0
+        self.transport_failures = 0
 
     def call(self, function: str, **params) -> Any:
+        """One REST call, with transport failures normalised to MoodleError.
+
+        Every transport problem — a read timeout, a dropped connection — is converted
+        rather than allowed to propagate. A suite that dies on the first slow response
+        throws away every result it had already collected, which on a ~48s-per-call
+        instance means losing forty minutes of work to one unlucky request. Recording
+        it as a failed check and carrying on is strictly more useful.
+
+        One retry, because on this filesystem a slow response is usually a cold cache
+        rather than a real fault, and the second attempt is nearly always fast.
+        """
         payload = {
             "wstoken": self.token,
             "wsfunction": function,
             "moodlewsrestformat": "json",
             **params,
         }
-        started = time.monotonic()
-        response = requests.post(
-            f"{self.url}/webservice/rest/server.php", data=payload, timeout=TIMEOUT
-        )
-        elapsed = time.monotonic() - started
 
-        self.calls += 1
-        self.total_seconds += elapsed
+        last_error: Exception | None = None
+        for attempt in (1, 2):
+            started = time.monotonic()
+            try:
+                response = requests.post(
+                    f"{self.url}/webservice/rest/server.php", data=payload, timeout=TIMEOUT
+                )
+                response.raise_for_status()
+                body = response.json()
+            except requests.RequestException as exc:
+                last_error = exc
+                self.calls += 1
+                self.total_seconds += time.monotonic() - started
+                self.transport_failures += 1
+                continue
+            except ValueError as exc:
+                # HTTP 200 carrying something that is not JSON — Moodle does this when
+                # it redirects (a host that is not $CFG->wwwroot returns an HTML page).
+                last_error = exc
+                self.calls += 1
+                self.total_seconds += time.monotonic() - started
+                raise MoodleError(f"{function}: non-JSON response ({exc})") from exc
 
-        response.raise_for_status()
-        body = response.json()
-        if isinstance(body, dict) and "exception" in body:
-            raise MoodleError(f"{function}: {body.get('errorcode')} — {body.get('message')}")
-        return body
+            self.calls += 1
+            self.total_seconds += time.monotonic() - started
+
+            if isinstance(body, dict) and "exception" in body:
+                raise MoodleError(f"{function}: {body.get('errorcode')} — {body.get('message')}")
+            return body
+
+        raise MoodleError(f"{function}: transport failure after 2 attempts — {last_error}")
 
     # -- our plugin ---------------------------------------------------------
 
@@ -220,6 +250,23 @@ def check_asserted(report: Report, client: Client, idnumber: str, spec: dict, te
         ok = subjects[0].get("pendingcount") == spec["pendingcount"]
         report.add(f"{idnumber} :: pendingcount == {spec['pendingcount']}", ok,
                    "" if ok else f"got {subjects[0].get('pendingcount')}")
+
+    if "academic_pct" in spec:
+        expected = spec["academic_pct"]
+        academic = (subjects[0].get("academic") or {}) if subjects else {}
+        actual = academic.get("percentage")
+        ok = close_enough(actual, expected)
+        report.add(f"{idnumber} :: academic == {expected}", ok,
+                   "" if ok else f"got {actual} unavailable={academic.get('unavailable')!r}")
+
+        # The point of having two figures at all: where attendance is graded they must
+        # NOT be the same number. If they coincide, either the academic subtotal is
+        # silently falling back to the course total, or the scenario failed to seed.
+        overall = subjects[0].get("percentage") if subjects else None
+        if actual is not None and overall is not None:
+            report.add(f"{idnumber} :: academic differs from course total",
+                       not close_enough(actual, overall),
+                       f"both {actual} — attendance is not affecting the total")
 
     return payload
 
@@ -339,14 +386,28 @@ def check_injection(report: Report, client: Client, term: str) -> None:
                    why if ok else f"RETURNED DATA: found={payload.get('found')} "
                                   f"subjects={len(payload.get('subjects') or [])}")
 
-    # Whitespace: PARAM_RAW_TRIMMED trims, so a padded lookup must still resolve.
+    # Whitespace is REJECTED, not silently trimmed — and that is the better behaviour.
+    #
+    # Moodle's validate_param() compares a value against clean_param() of itself and
+    # throws when they differ, so PARAM_RAW_TRIMMED *validates* that input is already
+    # trimmed rather than trimming it. The alternative, PARAM_RAW, would pass "  X  "
+    # through to the lookup, match nothing, and return found=false — a padded idnumber
+    # would then be indistinguishable from a student who does not exist. An explicit
+    # error beats a silent no-match, because the caller can fix the former.
     try:
         padded = client.grades("  GRD-BASELINE  ", term)
-        report.add("injection :: surrounding whitespace is trimmed",
-                   padded.get("found") is True,
-                   "" if padded.get("found") else "a padded idnumber failed to resolve")
+        report.add(
+            "injection :: padded idnumber is rejected, not silently unmatched",
+            False,
+            f"expected a refusal; got found={padded.get('found')}",
+        )
     except MoodleError as exc:
-        report.add("injection :: surrounding whitespace is trimmed", False, str(exc)[:100])
+        rejected = "invalidparameter" in str(exc).lower()
+        report.add(
+            "injection :: padded idnumber is rejected, not silently unmatched",
+            rejected,
+            "" if rejected else f"refused for the wrong reason: {str(exc)[:90]}",
+        )
 
 
 def check_term_filter(report: Report, client: Client, term: str) -> None:
@@ -431,6 +492,11 @@ def main() -> int:
     wall = time.monotonic() - started
     print(f"\n{client.calls} web service calls, "
           f"{client.total_seconds:.0f}s in calls, {wall:.0f}s wall")
+    if client.transport_failures:
+        # Reported separately from assertion failures: a timeout says something about
+        # this machine, not about the plugin, and conflating the two would make a slow
+        # afternoon look like a regression.
+        print(f"{client.transport_failures} transport failure(s) retried")
 
     return report.summary()
 

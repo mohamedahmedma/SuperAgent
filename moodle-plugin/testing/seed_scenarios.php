@@ -31,7 +31,26 @@ require_once($CFG->libdir . '/enrollib.php');
 \core\session\manager::set_user(get_admin());
 mt_srand(20260810);           // Deterministic: a shifting dataset cannot prove a regression.
 
+[$options] = cli_get_params(['reset' => false, 'help' => false], ['h' => 'help']);
+
+if (!empty($options['help'])) {
+    cli_writeln("Seed one student per scenario.");
+    cli_writeln("  --reset   delete data from a previous run of this script first");
+    exit(0);
+}
+
 $TERM = '2026-T1';
+
+// A namespace of its own. The suite MUST own its data: an earlier ad-hoc fixture had
+// already created "2026-T1-G7A-MATH" with its own grade items, and reusing that
+// shortname put two populations in one course — which showed up as pendingcount being 5
+// where the scenario intended 1. The percentages were unaffected, because rawgrademax
+// excludes ungraded items, but a suite whose numbers depend on what someone seeded
+// last month is not a regression suite.
+//
+// "R7A" rather than "G7A" keeps the term prefix intact, so term filtering is still
+// exercised exactly as in production.
+$SUITE = 'R7A';
 $started = microtime(true);
 
 function say(string $line): void {
@@ -210,6 +229,66 @@ function statuses_for(int $attendanceid): array {
 }
 
 // ---------------------------------------------------------------------------
+// Reset
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete everything a previous run of THIS script created.
+ *
+ * Needed because both the students and the courses are fetched-or-created: without a
+ * reset, a re-run after changing the course namespace would enrol the existing
+ * scenario students into the NEW courses while leaving them in the old ones, so
+ * `subject_count` assertions would fail for reasons that have nothing to do with the
+ * plugin. A regression suite that cannot be re-run from a known state is not one.
+ *
+ * Scoped by the suite's own namespace and idnumber prefixes, so it cannot touch a
+ * developer's other data on the same instance.
+ */
+function reset_suite_data(string $term, string $suite): void {
+    global $DB;
+
+    // course/lib.php and user/lib.php are already required at the top of this script,
+    // and their paths moved under public/ in Moodle 5.x — so do not re-require them
+    // relative to __DIR__ here.
+
+    // Courses first: delete_course() takes grades, attendance, enrolments and the
+    // module instances with it, which is most of the cleanup.
+    $like = $DB->sql_like('shortname', ':pattern');
+    $courses = $DB->get_records_select('course', $like,
+        ['pattern' => $DB->sql_like_escape("{$term}-{$suite}-") . '%']);
+    foreach ($courses as $course) {
+        delete_course($course, false);
+    }
+    $extra = $DB->get_records_list('course', 'shortname',
+        ["2026-T2-{$suite}-MATH", 'LEGACY-COURSE-NO-TERM']);
+    foreach ($extra as $course) {
+        delete_course($course, false);
+    }
+    say('  deleted ' . (count($courses) + count($extra)) . ' suite courses');
+
+    // Then the students. delete_user() clears the idnumber, which is what frees it for
+    // the next run — a hard row delete would leave the unique-ish idnumber in place on
+    // a soft-deleted row and collide.
+    $deleted = 0;
+    foreach (['GRD-%', 'ATT-%', 'LIF-%', 'ID-%', 'ID\_%'] as $pattern) {
+        $sql = $DB->sql_like('idnumber', ':pattern', true, true, false, '\\');
+        foreach ($DB->get_records_select('user', "{$sql} AND deleted = 0",
+            ['pattern' => $pattern]) as $user) {
+            delete_user($user);
+            $deleted++;
+        }
+    }
+    say("  deleted {$deleted} scenario students");
+}
+
+if (!empty($options['reset'])) {
+    say('Resetting previous suite data...');
+    reset_suite_data($TERM, $SUITE);
+    purge_all_caches();
+    say('');
+}
+
+// ---------------------------------------------------------------------------
 // Courses
 // ---------------------------------------------------------------------------
 
@@ -217,22 +296,22 @@ say('Courses...');
 
 // The main course most scenarios share — students really do share classes, and sharing
 // exercises the per-student aggregation bounds that a one-student course would not.
-$math = seed_course("{$TERM}-G7A-MATH", ['fullname' => 'Mathematics G7A T1']);
-$sci = seed_course("{$TERM}-G7A-SCI", ['fullname' => 'Science G7A T1']);
+$math = seed_course("{$TERM}-{$SUITE}-MATH", ['fullname' => 'Mathematics R7A T1']);
+$sci = seed_course("{$TERM}-{$SUITE}-SCI", ['fullname' => 'Science R7A T1']);
 
 // Course-level pathologies need their own courses.
-$hidden = seed_course("{$TERM}-G7A-HIDDEN", ['fullname' => 'Hidden course', 'visible' => 0]);
+$hidden = seed_course("{$TERM}-{$SUITE}-HIDDEN", ['fullname' => 'Hidden course', 'visible' => 0]);
 $unconventional = seed_course('LEGACY-COURSE-NO-TERM', ['fullname' => 'Outside the term convention']);
-$nextterm = seed_course('2026-T2-G7A-MATH', ['fullname' => 'Mathematics G7A T2',
+$nextterm = seed_course("2026-T2-{$SUITE}-MATH", ['fullname' => 'Mathematics R7A T2',
     'startdate' => strtotime('2026-04-01')]);
-$grouped = seed_course("{$TERM}-G7A-GROUPS", ['fullname' => 'Grouped course',
+$grouped = seed_course("{$TERM}-{$SUITE}-GROUPS", ['fullname' => 'Grouped course',
     'groupmode' => SEPARATEGROUPS, 'groupmodeforce' => 1]);
 
 // Disabling an enrolment INSTANCE affects every student on it, so that scenario needs a
 // course of its own. Putting it on a shared course would silently break every other
 // student there — the kind of cross-contamination that makes a suite untrustworthy and
 // is very hard to spot once the failures start.
-$disabledenrol = seed_course("{$TERM}-G7A-DISABLED", ['fullname' => 'Disabled enrolment method']);
+$disabledenrol = seed_course("{$TERM}-{$SUITE}-DISABLED", ['fullname' => 'Disabled enrolment method']);
 
 say('  7 courses');
 
@@ -343,8 +422,18 @@ scenario('GRD-FULL', 'Full marks',
     });
 
 scenario('GRD-PARTIAL', 'One item still ungraded',
-    ['grades_pct' => 75.0, 'pendingcount' => 1, 'differential' => true,
-     'note' => 'the ungraded item must leave the denominator, not score zero'],
+    // TWO pending, not one. Assessment 3 is ungraded, and so is the attendance
+    // activity's OWN grade item — creating a "Class register" in a course adds a
+    // gradeable item to it, whether or not anybody has marked a register.
+    //
+    // That is correct rather than a quirk to filter out, and it has a consequence
+    // worth knowing: if a school enables attendance grading, attendance feeds the
+    // course total, so the percentage a parent is shown for Mathematics already
+    // includes it. Excluding attendance items here would make our item list disagree
+    // with the gradebook, which is the one failure this design exists to avoid.
+    ['grades_pct' => 75.0, 'pendingcount' => 2, 'differential' => true,
+     'note' => 'Assessment 3 plus the attendance grade item; the ungraded items must '
+             . 'leave the denominator, not score zero'],
     function ($u) use ($math, $mathitems) {
         enrol_student($math, $u);
         $mathitems[0]->update_final_grade($u->id, 75);
@@ -356,6 +445,36 @@ scenario('GRD-DECIMAL', 'Fractional marks round to two places',
     function ($u) use ($math, $mathitems) {
         enrol_student($math, $u);
         foreach ($mathitems as $item) { $item->update_final_grade($u->id, 66.666); }
+    });
+
+scenario('GRD-ATTENDANCE-GRADED', 'Attendance graded: course total and academic diverge',
+    // THE case that justifies returning two figures.
+    //
+    // Three assessments at 80 (240/300 = 80%) plus a graded attendance item at 20/100.
+    // Moodle's course total is (240+20)/400 = 65%, because attendance is a gradeable
+    // item like any other. The academic figure ignores it and reports 80%.
+    //
+    // Both are true and they answer different questions. A parent asking "how is she
+    // doing in maths" almost always means the 80%; the school's official course total
+    // is the 65%. Reporting only one would be wrong in one direction or the other, and
+    // silently choosing would be worse than either.
+    ['grades_pct' => 65.0, 'academic_pct' => 80.0, 'differential' => true,
+     'note' => 'course total includes attendance; academic excludes it'],
+    function ($u) use ($math, $mathitems, $mathatt) {
+        enrol_student($math, $u);
+        foreach ($mathitems as $item) { $item->update_final_grade($u->id, 80); }
+
+        // The attendance activity's own grade item — created by the activity, graded
+        // here the way a school with attendance grading enabled would have it.
+        $attitem = grade_item::fetch([
+            'courseid' => $math->id,
+            'itemtype' => 'mod',
+            'itemmodule' => 'attendance',
+            'iteminstance' => $mathatt,
+        ]);
+        if ($attitem) {
+            $attitem->update_final_grade($u->id, 20);
+        }
     });
 
 scenario('GRD-TWO-COURSES', 'Two subjects report independently',
