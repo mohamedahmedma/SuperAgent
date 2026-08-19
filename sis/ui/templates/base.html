@@ -1,0 +1,119 @@
+{#
+  The layout every page extends. Plain, dense, and readable with JavaScript switched off.
+
+  There is no <script> tag in this file and no page needs one. Every control below is a
+  link or a form that posts to Python; a school running a locked-down browser, or a
+  machine that failed to fetch one asset, gets a working registrar UI rather than a blank
+  frame. JavaScript may only be added for things that are purely cosmetic.
+
+  Bootstrap is served from `/ui/static`, never from a CDN. Schools lose their connection,
+  and a UI that becomes unreadable when the internet does is a UI that fails on the
+  afternoon it is most needed.
+
+  Blocks a page may override are listed at the foot of this file.
+#}
+<!doctype html>
+<html lang="{% block html_lang %}en{% endblock %}" dir="{% block html_dir %}ltr{% endblock %}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {# These screens list named children and their marks. Keep them out of every cache
+       and out of the Referer header sent to anywhere else. #}
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="same-origin" />
+    <title>{% block title %}Registrar{% endblock %} · SIS</title>
+    <link rel="stylesheet" href="{{ static_url('bootstrap.min.css') }}" />
+    <link rel="stylesheet" href="{{ static_url('app.css') }}" />
+    {% block head_extra %}{% endblock %}
+  </head>
+  <body class="{% block body_class %}{% endblock %}">
+    <a class="visually-hidden-focusable skip-link" href="#main">Skip to content</a>
+
+    {% block nav %}
+    <nav class="navbar navbar-expand navbar-dark bg-dark sis-navbar">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="{{ dashboard_path }}">SIS</a>
+        <ul class="navbar-nav me-auto">
+          {% for key, label, path in nav_items %}
+          <li class="nav-item">
+            <a
+              class="nav-link{% if active_nav == key %} active{% endif %}"
+              href="{{ path }}"
+              {% if active_nav == key %}aria-current="page"{% endif %}
+            >{{ label }}</a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% if caller %}
+        <div class="d-flex align-items-center gap-2">
+          {# The key prefix names which credential is signed in so an operator can revoke
+             the right one. It is not the secret and cannot be used to authenticate. #}
+          <span class="navbar-text small" title="Signed in as key {{ caller.prefix }}">
+            {{ caller.prefix }}{% if caller.is_bootstrap %} · bootstrap{% endif %}
+          </span>
+          {# A form, not a link: sign-out changes state, and a GET can be prefetched by a
+             browser or triggered by an <img> on another page. #}
+          <form method="post" action="{{ logout_path }}" class="m-0">
+            <button type="submit" class="btn btn-sm btn-outline-light">Sign out</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+    </nav>
+    {% endblock %}
+
+    <main id="main" class="container-fluid py-3">
+      {% block flash %}{% include "_flash.html" %}{% endblock %}
+
+      {% block header %}
+      <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h1 class="h4 m-0">{% block page_title %}{% endblock %}</h1>
+        <div class="d-flex gap-2">{% block page_actions %}{% endblock %}</div>
+      </div>
+      {% endblock %}
+
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="container-fluid py-3 mt-4 border-top text-muted small sis-footer">
+      <div class="d-flex flex-wrap justify-content-between gap-2">
+        <span>
+          {% if current_year %}
+            Current academic year:
+            <strong class="ar">{{ current_year.name_ar }}</strong>
+            <span class="text-muted">({{ current_year.code }})</span>,
+            {{ current_year.starts_on | date_ar }} – {{ current_year.ends_on | date_ar }}
+          {% else %}
+            {# Not an error: a fresh install has no year yet, and every class dropdown
+               reads from this. Saying so here is what stops "the lists are all empty"
+               becoming a support call. #}
+            <strong>No academic year is marked current.</strong>
+            Create one under <a href="{{ ui_prefix }}/structure">Structure</a>.
+          {% endif %}
+        </span>
+        <span>
+          {# The legend for invariant 1, in front of the registrar on every page. #}
+          <span class="grade-none">{{ not_graded }}</span> means not graded yet — not zero.
+        </span>
+      </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+  </body>
+</html>
+
+{#
+  Blocks defined here, for the pages that extend this file:
+
+    html_lang, html_dir   "en"/"ltr" by default; an Arabic page sets "ar"/"rtl".
+    title                 Text before " · SIS" in the browser tab.
+    head_extra            Extra <link>/<meta>. Local assets only.
+    body_class            Classes on <body>.
+    nav                   The whole navbar. The login page overrides it empty.
+    flash                 The flash region. Override only to move it, never to drop it.
+    header                Title row. Override to replace it entirely.
+    page_title            Text of the <h1>.
+    page_actions          Buttons on the right of the title row.
+    content               The page itself. This is the one a page normally fills.
+    scripts               Cosmetic enhancement only; the page must work without it.
+#}

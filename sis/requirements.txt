@@ -1,0 +1,43 @@
+# Deliberately tiny, and deliberately separate from the root pyproject.
+#
+# This service carries no LangChain, no Milvus, no model clients. It is a registrar's
+# database with an HTTP surface, and it must be buildable, deployable and restartable
+# without any of the machinery the chat backend needs.
+#
+#   pip install -r sis/requirements.txt
+#   alembic -c sis/alembic.ini upgrade head
+#   uvicorn sis.api.app:app --port 8300
+
+fastapi>=0.115.0
+uvicorn>=0.30.0
+sqlalchemy>=2.0.36
+pydantic>=2.8.0
+
+# The registrar UI is server-rendered: Python calls the services and sends finished HTML,
+# so there is no client-side data layer to install. Jinja2 is the whole of that layer.
+# 3.1.4 is the floor for CVE-2024-34064 (attribute injection via `xmlattr`), and this
+# service renders student names typed into a spreadsheet by a school secretary.
+#
+# Autoescape is switched on explicitly in `sis/ui/templates.py` rather than relied upon:
+# it is what makes those names safe to display, and it is not Jinja's default when an
+# Environment is constructed by hand.
+jinja2>=3.1.4
+
+# Migrations are authoritative. `records/` uses Base.metadata.create_all, which creates
+# missing TABLES but never missing COLUMNS — so a column added in month two exists in
+# every developer's fresh database and in none of the deployed ones. This service does
+# not inherit that trap. 1.13 for the %(here)s token used in alembic.ini.
+alembic>=1.13.0
+
+# FastAPI's UploadFile support. Without it, every import endpoint 500s on the first
+# multipart request rather than at startup.
+python-multipart>=0.0.9
+
+# Reading .xlsx roster and grade files. Chosen over pandas on purpose: a 30-row
+# spreadsheet does not justify pulling in numpy, and openpyxl's read_only mode streams
+# rows instead of materialising a frame.
+openpyxl>=3.1.0
+
+# Postgres for anything holding real student records. SQLite is the default only so
+# the service runs with no infrastructure.
+psycopg2-binary>=2.9.10

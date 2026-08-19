@@ -1,0 +1,430 @@
+"""The read model: what the registrar UI, the API and the `records/` adapter ask for.
+
+Reads live in their own service because they have a different shape of correctness from
+writes. A write has to be refused when it is wrong; a read has to be *unambiguous* when
+it is empty. Most of the care in this module is spent on that second thing — an unknown
+class raises `UnknownReference` rather than returning an empty roster, because "no such
+class" and "a class with nobody in it" render identically on a screen and send the
+registrar to look for children who were never missing.
+
+The other reason this module exists is `resolve_sections_for_term`. Invariant 2 says a
+placement is time-bounded, so "which class was she in for Term 1" is a lookup against a
+date rather than a column — and the *choice of date* is a real decision that must be made
+in exactly one place. `GradeImportService` files a mark under the class this function
+resolves, and the report read back through `student_term_grades` resolves it the same
+way. Two implementations of that rule would eventually disagree by one day, and the
+symptom is a Term 1 mark filed under 3A that prints under 3B.
+
+Ports only: no sqlalchemy, no fastapi, no `sis.config`. Every method here is exercisable
+against fake repositories.
+"""
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import date
+
+from sis.application.ports.repositories import EnrolmentRepository
+from sis.application.ports.unit_of_work import UnitOfWork
+from sis.domain.errors import UnknownReference
+from sis.domain.grades import SubjectGrade
+from sis.domain.guardians import Guardian, StudentGuardian
+from sis.domain.people import ClassEnrolment, Student
+from sis.domain.structure import (
+    AcademicYear,
+    ClassSection,
+    Subject,
+    Term,
+    YearLevel,
+)
+from sis.domain.value_objects import (
+    AcademicYearCode,
+    ClassCode,
+    Phone,
+    StudentNumber,
+    SubjectCode,
+    TermCode,
+    YearCode,
+)
+
+__all__ = [
+    "ClassRosterEntry",
+    "GradeLine",
+    "GuardianLink",
+    "QueryService",
+    "StudentTermGrades",
+    "resolve_section_for_term",
+    "resolve_sections_for_term",
+]
+
+
+def resolve_sections_for_term(
+    enrolments: EnrolmentRepository,
+    student_numbers: Collection[StudentNumber],
+    term: Term,
+) -> Mapping[str, ClassSection]:
+    """Which class each of these children was in *as at* `term`, keyed by student number.
+
+    The whole of invariant 2 in one function, and the anchor dates are the decision worth
+    stating. A term is a period, not a day, and a child can be in two classes across it,
+    so "the class for Term 1" has to name a day. This asks about the **last** day of term
+    first, because that is where a term's reporting is cut and where a mid-term transfer
+    should already have taken effect: a child who moved 3A->3B in March gets her Term 3
+    marks under 3B, which is where she sat when they were given.
+
+    The **first** day of term is the fallback, and it is not a nicety. A child who leaves
+    the school in November has no placement on the last day of Term 1, and resolving her
+    to nothing would reject a term of marks she genuinely earned — or, worse in a report,
+    render a finished term as blank. Asking again at the start of term files those marks
+    under the class she actually sat in.
+
+    Children with no placement covering either day are simply absent from the result. That
+    is a real answer — she had left, or had not yet arrived — and callers must treat it as
+    one rather than substituting a class, which is how a grade sheet acquires a child who
+    was never in the room.
+    """
+    if not student_numbers:
+        return {}
+    resolved = dict(enrolments.class_sections_on(student_numbers, term.ends_on))
+    missing = [s for s in student_numbers if s.value not in resolved]
+    # Second query only for the children the first one could not place. A file of 600
+    # marks for a settled class costs one query, not two.
+    if missing:
+        for number, section in enrolments.class_sections_on(
+            missing, term.starts_on
+        ).items():
+            resolved.setdefault(number, section)
+    return resolved
+
+
+def resolve_section_for_term(
+    enrolments: EnrolmentRepository, student_number: StudentNumber, term: Term
+) -> ClassSection | None:
+    """One child's class as at a term. Same rule as the bulk form, never a second one."""
+    return resolve_sections_for_term(enrolments, [student_number], term).get(
+        student_number.value
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ClassRosterEntry:
+    """One child in a class register, with the placement window she is listed under.
+
+    `student` is optional so a placement whose student row cannot be loaded still appears,
+    carrying its number. Dropping it would shorten the register silently, and a register
+    that is quietly one child short is worse than one showing a number without a name.
+    """
+
+    student_number: str
+    enrolment: ClassEnrolment
+    student: Student | None = None
+
+    @property
+    def display_name_ar(self) -> str:
+        return self.student.full_name_ar if self.student else ""
+
+    @property
+    def display_name_en(self) -> str:
+        return self.student.full_name_en if self.student else ""
+
+
+@dataclass(frozen=True, slots=True)
+class GuardianLink:
+    """One guardian beside the link that says what she is to a child.
+
+    Both sides are optional for the reason `ClassRosterEntry.student` is: a link whose
+    guardian row cannot be loaded still appears, carrying the number it names. Dropping it
+    would shorten the list silently, and a contact list that is quietly one adult short is
+    worse than one showing a number without a name — the number still reaches somebody.
+
+    Serves both directions. `student` is filled when the question started from a guardian
+    ("which children may this number ask about") and left `None` when it started from a
+    child, where every entry shares one student and repeating her would be noise.
+    """
+
+    link: StudentGuardian
+    guardian: Guardian | None = None
+    student: Student | None = None
+
+    @property
+    def phone(self) -> str:
+        return str(self.link.guardian_phone)
+
+    @property
+    def phones(self) -> tuple[str, ...]:
+        """Every number that reaches this adult, primary first."""
+        return tuple(str(p) for p in self.guardian.phones) if self.guardian else (self.phone,)
+
+    @property
+    def student_number(self) -> str:
+        return str(self.link.student_number)
+
+    @property
+    def display_name_ar(self) -> str:
+        return self.guardian.full_name_ar if self.guardian else ""
+
+    @property
+    def display_name_en(self) -> str:
+        return self.guardian.full_name_en if self.guardian else ""
+
+
+@dataclass(frozen=True, slots=True)
+class GradeLine:
+    """A stated mark beside the subject it belongs to — one line of a report card.
+
+    `subject` may be `None` for the same reason as above: a mark whose subject row has
+    gone missing still has to be shown, because a report card that quietly drops a line
+    is a report card nobody can tell is incomplete.
+
+    Nothing here totals, averages or ranks (invariant 5). A caller wanting an average is
+    a caller stating a policy, and it must do so where a human can see it.
+    """
+
+    grade: SubjectGrade
+    subject: Subject | None = None
+
+    @property
+    def is_graded(self) -> bool:
+        """Delegates on purpose: no caller re-derives null-vs-zero (invariant 1)."""
+        return self.grade.is_graded
+
+
+@dataclass(frozen=True, slots=True)
+class StudentTermGrades:
+    """A child's marks for one term, under the class she was in *for that term*.
+
+    `class_section` is resolved through `resolve_sections_for_term` rather than read from
+    her current placement, which is what keeps a Term 1 report printing 3A after a March
+    move to 3B. `None` means no placement covered that term at all — she had left, or had
+    not yet joined — and is deliberately distinguishable from "her current class".
+    """
+
+    student: Student
+    term: Term
+    class_section: ClassSection | None
+    lines: tuple[GradeLine, ...] = ()
+
+    @property
+    def graded_count(self) -> int:
+        """Subjects with a stated figure. The rest are awaiting a mark, not scoring zero."""
+        return sum(1 for line in self.lines if line.is_graded)
+
+
+class QueryService:
+    """Every read the API and the `records/` adapter need, and no writes at all.
+
+    Takes a factory rather than a live unit of work so each query runs in its own
+    transaction and none of them can see another's half-written state. Nothing here
+    commits: leaving the context manager rolls back, which for a read is exactly right and
+    means a query can never leave a lock or a stray write behind.
+    """
+
+    def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
+        self._uow_factory = uow_factory
+
+    # -- Structure ---------------------------------------------------------
+
+    def list_academic_years(self) -> Sequence[AcademicYear]:
+        """Every school year, most recent first."""
+        with self._uow_factory() as uow:
+            return tuple(uow.academic_years.list_all())
+
+    def current_academic_year(self) -> AcademicYear | None:
+        """The year the registrar has marked current, or `None` before one is chosen."""
+        with self._uow_factory() as uow:
+            return uow.academic_years.current()
+
+    def list_year_levels(self) -> Sequence[YearLevel]:
+        """The rungs of the ladder in `display_order`, so `Y10` follows `Y9`."""
+        with self._uow_factory() as uow:
+            return tuple(uow.year_levels.list_all())
+
+    def list_classes(
+        self,
+        academic_year_code: AcademicYearCode,
+        *,
+        year_level_code: YearCode | None = None,
+    ) -> Sequence[ClassSection]:
+        """A year's sections, optionally one rung's.
+
+        The year is required rather than defaulted to the current one: a class code names
+        a different room of children every September, so a caller that forgot to say which
+        year would silently be answered about whichever year happens to be flagged.
+        """
+        with self._uow_factory() as uow:
+            self._require_year(uow, academic_year_code)
+            return tuple(
+                uow.class_sections.list_for_year(
+                    academic_year_code, year_level_code=year_level_code
+                )
+            )
+
+    def list_terms(self, academic_year_code: AcademicYearCode) -> Sequence[Term]:
+        """The year's terms in `sequence` order — chronological without parsing codes."""
+        with self._uow_factory() as uow:
+            self._require_year(uow, academic_year_code)
+            return tuple(uow.terms.list_for_year(academic_year_code))
+
+    def list_subjects(self, *, include_inactive: bool = False) -> Sequence[Subject]:
+        """Subjects in `display_order`; retired ones only when asked for by name."""
+        with self._uow_factory() as uow:
+            return tuple(uow.subjects.list_all(include_inactive=include_inactive))
+
+    # -- People ------------------------------------------------------------
+
+    def class_roster(
+        self,
+        academic_year_code: AcademicYearCode,
+        class_code: ClassCode,
+        on_date: date,
+    ) -> Sequence[ClassRosterEntry]:
+        """Who was in this class on `on_date` — the register as of any day.
+
+        `on_date` is a required argument and never `date.today()`. A register is a
+        statement about a day, and a default of "now" would answer today's question to a
+        caller printing last term's attendance sheet, with nothing on screen to say so.
+        """
+        with self._uow_factory() as uow:
+            self._require_year(uow, academic_year_code)
+            if uow.class_sections.get(academic_year_code, class_code) is None:
+                # Refused rather than answered with an empty list: "no such class" and
+                # "a class with nobody in it" are indistinguishable once rendered, and
+                # the first is a typo the caller can fix in seconds.
+                raise UnknownReference(
+                    f"no class {class_code} in {academic_year_code}", field="class_code"
+                )
+            enrolments = uow.enrolments.roster_on(
+                academic_year_code, class_code, on_date
+            )
+            students = uow.students.get_many(
+                [
+                    e.student_number
+                    for e in enrolments
+                    if isinstance(e.student_number, StudentNumber)
+                ]
+            )
+        return tuple(
+            ClassRosterEntry(
+                student_number=str(enrolment.student_number),
+                enrolment=enrolment,
+                student=students.get(str(enrolment.student_number)),
+            )
+            for enrolment in enrolments
+        )
+
+    # -- Guardians ---------------------------------------------------------
+
+    def student_guardians(
+        self, student_number: StudentNumber
+    ) -> Sequence[GuardianLink]:
+        """Every adult on file for one child, with what each is to her.
+
+        An unknown student raises rather than returning an empty sequence, for the reason
+        `class_roster` refuses an unknown class: "no such child" and "a child with no
+        guardians recorded" render identically, and only one of them is a typo the caller
+        can fix in seconds. The second is a real and common answer — a roster is uploaded
+        before any guardian file is — so it must stay distinguishable.
+        """
+        with self._uow_factory() as uow:
+            if uow.students.get(student_number) is None:
+                raise UnknownReference(
+                    f"no student {student_number}", field="student_number"
+                )
+            links = uow.student_guardians.list_for_student(student_number)
+            guardians = uow.guardians.get_many([link.guardian_phone for link in links])
+        return tuple(
+            GuardianLink(link=link, guardian=guardians.get(str(link.guardian_phone)))
+            for link in links
+        )
+
+    def guardian_students(
+        self, phone: Phone, *, viewable_only: bool = True
+    ) -> Sequence[GuardianLink]:
+        """Which children this number may ask about — the parent-facing question.
+
+        Raises when the number reaches nobody, so a caller can tell "not a guardian here"
+        from "a guardian barred from every child on file". Those need different answers:
+        the first is a wrong number, the second is a custody restriction working.
+        """
+        with self._uow_factory() as uow:
+            guardian = uow.guardians.get(phone)
+            if guardian is None:
+                raise UnknownReference(f"no guardian on {phone}", field="phone")
+            links = uow.student_guardians.list_students_for_guardian(
+                phone, viewable_only=viewable_only
+            )
+            students = uow.students.get_many(
+                [
+                    link.student_number
+                    for link in links
+                    if isinstance(link.student_number, StudentNumber)
+                ]
+            )
+        return tuple(
+            GuardianLink(
+                link=link,
+                guardian=guardian,
+                student=students.get(str(link.student_number)),
+            )
+            for link in links
+        )
+
+    # -- Grades ------------------------------------------------------------
+
+    def student_term_grades(
+        self, student_number: StudentNumber, term_code: TermCode
+    ) -> StudentTermGrades:
+        """A child's marks for one term, with the class she was in for that term.
+
+        Returns the grades exactly as stated (invariant 5) and in the order the repository
+        contract defines — subject `display_order`. They are not re-sorted here, because a
+        re-sort would need every `Subject` row and would quietly reshuffle a report card
+        whenever one of them failed to load.
+        """
+        with self._uow_factory() as uow:
+            student = uow.students.get(student_number)
+            if student is None:
+                raise UnknownReference(
+                    f"no student {student_number}", field="student_number"
+                )
+            term = uow.terms.get(term_code)
+            if term is None:
+                raise UnknownReference(f"no term {term_code}", field="term_code")
+            grades = uow.grades.list_for_student(student_number, term_code=term_code)
+            subjects = uow.subjects.get_many(
+                [
+                    grade.subject_code
+                    for grade in grades
+                    if isinstance(grade.subject_code, SubjectCode)
+                ]
+            )
+            section = resolve_section_for_term(uow.enrolments, student_number, term)
+        return StudentTermGrades(
+            student=student,
+            term=term,
+            class_section=section,
+            lines=tuple(
+                GradeLine(grade=grade, subject=subjects.get(str(grade.subject_code)))
+                for grade in grades
+            ),
+        )
+
+    def subject_codes_for_grades(
+        self, student_number: StudentNumber, term_code: TermCode
+    ) -> Sequence[SubjectCode]:
+        """The subjects a child has a *row* for this term, graded or not.
+
+        Separate from `student_term_grades` because the `records/` adapter asks only which
+        subjects are on file, and pulling a full report card to answer that is a read of
+        every mark for a question about headings.
+        """
+        return tuple(
+            SubjectCode(str(line.grade.subject_code))
+            for line in self.student_term_grades(student_number, term_code).lines
+        )
+
+    @staticmethod
+    def _require_year(uow: UnitOfWork, code: AcademicYearCode) -> None:
+        """One unknown-year check, so every listing fails the same way it succeeds."""
+        if uow.academic_years.get(code) is None:
+            raise UnknownReference(
+                f"no academic year {code}", field="academic_year_code"
+            )
