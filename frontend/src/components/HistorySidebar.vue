@@ -23,7 +23,7 @@
         <div v-if="sessionStore.sessions.length === 0" class="empty-history">
           <span class="empty-icon"><i class="fa-regular fa-comments"></i></span>
           <h3>No history yet</h3>
-          <p>Start a new conversation and Mew will save it here for you.</p>
+          <p>Start a new conversation and Agent will save it here for you.</p>
         </div>
 
         <article

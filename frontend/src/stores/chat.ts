@@ -52,7 +52,7 @@ export const useChatStore = defineStore('chat', {
       if (pendingHitl) {
         return 'Type your own answer, or pick an option above and send...';
       }
-      return 'Say something to Mew... (Shift+Enter for a new line)';
+      return 'Say something to Agent... (Shift+Enter for a new line)';
     },
   },
 

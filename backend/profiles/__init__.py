@@ -9,7 +9,8 @@ Import `get_profile` and read the section you need:
     top_k = profile.retrieval.top_k
 
 Select the active profile with the ACTIVE_PROFILE environment variable (default:
-"supermew"). Individual values can still be overridden by their original environment
+"supermew" — the profile id/filename, not the display identity it composes to, which
+is "SuperAgent"). Individual values can still be overridden by their original environment
 variables — see ENV_OVERRIDES in registry.py for the full list.
 """
 from backend.profiles.registry import (

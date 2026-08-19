@@ -40,3 +40,7 @@ rag_pipeline_graph.png
 # not here.
 /identity-dev-key.pem
 /identity.db
+
+# SIS local database and scratch verification files
+sis.db
+.sis_*.db

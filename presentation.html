@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SuperMew - Next-Generation RAG Retrieval Engine</title>
+    <title>SuperAgent - Next-Generation RAG Retrieval Engine</title>
     <style>
         :root {
             --bg-color: #0a0a0a;
@@ -160,7 +160,7 @@
         <!-- Slide 1: Hero -->
         <section class="slide">
             <div class="slide-content">
-                <h1>SuperMew</h1>
+                <h1>SuperAgent</h1>
                 <p style="color: var(--text-primary); font-size: clamp(1.5rem, 3vw, 2.5rem); font-weight: 500;">A Next-Generation CRAG Knowledge Engine</p>
                 <p>An enterprise-grade, self-reflective RAG architecture built for high-precision Q&A.</p>
                 <div class="scroll-indicator">↓</div>
@@ -180,7 +180,7 @@
         <section class="slide">
             <div class="slide-content">
                 <h2>A self-reflective architecture.</h2>
-                <p>SuperMew doesn't just search. It knows how to <strong>evaluate</strong> and <strong>self-correct</strong>.</p>
+                <p>SuperAgent doesn't just search. It knows how to <strong>evaluate</strong> and <strong>self-correct</strong>.</p>
                 <p>If the <strong>Grader model</strong> judges the retrieved results irrelevant, the LangGraph state machine automatically triggers a <strong>HyDE</strong> (hypothetical document) or <strong>Step-back</strong> transformation to recover the lost context.</p>
                 <div class="code-snippet">
                     graph.add_conditional_edges(<br>
@@ -209,7 +209,7 @@
             <div class="slide-content">
                 <h2>Complete, coherent context.</h2>
                 <p>Parent-Child Chunking completely eliminates context fragmentation.</p>
-                <p>Documents are split into 3 tiers. Only the smallest, fine-grained sentences (L3) go into the vector store. Once one is matched, SuperMew traces back up to wake the larger parent passages (L1/L2) so the LLM gets the full picture.</p>
+                <p>Documents are split into 3 tiers. Only the smallest, fine-grained sentences (L3) go into the vector store. Once one is matched, SuperAgent traces back up to wake the larger parent passages (L1/L2) so the LLM gets the full picture.</p>
                 <div style="display: flex; justify-content: center; gap: 20px; margin-top: 2rem;">
                     <div style="padding: 1rem; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px;">L1 (1200 characters)</div>
                     <div style="padding: 1rem; border: 1px solid rgba(255,255,255,0.4); border-radius: 8px;">L2 (600 characters)</div>

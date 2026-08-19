@@ -1,3 +1,9 @@
+---
+noteId: "3e5d04b095c711f1a6d4fb6c6accc4db"
+tags: []
+
+---
+
 # Academic Records Facade
 
 A small, AI-free service between the school assistant agent and the school's system of
@@ -63,12 +69,14 @@ pytest records/tests -q
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `RECORDS_DATABASE_URL` | `sqlite:///./records.db` | Point at Postgres for real data. |
-| `RECORDS_LMS` | `fake` | `fake` or `moodle`. |
+| `RECORDS_LMS` | `fake` | `fake`, `moodle`, or `sis` (the school's own SIS on :8300). |
 | `RECORDS_BOOTSTRAP_ADMIN_KEY` | — | Mints the first admin key, once. |
 | `IDENTITY_JWKS_URL` | — | **Required.** e.g. `http://localhost:8200/.well-known/jwks.json`. |
 | `IDENTITY_PUBLIC_KEY_PEM` | — | A pinned key instead of JWKS. Takes precedence. |
 | `IDENTITY_ISSUER` / `IDENTITY_AUDIENCE` | `school-identity` / `school-services` | Must match the identity service. |
 | `MOODLE_BASE_URL` / `MOODLE_TOKEN` | — | Required when `RECORDS_LMS=moodle`. |
+| `SIS_BASE_URL` / `SIS_API_KEY` | — | Required when `RECORDS_LMS=sis`. The key must be `reader`-scoped. |
+| `SIS_TIMEOUT_SECONDS` | `10` | Per-call ceiling. No retries: a retry budget multiplies it. |
 
 ## The contract
 
@@ -126,7 +134,8 @@ These are the ones that are cheap now and brutal to retrofit once real data land
 
 **`MoodleAdapter` is a skeleton** — its methods raise. The questions it was blocked on
 have now been answered against a real Moodle 5.1.6 with mod_attendance 2026042100; the
-full findings and a reproducible local instance live in `d:/Work/moodle-dev/`, and the
+full findings and a reproducible local instance live in `~/moodle-dev/` inside the
+Ubuntu-22.04 WSL2 distro (moved there off the Windows disk for speed), and the
 implementation notes are in the `MoodleAdapter` docstring in [lms.py](lms.py).
 
 Two results change this service's design.
@@ -163,3 +172,34 @@ Everything LMS-shaped is behind the `LmsAdapter` protocol in [lms.py](lms.py). R
 never import a Moodle symbol, never see a web-service function name, never handle a
 Moodle error type. Replacing Moodle means writing one class — the blast radius is that
 file, and the agent's tool layer does not change.
+
+### `RECORDS_LMS=sis`
+
+[sis_adapter.py](sis_adapter.py) is that claim tested. It reads the school's own Student
+Information Service (`:8300`, see [../SERVICES.md](../SERVICES.md)) —
+`GET /v1/students/{student_number}/grades?term=` with a `reader`-scoped `X-API-Key` — and
+nothing in the routes, the assembler or the tool layer changed to accommodate it.
+
+```bash
+RECORDS_LMS=sis SIS_BASE_URL=http://localhost:8300 SIS_API_KEY=<reader key> \
+  uvicorn records.app:app --port 8100
+```
+
+Four things to know before switching a deployment to it:
+
+- **Bind courses on the subject code.** `records.assembler` matches on the reference the
+  system of record reports, which for SIS is the subject code (`MATH`), so a
+  `CourseBinding` needs `lms_idnumber` set to that. Unbound subjects are dropped, exactly
+  as they are under Moodle — a subject the school has not published is not on a report.
+- **Attendance is unavailable.** SIS records grades only, so `get_subject_attendance`
+  raises `LmsUnavailable` and the attendance route answers 503. Returning an empty
+  register instead would have reported every child as perfectly attending.
+- **One figure per subject.** SIS states the mark a teacher wrote; there is no assignment
+  ledger, no weighting and no attendance mixed in, so `academic` carries the same figure
+  as the course total rather than a second one. A mark stated only as points ("17 out of
+  20") arrives with `academic.unavailable: "points_not_percentage"` — this adapter will
+  not divide to manufacture a percentage.
+- **An unknown student reads as no records, not as an error**, which is the same answer a
+  restricted or unlinked student gets. Any other refusal — a revoked key, a wrong base
+  URL, a timeout — is `LmsUnavailable` and reaches the parent as "records are temporarily
+  unavailable".

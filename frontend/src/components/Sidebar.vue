@@ -2,10 +2,10 @@
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="logo-icon" aria-hidden="true">
-        <i class="fa-solid fa-cat"></i>
+        <i class="fa-solid fa-robot"></i>
       </div>
       <div class="brand-copy">
-        <h1>Mew Assistant</h1>
+        <h1>Agent Assistant</h1>
         <span>Knowledge Copilot</span>
       </div>
     </div>
@@ -13,7 +13,7 @@
     <div class="workspace-switcher">
       <span class="workspace-orb" aria-hidden="true"></span>
       <span class="workspace-copy">
-        <strong>SuperMew Knowledge Space</strong>
+        <strong>SuperAgent Knowledge Space</strong>
         <small>{{ workspaceMeta }}</small>
       </span>
       <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
@@ -74,7 +74,7 @@
         </button>
 
         <div v-if="!recentSessions.length" class="recent-empty">
-          No conversations yet — ask Mew a question.
+          No conversations yet — ask Agent a question.
         </div>
       </div>
     </template>

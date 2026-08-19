@@ -1,4 +1,4 @@
-# SuperMew Project Documentation
+# SuperAgent Project Documentation
 
 An Agent project log, kept up to date for ongoing development and demos.
 

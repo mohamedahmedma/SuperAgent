@@ -3,7 +3,7 @@
     <div class="auth-showcase">
       <div class="auth-showcase-badge">
         <i class="fa-solid fa-sparkles"></i>
-        <span>SuperMew Knowledge Copilot</span>
+        <span>SuperAgent Knowledge Copilot</span>
       </div>
       <h2>Every piece of knowledge<br />deserves a clear echo.</h2>
       <p>
@@ -28,10 +28,10 @@
 
     <div class="auth-panel">
       <div class="auth-panel-heading">
-        <span class="auth-mini-logo"><i class="fa-solid fa-cat"></i></span>
+        <span class="auth-mini-logo"><i class="fa-solid fa-robot"></i></span>
         <div>
           <span class="auth-eyebrow">{{ authStore.authMode === 'login' ? 'Welcome back' : 'Create account' }}</span>
-          <h1>{{ authStore.authMode === 'login' ? 'Log in to Mew Assistant' : 'Sign up for Mew Assistant' }}</h1>
+          <h1>{{ authStore.authMode === 'login' ? 'Log in to Agent Assistant' : 'Sign up for Agent Assistant' }}</h1>
         </div>
       </div>
       <p class="auth-description">

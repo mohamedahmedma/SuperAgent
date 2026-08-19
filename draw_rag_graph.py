@@ -701,7 +701,7 @@ def write_outputs(graphs: List[Graph], out_dir: Path) -> List[Path]:
     index = out_dir / "index.html"
     index.write_text(
         HTML_TEMPLATE.format(
-            title="SuperMew pipelines" if len(graphs) > 1 else graphs[0].title,
+            title="SuperAgent pipelines" if len(graphs) > 1 else graphs[0].title,
             nav="".join(nav),
             sections="\n".join(sections),
         ),

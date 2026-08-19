@@ -2,9 +2,9 @@
   <div class="settings-panel">
     <header class="settings-header">
       <div>
-        <span class="panel-eyebrow">Mew memory</span>
+        <span class="panel-eyebrow">Agent memory</span>
         <h1>Knowledge Base</h1>
-        <p>Manage the documents, indexes, and data sources Mew can search.</p>
+        <p>Manage the documents, indexes, and data sources Agent can search.</p>
       </div>
       <button
         type="button"
@@ -45,7 +45,7 @@
         <div class="documents-section-head">
           <div>
             <h2>All documents</h2>
-            <p>{{ filteredDocuments.length }} files available for Mew to search</p>
+            <p>{{ filteredDocuments.length }} files available for Agent to search</p>
           </div>
           <label class="document-search">
             <i class="fa-solid fa-magnifying-glass"></i>
@@ -69,7 +69,7 @@
         <div v-else-if="filteredDocuments.length === 0" class="empty-documents">
           <span class="empty-icon"><i class="fa-regular fa-folder-open"></i></span>
           <h3>{{ searchQuery ? 'No matching documents' : 'Your knowledge base is empty' }}</h3>
-          <p>{{ searchQuery ? 'Try a different keyword.' : 'Upload your first file on the right to get Mew started.' }}</p>
+          <p>{{ searchQuery ? 'Try a different keyword.' : 'Upload your first file on the right to get Agent started.' }}</p>
         </div>
 
         <div v-else class="documents-list">

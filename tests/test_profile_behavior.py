@@ -228,7 +228,7 @@ class AgentAssemblyTests(ProfileTestCase):
             ["get_current_weather", "search_knowledge_base", "view_figure", "search_products"],
             [tool.name for tool in kwargs["tools"]],
         )
-        self.assertTrue(kwargs["system_prompt"].startswith("You are a cute cat bot"))
+        self.assertTrue(kwargs["system_prompt"].startswith("You are a helpful knowledge-base assistant"))
 
     def test_tool_order_follows_the_profile_declaration(self):
         body = 'name: reversed\nagent:\n  tools: ["search_knowledge_base", "get_current_weather"]\n'

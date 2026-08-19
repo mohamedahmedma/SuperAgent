@@ -4,12 +4,12 @@
     :class="['message', msg.isUser ? 'user-message' : 'bot-message']"
   >
     <div v-if="!msg.isUser" class="message-avatar" aria-hidden="true">
-      <i class="fa-solid fa-cat"></i>
+      <i class="fa-solid fa-robot"></i>
     </div>
 
     <div class="message-column">
       <div v-if="!msg.isUser" class="message-author">
-        <span>Mew Assistant</span>
+        <span>Agent Assistant</span>
         <small v-if="msg.ragTrace?.retrieved_chunks?.length">
           Cited {{ msg.ragTrace.retrieved_chunks.length }} sources
         </small>

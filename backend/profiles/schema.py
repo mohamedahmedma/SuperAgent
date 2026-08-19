@@ -36,15 +36,15 @@ class _Section(BaseModel):
 class IdentityConfig(_Section):
     """Who the deployment says it is. Replaces every hardcoded product string."""
 
-    name: str = "SuperMew"
-    display_name: str = "SuperMew"
-    api_title: str = "SuperMew API"
+    name: str = "SuperAgent"
+    display_name: str = "SuperAgent"
+    api_title: str = "SuperAgent API"
     description: str = "Knowledge-base assistant"
     # Injected into the agent system prompt as {persona}; the one place a
     # deployment's voice is defined.
-    persona: str = "You are a cute cat bot that loves to help users."
-    redis_key_prefix: str = "supermew"
-    langsmith_project: str = "supermew-rag"
+    persona: str = "You are a helpful knowledge-base assistant."
+    redis_key_prefix: str = "superagent"
+    langsmith_project: str = "superagent-rag"
 
 
 class ModelConfig(_Section):

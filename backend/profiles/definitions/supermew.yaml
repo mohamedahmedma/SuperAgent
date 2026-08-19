@@ -1,4 +1,4 @@
-# SuperMew — the original deployment identity, and the default active profile.
+# SuperAgent — the original deployment identity, and the default active profile.
 #
 # This profile is currently the FULL-FEATURE test bed: every optional capability is
 # switched on so the whole system can be exercised end to end. That is a deliberate
@@ -6,16 +6,21 @@
 # production deployment should start from `document_kb` and enable only what it needs.
 
 extends: base
+# The profile id is the filename stem (`supermew`), not this field — the registry
+# overwrites `name` with the requested profile id during composition regardless of
+# what is written here. It also doubles as the scoping key for already-ingested
+# corpus data (SectionSummary/CorpusDigest rows, entity records), so it stays
+# `supermew` even though the display identity below has moved on from that name.
 name: supermew
 
 identity:
-  name: "SuperMew"
-  display_name: "SuperMew"
-  api_title: "Cute Cat Bot API"
+  name: "SuperAgent"
+  display_name: "SuperAgent"
+  api_title: "SuperAgent API"
   description: "Self-reflective RAG knowledge-base assistant"
-  persona: "You are a cute cat bot that loves to help users."
-  redis_key_prefix: "supermew"
-  langsmith_project: "supermew-rag"
+  persona: "You are a helpful knowledge-base assistant."
+  redis_key_prefix: "superagent"
+  langsmith_project: "superagent-rag"
 
 agent:
   tools:

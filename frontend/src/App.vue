@@ -37,13 +37,13 @@ const sessionStore = useSessionStore();
 
 type Theme = 'dark' | 'light';
 
-const storedTheme = localStorage.getItem('supermew-theme');
+const storedTheme = localStorage.getItem('superagent-theme');
 const theme = ref<Theme>(storedTheme === 'light' ? 'light' : 'dark');
 
 const applyTheme = (nextTheme: Theme) => {
   document.documentElement.dataset.theme = nextTheme;
   document.documentElement.style.colorScheme = nextTheme;
-  localStorage.setItem('supermew-theme', nextTheme);
+  localStorage.setItem('superagent-theme', nextTheme);
 };
 
 const toggleTheme = () => {

@@ -1,3 +1,9 @@
+---
+noteId: "3e5c416095c711f1a6d4fb6c6accc4db"
+tags: []
+
+---
+
 # Identity Service
 
 The one place in the system that decides **who someone is**. Every other service

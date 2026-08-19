@@ -141,7 +141,7 @@ const runSteps = computed<RunStepView[]>(() => {
   if (!currentTrace) {
     return [{
       key: 'answer',
-      label: isRunning.value ? 'Connecting to Mew agent' : 'Direct answer completed',
+      label: isRunning.value ? 'Connecting to Agent' : 'Direct answer completed',
       detail: isRunning.value ? 'Understanding the question and choosing a tool' : 'No retrieval trace was produced this time',
     }];
   }

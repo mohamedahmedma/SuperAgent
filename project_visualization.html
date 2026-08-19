@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SuperMew Project Architecture & Core Code Walkthrough</title>
+    <title>SuperAgent Project Architecture & Core Code Walkthrough</title>
     <style>
         :root {
             --primary-color: #4A90E2;
@@ -346,7 +346,7 @@
 <body>
 
     <header>
-        <h1>🐈 SuperMew - Project Architecture Walkthrough</h1>
+        <h1>🤖 SuperAgent - Project Architecture Walkthrough</h1>
         <div style="font-weight: 500; color: #666;">Advanced RAG Knowledge Base System | FastAPI + LangGraph + Milvus</div>
     </header>
 
@@ -356,7 +356,7 @@
             <h2>Project File Structure</h2>
             <div class="tree-view">
                 <ul>
-                    <li class="folder" onclick="showPage('page-overview')">SuperMew/</li>
+                    <li class="folder" onclick="showPage('page-overview')">SuperAgent/</li>
                     <ul>
                         <li class="file" onclick="showPage('page-overview')">
                             <span class="filename">main.py</span><span class="badge">Entry point</span>
@@ -411,7 +411,7 @@
             <div id="page-overview" class="details-section active">
                 <div class="card">
                     <h2>Project Overview</h2>
-                    <p>SuperMew is an advanced intelligent Q&A knowledge-base system built around the <span class="highlight-text">Self-Reflective RAG (CRAG)</span> concept. It breaks past the limits of traditional, simple RAG (bare similarity recall handed straight to the model) with a substantial amount of industrial-grade engineering aimed at recall quality, context completeness, and hallucination prevention.</p>
+                    <p>SuperAgent is an advanced intelligent Q&A knowledge-base system built around the <span class="highlight-text">Self-Reflective RAG (CRAG)</span> concept. It breaks past the limits of traditional, simple RAG (bare similarity recall handed straight to the model) with a substantial amount of industrial-grade engineering aimed at recall quality, context completeness, and hallucination prevention.</p>
 
                     <div style="margin: 25px 0;">
                         <span class="tag">FastAPI</span>
@@ -671,7 +671,7 @@ index_params.add_index(
 
                     <h3>Design Highlight: The Anti-Hallucination System Prompt</h3>
                     <pre><code>system_prompt=(
-    <span class="string">"You are a cute cat bot that loves to help users. "</span>
+    <span class="string">"You are a helpful knowledge-base assistant. "</span>
     <span class="string">"Use search_knowledge_base when users ask document questions. "</span>
 
     <span class="comment"># Core constraint 1: prevent an infinite loop of frantic tool calls (rate limit)</span>

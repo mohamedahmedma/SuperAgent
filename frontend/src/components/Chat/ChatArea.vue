@@ -76,9 +76,9 @@ const sessionTitle = computed(() => {
 });
 
 const generationStatus = computed(() => {
-  if (chatStore.isViewingStreamingSession) return 'Mew is generating a response';
+  if (chatStore.isViewingStreamingSession) return 'Agent is generating a response';
   if (chatStore.currentPendingHitl) return 'Waiting for your input';
-  return 'Mew is online';
+  return 'Agent is online';
 });
 
 onBeforeUpdate(() => {

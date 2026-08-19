@@ -5,7 +5,7 @@
         <span class="hitl-icon"><i class="fa-solid fa-circle-question"></i></span>
         <span>
           <strong>Just need a bit more from you</strong>
-          <small>Mew will continue the original search based on your choice</small>
+          <small>Agent will continue the original search based on your choice</small>
         </span>
       </div>
       <div class="hitl-panel-prompt">{{ chatStore.currentPendingHitl.prompt }}</div>

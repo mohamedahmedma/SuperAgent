@@ -269,7 +269,7 @@ class SystemPromptTests(ProfileTestCase):
     def test_persona_is_substituted(self):
         profile = load_profile("supermew")
         rendered = profile.render_system_prompt()
-        self.assertTrue(rendered.startswith("You are a cute cat bot that loves to help users."))
+        self.assertTrue(rendered.startswith("You are a helpful knowledge-base assistant."))
         self.assertNotIn("{persona}", rendered)
 
     def test_literal_braces_in_a_prompt_survive_rendering(self):
@@ -291,9 +291,9 @@ class NoDriftTests(ProfileTestCase):
         # may well set them, so clear those two to assert the profile's own values.
         with patch.dict(os.environ, {"REDIS_KEY_PREFIX": "", "LANGSMITH_PROJECT": ""}):
             profile = load_profile("supermew")
-        self.assertEqual("Cute Cat Bot API", profile.identity.api_title)
-        self.assertEqual("supermew", profile.identity.redis_key_prefix)
-        self.assertEqual("supermew-rag", profile.identity.langsmith_project)
+        self.assertEqual("SuperAgent API", profile.identity.api_title)
+        self.assertEqual("superagent", profile.identity.redis_key_prefix)
+        self.assertEqual("superagent-rag", profile.identity.langsmith_project)
 
     def test_original_retrieval_and_chunking_defaults(self):
         # Load `base` with retrieval/chunking env cleared so the profile value shows.

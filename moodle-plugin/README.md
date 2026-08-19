@@ -11,7 +11,7 @@ term?** One call, one student, correct figures.
 
 It exists because Moodle's core web services cannot answer that question safely or
 quickly. Every claim below was measured on a live Moodle 5.1.6 — see
-`d:/Work/moodle-dev/README.md` for the spike.
+`~/moodle-dev/README.md` inside the Ubuntu-22.04 WSL2 distro for the spike.
 
 ## Why not core web services
 

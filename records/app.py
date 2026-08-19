@@ -7,10 +7,15 @@ unaffected.
 
     uvicorn records.app:app --port 8100
 
-`RECORDS_LMS` selects the adapter. It defaults to `fake`, which is the right default
+`RECORDS_LMS` selects the adapter — `fake`, `moodle`, or `sis` for the school's own
+Student Information Service on :8300. It defaults to `fake`, which is the right default
 for a service whose real adapter is still a skeleton: an explicit fixture backend is
 honest, whereas defaulting to a half-built Moodle client would fail at the first
 parent question instead of at startup.
+
+Each backend's credentials are demanded here, at startup, rather than discovered on the
+first parent question. A misconfigured deployment should refuse to start; the failure
+mode it replaces is a service that looks healthy until someone asks about a child.
 """
 import os
 from contextlib import asynccontextmanager
@@ -20,6 +25,7 @@ from fastapi import FastAPI
 from records import lms
 from records.db import SessionLocal, init_db
 from records.routes import admin_router, agent_router
+from records.sis_adapter import SisAdapter
 
 
 def _configure_adapter() -> None:
@@ -31,6 +37,17 @@ def _configure_adapter() -> None:
         if not base_url or not token:
             raise RuntimeError("RECORDS_LMS=moodle requires MOODLE_BASE_URL and MOODLE_TOKEN.")
         lms.set_adapter(lms.MoodleAdapter(base_url=base_url, token=token))
+        return
+
+    if backend == "sis":
+        base_url = os.getenv("SIS_BASE_URL", "")
+        # A `reader`-scoped key. A registrar key would also read grades, and handing the
+        # school's write credential to the process that answers parents is how a
+        # read-only integration becomes the blast radius of a leak.
+        api_key = os.getenv("SIS_API_KEY", "")
+        if not base_url or not api_key:
+            raise RuntimeError("RECORDS_LMS=sis requires SIS_BASE_URL and SIS_API_KEY.")
+        lms.set_adapter(SisAdapter(base_url=base_url, api_key=api_key))
         return
 
     lms.set_adapter(lms.FakeLms())
