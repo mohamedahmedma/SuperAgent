@@ -81,18 +81,6 @@ def registrar() -> dict[str, str]:
 
 
 @pytest.fixture
-def reader(client: TestClient, registrar: dict[str, str]) -> dict[str, str]:
-    """A minted `reader` key — the credential every write route below must refuse."""
-    response = client.post(
-        "/v1/admin/api-keys",
-        json={"label": "reporting dashboard", "scope": "reader"},
-        headers=registrar,
-    )
-    assert response.status_code == 201, response.text
-    return {"X-API-Key": response.json()["api_key"]}
-
-
-@pytest.fixture
 def roll(client: TestClient, registrar: dict[str, str]) -> None:
     """Two children on the roll. Guardians attach to students; they never create them."""
     with SqlAlchemyUnitOfWork() as uow:
@@ -363,28 +351,6 @@ def test_an_unknown_student_is_a_404_not_an_empty_list(
     known = client.get("/v1/students/S001/guardians", headers=registrar)
     assert known.status_code == 200
     assert known.json()["count"] == 0
-
-
-def test_a_reader_key_cannot_import_or_change_access(
-    client: TestClient, reader: dict[str, str], roll: None
-) -> None:
-    """Scope is compared by exact equality; a route that forgot its dependency serves all."""
-    refused = client.post(
-        "/v1/imports/guardians/preview",
-        files={"file": ("guardians.csv", GUARDIANS_CSV, "text/csv")},
-        headers=reader,
-    )
-    assert refused.status_code == 403
-
-    patched = client.patch(
-        "/v1/students/S001/guardians/+201001234567",
-        json={"can_view_records": False},
-        headers=reader,
-    )
-    assert patched.status_code == 403
-
-    # Reads stay open to both scopes.
-    assert client.get("/v1/students/S001/guardians", headers=reader).status_code == 200
 
 
 def test_a_batch_cannot_be_committed_twice(

@@ -90,20 +90,6 @@ def registrar() -> dict[str, str]:
     return {"X-API-Key": BOOTSTRAP_KEY}
 
 
-@pytest.fixture
-def reader(client: TestClient, registrar: dict[str, str]) -> dict[str, str]:
-    """A minted `reader` key — the credential every write route below must refuse."""
-    response = client.post(
-        "/v1/admin/api-keys",
-        json={"label": "reporting dashboard", "scope": "reader"},
-        headers=registrar,
-    )
-    assert response.status_code == 201, response.text
-    body = response.json()
-    assert body["scope"] == "reader"
-    return {"X-API-Key": body["api_key"]}
-
-
 def _seed_academic_year() -> None:
     """The one thing the HTTP surface cannot create, and everything else hangs from it."""
     with SqlAlchemyUnitOfWork() as uow:
@@ -168,92 +154,9 @@ def _csv_upload(name: str = "roster.csv", content: bytes = ROSTER_CSV) -> dict[s
     return {"file": (name, content, "text/csv")}
 
 
-# Every route that writes, or reads a write's audit trail. Each carries a well-formed
-# payload on purpose: if the body were invalid, a 422 could mask a missing scope check
-# and the test would pass against an unguarded route.
-WRITE_ROUTES: tuple[tuple[str, str, dict[str, Any]], ...] = (
-    (
-        "POST",
-        "/v1/structure/generate",
-        {"json": {"academic_year_code": YEAR_CODE, "year_count": 1, "classes_per_year": 1}},
-    ),
-    (
-        "POST",
-        "/v1/terms",
-        {
-            "json": {
-                "code": TERM_CODE,
-                "academic_year_code": YEAR_CODE,
-                "name_en": "Term 1",
-                "name_ar": "الفصل الأول",
-                "starts_on": "2025-09-01",
-                "ends_on": "2025-12-15",
-            }
-        },
-    ),
-    ("POST", "/v1/subjects", {"json": {"code": "MATH", "name_en": "Mathematics"}}),
-    (
-        "POST",
-        "/v1/imports/roster/preview",
-        {"files": _csv_upload(), "data": {"academic_year_code": YEAR_CODE}},
-    ),
-    ("POST", "/v1/imports/roster/any-batch/commit", {}),
-    (
-        "POST",
-        "/v1/imports/grades/preview",
-        {
-            "files": _csv_upload("grades.csv", GRADES_CSV),
-            "data": {"term_code": TERM_CODE},
-        },
-    ),
-    ("POST", "/v1/imports/grades/any-batch/commit", {}),
-    ("GET", "/v1/imports/any-batch", {}),
-    ("POST", "/v1/admin/api-keys", {"json": {"label": "another", "scope": "reader"}}),
-)
-
-_ROUTE_IDS = [f"{method} {path}" for method, path, _ in WRITE_ROUTES]
-
-
-@pytest.mark.parametrize(("method", "path", "payload"), WRITE_ROUTES, ids=_ROUTE_IDS)
-def test_write_route_refuses_a_request_carrying_no_key(
-    client: TestClient, method: str, path: str, payload: dict[str, Any]
-) -> None:
-    response = client.request(method, path, **payload)
-
-    assert_error_envelope(response, status=401, code="not_authorized")
-    # The refusal must come from the dependency, before the handler: a 404 here would
-    # mean an unauthenticated caller had already been told whether a batch id exists.
-    assert response.headers.get("WWW-Authenticate") == "X-API-Key"
-
-
-@pytest.mark.parametrize(("method", "path", "payload"), WRITE_ROUTES, ids=_ROUTE_IDS)
-def test_write_route_refuses_a_reader_key(
-    client: TestClient,
-    reader: dict[str, str],
-    method: str,
-    path: str,
-    payload: dict[str, Any],
-) -> None:
-    """`Scope.permits` is exact equality, and this is where that has to hold.
-
-    A reader key reaching a write route is how a reporting dashboard handed the wrong
-    credential silently gains the ability to rewrite a term's grades — and nothing in a
-    log distinguishes that from a registrar doing her job.
-    """
-    response = client.request(method, path, headers=reader, **payload)
-
-    assert_error_envelope(response, status=403, code="not_authorized")
-
-
-def test_a_registrar_key_is_refused_by_reader_only_checks_nowhere_it_reads(
+def test_a_registrar_key_reads_structure(
     client: TestClient, registrar: dict[str, str]
 ) -> None:
-    """Reads a registrar legitimately performs must not be locked behind `reader`.
-
-    The mirror of the test above, and the reason `require_read_access` names both scopes
-    out loud: exact-equality scopes would otherwise refuse the registrar the very
-    dropdowns she generates the structure from.
-    """
     _seed_academic_year()
 
     assert client.get("/v1/structure/years", headers=registrar).status_code == 200

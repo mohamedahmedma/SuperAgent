@@ -8,21 +8,14 @@ That is what makes every service in this package testable with fakes: the only p
 that knows an environment and a database exist is this file, and a test replaces it
 wholesale through `app.dependency_overrides`.
 
-**Two scopes, compared by exact equality.** `registrar` does not implicitly satisfy
-`reader` — see `Scope.permits` for the incident that rule prevents. A route that
-legitimately accepts either lists both, out loud, via `require_read_access`.
-
-**A key is never logged, echoed or returned.** What may appear in a log line is the
-`prefix`, which names a key so an operator can revoke the right one and is useless for
-authenticating with it. The secret itself exists in this module only as a local variable
-and a SHA-256 digest, and no error message ever quotes it back — an unauthenticated
-caller learns that authentication failed and nothing further, because "your key is
-almost right" is the one hint worth having.
+**No API key is required.** `require_registrar`, `require_reader` and `require_read_access`
+all admit every caller as a full registrar — see `_require_scopes`. Key minting
+(`ApiKeyMinter`, `hash_api_key`, `key_prefix`) is left in place for later, but nothing in
+this module currently checks a presented key against it.
 """
 from __future__ import annotations
 
 import hashlib
-import hmac
 import logging
 import secrets
 from collections.abc import Callable, Collection, Iterator
@@ -30,7 +23,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Final
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends
 
 from sis.application.dto import Page, PageRequest
 from sis.application.ports.unit_of_work import UnitOfWork
@@ -89,12 +82,6 @@ def generate_api_key() -> tuple[str, str, str]:
     return raw, key_prefix(raw), hash_api_key(raw)
 
 
-# Compared against when no key row matched, so a wrong prefix and a wrong secret do the
-# same work. Skipping the comparison on a miss turns prefix enumeration into a timing
-# measurement, which is how an attacker learns which handles are real before guessing.
-_ABSENT_HASH: Final[str] = hash_api_key("")
-
-
 @dataclass(frozen=True, slots=True)
 class Caller:
     """The authenticated *system* behind a request. Never a person.
@@ -117,124 +104,28 @@ class Caller:
 # ---------------------------------------------------------------------------
 
 
-def _unauthorised(message: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"code": "not_authorized", "message": message},
-        headers={"WWW-Authenticate": API_KEY_HEADER},
-    )
-
-
-def _matches_bootstrap(presented: str, configured: str | None) -> bool:
-    """Constant-time comparison against `SIS_BOOTSTRAP_REGISTRAR_KEY`.
-
-    Solves the chicken-and-egg of needing a registrar key to mint a registrar key. The
-    value is compared, never stored: an empty database plus one environment variable is
-    a working registrar, and unsetting the variable revokes it without a migration.
-
-    Encoded to bytes first because `secrets.compare_digest` raises `TypeError` on a
-    `str` holding non-ASCII — and the presented value is a header a client controls
-    completely, so the str form turns one hostile request into a 500.
-    """
-    if not configured:
-        return False
-    return secrets.compare_digest(presented.encode("utf-8"), configured.encode("utf-8"))
-
-
-def _lookup_stored_key(presented: str) -> ApiKey | None:
-    """Find and verify a stored key, in its own short transaction.
-
-    Deliberately not the caller's unit of work. Authentication runs before the handler
-    has written anything and must not be able to see — or contaminate — the transaction
-    the handler will later roll back. The session is closed before the route body
-    starts, so a request rejected here never holds a pooled connection for the length of
-    the response.
-    """
-    with SqlAlchemyUnitOfWork() as uow:
-        stored = uow.api_keys.get_by_prefix(key_prefix(presented))
-
-    candidate = hash_api_key(presented)
-    expected = stored.key_hash if stored is not None else _ABSENT_HASH
-    if not hmac.compare_digest(candidate, expected):
-        return None
-    return stored
-
-
-def _record_use(prefix: str, at: datetime) -> None:
-    """Best effort, by contract. A failed touch must never fail an authorised request."""
-    try:
-        with SqlAlchemyUnitOfWork() as uow:
-            uow.api_keys.touch(prefix, at=at)
-            uow.commit()
-    except Exception:  # noqa: BLE001 - the request is already authorised; do not fail it
-        # The prefix identifies the key; it is not the secret. See the module docstring.
-        logger.warning("Could not record last use of API key %s", prefix)
-
-
 def _require_scopes(*allowed: Scope) -> Callable[..., Caller]:
-    """Build the dependency that admits exactly the listed scopes and nothing else.
+    """Build the dependency for routes that used to require a scoped API key.
 
-    Every allowed scope is spelled out at the call site. There is no ordering, no
-    superset and no "registrar can do anything" shortcut, so reading a route's signature
-    tells you precisely which credentials reach it.
+    No key check: every caller is admitted as a full registrar. `allowed` is unused now
+    but kept as a parameter so call sites (`require_registrar`, `require_reader`, ...)
+    don't need to change.
     """
 
-    allowed_scopes: tuple[Scope, ...] = allowed
-    required = " or ".join(scope.value for scope in allowed_scopes)
-
-    def dependency(
-        x_api_key: Annotated[str | None, Header(alias=API_KEY_HEADER)] = None,
-    ) -> Caller:
-        presented = (x_api_key or "").strip()
-        if not presented:
-            raise _unauthorised(f"Missing {API_KEY_HEADER} header.")
-
-        now = datetime.now(UTC)
-        settings = get_settings()
-
-        if _matches_bootstrap(presented, settings.bootstrap_registrar_key):
-            caller = Caller(
-                prefix=key_prefix(presented), scope=Scope.REGISTRAR, is_bootstrap=True
-            )
-            _check_scope(caller, allowed_scopes, required)
-            return caller
-
-        stored = _lookup_stored_key(presented)
-        # Unknown prefix, wrong secret, revoked and expired all answer identically. A
-        # caller who can tell them apart can enumerate which handles exist and learn
-        # that a leaked key was noticed, both from error text alone.
-        if stored is None or not stored.is_usable_at(now):
-            raise _unauthorised("Invalid or expired API key.")
-
-        caller = Caller(prefix=stored.prefix, scope=stored.scope)
-        _check_scope(caller, allowed_scopes, required)
-        _record_use(stored.prefix, now)
-        return caller
+    def dependency() -> Caller:
+        return Caller(prefix="open", scope=Scope.REGISTRAR, is_bootstrap=True)
 
     return dependency
 
 
-def _check_scope(caller: Caller, allowed: tuple[Scope, ...], required: str) -> None:
-    if any(caller.scope.permits(scope) for scope in allowed):
-        return
-    logger.info("Key %s refused: scope %s cannot call this route", caller.prefix, caller.scope.value)
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={
-            "code": "not_authorized",
-            "message": f"This endpoint requires an API key with scope {required}.",
-        },
-    )
-
-
 require_registrar = _require_scopes(Scope.REGISTRAR)
-"""Writes: structure generation, imports, key management."""
+"""Writes: structure generation, imports, key management. Open — see module docstring."""
 
 require_reader = _require_scopes(Scope.READER)
-"""Read-only integrations. A registrar key is refused here, on purpose."""
+"""Read-only integrations. Open — see module docstring."""
 
 require_read_access = _require_scopes(Scope.REGISTRAR, Scope.READER)
-"""Both scopes, granted explicitly, for reads a registrar also legitimately performs."""
+"""Reads a registrar also legitimately performs. Open — see module docstring."""
 
 
 # ---------------------------------------------------------------------------
