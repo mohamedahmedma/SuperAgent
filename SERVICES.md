@@ -6,23 +6,38 @@ tags: []
 
 # Services
 
-Four processes, started separately, deployed separately, failing separately.
+Five processes, started separately, deployed separately, failing separately.
 
 ```
 frontend/    Vue app                     (existing)
 backend/     chat agent + RAG            (existing)  :8000
 records/     academic records facade     :8100
 identity/    authentication              :8200
+sis/         student information service :8300
 ```
 
-`records/` and `identity/` are independent projects. They have their own
+`records/`, `identity/` and `sis/` are independent projects. They have their own
 `requirements.txt`, their own database, their own OpenAPI contract, and no import in
 either direction with `backend/` — verified by:
 
 ```bash
-grep -rn "from backend\|import backend" records/ identity/     # nothing
-grep -rn "from records\|from identity"   backend/              # nothing
+grep -rn "from backend\|import backend" records/ identity/ sis/  # nothing
+grep -rn "from records\|from identity\|from sis" backend/        # nothing
 ```
+
+`sis/` is the school's own registrar-facing system of record: year levels, classes,
+subjects, terms, time-bounded class placements, spreadsheet imports, the marks a teacher
+stated, and the guardians a child may be contacted through. It is a peer of Moodle, not a
+layer over it — `records/` reads it through the same `LmsAdapter` seam, and `sis/` does
+not know `records/` exists.
+
+Guardians live in `sis/` and are **not** the same table as `records/`'s. A student on the
+SIS roll need not exist in `records/` at all, which is the intended state rather than
+something to reconcile: `records/` is the Moodle-era facade and its own guardian model is
+on its way out. Three tables carry it — `guardians`, `guardian_phones` and
+`student_guardians` — and the split is what lets one parent hold two numbers and one child
+have any number of adults, each with their own relationship and their own permission to
+read academic records.
 
 ## How a parent question flows
 
@@ -43,7 +58,13 @@ parent → frontend → backend    chat turn, Authorization: Bearer <token>
                               checks the guardian↔student link.
 
                     records → Moodle   grades and attendance, read live
+                            (or → sis) GET /v1/students/{number}/grades?term=
+                                       X-API-Key: a reader-scoped SIS key
 ```
+
+Which system of record answers that last hop is `RECORDS_LMS`, and it is the only thing
+that changes: `fake`, `moodle`, or `sis`. No route, tool schema or parent-facing contract
+differs between them.
 
 The chat backend is the process running a language model on untrusted input. It holds
 a token it cannot forge and cannot alter, and it has no ability to change whose records
@@ -66,7 +87,25 @@ IDENTITY_JWKS_URL=http://localhost:8200/.well-known/jwks.json \
 # 3. backend   :8000
 RECORDS_BASE_URL=http://localhost:8100 RECORDS_API_KEY=<agent key> \
   uvicorn backend.app:app --port 8000
+
+# 4. sis       :8300  (only when RECORDS_LMS=sis)
+SIS_BOOTSTRAP_REGISTRAR_KEY=dev-sis-registrar uvicorn sis.app:app --port 8300
 ```
+
+`SIS_DEFAULT_COUNTRY_CODE` (default `+20`, Egypt) is what a guardian's phone number is
+normalised against when a registrar types it in national form. It matters more than it
+looks: Excel formats a phone column as a number and drops the leading zero, so
+`01001234567` reaches the service as `1001234567`, and this setting is what turns it back
+into a number that can actually be dialled. A number typed with its own `+` prefix ignores
+the setting entirely, so a foreign parent is unaffected at any value, and a bare `20` is
+accepted and read as `+20`. Set it wrong and every locally-typed parent number in the
+school points at another country.
+
+To point the facade at it, mint a **`reader`**-scoped key from the SIS admin routes and
+start `records/` with `RECORDS_LMS=sis`, `SIS_BASE_URL` and `SIS_API_KEY`. A registrar
+key would also read grades, which is the reason not to use one: the process answering
+parents should not hold the school's write credential. Course bindings must key on the
+SIS subject code — details in [records/README.md](records/README.md#records_lmssis).
 
 `IDENTITY_ISSUER` and `IDENTITY_AUDIENCE` must match across identity and records. They
 default to `school-identity` / `school-services` on both sides.

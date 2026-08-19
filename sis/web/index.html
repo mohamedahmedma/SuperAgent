@@ -1,0 +1,733 @@
+<!doctype html>
+<!--
+  Registrar dashboard — the first screen, and the only one that owns the API key.
+
+  Plain HTML, vendored Bootstrap and one script tag: no framework and no build step, so
+  what is on disk is what runs, and the service can serve it straight from StaticFiles at
+  /ui/. Nothing here is fetched from a CDN — a school network may be offline or filtered.
+
+  This page reads four routes and nothing else:
+
+      GET /v1/structure/years                       years, year levels, which is current
+      GET /v1/structure/classes?academic_year=…     the classes of one year
+      GET /v1/terms?academic_year=…                 the terms of one year
+      GET /v1/subjects[?include_inactive=true]      the subject catalogue
+
+  Every one of them goes through SIS.get() in api.js, which prefixes /v1, attaches the
+  X-API-Key header and turns every failure into one SIS.ApiError. There is no fetch() in
+  this file and no base path literal — the last time each page kept its own client, the
+  pages drifted until they were calling routes that had never existed.
+
+  There is deliberately no grade rendering here. Marks belong to the screens that fetch
+  them; a dashboard that paints a percentage it never read is how "0" starts meaning
+  "blank".
+-->
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SIS Registrar — Dashboard</title>
+    <link rel="stylesheet" href="bootstrap.min.css" />
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header class="sis-header py-2 mb-3">
+      <div class="container-fluid sis-main d-flex flex-wrap align-items-center gap-2">
+        <div class="sis-brand me-auto">
+          Student Information Service
+          <small class="d-block">Registrar console</small>
+        </div>
+
+        <!--
+          The whole of "authentication" in this console: one box, held for this browser
+          tab. Security is out of scope for the UI — the service checks the key on every
+          request, and there is no login page, session or cookie to get subtly wrong here.
+          sessionStorage rather than localStorage so closing the tab forgets it; these are
+          shared front-office machines.
+        -->
+        <label class="form-label mb-0" for="api-key">API key</label>
+        <input
+          class="form-control form-control-sm code-input"
+          id="api-key"
+          type="password"
+          style="max-width: 16rem"
+          autocomplete="off"
+          spellcheck="false"
+          aria-describedby="key-state"
+        />
+        <button class="btn btn-sm btn-outline-secondary" id="key-reveal" type="button">Show</button>
+        <span class="key-state" id="key-state"><span class="dot"></span>…</span>
+        <button class="btn btn-sm btn-outline-secondary" id="refresh" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main class="container-fluid sis-main pb-5">
+      <nav class="nav nav-tabs mb-3" aria-label="Screens">
+        <a class="nav-link active" href="index.html" aria-current="page">Dashboard</a>
+        <a class="nav-link" href="structure.html">Structure</a>
+        <a class="nav-link" href="roster.html">Roster upload</a>
+        <a class="nav-link" href="guardians.html">Guardians</a>
+        <a class="nav-link" href="grades.html">Marks upload</a>
+        <a class="nav-link" href="imports.html">Import batches</a>
+      </nav>
+
+      <noscript>
+        <div class="alert alert-danger">
+          This console is JavaScript talking to the service's own API. With scripting off it
+          can show nothing at all.
+        </div>
+      </noscript>
+
+      <!-- Key rejected, service unreachable: anything that makes the whole page wrong. -->
+      <div id="global-msg" aria-live="polite"></div>
+
+      <!--
+        The required first step, stated plainly. Everything else in the service hangs off an
+        academic year: classes are generated into one, terms belong to one, and a roster
+        upload names one. An empty dashboard with four zeroes on it would tell a registrar
+        nothing about what to do next.
+      -->
+      <div id="no-year" class="alert alert-warning" hidden>
+        <strong>No academic year exists yet.</strong>
+        Nothing can be created until one does — classes, terms and every upload are recorded
+        against a year.
+        <a class="alert-link" href="structure.html">Create the academic year in Structure</a>,
+        then come back here.
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-body d-flex flex-wrap align-items-end gap-3">
+          <div>
+            <label class="form-label" for="year-select">Academic year</label>
+            <select class="form-select form-select-sm code-input" id="year-select" style="min-width: 12rem" disabled>
+              <option value="">loading…</option>
+            </select>
+          </div>
+          <div id="year-detail" class="hint">Reading the service…</div>
+        </div>
+      </div>
+
+      <!-- Counts. Each tile links to the screen that changes the thing it counts. -->
+      <div class="row g-3 mb-3">
+        <div class="col-6 col-lg-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="hint">Year levels</div>
+              <div class="tile-n" id="count-levels">…</div>
+              <div id="levels-note" class="hint"></div>
+              <a class="hint" href="structure.html">Structure →</a>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-lg-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="hint">Classes <span id="classes-scope" class="muted"></span></div>
+              <div class="tile-n" id="count-classes">…</div>
+              <div id="classes-note" class="hint"></div>
+              <a class="hint" href="structure.html">Structure →</a>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-lg-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="hint">Terms <span id="terms-scope" class="muted"></span></div>
+              <div class="tile-n" id="count-terms">…</div>
+              <div id="terms-note" class="hint"></div>
+              <a class="hint" href="structure.html">Structure →</a>
+            </div>
+          </div>
+        </div>
+        <div class="col-6 col-lg-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="hint">Subjects</div>
+              <div class="tile-n" id="count-subjects">…</div>
+              <div id="subjects-note" class="hint"></div>
+              <a class="hint" href="structure.html">Structure →</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-xl-6">
+          <div class="card h-100">
+            <div class="card-header">Academic years</div>
+            <div class="card-body" id="years-out"><span class="hint">Loading…</span></div>
+          </div>
+        </div>
+
+        <div class="col-xl-6">
+          <div class="card h-100">
+            <div class="card-header">Classes by year level</div>
+            <div class="card-body" id="classes-out"><span class="hint">Loading…</span></div>
+          </div>
+        </div>
+
+        <div class="col-xl-6">
+          <div class="card h-100">
+            <div class="card-header">Terms</div>
+            <div class="card-body" id="terms-out"><span class="hint">Loading…</span></div>
+          </div>
+        </div>
+
+        <div class="col-xl-6">
+          <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span>Subjects</span>
+              <label class="hint mb-0"><input type="checkbox" id="subj-inactive" /> include retired</label>
+            </div>
+            <div class="card-body" id="subjects-out"><span class="hint">Loading…</span></div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header">Where things are done</div>
+            <div class="card-body">
+              <ul class="mb-0">
+                <li>
+                  <a href="structure.html">Structure</a> — create the academic year, generate
+                  year levels and classes, add terms and subjects. Start here.
+                </li>
+                <li>
+                  <a href="roster.html">Roster upload</a> — a spreadsheet of children into one
+                  class. Columns: <span class="code">student_number</span>,
+                  <span class="code">full_name_ar</span>, <span class="code">full_name_en</span>
+                  (<span class="code">class_code</span> optional).
+                </li>
+                <li>
+                  <a href="guardians.html">Guardians</a> — a spreadsheet of parents for children
+                  already on the roll. Columns: <span class="code">student_number</span>,
+                  <span class="code">phone</span>, a guardian name in either script
+                  (<span class="code">alt_phone</span>, <span class="code">relationship</span>,
+                  <span class="code">can_view_records</span> optional). One row per adult, so a
+                  mother, a father and a big brother for one child are three rows.
+                </li>
+                <li>
+                  <a href="grades.html">Marks upload</a> — a spreadsheet of marks for one term.
+                  Columns: <span class="code">student_number</span>,
+                  <span class="code">subject_code</span>, <span class="code">percentage</span>
+                  (or <span class="code">points</span> + <span class="code">max_points</span>).
+                </li>
+                <li>
+                  <a href="imports.html">Import batches</a> — what an upload did, row by row,
+                  including every rejected line.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <style>
+      /* One tile style, kept here because it exists only on this page. */
+      .tile-n {
+        font-size: 1.9rem;
+        font-weight: 600;
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+        direction: ltr;
+      }
+      .tile-n.unknown {
+        color: var(--sis-ink-soft);
+        font-size: 1.3rem;
+      }
+    </style>
+
+    <script src="api.js"></script>
+    <script>
+      (function () {
+        'use strict';
+
+        var SIS = window.SIS;
+
+        /* The bootstrap key the service ships with. It is a default, not a secret: the box
+           shows exactly what will be sent, and typing over it is the whole of "logging in". */
+        var DEFAULT_KEY = 'dev-sis-registrar';
+
+        function $(id) {
+          return document.getElementById(id);
+        }
+
+        /* Every value that reaches markup goes through here. Year and subject labels are
+           typed by people and roster names come out of uploaded spreadsheets; one unescaped
+           name is all it takes for a workbook to write script into the registrar's page. */
+        function esc(value) {
+          if (value === null || value === undefined) return '';
+          return String(value).replace(/[&<>"']/g, function (ch) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+          });
+        }
+
+        function code(value) {
+          return value === null || value === undefined || value === ''
+            ? '<span class="muted">—</span>'
+            : '<span class="code">' + esc(value) + '</span>';
+        }
+        function nameEn(value) {
+          return '<span class="name-en" lang="en">' + esc(value) + '</span>';
+        }
+        function nameAr(value) {
+          return '<span class="name-ar" lang="ar">' + esc(value) + '</span>';
+        }
+        function yesNo(flag) {
+          return flag ? 'yes' : 'no';
+        }
+
+        function show(node, html) {
+          node.innerHTML = html;
+        }
+        function busy(node) {
+          show(node, '<div class="hint"><span class="spin"></span>Loading…</div>');
+        }
+
+        function table(headers, rows) {
+          if (!rows.length) return '<p class="hint mb-0">Nothing yet.</p>';
+          var head = headers
+            .map(function (h) {
+              return '<th>' + esc(h) + '</th>';
+            })
+            .join('');
+          var body = rows
+            .map(function (cells) {
+              return (
+                '<tr>' +
+                cells
+                  .map(function (cell) {
+                    return '<td>' + cell + '</td>';
+                  })
+                  .join('') +
+                '</tr>'
+              );
+            })
+            .join('');
+          return (
+            '<div class="table-scroll"><table class="table table-sm table-hover"><thead><tr>' +
+            head +
+            '</tr></thead><tbody>' +
+            body +
+            '</tbody></table></div>'
+          );
+        }
+
+        /*
+         * Failures are reported by what the registrar must do next, which is the only thing
+         * a status number is good for here. Nothing is swallowed: 401, 403, 404, 413, 422, a
+         * dead network and an unreadable proxy page all land in one of these branches and all
+         * of them print the service's own code so it can be repeated down a phone line.
+         */
+        function describe(err) {
+          if (!(err && err.kind)) {
+            return { cls: 'alert-danger', lead: '', message: String(err), code: 'unexpected', field: null };
+          }
+          var lead = '';
+          var cls = 'alert-danger';
+          if (err.kind === 'unauthorized') {
+            lead = 'The API key was not accepted. Check the key box above. ';
+          } else if (err.kind === 'forbidden') {
+            lead = 'This key lacks the scope for that. A registrar key is needed to write. ';
+          } else if (err.kind === 'network') {
+            lead = 'The service could not be reached. ';
+            cls = 'alert-warning';
+          } else if (err.kind === 'too_large') {
+            lead = 'The file was larger than the service accepts. ';
+          } else if (err.kind === 'gone') {
+            lead = 'That preview has expired. ';
+          } else if (err.status === 404) {
+            lead = 'Not found. ';
+          }
+          return { cls: cls, lead: lead, message: err.message, code: err.code, field: err.field };
+        }
+
+        function alertHtml(err) {
+          var d = describe(err);
+          return (
+            '<div class="alert ' + d.cls + ' py-1 mb-2">' +
+            esc(d.lead + d.message) +
+            ' <span class="err-code">[' + esc(d.code) + ']</span>' +
+            (d.field ? ' <span class="err-code">field: ' + esc(d.field) + '</span>' : '') +
+            '</div>'
+          );
+        }
+
+        function fail(node, err) {
+          show(node, alertHtml(err));
+        }
+
+        function globalFail(err) {
+          show($('global-msg'), alertHtml(err));
+          if (err && err.kind === 'unauthorized') {
+            paintKeyState();
+            $('api-key').focus();
+            $('api-key').select();
+          }
+        }
+
+        function clearGlobal() {
+          show($('global-msg'), '');
+        }
+
+        function setCount(id, value, unknown) {
+          var node = $(id);
+          node.className = 'tile-n' + (unknown ? ' unknown' : '');
+          node.textContent = unknown ? '—' : String(value);
+        }
+
+        function note(id, text, muted) {
+          show($(id), text ? '<span class="' + (muted ? 'muted' : 'row-bad') + '">' + esc(text) + '</span>' : '');
+        }
+
+        // -- The key ---------------------------------------------------------
+
+        function paintKeyState() {
+          var node = $('key-state');
+          if (SIS.hasKey()) {
+            node.innerHTML = '<span class="dot on"></span>Key held for this tab';
+          } else {
+            node.innerHTML = '<span class="dot off"></span>No key — requests will be refused';
+          }
+        }
+
+        function storeKey(value) {
+          var stored = SIS.setKey(value);
+          paintKeyState();
+          if (!stored) {
+            /* Private mode, or storage blocked by policy. api.js reads the key back out of
+               sessionStorage on every request, so a failed write means every call goes out
+               unauthenticated and 401s — say so instead of letting the page look broken. */
+            globalFail(
+              SIS.ApiError(
+                'api',
+                0,
+                'no_session_storage',
+                'This browser refused session storage, so the key cannot be held. Every request will be refused until storage is allowed.'
+              )
+            );
+          }
+          return stored;
+        }
+
+        $('api-key').addEventListener('change', function () {
+          var value = this.value.trim();
+          this.value = value;
+          clearGlobal();
+          if (storeKey(value)) load();
+        });
+
+        $('key-reveal').addEventListener('click', function () {
+          var input = $('api-key');
+          var hidden = input.type === 'password';
+          input.type = hidden ? 'text' : 'password';
+          this.textContent = hidden ? 'Hide' : 'Show';
+        });
+
+        $('refresh').addEventListener('click', function () {
+          clearGlobal();
+          load();
+        });
+
+        // -- Reads -----------------------------------------------------------
+
+        var levels = []; // year levels, kept from the years read to group the class list
+        var years = []; // the years themselves, so the select can be repainted without a re-read
+        var currentYear = null; // whichever the service flags current, or null if none is
+        var selectedYear = '';
+
+        function loadYears() {
+          busy($('years-out'));
+          $('year-detail').innerHTML = '<span class="spin"></span>Reading the service…';
+          return SIS.get('/structure/years').then(
+            function (body) {
+              years = (body && body.academic_years) || [];
+              levels = (body && body.year_levels) || [];
+              currentYear = body ? body.current_academic_year_code : null;
+
+              setCount('count-levels', levels.length, false);
+              note(
+                'levels-note',
+                levels.length
+                  ? levels
+                      .map(function (level) {
+                        return level.code;
+                      })
+                      .join(' · ')
+                  : 'none — generate them in Structure',
+                true
+              );
+
+              show(
+                $('years-out'),
+                table(
+                  ['Year', 'English', 'Arabic', 'Starts', 'Ends', 'Current'],
+                  years.map(function (year) {
+                    return [
+                      code(year.code),
+                      nameEn(year.name_en),
+                      nameAr(year.name_ar),
+                      esc(year.starts_on),
+                      esc(year.ends_on),
+                      year.is_current ? '<span class="row-ok">yes</span>' : '<span class="muted">no</span>'
+                    ];
+                  })
+                )
+              );
+
+              fillYearSelect();
+              return years;
+            },
+            function (err) {
+              years = [];
+              levels = [];
+              currentYear = null;
+              fail($('years-out'), err);
+              globalFail(err);
+              setCount('count-levels', 0, true);
+              $('year-detail').textContent = 'Could not read the structure.';
+              $('year-select').disabled = true;
+              throw err;
+            }
+          );
+        }
+
+        function fillYearSelect() {
+          var select = $('year-select');
+          var current = currentYear;
+          var wanted = selectedYear || current || (years.length ? years[0].code : '');
+          var present = years.some(function (year) {
+            return year.code === wanted;
+          });
+          if (!present) wanted = current || (years.length ? years[0].code : '');
+
+          select.innerHTML = years
+            .map(function (year) {
+              return (
+                '<option value="' + esc(year.code) + '"' + (year.code === wanted ? ' selected' : '') + '>' +
+                esc(year.code) + (year.is_current ? ' (current)' : '') +
+                '</option>'
+              );
+            })
+            .join('');
+          select.disabled = years.length === 0;
+          selectedYear = wanted;
+
+          $('no-year').hidden = years.length > 0;
+
+          var detail = $('year-detail');
+          if (!years.length) {
+            select.innerHTML = '<option value="">no academic year</option>';
+            detail.innerHTML =
+              'No academic year yet. <a href="structure.html">Create one in Structure</a> — it is the first step.';
+            return;
+          }
+
+          var chosen = years.filter(function (year) {
+            return year.code === wanted;
+          })[0];
+          var lines = [];
+          if (current) {
+            lines.push('Current year: ' + code(current));
+          } else {
+            lines.push('<span class="row-bad">No year is flagged current.</span>');
+          }
+          if (chosen) {
+            lines.push(
+              nameEn(chosen.name_en) + ' · ' + nameAr(chosen.name_ar) +
+                ' · ' + esc(chosen.starts_on) + ' → ' + esc(chosen.ends_on)
+            );
+          }
+          detail.innerHTML = lines.join(' — ');
+        }
+
+        function loadClasses(year) {
+          var out = $('classes-out');
+          $('classes-scope').textContent = year ? 'in ' + year : '';
+          if (!year) {
+            setCount('count-classes', 0, true);
+            note('classes-note', 'waiting for an academic year', true);
+            show(out, '<p class="hint mb-0">No academic year to list classes for.</p>');
+            return;
+          }
+          busy(out);
+          /* `academic_year` is required by the route and never guessed: `3A` names a
+             different room of children every September. */
+          SIS.get('/structure/classes', { academic_year: year }).then(
+            function (sections) {
+              var list = sections || [];
+              setCount('count-classes', list.length, false);
+              note('classes-note', list.length ? '' : 'none — generate them in Structure', true);
+
+              var byLevel = {};
+              list.forEach(function (section) {
+                var key = section.year_level_code || '';
+                if (!byLevel[key]) byLevel[key] = [];
+                byLevel[key].push(section);
+              });
+
+              /* Ordered by the ladder's own display_order, not by code: `Y10` sorts before
+                 `Y9` as text and prints the school scrambled. */
+              var order = levels.map(function (level) {
+                return level.code;
+              });
+              Object.keys(byLevel).forEach(function (key) {
+                if (order.indexOf(key) === -1) order.push(key);
+              });
+
+              show(
+                out,
+                table(
+                  ['Year level', 'Classes', 'Codes'],
+                  order
+                    .filter(function (key) {
+                      return byLevel[key];
+                    })
+                    .map(function (key) {
+                      var group = byLevel[key];
+                      return [
+                        code(key),
+                        '<span class="table-numeric">' + group.length + '</span>',
+                        group
+                          .map(function (section) {
+                            return code(section.code);
+                          })
+                          .join(' ')
+                      ];
+                    })
+                )
+              );
+            },
+            function (err) {
+              setCount('count-classes', 0, true);
+              note('classes-note', 'could not be read', false);
+              fail(out, err);
+              if (err && err.isAuth && err.isAuth()) globalFail(err);
+            }
+          );
+        }
+
+        function loadTerms(year) {
+          var out = $('terms-out');
+          $('terms-scope').textContent = year ? 'in ' + year : '';
+          if (!year) {
+            setCount('count-terms', 0, true);
+            note('terms-note', 'waiting for an academic year', true);
+            show(out, '<p class="hint mb-0">No academic year to list terms for.</p>');
+            return;
+          }
+          busy(out);
+          SIS.get('/terms', { academic_year: year }).then(
+            function (terms) {
+              var list = terms || [];
+              setCount('count-terms', list.length, false);
+              note('terms-note', list.length ? '' : 'none — a marks upload needs one', true);
+              show(
+                out,
+                table(
+                  ['Term', 'English', 'Arabic', 'Seq', 'Starts', 'Ends', 'Closed'],
+                  list.map(function (term) {
+                    return [
+                      code(term.code),
+                      nameEn(term.name_en),
+                      nameAr(term.name_ar),
+                      '<span class="table-numeric">' + esc(term.sequence) + '</span>',
+                      esc(term.starts_on),
+                      esc(term.ends_on),
+                      yesNo(term.is_closed)
+                    ];
+                  })
+                )
+              );
+            },
+            function (err) {
+              setCount('count-terms', 0, true);
+              note('terms-note', 'could not be read', false);
+              fail(out, err);
+              if (err && err.isAuth && err.isAuth()) globalFail(err);
+            }
+          );
+        }
+
+        function loadSubjects() {
+          var out = $('subjects-out');
+          busy(out);
+          /* Subjects are school-wide, not per year, so this read stands even before the
+             first academic year exists. */
+          var params = $('subj-inactive').checked ? { include_inactive: 'true' } : null;
+          SIS.get('/subjects', params).then(
+            function (subjects) {
+              var list = subjects || [];
+              setCount('count-subjects', list.length, false);
+              note('subjects-note', list.length ? '' : 'none — marks need a subject to hang on', true);
+              show(
+                out,
+                table(
+                  ['Code', 'English', 'Arabic', 'Order', 'Active'],
+                  list.map(function (subject) {
+                    return [
+                      code(subject.code),
+                      nameEn(subject.name_en),
+                      nameAr(subject.name_ar),
+                      '<span class="table-numeric">' + esc(subject.display_order) + '</span>',
+                      subject.is_active ? 'yes' : '<span class="muted">retired</span>'
+                    ];
+                  })
+                )
+              );
+            },
+            function (err) {
+              setCount('count-subjects', 0, true);
+              note('subjects-note', 'could not be read', false);
+              fail(out, err);
+              if (err && err.isAuth && err.isAuth()) globalFail(err);
+            }
+          );
+        }
+
+        function load() {
+          if (!SIS.hasKey()) {
+            globalFail(
+              SIS.ApiError('api', 0, 'no_key', 'Enter the API key above — every request needs one.')
+            );
+          }
+          loadSubjects();
+          loadYears().then(
+            function (loaded) {
+              var year = loaded.length ? selectedYear : '';
+              loadClasses(year);
+              loadTerms(year);
+            },
+            function () {
+              /* Already reported by loadYears; the year-scoped panels have nothing to ask
+                 for, and asking anyway would repeat the same failure three times. */
+              loadClasses('');
+              loadTerms('');
+            }
+          );
+        }
+
+        $('year-select').addEventListener('change', function () {
+          selectedYear = this.value;
+          clearGlobal();
+          fillYearSelect(); // repaints the detail line for the year now being shown
+          loadClasses(selectedYear);
+          loadTerms(selectedYear);
+        });
+
+        $('subj-inactive').addEventListener('change', loadSubjects);
+
+        // -- Boot -------------------------------------------------------------
+
+        /* Prefill from whatever the tab already holds, falling back to the bootstrap key so
+           a fresh browser can read the service immediately. Writing it back means the other
+           screens — which read the same sessionStorage through api.js — start with it too. */
+        var initial = SIS.getKey() || DEFAULT_KEY;
+        $('api-key').value = initial;
+        storeKey(initial); // may report that storage is refused — do not clear that message
+        load();
+      })();
+    </script>
+  </body>
+</html>

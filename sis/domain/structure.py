@@ -1,0 +1,288 @@
+"""The skeleton a school hangs its children on: years, rungs, classes, terms, subjects.
+
+These are the things a registrar sets up in August and then mostly leaves alone. They
+are frozen because they are *referenced* by enrolments and grades rather than owned by
+them: a mutable `ClassSection` handed to three services is a class that changes shape
+under two of them, and the symptom of that is a report card whose header disagrees with
+its body.
+
+Immutability is also how decision 7 — codes immutable, labels renameable — is expressed
+rather than merely documented. There is no setter for a code, and `renamed()` returns a
+new object carrying the *same* code, so the only rename a caller can express is one that
+keeps every enrolment and grade attached. Renaming "3A" to "3 Alpha" cannot accidentally
+become "create a new class and orphan its students", because nothing here can change a
+code at all.
+
+Constructors accept either the value object or the raw cell it came from, so a parser
+can build a `Subject` straight from a spreadsheet row and get `InvalidCode` at the row
+that caused it. No framework imports: these types are what the service unit tests are
+written against, with no database in sight.
+"""
+from dataclasses import dataclass, replace
+from datetime import date
+from typing import ClassVar, TypeVar
+
+from sis.domain.errors import InvalidDateRange, ValidationError
+from sis.domain.value_objects import (
+    AcademicYearCode,
+    ClassCode,
+    SubjectCode,
+    TermCode,
+    YearCode,
+)
+
+_C = TypeVar("_C")
+_E = TypeVar("_E", bound="_Named")
+
+
+def _coerce(field: str, kind: type[_C], entity: object) -> None:
+    """Replace a raw cell with its value object, in place, during `__post_init__`."""
+    raw = getattr(entity, field)
+    if not isinstance(raw, kind):
+        raw = kind(raw)  # type: ignore[call-arg]  # every code type takes one argument
+        object.__setattr__(entity, field, raw)
+
+
+def _coerce_names(entity: object) -> None:
+    """Trim both labels and refuse a nameable thing with no name in either language.
+
+    Blank in *one* language is allowed and common — a school types Arabic names for its
+    classes and English ones for nothing else — but blank in both is rejected here
+    rather than accepted and rendered later, because an empty label reaches the parent
+    as a report card line with a mark and no subject beside it.
+    """
+    name_en = str(getattr(entity, "name_en", "") or "").strip()
+    name_ar = str(getattr(entity, "name_ar", "") or "").strip()
+    if not name_en and not name_ar:
+        raise ValidationError(
+            "a name is required in at least one of English or Arabic", field="name_en"
+        )
+    object.__setattr__(entity, "name_en", name_en)
+    object.__setattr__(entity, "name_ar", name_ar)
+
+
+def _check_range(starts_on: date, ends_on: date, field: str) -> None:
+    """A single-day period is legal; an inverted one is not. See `InvalidDateRange`."""
+    if ends_on < starts_on:
+        raise InvalidDateRange(
+            f"end date {ends_on.isoformat()} precedes start date {starts_on.isoformat()}",
+            field=field,
+        )
+
+
+class _Named:
+    """Bilingual-label behaviour, shared by everything in this module (invariant 7)."""
+
+    __slots__ = ()
+
+    name_en: str
+    name_ar: str
+
+    def name_for(self, language: str) -> str:
+        """The label to show, falling back to the other language when one is blank.
+
+        The fallback is the whole point: half of a school's structure is named in Arabic
+        only, and returning `""` for its English label produces a printed class list of
+        blank rows that reads as data loss rather than as a missing translation.
+        """
+        preferred = self.name_ar if language.lower().startswith("ar") else self.name_en
+        return preferred or self.name_ar or self.name_en
+
+    def renamed(self: _E, *, name_en: str | None = None, name_ar: str | None = None) -> _E:
+        """A copy wearing new labels and the same code — decision 7 in one method."""
+        return replace(
+            self,
+            name_en=self.name_en if name_en is None else name_en,
+            name_ar=self.name_ar if name_ar is None else name_ar,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AcademicYear(_Named):
+    """One school year, e.g. `2025-2026`, and the dates it spans.
+
+    `is_current` is a stated flag rather than a comparison against today, because the
+    domain never reads the clock and because the changeover is an administrative act:
+    a registrar builds next year's classes in July while this year is still the one
+    report cards are issued against.
+    """
+
+    code: AcademicYearCode | str
+    name_en: str
+    name_ar: str
+    starts_on: date
+    ends_on: date
+    is_current: bool = False
+
+    def __post_init__(self) -> None:
+        _coerce("code", AcademicYearCode, self)
+        _coerce_names(self)
+        _check_range(self.starts_on, self.ends_on, "ends_on")
+
+    def contains(self, day: date) -> bool:
+        """Both ends inclusive — the last day of the year is a day of the year."""
+        return self.starts_on <= day <= self.ends_on
+
+
+@dataclass(frozen=True, slots=True)
+class YearLevel(_Named):
+    """A rung of the ladder — "Year 3", "Grade 10" — and **not** scoped to a year.
+
+    This is the decision most schemas get wrong. "Year 3" is the same rung in 2025-2026
+    as in 2030-2031: different children stand on it, but the rung itself does not change
+    identity. Scoping it to an academic year would create one `YearLevel` row per year
+    per rung, so a twelve-rung school accumulates twelve new rows every August, and —
+    far worse — "how do this year's Year 3 results compare with last year's" stops being
+    a filter on one year level and becomes a join between two *different* Year 3s that
+    happen to share a label. Every cross-year question then depends on a text match
+    against a name a registrar is free to retype. Cohorts live in `ClassSection` and in
+    enrolment, which are the things that genuinely differ year to year.
+
+    `display_order` exists because sorting on `code` is wrong in exactly the place it
+    matters: lexicographically `"Y10"` sorts before `"Y9"`, so a school with more than
+    nine rungs prints its year list out of order, and the person reading it assumes the
+    data is scrambled rather than the sort. Storing the order explicitly also lets a
+    school whose ladder is `KG1, KG2, Y1…` place its kindergarten rungs first without
+    inventing codes that happen to sort correctly.
+    """
+
+    code: YearCode | str
+    name_en: str
+    name_ar: str
+    display_order: int
+
+    def __post_init__(self) -> None:
+        _coerce("code", YearCode, self)
+        _coerce_names(self)
+        # A bool is an int, and `display_order=True` would silently mean "position 1".
+        if isinstance(self.display_order, bool) or not isinstance(self.display_order, int):
+            raise ValidationError(
+                "display order must be a whole number", field="display_order"
+            )
+
+    @property
+    def sort_key(self) -> tuple[int, str]:
+        """Order for display. Code breaks ties so the sort is stable across processes."""
+        return (self.display_order, str(self.code))
+
+
+@dataclass(frozen=True, slots=True)
+class ClassSection(_Named):
+    """One room of children, e.g. `3A`, within one academic year.
+
+    Scoped to an academic year and to nothing narrower. The `3A` of 2025-2026 and the
+    `3A` of 2026-2027 are different groups of children who share a label, so the year is
+    part of this thing's identity — without it, September's intake inherits last June's
+    enrolments and grades.
+
+    It is emphatically **not** scoped to a term. A class outlives a term: the same 3A
+    runs from September to June across three terms, and giving each term its own class
+    row would triple the structure, force a re-import of every roster each term, and
+    make "which class is she in" a question with three answers. What genuinely varies
+    within a year is *membership*, and that is why placement is a time-bounded enrolment
+    (invariant 2) rather than a column here: a child moving 3A->3B in March is one
+    membership ending and another beginning, leaving her Term 1 grades resolving to 3A
+    forever. Were the class term-scoped, that move would instead be modelled by editing
+    a class, and the Term 1 report would silently reprint under the new one.
+    """
+
+    code: ClassCode | str
+    academic_year_code: AcademicYearCode | str
+    year_level_code: YearCode | str
+    name_en: str
+    name_ar: str
+    # `None` means "no stated limit", never 0 — same distinction as invariant 1. A
+    # capacity of 0 is a class that admits nobody, which is a thing a registrar can
+    # legitimately configure while closing a section.
+    capacity: int | None = None
+
+    def __post_init__(self) -> None:
+        _coerce("code", ClassCode, self)
+        _coerce("academic_year_code", AcademicYearCode, self)
+        _coerce("year_level_code", YearCode, self)
+        _coerce_names(self)
+        if self.capacity is not None and (
+            isinstance(self.capacity, bool) or not isinstance(self.capacity, int)
+        ):
+            raise ValidationError("capacity must be a whole number", field="capacity")
+        if self.capacity is not None and self.capacity < 0:
+            raise ValidationError("capacity may not be negative", field="capacity")
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        """The pair that is actually unique. Use this as a dict key, never `code` alone."""
+        return (str(self.academic_year_code), str(self.code))
+
+
+@dataclass(frozen=True, slots=True)
+class Term(_Named):
+    """A reporting period inside one academic year, e.g. `2026-T1`.
+
+    Terms are what make a grade answerable: a mark belongs to a term, and a term belongs
+    to a year. `is_closed` is stated rather than derived from `ends_on` because a school
+    keeps entering late marks for a week after a term ends, and a clock-derived close
+    would reject them; `TermClosed` is raised only once a human has said so.
+    """
+
+    code: TermCode | str
+    academic_year_code: AcademicYearCode | str
+    name_en: str
+    name_ar: str
+    starts_on: date
+    ends_on: date
+    sequence: int = 1
+    is_closed: bool = False
+
+    # Term dates are the input to invariant 2: a placement covers a term when the
+    # membership overlaps this range, which is why the range must never be inverted.
+    def __post_init__(self) -> None:
+        _coerce("code", TermCode, self)
+        _coerce("academic_year_code", AcademicYearCode, self)
+        _coerce_names(self)
+        _check_range(self.starts_on, self.ends_on, "ends_on")
+        if isinstance(self.sequence, bool) or not isinstance(self.sequence, int):
+            raise ValidationError("sequence must be a whole number", field="sequence")
+
+    def contains(self, day: date) -> bool:
+        """Both ends inclusive; the last day of term is a teaching day."""
+        return self.starts_on <= day <= self.ends_on
+
+    def overlaps(self, starts_on: date, ends_on: date | None) -> bool:
+        """Whether an open-ended period touches this term — `None` end means "still on"."""
+        return starts_on <= self.ends_on and (ends_on is None or ends_on >= self.starts_on)
+
+    @property
+    def sort_key(self) -> tuple[int, str]:
+        """Chronological order without parsing the code, which schools format freely."""
+        return (self.sequence, str(self.code))
+
+
+@dataclass(frozen=True, slots=True)
+class Subject(_Named):
+    """A taught subject, e.g. `MATH`. Global, not per year level.
+
+    `is_active` retires a subject instead of deleting it: grades already stated against
+    a dropped subject must keep resolving, and a code that vanishes turns last year's
+    report card into a row of marks with no heading.
+    """
+
+    code: SubjectCode | str
+    name_en: str
+    name_ar: str
+    display_order: int = 0
+    is_active: bool = True
+
+    DEFAULT_ORDER: ClassVar[int] = 0
+
+    def __post_init__(self) -> None:
+        _coerce("code", SubjectCode, self)
+        _coerce_names(self)
+        if isinstance(self.display_order, bool) or not isinstance(self.display_order, int):
+            raise ValidationError(
+                "display order must be a whole number", field="display_order"
+            )
+
+    @property
+    def sort_key(self) -> tuple[int, str]:
+        """Order on a report card: stated order first, then code for a stable tie-break."""
+        return (self.display_order, str(self.code))

@@ -1,0 +1,25 @@
+{#
+  One-shot messages carried across a redirect. Included by base.html; a page never
+  includes it directly.
+
+  No dismiss button. Bootstrap's `.btn-close` needs Bootstrap's JavaScript to do anything,
+  and a close button that does nothing when clicked is worse than no close button — the
+  registrar clicks it twice, decides the page is broken, and stops trusting the message
+  beside it. These clear themselves on the next page load, which is what a flash is.
+
+  `level` is one of success/info/warning/danger, validated in `sis/ui/deps.py`, so the
+  class below can never be interpolated from anything a user supplied. The message text is
+  autoescaped like everything else: an import error quoting a student's name from a
+  spreadsheet is data, not markup.
+#}
+{% if flashes %}
+<div class="sis-flashes mb-3">
+  {% for item in flashes %}
+  <div
+    class="alert alert-{{ item.level }} py-2 mb-2"
+    {# A failure has to interrupt a screen reader; a confirmation should wait its turn. #}
+    role="{% if item.level in ('danger', 'warning') %}alert{% else %}status{% endif %}"
+  >{{ item.message }}</div>
+  {% endfor %}
+</div>
+{% endif %}
