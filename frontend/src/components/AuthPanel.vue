@@ -30,10 +30,37 @@
       <div class="auth-panel-heading">
         <span class="auth-mini-logo"><i class="fa-solid fa-robot"></i></span>
         <div>
-          <span class="auth-eyebrow">{{ authStore.authMode === 'login' ? 'Welcome back' : 'Create account' }}</span>
-          <h1>{{ authStore.authMode === 'login' ? 'Log in to Agent Assistant' : 'Sign up for Agent Assistant' }}</h1>
+          <span class="auth-eyebrow">{{ audience === 'parent' ? 'أهلًا بك' : (authStore.authMode === 'login' ? 'Welcome back' : 'Create account') }}</span>
+          <h1>{{ audience === 'parent' ? 'الدخول لأولياء الأمور' : (authStore.authMode === 'login' ? 'Log in to Agent Assistant' : 'Sign up for Agent Assistant') }}</h1>
         </div>
       </div>
+
+      <!-- Parents first, and by default. They are the many; staff are the few, and the
+           few already know where their password box is. -->
+      <div class="auth-audience" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="audience === 'parent'"
+          :class="{ active: audience === 'parent' }"
+          @click="showParent"
+        >
+          <i class="fa-solid fa-user-group"></i> ولي أمر
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="audience === 'staff'"
+          :class="{ active: audience === 'staff' }"
+          @click="showStaff"
+        >
+          <i class="fa-solid fa-briefcase"></i> Staff
+        </button>
+      </div>
+
+      <WhatsAppLogin v-if="audience === 'parent'" />
+
+      <template v-else>
       <p class="auth-description">
         {{ authStore.authMode === 'login'
           ? 'Enter your private knowledge space and pick up where you left off.'
@@ -99,15 +126,39 @@
       <button class="auth-switch" type="button" @click="toggleAuthMode">
         {{ authStore.authMode === 'login' ? "Don't have an account? Create one" : 'Already have an account? Back to login' }}
       </button>
+      </template>
+
       <p class="auth-footnote">By logging in, you acknowledge that AI output should go through the necessary human review.</p>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue';
+import WhatsAppLogin from '@/components/WhatsAppLogin.vue';
 import { useAuthStore } from '@/stores/auth';
 
 const authStore = useAuthStore();
+
+/**
+ * Which door this visitor came to.
+ *
+ * Parents by default: they outnumber staff by a few hundred to one, they have no password
+ * and never will, and a screen that opens on a password box tells them they are in the
+ * wrong place. Staff are one tap away and already know what they are looking for.
+ */
+const audience = ref<'parent' | 'staff'>('parent');
+
+const showParent = () => {
+  audience.value = 'parent';
+};
+
+const showStaff = () => {
+  // Abandon any half-finished verification, so its poller does not keep running behind a
+  // panel nobody is looking at.
+  authStore.resetWhatsApp();
+  audience.value = 'staff';
+};
 
 const toggleAuthMode = () => {
   authStore.authMode = authStore.authMode === 'login' ? 'register' : 'login';
@@ -121,3 +172,33 @@ const onSubmit = async () => {
   }
 };
 </script>
+
+<style scoped>
+.auth-audience {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.auth-audience button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.6rem;
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.auth-audience button.active {
+  opacity: 1;
+  border-color: currentColor;
+  background: rgba(127, 127, 127, 0.12);
+  font-weight: 600;
+}
+</style>
