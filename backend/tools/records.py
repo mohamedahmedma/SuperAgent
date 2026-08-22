@@ -80,19 +80,41 @@ def _get(path: str, ctx: ChatRequestContext, params: dict | None = None) -> tupl
         return "unavailable", {}
 
 
-def _match_student(students: list, student_name: str) -> dict | None:
+def _match_student(
+    students: list, student_name: str, *, remembered: str = ""
+) -> dict | None:
     """Pick the child the parent meant.
 
-    Substring match across both scripts, because a parent writing in Arabic and a
-    record stored with a Latin transliteration are the normal case in this school,
-    not the exception. Returns None when the answer is not unambiguous — the caller
-    then asks rather than guessing, since guessing means showing one child's grades
-    while naming another.
+    Substring match across both scripts, because a parent writing in Arabic and a record
+    stored with a Latin transliteration are the normal case in this school, not the
+    exception. Returns None when the answer is not unambiguous — the caller then asks
+    rather than guessing, since guessing means showing one child's grades while naming
+    another.
+
+    Three routes to a child, in order of how firmly the parent stated it:
+
+    1. **A name they just used.** Always wins, so "and how is Omar?" moves the
+       conversation on even when the previous question was about his sister.
+    2. **An only child.** Nothing to disambiguate, so they are never asked at all.
+    3. **The child already under discussion.** A parent who answered "Layla" once is not
+       asked again on their next question.
+
+    A name matching nobody falls through to `None` rather than quietly keeping the
+    remembered child: the parent named somebody, and answering about a different child
+    while they watch is worse than one more question.
     """
     if not students:
         return None
     if not student_name:
-        return students[0] if len(students) == 1 else None
+        if len(students) == 1:
+            return students[0]
+        if remembered:
+            found = next(
+                (s for s in students if (s.get("student_id") or "") == remembered), None
+            )
+            if found is not None:
+                return found
+        return None
 
     needle = student_name.strip().casefold()
     matches = [
@@ -145,7 +167,9 @@ def make_get_student_records(ctx: ChatRequestContext):
         if not students:
             return render_prompt("tools/records_result.j2", outcome="no_students")
 
-        student = _match_student(students, student_name)
+        student = _match_student(
+            students, student_name, remembered=ctx.remembered_child
+        )
         if student is None:
             # Either several children and no name, or a name matching more than one.
             # Both are questions for the parent, never a coin flip.
@@ -159,6 +183,10 @@ def make_get_student_records(ctx: ChatRequestContext):
             )
 
         student_id = student.get("student_id")
+        # Pinned for the rest of the conversation, so a parent who answered "Layla" once
+        # is not asked again. Recorded only after a child has actually been resolved, so a
+        # turn that failed to identify one leaves nothing wrong pinned behind it.
+        ctx.remember_child(student_id)
         kind = (record_type or "grades").strip().lower()
 
         if kind == "attendance":
