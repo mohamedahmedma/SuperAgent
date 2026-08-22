@@ -191,11 +191,32 @@ class AgentConfig(_Section):
     # identical canned string every time reads as a script.
     social_reply_mode: Literal["model", "static"] = "model"
 
-    # The escalation rung of the request classifier: one small call that settles scope
-    # and reads disclosed profile fields in a single envelope. Off until wired.
-    # Without it the corpus-similarity rung can only ever ADMIT a question — it is
-    # never permitted to end a turn on its own.
+    # The escalation rung of the request classifier: one small call that settles scope,
+    # reads disclosed profile fields, and — where the deployment has children to talk
+    # about — says whether the message is about one. Without it the corpus-similarity
+    # rung can only ever ADMIT a question; it is never permitted to end a turn alone.
     request_envelope_enabled: bool = False
+
+    # What this deployment can help with, in prose, for the classifier to judge against.
+    #
+    # Needed only where there is no scope catalogue: with one, the classifier is shown
+    # real indexed questions and their similarity scores, which is far better evidence
+    # than any description. Without one — the school profile today — a description is
+    # the only thing standing between the classifier and a guess, and an empty string
+    # here is how a classifier starts refusing valid questions for lack of anything to
+    # compare them to.
+    coverage: str = ""
+
+    # Profile fields a message may disclose, by name. The classifier may only report
+    # from this list; free text here would become an extraction, which is a different
+    # and much more expensive thing to get right. Empty disables the reporting.
+    personal_data_fields: List[str] = Field(default_factory=list)
+
+    # Whether this deployment has children to talk about at all. Gates the child half
+    # of the classifier prompt, so a document knowledge base never pays for wording
+    # about sons and daughters. Deployment data, which is why a detector may read it —
+    # it says nothing about who is asking.
+    child_context_enabled: bool = False
 
     # ---- Contextual query resolution ---------------------------------------------
     # Rewriting a follow-up into a question that stands on its own, once per turn, so

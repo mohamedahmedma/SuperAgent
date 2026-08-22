@@ -69,6 +69,25 @@ class RequestSignals:
     # see turn_policy for why narrowing must never be able to hide a document.
     candidate_sections: List[str] = field(default_factory=list)
 
+    # Whether this message is about one of the caller's own children, as opposed to
+    # the school in general. Reported by the classifier node, which reads the message
+    # and the conversation; never derived from a word list, because the commonest form
+    # in Arabic attaches the possessive to the end of the word ("جدوله" — his
+    # timetable) where no marker can reach it.
+    #
+    # A HINT about the message, in the same class as `personal_data`. It says nothing
+    # about whether this caller has children or may read them; that is decided later,
+    # by code holding a verified identity this module deliberately cannot see.
+    about_child: bool = False
+    # How the child was referred to: son | daughter | child | plural | named |
+    # context | none. Narrows which child is meant without asking, when the roster
+    # makes it unambiguous.
+    child_reference: str = "none"
+    # A name the message actually contained, verbatim. Empty unless `child_reference`
+    # is "named". Never resolved here — matching it to a real child is done against
+    # the school's own roster, by something that has one.
+    child_name: str = ""
+
     # A closed-set social utterance and nothing else: "thanks", "شكرا".
     is_social: bool = False
     # Profile fields the message appears to disclose. Drives post-turn capture and
@@ -106,6 +125,8 @@ class RequestSignals:
             "request_carried_constraints": list(self.carried_constraints),
             "request_followup_intent": self.followup_intent,
             "request_is_social": self.is_social,
+            "request_about_child": self.about_child,
+            "request_child_reference": self.child_reference,
             "request_personal_data": list(self.personal_data),
             "request_candidate_sections": list(self.candidate_sections),
             "request_scope_options": list(self.scope_options),
@@ -296,20 +317,39 @@ def _last_user_text(history: Sequence[Any]) -> str:
 # Rung 2 — the envelope call
 # ---------------------------------------------------------------------------
 
+#: How a message referred to a child. Closed, because every value has a rule attached
+#: downstream — a free-text reference would be a string nobody could branch on.
+CHILD_REFERENCES = ("none", "son", "daughter", "child", "plural", "named", "context")
+
+
 class EnvelopeDetector:
-    """One small model call that settles scope and reads personal data together.
+    """The classification node: one small model call, three decisions.
 
-    This rung is what makes the cheap one safe to ship. The vector gate never has to
-    be perfectly calibrated, because being wrong costs this call rather than a silent
-    refusal — and because it only ever escalates, the in-corpus majority never
-    reaches here at all.
+    A node, not an agent. It runs at a fixed point in the turn, reads one message,
+    returns a structured verdict, and stops. Nothing here chooses tools, loops, or
+    talks to the user — those are the properties that make an agent expensive and
+    unpredictable, and a classifier needs none of them. It costs one call on
+    FAST_MODEL and that is the whole of it.
 
-    Both signals come back in a single envelope. Asking separately would double the
-    cost of the turns that can least afford it.
+    **Three decisions in one envelope.** Scope, disclosed profile fields, and — where
+    the deployment has children to talk about — whether the message is about one of
+    the caller's own. They share every scrap of context they need, so asking
+    separately would triple the cost of the one call every turn already pays.
+
+    This rung is also what makes the cheap ones safe to ship: the vector gate never
+    has to be perfectly calibrated, because being wrong costs this call rather than a
+    silent refusal.
+
+    **It is never told who is asking.** `SignalContext` carries no identity, by
+    design. This node reports what the MESSAGE says; whether the caller has children,
+    or may read them, is settled afterwards by code that has verified a signature. A
+    classifier that knew the caller could be argued into changing its answer about
+    them.
 
     `invoke` is injected so this is testable without a model and swappable per
-    deployment; a detector that raises abstains, and abstention means the question
-    proceeds.
+    deployment. A detector that raises abstains, and abstention means the question
+    proceeds — losing this node costs the savings it would have produced, never the
+    turn.
     """
 
     name = "envelope"
@@ -320,11 +360,23 @@ class EnvelopeDetector:
 
     def detect(self, ctx: SignalContext, signals: RequestSignals) -> Optional[RequestSignals]:
         invoke = self._invoke or _default_envelope_invoke
-        result = invoke(ctx.question, ctx.history, ctx.config)
+        # `text_to_score`, not the raw message: a follow-up's own words do not name its
+        # subject, and judging "and what about those?" on its own measures nothing and
+        # looks identical to being off-topic. This is the same text the rung below
+        # scored, so the two cannot disagree about what the turn is about.
+        result = invoke(ctx.text_to_score, ctx.history, ctx.config)
         if not isinstance(result, dict):
             return None
 
         signals.personal_data = [str(item) for item in (result.get("personal_data") or [])]
+        # Deliberately NOT text_to_score. With no resolver that falls back to gluing the
+        # previous user turn onto this one — the module's own "blunt instrument" — and a
+        # name from the turn before is exactly the carried-over guess the check exists to
+        # catch. The resolved question is a different matter: a resolver naming the child
+        # is the designed path, and its name is evidence.
+        self._read_child(
+            result, signals, classified_text=ctx.resolved_question or ctx.question
+        )
 
         verdict = str(result.get("scope") or "").strip().lower()
         if verdict == Scope.OUT_OF_DOMAIN.value:
@@ -345,14 +397,196 @@ class EnvelopeDetector:
         if signals.personal_data and signals.scope is Scope.OUT_OF_DOMAIN:
             signals.scope = Scope.IN_DOMAIN
             signals.reasons.append("overridden: message discloses profile information")
+
+        # A question about this parent's own child is by definition this assistant's
+        # subject. Enforced here rather than asked for in the prompt, because a prompt
+        # is a request and this has to hold every time: refusing "how is my son doing?"
+        # as off-topic is the single worst answer this deployment can give.
+        if signals.about_child and signals.scope is Scope.OUT_OF_DOMAIN:
+            signals.scope = Scope.IN_DOMAIN
+            signals.reasons.append("overridden: the message is about the caller's child")
         return signals
+
+    @staticmethod
+    def _read_child(result: dict, signals: RequestSignals, *, classified_text: str = "") -> None:
+        """Take the child verdict, distrusting every field of it.
+
+        A model returning `about_child` with a reference outside the closed set, or a
+        name it invented, would otherwise select a child — and selecting the wrong
+        child shows one family's marks while naming another. Everything unrecognised
+        degrades to the shape that asks rather than the shape that guesses.
+        """
+        if not bool(result.get("about_child")):
+            return
+        signals.about_child = True
+
+        reference = str(result.get("child_reference") or "").strip().lower()
+        signals.child_reference = reference if reference in CHILD_REFERENCES else "context"
+        if signals.child_reference == "none":
+            # "About a child, referred to in no way at all" is not a state. Read it as
+            # the conversation carrying the subject, which is what it almost always is.
+            signals.child_reference = "context"
+
+        name = " ".join(str(result.get("child_name") or "").split())
+        # A name is only meaningful when the model said the message contained one.
+        # Carried on any other reference kind it is a guess.
+        if signals.child_reference != "named":
+            name = ""
+        elif not _names_the_child(classified_text, name):
+            # Measured, not hypothetical: asked to classify "طيب وجدوله؟" after a turn
+            # about علي, the model returns `named` with "علي" — resolving the reference
+            # itself, which the prompt forbids precisely because it is not the thing
+            # holding the school's list of children.
+            #
+            # It guesses right when one child has been discussed and wrong the moment
+            # two have, and a wrong name here OVERRIDES a correct pin. Enforced in code
+            # rather than asked for again in wording, because a prompt is a request and
+            # this has to hold every time.
+            #
+            # Checked against the text the node actually classified, which is the
+            # resolved question when a resolver produced one — so a name a resolver
+            # legitimately supplied still counts.
+            signals.reasons.append(
+                "classifier named a child the message does not name — treated as context"
+            )
+            name = ""
+            signals.child_reference = "context"
+
+        signals.child_name = name
+        if signals.child_reference == "named" and not name:
+            signals.child_reference = "context"
+        signals.reasons.append(
+            f"classifier: about the caller's child ({signals.child_reference})"
+        )
+
+
+def _names_the_child(text: str, name: str) -> bool:
+    """Whether `name` actually appears in the classified message.
+
+    Normalised on both sides with the same function retrieval uses, so a difference of
+    alif form, tatweel or an invisible character is not read as a different name. A
+    plain containment test after that: the question is only ever "did these words
+    appear", never "who is this".
+    """
+    if not name:
+        return False
+    haystack = (normalize_query(text) or text or "").casefold()
+    needle = (normalize_query(name) or name).casefold()
+    return bool(needle) and needle in haystack
 
 
 def _default_envelope_invoke(question, history, config):  # pragma: no cover - needs a model
-    raise NotImplementedError(
-        "No envelope classifier is wired. Register one via SignalLadder(envelope=...) "
-        "or leave request_envelope_enabled false."
+    """One structured call on FAST_MODEL. The classification node's only I/O.
+
+    Shaped exactly like `backend/rag/scope_detector._default_scope_invoke`, its
+    catalogue-backed twin, because the two answer the same question with different
+    evidence and diverging on the plumbing would make them diverge on the verdict. The
+    difference is what they can show the model: that one has real indexed questions and
+    similarity scores, this one has a prose description of what the deployment covers.
+
+    Weaker evidence is why the prompt leans harder on explicit rules and worked
+    examples — see `chat/request_envelope.j2`.
+    """
+    import os
+
+    from langchain.chat_models import init_chat_model
+    from pydantic import BaseModel, Field
+    from typing import List as _List, Literal as _Literal
+
+    from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
+    from backend.llm import sampling
+    from backend.profiles import get_profile
+    from backend.prompts import render
+
+    profile = get_profile()
+    personal_fields = list(getattr(config, "personal_data_fields", None) or [])
+    child_context = bool(getattr(config, "child_context_enabled", False))
+
+    class RequestEnvelope(BaseModel):
+        """Every field is declared and every field is required.
+
+        Providers enforcing OpenAI-style strict structured output reject a schema whose
+        properties are optional, and a model told to "omit the field when it does not
+        apply" omits it rather than sending the empty value. Defaults here mean a
+        missing field is read as its safe value instead of failing the call — the same
+        arrangement `RewritePlan` documents in rag/rewrite.j2.
+        """
+
+        scope: _Literal["in_domain", "out_of_domain"] = Field(
+            description="Whether the message is this assistant's subject"
+        )
+        reason: str = Field(default="", description="One short sentence")
+        personal_data: _List[str] = Field(
+            default_factory=list,
+            description="Field names from the supplied list that the message discloses",
+        )
+        about_child: bool = Field(
+            default=False,
+            description=(
+                "True when the message asks about a particular child's own situation "
+                "rather than about the school in general"
+            ),
+        )
+        child_reference: _Literal[
+            "none", "son", "daughter", "child", "plural", "named", "context"
+        ] = Field(default="none", description="How the child was referred to")
+        child_name: str = Field(
+            default="",
+            description="A name the message actually contained; empty otherwise",
+        )
+
+    prompt = render(
+        "chat/request_envelope.j2",
+        question=question,
+        persona=profile.identity.persona,
+        coverage=getattr(config, "coverage", "") or "",
+        history=_history_text(history, config),
+        personal_fields=personal_fields,
+        child_context=child_context,
     )
+    model = init_chat_model(
+        model=getattr(config, "scope_summary_model", "") or os.getenv("FAST_MODEL"),
+        model_provider="openai",
+        api_key=os.getenv("ARK_API_KEY"),
+        base_url=os.getenv("BASE_URL"),
+        **sampling("scope"),
+    )
+
+    # Same quota as everything else in the turn, so the same treatment. A 429 here makes
+    # this node abstain, which leaves scope UNKNOWN — safe, since nothing may end a turn
+    # on an unsettled scope, but it spends the search this node existed to avoid and it
+    # loses the child signal for the turn.
+    class _Retry:
+        vision_retry_attempts = int(getattr(config, "model_retry_attempts", 3))
+        vision_retry_base_seconds = float(getattr(config, "model_retry_base_seconds", 5.0))
+        vision_retry_max_seconds = float(getattr(config, "model_retry_max_seconds", 60.0))
+
+    result = call_with_rate_limit_retry(
+        lambda: invoke_structured(model, RequestEnvelope, [{"role": "user", "content": prompt}]),
+        config=_Retry(),
+        description="request classifier",
+    )
+    return result if isinstance(result, dict) else result.model_dump()
+
+
+def _history_text(history, config) -> str:
+    """The recent conversation as plain dialogue, for the classifier to read.
+
+    Both sides. A follow-up points at what the ASSISTANT said as often as at what the
+    user did — "and what about her attendance?" refers to a child only the assistant
+    named — and a history containing one side cannot resolve that.
+
+    Reuses the renderer query resolution already uses, so the two nodes read the same
+    conversation in the same shape. A second way of flattening history is a second set
+    of truncation rules to keep in step.
+    """
+    from backend.chat.resolution import conversation_text
+
+    limit = int(getattr(config, "query_resolution_history_messages", 6) or 6)
+    try:
+        return conversation_text(history or [], limit=limit)
+    except Exception:  # pragma: no cover - a classifier must never fail on its context
+        return ""
 
 
 # ---------------------------------------------------------------------------
