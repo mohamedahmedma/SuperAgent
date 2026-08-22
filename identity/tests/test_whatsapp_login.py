@@ -242,9 +242,9 @@ def test_either_of_her_numbers_reaches_the_same_account(client, gateway, directo
         assert signed_in.status_code == 200, signed_in.text
 
     accounts = client.app  # noqa: F841 - the assertion below reads the database directly
-    from identity.db import SessionLocal
+    from identity.db import new_session
 
-    session = SessionLocal()
+    session = new_session()
     try:
         rows = session.query(Account).filter(Account.role == "parent").all()
         assert len(rows) == 1

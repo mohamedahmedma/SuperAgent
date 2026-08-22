@@ -28,7 +28,7 @@ import sys
 from sqlalchemy import create_engine, text
 
 from identity.auth import ASSIGNABLE_ROLES
-from identity.db import SessionLocal, init_db
+from identity.db import init_db, new_session
 from identity.models import Account
 
 
@@ -41,7 +41,7 @@ def import_accounts(source_url: str, *, dry_run: bool = False) -> dict:
 
     created = 0
     skipped = 0
-    db = SessionLocal()
+    db = new_session()
     try:
         for row in rows:
             username = (row.username or "").strip()

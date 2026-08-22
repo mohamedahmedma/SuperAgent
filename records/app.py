@@ -25,7 +25,7 @@ from fastapi import FastAPI
 
 from records import calendar as school_calendar
 from records import guardian_directory, lms
-from records.db import SessionLocal, init_db
+from records.db import init_db, new_session
 from records.routes import admin_router, agent_router
 from records.sis_adapter import SisAdapter
 
@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI):
 
     from records.auth import bootstrap_admin_key
 
-    db = SessionLocal()
+    db = new_session()
     try:
         bootstrap_admin_key(db)
     finally:
