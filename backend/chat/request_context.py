@@ -10,6 +10,7 @@ from typing import Optional
 
 from backend.chat.asset_context import SessionAssetState
 from backend.chat.caller_identity import CallerIdentity
+from backend.chat.child_context import SessionChild
 from backend.schemas.chat import HitlResumeState, normalize_rag_trace
 
 logger = logging.getLogger(__name__)
@@ -41,16 +42,20 @@ class ChatRequestContext:
     # a module global) so concurrent requests cannot see each other's state.
     asset_state: SessionAssetState = field(default_factory=SessionAssetState)
 
+    # The child this conversation settled on. Loaded from session metadata at turn
+    # start and threaded BY REFERENCE, so a turn that resolves a child has already
+    # written it back by the time the metadata is saved — the same arrangement
+    # `asset_state` uses. A default-constructed pin is the correct shape for a staff
+    # session, a background job or a test: empty, and never consulted, because nothing
+    # asks about a child without a guardian to ask on behalf of.
+    child: SessionChild = field(default_factory=SessionChild)
+
     _lock: threading.RLock = field(default_factory=threading.RLock)
     _active: bool = True
     _rag_trace: Optional[dict] = None
     _knowledge_tool_slots_used: int = 0
     _figure_tool_slots_used: int = 0
     _records_tool_slots_used: int = 0
-    #: The child this conversation settled on, so a parent who answered "Layla"
-    #: once is not asked again on their next question. Seeded from the session at
-    #: turn start and written back when a turn resolves a child.
-    _remembered_child: str = ""
     _short_circuit_status: Optional[str] = None
     _surfaced_asset_ids: list = field(default_factory=list)
     _started_at: float = field(default_factory=time.monotonic)
@@ -109,6 +114,7 @@ class ChatRequestContext:
         output_queue: asyncio.Queue,
         asset_state: Optional[SessionAssetState] = None,
         caller: Optional[CallerIdentity] = None,
+        child: Optional[SessionChild] = None,
     ) -> ChatRequestContext:
         return cls(
             user_id=user_id,
@@ -117,6 +123,7 @@ class ChatRequestContext:
             loop=asyncio.get_running_loop(),
             asset_state=asset_state or SessionAssetState(),
             caller=caller,
+            child=child if child is not None else SessionChild(),
         )
 
     @classmethod
@@ -127,12 +134,14 @@ class ChatRequestContext:
         session_id: str,
         asset_state: Optional[SessionAssetState] = None,
         caller: Optional[CallerIdentity] = None,
+        child: Optional[SessionChild] = None,
     ) -> ChatRequestContext:
         return cls(
             user_id=user_id,
             session_id=session_id,
             asset_state=asset_state or SessionAssetState(),
             caller=caller,
+            child=child if child is not None else SessionChild(),
         )
 
     def note_turn_plan(
@@ -257,18 +266,41 @@ class ChatRequestContext:
         call is re-checked against the guardian link on the server that answers it.
         """
         with self._lock:
-            return self._remembered_child
+            return self.child.student_id
 
-    def remember_child(self, student_id: str) -> None:
+    @property
+    def remembered_child_label(self) -> str:
+        """What to call the pinned child. Empty when nothing is pinned."""
+        with self._lock:
+            return self.child.label
+
+    def remember_child(
+        self, student_id: str, *, label: str = "", gender: str = ""
+    ) -> None:
         """Pin this conversation to a child.
 
         Called only once a child has actually been resolved, so a turn that failed to
         identify one does not leave the wrong child pinned for every question after it.
+
+        Writes through to the `SessionChild` this context was built with, which is the
+        same object the turn will serialise into session metadata — so the pin is
+        durable without this method knowing anything about storage.
         """
         if not student_id:
             return
         with self._lock:
-            self._remembered_child = str(student_id)
+            self.child.pin(student_id=student_id, label=label, gender=gender)
+
+    def forget_child(self) -> None:
+        """Drop the pin.
+
+        For the one case that is real evidence it is wrong: the records facade refusing
+        this guardian. A transient outage must NOT come here — a hint the reader
+        re-checks anyway is not worth discarding over a timeout, and doing so would
+        re-ask the parent for no reason they could see.
+        """
+        with self._lock:
+            self.child.clear()
 
     def acquire_records_tool_slot(self) -> bool:
         """Budget for get_student_records, separate from the other tool budgets.

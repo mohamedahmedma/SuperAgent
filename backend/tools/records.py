@@ -186,7 +186,14 @@ def make_get_student_records(ctx: ChatRequestContext):
         # Pinned for the rest of the conversation, so a parent who answered "Layla" once
         # is not asked again. Recorded only after a child has actually been resolved, so a
         # turn that failed to identify one leaves nothing wrong pinned behind it.
-        ctx.remember_child(student_id)
+        #
+        # The label rides along because the pin is now durable: a later turn that wants to
+        # say which child it is answering about would otherwise have only an opaque
+        # student number to show a parent.
+        ctx.remember_child(
+            student_id,
+            label=_label(student, "full_name_ar", "full_name_en", "student_id"),
+        )
         kind = (record_type or "grades").strip().lower()
 
         if kind == "attendance":
