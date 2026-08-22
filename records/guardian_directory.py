@@ -57,6 +57,11 @@ class PermittedStudent:
     full_name_en: str = ""
     grade_level: str = ""
     section: str = ""
+    #: "male" | "female" | "unspecified", as the system of record states it. Relayed, not
+    #: interpreted: this service holds no data and forms no view about a child, and the
+    #: only reason it carries this at all is that the chat service needs it to understand
+    #: a parent who writes "my son" rather than a name.
+    gender: str = "unspecified"
 
     @property
     def external_id(self) -> str:
@@ -164,6 +169,10 @@ class SisGuardianDirectory:
                 student_id=str(row.get("student_number") or ""),
                 full_name_ar=str(row.get("full_name_ar") or ""),
                 full_name_en=str(row.get("full_name_en") or ""),
+                # Defaulted rather than required, so a SIS that predates the column — or
+                # one that never fills it in — keeps answering this route instead of
+                # failing it over a field nothing depends on.
+                gender=str(row.get("gender") or "unspecified"),
             )
             for row in rows
             if row.get("student_number")

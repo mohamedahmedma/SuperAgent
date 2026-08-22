@@ -32,6 +32,7 @@ from sis.application.ports.unit_of_work import UnitOfWork
 from sis.application.services import QueryService
 from sis.application.services.queries import GuardianIdentity, GuardianLink
 from sis.domain.errors import UnknownReference
+from sis.domain.people import Gender
 from sis.domain.guardians import RelationshipType
 from sis.domain.value_objects import Phone, StudentNumber
 
@@ -109,6 +110,11 @@ class GuardianChildOut(BaseModel):
     student_number: str
     full_name_ar: str
     full_name_en: str
+    #: The child's own sex, so a parent writing "my son" can be understood without being
+    #: asked which child. `unspecified` is the honest answer for every child until a
+    #: registrar uploads it, and a reader must treat it as "not said" rather than as a
+    #: default — see `sis.domain.people.Gender`.
+    gender: Gender = Gender.UNSPECIFIED
     relationship_type: RelationshipType
     relationship_label: str = ""
     can_view_records: bool
@@ -119,6 +125,7 @@ class GuardianChildOut(BaseModel):
             student_number=entry.student_number,
             full_name_ar=entry.student.full_name_ar if entry.student else "",
             full_name_en=entry.student.full_name_en if entry.student else "",
+            gender=entry.student.gender if entry.student else Gender.UNSPECIFIED,
             relationship_type=entry.link.relationship_type,
             relationship_label=entry.link.relationship_label,
             can_view_records=entry.link.can_view_records,

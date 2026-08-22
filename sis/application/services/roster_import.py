@@ -68,7 +68,7 @@ from sis.domain.imports import (
     RowOutcome as StoredOutcome,
     tally,
 )
-from sis.domain.people import ClassEnrolment, Student
+from sis.domain.people import ClassEnrolment, Gender, Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
 
 __all__ = ["BATCH_FAILURE_ROW_CODE", "RosterImportService"]
@@ -97,6 +97,7 @@ _K_NAME_EN = "full_name_en"
 _K_YEAR = "academic_year_code"
 _K_CLASS = "class_code"
 _K_STARTS = "starts_on"
+_K_GENDER = "gender"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +117,10 @@ class _Assertion:
     year_code: AcademicYearCode
     class_code: ClassCode
     starts_on: date
+    #: Defaulted, so a caller written against the previous shape still builds — and gets
+    #: the value that means "the school has not said", which is the truthful answer for
+    #: any row whose sheet had no such column.
+    gender: Gender = Gender.UNSPECIFIED
 
     @property
     def payload(self) -> dict[str, object]:
@@ -127,6 +132,10 @@ class _Assertion:
             _K_YEAR: str(self.year_code),
             _K_CLASS: str(self.class_code),
             _K_STARTS: self.starts_on.isoformat(),
+            # In the payload, not just on the row, because commit rebuilds the assertion
+            # from this dict rather than from the file: a field missing here is a field
+            # that previews correctly and is silently dropped on the way to being stored.
+            _K_GENDER: str(self.gender),
         }
 
 
@@ -387,6 +396,7 @@ class RosterImportService:
                     year_code=command.academic_year_code,
                     class_code=class_code,
                     starts_on=row.starts_on or default_start,
+                    gender=row.gender,
                 )
             )
         return assertions, unresolved
@@ -471,6 +481,10 @@ class RosterImportService:
                         year_code=AcademicYearCode(row.payload[_K_YEAR]),
                         class_code=ClassCode(row.payload[_K_CLASS]),
                         starts_on=date.fromisoformat(str(row.payload[_K_STARTS])),
+                        # `.get`, unlike the required keys above: a batch previewed
+                        # before this column existed is still a valid batch, and must
+                        # commit rather than be reported as no longer rebuilding.
+                        gender=Gender(str(row.payload.get(_K_GENDER, Gender.UNSPECIFIED))),
                     )
                 )
             except (SisError, KeyError, TypeError, ValueError) as exc:
@@ -683,23 +697,35 @@ class RosterImportService:
         )
 
     def _merged_student(self, stated: _Assertion, existing: Student | None) -> Student:
-        """Fill in a name the record lacks; never replace one it has.
+        """Fill in a detail the record lacks; never replace one it has.
 
         A file with an empty English column must not blank the English name a registrar
         typed by hand, and `_names_collide` has already refused the case where the two
         disagree — so what reaches here is only ever an addition.
+
+        Gender follows the same rule for the same reason, and the rule matters more here
+        because the blank is so much commoner: a sheet with no gender column at all would
+        otherwise reset every child it re-imports back to `unspecified`, quietly undoing
+        an earlier upload that did carry it. A registrar correcting a recorded sex states
+        it, which lands as an `UNSPECIFIED` existing value only if it was never set.
         """
         if existing is None:
             return Student(
                 student_number=stated.number,
                 full_name_ar=stated.name_ar,
                 full_name_en=stated.name_en,
+                gender=stated.gender,
             )
         return Student(
             student_number=existing.student_number,
             full_name_ar=existing.full_name_ar or stated.name_ar,
             full_name_en=existing.full_name_en or stated.name_en,
             is_active=existing.is_active,
+            gender=(
+                stated.gender
+                if stated.gender is not Gender.UNSPECIFIED
+                else existing.gender
+            ),
         )
 
     def _apply(self, uow: UnitOfWork, plans: Sequence[_Plan]) -> None:

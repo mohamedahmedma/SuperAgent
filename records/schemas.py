@@ -45,6 +45,14 @@ class StudentRef(BaseModel):
     full_name_en: str = ""
     grade_level: str = ""
     section: str = ""
+    gender: str = Field(
+        default="unspecified",
+        description=(
+            "The child's sex as the system of record states it: male, female, or "
+            "unspecified. `unspecified` means the school has not recorded one — it is "
+            "not a default, and a caller must not let it satisfy a filter for either sex."
+        ),
+    )
 
 
 class TermOut(BaseModel):

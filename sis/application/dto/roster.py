@@ -9,6 +9,7 @@ would discard that at the boundary, before any service could preserve it.
 from dataclasses import dataclass
 from datetime import date
 
+from sis.domain.people import Gender
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
 
 
@@ -33,6 +34,11 @@ class ParsedRosterRow:
     full_name_ar: str
     full_name_en: str
     class_code: ClassCode | None = None
+    #: What the sheet said, already folded to the closed vocabulary by the parser.
+    #: `UNSPECIFIED` covers a blank cell, a missing column and a word nobody anticipated —
+    #: all three mean "the school has not said", and none of them is grounds for rejecting
+    #: a row over a field this optional.
+    gender: Gender = Gender.UNSPECIFIED
     #: Placement start. Defaults at the service layer to the academic year's start rather
     #: than to "today", so importing a roster in November does not record every child as
     #: having joined in November.

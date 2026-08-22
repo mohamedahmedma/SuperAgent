@@ -43,6 +43,7 @@ __all__ = [
     "ColumnSpec",
     "ENDS_ON",
     "FULL_NAME_AR",
+    "GENDER",
     "FULL_NAME_EN",
     "GUARDIAN_ALT_PHONE",
     "GUARDIAN_NAME_AR",
@@ -336,6 +337,19 @@ FULL_NAME_EN: Final[ColumnSpec] = ColumnSpec(
         "الاسم بالانجليزي",
         "الاسم الانجليزي",
         "الاسم باللغة الانجليزية",
+    ),
+)
+
+GENDER: Final[ColumnSpec] = ColumnSpec(
+    field="gender",
+    aliases=(
+        "gender",
+        "sex",
+        "student gender",
+        "النوع",
+        "الجنس",
+        "نوع الطالب",
+        "ذكر/انثى",
     ),
 )
 

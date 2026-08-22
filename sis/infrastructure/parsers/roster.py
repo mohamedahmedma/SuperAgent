@@ -27,10 +27,13 @@ from typing import Final
 
 from sis.application.dto import ParsedRosterRow, ParseResult, RowCode, RowOutcome
 from sis.domain.errors import UnreadableImportFile, ValidationError
+from sis.domain.people import Gender
 from sis.domain.value_objects import ClassCode, StudentNumber
 from sis.infrastructure.parsers.columns import (
+    normalise_header,
     CLASS_CODE,
     FULL_NAME_AR,
+    GENDER,
     FULL_NAME_EN,
     STUDENT_NUMBER,
     ColumnMap,
@@ -50,6 +53,7 @@ ROSTER_COLUMNS: Final[tuple[ColumnSpec, ...]] = (
     FULL_NAME_AR,
     FULL_NAME_EN,
     CLASS_CODE,
+    GENDER,
 )
 
 # Mirrors `_NAME_LEN` in `sis.infrastructure.db.models`. Checked here so an over-long name
@@ -155,6 +159,7 @@ def _parse_row(
         full_name_ar=name_ar,
         full_name_en=name_en,
         class_code=class_code,
+        gender=_gender(columns.text(cells, GENDER.field)),
     )
 
 
@@ -202,6 +207,40 @@ def _require_a_faithful_read(sheet: Sheet, columns: ColumnMap) -> None:
             f"Delete or rename the duplicate and upload again.",
             field="headers",
         )
+
+
+#: What a registrar actually types in a gender column, folded through the same function
+#: that folds headers — so spacing, casing, diacritics and Arabic letter variants all
+#: disappear before the lookup. The same generosity the relationship words get, and for
+#: the same reason: a school's spelling of "female" is not its fault.
+_GENDERS: Final[dict[str, Gender]] = {
+    normalise_header(word): value
+    for words, value in (
+        (("m", "male", "boy", "ذكر", "ذكور", "ولد", "طالب"), Gender.MALE),
+        (("f", "female", "girl", "أنثى", "انثى", "اناث", "بنت", "طالبة"), Gender.FEMALE),
+    )
+    for word in words
+}
+
+
+def _gender(raw: str | None) -> Gender:
+    """Read one cell. Never rejects a row, and never guesses.
+
+    Anything unrecognised — a blank, a dash, a word nobody anticipated — becomes
+    `UNSPECIFIED`, which is a real value meaning "the school has not said" rather than a
+    default sex. That degradation is lossless in a way guessing would not be: the chat
+    service treats `UNSPECIFIED` as matching neither "my son" nor "my daughter", so an
+    unreadable cell costs one clarifying question, where a wrong guess would show one
+    child's records while the parent asked about another.
+
+    Deliberately exact-match only, with no containment pass. The relationship resolver
+    needs containment because registrars write "big brother"; nobody writes "quite male",
+    and the Arabic single letters here are short enough that containment would match
+    inside unrelated words.
+    """
+    if not raw or not raw.strip():
+        return Gender.UNSPECIFIED
+    return _GENDERS.get(normalise_header(raw), Gender.UNSPECIFIED)
 
 
 def _text(raw: object) -> str:
