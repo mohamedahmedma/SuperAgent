@@ -11,9 +11,16 @@ SQL instead.
 Services own the transaction boundary -- they enter the unit of work and commit once --
 because they are what composes a request. Repositories never commit on their own.
 """
+from sis.application.services.attendance import (
+    AttendanceService,
+    ClassRegister,
+    RegisterEntry,
+    StudentAttendance,
+)
 from sis.application.services.grade_import import GradeImportService
 from sis.application.services.guardian_import import GuardianImportService
 from sis.application.services.queries import (
+    GuardianIdentity,
     GuardianLink,
     QueryService,
     resolve_section_for_term,
@@ -23,11 +30,16 @@ from sis.application.services.roster_import import RosterImportService
 from sis.application.services.structure import StructureGenerationService
 
 __all__ = [
+    "AttendanceService",
+    "ClassRegister",
     "GradeImportService",
     "GuardianImportService",
+    "GuardianIdentity",
     "GuardianLink",
     "QueryService",
+    "RegisterEntry",
     "RosterImportService",
+    "StudentAttendance",
     "StructureGenerationService",
     "resolve_section_for_term",
     "resolve_sections_for_term",

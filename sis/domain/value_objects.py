@@ -145,6 +145,26 @@ class _Code:
 
 
 @dataclass(frozen=True, slots=True)
+class SchoolCode(_Code):
+    """Identifies one school, e.g. `NC` for the Nasr City branch.
+
+    This service held one school for its whole life, and the school was therefore
+    implicit: every year, class and mark in the database belonged to it, and nothing had
+    to say so. It holds several now, and the consequence worth stating is what the code is
+    *for*: it is the boundary a registrar must not be able to cross by accident. Two
+    branches with a `3A` each is the normal case, and a screen that mixed them would put a
+    child on a register at a school she has never attended.
+
+    Short, like every other code here, because it is a prefix an operator types into year
+    codes and file names all day.
+    """
+
+    MAX_LENGTH: ClassVar[int] = 16
+    LABEL: ClassVar[str] = "school code"
+    FIELD: ClassVar[str] = "school_code"
+
+
+@dataclass(frozen=True, slots=True)
 class AcademicYearCode(_Code):
     """Identifies one school year, e.g. `2025-2026`.
 

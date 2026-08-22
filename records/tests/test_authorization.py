@@ -103,7 +103,13 @@ def test_denials_are_audited_with_the_real_reason(client, db):
     )
     assert row is not None
     assert row.allowed is False
-    assert row.reason == "records_restricted"
+    # `no_children`, not `records_restricted`. Guardian links moved to SIS, which filters
+    # restricted ones out before answering, so a barred parent and an unknown handle now
+    # arrive here identical. That indistinguishability is the point on the *response* side
+    # and a genuine loss on the *audit* side: this service can no longer record which of
+    # the two it was. The reason worth keeping is still recorded — a run of these against
+    # one handle is somebody probing — and the full detail now lives in SIS's own audit.
+    assert row.reason == "no_children"
 
 
 def test_successful_reads_are_audited(client, db):
@@ -131,19 +137,25 @@ def test_request_id_is_carried_into_the_audit(client, db):
     assert row is not None
 
 
-def test_granting_access_makes_records_readable(client):
-    """The admin path works, and the default it overrides was deny."""
-    before = client.get("/v1/guardians/G-3/students", headers=agent_headers("G-3"))
-    assert before.json()["students"] == []
+def test_the_old_granting_route_is_gone_rather_than_quietly_useless(client):
+    """It used to write this service's tables. Those tables are no longer read.
 
-    client.post(
+    Left alone it would accept the write, answer 201, and change nothing — so a registrar
+    would believe a parent had been granted access to their child's records when nobody
+    had. 410 says the capability moved and names where, which is the one answer that
+    cannot be mistaken for success.
+    """
+    refused = client.post(
         "/v1/admin/guardians/G-3/students",
         headers=admin_headers(),
         json={"student_id": "S-2002", "can_view_records": True},
     )
+    assert refused.status_code == 410
+    assert refused.json()["detail"]["code"] == "moved"
 
+    # And the grant genuinely did not happen.
     after = client.get("/v1/guardians/G-3/students", headers=agent_headers("G-3"))
-    assert [s["student_id"] for s in after.json()["students"]] == ["S-2002"]
+    assert after.json()["students"] == []
 
 
 def test_link_without_explicit_grant_reveals_nothing(client):

@@ -1,0 +1,301 @@
+{
+  "GET /health": {
+    "status": "ok"
+  },
+  "GET /v1/schools": [
+    {
+      "code": "MAIN",
+      "name_en": "Main School",
+      "name_ar": "المدرسة",
+      "is_active": true
+    },
+    {
+      "code": "ANNEX",
+      "name_en": "The Annex",
+      "name_ar": "الملحق",
+      "is_active": true
+    }
+  ],
+  "GET /v1/structure/years": {
+    "academic_years": [
+      {
+        "code": "2025-2026",
+        "school_code": "MAIN",
+        "name_en": "2025/2026",
+        "name_ar": "٢٠٢٥",
+        "starts_on": "2025-09-01",
+        "ends_on": "2026-06-30",
+        "is_current": true
+      }
+    ],
+    "year_levels": [
+      {
+        "code": "Y3",
+        "school_code": "MAIN",
+        "name_en": "Grade 3",
+        "name_ar": "الثالث",
+        "stage": "primary",
+        "display_order": 3
+      }
+    ]
+  },
+  "GET /v1/schools/MAIN/levels": [
+    {
+      "code": "Y3",
+      "school_code": "MAIN",
+      "name_en": "Grade 3",
+      "name_ar": "الثالث",
+      "stage": "primary",
+      "display_order": 3
+    },
+    {
+      "code": "KG1",
+      "school_code": "MAIN",
+      "name_en": "Kindergarten 1",
+      "name_ar": "روضة",
+      "stage": "kindergarten",
+      "display_order": 1
+    }
+  ],
+  "GET /v1/structure/classes": [
+    {
+      "code": "3A",
+      "academic_year_code": "2025-2026",
+      "year_level_code": "Y3",
+      "name_en": "Falcons",
+      "name_ar": "الصقور",
+      "capacity": 30
+    },
+    {
+      "code": "3B",
+      "academic_year_code": "2025-2026",
+      "year_level_code": "Y3",
+      "name_en": "Eagles",
+      "name_ar": "النسور",
+      "capacity": null
+    }
+  ],
+  "GET /v1/terms": [
+    {
+      "code": "2025-T1",
+      "academic_year_code": "2025-2026",
+      "name_en": "Term 1",
+      "name_ar": "الفصل",
+      "sequence": 1,
+      "is_closed": false,
+      "starts_on": "2025-09-01",
+      "ends_on": "2025-12-20"
+    }
+  ],
+  "GET /v1/subjects": [
+    {
+      "code": "MATH",
+      "academic_year_code": "2025-2026",
+      "name_en": "Mathematics",
+      "name_ar": "رياضيات",
+      "display_order": 1,
+      "is_active": true
+    }
+  ],
+  "GET /v1/classes/3A/students": {
+    "academic_year_code": "2025-2026",
+    "class_code": "3A",
+    "as_of": "2026-03-01",
+    "count": 2,
+    "students": [
+      {
+        "student_number": "10432",
+        "full_name_en": "Layla Hassan",
+        "full_name_ar": "ليلى حسن",
+        "starts_on": "2025-09-01",
+        "ends_on": null,
+        "is_open": true
+      },
+      {
+        "student_number": "10433",
+        "full_name_en": "",
+        "full_name_ar": "عمر خالد",
+        "starts_on": "2025-09-01",
+        "ends_on": null,
+        "is_open": true
+      }
+    ]
+  },
+  "GET /v1/classes/3A/attendance": {
+    "academic_year_code": "2025-2026",
+    "class_code": "3A",
+    "on_date": "2026-03-01",
+    "size": 2,
+    "unmarked": 1,
+    "is_complete": false,
+    "counts": {
+      "present": 1,
+      "absent": 0,
+      "late": 0,
+      "excused": 0,
+      "recorded": 1,
+      "in_the_room": 1,
+      "away": 0
+    },
+    "students": [
+      {
+        "student_number": "10432",
+        "full_name_en": "Layla Hassan",
+        "full_name_ar": "ليلى حسن",
+        "state": "present",
+        "note": "",
+        "is_marked": true
+      },
+      {
+        "student_number": "10433",
+        "full_name_en": "",
+        "full_name_ar": "عمر خالد",
+        "state": null,
+        "note": "",
+        "is_marked": false
+      }
+    ]
+  },
+  "GET /v1/students": {
+    "query": "layla",
+    "count": 1,
+    "students": [
+      {
+        "student_number": "10432",
+        "full_name_en": "Layla Hassan",
+        "full_name_ar": "ليلى حسن",
+        "is_active": true,
+        "age": 9,
+        "date_of_birth": "2016-07-14",
+        "contact_phone": "+201234567890",
+        "contact_email": "",
+        "address": ""
+      }
+    ]
+  },
+  "GET /v1/students/10432": {
+    "student_number": "10432",
+    "full_name_en": "Layla Hassan",
+    "full_name_ar": "ليلى حسن",
+    "is_active": true,
+    "date_of_birth": "2016-07-14",
+    "age": 9,
+    "contact_phone": "+201234567890",
+    "contact_email": "",
+    "address": ""
+  },
+  "GET /v1/students/10432/grades": {
+    "student_number": "10432",
+    "full_name_en": "Layla Hassan",
+    "full_name_ar": "ليلى حسن",
+    "term_code": "2025-T1",
+    "term_name_en": "Term 1",
+    "term_name_ar": "الفصل",
+    "term_is_closed": false,
+    "class_code": "3A",
+    "class_name_en": "Falcons",
+    "class_name_ar": "الصقور",
+    "subject_count": 2,
+    "graded_count": 1,
+    "grades": [
+      {
+        "subject_code": "MATH",
+        "subject_name_en": "Mathematics",
+        "subject_name_ar": "رياضيات",
+        "is_graded": true,
+        "percentage": 0,
+        "points": 0,
+        "max_points": 100,
+        "class_code": "3A"
+      },
+      {
+        "subject_code": "SCI",
+        "subject_name_en": "Science",
+        "subject_name_ar": "علوم",
+        "is_graded": false,
+        "percentage": null,
+        "points": null,
+        "max_points": null,
+        "class_code": "3A"
+      }
+    ]
+  },
+  "GET /v1/students/10432/attendance": {
+    "student_number": "10432",
+    "from_date": "2025-08-01",
+    "to_date": "2026-03-01",
+    "counts": {
+      "present": 41,
+      "absent": 4,
+      "late": 2,
+      "excused": 1,
+      "recorded": 48,
+      "in_the_room": 43,
+      "away": 5
+    },
+    "days": [
+      {
+        "on_date": "2026-02-27",
+        "state": "present",
+        "note": "",
+        "class_code": "3A"
+      },
+      {
+        "on_date": "2026-02-28",
+        "state": "excused",
+        "note": "Medical appointment",
+        "class_code": "3A"
+      }
+    ]
+  },
+  "GET /v1/students/10432/guardians": {
+    "student_number": "10432",
+    "count": 1,
+    "guardians": [
+      {
+        "phone": "+201234567890",
+        "phones": [
+          "+201234567890"
+        ],
+        "full_name_en": "Hassan Ali",
+        "full_name_ar": "حسن علي",
+        "relationship_type": "father",
+        "relationship_label": "",
+        "can_view_records": true,
+        "is_primary_contact": true,
+        "restriction_note": ""
+      }
+    ]
+  },
+  "GET /v1/schools/ANNEX/levels": [
+    {
+      "code": "S1",
+      "school_code": "ANNEX",
+      "name_en": "Secondary 1",
+      "name_ar": "الثانوي",
+      "stage": "secondary",
+      "display_order": 10
+    }
+  ],
+  "GET /v1/classes/3B/students": {
+    "academic_year_code": "2025-2026",
+    "class_code": "3B",
+    "as_of": "2026-03-01",
+    "count": 0,
+    "students": []
+  },
+  "GET /v1/students/10432/placements": {
+    "student_number": "10432",
+    "count": 1,
+    "placements": [
+      {
+        "student_number": "10432",
+        "academic_year_code": "2025-2026",
+        "class_code": "3A",
+        "starts_on": "2025-09-01",
+        "ends_on": null,
+        "is_open": true
+      }
+    ]
+  }
+}

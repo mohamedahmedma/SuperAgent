@@ -8,6 +8,14 @@ The important row is `Account.guardian_external_id`. That single column is the
 mapping from "someone who logged in" to "a guardian the records facade will answer
 about", and it exists in exactly one place in the whole system. Nothing else may
 derive it, infer it, or accept it from a request body.
+
+**Two authorities may write that column, and only two.** An administrator, through the
+admin route; and the WhatsApp verification flow, which does not take the value from
+anybody's request either — it proves control of a phone number through WhatsApp, asks the
+school's own system of record which guardian that number belongs to, and writes the answer
+it is given. Both paths share the property the rule is actually about: the account never
+names its own guardian. A parent who could choose their own guardian id could read any
+family's records, and neither path lets them near it.
 """
 from datetime import datetime, timezone
 
@@ -88,6 +96,93 @@ class RefreshToken(Base):
 
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class VerificationChallenge(Base):
+    """One attempt to prove that a browser and a WhatsApp number belong to the same person.
+
+    The flow this row exists for, in the order it happens: a browser asks for a challenge
+    and gets back a `wa.me` link carrying `nonce`; the parent sends that link's pre-filled
+    message from their own WhatsApp; our webhook receives it, learns the sender's number
+    from WhatsApp itself, and — if the school has that number on file — replies with a
+    short code; the parent types the code into the browser.
+
+    **Two secrets, and the split is the whole security model.** `nonce` travels out through
+    a URL the parent can forward, screenshot or paste, and comes back over WhatsApp;
+    `poll_secret_hash` never leaves the browser that asked. Neither half alone is enough,
+    which is what makes both of the obvious attacks fail:
+
+      * Somebody sends a nonce they stole from a screenshot. The code is then delivered to
+        *their* WhatsApp, but they hold no poll secret, so they cannot finish — and the
+        person whose nonce it was is merely blocked, not impersonated.
+      * Somebody tricks a parent into clicking a link they generated. The code goes to the
+        *parent's* WhatsApp, which the attacker cannot read.
+
+    `code_hash` rather than the code, for the reason `RefreshToken` stores a hash: a leaked
+    database must not yield a usable session. `attempts` is on the row rather than on an
+    account because at code-entry time there may be no account yet, and a six-digit code
+    with no counter is guessed in an afternoon.
+
+    `wa_message_id` is the WhatsApp message id of the inbound message that claimed this
+    challenge. It is stored because Meta retries a webhook for up to seven days when a
+    delivery is not acknowledged, so the same parent message arrives repeatedly; without
+    remembering which message was already handled, one tap sends a parent several
+    conflicting codes.
+
+    Rows are consumed, never reused: `consumed_at` is set the moment a challenge mints a
+    token, and a consumed challenge is dead whatever else it holds.
+    """
+
+    __tablename__ = "verification_challenges"
+    __table_args__ = (
+        # The webhook's only lookup: it holds a nonce parsed out of a message and nothing
+        # else. Unique because two live challenges sharing one nonce would make "which
+        # browser is this parent talking to" unanswerable.
+        UniqueConstraint("nonce", name="uq_verification_nonce"),
+        # Dedupe of Meta's retries, and of a parent who taps send twice.
+        Index("ix_verification_wa_message", "wa_message_id"),
+        # Sweeping expired rows, and rate-limiting by number.
+        Index("ix_verification_phone_time", "guardian_phone", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    #: Travels out in the wa.me link and back in the parent's message. Short and typable:
+    #: a parent may retype it by hand when an in-app browser swallows the link.
+    nonce: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Held only by the browser that asked for this challenge. Hashed, like every other
+    #: bearer credential in this service.
+    poll_secret_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+
+    #: "pending" -> "code_sent" -> "verified", or the terminal "rejected" / "expired".
+    #: A string rather than an enum column for the reason the audit `reason` is: it is read
+    #: far more often than it is branched on, and a new state must not need a migration in
+    #: a service whose schema is built by `create_all`.
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+
+    #: Filled by the webhook, from WhatsApp's own view of who sent the message — never
+    #: from anything the browser said. Kept in E.164 so it matches what the school stores.
+    guardian_phone: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    #: The handle the system of record gave back for that number. This is what the minted
+    #: token will carry, and it is the reason the phone itself need not be kept anywhere
+    #: else in this service.
+    guardian_external_id: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    #: Her name, so the browser can greet her before she has an account. Display only.
+    display_name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    preferred_language: Mapped[str] = mapped_column(String(8), default="ar", nullable=False)
+
+    code_hash: Mapped[str] = mapped_column(String(128), default="", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    #: The inbound WhatsApp message that claimed this challenge, for retry deduplication.
+    wa_message_id: Mapped[str] = mapped_column(String(128), default="", nullable=False)
+    #: Why a rejected challenge was rejected. Shown to nobody; read when a parent phones
+    #: the school to say it did not work.
+    reason: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 

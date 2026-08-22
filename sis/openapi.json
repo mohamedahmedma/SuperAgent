@@ -1,0 +1,6228 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Student Information Service",
+    "description": "Student Information Service — the registrar's system of record for school structure, class placement and stated grades.\n\n**A blank grade is `null`, never `0`.** Zero is a mark a child can earn; the absence of a mark is not. Every grade field in this API distinguishes the two, and a client that renders `null` as `0%` is reporting a failure that did not happen.\n\n**Class placement is a dated membership, not a property of the student.** A child who moves from 3A to 3B in March is in 3A for Term 1 and 3B for Term 2, and both remain true forever. Ask for a placement *as of* a date or a term; there is no 'current class' field to read.\n\n**Imports are preview-then-commit.** An upload is parsed and validated into a batch with a per-row outcome, and nothing is written until that batch is committed. One malformed row is reported as one rejected row — it never discards the rows around it.\n\n**Codes are immutable; labels are not.** A class is identified by its code for its whole life, so renaming '3A' to 'Falcons' changes a label and detaches no student and no grade. Every nameable thing carries both an Arabic and an English name.\n\nGrades here are stated figures, reported exactly as the school recorded them. This service does not average, weight, or drop the lowest.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Is this process serving HTTP",
+        "description": "Liveness only. It does not touch the database — see the module note on why a database-backed probe makes an overloaded system restart itself.",
+        "operationId": "read_health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/structure/generate": {
+      "post": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Generate a year's levels and class sections",
+        "description": "Idempotent and additive: it creates only what is missing, renames nothing, and deletes nothing. Asking for fewer classes than exist removes none.",
+        "operationId": "generate_structure_v1_structure_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateStructureIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateStructureOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/structure/years": {
+      "get": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Academic years and year levels",
+        "description": "Both lists in one body so the two selects on a structure screen cannot be fetched a moment apart and disagree.\n\n`school` narrows both to one school and is optional: without it the years of every school are returned and `year_levels` is empty, because a ladder only means something inside a school and merging several would put two branches' `Y1` side by side with nothing to tell them apart. The school picker itself is the caller that omits it.",
+        "operationId": "list_years_v1_structure_years_get",
+        "parameters": [
+          {
+            "name": "school",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "School code. Omit to list the years of every school.",
+              "title": "School"
+            },
+            "description": "School code. Omit to list the years of every school."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StructureYearsOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/structure/classes": {
+      "get": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Class sections of one academic year",
+        "description": "`academic_year` is required and never defaulted: `3A` names a different room of children every September, so a missing year would be answered about whichever one happens to be flagged current.",
+        "operationId": "list_classes_v1_structure_classes_get",
+        "parameters": [
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "year_level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "examples": [
+                "Y3"
+              ],
+              "title": "Year Level"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClassSectionOut"
+                  },
+                  "title": "Response List Classes V1 Structure Classes Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Add one class section to a year",
+        "description": "201 when the section is new, 200 when one with this code already existed in this year — in which case its labels are corrected and no enrolment is touched. An unknown year or year level is a 404: this route will not invent the rung a class sits on.",
+        "operationId": "create_class_section_v1_structure_classes_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassSectionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassSectionOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/terms": {
+      "post": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Create or relabel a term",
+        "description": "201 when the term is new, 200 when a term with this code already existed and its labels or dates were updated. The code is identity and is never rewritten.",
+        "operationId": "create_term_v1_terms_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Terms of one academic year",
+        "description": "In `sequence` order, which is chronological without parsing codes.",
+        "operationId": "list_terms_v1_terms_get",
+        "parameters": [
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TermOut"
+                  },
+                  "title": "Response List Terms V1 Terms Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/academic-years": {
+      "post": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Create or relabel an academic year",
+        "description": "201 when the year is new, 200 when a year with this code already existed and its labels or dates were updated. Every other structural row hangs off a year, so this is the first call when setting a school up.",
+        "operationId": "create_academic_year_v1_academic_years_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcademicYearIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademicYearOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/subjects": {
+      "post": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Create or relabel a subject",
+        "description": "201 when the subject is new, 200 when one with this code already existed. Retire a subject with `is_active: false`; there is no delete.",
+        "operationId": "create_subject_v1_subjects_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubjectIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "One year's subjects, in report-card order",
+        "description": "`academic_year` is required: the catalogue is per-year, so `MATH` alone names a different subject each September and 'the subjects' is not a question with an answer. Retired subjects are omitted unless asked for by name. Unknown year is a 404, never an empty list — a typo and a year with no catalogue read identically on screen.",
+        "operationId": "list_subjects_v1_subjects_get",
+        "parameters": [
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "include_inactive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Inactive"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SubjectOut"
+                  },
+                  "title": "Response List Subjects V1 Subjects Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/structure/classes/{class_code}": {
+      "patch": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Relabel one class section",
+        "description": "Renaming `3A` to `Falcons` changes a label and detaches no student and no grade — the code is what everything points at, and this route cannot reach it. `academic_year` is required, because a class code names a different room each year.",
+        "operationId": "rename_class_section_v1_structure_classes__class_code__patch",
+        "parameters": [
+          {
+            "name": "class_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Class Code"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassSectionPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassSectionOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/schools": {
+      "get": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Every school",
+        "description": "Closed branches are omitted unless `include_inactive` asks for them.",
+        "operationId": "list_schools_v1_schools_get",
+        "parameters": [
+          {
+            "name": "include_inactive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Inactive"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SchoolOut"
+                  },
+                  "title": "Response List Schools V1 Schools Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Create or relabel a school",
+        "description": "201 when the school is new, 200 when this code already existed and its labels were corrected — which detaches nothing, because every year and rung points at the row rather than at the name. There is no delete; close a branch with `is_active: false`.",
+        "operationId": "create_school_v1_schools_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchoolIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchoolOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/schools/{school_code}/levels": {
+      "get": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "One school's ladder, grouped by stage",
+        "description": "Ordered by stage — garden, primary, preparatory, secondary, then anything unclassified — and by `display_order` within each. Unknown school is a 404, never an empty ladder.",
+        "operationId": "list_school_levels_v1_schools__school_code__levels_get",
+        "parameters": [
+          {
+            "name": "school_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "School Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/YearLevelOut"
+                  },
+                  "title": "Response List School Levels V1 Schools  School Code  Levels Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/structure/levels": {
+      "post": {
+        "tags": [
+          "structure"
+        ],
+        "summary": "Add or relabel one rung",
+        "description": "201 when the rung is new in this school, 200 when it already existed and its labels, order or stage were corrected — none of which detaches a class or a mark, because those point at the rung's row. The generator builds a whole ladder at once; this is for the single rung a school adds afterwards.",
+        "operationId": "create_year_level_v1_structure_levels_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/YearLevelIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YearLevelOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/classes/{class_code}/students": {
+      "get": {
+        "tags": [
+          "students"
+        ],
+        "summary": "The register of one class on one day",
+        "description": "`academic_year` is required: a class code is unique within a year, so `3A` alone names a different room of children every September. Unknown class or year is a 404, never an empty list.",
+        "operationId": "read_class_roster_v1_classes__class_code__students_get",
+        "parameters": [
+          {
+            "name": "class_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Class Code"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "on",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The day to answer for. Defaults to today, echoed as `as_of`.",
+              "title": "On"
+            },
+            "description": "The day to answer for. Defaults to today, echoed as `as_of`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassRosterOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students": {
+      "get": {
+        "tags": [
+          "students"
+        ],
+        "summary": "Find a child by number or name",
+        "description": "Type-ahead over the student number and both spellings of the name. A blank `q` returns nothing rather than the whole school. Children who have left are excluded unless `include_inactive` asks for them.",
+        "operationId": "search_students_v1_students_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Number or part of a name.",
+              "examples": [
+                "ahmed"
+              ],
+              "default": "",
+              "title": "Q"
+            },
+            "description": "Number or part of a name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "include_inactive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Inactive"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentSearchOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "students"
+        ],
+        "summary": "Add or correct one child",
+        "description": "201 when the child is new, 200 when this number was already on file — in which case her names are corrected and not one mark, placement or guardian link is touched. Enrolling her in a class is a separate act: `POST /v1/students/{student_number}/placements`.",
+        "operationId": "save_student_v1_students_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudentIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_number}": {
+      "get": {
+        "tags": [
+          "students"
+        ],
+        "summary": "One child's record",
+        "description": "Her number and her name, and deliberately not her class: placement is a dated membership with a different answer per term, and there is no current-class field to read. Ask `/students/{student_number}/placements` for the history.",
+        "operationId": "read_student_v1_students__student_number__get",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "students"
+        ],
+        "summary": "Correct one child's name, or mark her as having left",
+        "description": "Omitted fields are left alone. Setting `is_active: false` is how a child who has left the school is recorded — there is no delete, because her marks and her placements are still true statements about terms that happened.",
+        "operationId": "update_student_v1_students__student_number__patch",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudentPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_number}/placements": {
+      "get": {
+        "tags": [
+          "students"
+        ],
+        "summary": "Every class this child has been in",
+        "description": "The whole history, not just the open placement. A child who moved 3A to 3B in March has two rows here and both are true — which is what makes her Term 1 report card say 3A and her Term 2 report card say 3B.",
+        "operationId": "read_student_placements_v1_students__student_number__placements_get",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacementHistoryOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "students"
+        ],
+        "summary": "Place one child in a class",
+        "description": "Opens a placement from `starts_on`. A child may hold only one *open* placement at a time and the database enforces it, so placing a child who is already in a class is refused rather than silently leaving her in two — use `POST /transfer`, which closes the old one in the same transaction.",
+        "operationId": "place_student_v1_students__student_number__placements_post",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlacementIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacementOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_number}/transfer": {
+      "post": {
+        "tags": [
+          "students"
+        ],
+        "summary": "Move one child to another class",
+        "description": "One transaction: the open placement is closed the day before `on_date` and a new one opens on it. Two separate calls would leave a window in which the child is in no class at all, and a marks upload landing in that window rejects every one of her rows for having no placement. Her marks in the old class stay filed under the old class — that is the point of the invariant.",
+        "operationId": "transfer_student_v1_students__student_number__transfer_post",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_number}/placements/current": {
+      "patch": {
+        "tags": [
+          "students"
+        ],
+        "summary": "End this child's current placement",
+        "description": "`ends_on` is her **last day** in the class, not the day after. She then holds no open placement, which is the correct state for a child who has left mid-year and is not the same as her never having been there. 404 when she has no open placement to end.",
+        "operationId": "end_current_placement_v1_students__student_number__placements_current_patch",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlacementEndIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlacementOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/resolve": {
+      "post": {
+        "tags": [
+          "guardians"
+        ],
+        "summary": "Which guardian does this number reach",
+        "description": "For a service that has just proved somebody controls a number and needs to know whether the school has that number on file. Returns her stable `public_id`, which is what the caller should store — never the number itself. A number that reaches nobody is a 404. That is an ordinary answer here, not an error: most numbers in the world are not this school's parents.",
+        "operationId": "resolve_guardian_v1_guardians_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardianRefOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_number}/guardians": {
+      "get": {
+        "tags": [
+          "guardians"
+        ],
+        "summary": "Every guardian on file for one child",
+        "description": "Primary contact first. An unknown student is a 404, never an empty list — a child with no guardians recorded yet is a real and common answer, and the two must stay distinguishable.",
+        "operationId": "read_student_guardians_v1_students__student_number__guardians_get",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentGuardiansOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/{phone}/students": {
+      "get": {
+        "tags": [
+          "guardians"
+        ],
+        "summary": "Which children one number may ask about",
+        "description": "The parent-facing question. Resolves through **any** of her numbers, so a parent who verifies the second line she gave the school sees the same children as one who verifies the first. Restricted links are excluded unless `include_restricted` is set, which is a registrar's view and not a parent's.",
+        "operationId": "read_guardian_students_v1_guardians__phone__students_get",
+        "parameters": [
+          {
+            "name": "phone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Phone"
+            }
+          },
+          {
+            "name": "include_restricted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Restricted"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardianChildrenOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_number}/guardians/{phone}": {
+      "patch": {
+        "tags": [
+          "guardians"
+        ],
+        "summary": "Grant or revoke one guardian's access to one child's records",
+        "description": "The urgent custody path, deliberately not requiring an upload: when a court order arrives the office has to act now, and 're-upload the guardians file' is not an answer. The link itself is untouched — the adult stays on the contact list.",
+        "operationId": "set_records_access_v1_students__student_number__guardians__phone__patch",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          },
+          {
+            "name": "phone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Phone"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "guardians"
+        ],
+        "summary": "Remove one guardian from one child",
+        "description": "For a link created in error. Ending a *correct* relationship is the PATCH above, which keeps the contact and removes only the reading.",
+        "operationId": "unlink_guardian_v1_students__student_number__guardians__phone__delete",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          },
+          {
+            "name": "phone",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Phone"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_number}/grades": {
+      "get": {
+        "tags": [
+          "grades"
+        ],
+        "summary": "A child's stated marks for one term",
+        "description": "Returns the figures exactly as recorded, in subject order. An unmarked subject is `percentage: null` with `is_graded: false` — never 0. Nothing is averaged, weighted or ranked. The class is the one she was in for this term, not her current one.",
+        "operationId": "read_student_term_grades_v1_students__student_number__grades_get",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Term code. Required: a bare 'this term' would be answered from a clock, and a report is a statement about a named period.",
+              "examples": [
+                "2026-T1"
+              ],
+              "title": "Term"
+            },
+            "description": "Term code. Required: a bare 'this term' would be answered from a clock, and a report is a statement about a named period."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentTermGradesOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/classes/{class_code}/attendance": {
+      "get": {
+        "tags": [
+          "attendance"
+        ],
+        "summary": "The register of one class on one day",
+        "description": "Every child placed in the class that day, marked or not. `state` is null for a child nobody marked, which is a third value beside present and absent — a client that renders it as either is stating a fact the school did not.\n\n`academic_year` is required: a class code names a different room of children each September. `on` defaults to today and is echoed as `on_date`.",
+        "operationId": "read_class_register_v1_classes__class_code__attendance_get",
+        "parameters": [
+          {
+            "name": "class_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Class Code"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "on",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The day to answer for. Defaults to today, echoed as `on_date`.",
+              "title": "On"
+            },
+            "description": "The day to answer for. Defaults to today, echoed as `on_date`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassRegisterOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "attendance"
+        ],
+        "summary": "Record the register for one class on one day",
+        "description": "Idempotent: saving the same morning twice corrects the marks rather than writing a second set beside them, because a day holds one statement per child.\n\nPUT rather than POST for that reason — the request states what the register *is* for that day, and repeating it changes nothing. Children absent from `entries` are left untouched, so a partial register can be saved and finished later.\n\nA child who was not in this class on this day is refused with her number in the message: that is a stale screen or the wrong class, and writing it would file her attendance under a room she had already left.",
+        "operationId": "take_register_v1_classes__class_code__attendance_put",
+        "parameters": [
+          {
+            "name": "class_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Class Code"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "on",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The day being recorded. Defaults to today.",
+              "title": "On"
+            },
+            "description": "The day being recorded. Defaults to today."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeRegisterIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassRegisterOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_number}/attendance": {
+      "get": {
+        "tags": [
+          "attendance"
+        ],
+        "summary": "One child's attendance over a range",
+        "description": "Oldest first, with counts. Both `from` and `to` are inclusive and both are optional; omitting them returns everything on file.\n\nThe counts carry `recorded` — the number of days a mark exists for — and no rate. A percentage needs a denominator, and the only one this service can state honestly is the days somebody actually took the register.",
+        "operationId": "read_student_attendance_v1_students__student_number__attendance_get",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "First day, inclusive.",
+              "title": "From"
+            },
+            "description": "First day, inclusive."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last day, inclusive.",
+              "title": "To"
+            },
+            "description": "Last day, inclusive."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentAttendanceOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/roster/preview": {
+      "post": {
+        "tags": [
+          "imports"
+        ],
+        "summary": "Preview a roster upload",
+        "description": "Multipart. Send the spreadsheet as `file` and `academic_year_code` as a form field; `class_code` when the file is one class per upload, and `default_starts_on` to date the placements it creates. **Nothing is written**: this returns a per-row account and a `batch_id` to commit.",
+        "operationId": "preview_roster_v1_imports_roster_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The sheet itself: .xlsx or .csv."
+                  },
+                  "academic_year_code": {
+                    "type": "string",
+                    "description": "The year these placements belong to."
+                  },
+                  "class_code": {
+                    "type": "string",
+                    "description": "Target class, when the file is one class per upload. Omitted means every row must name its own class."
+                  },
+                  "default_starts_on": {
+                    "type": "string",
+                    "description": "ISO date for placements whose row states none. Defaults to the academic year's start, never to today."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "file",
+                  "academic_year_code"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreviewOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or the uploaded file could not be read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The upload exceeds SIS_MAX_UPLOAD_BYTES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file extension is not one this service can read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/roster/{batch_id}/commit": {
+      "post": {
+        "tags": [
+          "imports"
+        ],
+        "summary": "Apply a previewed roster batch",
+        "description": "Every row is judged again against current data, so a child enrolled by somebody else since the preview is reported rather than overwritten. A second commit of the same batch is refused, which is what makes a double-clicked button safe.",
+        "operationId": "commit_roster_v1_imports_roster__batch_id__commit_post",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportCommitOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The preview batch expired before it was committed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/guardians/preview": {
+      "post": {
+        "tags": [
+          "imports"
+        ],
+        "summary": "Preview a guardians upload",
+        "description": "Multipart. Send the spreadsheet as `file` and nothing else — every row names its own child and its own guardian, so this upload has no target to scope it to. Columns: `student_number`, `phone` (required), a guardian name in either script, and optionally `alt_phone`, `relationship`, `can_view_records`. **Nothing is written**: this returns a per-row account and a `batch_id` to commit.",
+        "operationId": "preview_guardians_v1_imports_guardians_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The sheet itself: .xlsx or .csv."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreviewOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or the uploaded file could not be read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The upload exceeds SIS_MAX_UPLOAD_BYTES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file extension is not one this service can read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/guardians/{batch_id}/commit": {
+      "post": {
+        "tags": [
+          "imports"
+        ],
+        "summary": "Apply a previewed guardians batch",
+        "description": "Every row is judged again against current data, so an adult linked by somebody else since the preview is reported rather than overwritten. A second commit of the same batch is refused, which is what makes a double-clicked button safe.",
+        "operationId": "commit_guardians_v1_imports_guardians__batch_id__commit_post",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportCommitOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The preview batch expired before it was committed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/grades/preview": {
+      "post": {
+        "tags": [
+          "imports"
+        ],
+        "summary": "Preview a marks upload",
+        "description": "Multipart. Send the sheet as `file` and `term_code` as a form field; `subject_code` and `class_code` narrow the upload so a file sent against the wrong class is refused loudly instead of matched across the whole school. **Nothing is written.** A blank cell previews as not-graded and never as zero.",
+        "operationId": "preview_grades_v1_imports_grades_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The sheet itself: .xlsx or .csv."
+                  },
+                  "term_code": {
+                    "type": "string",
+                    "description": "The term these marks belong to, e.g. `2026-T1`."
+                  },
+                  "subject_code": {
+                    "type": "string",
+                    "description": "Refuse rows naming any other subject."
+                  },
+                  "class_code": {
+                    "type": "string",
+                    "description": "Refuse rows for children who were in another class this term."
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "file",
+                  "term_code"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreviewOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or the uploaded file could not be read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The upload exceeds SIS_MAX_UPLOAD_BYTES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The file extension is not one this service can read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/grades/{batch_id}/commit": {
+      "post": {
+        "tags": [
+          "imports"
+        ],
+        "summary": "Apply a previewed marks batch",
+        "description": "Re-validated row by row: a term closed, a subject retired or a child transferred since the preview is reported as changed rather than written. Marks are stored exactly as stated — nothing is averaged, weighted or rescaled.",
+        "operationId": "commit_grades_v1_imports_grades__batch_id__commit_post",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportCommitOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The preview batch expired before it was committed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/imports/{batch_id}": {
+      "get": {
+        "tags": [
+          "imports"
+        ],
+        "summary": "A batch and one page of its per-row outcomes",
+        "description": "Filter with `outcome` (repeatable) to read the fourteen rejected rows of a twelve-hundred-row file without fetching the rest. `limit` above the ceiling is clamped, and the applied window is echoed back.",
+        "operationId": "read_import_report_v1_imports__batch_id__get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Batch Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RowOutcome"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Repeatable, e.g. `?outcome=rejected&outcome=updated`.",
+              "title": "Outcome"
+            },
+            "description": "Repeatable, e.g. `?outcome=rejected&outcome=updated`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportReportOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/api-keys": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Mint an API key",
+        "description": "Returns the only copy of the secret that will ever exist. Requires a `registrar` key — including the bootstrap key, which is how the first one is made.",
+        "operationId": "create_api_key_v1_admin_api_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AcademicYearIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Academic year code. Globally unique, so it names one year at one school — two branches cannot both use `2025-2026` and must distinguish them.",
+            "examples": [
+              "2025-2026"
+            ]
+          },
+          "school_code": {
+            "type": "string",
+            "title": "School Code",
+            "description": "The school this year belongs to. Must already exist.",
+            "examples": [
+              "MAIN"
+            ]
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "description": "English label.",
+            "default": ""
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "description": "Arabic label.",
+            "default": ""
+          },
+          "starts_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Starts On",
+            "description": "First day of the year."
+          },
+          "ends_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Ends On",
+            "description": "Last day of the year, inclusive."
+          },
+          "is_current": {
+            "type": "boolean",
+            "title": "Is Current",
+            "description": "Make this the working year. Defaults true: a registrar creating a year almost always means the one they are about to build.",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "school_code",
+          "starts_on",
+          "ends_on"
+        ],
+        "title": "AcademicYearIn",
+        "description": "Create or relabel one school year.\n\nUpsert rather than insert-only, for the same reason as terms and subjects: `code` is\nidentity and the names are labels, so correcting a spelling must not create a second\nyear beside the one every class already points at."
+      },
+      "AcademicYearOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "school_code": {
+            "type": "string",
+            "title": "School Code",
+            "description": "The school this year belongs to. Year codes are globally unique, so a code names one year at one school — this says which."
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar"
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En"
+          },
+          "starts_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Starts On"
+          },
+          "ends_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Ends On"
+          },
+          "is_current": {
+            "type": "boolean",
+            "title": "Is Current"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "school_code",
+          "name_ar",
+          "name_en",
+          "starts_on",
+          "ends_on",
+          "is_current"
+        ],
+        "title": "AcademicYearOut"
+      },
+      "AccessIn": {
+        "properties": {
+          "can_view_records": {
+            "type": "boolean",
+            "title": "Can View Records"
+          },
+          "restriction_note": {
+            "type": "string",
+            "title": "Restriction Note",
+            "description": "Why. Recorded whichever way the flag went, so a later reader can tell a deliberate restriction from a default that was never revisited.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "can_view_records"
+        ],
+        "title": "AccessIn",
+        "description": "A custody decision, applied to one link."
+      },
+      "ApiKeyIn": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "description": "Which system holds this key. A key nobody can attribute is a key nobody dares revoke.",
+            "examples": [
+              "records adapter"
+            ]
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope",
+            "description": "`registrar` writes, `reader` reads. Checked by exact equality: a registrar key is refused by reader-only routes and vice versa."
+          },
+          "expires_in_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3650.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Days",
+            "description": "Omit for a key that must be revoked deliberately rather than expiring under someone at 3am."
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "scope"
+        ],
+        "title": "ApiKeyIn"
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "prefix": {
+            "type": "string",
+            "title": "Prefix",
+            "description": "The public handle. Appears in logs and audit rows so a human can point at one key and revoke it.",
+            "examples": [
+              "sis_a1b2c3d4"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope"
+          },
+          "api_key": {
+            "type": "string",
+            "title": "Api Key",
+            "description": "The secret, shown exactly once. Store it now; the service keeps only a hash and cannot show it again."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prefix",
+          "label",
+          "scope",
+          "api_key",
+          "created_at"
+        ],
+        "title": "ApiKeyOut",
+        "description": "The minted key. `api_key` appears here and is never retrievable again."
+      },
+      "AttendanceEntryIn": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number",
+            "examples": [
+              "10432"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "present / absent / late / excused.",
+            "examples": [
+              "present"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "Required for `excused`: an excused absence with no reason on file cannot be told apart from an ordinary one marked by mistake.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "state"
+        ],
+        "title": "AttendanceEntryIn",
+        "description": "One child's state for the day, and why if it needs one."
+      },
+      "ClassRegisterOut": {
+        "properties": {
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code"
+          },
+          "on_date": {
+            "type": "string",
+            "format": "date",
+            "title": "On Date",
+            "description": "The day this register is a statement about. Echoed because `on` defaults to today, and a caller who meant last Friday must be able to see that it did not."
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Children placed in this class on that day."
+          },
+          "unmarked": {
+            "type": "integer",
+            "title": "Unmarked",
+            "description": "How many of them nobody marked. Reported separately and never folded into the counts, so an unfinished register cannot read as a finished one."
+          },
+          "is_complete": {
+            "type": "boolean",
+            "title": "Is Complete",
+            "description": "Whether every child has a mark — not whether they were present."
+          },
+          "counts": {
+            "$ref": "#/components/schemas/TallyOut"
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/RegisterLineOut"
+            },
+            "type": "array",
+            "title": "Students"
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_year_code",
+          "class_code",
+          "on_date",
+          "size",
+          "unmarked",
+          "is_complete",
+          "counts",
+          "students"
+        ],
+        "title": "ClassRegisterOut"
+      },
+      "ClassRosterOut": {
+        "properties": {
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of",
+            "description": "The day this register answers for. Echoed because `on` defaults to today, and a caller who meant last term must be able to see that it did."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/RosterEntryOut"
+            },
+            "type": "array",
+            "title": "Students"
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_year_code",
+          "class_code",
+          "as_of",
+          "count",
+          "students"
+        ],
+        "title": "ClassRosterOut"
+      },
+      "ClassSectionIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Unique within the academic year, and immutable once created. Renaming is a label change through PATCH; the code is identity.",
+            "examples": [
+              "3C"
+            ]
+          },
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code",
+            "examples": [
+              "2025-2026"
+            ]
+          },
+          "year_level_code": {
+            "type": "string",
+            "title": "Year Level Code",
+            "description": "The rung this section sits on. Must already exist.",
+            "examples": [
+              "Y3"
+            ]
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "default": ""
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "default": ""
+          },
+          "capacity": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity",
+            "description": "Places in the room. `null` means nobody has stated one, which is not the same as `0` — a capacity of zero is a section that admits nobody, and a registrar can legitimately mean it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "academic_year_code",
+          "year_level_code"
+        ],
+        "title": "ClassSectionIn",
+        "description": "One class section, in one academic year, on one year level."
+      },
+      "ClassSectionOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          },
+          "year_level_code": {
+            "type": "string",
+            "title": "Year Level Code"
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar"
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En"
+          },
+          "capacity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity",
+            "description": "`null` means no stated limit. It is not 0 — a capacity of 0 is a section that admits nobody, which a registrar closing a class may mean."
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "academic_year_code",
+          "year_level_code",
+          "name_ar",
+          "name_en"
+        ],
+        "title": "ClassSectionOut"
+      },
+      "ClassSectionPatch": {
+        "properties": {
+          "name_ar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Ar"
+          },
+          "name_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name En"
+          }
+        },
+        "type": "object",
+        "title": "ClassSectionPatch",
+        "description": "Labels only. There is deliberately no `code` and no `year_level_code` here.\n\nMoving a class to another rung or renaming its code would carry every enrolment and\nevery mark with it, under a class the children were never in. Both are new sections\nplus a roster change, and neither is an edit."
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "examples": [
+              "unknown_reference"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "examples": [
+              "no academic year 2025-2026"
+            ]
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field",
+            "description": "Which input caused it, when a single one did. Lets a UI highlight the cell rather than reddening the whole form.",
+            "examples": [
+              "academic_year_code"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail",
+        "description": "The body of a refusal: a code to branch on, a sentence to show, a cell to blame.\n\n`code` is the contract and `message` is prose — a client that branches on the wording\nbreaks the first time somebody translates it into Arabic, which this school will do."
+      },
+      "ErrorOut": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorOut",
+        "description": "Every failure this service returns, nested under FastAPI's own `detail` key."
+      },
+      "GenerateStructureIn": {
+        "properties": {
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code",
+            "examples": [
+              "2025-2026"
+            ]
+          },
+          "year_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Count"
+          },
+          "classes_per_year": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classes Per Year"
+          },
+          "classes_by_year": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classes By Year",
+            "description": "Year level code to section count, e.g. `{\"Y1\": 3, \"Y2\": 5}`. Key order is creation order."
+          },
+          "year_code_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Code Template",
+            "examples": [
+              "Y{n}"
+            ]
+          },
+          "year_name_en_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Name En Template"
+          },
+          "year_name_ar_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Name Ar Template"
+          },
+          "class_code_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Code Template",
+            "examples": [
+              "{year}{suffix}"
+            ]
+          },
+          "class_name_en_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name En Template"
+          },
+          "class_name_ar_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name Ar Template"
+          },
+          "class_suffixes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Suffixes"
+          },
+          "allow_new_convention": {
+            "type": "boolean",
+            "title": "Allow New Convention",
+            "description": "Set only to build a second ladder beside the codes already on file. The default refusal exists because a mismatched template generates a full set of empty classes that reports as a success and strands every existing enrolment.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_year_code"
+        ],
+        "title": "GenerateStructureIn",
+        "description": "Either uniform (`year_count` + `classes_per_year`) or explicit (`classes_by_year`).\n\nEvery template is optional and omitted fields keep the command's own defaults; sending\nan explicit `null` is treated as \"not stated\" for the same reason, so a client that\nserialises its whole form does not blank a template into a crash."
+      },
+      "GenerateStructureOut": {
+        "properties": {
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          },
+          "created_count": {
+            "type": "integer",
+            "title": "Created Count"
+          },
+          "existing_count": {
+            "type": "integer",
+            "title": "Existing Count"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GeneratedItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_year_code",
+          "created_count",
+          "existing_count",
+          "items"
+        ],
+        "title": "GenerateStructureOut"
+      },
+      "GeneratedItemOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "year_level",
+              "class_section"
+            ],
+            "title": "Kind"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar"
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created",
+            "description": "`false` is a success, not a skip: generation is idempotent, so a re-run reports what was already there."
+          },
+          "year_level_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Level Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "code",
+          "name_ar",
+          "name_en",
+          "created"
+        ],
+        "title": "GeneratedItemOut"
+      },
+      "GradeLineOut": {
+        "properties": {
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code"
+          },
+          "subject_name_ar": {
+            "type": "string",
+            "title": "Subject Name Ar",
+            "description": "Empty when the subject row could not be loaded. The line is still returned — a report card that quietly drops a line is one nobody can tell is incomplete."
+          },
+          "subject_name_en": {
+            "type": "string",
+            "title": "Subject Name En"
+          },
+          "is_graded": {
+            "type": "boolean",
+            "title": "Is Graded",
+            "description": "The supported way to ask whether a mark exists. `false` means the subject has not been marked yet; it does not mean zero."
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage",
+            "description": "`null` when not graded yet — never 0. A stated 0 is a mark the child earned and is returned as `0.0` with `is_graded: true`."
+          },
+          "points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points",
+            "description": "The raw figure the teacher wrote, when the sheet stated one. Never recomputed from `percentage`, and `percentage` is never recomputed from it."
+          },
+          "max_points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Points"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code",
+            "description": "The class this mark was earned in, carried on the grade itself so a later transfer cannot reprint it under a room the child had not yet entered."
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject_code",
+          "subject_name_ar",
+          "subject_name_en",
+          "is_graded",
+          "class_code"
+        ],
+        "title": "GradeLineOut",
+        "description": "One line of a report card: a subject, and the figure the school stated for it."
+      },
+      "GuardianChildOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar"
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En"
+          },
+          "relationship_type": {
+            "$ref": "#/components/schemas/RelationshipType"
+          },
+          "relationship_label": {
+            "type": "string",
+            "title": "Relationship Label",
+            "default": ""
+          },
+          "can_view_records": {
+            "type": "boolean",
+            "title": "Can View Records"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "full_name_ar",
+          "full_name_en",
+          "relationship_type",
+          "can_view_records"
+        ],
+        "title": "GuardianChildOut",
+        "description": "One child a guardian is responsible for."
+      },
+      "GuardianChildrenOut": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "title": "Phone"
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar"
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/GuardianChildOut"
+            },
+            "type": "array",
+            "title": "Students"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone",
+          "full_name_ar",
+          "full_name_en",
+          "count",
+          "students"
+        ],
+        "title": "GuardianChildrenOut"
+      },
+      "GuardianOut": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "description": "Her identifying number, in E.164. Normalised on the way in, so the same parent typed three ways in three uploads appears once."
+          },
+          "phones": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Phones",
+            "description": "Every number that reaches her, this one first."
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "description": "Empty when the guardian row could not be loaded. The link is still listed: a contact list that is quietly one adult short is worse than one showing a number without a name — the number still reaches somebody."
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En"
+          },
+          "relationship_type": {
+            "$ref": "#/components/schemas/RelationshipType",
+            "description": "The closed vocabulary, for counting and filtering."
+          },
+          "relationship_label": {
+            "type": "string",
+            "title": "Relationship Label",
+            "description": "What the registrar actually typed — 'big brother' — kept verbatim beside the bucketed type.",
+            "default": ""
+          },
+          "is_primary_contact": {
+            "type": "boolean",
+            "title": "Is Primary Contact"
+          },
+          "can_view_records": {
+            "type": "boolean",
+            "title": "Can View Records",
+            "description": "Whether this adult may read the child's academic records. Separate from the link existing: an emergency contact barred by a court order stays on file and reads nothing."
+          },
+          "restriction_note": {
+            "type": "string",
+            "title": "Restriction Note",
+            "description": "Why access was restricted. For the registrar and an audit; never rendered to a parent.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone",
+          "full_name_ar",
+          "full_name_en",
+          "relationship_type",
+          "is_primary_contact",
+          "can_view_records"
+        ],
+        "title": "GuardianOut",
+        "description": "One adult on a child's contact list, and what she is to that child."
+      },
+      "GuardianRefOut": {
+        "properties": {
+          "public_id": {
+            "type": "string",
+            "title": "Public Id",
+            "description": "Opaque and permanent. This is what another service stores to refer to her later, so that it never has to keep her phone number."
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "default": ""
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En",
+            "default": ""
+          },
+          "preferred_language": {
+            "type": "string",
+            "title": "Preferred Language",
+            "default": "ar"
+          }
+        },
+        "type": "object",
+        "required": [
+          "public_id"
+        ],
+        "title": "GuardianRefOut",
+        "description": "A guardian named by her stable handle. Deliberately carries no phone number back."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "title": "Status",
+            "default": "ok"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service",
+            "examples": [
+              "sis"
+            ]
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Checked At",
+            "description": "When this process answered, in UTC. A stale value in a proxied response is how a cached health page is spotted."
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "checked_at"
+        ],
+        "title": "HealthOut",
+        "description": "What a probe reads. Deliberately says nothing about stored data."
+      },
+      "ImportCommitOut": {
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id"
+          },
+          "committed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Committed At"
+          },
+          "total_rows": {
+            "type": "integer",
+            "title": "Total Rows"
+          },
+          "ok_count": {
+            "type": "integer",
+            "title": "Ok Count",
+            "description": "Rows that reached the database."
+          },
+          "rejected_count": {
+            "type": "integer",
+            "title": "Rejected Count"
+          },
+          "totals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Totals"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/RowOutcomeOut"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "batch_id",
+          "total_rows",
+          "ok_count",
+          "rejected_count",
+          "totals",
+          "rows"
+        ],
+        "title": "ImportCommitOut",
+        "description": "What was actually written, row by row — not assumed to match the preview.\n\nA row that previewed `ok` can commit as `changed_since_preview` because somebody else\nedited the same child in between, so this is a fresh account rather than an echo."
+      },
+      "ImportKind": {
+        "type": "string",
+        "enum": [
+          "roster",
+          "grades",
+          "guardians"
+        ],
+        "title": "ImportKind",
+        "description": "What a file is claiming to be. Chosen by the caller, never sniffed.\n\nA `StrEnum` because these values are persisted, put in URLs and shown in JSON; an\n`IntEnum` would store `0` and `1` and make the database unreadable to the person\ndebugging an import at 7am, while a bare `str` would let `\"rosters\"` reach the\nparser registry and fail as \"unknown kind\" three layers from the typo.\n\nKind is *not* inferred from the file's columns. A grades sheet whose header row was\nedited can look like a roster, and guessing wrong means writing enrolments from a\nfile of marks."
+      },
+      "ImportPreviewOut": {
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id",
+            "description": "Name this in the commit call; do not re-upload."
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "After this the batch cannot be committed and the file must be uploaded again — a preview taken against last week's class list must not be applied to today's."
+          },
+          "total_rows": {
+            "type": "integer",
+            "title": "Total Rows"
+          },
+          "ok_count": {
+            "type": "integer",
+            "title": "Ok Count"
+          },
+          "rejected_count": {
+            "type": "integer",
+            "title": "Rejected Count"
+          },
+          "totals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Totals",
+            "description": "Counts per row code, omitting codes that did not occur. These are the filter chips above the table."
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/RowOutcomeOut"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "batch_id",
+          "total_rows",
+          "ok_count",
+          "rejected_count",
+          "totals",
+          "rows"
+        ],
+        "title": "ImportPreviewOut",
+        "description": "What the registrar reads *before* anything is written."
+      },
+      "ImportReportOut": {
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ImportKind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ImportStatus",
+            "description": "Derived against the clock on read, so a preview past its TTL reports `expired` rather than offering a commit that will fail."
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor",
+            "description": "The prefix of the key that uploaded the file."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "committed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Committed At"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts",
+            "description": "Rows per outcome, with every outcome present so a zero is explicit."
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Rows matching the filter, not the size of this page."
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "The window actually applied. A larger request is clamped rather than refused, so this may be smaller than the one asked for."
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ImportRowOut"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "batch_id",
+          "kind",
+          "status",
+          "actor",
+          "created_at",
+          "expires_at",
+          "counts",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "rows"
+        ],
+        "title": "ImportReportOut",
+        "description": "A batch and one page of its rows."
+      },
+      "ImportRowOut": {
+        "properties": {
+          "line": {
+            "type": "integer",
+            "title": "Line"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RowOutcome",
+            "description": "Whether anything was, or would be, written."
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Why. Finer-grained than `outcome` and stable on the wire."
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "line",
+          "outcome",
+          "code"
+        ],
+        "title": "ImportRowOut",
+        "description": "One stored row of a batch: its fate, its diagnosis, and the cells it came from."
+      },
+      "ImportStatus": {
+        "type": "string",
+        "enum": [
+          "previewed",
+          "committed",
+          "expired"
+        ],
+        "title": "ImportStatus",
+        "description": "Where a batch is in the two-step flow. Only `PREVIEWED` may be committed."
+      },
+      "LinkOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone"
+          },
+          "can_view_records": {
+            "type": "boolean",
+            "title": "Can View Records"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "phone",
+          "can_view_records"
+        ],
+        "title": "LinkOut"
+      },
+      "PlacementEndIn": {
+        "properties": {
+          "ends_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Ends On",
+            "description": "Her last day in the class she is currently in — not the day after."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ends_on"
+        ],
+        "title": "PlacementEndIn"
+      },
+      "PlacementHistoryOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "placements": {
+            "items": {
+              "$ref": "#/components/schemas/PlacementOut"
+            },
+            "type": "array",
+            "title": "Placements"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "count",
+          "placements"
+        ],
+        "title": "PlacementHistoryOut"
+      },
+      "PlacementIn": {
+        "properties": {
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code",
+            "examples": [
+              "2025-2026"
+            ]
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code",
+            "examples": [
+              "3A"
+            ]
+          },
+          "starts_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Starts On",
+            "description": "Her first day in this class."
+          },
+          "ends_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends On",
+            "description": "Her **last day** in the class, not the day after. `null` opens the placement — she is in this class now and no end has been decided."
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_year_code",
+          "class_code",
+          "starts_on"
+        ],
+        "title": "PlacementIn",
+        "description": "Put a child in a class from a date."
+      },
+      "PlacementOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code"
+          },
+          "starts_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Starts On"
+          },
+          "ends_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends On"
+          },
+          "is_open": {
+            "type": "boolean",
+            "title": "Is Open"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "academic_year_code",
+          "class_code",
+          "starts_on",
+          "ends_on",
+          "is_open"
+        ],
+        "title": "PlacementOut"
+      },
+      "RegisterLineOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "default": ""
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En",
+            "default": ""
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State",
+            "description": "present / absent / late / excused, or **null** when nobody marked her. Null is not absent: rendering it as either states a fact the school did not."
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          },
+          "is_marked": {
+            "type": "boolean",
+            "title": "Is Marked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "is_marked"
+        ],
+        "title": "RegisterLineOut",
+        "description": "One child on a day's register."
+      },
+      "RelationshipType": {
+        "type": "string",
+        "enum": [
+          "mother",
+          "father",
+          "guardian",
+          "sibling",
+          "grandparent",
+          "other"
+        ],
+        "title": "RelationshipType",
+        "description": "Who a guardian is to a child. A closed vocabulary, with the words kept beside it.\n\nClosed because this is the half that gets *counted*: \"how many mothers are on file\",\n\"show me every child whose only contact is a sibling\". Free text cannot be counted —\n\"mother\", \"Mother\" and \"الأم\" tally as three — and it cannot be translated, since a\nstring typed into a spreadsheet appears in no translation table the UI owns.\n\nThe cost of a closed list is that it cannot describe every family, which is what\n`StudentGuardian.relationship_label` is for: \"big brother\" buckets to `SIBLING` here\nand survives verbatim there. Degrading an unrecognised word to `OTHER` is therefore\nlossless, which is why it is safe — unlike guessing at an unfamiliar *grade*, where\nthe guess would replace a fact nobody could recover."
+      },
+      "ResolveIn": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "description": "The number in international form, e.g. +201001234567, or in the school's national form. Normalised here, so a caller holding whatever a parent typed does not have to know the rules.",
+            "examples": [
+              "+201001234567",
+              "01001234567"
+            ]
+          },
+          "default_country_code": {
+            "type": "string",
+            "title": "Default Country Code",
+            "description": "Applied only to a number given in national form. A number carrying its own + prefix ignores this entirely.",
+            "default": "+20"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone"
+        ],
+        "title": "ResolveIn",
+        "description": "A number to look up. In a body, never a path — see the route's own docstring."
+      },
+      "RosterEntryOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "description": "Empty when the student row could not be loaded. The placement is still listed: a register that is quietly one child short is worse than one showing a number without a name."
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En"
+          },
+          "starts_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Starts On"
+          },
+          "ends_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends On",
+            "description": "Her **last day** in the class, not the day after. `null` means the placement is open — she is in this class now and no end has been decided."
+          },
+          "is_open": {
+            "type": "boolean",
+            "title": "Is Open"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "full_name_ar",
+          "full_name_en",
+          "starts_on",
+          "is_open"
+        ],
+        "title": "RosterEntryOut",
+        "description": "One child on the register, with the placement window she is listed under."
+      },
+      "RowCode": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "duplicate_in_file",
+          "duplicate_existing",
+          "unknown_class",
+          "unknown_subject",
+          "unknown_term",
+          "unknown_student",
+          "missing_student_number",
+          "missing_phone",
+          "invalid_name",
+          "invalid_grade",
+          "grade_out_of_range",
+          "already_enrolled_elsewhere",
+          "changed_since_preview",
+          "batch_expired",
+          "batch_already_committed"
+        ],
+        "title": "RowCode",
+        "description": "Every outcome a single import row can have. Closed on purpose — see the module docstring.\n\n`StrEnum` so the member *is* its wire value: `RowCode.OK == \"ok\"` holds, JSON\nencoding needs no custom hook, and a stored batch read back from the database\nreconstructs by value. The cost is that a typo in a comparison against a bare string\nis silently false, which is why services should compare against members."
+      },
+      "RowOutcome": {
+        "type": "string",
+        "enum": [
+          "created",
+          "updated",
+          "unchanged",
+          "skipped",
+          "rejected"
+        ],
+        "title": "RowOutcome",
+        "description": "What happened, or would happen, to one row.\n\nThe distinction between `CREATED`, `UPDATED` and `UNCHANGED` is what makes a preview\nworth reading: a registrar re-uploading a corrected file needs to see that 200 rows\nare unchanged and 3 are updated. Collapsing those into \"ok\" hides the three rows\nthat are the entire reason for the upload.\n\n`SKIPPED` is deliberately separate from `REJECTED`. A skipped row is one the file\nasked to be ignored — a blank line, a totals row — and it is not a defect the\nregistrar has to fix. Counting it as a rejection makes a clean file look broken."
+      },
+      "RowOutcomeOut": {
+        "properties": {
+          "line": {
+            "type": "integer",
+            "title": "Line",
+            "description": "The number in Excel's own gutter, 1-based and counting the header, so 'row 12 is wrong' points at row 12 on the registrar's screen."
+          },
+          "code": {
+            "$ref": "#/components/schemas/RowCode",
+            "description": "A closed vocabulary, safe to filter and count on. `ok` is the only non-failure."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Prose for a human. Nothing may branch on its wording — it is translated.",
+            "default": ""
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field",
+            "description": "Which column failed, when a single one did."
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload",
+            "description": "The row's identifying cells, so a table can be rendered without holding the original file."
+          }
+        },
+        "type": "object",
+        "required": [
+          "line",
+          "code"
+        ],
+        "title": "RowOutcomeOut",
+        "description": "What happened, or would happen, to one line of the uploaded file."
+      },
+      "SchoolIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Immutable identity. Every year and rung in the school points at it.",
+            "examples": [
+              "MAIN"
+            ]
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "description": "English label.",
+            "default": ""
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "description": "Arabic label.",
+            "default": ""
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "description": "Set false to close a branch. Nothing is deleted: the registers taken and marks stated in the years it ran are still true, and the database refuses a delete while any year or rung points at it.",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "SchoolIn",
+        "description": "Create or relabel one school."
+      },
+      "SchoolOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar"
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name_ar",
+          "name_en",
+          "is_active"
+        ],
+        "title": "SchoolOut"
+      },
+      "Scope": {
+        "type": "string",
+        "enum": [
+          "registrar",
+          "reader"
+        ],
+        "title": "Scope",
+        "description": "What a key may do. Two levels, checked by exact equality.\n\n`StrEnum` so the member serialises to its own literal (`\"registrar\"`, `\"reader\"`) in\nJSON and in a database column without a translation table that can drift from the\nenum it mirrors."
+      },
+      "StructureYearsOut": {
+        "properties": {
+          "academic_years": {
+            "items": {
+              "$ref": "#/components/schemas/AcademicYearOut"
+            },
+            "type": "array",
+            "title": "Academic Years"
+          },
+          "year_levels": {
+            "items": {
+              "$ref": "#/components/schemas/YearLevelOut"
+            },
+            "type": "array",
+            "title": "Year Levels"
+          },
+          "current_academic_year_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Academic Year Code",
+            "description": "`null` until a registrar has marked one current; never guessed from today's date."
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_years",
+          "year_levels"
+        ],
+        "title": "StructureYearsOut",
+        "description": "Both ladders at once — see the module note on why this is one route."
+      },
+      "StudentAttendanceOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "from_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Date"
+          },
+          "to_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Date",
+            "description": "Both bounds inclusive, and echoed: a count of absences means nothing without the window it was counted over."
+          },
+          "counts": {
+            "$ref": "#/components/schemas/TallyOut"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/StudentDayOut"
+            },
+            "type": "array",
+            "title": "Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "from_date",
+          "to_date",
+          "counts",
+          "days"
+        ],
+        "title": "StudentAttendanceOut"
+      },
+      "StudentDayOut": {
+        "properties": {
+          "on_date": {
+            "type": "string",
+            "format": "date",
+            "title": "On Date"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code",
+            "description": "The class she was in that day — stored on the mark, not resolved now, so a transfer in March leaves October's register saying 3A."
+          }
+        },
+        "type": "object",
+        "required": [
+          "on_date",
+          "state",
+          "class_code"
+        ],
+        "title": "StudentDayOut"
+      },
+      "StudentGuardiansOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "guardians": {
+            "items": {
+              "$ref": "#/components/schemas/GuardianOut"
+            },
+            "type": "array",
+            "title": "Guardians"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "count",
+          "guardians"
+        ],
+        "title": "StudentGuardiansOut"
+      },
+      "StudentIn": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number",
+            "description": "The school's own identifier, and the key every mark and guardian link points at. Immutable — correcting a mistyped number is a new student plus a roster fix, not an edit, because the old number may already carry marks.",
+            "examples": [
+              "10432"
+            ]
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "description": "Full name in Arabic.",
+            "default": ""
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En",
+            "description": "Full name in English.",
+            "default": ""
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "description": "False once the child has left the school. She keeps her marks, her placements and her guardians; she stops appearing in the pickers.",
+            "default": true
+          },
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth",
+            "description": "Stated, never derived — and there is no age field anywhere in this API, because an age is right for one year and silently wrong afterwards. A date in the future is refused."
+          },
+          "contact_phone": {
+            "type": "string",
+            "title": "Contact Phone",
+            "description": "The child's own number, which is **not** her guardian's. Guardian numbers live under `/students/{student_number}/guardians`, where the permission to be told about her marks lives with them.",
+            "default": ""
+          },
+          "contact_email": {
+            "type": "string",
+            "title": "Contact Email",
+            "default": ""
+          },
+          "address": {
+            "type": "string",
+            "title": "Address",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number"
+        ],
+        "title": "StudentIn",
+        "description": "A child's own record: her number and how her name is written."
+      },
+      "StudentOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar"
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
+          "age": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age",
+            "description": "Her age in whole years **as of the day this response was built**, computed from `date_of_birth` and never stored. `null` when no birth date is on file — which is not the same as nought, exactly as a blank mark is not a zero."
+          },
+          "contact_phone": {
+            "type": "string",
+            "title": "Contact Phone",
+            "default": ""
+          },
+          "contact_email": {
+            "type": "string",
+            "title": "Contact Email",
+            "default": ""
+          },
+          "address": {
+            "type": "string",
+            "title": "Address",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "full_name_ar",
+          "full_name_en",
+          "is_active"
+        ],
+        "title": "StudentOut"
+      },
+      "StudentPatch": {
+        "properties": {
+          "full_name_ar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name Ar"
+          },
+          "full_name_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name En"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "contact_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Email"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          }
+        },
+        "type": "object",
+        "title": "StudentPatch",
+        "description": "A correction. Every field optional; omitted means leave it alone.\n\n`student_number` is absent by design. It is in the path, and it is identity."
+      },
+      "StudentSearchOut": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "description": "Echoed, so a stale response is recognisable as stale."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/StudentOut"
+            },
+            "type": "array",
+            "title": "Students"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "count",
+          "students"
+        ],
+        "title": "StudentSearchOut"
+      },
+      "StudentTermGradesOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar"
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En"
+          },
+          "term_code": {
+            "type": "string",
+            "title": "Term Code"
+          },
+          "term_name_ar": {
+            "type": "string",
+            "title": "Term Name Ar"
+          },
+          "term_name_en": {
+            "type": "string",
+            "title": "Term Name En"
+          },
+          "term_is_closed": {
+            "type": "boolean",
+            "title": "Term Is Closed"
+          },
+          "class_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Code",
+            "description": "The class she was in *for this term*. `null` means no placement covered it — she had left, or had not yet joined — and is deliberately distinguishable from her current class."
+          },
+          "class_name_ar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name Ar"
+          },
+          "class_name_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name En"
+          },
+          "subject_count": {
+            "type": "integer",
+            "title": "Subject Count",
+            "description": "Subjects with a row this term, graded or not."
+          },
+          "graded_count": {
+            "type": "integer",
+            "title": "Graded Count",
+            "description": "Subjects carrying a stated figure. The remainder are awaiting a mark, not scoring zero. This is a count, not a score."
+          },
+          "grades": {
+            "items": {
+              "$ref": "#/components/schemas/GradeLineOut"
+            },
+            "type": "array",
+            "title": "Grades"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "full_name_ar",
+          "full_name_en",
+          "term_code",
+          "term_name_ar",
+          "term_name_en",
+          "term_is_closed",
+          "subject_count",
+          "graded_count",
+          "grades"
+        ],
+        "title": "StudentTermGradesOut",
+        "description": "One child, one term, the marks as stated. No aggregate of any kind."
+      },
+      "SubjectIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "examples": [
+              "MATH"
+            ]
+          },
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code",
+            "description": "The year that teaches this subject. Part of its identity, not a tag.",
+            "examples": [
+              "2025-2026"
+            ]
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "default": ""
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "default": ""
+          },
+          "display_order": {
+            "type": "integer",
+            "title": "Display Order",
+            "default": 0
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "description": "Retire a subject with `false` rather than deleting it; marks already stated against it must keep resolving, or that year's report card loses a heading.",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "academic_year_code"
+        ],
+        "title": "SubjectIn",
+        "description": "One subject as one academic year teaches it.\n\n`academic_year_code` is required and is half of the subject's identity. The same code\nin two years is two subjects, so posting `MATH` for 2026-2027 creates a row rather than\ncolliding with the `MATH` of 2025-2026 — and a mark stated against one of them is not a\nmark on the other."
+      },
+      "SubjectOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar"
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En"
+          },
+          "display_order": {
+            "type": "integer",
+            "title": "Display Order"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "academic_year_code",
+          "name_ar",
+          "name_en",
+          "display_order",
+          "is_active"
+        ],
+        "title": "SubjectOut"
+      },
+      "TakeRegisterIn": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/AttendanceEntryIn"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "TakeRegisterIn",
+        "description": "A day's register for one class.\n\nChildren left out of `entries` are **left alone**, not marked. Taking the register for\nthe twelve children present so far must not silently mark the other twenty-eight absent,\nand a second save later in the morning is a correction of the names it carries and a\nno-op for the rest."
+      },
+      "TallyOut": {
+        "properties": {
+          "present": {
+            "type": "integer",
+            "title": "Present"
+          },
+          "absent": {
+            "type": "integer",
+            "title": "Absent"
+          },
+          "late": {
+            "type": "integer",
+            "title": "Late"
+          },
+          "excused": {
+            "type": "integer",
+            "title": "Excused"
+          },
+          "recorded": {
+            "type": "integer",
+            "title": "Recorded",
+            "description": "Days a mark exists for — the only honest denominator this service has. It is not the number of school days: no calendar is held here, so an unmarked Tuesday cannot be told from a holiday."
+          },
+          "in_the_room": {
+            "type": "integer",
+            "title": "In The Room",
+            "description": "Present plus late: days she was actually there."
+          },
+          "away": {
+            "type": "integer",
+            "title": "Away",
+            "description": "Absent plus excused: days she was not."
+          }
+        },
+        "type": "object",
+        "required": [
+          "present",
+          "absent",
+          "late",
+          "excused",
+          "recorded",
+          "in_the_room",
+          "away"
+        ],
+        "title": "TallyOut",
+        "description": "Counts, and the number of days they were counted over. Never a rate."
+      },
+      "TermIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "examples": [
+              "2026-T1"
+            ]
+          },
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code",
+            "examples": [
+              "2025-2026"
+            ]
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "default": ""
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "default": ""
+          },
+          "starts_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Starts On"
+          },
+          "ends_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Ends On"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence",
+            "description": "Chronological order without parsing the code, which schools format freely.",
+            "default": 1
+          },
+          "is_closed": {
+            "type": "boolean",
+            "title": "Is Closed",
+            "description": "Stated by a human, never derived from `ends_on`: a school enters late marks for a week after a term ends.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "academic_year_code",
+          "starts_on",
+          "ends_on"
+        ],
+        "title": "TermIn"
+      },
+      "TermOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar"
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En"
+          },
+          "starts_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Starts On"
+          },
+          "ends_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Ends On"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "is_closed": {
+            "type": "boolean",
+            "title": "Is Closed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "academic_year_code",
+          "name_ar",
+          "name_en",
+          "starts_on",
+          "ends_on",
+          "sequence",
+          "is_closed"
+        ],
+        "title": "TermOut"
+      },
+      "TransferIn": {
+        "properties": {
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code",
+            "examples": [
+              "2025-2026"
+            ]
+          },
+          "to_class_code": {
+            "type": "string",
+            "title": "To Class Code",
+            "examples": [
+              "3B"
+            ]
+          },
+          "on_date": {
+            "type": "string",
+            "format": "date",
+            "title": "On Date",
+            "description": "Her first day in the new class. The old placement is closed the day before, so no single day belongs to two classes."
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_year_code",
+          "to_class_code",
+          "on_date"
+        ],
+        "title": "TransferIn",
+        "description": "Move a child to another class in the same year, from a date."
+      },
+      "TransferOut": {
+        "properties": {
+          "closed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlacementOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The placement that ended, or `null` when the child had none open — which is a first placement rather than a transfer, and is not an error."
+          },
+          "opened": {
+            "$ref": "#/components/schemas/PlacementOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "opened"
+        ],
+        "title": "TransferOut"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "YearLevelIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Unique within the school, not globally: `Y1` exists at every branch.",
+            "examples": [
+              "Y1"
+            ]
+          },
+          "school_code": {
+            "type": "string",
+            "title": "School Code",
+            "examples": [
+              "MAIN"
+            ]
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "description": "English label.",
+            "default": ""
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "description": "Arabic label.",
+            "default": ""
+          },
+          "display_order": {
+            "type": "integer",
+            "title": "Display Order",
+            "description": "Order within the stage. Stated, not derived from the code: `Y10` sorts before `Y9` as text.",
+            "default": 0
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage",
+            "description": "garden / primary / preparatory / secondary, or `unspecified`. Grouping only — no rule anywhere depends on it. An unrecognised value is refused rather than silently treated as unspecified.",
+            "default": "unspecified",
+            "examples": [
+              "primary"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "school_code"
+        ],
+        "title": "YearLevelIn",
+        "description": "Add or relabel one rung of one school's ladder."
+      },
+      "YearLevelOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "school_code": {
+            "type": "string",
+            "title": "School Code",
+            "description": "Rung codes are unique *within* a school, because 'Year 1' exists at every branch. This is the half of the identity the code does not carry."
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage",
+            "description": "garden / primary / preparatory / secondary, or `unspecified`. A label for grouping a long ladder on screen; it carries no rules."
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar"
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En"
+          },
+          "display_order": {
+            "type": "integer",
+            "title": "Display Order",
+            "description": "Stated order, not code order: `Y10` sorts before `Y9` as text, so a school with ten rungs prints its ladder scrambled without this."
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "school_code",
+          "stage",
+          "name_ar",
+          "name_en",
+          "display_order"
+        ],
+        "title": "YearLevelOut"
+      }
+    }
+  }
+}

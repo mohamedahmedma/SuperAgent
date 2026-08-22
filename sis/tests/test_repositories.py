@@ -26,7 +26,7 @@ from sqlalchemy import text
 from sis.config import reset_settings_cache
 from sis.domain.grades import SubjectGrade
 from sis.domain.people import ClassEnrolment, Student
-from sis.domain.structure import AcademicYear, ClassSection, Subject, Term, YearLevel
+from sis.domain.structure import AcademicYear, ClassSection, School, Subject, Term, YearLevel
 from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,
@@ -89,10 +89,12 @@ def _count(table: str) -> int:
 def _seed_structure() -> None:
     """A year, a rung, two sections and one child — the cast every test below needs."""
     with SqlAlchemyUnitOfWork() as uow:
+        uow.schools.upsert_many([School(code="MAIN", name_en="Main School", name_ar="المدرسة")])
         uow.academic_years.upsert_many(
             [
                 AcademicYear(
                     code=YEAR,
+                    school_code="MAIN",
                     name_en="2025-2026",
                     name_ar="٢٠٢٥-٢٠٢٦",
                     starts_on=YEAR_STARTS,
@@ -102,7 +104,7 @@ def _seed_structure() -> None:
             ]
         )
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", name_en="Year 3", name_ar="السنة الثالثة", display_order=3)]
+            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة الثالثة", display_order=3)]
         )
         uow.class_sections.upsert_many(
             [
@@ -140,8 +142,18 @@ def _seed_grade_references() -> int:
         )
         uow.subjects.upsert_many(
             [
-                Subject(code="MATH", name_en="Mathematics", name_ar="الرياضيات"),
-                Subject(code="SCI", name_en="Science", name_ar="العلوم"),
+                Subject(
+                    code="MATH",
+                    academic_year_code=YEAR,
+                    name_en="Mathematics",
+                    name_ar="الرياضيات",
+                ),
+                Subject(
+                    code="SCI",
+                    academic_year_code=YEAR,
+                    name_en="Science",
+                    name_ar="العلوم",
+                ),
             ]
         )
         section_id = uow.class_sections.ids_for([(str(YEAR), "3A")])[(str(YEAR), "3A")]

@@ -68,6 +68,18 @@ class Student:
     full_name_en: str
     is_active: bool = True
 
+    #: Stated, never derived. Age is a function of a date and today, and storing the age
+    #: instead would be a number that is wrong from the day after it is written.
+    date_of_birth: date | None = None
+
+    #: The child's own contact details, which are **not** her guardian's. A school holds
+    #: both, they differ, and merging them is how a message meant for a parent goes to a
+    #: nine-year-old's tablet. Guardian numbers live in `sis.domain.guardians`, where the
+    #: permission to hear about her marks lives with them.
+    contact_phone: str = ""
+    contact_email: str = ""
+    address: str = ""
+
     def __post_init__(self) -> None:
         _coerce(self, "student_number", StudentNumber)
         name_ar = _clean_name(self.full_name_ar, field="full_name_ar")
@@ -82,6 +94,42 @@ class Student:
             )
         object.__setattr__(self, "full_name_ar", name_ar)
         object.__setattr__(self, "full_name_en", name_en)
+
+        for field in ("contact_phone", "contact_email", "address"):
+            object.__setattr__(self, field, str(getattr(self, field) or "").strip())
+
+        # A birth date in the future is a typo — a year mistyped, or a form filled in with
+        # the current year by default — and it is worth refusing at the door because every
+        # age computed from it afterwards is negative and nothing downstream checks.
+        if self.date_of_birth is not None and self.date_of_birth > date.today():
+            raise ValidationError(
+                f"date of birth {self.date_of_birth.isoformat()} is in the future",
+                field="date_of_birth",
+            )
+
+    def age_on(self, day: date) -> int | None:
+        """Her age in whole years on `day`, or `None` when no birth date is on file.
+
+        Takes the day rather than reading the clock, like everything else in this module:
+        "how old is she" has a different answer on the day before her birthday and the day
+        after, and a domain that reads `date.today()` cannot be tested for either.
+
+        `None` rather than 0 for a missing birth date, and the distinction is the same one
+        this service makes about a blank mark: nought years old is a statement about a
+        newborn, and "nobody has recorded her birthday" is not a statement about her age
+        at all.
+        """
+        if self.date_of_birth is None:
+            return None
+        birthday = self.date_of_birth
+        years = day.year - birthday.year
+        # Subtract a year when the birthday has not come round yet. The tuple comparison
+        # handles 29 February without a special case: in a non-leap year the birthday is
+        # read as falling on the 29th, which has not occurred, so she turns a year older on
+        # the 1st of March.
+        if (day.month, day.day) < (birthday.month, birthday.day):
+            years -= 1
+        return years
 
 
 @dataclass(frozen=True, slots=True)

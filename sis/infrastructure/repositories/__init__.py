@@ -35,9 +35,13 @@ from sis.infrastructure.repositories.people_repository import (
     SqlAlchemyEnrolmentRepository,
     SqlAlchemyStudentRepository,
 )
+from sis.infrastructure.repositories.attendance_repository import (
+    SqlAlchemyAttendanceRepository,
+)
 from sis.infrastructure.repositories.structure_repository import (
     SqlAlchemyAcademicYearRepository,
     SqlAlchemyClassSectionRepository,
+    SqlAlchemySchoolRepository,
     SqlAlchemySubjectRepository,
     SqlAlchemyTermRepository,
     SqlAlchemyYearLevelRepository,
@@ -46,8 +50,10 @@ from sis.infrastructure.repositories.structure_repository import (
 
 __all__ = [
     "SqlAlchemyAcademicYearRepository",
+    "SqlAlchemyAttendanceRepository",
     "SqlAlchemyApiKeyRepository",
     "SqlAlchemyClassSectionRepository",
+    "SqlAlchemySchoolRepository",
     "SqlAlchemyEnrolmentRepository",
     "SqlAlchemyGradeRepository",
     "SqlAlchemyGuardianRepository",

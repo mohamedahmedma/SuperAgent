@@ -30,7 +30,7 @@ from sis.api.deps import (
 from sis.api.routers import domain_errors, error_responses
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.application.services import QueryService
-from sis.application.services.queries import GuardianLink
+from sis.application.services.queries import GuardianIdentity, GuardianLink
 from sis.domain.errors import UnknownReference
 from sis.domain.guardians import RelationshipType
 from sis.domain.value_objects import Phone, StudentNumber
@@ -150,6 +150,77 @@ class LinkOut(BaseModel):
     can_view_records: bool
 
 
+class ResolveIn(BaseModel):
+    """A number to look up. In a body, never a path — see the route's own docstring."""
+
+    phone: str = Field(
+        description="The number in international form, e.g. +201001234567, or in the "
+        "school's national form. Normalised here, so a caller holding whatever a parent "
+        "typed does not have to know the rules.",
+        examples=["+201001234567", "01001234567"],
+    )
+    default_country_code: str = Field(
+        default="+20",
+        description="Applied only to a number given in national form. A number carrying "
+        "its own + prefix ignores this entirely.",
+    )
+
+
+class GuardianRefOut(BaseModel):
+    """A guardian named by her stable handle. Deliberately carries no phone number back."""
+
+    public_id: str = Field(
+        description="Opaque and permanent. This is what another service stores to refer "
+        "to her later, so that it never has to keep her phone number."
+    )
+    full_name_ar: str = ""
+    full_name_en: str = ""
+    preferred_language: str = "ar"
+
+    @classmethod
+    def of(cls, found: GuardianIdentity) -> "GuardianRefOut":
+        return cls(
+            public_id=found.public_id,
+            full_name_ar=found.full_name_ar,
+            full_name_en=found.full_name_en,
+            preferred_language=found.preferred_language,
+        )
+
+
+@router.post(
+    "/guardians/resolve",
+    response_model=GuardianRefOut,
+    summary="Which guardian does this number reach",
+    description="For a service that has just proved somebody controls a number and needs "
+    "to know whether the school has that number on file. Returns her stable `public_id`, "
+    "which is what the caller should store — never the number itself. "
+    "A number that reaches nobody is a 404. That is an ordinary answer here, not an "
+    "error: most numbers in the world are not this school's parents.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def resolve_guardian(
+    body: Annotated[ResolveIn, Body()], queries: Queries, caller: Reader
+) -> GuardianRefOut:
+    """POST, and the method is the point.
+
+    The number goes in a body rather than a path so it stays out of access logs, browser
+    history and referrer headers — the same reasoning that put `public_id` on the guardians
+    table in the first place. A GET with the number in the URL would undo that on the very
+    request whose purpose is to stop holding numbers.
+    """
+    with domain_errors():
+        phone = Phone.parse(
+            body.phone, default_country_code=body.default_country_code
+        )
+        found = queries.resolve_guardian(phone)
+    if found is None:
+        # The same shape as every other "nothing on file" in this service. It says nothing
+        # about *why* — a caller learns that this number is not a parent here, and not
+        # whether some other number would have been.
+        raise UnknownReference("no guardian is on file for that number", field="phone")
+    return GuardianRefOut.of(found)
+
+
 @router.get(
     "/students/{student_number}/guardians",
     response_model=StudentGuardiansOut,
@@ -196,6 +267,37 @@ def read_guardian_students(
     first = entries[0].guardian if entries else None
     return GuardianChildrenOut(
         phone=str(parsed),
+        full_name_ar=first.full_name_ar if first else "",
+        full_name_en=first.full_name_en if first else "",
+        count=len(entries),
+        students=[GuardianChildOut.of(entry) for entry in entries],
+    )
+
+
+@router.get(
+    "/guardians/by-id/{public_id}/students",
+    response_model=GuardianChildrenOut,
+    summary="Which children this guardian handle may ask about",
+    description="The same question as the by-phone route, asked with the opaque handle a "
+    "token carries. This is the one a parent-facing service should use: it never has to "
+    "hold, log or transmit a parent's phone number to find out which children are hers.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def read_guardian_students_by_id(
+    public_id: str,
+    queries: Queries,
+    caller: Reader,
+    include_restricted: bool = False,
+) -> GuardianChildrenOut:
+    with domain_errors():
+        entries = queries.guardian_students_by_id(
+            public_id, viewable_only=not include_restricted
+        )
+    first = entries[0].guardian if entries else None
+    return GuardianChildrenOut(
+        # The handle is echoed rather than the number. A caller that only ever knew the
+        # handle must not learn a phone number by asking this question.
+        phone="",
         full_name_ar=first.full_name_ar if first else "",
         full_name_en=first.full_name_en if first else "",
         count=len(entries),

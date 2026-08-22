@@ -29,6 +29,7 @@ from typing import Protocol
 from sis.application.ports.repositories import (
     AcademicYearRepository,
     ApiKeyRepository,
+    AttendanceRepository,
     EnrolmentRepository,
     ClassSectionRepository,
     GuardianRepository,
@@ -37,6 +38,7 @@ from sis.application.ports.repositories import (
     StudentRepository,
     GradeRepository,
     SubjectRepository,
+    SchoolRepository,
     TermRepository,
     YearLevelRepository,
 )
@@ -44,6 +46,11 @@ from sis.application.ports.repositories import (
 
 class UnitOfWork(Protocol):
     """One transaction, entered as a context manager, exposing every repository."""
+
+    # The outermost scope. Everything below belongs to one school, reached through an
+    # academic year or a rung; a student is the one thing that does not, because a child is
+    # a person rather than a school's property.
+    schools: SchoolRepository
 
     # Academic structure. Separate repositories rather than one "structure" repository
     # because generation walks years -> levels -> sections and each step queries for what
@@ -66,6 +73,11 @@ class UnitOfWork(Protocol):
     # asked most often -- "which children may this number see" -- starts from the link.
     guardians: GuardianRepository
     student_guardians: StudentGuardianRepository
+
+    # The daily register. A first-class repository rather than a collection on a student
+    # for the same reason `enrolments` is: the question asked every morning — "who is in this
+    # room today" — starts from the class and the date, not from the child.
+    attendance: AttendanceRepository
 
     grades: GradeRepository
 

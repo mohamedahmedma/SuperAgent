@@ -1,0 +1,44 @@
+<!doctype html>
+<!--
+  The Vite entry. Everything below the mount point is built by the bundler and served from
+  `sis/web/` by the Python service at /ui.
+
+  What changed from the previous console, and why:
+
+    * Bootstrap now comes from npm and is bundled, so there is still nothing fetched from a
+      CDN at runtime — schools run this offline or behind a filter, and that constraint is
+      unchanged. It is simply enforced by the build rather than by a vendored file.
+    * Filenames are content-hashed, which is what actually fixes stale assets: an immutable
+      URL cannot go stale, so only this file needs revalidating.
+    * The scripts are ES modules with an import graph, so there is no hand-maintained load
+      order to get wrong. That list was previously a comment in this file asking the reader
+      not to reorder it.
+-->
+<html lang="en" dir="ltr" data-bs-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>SIS Registrar</title>
+  </head>
+  <body>
+    <!--
+      Holds the pre-JavaScript state. React replaces its contents on mount, so this is what a
+      registrar sees while the bundle parses — and what they keep seeing if scripting is off,
+      which is the honest answer for a console that is entirely JavaScript talking to an API.
+    -->
+    <div id="app">
+      <div style="padding: 2rem; max-width: 40rem; margin: 0 auto; font-family: sans-serif">
+        <p style="font-weight: 600">Student Information Service — registrar console</p>
+        <noscript>
+          <p>
+            This console is JavaScript talking to the service's own API. With scripting turned
+            off it can show nothing at all. The HTTP API itself is unaffected and is
+            documented at <a href="/docs">/docs</a>.
+          </p>
+        </noscript>
+      </div>
+    </div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

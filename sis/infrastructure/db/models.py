@@ -53,6 +53,10 @@ _SUBJECT_CODE_LEN = 32
 _TERM_CODE_LEN = 32
 _STUDENT_NUMBER_LEN = 64
 _NAME_LEN = 160
+_SCHOOL_CODE_LEN = 16  # `SchoolCode.MAX_LENGTH`.
+_STAGE_LEN = 16  # Longest `Stage` member is "preparatory".
+_ATTENDANCE_STATE_LEN = 16  # Longest `AttendanceState` member is "present".
+_ADDRESS_LEN = 500
 _PHONE_LEN = 16  # `Phone.MAX_LENGTH`: '+' plus E.164's fifteen digits.
 _RELATIONSHIP_LEN = 16  # Longest `RelationshipType` member is "grandparent".
 _PUBLIC_ID_LEN = 32
@@ -63,6 +67,34 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class School(Base):
+    """One school. Every year, rung, class and mark below it belongs to exactly one.
+
+    The service held a single school implicitly for its whole life: everything in the
+    database was that school's and nothing had to say so. This table makes the boundary
+    explicit, and the failure it exists to prevent is the quiet one — two branches each
+    running a `3A`, and a register showing a child at a school she has never attended.
+
+    **Students are deliberately not scoped here.** A child is a person rather than a
+    school's property, so `students.student_number` stays globally unique and which school
+    she attends follows from her placement: her class belongs to a year, and that year
+    belongs to a school. That leaves the join key `records/` reads, the guardian tables and
+    every stated mark untouched by this change, and it makes a child moving between branches
+    a transfer rather than a second record of the same girl.
+    """
+
+    __tablename__ = "schools"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(_SCHOOL_CODE_LEN), unique=True, nullable=False)
+    name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+    name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+    # Closes a branch without deleting it: the registers and marks of the years it ran are
+    # still true, and every row referencing it has to keep resolving.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
 class AcademicYear(Base):
     """One school year — the scope everything else is qualified by."""
 
@@ -70,7 +102,18 @@ class AcademicYear(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # Immutable identity (decision 7); `name_*` are the renameable labels.
+    #
+    # Still globally unique, and that is a decision rather than an oversight. `2025-2026`
+    # names exactly one year at exactly one school, so every route taking `?academic_year=`,
+    # every import that names one, and `records/` reading through the facade keep working
+    # unchanged and unambiguously. What it costs: two branches cannot both use the literal
+    # code `2025-2026` and must distinguish them (`NC-2025-2026`). Making it unique per
+    # school instead would force a school onto every one of those callers — a change to the
+    # external contract, for no gain in safety.
     code: Mapped[str] = mapped_column(String(_YEAR_CODE_LEN), unique=True, nullable=False)
+    school_id: Mapped[int] = mapped_column(
+        ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
     name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
 
@@ -98,19 +141,38 @@ class YearLevel(Base):
 
     __tablename__ = "year_levels"
     __table_args__ = (
-        # Serves the registrar's structure screen and the generator's ordered walk over
-        # levels: "list every year level in teaching order".
-        Index("ix_year_levels_order", "display_order"),
+        # Identity, replacing the old global unique on `code`: the same rung code in a
+        # different school is a different rung and has to be insertable.
+        UniqueConstraint("school_id", "code", name="uq_year_levels_school_code"),
+        # Serves the grouped ladder every school screen draws, and the generator's ordered
+        # walk over one school's levels.
+        Index("ix_year_levels_school_stage", "school_id", "stage", "display_order"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(_LEVEL_CODE_LEN), unique=True, nullable=False)
+    # Unique *within a school*, unlike an academic year code. "Year 1" genuinely exists at
+    # every branch, and forcing a school prefix into the code a registrar types into class
+    # codes and import headers all day would be the wrong trade here. It stays unambiguous
+    # because a rung is only ever resolved alongside an academic year, and the year names
+    # the school.
+    code: Mapped[str] = mapped_column(String(_LEVEL_CODE_LEN), nullable=False)
+    school_id: Mapped[int] = mapped_column(
+        ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
     name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
 
     # Explicit, because lexicographic order puts "Y10" before "Y9" and a school with
     # more than nine levels then prints its year list in an order no parent recognises.
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # garden / primary / preparatory / secondary, for grouping a long ladder on screen.
+    # A label carrying no rules: nothing is barred from a class, term or subject because of
+    # it. `unspecified` is what every existing rung was before this column existed, which is
+    # why it is the default rather than a guess.
+    stage: Mapped[str] = mapped_column(
+        String(_STAGE_LEN), default="unspecified", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
@@ -208,16 +270,39 @@ class Term(Base):
 
 
 class Subject(Base):
-    """A subject, global across year levels so a child's marks stay comparable over years."""
+    """A subject as taught in **one academic year**: `(academic_year_id, code)` is identity.
+
+    This was global once, deliberately — one `MATH` row for the whole school, so a child's
+    mathematics marks lined up from Year 3 to Year 4 and a report card could put them side
+    by side. It is per-year now because a school sets its own catalogue each year, and the
+    consequence of the change is worth stating in the file that carries it: `MATH` in
+    2025-2026 and `MATH` in 2026-2027 are two rows and two subjects, so nothing downstream
+    can treat a mark on one as comparable to a mark on the other. A cross-year view has to
+    match on `code` itself and accept that two schools' worth of meaning can hide behind
+    one string.
+
+    What did *not* change is the reason `code` exists: it is still immutable for the life of
+    the row within its year, so renaming "MATH" to "Mathematics" is a label edit that
+    detaches no grade.
+    """
 
     __tablename__ = "subjects"
     __table_args__ = (
-        # Serves the grade sheet's column order and the subject picker.
-        Index("ix_subjects_order", "display_order"),
+        # Identity. Replaces the old global `uq_subjects_code`: the same code in a
+        # different year is a different subject now, and must be insertable.
+        UniqueConstraint("academic_year_id", "code", name="uq_subjects_year_code"),
+        # Serves the grade sheet's column order and the subject picker, both of which are
+        # now always asked for one year at a time.
+        Index("ix_subjects_year_order", "academic_year_id", "display_order"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(_SUBJECT_CODE_LEN), unique=True, nullable=False)
+    code: Mapped[str] = mapped_column(String(_SUBJECT_CODE_LEN), nullable=False)
+    # RESTRICT, as every other reference to a year: deleting a year out from under the
+    # subjects its marks are stated against is not a thing the database will help with.
+    academic_year_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_years.id", ondelete="RESTRICT"), nullable=False
+    )
     name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
     name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
 
@@ -257,6 +342,88 @@ class Student(Base):
     # Left the school, but the transcript stays. Deletion is refused by the RESTRICT on
     # grades and enrolments, which is the intended behaviour, not an obstacle.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Nullable, and no age column beside it: an age is right for one year and silently
+    # wrong afterwards, so it is computed from this date at the moment of asking.
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # The child's own details, which are **not** her guardian's. A school holds both and
+    # they differ; merging them is how a message meant for a parent reaches a nine-year-old.
+    # Guardian numbers live in `guardians`/`guardian_phones`, where the permission to be
+    # told about her marks lives with them.
+    #
+    # `server_default` as well as `default`, on all three, because these columns were added
+    # to a populated table: a NOT NULL column with no server default cannot be added to
+    # existing rows, and the alternative — nullable, so "no phone on file" is `None` on old
+    # rows and `""` on new ones — would leave two spellings of empty for every reader to
+    # handle. The model states the default the database actually holds.
+    contact_phone: Mapped[str] = mapped_column(
+        String(_PHONE_LEN), default="", server_default="", nullable=False
+    )
+    contact_email: Mapped[str] = mapped_column(
+        String(255), default="", server_default="", nullable=False
+    )
+    address: Mapped[str] = mapped_column(
+        String(_ADDRESS_LEN), default="", server_default="", nullable=False
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
+class Attendance(Base):
+    """One mark per child per day: the daily register.
+
+    `uq_attendance_student_day` is the load-bearing constraint. Taking the register twice on
+    the same morning has to correct the mark rather than write a second, contradictory one —
+    and with two registrars on two machines it is the database that has to guarantee that,
+    not a check in Python.
+
+    **There is no row meaning "unmarked".** A day with no row is a day nobody took the
+    register, and that is different from every state this table can hold. An `unknown` row
+    would make "days recorded" meaningless as a denominator, and that is the number every
+    honest attendance figure has to be divided by.
+
+    `class_section_id` is stored rather than resolved from the child at read time, exactly as
+    it is on a grade and for the same reason: a child who moved 3A -> 3B in March was in 3A
+    in October, and her October register has to keep saying so.
+    """
+
+    __tablename__ = "attendance"
+    __table_args__ = (
+        # One statement per child per day. A correction replaces it.
+        UniqueConstraint("student_id", "on_date", name="uq_attendance_student_day"),
+        # Serves "the register of this class on this day" — the read the class screen makes
+        # every time a date is picked.
+        Index("ix_attendance_section_day", "class_section_id", "on_date"),
+        # Serves "this child's attendance across a range", for her card.
+        Index("ix_attendance_student_day", "student_id", "on_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="RESTRICT"), nullable=False
+    )
+    class_section_id: Mapped[int] = mapped_column(
+        ForeignKey("class_sections.id", ondelete="RESTRICT"), nullable=False
+    )
+    on_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    # present / absent / late / excused. Text rather than an integer so a dump is readable
+    # and so adding a state is not a renumbering of the ones already written.
+    state: Mapped[str] = mapped_column(String(_ATTENDANCE_STATE_LEN), nullable=False)
+
+    # Required by the domain for an excused absence: "excused by whom, for what" is the
+    # entire content of that state, and an excused absence with no reason on file cannot be
+    # told apart from a registrar clicking the wrong button.
+    note: Mapped[str] = mapped_column(String(_ADDRESS_LEN), default="", nullable=False)
+
+    # Who took the register, and when the row was last written. An attendance record is the
+    # kind of statement queried months later by somebody who needs to know whether it was
+    # taken that morning or corrected in June.
+    recorded_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False

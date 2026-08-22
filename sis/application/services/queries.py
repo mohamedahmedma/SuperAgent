@@ -31,6 +31,7 @@ from sis.domain.people import ClassEnrolment, Student
 from sis.domain.structure import (
     AcademicYear,
     ClassSection,
+    School,
     Subject,
     Term,
     YearLevel,
@@ -39,6 +40,7 @@ from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,
     Phone,
+    SchoolCode,
     StudentNumber,
     SubjectCode,
     TermCode,
@@ -48,6 +50,7 @@ from sis.domain.value_objects import (
 __all__ = [
     "ClassRosterEntry",
     "GradeLine",
+    "GuardianIdentity",
     "GuardianLink",
     "QueryService",
     "StudentTermGrades",
@@ -124,6 +127,33 @@ class ClassRosterEntry:
     @property
     def display_name_en(self) -> str:
         return self.student.full_name_en if self.student else ""
+
+
+@dataclass(frozen=True, slots=True)
+class GuardianIdentity:
+    """A guardian named by her stable handle rather than by her phone number.
+
+    What another service holds when it needs to refer to a parent later — an
+    authentication service that has just proved she controls a number, for instance. The
+    handle is the point: `public_id` is opaque and permanent, while a phone is neither.
+    She may add a second line or change carrier, and a number in a URL is PII in every
+    access log it passes through, which is the reason `guardians.public_id` exists at all.
+
+    Carries her names and preferred language so the caller can greet her without a second
+    round trip, and nothing else. It deliberately does not carry her children: whether she
+    may see any given child is a separate question with a separate answer, and bundling it
+    here would invite a caller to treat "I resolved her" as "she may read this".
+    """
+
+    public_id: str
+    full_name_ar: str = ""
+    full_name_en: str = ""
+    preferred_language: str = "ar"
+
+    @property
+    def display_name(self) -> str:
+        """Her name in whichever script the school recorded, Arabic first."""
+        return self.full_name_ar or self.full_name_en
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,20 +252,54 @@ class QueryService:
 
     # -- Structure ---------------------------------------------------------
 
-    def list_academic_years(self) -> Sequence[AcademicYear]:
-        """Every school year, most recent first."""
+    def list_schools(self, *, include_inactive: bool = False) -> Sequence[School]:
+        """Every school, by code. Closed branches only when asked for by name."""
         with self._uow_factory() as uow:
-            return tuple(uow.academic_years.list_all())
+            return tuple(uow.schools.list_all(include_inactive=include_inactive))
 
-    def current_academic_year(self) -> AcademicYear | None:
+    def get_school(self, school_code: SchoolCode) -> School:
+        """One school, or a refusal. Unknown code is never an empty shell."""
+        with self._uow_factory() as uow:
+            school = uow.schools.get(school_code)
+            if school is None:
+                raise UnknownReference(
+                    f"no school {school_code}", field="school_code"
+                )
+            return school
+
+    def list_academic_years(
+        self, school_code: SchoolCode | None = None
+    ) -> Sequence[AcademicYear]:
+        """Every school year, most recent first; one school's when asked for.
+
+        The school is optional here and required on `list_year_levels` below, and the
+        asymmetry is not an oversight: the year list is what the school picker itself is
+        built from, so it has to be answerable before a school has been chosen. A ladder is
+        only ever asked for inside a school.
+        """
+        with self._uow_factory() as uow:
+            if school_code is not None:
+                self._require_school(uow, school_code)
+            return tuple(uow.academic_years.list_all(school_code))
+
+    def current_academic_year(
+        self, school_code: SchoolCode | None = None
+    ) -> AcademicYear | None:
         """The year the registrar has marked current, or `None` before one is chosen."""
         with self._uow_factory() as uow:
-            return uow.academic_years.current()
+            return uow.academic_years.current(school_code)
 
-    def list_year_levels(self) -> Sequence[YearLevel]:
-        """The rungs of the ladder in `display_order`, so `Y10` follows `Y9`."""
+    def list_year_levels(self, school_code: SchoolCode) -> Sequence[YearLevel]:
+        """One school's ladder, grouped by stage and ordered within it.
+
+        Grouped rather than flat because a fourteen-rung ladder is unreadable as a list:
+        a registrar looks for the garden block, then primary. The grouping is a property of
+        each rung (`YearLevel.stage`) rather than a structure returned here, so a caller
+        that wants a flat list still has one.
+        """
         with self._uow_factory() as uow:
-            return tuple(uow.year_levels.list_all())
+            self._require_school(uow, school_code)
+            return tuple(uow.year_levels.list_for_school(school_code))
 
     def list_classes(
         self,
@@ -263,12 +327,76 @@ class QueryService:
             self._require_year(uow, academic_year_code)
             return tuple(uow.terms.list_for_year(academic_year_code))
 
-    def list_subjects(self, *, include_inactive: bool = False) -> Sequence[Subject]:
-        """Subjects in `display_order`; retired ones only when asked for by name."""
+    def list_subjects(
+        self, academic_year_code: AcademicYearCode, *, include_inactive: bool = False
+    ) -> Sequence[Subject]:
+        """One year's subjects in `display_order`; retired ones only when asked for.
+
+        The year is required rather than defaulted to the current one. A subject catalogue
+        is per-year now, so "the subjects" is not a question with an answer — and a silent
+        default would put next year's catalogue on screen for a registrar who is working
+        through last year's marks, with nothing on the page to say which they were shown.
+        """
         with self._uow_factory() as uow:
-            return tuple(uow.subjects.list_all(include_inactive=include_inactive))
+            self._require_year(uow, academic_year_code)
+            return tuple(
+                uow.subjects.list_for_year(
+                    academic_year_code, include_inactive=include_inactive
+                )
+            )
 
     # -- People ------------------------------------------------------------
+
+    def get_student(self, student_number: StudentNumber) -> Student:
+        """One child's own record. Unknown number is a refusal, never an empty shell.
+
+        No placement and no marks here on purpose: those are separate questions with
+        separate answers per year and per term, and folding "her class" into a student
+        record is precisely the column invariant 2 exists to keep out of this service.
+        """
+        with self._uow_factory() as uow:
+            student = uow.students.get(student_number)
+            if student is None:
+                raise UnknownReference(
+                    f"no student {student_number}", field="student_number"
+                )
+            return student
+
+    def search_students(
+        self, query: str, *, limit: int = 50, include_inactive: bool = False
+    ) -> Sequence[Student]:
+        """Type-ahead over number and both spellings of the name.
+
+        A blank query returns nothing rather than the whole school. The screen behind this
+        is a search box: answering an empty box with nine hundred children is a page of
+        noise, and it is also the request a registrar makes by accident most often.
+
+        Inactive children are excluded by default. A child who left in March must be
+        findable — her marks and her guardians are still true — but she should not appear in
+        the picker a registrar uses to place somebody in a class today.
+        """
+        with self._uow_factory() as uow:
+            return tuple(
+                uow.students.search(
+                    query, limit=limit, include_inactive=include_inactive
+                )
+            )
+
+    def student_placements(
+        self, student_number: StudentNumber
+    ) -> Sequence[ClassEnrolment]:
+        """Every placement this child has ever had, so the history is visible as history.
+
+        This is invariant 2 made legible. A child who moved 3A -> 3B in March has two rows
+        here, both true, and a screen that shows only the open one cannot explain why her
+        Term 1 report card says 3A.
+        """
+        with self._uow_factory() as uow:
+            if uow.students.get(student_number) is None:
+                raise UnknownReference(
+                    f"no student {student_number}", field="student_number"
+                )
+            return tuple(uow.enrolments.list_for_student(student_number))
 
     def class_roster(
         self,
@@ -335,6 +463,81 @@ class QueryService:
             for link in links
         )
 
+    def resolve_guardian(self, phone: Phone) -> GuardianIdentity | None:
+        """Who does this number reach? `None` when it reaches nobody on file.
+
+        `None` rather than a raise, unlike `student_guardians` and `guardian_students`
+        below. Those answer a question about somebody the caller already names, so "no
+        such person" is a mistake worth reporting; this one *is* the question, and a
+        number the school has never seen is an ordinary answer that a caller has to
+        handle either way.
+
+        The caller that matters is an authentication service asking "has this verified
+        number been entered by a registrar" — which must be able to say no without an
+        exception, and must learn nothing about a number that answers no.
+        """
+        with self._uow_factory() as uow:
+            public_id = uow.guardians.public_id_for(phone)
+            if public_id is None:
+                return None
+            guardian = uow.guardians.get(phone)
+        if guardian is None:
+            return None
+        return GuardianIdentity(
+            public_id=public_id,
+            full_name_ar=guardian.full_name_ar,
+            full_name_en=guardian.full_name_en,
+            preferred_language=guardian.preferred_language,
+        )
+
+    def guardian_student_term_grades(
+        self, public_id: str, student_number: StudentNumber, term_code: TermCode
+    ) -> StudentTermGrades:
+        """One child's marks for a term, for a caller who is only a guardian handle.
+
+        The link is re-checked here, on this request, even though every caller is expected
+        to have listed the children first and picked one from that list. The reason is what
+        the caller *is*: a chat service running a language model over text a stranger can
+        write. Its filtering is a convenience for the model, not a security boundary, and a
+        prompt that talks the model into naming another child must meet a server that says
+        no rather than one that trusts the id it was handed.
+
+        The refusal is deliberately the same `UnknownReference` a genuinely missing child
+        produces. A caller that could tell "not your child" from "no such child" could walk
+        student numbers and learn which ones exist.
+        """
+        permitted = {
+            str(entry.link.student_number)
+            for entry in self.guardian_students_by_id(public_id, viewable_only=True)
+        }
+        if str(student_number) not in permitted:
+            raise UnknownReference(
+                "no such student for this guardian", field="student_number"
+            )
+        return self.student_term_grades(student_number, term_code)
+
+    def guardian_students_by_id(
+        self, public_id: str, *, viewable_only: bool = True
+    ) -> Sequence[GuardianLink]:
+        """The same answer as `guardian_students`, asked with a handle instead of a number.
+
+        This is the parent-facing question as the chat service asks it. That service is
+        handed a handle when a parent signs in and is deliberately never told the number
+        behind it: it is the process running a language model over untrusted input, and a
+        parent's phone number is the one piece of PII it has no reason to hold.
+
+        Raises for an unknown handle, like its sibling, so "that is not a guardian" stays
+        distinguishable from "that guardian may see no children" — the second is what a
+        custody restriction looks like, and it must not read as a broken token.
+        """
+        with self._uow_factory() as uow:
+            phone = uow.guardians.primary_phone_for(public_id)
+        if phone is None:
+            raise UnknownReference(
+                "no guardian is on file under that reference", field="guardian_id"
+            )
+        return self.guardian_students(phone, viewable_only=viewable_only)
+
     def guardian_students(
         self, phone: Phone, *, viewable_only: bool = True
     ) -> Sequence[GuardianLink]:
@@ -389,12 +592,17 @@ class QueryService:
             if term is None:
                 raise UnknownReference(f"no term {term_code}", field="term_code")
             grades = uow.grades.list_for_student(student_number, term_code=term_code)
+            # Resolved within the term's own year, which is the only year these marks can
+            # be about. A lookup by code alone would have to guess, and the guess it would
+            # most naturally make — the current year — is wrong for every report card a
+            # registrar reprints after September.
             subjects = uow.subjects.get_many(
                 [
                     grade.subject_code
                     for grade in grades
                     if isinstance(grade.subject_code, SubjectCode)
-                ]
+                ],
+                term.academic_year_code,
             )
             section = resolve_section_for_term(uow.enrolments, student_number, term)
         return StudentTermGrades(
@@ -420,6 +628,12 @@ class QueryService:
             SubjectCode(str(line.grade.subject_code))
             for line in self.student_term_grades(student_number, term_code).lines
         )
+
+    @staticmethod
+    def _require_school(uow: UnitOfWork, code: SchoolCode) -> None:
+        """One unknown-school check, so every listing fails the same way it succeeds."""
+        if uow.schools.get(code) is None:
+            raise UnknownReference(f"no school {code}", field="school_code")
 
     @staticmethod
     def _require_year(uow: UnitOfWork, code: AcademicYearCode) -> None:

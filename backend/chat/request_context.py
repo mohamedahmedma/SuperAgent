@@ -47,6 +47,10 @@ class ChatRequestContext:
     _knowledge_tool_slots_used: int = 0
     _figure_tool_slots_used: int = 0
     _records_tool_slots_used: int = 0
+    #: The child this conversation settled on, so a parent who answered "Layla"
+    #: once is not asked again on their next question. Seeded from the session at
+    #: turn start and written back when a turn resolves a child.
+    _remembered_child: str = ""
     _short_circuit_status: Optional[str] = None
     _surfaced_asset_ids: list = field(default_factory=list)
     _started_at: float = field(default_factory=time.monotonic)
@@ -243,6 +247,28 @@ class ChatRequestContext:
         with self._lock:
             self._knowledge_tool_slots_used = 0
             self._figure_tool_slots_used = 0
+
+    @property
+    def remembered_child(self) -> str:
+        """The child already under discussion, or `""` on a fresh conversation.
+
+        A hint and never an authority. It selects *which* of this parent's own children a
+        vague question is about; it can never widen who may be read, because every records
+        call is re-checked against the guardian link on the server that answers it.
+        """
+        with self._lock:
+            return self._remembered_child
+
+    def remember_child(self, student_id: str) -> None:
+        """Pin this conversation to a child.
+
+        Called only once a child has actually been resolved, so a turn that failed to
+        identify one does not leave the wrong child pinned for every question after it.
+        """
+        if not student_id:
+            return
+        with self._lock:
+            self._remembered_child = str(student_id)
 
     def acquire_records_tool_slot(self) -> bool:
         """Budget for get_student_records, separate from the other tool budgets.

@@ -89,6 +89,52 @@ class GradeAssembler:
             assembled.append(self._to_course_grade(subject, binding))
         return assembled
 
+    def assemble_unbound(self, subjects: list[SubjectGrade]) -> list[CourseGrade]:
+        """Map subjects a backend has already identified, with no binding table.
+
+        For a system of record that stores marks against the school's own subject codes:
+        every subject it reports is one the school entered against this child for this
+        term, so there is nothing to match and nothing to drop.
+
+        **The drop that protects a parent from a teacher's sandbox is not lost — it moved.**
+        On the Moodle path it happens here, because Moodle answers for every course a
+        student is enrolled in. On this path it happened upstream: a subject with no mark
+        recorded for this child in this term has no row to return.
+
+        Nothing is invented for the fields a binding used to supply. `course_id` is the
+        subject code, because that is the identifier this backend answers about and a
+        fabricated numeric id would be a key that resolves to nothing.
+        """
+        return [self._to_unbound_course_grade(subject) for subject in subjects]
+
+    def _to_unbound_course_grade(self, subject: SubjectGrade) -> CourseGrade:
+        letter, passed = self.policy.classify(subject.percentage)
+        academic_letter, academic_passed = self.policy.classify(subject.academic_percentage)
+
+        return CourseGrade(
+            course_id=subject.course_ref,
+            subject_code=subject.course_ref,
+            # Each script from the backend that keeps it, falling back to the other rather
+            # than to blank: a subject rendered with no name at all is worse than one
+            # rendered in the wrong language, and this service holds no translation to
+            # invent the missing side with.
+            subject_name_ar=subject.subject_name_ar or subject.subject_name,
+            subject_name_en=subject.subject_name or subject.subject_name_ar,
+            computed_percentage=subject.percentage,
+            letter_grade=letter,
+            passed=passed,
+            academic=AcademicGrade(
+                percentage=subject.academic_percentage,
+                letter_grade=academic_letter,
+                passed=academic_passed,
+                unavailable_reason=subject.academic_unavailable,
+            ),
+            graded_count=subject.graded_count,
+            excused_count=subject.excluded_count,
+            missing_count=subject.pending_count,
+            is_complete=subject.is_complete,
+        )
+
     def _to_course_grade(self, subject: SubjectGrade, binding: CourseBinding) -> CourseGrade:
         letter, passed = self.policy.classify(subject.percentage)
         academic_letter, academic_passed = self.policy.classify(subject.academic_percentage)
@@ -137,11 +183,25 @@ class AttendanceAssembler:
     #: into an accusation.
     PRESENT_LIKE = ("present", "late", "excused")
 
-    def __init__(self, bindings: list[CourseBinding]):
+    def __init__(self, bindings: list[CourseBinding], *, unbound: bool = False):
+        """`unbound` for a backend that names its own subjects.
+
+        There is then no binding table to filter against, and nothing to filter: every
+        subject such a backend reports is one the school recorded against this child for
+        this term. The drop that keeps a teacher's sandbox away from a parent still
+        happens — it happens upstream, where a subject with no register taken has no row.
+        """
         self._index = _index_bindings(bindings)
+        self._unbound = unbound
 
     def visible(self, subjects: list[SubjectAttendance]) -> list[SubjectAttendance]:
-        """Only subjects with a published binding — same rule as grades."""
+        """Only subjects with a published binding — same rule as grades.
+
+        Everything, on the unbound path. Filtering against an empty index there would
+        return nothing at all and report a term of registers as "no attendance recorded".
+        """
+        if self._unbound:
+            return list(subjects)
         return [s for s in subjects if s.course_ref in self._index]
 
     def term_percentage(self, subjects: list[SubjectAttendance]) -> float | None:

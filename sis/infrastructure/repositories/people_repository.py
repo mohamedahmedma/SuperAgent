@@ -66,7 +66,26 @@ def _to_student(row: models.Student) -> Student:
         full_name_ar=row.full_name_ar,
         full_name_en=row.full_name_en,
         is_active=row.is_active,
+        date_of_birth=row.date_of_birth,
+        contact_phone=row.contact_phone,
+        contact_email=row.contact_email,
+        address=row.address,
     )
+
+
+#: The columns a demographic edit can touch. Named once because the insert payload, the
+#: update payload and the "has anything actually changed" comparison below must agree: a
+#: column present in two of the three is a field that saves on creation and is silently
+#: ignored on every correction afterwards.
+_STUDENT_DETAIL_COLUMNS = (
+    "full_name_ar",
+    "full_name_en",
+    "is_active",
+    "date_of_birth",
+    "contact_phone",
+    "contact_email",
+    "address",
+)
 
 
 # The columns a domain `ClassSection` is built from. Selected explicitly because the
@@ -221,31 +240,24 @@ class SqlAlchemyStudentRepository:
         created: dict[str, bool] = {}
         for number, student in incoming.items():
             row = existing.get(number)
+            details = {
+                column: getattr(student, column) for column in _STUDENT_DETAIL_COLUMNS
+            }
             if row is None:
                 created[number] = True
-                to_insert.append(
-                    {
-                        "student_number": number,
-                        "full_name_ar": student.full_name_ar,
-                        "full_name_en": student.full_name_en,
-                        "is_active": student.is_active,
-                    }
-                )
+                to_insert.append({"student_number": number, **details})
                 continue
             created[number] = False
-            if (
-                row.full_name_ar != student.full_name_ar
-                or row.full_name_en != student.full_name_en
-                or row.is_active != student.is_active
+            # Compared column by column against the same list the payload is built from,
+            # so a row whose values already match stays out of the UPDATE. That is
+            # invariant 3 held honestly: re-importing September's roster in March must not
+            # stamp `updated_at` on nine hundred children and destroy the only column that
+            # can answer "whose details changed in this import".
+            if any(
+                getattr(row, column) != details[column]
+                for column in _STUDENT_DETAIL_COLUMNS
             ):
-                to_update.append(
-                    {
-                        "id": row.id,
-                        "full_name_ar": student.full_name_ar,
-                        "full_name_en": student.full_name_en,
-                        "is_active": student.is_active,
-                    }
-                )
+                to_update.append({"id": row.id, **details})
 
         if to_insert:
             self._session.execute(insert(models.Student), to_insert)

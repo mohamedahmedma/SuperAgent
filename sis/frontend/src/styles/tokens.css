@@ -1,0 +1,587 @@
+/*
+ * Design tokens — the whole visual language of the console, and the only file in it
+ * that another project is expected to copy.
+ *
+ * Nothing here selects a component. It declares custom properties and stops, so this
+ * file can be dropped into the Vue frontend under `frontend/src/assets/styles/` (or any
+ * other project) and re-skin it without importing one line of SIS markup. That is the
+ * point: a school running two of our apps side by side must not look like it is running
+ * two apps.
+ *
+ * Two knobs are meant to be edited per project, and everything else follows them:
+ *
+ *   --accent-*        the one non-neutral hue. Swap the seven values, get a new brand.
+ *   --motion-scale    a multiplier on every duration in the app. 0 stops all motion.
+ *
+ * -- The palette, and what changed ------------------------------------------------
+ *
+ * Four colours: a near-white page, Apple's system greys, black, and one blue — Apple's
+ * systemBlue, spent in a handful of places and nowhere else.
+ *
+ * Three decisions here replaced earlier ones, all at the request of the person who owns the
+ * design, and all recorded rather than silently swapped:
+ *
+ *   1. The grey ramp is Apple's, not a hand-rolled neutral one. It used to be a strictly
+ *      neutral scale anchored on #8E8E8E, chosen so no grey could read as a colour beside
+ *      white. Apple's greys carry a deliberate cool cast — systemGray is #8E8E93, five points
+ *      of blue over red — and that cast is the thing being asked for, so the ramp now is
+ *      Apple's palette rather than an approximation of it: twenty steps drawn from both the
+ *      apple.com web greys and the iOS system greys, eighteen of them a published value and
+ *      two marked interpolations.
+ *
+ *   2. The page is a light off-white and the panels on it are grey, which is the inverse of
+ *      what this file used to say. It read as paper with lines ruled on it: an off-white
+ *      canvas with pure white panels separated by borders. It now reads as Apple's grouped
+ *      content — a page divided into big grey sections, each a rounded slab with a hairline
+ *      and generous padding, so a screen is a handful of visibly separate blocks rather than
+ *      one continuous sheet of rows.
+ *
+ *   3. The page colour is one variable and every surface is derived from it, so it is a
+ *      setting rather than a constant. `--tint` is the page; the panel, the hover, the well
+ *      and the two hairlines are that colour mixed a measured distance toward a grey. The
+ *      settings dialog writes `--tint` onto `<html>` and the whole console follows, which is
+ *      what makes a colour a user picked look like part of the design instead of a stripe of
+ *      their colour laid over somebody else's.
+ *
+ * What did not change is how little the blue is used. It marks a link, the focus ring, the
+ * current item in a set, and the one button on a form that commits something — and nothing
+ * else. A screen that paints every button in the accent has spent its one loud colour on its
+ * least interesting element, and by the fourth blue rectangle the reader has stopped seeing
+ * any of them.
+ */
+
+:root {
+  /* -- Neutrals -------------------------------------------------------------------
+   *
+   * Apple's greys, from both of the places Apple publishes them, merged into one scale.
+   * Twenty steps, and eighteen of them are a value Apple actually ships:
+   *
+   *   the web palette      what apple.com is built from: #F5F5F7 behind a section, #D2D2D7
+   *                        for a rule, #86868B and #6E6E73 for secondary text, #1D1D1F for
+   *                        body copy. These are the ones that matter most here, because this
+   *                        is a web page and they were chosen for one.
+   *
+   *   the system palette   systemGray and its numbered relatives, light appearance at the top
+   *                        of the scale and dark appearance at the bottom, which is what makes
+   *                        one ramp serve both themes.
+   *
+   * The two families are the same family — they interleave without a seam, and where they land
+   * within a few points of each other (#F5F5F7 beside #F2F2F7, #D2D2D7 beside #D1D1D6) the
+   * scale keeps both, because the near-duplicate is the difference between a panel and the
+   * thing sitting on it. The anchor is #8E8E93 — systemGray, and `--grey-500`.
+   *
+   * The steps are the platform's own values rather than an even lightness curve, which is why
+   * the gaps are uneven: Apple spaces its greys by what separates on a real screen, and
+   * flattening them into a tidy ramp would lose exactly the distinctions the palette was
+   * measured for. Two slots have no published value and are interpolated; they are marked.
+   *
+   * Every step is built the same way — red and green equal, blue a few points above — so the
+   * whole scale carries one faint cool cast and no step reads as a different colour from its
+   * neighbours. #848484 is the exception that proves it: a true neutral, and the one place the
+   * scale is allowed to have no cast at all.
+   */
+  --grey-0: #ffffff; /* systemBackground — the page, and every field on a panel */
+  --grey-25: #fbfbfd; /* interpolated: a hair off white */
+  --grey-50: #f5f5f7; /* apple.com section grey — the panel fill */
+  --grey-75: #f2f2f7; /* systemGray6 (light) */
+  --grey-100: #e8e8ed; /* apple.com light fill — a hovered row, a well */
+  --grey-150: #e5e5ea; /* systemGray5 (light) */
+  --grey-200: #d2d2d7; /* apple.com border — the hairline */
+  --grey-250: #c7c7cc; /* systemGray3 (light) — the strong hairline */
+  --grey-300: #aeaeb2; /* systemGray2 (light) */
+  --grey-400: #a1a1a6; /* apple.com disabled grey */
+  --grey-500: #8e8e93; /* systemGray — the anchor, and the same in both appearances */
+  --grey-550: #86868b; /* apple.com secondary text */
+  --grey-600: #848484; /* a true neutral mid grey */
+  --grey-650: #6e6e73; /* apple.com tertiary text */
+  --grey-700: #636366; /* systemGray2 (dark) — the secondary ink */
+  --grey-800: #48484a; /* systemGray3 (dark) */
+  --grey-850: #3a3a3c; /* systemGray4 (dark) */
+  --grey-900: #2c2c2e; /* systemGray5 (dark) */
+  --grey-950: #1d1d1f; /* apple.com near-black — the body ink, and the dark canvas */
+  --black: #000000; /* true black, held for the dark theme's inverse ink */
+
+  /* -- Accent ---------------------------------------------------------------------
+   *
+   * systemBlue, seven steps, and used sparingly on purpose. The blue marks four things and
+   * nothing else: a link, the focus ring, the current item in a set, and the button that
+   * commits a form. Everything else that merely does something is a quiet or outlined
+   * button drawn in grey.
+   *
+   * Two steps sit unusually close together, and it is deliberate: #0A84FF is Apple's blue in
+   * the dark appearance and #007AFF is Apple's blue in the light one, so the ramp holds both
+   * rather than picking one and tinting it. 400 is the lighter of the pair, which keeps the
+   * scale monotonic; the dark theme takes 400 as its action colour and the light theme takes
+   * 600.
+   *
+   * Replace these seven values to rebrand. Nothing else in the app names a blue.
+   */
+  --accent-50: #eff6ff;
+  --accent-100: #d9e9ff;
+  --accent-200: #a9d0ff;
+  --accent-400: #0a84ff; /* systemBlue (dark appearance) */
+  --accent-600: #007aff; /* systemBlue (light appearance) */
+  --accent-700: #0062cc;
+  --accent-900: #003c80;
+
+  /* -- Action ---------------------------------------------------------------------
+   *
+   * The colour of a button that commits something: #007AFF with a white label, which is
+   * Apple's prominent button and the one place the accent is spent on a control.
+   *
+   * This replaced a grey fill (#8E8E8E) with a light grey label (#DADADC), and the swap fixed
+   * two things at once. The grey button now sits on a grey panel — a mid grey on #F5F5F7 — where
+   * a filled control loses its shape against the surface it is on. And the old pair measured
+   * 2.35:1, a knowingly-accepted failure of the 4.5:1 WCAG AA floor that this file used to
+   * record as a debt.
+   *
+   * The new pair measures 4.02:1. Better by a wide margin, still short of AA for text of
+   * this size, and stated here with the number because it is the same class of decision as
+   * the one it replaces: #007AFF with a white label is what the platform ships and what was
+   * asked for. `--action-hover` is #0062CC at 5.80:1, so the label gets clearer under the
+   * pointer, never fainter.
+   *
+   * The hover direction is load-bearing. With a light label, a lighter hover fill closes
+   * the gap to the label and the button's own text fades at the exact moment the pointer lands
+   * on it. Every theme block below therefore darkens on hover, and the contract suite measures
+   * that the hovered pair is no worse than the resting one.
+   */
+  --action: var(--accent-600);
+  --action-hover: var(--accent-700);
+  --action-ink: var(--grey-0);
+
+  /* -- Status ---------------------------------------------------------------------
+   *
+   * Import outcomes and nothing else. Each is a triple: a text-safe ink, a wash to sit
+   * behind it and a border, because a coloured background with unadjusted body text
+   * fails contrast on every one of these hues.
+   *
+   * Left alone by the repalette: these are the outcome language, not the main palette, and
+   * they read the same on a grey panel as they did on a white one.
+   *
+   * Note what is absent: no colour for an ungraded mark. A blank mark is an absence,
+   * and painting it amber would tell a registrar something went wrong when nothing did.
+   * It renders in --ink-faint, like every other kind of nothing.
+   */
+  --ok-ink: #1c6b45;
+  --ok-wash: #e7f5ee;
+  --ok-line: #a9d9c1;
+
+  --warn-ink: #8a5a09;
+  --warn-wash: #fdf4e3;
+  --warn-line: #f0d69b;
+
+  --bad-ink: #a32833;
+  --bad-wash: #fdecee;
+  --bad-line: #f2b6bd;
+
+  --info-ink: var(--accent-700);
+  --info-wash: var(--accent-50);
+  --info-line: var(--accent-200);
+
+  /* -- The page colour, and the seven surfaces derived from it ---------------------
+   *
+   * One value decides what the whole console is made of. `--tint` is the colour of the page,
+   * and every panel, hover, well and hairline on it is that colour mixed a measured distance
+   * toward `--tint-blend`. Change `--tint` and the interface re-skins itself without a single
+   * other value moving, which is the property the settings dialog depends on: it writes one
+   * custom property onto `<html>` and the design follows.
+   *
+   * The default is not white. #FAF9F7 is an off-white with a little black in it — warm by two
+   * points, about 2% down from paper white — because a pure white page under grey panels only
+   * separates by the panel fill, and on a cheap office monitor that separation is the first
+   * thing to disappear. Starting the page slightly below white gives every surface above it
+   * somewhere to sit. The settings dialog offers creams, a cool mist and pure white for anyone
+   * who wants one, and the same machinery serves all of them.
+   *
+   * Why derived rather than a table of hand-picked quads per colour. A table only works for
+   * the colours somebody sat down and picked; the moment a user chooses their own, either the
+   * panel stops relating to the page or the app has to refuse the choice. Mixing keeps the
+   * *relationships* — panel a soft step down, hairline a firm one — true of any tint, so the
+   * colour is genuinely configurable rather than a menu of five presets pretending to be.
+   *
+   * The percentages are what those relationships are, stated as numbers. They differ between
+   * the themes because the arithmetic is not symmetrical: in the light theme the surfaces move
+   * *down* from the page toward a mid grey, in the dark theme they move *up* toward a light
+   * one, and the same 92% does not produce the same visual step in both directions.
+   */
+  --tint: #faf9f7;
+  --tint-blend: var(--grey-500);
+  --tint-panel: 92%;
+  --tint-hover: 80%;
+  --tint-line: 62%;
+  --tint-line-strong: 52%;
+
+  /*
+   * Three surfaces are the tint itself, and that is the point of the inversion: the page, the
+   * fields on it and anything that floats above it are all the same colour, and the grey slabs
+   * in between are what divide the screen. `--field` matters most — a control has to be the
+   * page colour rather than the panel colour, or an input is indistinguishable from the card
+   * behind it.
+   */
+  --canvas: var(--tint);
+  --field: var(--tint);
+  --surface-raised: var(--tint);
+
+  --surface: color-mix(in srgb, var(--tint) var(--tint-panel), var(--tint-blend));
+  --surface-hover: color-mix(in srgb, var(--tint) var(--tint-hover), var(--tint-blend));
+  --surface-sunken: color-mix(in srgb, var(--tint) var(--tint-hover), var(--tint-blend));
+  --surface-inverse: var(--grey-900);
+
+  /*
+   * Body copy is #1D1D1F rather than #000000, which is the ink apple.com sets and the reason
+   * is density: several hundred rows of pure black on white is a page that glares, and two
+   * points of grey take the edge off without anyone being able to name the difference. True
+   * black stays in the ramp for the dark theme, where it is the inverse ink.
+   *
+   * The inks are ramp values rather than derived from the tint, deliberately. A tint is a
+   * *background* choice, and letting it drag the text with it is how a user picks a slightly
+   * warm cream and quietly loses a point of contrast on every label in the console.
+   */
+  --ink: var(--grey-950);
+  --ink-soft: var(--grey-700);
+  --ink-faint: var(--grey-550);
+  --ink-inverse: var(--grey-0);
+  --ink-accent: var(--accent-700);
+
+  --line: color-mix(in srgb, var(--tint) var(--tint-line), var(--tint-blend));
+  --line-strong: color-mix(in srgb, var(--tint) var(--tint-line-strong), var(--tint-blend));
+  --focus-ring: var(--accent-600);
+
+  /*
+   * Behind a modal: a light scrim and a blur, rather than a heavy scrim alone.
+   *
+   * The blur is what makes the dialog read as *in front of* the console instead of drawn on
+   * top of it, and it is also why the scrim is only 22%. The two do the same job — separating
+   * the dialog from the page — and stacking a heavy one on a blurred one makes the page behind
+   * look like a smudge rather than like a page. The dark theme still needs more, because a
+   * blurred near-black page and a near-black dialog are the same colour.
+   *
+   * `--veil-blur` is a token so it can go to `0px` for a machine that renders backdrop-filter
+   * slowly, without touching a rule.
+   */
+  --veil: rgba(0, 0, 0, 0.22);
+  --veil-blur: 14px;
+
+  /* -- Type -----------------------------------------------------------------------
+   *
+   * System stacks only. A webfont is an external request, and schools run this offline;
+   * a self-hosted one would be megabytes of Arabic glyphs for a page whose job is
+   * showing a table.
+   *
+   * The Apple faces are named first and simply do not resolve on the office Windows machines
+   * this mostly runs on, which is the correct behaviour: the palette is Apple's, the metrics
+   * stay whatever the machine actually has.
+   */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI Variable Text", "Segoe UI", system-ui, "Helvetica Neue", Arial,
+    sans-serif;
+
+  /*
+   * Names are data, not chrome, and every school in scope stores both scripts. Latin
+   * faces first so English names keep the metrics of the UI; Arabic faces follow as
+   * fallback for the codepoints the Latin faces lack, and the browser picks per
+   * character, so one stack serves both columns. Naskh before Sans: a registrar reads
+   * names, and Naskh is what a name looks like on a school document.
+   */
+  --font-name: -apple-system, "Segoe UI", system-ui, "Geeza Pro",
+    "Noto Naskh Arabic", "Noto Sans Arabic", "Al Bayan", "Traditional Arabic",
+    "Times New Roman", Tahoma, serif;
+
+  --font-code: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Courier New",
+    monospace;
+
+  /*
+   * The body sizes are fixed and the display sizes are fluid, which is the split that
+   * matters: shrinking 13px body text on a narrow screen makes a register unreadable, while
+   * a 34px page title on a 360px phone is a heading that wraps three times and pushes the
+   * data below the fold. So `xs`..`lg` hold still and `xl`..`3xl` scale with the viewport.
+   */
+  --text-xs: 0.6875rem;
+  --text-sm: 0.75rem;
+  --text-base: 0.8125rem;
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: clamp(1.0625rem, 0.98rem + 0.4vw, 1.25rem);
+  --text-2xl: clamp(1.25rem, 1.05rem + 0.9vw, 1.625rem);
+  --text-3xl: clamp(1.5rem, 1.15rem + 1.6vw, 2.125rem);
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* -- Space ----------------------------------------------------------------------
+   *
+   * A 4px grid. The reader is a clerk working through several hundred rows on a
+   * 1366x768 office screen, so the scale starts tight: density is the feature, and
+   * comfortable default spacing fits about twelve roster lines on that screen.
+   */
+  --space-1: 0.25rem;
+  --space-2: 0.375rem;
+  --space-3: 0.5rem;
+  --space-4: 0.75rem;
+  --space-5: 1rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 3rem;
+
+  /*
+   * Apple's corner radii: controls round gently, panels round more. The jump from 8 to 14 is
+   * what makes a card read as a slab of content rather than as a large button.
+   */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* -- Concentric corners ---------------------------------------------------------
+   *
+   * A rounded thing inside another rounded thing has one correct radius, and it is not the
+   * same radius:
+   *
+   *     inner = outer - gap
+   *
+   * where `gap` is the distance between the two edges — the outer element's padding, plus its
+   * border. Give the inner corner the same radius as the outer one and the two curves run at
+   * different distances from each other, tight at the corner and slack along the edge; the eye
+   * reads that as a misprint even when it cannot say why. Give it too little and the inner
+   * corner looks square inside a round one.
+   *
+   * Two cases cover almost everything in this console, so they are tokens rather than a rule
+   * somebody has to remember:
+   *
+   *   --radius-flush   a child that touches the parent's edge, separated only by the 1px
+   *                    border: a card header, a table flush inside a card, a modal header.
+   *
+   *   --radius-inset   a child sitting inside the parent's padding — a tile in a card, an
+   *                    alert in a card body. `--space-5` is the padding those all use.
+   *
+   * Anywhere the gap is something else, the site writes its own `calc()` and says what the gap
+   * is. `max()` floors the result: a small element deep inside a large one wants a square
+   * corner, not a negative one.
+   */
+  --radius-flush: calc(var(--radius-lg) - 1px);
+  --radius-inset: max(var(--radius-xs), calc(var(--radius-lg) - var(--space-5)));
+
+  /*
+   * Shadows are almost absent. A grey panel on a white page is separated by its fill and its
+   * hairline, not by elevation, and stacking a shadow on top of that reads as grime around the
+   * edge of every block. What is left lifts a menu, a toast or the selected segment of a
+   * control off the thing directly under it — nothing else gets one.
+   */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.16);
+
+  --header-h: 3.25rem;
+  --content-max: 96rem;
+
+  /* -- Controls ------------------------------------------------------------------
+   *
+   * Every button, input and select is sized from these four, and they are the reason the
+   * chrome now shrinks with the window instead of holding a desktop size down to 360px.
+   *
+   * `clamp()` rather than a breakpoint, deliberately. A control that jumps a size at 640px
+   * is a control that is wrong on one side of the jump: too big at 641px or too small at
+   * 639px, and the layout reflows around it at exactly the width a tablet in landscape
+   * happens to be. Interpolating means the toolbar is always as large as the space allows.
+   *
+   * The floors are hit targets and not guesses: 2rem of control height and 0.75rem of text
+   * are the smallest a finger and an eye respectively can be relied on for, so the scale
+   * stops there rather than continuing down to something that technically fits.
+   */
+  --control-h: clamp(1.875rem, 1.6rem + 1.2vw, 2.25rem);
+  --control-pad-x: clamp(0.4375rem, 0.2rem + 1vw, 0.875rem);
+  --control-pad-y: clamp(0.1875rem, 0.1rem + 0.35vw, 0.4375rem);
+  --control-font: clamp(0.75rem, 0.72rem + 0.14vw, 0.8125rem);
+  --control-gap: clamp(0.25rem, 0.1rem + 0.5vw, 0.5rem);
+
+  /* The page gutter, on the same principle: 1rem on a phone is the difference between a
+     table you can read and a table with its first column against the glass. */
+  --gutter: clamp(0.75rem, 0.35rem + 1.6vw, 1.5rem);
+
+  /* -- Motion --------------------------------------------------------------------
+   *
+   * Every animated property in the app resolves its duration through one of these, and
+   * every one of these is multiplied by --motion-scale. So:
+   *
+   *     :root { --motion-scale: 0; }      no animation anywhere, instantly
+   *     :root { --motion-scale: 1.6; }    the same choreography, slower
+   *
+   * That is the whole reason durations are not written at the call site. A project that
+   * copies this file gets the same lever, and the reduced-motion block at the bottom is
+   * simply the lever pulled to zero — one rule, instead of a media query repeated
+   * beside every transition in the codebase and forgotten next to half of them.
+   */
+  --motion-scale: 1;
+
+  --dur-instant: calc(80ms * var(--motion-scale));
+  --dur-fast: calc(140ms * var(--motion-scale));
+  --dur-base: calc(220ms * var(--motion-scale));
+  --dur-slow: calc(360ms * var(--motion-scale));
+  --dur-slower: calc(600ms * var(--motion-scale));
+
+  /* Asymmetric on purpose: things arrive with a decelerating ease and leave quickly.
+     An exit that takes as long as the entrance reads as lag, not as polish. */
+  --ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --ease-in-out: cubic-bezier(0.5, 0, 0.5, 1);
+  --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+
+  /* Named transitions, so a component states what it is animating rather than
+     restating a duration-and-easing pair that then drifts from its neighbours. */
+  --t-colors: color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+  --t-transform: transform var(--dur-base) var(--ease-out);
+  --t-fade: opacity var(--dur-base) var(--ease-out);
+
+  /* Stagger step for lists that animate in row by row. Kept here so the rhythm of a
+     table appearing matches the rhythm of the nav underlining itself. */
+  --stagger: calc(24ms * var(--motion-scale));
+}
+
+/*
+ * Dark theme. Only the semantic layer is redefined — the ramps and every duration are
+ * untouched, which is the test of whether the indirection above is real.
+ *
+ * Not a black page. Apple's dark canvas is #000000; this one is #1D1D1F with #2C2C2E
+ * panels on it, which is apple.com's dark ground and the platform's elevated dark
+ * appearance. The reason is the same
+ * one that put a white page under grey cards in the light theme: the interface is a set of
+ * blocks separated by one step of fill, and against pure black the first step has nowhere
+ * below it to go, so every panel edge would have to be drawn with a border instead.
+ *
+ * The attribute is `data-bs-theme`, and that it is Bootstrap's own name is the point rather
+ * than a coincidence. The store writes exactly one attribute, so the framework and the console
+ * cannot disagree about which theme is on.
+ *
+ * They did disagree, for as long as these two blocks were keyed on a `data-theme` nobody set.
+ * The bug was invisible from either end: a machine on a dark OS got the dark theme from the
+ * media query below, and Bootstrap's own components got their dark values from theme.css, so
+ * the only broken case was the one nobody tests — choosing Dark explicitly on a light machine,
+ * which produced dark form controls on a near-white page. A second attribute name is a second
+ * source of truth, and this is what one costs.
+ *
+ * The OS preference is guarded with :not([data-bs-theme="light"]) so an explicit light choice
+ * still wins on a machine set to dark.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-bs-theme="light"]) {
+    /*
+     * The same machinery, pointed the other way. The tint is the dark page and the surfaces
+     * mix *up* toward a light grey instead of down toward a mid one, so a panel is still one
+     * soft step away from the page and a hairline still one firm step.
+     *
+     * The percentages are not the light theme's. Moving 8% toward #AEAEB2 from a near-black
+     * page is a much larger visual step than moving 8% toward #8E8E93 from a near-white one,
+     * and using one set of numbers for both gives a dark theme whose panels either vanish or
+     * glow. These four were picked to land on the greys the dark theme had when they were
+     * written by hand: #2E2E30 for a panel, #3A3A3D for a hover.
+     */
+    --tint: #1d1d1f;
+    --tint-blend: var(--grey-300);
+    --tint-panel: 88%;
+    --tint-hover: 80%;
+    --tint-line: 76%;
+    --tint-line-strong: 64%;
+
+    --surface-inverse: var(--grey-100);
+
+    /* systemBlue's dark-appearance value, one step lighter than the light theme's, because a
+       #007AFF fill on a #2C2C2E panel is the blue sinking into the dark. Hover moves to
+       #007AFF, so the white label gains contrast under the pointer here too. */
+    --action: var(--accent-400);
+    --action-hover: var(--accent-600);
+    --action-ink: var(--grey-0);
+
+    --ink: var(--grey-0);
+    --ink-soft: var(--grey-300);
+    --ink-faint: var(--grey-500);
+    --ink-inverse: var(--black);
+    --ink-accent: var(--accent-200);
+
+    --veil: rgba(0, 0, 0, 0.5);
+
+    --ok-ink: #6fd3a3;
+    --ok-wash: #10281d;
+    --ok-line: #235f43;
+
+    --warn-ink: #f0c473;
+    --warn-wash: #2b2010;
+    --warn-line: #6b5220;
+
+    --bad-ink: #f39aa4;
+    --bad-wash: #2d1418;
+    --bad-line: #71303a;
+
+    --info-ink: var(--accent-200);
+    --info-wash: #0c2333;
+    --info-line: #1d4c6b;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+  }
+}
+
+/* The same overrides, applied by the in-app toggle rather than by the OS. Written out
+   twice rather than shared through a selector list, because combining them would lose
+   to the media query on specificity in exactly the case the toggle exists for. */
+:root[data-bs-theme="dark"] {
+  --tint: #1d1d1f;
+  --tint-blend: var(--grey-300);
+  --tint-panel: 88%;
+  --tint-hover: 80%;
+  --tint-line: 76%;
+  --tint-line-strong: 64%;
+
+  --surface-inverse: var(--grey-100);
+
+  --action: var(--accent-400);
+  --action-hover: var(--accent-600);
+  --action-ink: var(--grey-0);
+
+  --ink: var(--grey-0);
+  --ink-soft: var(--grey-300);
+  --ink-faint: var(--grey-500);
+  --ink-inverse: var(--black);
+  --ink-accent: var(--accent-200);
+
+  --veil: rgba(0, 0, 0, 0.5);
+
+  --ok-ink: #6fd3a3;
+  --ok-wash: #10281d;
+  --ok-line: #235f43;
+
+  --warn-ink: #f0c473;
+  --warn-wash: #2b2010;
+  --warn-line: #6b5220;
+
+  --bad-ink: #f39aa4;
+  --bad-wash: #2d1418;
+  --bad-line: #71303a;
+
+  --info-ink: var(--accent-200);
+  --info-wash: #0c2333;
+  --info-line: #1d4c6b;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+/*
+ * One rule, and the entire app stops moving. This is what --motion-scale is for: no
+ * component needs its own reduced-motion branch, so none of them can forget to have one.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-scale: 0;
+  }
+}

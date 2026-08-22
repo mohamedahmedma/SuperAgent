@@ -29,7 +29,12 @@ from sqlalchemy.orm import Session
 
 from records import identity
 from records.db import get_db
-from records.models import AccessAudit, ApiKey, Guardian, GuardianStudent, Student
+from records.guardian_directory import (
+    GuardianDirectoryUnavailable,
+    PermittedStudent,
+    get_directory,
+)
+from records.models import AccessAudit, ApiKey
 
 logger = logging.getLogger(__name__)
 
@@ -275,53 +280,75 @@ def resolve_permitted_student(
     student_external_id: str,
     caller: Caller,
     endpoint: str,
-) -> Student:
+) -> PermittedStudent:
     """The chokepoint. Every parent-facing read passes through here first.
 
-    Returns the student only when an active link exists *and* carries
-    `can_view_records`. Anything else raises, and every outcome — including the
-    successful one — is written to the audit before this function returns.
+    Returns the child only when the school's system of record says this guardian may be
+    told about her. Anything else raises, and every outcome — including the successful
+    one — is written to the audit before this function returns.
 
-    Note what is deliberately indistinguishable from the caller's side: an unknown
-    student, a student who exists but is not this guardian's, and a student whose
-    records are restricted all produce the same 404 and the same message. The audit
-    records which one actually happened; the response does not, because a caller who
-    can tell those apart can enumerate the student body and detect custody
-    restrictions by their error code alone.
+    **The answer is asked for, never remembered.** This service used to hold guardian links
+    in its own tables; it now puts the question to SIS on every request, so a registrar
+    revoking access the minute a court order arrives takes effect on the next question
+    rather than whenever something here was next synchronised.
+
+    Note what stays deliberately indistinguishable from the caller's side: an unknown
+    student, a student who exists but is not this guardian's, and a student whose records
+    are restricted all produce the same 404 and the same message. The audit records which
+    one actually happened; the response does not, because a caller who could tell them
+    apart could enumerate the student body and detect custody restrictions by their error
+    code alone.
+
+    A directory that cannot be reached is the one case that is *not* a 404. Telling a
+    parent "no such child" because another service was briefly down is a lie about their
+    own family, so it is a 503 and says so.
     """
-    guardian = (
-        db.query(Guardian)
-        .filter(Guardian.external_id == guardian_external_id, Guardian.is_active.is_(True))
-        .first()
-    )
-    student = db.query(Student).filter(Student.external_id == student_external_id).first()
-
-    link = None
-    if guardian is not None and student is not None:
-        link = (
-            db.query(GuardianStudent)
-            .filter(
-                GuardianStudent.guardian_id == guardian.id,
-                GuardianStudent.student_id == student.id,
-            )
-            .first()
+    try:
+        # The full list rather than a single lookup, so the audit can still say *why* a
+        # denial happened. It costs nothing extra — `permits` reads the same list — and
+        # the reason is the part that matters later: a run of `no_children` against one
+        # guardian is somebody probing with a handle that reaches nobody, while a run of
+        # `no_link` is somebody walking student numbers against a real parent's handle.
+        children = get_directory().children_of(guardian_external_id)
+        student = next(
+            (child for child in children if child.student_id == str(student_external_id)),
+            None,
         )
+    except GuardianDirectoryUnavailable as error:
+        logger.error("Guardian directory unavailable: %s", error)
+        write_audit(
+            db,
+            endpoint=endpoint,
+            allowed=False,
+            reason="directory_unavailable",
+            guardian_external_id=guardian_external_id,
+            student_external_id=student_external_id,
+            api_key_prefix=caller.prefix,
+            request_id=caller.request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "not_configured",
+                "message": "The school's records are temporarily unavailable.",
+            },
+        ) from error
 
-    if guardian is None:
-        reason = "unknown_guardian"
-    elif student is None:
-        reason = "unknown_student"
-    elif link is None:
-        reason = "no_link"
-    elif not link.can_view_records:
-        reason = "records_restricted"
-    else:
+    if student is not None:
         reason = "ok"
+    elif not children:
+        # The handle reaches nobody the school will talk about: an unknown guardian, or
+        # one every link of whose is restricted. SIS filters restricted links out before
+        # answering, so those two arrive here identical — deliberately, since a caller who
+        # could tell them apart could detect a custody restriction from the outside.
+        reason = "no_children"
+    else:
+        reason = "no_link"
 
     write_audit(
         db,
         endpoint=endpoint,
-        allowed=reason == "ok",
+        allowed=student is not None,
         reason=reason,
         guardian_external_id=guardian_external_id,
         student_external_id=student_external_id,
@@ -329,7 +356,7 @@ def resolve_permitted_student(
         request_id=caller.request_id,
     )
 
-    if reason != "ok":
+    if student is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "not_found", "message": "No such student record for this guardian."},
@@ -338,27 +365,24 @@ def resolve_permitted_student(
     return student
 
 
-def permitted_students(db: Session, *, guardian_external_id: str) -> list[Student]:
-    """Every student this guardian may ask about. Restricted links are excluded."""
-    guardian = (
-        db.query(Guardian)
-        .filter(Guardian.external_id == guardian_external_id, Guardian.is_active.is_(True))
-        .first()
-    )
-    if guardian is None:
-        return []
+def permitted_students(
+    db: Session, *, guardian_external_id: str
+) -> list[PermittedStudent]:
+    """Every child this guardian may ask about. Restricted links are already excluded.
 
-    rows = (
-        db.query(Student)
-        .join(GuardianStudent, GuardianStudent.student_id == Student.id)
-        .filter(
-            GuardianStudent.guardian_id == guardian.id,
-            GuardianStudent.can_view_records.is_(True),
-            Student.is_active.is_(True),
-        )
-        .all()
-    )
-    return list(rows)
+    The filtering happens in SIS rather than here — it returns only links carrying
+    `can_view_records` — so a barred parent arrives holding no children at all rather than
+    holding children this service would have to remember to hide.
+
+    An unreachable directory returns empty rather than raising, because the only caller is
+    the "list my children" route and an empty list there renders as "no children on file",
+    which is recoverable. The read routes below it raise properly.
+    """
+    try:
+        return list(get_directory().children_of(guardian_external_id))
+    except GuardianDirectoryUnavailable as error:
+        logger.error("Guardian directory unavailable while listing children: %s", error)
+        return []
 
 
 def bootstrap_admin_key(db: Session) -> str | None:

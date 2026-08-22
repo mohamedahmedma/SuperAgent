@@ -11,7 +11,15 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
+import logging
+
 from records import auth, lms
+from records.guardian_directory import PermittedStudent
+from records.calendar import (
+    CalendarUnavailable,
+    SchoolTerm,
+    get_calendar,
+)
 from records.assembler import AttendanceAssembler, GradeAssembler, term_prefix
 from records.db import get_db
 from records.grading import DEFAULT_POLICY
@@ -42,6 +50,8 @@ from records.schemas import (
     TermOut,
 )
 
+logger = logging.getLogger(__name__)
+
 agent_router = APIRouter(prefix="/v1", tags=["records"])
 admin_router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
@@ -69,75 +79,121 @@ def _student_ref(student: Student) -> StudentRef:
     )
 
 
-def _term_out(term: Term) -> TermOut:
-    now = _now()
-    starts, ends = term.starts_on, term.ends_on
-    # SQLite hands back naive datetimes even from a timezone-aware column, so the
-    # comparison below would raise on a perfectly valid row. Normalise rather than
-    # forbid SQLite, which is the default for local development.
-    if starts.tzinfo is None:
-        starts = starts.replace(tzinfo=timezone.utc)
-    if ends.tzinfo is None:
-        ends = ends.replace(tzinfo=timezone.utc)
+def _term_out(term: SchoolTerm) -> TermOut:
+    """The contract's term, from the school's own calendar.
 
+    No timezone repair here any more. `SchoolTerm` is built at the boundary and is never
+    naive, which is what the ORM row this replaced could not promise — SQLite handed those
+    back without a zone, and every caller had to remember to re-attach one before
+    comparing.
+    """
     return TermOut(
         term_id=term.code,
         name_ar=term.name_ar,
         name_en=term.name_en,
         academic_year=term.academic_year,
-        starts_on=starts,
-        ends_on=ends,
+        starts_on=term.starts_on,
+        ends_on=term.ends_on,
         is_closed=term.is_closed,
-        is_current=starts <= now <= ends,
+        is_current=term.is_current,
     )
 
 
-def _resolve_term(db: Session, term_code: str | None) -> Term:
-    """Named term, or the one we are in.
+def _resolve_term(db: Session, term_code: str | None) -> SchoolTerm:
+    """Named term, or the one we are in — asked of the school, not remembered here.
 
-    Falling back to the current term is what lets a parent ask "how is she doing"
-    without naming a term. When no term contains today — a school holiday, a gap
-    between years — the most recently started term wins, because "the term that just
-    ended" is what a parent means in August.
+    Falling back to the current term is what lets a parent ask "how is she doing" without
+    naming one. When today falls in no term — a holiday, a gap between years — the most
+    recently started term wins, because "the term that just ended" is what a parent means
+    in August.
+
+    `db` is still taken and no longer read. Kept so that every caller's signature is
+    unchanged while the calendar moves; removing it is a separate, mechanical edit.
+
+    A calendar that cannot be reached is a 503, never a 404. "No such term" and "the
+    school's records are down" are different things to tell a parent, and only one of them
+    is their problem.
     """
-    if term_code:
-        term = db.query(Term).filter(Term.code == term_code).first()
-        if term is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "unknown_term", "message": f"No term '{term_code}'."},
-            )
-        return term
+    try:
+        calendar = get_calendar()
+        if term_code:
+            term = calendar.term(term_code)
+            if term is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "unknown_term", "message": f"No term '{term_code}'."},
+                )
+            return term
 
-    now = _now().replace(tzinfo=None)
-    current = (
-        db.query(Term)
-        .filter(Term.starts_on <= now, Term.ends_on >= now)
-        .order_by(Term.starts_on.desc())
-        .first()
-    )
-    if current is not None:
-        return current
+        current = calendar.current_term()
+    except CalendarUnavailable as error:
+        logger.error("School calendar unavailable: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "lms_unavailable",
+                "message": "The school's records are temporarily unavailable.",
+            },
+        ) from error
 
-    fallback = db.query(Term).order_by(Term.starts_on.desc()).first()
-    if fallback is None:
+    if current is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "unknown_term", "message": "No terms are configured."},
         )
-    return fallback
+    return current
 
 
-def _bindings_for(db: Session, student: Student, term: Term) -> list[CourseBinding]:
+def _term_argument(adapter: object, term: SchoolTerm) -> str:
+    """Name a term the way this backend expects to be asked.
+
+    `term_prefix` produces `"2026-T1-"`, which is a **Moodle idnumber convention**: its
+    courses are called `2026-T1-G7A-MATH`, and the trailing hyphen is what stops
+    `"2026-T1"` also matching `"2026-T10"`. A backend that stores marks against the
+    school's own term codes wants the bare `"2026-T1"` and matches nothing at all when
+    handed the prefixed form — which fails as an empty report rather than an error, so the
+    parent is told their child has no marks this term.
+
+    Keyed off the same capability as subject naming because it is the same underlying
+    fact: whether this backend speaks Moodle's conventions or the school's own.
+    """
+    if getattr(adapter, "reports_own_subjects", False):
+        return term.code
+    return term_prefix(term.code)
+
+
+def _local_term_id(db: Session, term_code: str) -> int | None:
+    """This service's own row id for a term, or `None` when it has none.
+
+    Terms themselves now come from the school's calendar, but two tables here still key
+    on a local id: `course_bindings`, which is Moodle-mapping data this service genuinely
+    owns, and `report_cards`, which are frozen snapshots it published. Both are looked up
+    by the code the calendar reports rather than by an id the caller carries, so the local
+    row is an implementation detail of those two features and not part of the term.
+    """
+    row = db.query(Term).filter(Term.code == term_code).first()
+    return row.id if row is not None else None
+
+
+def _bindings_for(
+    db: Session, student: PermittedStudent, term: SchoolTerm
+) -> list[CourseBinding]:
     """Published courses for this student's grade level and section in this term.
 
     Unpublished bindings are invisible here by design — a registrar entering next
     term's courses, or a teacher's sandbox, cannot reach a parent.
+
+    Only ever reached on a backend that does *not* name its own subjects; see
+    `LmsAdapter.reports_own_subjects`. A school with no local term row has no bindings
+    either, which is the same empty answer by a shorter route.
     """
+    term_id = _local_term_id(db, term.code)
+    if term_id is None:
+        return []
     return (
         db.query(CourseBinding)
         .filter(
-            CourseBinding.term_id == term.id,
+            CourseBinding.term_id == term_id,
             CourseBinding.grade_level == student.grade_level,
             CourseBinding.section == student.section,
             CourseBinding.is_published.is_(True),
@@ -169,9 +225,29 @@ def list_terms(
     db: Session = Depends(get_db),
     caller: auth.Caller = Depends(auth.require_agent_key),
 ) -> list[TermOut]:
-    """Terms the school has configured. Carries no student data, so needs no subject."""
-    terms = db.query(Term).order_by(Term.starts_on.desc()).all()
-    return [_term_out(t) for t in terms]
+    """Terms the school has configured. Carries no student data, so needs no subject.
+
+    Read from the school's own calendar rather than a table here, like every other term
+    in this service. Reading the local table would answer with whatever this service last
+    happened to hold — which, now that terms live in SIS, is nothing.
+    """
+    try:
+        calendar = get_calendar()
+        current = calendar.current_term()
+    except CalendarUnavailable as error:
+        logger.error("School calendar unavailable while listing terms: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "lms_unavailable",
+                "message": "The school's records are temporarily unavailable.",
+            },
+        ) from error
+
+    # `current_term` is the only listing the port promises, so the answer is that term
+    # when there is one. A caller wanting the whole year asks SIS, which owns the
+    # calendar; this route exists so an agent can name the term it is asking about.
+    return [_term_out(current)] if current is not None else []
 
 
 @agent_router.get(
@@ -217,7 +293,14 @@ def get_grades(
         endpoint=str(request.url.path),
     )
     resolved_term = _resolve_term(db, term)
-    bindings = _bindings_for(db, student, resolved_term)
+    adapter = _adapter_or_503()
+
+    # A backend that names its own subjects needs no binding table — see
+    # `LmsAdapter.reports_own_subjects`. SIS stores marks against the school's own subject
+    # codes, so requiring bindings there would drop every subject and tell a parent their
+    # child has no marks until the whole curriculum had been re-entered into this service,
+    # which is supposed to hold no data of its own.
+    unbound = getattr(adapter, "reports_own_subjects", False)
 
     # No published courses: an empty `courses` list is the honest answer, and the agent
     # renders it as "nothing recorded for her this term" rather than inventing subjects.
@@ -225,21 +308,27 @@ def get_grades(
     # Asked for BEFORE the LMS call rather than filtered afterwards. If nothing is
     # published there is nothing a parent may see, so there is no reason to ask the
     # system of record about this child at all.
+    bindings = [] if unbound else _bindings_for(db, student, resolved_term)
+
     courses: list[CourseGrade] = []
-    if bindings:
-        adapter = _adapter_or_503()
+    if bindings or unbound:
         try:
             # ONE call for the whole term, however many subjects. The per-course loop
             # this replaces was a round trip per subject, and it aggregated the results
             # itself — producing a figure that could disagree with the gradebook.
             subjects = adapter.get_subject_grades(
                 student_ref=_lms_ref(student),
-                term=term_prefix(resolved_term.code),
+                term=_term_argument(adapter, resolved_term),
             )
         except lms.LmsUnavailable:
             _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
 
-        courses = GradeAssembler(DEFAULT_POLICY).assemble(subjects, bindings)
+        assembler = GradeAssembler(DEFAULT_POLICY)
+        courses = (
+            assembler.assemble_unbound(subjects)
+            if unbound
+            else assembler.assemble(subjects, bindings)
+        )
 
     return StudentGradesOut(
         primary_figure=DEFAULT_POLICY.primary_figure,
@@ -289,29 +378,53 @@ def get_course_detail(
         endpoint=str(request.url.path),
     )
     resolved_term = _resolve_term(db, term)
-
-    # Re-derived from the permitted binding set rather than trusted from the path, so
-    # a caller cannot read an arbitrary course by guessing its id.
-    binding = next(
-        (b for b in _bindings_for(db, student, resolved_term) if str(b.lms_course_id) == course_id),
-        None,
-    )
-    if binding is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "not_found", "message": "No such subject for this student this term."},
-        )
-
     adapter = _adapter_or_503()
+    unbound = getattr(adapter, "reports_own_subjects", False)
+
+    # Re-derived from what this student may actually see rather than trusted from the
+    # path, so a caller cannot read an arbitrary course by guessing its id. On the
+    # unbound path the guard is the same in substance: the subject has to appear in the
+    # set the system of record returns for *this* child in *this* term, so an id that is
+    # not one of hers matches nothing below.
+    binding = None
+    if not unbound:
+        binding = next(
+            (
+                b
+                for b in _bindings_for(db, student, resolved_term)
+                if str(b.lms_course_id) == course_id
+            ),
+            None,
+        )
+        if binding is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "not_found",
+                    "message": "No such subject for this student this term.",
+                },
+            )
+
     try:
         subjects = adapter.get_subject_grades(
             student_ref=_lms_ref(student),
-            term=term_prefix(resolved_term.code),
+            term=_term_argument(adapter, resolved_term),
         )
     except lms.LmsUnavailable:
         _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
 
-    courses = GradeAssembler(DEFAULT_POLICY).assemble(subjects, [binding])
+    assembler = GradeAssembler(DEFAULT_POLICY)
+    if unbound:
+        # `assemble_unbound` sets `course_id` to the school's own subject code, which is
+        # what this route's path segment carries on this backend — so the filter here is
+        # the same identity check the binding lookup performs on the Moodle path.
+        courses = [
+            course
+            for course in assembler.assemble_unbound(subjects)
+            if course.course_id == course_id
+        ]
+    else:
+        courses = assembler.assemble(subjects, [binding])
     if not courses:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -349,11 +462,14 @@ def get_attendance(
         endpoint=str(request.url.path),
     )
     resolved_term = _resolve_term(db, term)
-    bindings = _bindings_for(db, student, resolved_term)
+    adapter = _adapter_or_503()
+    # See the grades route: a backend that names its own subjects needs no binding table,
+    # and gating the call behind one reports a term of registers as no attendance at all.
+    unbound = getattr(adapter, "reports_own_subjects", False)
+    bindings = [] if unbound else _bindings_for(db, student, resolved_term)
 
     subjects: list = []
-    if bindings:
-        adapter = _adapter_or_503()
+    if bindings or unbound:
         try:
             # ONE call for the term. The shape this replaces walked every session in
             # every course, and the system of record handed back the whole class each
@@ -361,12 +477,12 @@ def get_attendance(
             # not see. That is now impossible rather than filtered.
             subjects = adapter.get_subject_attendance(
                 student_ref=_lms_ref(student),
-                term=term_prefix(resolved_term.code),
+                term=_term_argument(adapter, resolved_term),
             )
         except lms.LmsUnavailable:
             _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
 
-    assembler = AttendanceAssembler(bindings)
+    assembler = AttendanceAssembler(bindings, unbound=unbound)
     visible = assembler.visible(subjects)
     counts = assembler.counts(visible)
 
@@ -414,7 +530,7 @@ def get_report_card(
         db.query(ReportCard)
         .filter(
             ReportCard.student_id == student.id,
-            ReportCard.term_id == term.id,
+            ReportCard.term_id == _local_term_id(db, term.code),
             ReportCard.superseded_at.is_(None),
         )
         .order_by(ReportCard.version.desc())
@@ -473,71 +589,56 @@ def _raise_unavailable(db, caller, request, guardian_id, student_id):
 # ---------------------------------------------------------------------------
 
 
-@admin_router.post("/guardians", status_code=status.HTTP_201_CREATED)
-def create_guardian(
-    body: GuardianIn,
-    db: Session = Depends(get_db),
+# ---------------------------------------------------------------------------
+# Guardian administration — moved, not removed
+# ---------------------------------------------------------------------------
+#
+# These three routes used to write this service's own guardian tables. Those tables are no
+# longer read: who a child's parents are is the registrar's fact and lives in SIS, and this
+# service asks rather than remembers (see records/guardian_directory.py).
+#
+# They answer 410 instead of being deleted outright. A removed route is a 404, which a
+# caller reads as "wrong URL" and retries; a 410 says the thing itself is gone and names
+# where it went. What they must never do is what they would do if left alone — accept the
+# write, return 201, and change nothing, so that a registrar believes a parent has been
+# granted access to their child's records when nobody has.
+
+_MOVED_TO_SIS = {
+    "code": "moved",
+    "message": (
+        "Guardians are managed in the school's SIS. Upload them there "
+        "(POST /v1/imports/guardians/preview) and change records access with "
+        "PATCH /v1/students/{student_number}/guardians/{phone}."
+    ),
+}
+
+
+@admin_router.post("/guardians", status_code=status.HTTP_410_GONE)
+def create_guardian_moved(
     caller: auth.Caller = Depends(auth.require_admin_key),
 ) -> dict:
-    if db.query(Guardian).filter(Guardian.external_id == body.external_id).first():
-        raise HTTPException(status_code=409, detail={"code": "conflict", "message": "Guardian exists."})
-
-    guardian = Guardian(**body.model_dump())
-    db.add(guardian)
-    db.commit()
-    return {"guardian_id": guardian.external_id}
+    """Gone. Guardians are created by the SIS spreadsheet import."""
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=_MOVED_TO_SIS)
 
 
-@admin_router.post("/guardians/{guardian_id}/students", status_code=status.HTTP_201_CREATED)
-def link_student(
-    guardian_id: str,
-    body: GuardianLinkIn,
-    db: Session = Depends(get_db),
-    caller: auth.Caller = Depends(auth.require_admin_key),
+@admin_router.post("/guardians/{guardian_id}/students", status_code=status.HTTP_410_GONE)
+def link_student_moved(
+    guardian_id: str, caller: auth.Caller = Depends(auth.require_admin_key)
 ) -> dict:
-    """Link a guardian to a student, and set whether they may see records.
-
-    Creating the link and granting records access are one call but two decisions —
-    `can_view_records` defaults to False, so an import that omits it grants nothing.
-    """
-    guardian = db.query(Guardian).filter(Guardian.external_id == guardian_id).first()
-    student = db.query(Student).filter(Student.external_id == body.student_id).first()
-    if guardian is None or student is None:
-        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown guardian or student."})
-
-    link = (
-        db.query(GuardianStudent)
-        .filter(GuardianStudent.guardian_id == guardian.id, GuardianStudent.student_id == student.id)
-        .first()
-    )
-    if link is None:
-        link = GuardianStudent(guardian_id=guardian.id, student_id=student.id)
-        db.add(link)
-
-    link.relationship_type = body.relationship_type
-    link.can_view_records = body.can_view_records
-    link.restriction_note = body.restriction_note
-    db.commit()
-    return {"guardian_id": guardian_id, "student_id": body.student_id, "can_view_records": link.can_view_records}
+    """Gone. Links are created by the SIS import and amended on the SIS access route."""
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=_MOVED_TO_SIS)
 
 
-@admin_router.delete("/guardians/{guardian_id}/students/{student_id}")
-def unlink_student(
+@admin_router.delete(
+    "/guardians/{guardian_id}/students/{student_id}", status_code=status.HTTP_410_GONE
+)
+def unlink_student_moved(
     guardian_id: str,
     student_id: str,
-    db: Session = Depends(get_db),
     caller: auth.Caller = Depends(auth.require_admin_key),
 ) -> dict:
-    guardian = db.query(Guardian).filter(Guardian.external_id == guardian_id).first()
-    student = db.query(Student).filter(Student.external_id == student_id).first()
-    if guardian is None or student is None:
-        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Unknown guardian or student."})
-
-    db.query(GuardianStudent).filter(
-        GuardianStudent.guardian_id == guardian.id, GuardianStudent.student_id == student.id
-    ).delete()
-    db.commit()
-    return {"deleted": True}
+    """Gone. Unlinking is a SIS operation."""
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=_MOVED_TO_SIS)
 
 
 @admin_router.post("/api-keys", response_model=ApiKeyOut, status_code=status.HTTP_201_CREATED)

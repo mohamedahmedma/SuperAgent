@@ -20,12 +20,14 @@ written against, with no database in sight.
 """
 from dataclasses import dataclass, replace
 from datetime import date
+from enum import StrEnum
 from typing import ClassVar, TypeVar
 
 from sis.domain.errors import InvalidDateRange, ValidationError
 from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,
+    SchoolCode,
     SubjectCode,
     TermCode,
     YearCode,
@@ -97,6 +99,70 @@ class _Named:
         )
 
 
+class Stage(StrEnum):
+    """The division of a school a rung belongs to: garden, primary, preparatory, secondary.
+
+    A grouping, deliberately, and not a level of the hierarchy in its own right. Schools in
+    scope talk about "the garden" and "the secondary school" as parts of one institution,
+    and a registrar looking for Year 8 looks under preparatory — so this exists to make a
+    list of fourteen rungs readable, and for nothing else. It carries no rules: no rung is
+    barred from a class, a term or a subject because of its stage, and a school that does
+    not use the distinction leaves everything in UNSPECIFIED and never sees it.
+
+    Stored as text rather than an integer so a database dump is readable and so adding a
+    stage later is not a renumbering of the ones already stored. UNSPECIFIED exists because
+    it is what every rung was before this field did, and a migration must not have to guess.
+    """
+
+    UNSPECIFIED = "unspecified"
+    GARDEN = "garden"
+    PRIMARY = "primary"
+    PREPARATORY = "preparatory"
+    SECONDARY = "secondary"
+
+    @property
+    def order(self) -> int:
+        """Youngest first, which is the order a school lists its own divisions in."""
+        return _STAGE_ORDER[self]
+
+
+_STAGE_ORDER = {
+    Stage.GARDEN: 0,
+    Stage.PRIMARY: 1,
+    Stage.PREPARATORY: 2,
+    Stage.SECONDARY: 3,
+    # Last, not first: an ungrouped rung is one nobody has classified yet, and it belongs
+    # at the bottom of the list rather than above the kindergarten.
+    Stage.UNSPECIFIED: 4,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class School(_Named):
+    """One school. The service held exactly one for its whole life and now holds several.
+
+    What this type is really for is the boundary. Every year, rung, class, mark and
+    placement below it belongs to one school, and the failure it exists to prevent is the
+    quiet one: two branches each running a 3A, and a register showing a child at a school
+    she has never attended. Nothing here crosses that boundary except a child herself — a
+    Student is a person rather than a school's property, so a child moving between branches
+    is a transfer and not a second record of the same girl.
+
+    `is_active` closes a branch without deleting it, for the same reason a retired subject
+    is deactivated rather than dropped: the registers and marks of the years it ran are
+    still true.
+    """
+
+    code: SchoolCode | str
+    name_en: str
+    name_ar: str
+    is_active: bool = True
+
+    def __post_init__(self) -> None:
+        _coerce("code", SchoolCode, self)
+        _coerce_names(self)
+
+
 @dataclass(frozen=True, slots=True)
 class AcademicYear(_Named):
     """One school year, e.g. `2025-2026`, and the dates it spans.
@@ -108,6 +174,7 @@ class AcademicYear(_Named):
     """
 
     code: AcademicYearCode | str
+    school_code: SchoolCode | str
     name_en: str
     name_ar: str
     starts_on: date
@@ -116,6 +183,7 @@ class AcademicYear(_Named):
 
     def __post_init__(self) -> None:
         _coerce("code", AcademicYearCode, self)
+        _coerce("school_code", SchoolCode, self)
         _coerce_names(self)
         _check_range(self.starts_on, self.ends_on, "ends_on")
 
@@ -147,13 +215,29 @@ class YearLevel(_Named):
     """
 
     code: YearCode | str
+    school_code: SchoolCode | str
     name_en: str
     name_ar: str
     display_order: int
+    stage: Stage = Stage.UNSPECIFIED
 
     def __post_init__(self) -> None:
         _coerce("code", YearCode, self)
+        _coerce("school_code", SchoolCode, self)
         _coerce_names(self)
+        # The raw string a spreadsheet or a form sends is accepted, so a caller never has
+        # to import the enum to state a stage. An unknown value is refused rather than
+        # quietly falling back to UNSPECIFIED: "secondry" would otherwise create a rung
+        # that is silently missing from the secondary group on every screen that groups.
+        if not isinstance(self.stage, Stage):
+            try:
+                object.__setattr__(self, "stage", Stage(str(self.stage).strip().lower()))
+            except ValueError:
+                raise ValidationError(
+                    f"{self.stage!r} is not a stage; expected one of "
+                    + ", ".join(member.value for member in Stage),
+                    field="stage",
+                ) from None
         # A bool is an int, and `display_order=True` would silently mean "position 1".
         if isinstance(self.display_order, bool) or not isinstance(self.display_order, int):
             raise ValidationError(
@@ -161,9 +245,14 @@ class YearLevel(_Named):
             )
 
     @property
-    def sort_key(self) -> tuple[int, str]:
-        """Order for display. Code breaks ties so the sort is stable across processes."""
-        return (self.display_order, str(self.code))
+    def sort_key(self) -> tuple[int, int, str]:
+        """Stage, then stated order, then code so the sort is stable across processes.
+
+        Stage leads because that is how the list is read: a registrar scanning fourteen
+        rungs finds the garden block, then primary. Within a stage `display_order` still
+        decides, which is the reason it was stored explicitly in the first place.
+        """
+        return (self.stage.order, self.display_order, str(self.code))
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,7 +348,13 @@ class Term(_Named):
 
 @dataclass(frozen=True, slots=True)
 class Subject(_Named):
-    """A taught subject, e.g. `MATH`. Global, not per year level.
+    """A taught subject inside one academic year, e.g. `MATH` in `2025-2026`.
+
+    Identity is the pair, not the code. A school sets its own catalogue each year, so
+    `MATH` in two years is two subjects — and the cost of that, which the caller has to
+    know about, is that a mark on one is not comparable to a mark on the other. Anything
+    wanting a child's mathematics across three years has to match on the code string and
+    accept that the school may have meant something different by it each time.
 
     `is_active` retires a subject instead of deleting it: grades already stated against
     a dropped subject must keep resolving, and a code that vanishes turns last year's
@@ -267,6 +362,7 @@ class Subject(_Named):
     """
 
     code: SubjectCode | str
+    academic_year_code: AcademicYearCode | str
     name_en: str
     name_ar: str
     display_order: int = 0
@@ -276,6 +372,7 @@ class Subject(_Named):
 
     def __post_init__(self) -> None:
         _coerce("code", SubjectCode, self)
+        _coerce("academic_year_code", AcademicYearCode, self)
         _coerce_names(self)
         if isinstance(self.display_order, bool) or not isinstance(self.display_order, int):
             raise ValidationError(

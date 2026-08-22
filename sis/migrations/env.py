@@ -94,17 +94,60 @@ def run_migrations_online() -> None:
     engine = create_engine(_database_url(), poolclass=pool.NullPool, future=True)
     try:
         with engine.connect() as connection:
+            is_sqlite = connection.dialect.name == "sqlite"
+
+            if is_sqlite:
+                # SQLite has no ALTER for a constraint, so alembic's batch mode rebuilds
+                # the table: create a copy, move the rows, drop the original, rename. With
+                # foreign keys enforced — and `sis/infrastructure/db/session.py` turns them
+                # on for every connection this service opens — that DROP is refused the
+                # moment another table references the one being rebuilt, and the migration
+                # dies half-applied. It is SQLite's own documented procedure to disable
+                # enforcement for the duration of a schema change, and this is the only
+                # place in the service that performs one.
+                #
+                # The check afterwards is the other half of the bargain: enforcement off
+                # means a mistake in a revision could leave a dangling reference silently,
+                # so the references are verified before this process is allowed to exit.
+                connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+                # Committed immediately, and this line is load-bearing. SQLAlchemy opens a
+                # transaction on the first statement, so leaving it open would wrap the
+                # entire migration in a transaction that this block never commits: alembic's
+                # own commit closes its nested one and changes nothing, and every row the
+                # revision wrote — the backfill *and* the `alembic_version` stamp — is
+                # rolled back when the connection closes. DDL survives that rollback because
+                # SQLite's is non-transactional, so the symptom is the worst available one:
+                # a half-applied schema, an unchanged revision, and an exit code of zero.
+                connection.commit()
+
             context.configure(
                 connection=connection,
                 target_metadata=target_metadata,
                 compare_type=True,
-                # SQLite cannot ALTER a column, so alembic has to rebuild the table.
-                # Enabled by dialect rather than always, because batch mode on Postgres
-                # would turn a cheap ALTER into a full table copy under a lock.
-                render_as_batch=connection.dialect.name == "sqlite",
+                # Batch mode by dialect rather than always, because on Postgres it would
+                # turn a cheap ALTER into a full table copy under a lock.
+                render_as_batch=is_sqlite,
             )
             with context.begin_transaction():
                 context.run_migrations()
+
+            if is_sqlite:
+                broken = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
+                connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+                connection.commit()
+                if broken:
+                    # Loud, and after the fact: the rows are already written, so the point
+                    # is to make sure nobody finds out months later from a report card with
+                    # a missing subject heading.
+                    listed = ", ".join(
+                        f"{row[0]}(rowid={row[1]}) -> {row[2]}" for row in broken[:20]
+                    )
+                    raise RuntimeError(
+                        "The migration left references that do not resolve, which means a "
+                        "revision rebuilt a table without carrying its rows across "
+                        f"correctly: {listed}. Restore from backup before using this "
+                        "database — the schema is current but the data is not trustworthy."
+                    )
     finally:
         engine.dispose()
 

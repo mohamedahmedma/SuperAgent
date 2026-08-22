@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "School Identity Service",
-    "description": "Authentication for the school assistant. The only service that decides who someone is, and the only one that can mint a token.\n\n**Tokens are RS256.** Other services verify against `/.well-known/jwks.json` with a public key and hold nothing that could forge one. That is what keeps identity resolution out of the chat backend and the records facade.\n\n**The `guardian_id` claim is the whole integration.** It is set only by an administrator through `PUT /v1/admin/accounts/{username}/guardian-binding`, never at self-registration and never from a request body on a public route. A token without the claim can read no student records at all.",
+    "description": "Authentication for the school assistant. The only service that decides who someone is, and the only one that can mint a token.\n\n**Tokens are RS256.** Other services verify against `/.well-known/jwks.json` with a public key and hold nothing that could forge one. That is what keeps identity resolution out of the chat backend and the records facade.\n\n**The `guardian_id` claim is the whole integration.** It is set only by an administrator through `PUT /v1/admin/accounts/{username}/guardian-binding`, never at self-registration and never from a request body on a public route. A token without the claim can read no student records at all.\n\n**Parents sign in through WhatsApp, not with a password.** They ask for a challenge, send a pre-filled message from their own WhatsApp, and type back a code. WhatsApp proves they control the number; the school's own records decide whether that number belongs to a parent. Neither the browser nor the parent ever states which guardian they are.",
     "version": "0.1.0"
   },
   "paths": {
@@ -273,6 +273,132 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "Account temporarily locked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/whatsapp/start": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start Whatsapp Verification",
+        "description": "Begin a verification. Takes no phone number, and that is the point.\n\nBecause the caller states nothing, there is nothing here to probe: this endpoint cannot\nbe used to ask whether a given number belongs to a parent. That question is answered\nonly to somebody who can actually send a WhatsApp message from the number, and it is\nanswered over WhatsApp rather than in this response.",
+        "operationId": "start_whatsapp_verification_v1_auth_whatsapp_start_post",
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsAppStartOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/whatsapp/status": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Whatsapp Verification Status",
+        "description": "Where has this verification got to? Polled while the parent goes to tap send.",
+        "operationId": "whatsapp_verification_status_v1_auth_whatsapp_status_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WhatsAppStatusIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsAppStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/whatsapp/verify": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Complete Whatsapp Verification",
+        "description": "The code, and the tokens if it is right.\n\nThe account is created here on first use rather than by an administrator, and the\nbinding written onto it does not come from this request: it came from the school's own\nrecords, keyed on a number WhatsApp proved. That is the invariant identity/models.py\nstates — an account never names its own guardian — held through a second authority\nrather than broken by one.",
+        "operationId": "complete_whatsapp_verification_v1_auth_whatsapp_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WhatsAppVerifyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenOut"
                 }
               }
             }
@@ -849,6 +975,120 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WhatsAppStartOut": {
+        "properties": {
+          "poll_secret": {
+            "type": "string",
+            "title": "Poll Secret",
+            "description": "Hold this in the page and send it back with the code. Never shown again, never sent over WhatsApp, and never put in a URL."
+          },
+          "link": {
+            "type": "string",
+            "title": "Link",
+            "description": "Opens WhatsApp with the message already typed. The parent must still tap send — WhatsApp never sends it for them.",
+            "examples": [
+              "https://wa.me/201288339613?text=SCHOOL%20VERIFY%3A%20K7QP4M2X"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "The exact text the link pre-fills. Show it beside the button so a parent whose in-app browser swallowed the link can send it by hand.",
+            "examples": [
+              "SCHOOL VERIFY: K7QP4M2X"
+            ]
+          },
+          "business_number": {
+            "type": "string",
+            "title": "Business Number",
+            "description": "The school's WhatsApp number, for the same manual fallback.",
+            "examples": [
+              "+201288339613"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "poll_secret",
+          "link",
+          "message",
+          "business_number",
+          "expires_at"
+        ],
+        "title": "WhatsAppStartOut",
+        "description": "What a browser gets when it begins a WhatsApp verification.\n\n`poll_secret` is shown exactly once and is never recoverable — it is this browser's\nhalf of the proof, and the reason somebody who forwards the link cannot finish the\nlogin in your place."
+      },
+      "WhatsAppStatusIn": {
+        "properties": {
+          "poll_secret": {
+            "type": "string",
+            "title": "Poll Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "poll_secret"
+        ],
+        "title": "WhatsAppStatusIn",
+        "description": "In a body, not a query string: a poll secret in a URL is a credential in a log."
+      },
+      "WhatsAppStatusOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "pending | code_sent | verified | rejected",
+            "examples": [
+              "code_sent"
+            ]
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "The parent's name once the school's records have identified her, so the page can greet her before she has an account. Empty until then.",
+            "default": ""
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "expires_at"
+        ],
+        "title": "WhatsAppStatusOut",
+        "description": "Where a verification has got to, with nothing in it a stranger could use."
+      },
+      "WhatsAppVerifyIn": {
+        "properties": {
+          "poll_secret": {
+            "type": "string",
+            "title": "Poll Secret"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "The six digits sent over WhatsApp.",
+            "examples": [
+              "482103"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "poll_secret",
+          "code"
+        ],
+        "title": "WhatsAppVerifyIn"
       }
     }
   }

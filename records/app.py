@@ -17,15 +17,48 @@ Each backend's credentials are demanded here, at startup, rather than discovered
 first parent question. A misconfigured deployment should refuse to start; the failure
 mode it replaces is a service that looks healthy until someone asks about a child.
 """
+import logging
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from records import lms
+from records import calendar as school_calendar
+from records import guardian_directory, lms
 from records.db import SessionLocal, init_db
 from records.routes import admin_router, agent_router
 from records.sis_adapter import SisAdapter
+
+logger = logging.getLogger(__name__)
+
+
+def _configure_guardian_directory() -> None:
+    """Choose where "which children are this parent's" is answered.
+
+    Left as the empty in-memory fake when `SIS_BASE_URL` is unset, which makes an
+    unconfigured deployment tell every parent they have no children on file. That is the
+    safe direction: a support call, rather than a service quietly answering from local
+    tables nobody maintains any more.
+
+    The same `SIS_BASE_URL` the LMS adapter uses, because it is the same service — this
+    reads guardians from it while `SisAdapter` reads marks.
+    """
+    base_url = os.getenv("SIS_BASE_URL", "")
+    if not base_url:
+        logger.warning(
+            "SIS_BASE_URL is not set; guardian links resolve against an empty directory "
+            "and every parent will be told they have no children on file."
+        )
+        return
+    api_key = os.getenv("SIS_API_KEY", "")
+    guardian_directory.set_directory(
+        guardian_directory.SisGuardianDirectory(base_url=base_url, api_key=api_key)
+    )
+    # The academic calendar comes from the same service, for the same reason: a term
+    # whose dates a registrar corrected must not keep answering from a stale copy here.
+    school_calendar.set_calendar(
+        school_calendar.SisSchoolCalendar(base_url=base_url, api_key=api_key)
+    )
 
 
 def _configure_adapter() -> None:
@@ -47,7 +80,16 @@ def _configure_adapter() -> None:
         api_key = os.getenv("SIS_API_KEY", "")
         if not base_url or not api_key:
             raise RuntimeError("RECORDS_LMS=sis requires SIS_BASE_URL and SIS_API_KEY.")
-        lms.set_adapter(SisAdapter(base_url=base_url, api_key=api_key))
+        # The same calendar the routes read, handed to the adapter rather than letting it
+        # build a second one: attendance is addressed by dates, and two components
+        # resolving one term separately is how they come to disagree about it.
+        lms.set_adapter(
+            SisAdapter(
+                base_url=base_url,
+                api_key=api_key,
+                calendar=school_calendar.get_calendar(),
+            )
+        )
         return
 
     lms.set_adapter(lms.FakeLms())
@@ -65,6 +107,9 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Order matters: the LMS adapter is handed the calendar, so the calendar is
+    # chosen first.
+    _configure_guardian_directory()
     _configure_adapter()
     yield
 

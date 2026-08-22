@@ -1,0 +1,28 @@
+{
+  "name": "sis-registrar-console",
+  "version": "1.0.0",
+  "description": "The SIS registrar console: React + Vite + Bootstrap. Builds into ../web, which sis/app.py serves at /ui.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "smoke": "node tests/smoke.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "bootstrap": "^5.3.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "vite": "^5.4.21"
+  },
+  "private": true
+}
