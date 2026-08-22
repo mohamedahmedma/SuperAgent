@@ -61,6 +61,17 @@ agent:
   # ChatRequestContext.acquire_records_tool_slot.
   max_knowledge_calls_per_turn: 2
 
+  # Six turns of conversation, which is TWELVE messages — this is counted in messages,
+  # not exchanges, and setting it to 6 would give a parent three turns of memory.
+  #
+  # Six is chosen rather than inherited because this is the profile where the history
+  # window does real work: it is what lets the model follow "and what about his
+  # timetable?" back to the child settled two turns ago, without anything having to
+  # detect the Arabic enclitic possessive that question takes. The durable pin
+  # (backend/chat/child_context.py) is the mechanism; this window is what makes the
+  # model's own reading of the conversation agree with it.
+  context_window_messages: 12
+
 retrieval:
   # School corpora are small and repetitive — fee tables, calendars, policy pages
   # restated per year group — so recall matters more than precision here.

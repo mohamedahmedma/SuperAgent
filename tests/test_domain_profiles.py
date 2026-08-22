@@ -58,6 +58,18 @@ class ShippedProfilesTests(ProfileTestCase):
         os.environ[registry.PROFILE_ENV_VAR] = "ecommerce"
         self.assertEqual("ecommerce", reload_profile().name)
 
+    def test_the_school_profile_keeps_six_turns_of_conversation(self):
+        """Twelve MESSAGES, which is six exchanges — the units are the trap here.
+
+        Load-bearing for child context: this window is what lets the model follow "and
+        what about his timetable?" back to the child settled two turns earlier. That
+        question takes the Arabic enclitic possessive form, which no marker list can
+        reach, so the history is the mechanism rather than an optimisation. Halving it
+        would degrade the feature silently, with every test still green.
+        """
+        profile = load_profile("school")
+        self.assertEqual(12, profile.agent.context_window_messages)
+
     def test_unknown_profile_fails_loudly(self):
         with self.assertRaises(ProfileError) as ctx:
             load_profile("does_not_exist")
