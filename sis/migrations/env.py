@@ -42,7 +42,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False, and it is load-bearing. fileConfig defaults to True,
+    # which switches off every logger that already exists — so an in-process `upgrade head`
+    # (the test fixture does exactly this) silences the rest of the application from the
+    # moment it runs. Nothing raises; the logs simply stop.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 log = logging.getLogger("alembic.env")
 
