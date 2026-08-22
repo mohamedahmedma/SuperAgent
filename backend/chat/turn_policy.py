@@ -35,6 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from backend.chat.child_resolution import ResolvedChild
 from backend.chat.language import ARABIC, ENGLISH
 from backend.chat.signals import RequestSignals, Scope
 from backend.rag.evidence import Certainty
@@ -77,6 +78,17 @@ class TurnPlan:
     # from the signals downstream because the agent is built from the plan, and the
     # prompt has to be able to say it.
     language: str = ENGLISH
+    # The child this turn is about, as a display label. Empty when the turn is not
+    # about a child, or when which child is still an open question.
+    child_hint: str = ""
+    # The child's year group, when the roster reported one. Rendered beside the name so
+    # an answer about a general school matter can be given for the right year.
+    child_year: str = ""
+    # Children to offer when the parent has to be asked which one. Mutually exclusive
+    # with `child_hint`, and enforced as such in `_plan_child` rather than in Jinja —
+    # a template deciding between them would be policy no test could see.
+    child_options: List[str] = field(default_factory=list)
+
     # Whether this turn is worth a post-turn profile extraction.
     capture_user_info: bool = False
     reasons: List[str] = field(default_factory=list)
@@ -96,6 +108,10 @@ class TurnPlan:
             "turn_is_followup": self.is_followup,
             "turn_language": self.language,
             "turn_capture_user_info": self.capture_user_info,
+            # The resolution, never the name. This trace is persisted per message and
+            # streamed to the browser, and a turn may settle on a child silently.
+            "turn_child_resolved": bool(self.child_hint),
+            "turn_child_asked": bool(self.child_options),
             "turn_reason": "; ".join(self.reasons) or "n/a",
         }
 
@@ -131,8 +147,14 @@ def resolve_turn(
     agent_config,
     copy_config,
     rag_config=None,
+    child: Optional[ResolvedChild] = None,
 ) -> TurnPlan:
-    """Decide how this turn should run."""
+    """Decide how this turn should run.
+
+    `child` is keyword-only and defaulted, so every existing caller — a test double, an
+    integrating deployment — keeps working and simply plans a turn that is about nobody
+    in particular.
+    """
     plan = TurnPlan()
     # Independent of scope: someone can disclose their phone number in the middle of
     # an off-topic message, and that is still worth keeping.
@@ -159,12 +181,17 @@ def resolve_turn(
             "knowledge tool stays available"
         )
 
+    _plan_child(plan, child)
     plan.retrieval_sections = list(signals.candidate_sections)
     plan.scope_options = list(signals.scope_options)
     if plan.resolved_question and plan.resolved_question != signals.question:
         plan.reasons.append(f"resolved as {signals.followup_intent}")
     if plan.carried_constraints:
         plan.reasons.append(f"carrying {len(plan.carried_constraints)} condition(s) forward")
+    if plan.child_hint:
+        plan.reasons.append(f"about one child ({child.source})")
+    if plan.child_options:
+        plan.reasons.append(f"asking which of {len(plan.child_options)} children")
     if plan.retrieval_sections:
         plan.reasons.append(f"search {len(plan.retrieval_sections)} section(s) first")
     if len(plan.scope_options) > 1:
@@ -172,6 +199,27 @@ def resolve_turn(
     if not plan.reasons:
         plan.reasons.append("no signal changed the default plan")
     return plan
+
+
+def _plan_child(plan: TurnPlan, child: Optional[ResolvedChild]) -> None:
+    """Put the resolved child on the plan — as a name, or as a question, never both.
+
+    The mutual exclusion lives here because it is a decision. Expressed in the template
+    it would become `{% if hint and not options %}`, which is policy that no test covers
+    and no type checker sees — the thing `backend/prompts/__init__.py` forbids in as
+    many words.
+
+    A turn that is not about a child sets neither, and `_turn_context_message` then
+    renders nothing at all, so most turns pay nothing for this feature.
+    """
+    if child is None:
+        return
+    if child.resolved:
+        plan.child_hint = child.label
+        plan.child_year = child.year_level
+        return
+    if child.ask:
+        plan.child_options = list(child.option_labels)
 
 
 def _plan_social(signals, plan: TurnPlan, agent_config, copy_config) -> TurnPlan:

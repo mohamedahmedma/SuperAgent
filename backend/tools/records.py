@@ -24,6 +24,7 @@ import os
 import requests
 from langchain_core.tools import tool
 
+from backend.chat.child_resolution import resolve_child
 from backend.chat.child_roster import ChildOption, forget, load_roster
 from backend.chat.request_context import ChatRequestContext
 from backend.prompts import render as render_prompt
@@ -82,46 +83,34 @@ def _get(path: str, ctx: ChatRequestContext, params: dict | None = None) -> tupl
 
 
 def _match_student(
-    students: list[ChildOption], student_name: str, *, remembered: str = ""
+    students: list[ChildOption], student_name: str, *, ctx=None
 ) -> ChildOption | None:
-    """Pick the child the parent meant.
+    """Pick the child the parent meant, using the turn's one resolver.
 
-    Substring match across both scripts, because a parent writing in Arabic and a record
-    stored with a Latin transliteration are the normal case in this school, not the
-    exception. Returns None when the answer is not unambiguous — the caller then asks
-    rather than guessing, since guessing means showing one child's grades while naming
-    another.
+    A thin adapter over `backend.chat.child_resolution.resolve_child` rather than a
+    second route table. There used to be one here and another in the planner, and two
+    matchers with different rules drift — which here means the prompt naming one child
+    while the tool answers about a different one, in the same turn.
 
-    Three routes to a child, in order of how firmly the parent stated it:
+    Returns None when the answer is not unambiguous. The caller then asks rather than
+    guessing, since guessing means showing one child's grades while naming another.
 
-    1. **A name they just used.** Always wins, so "and how is Omar?" moves the
-       conversation on even when the previous question was about his sister.
-    2. **An only child.** Nothing to disambiguate, so they are never asked at all.
-    3. **The child already under discussion.** A parent who answered "Layla" once is not
-       asked again on their next question.
-
-    A name matching nobody falls through to `None` rather than quietly keeping the
-    remembered child: the parent named somebody, and answering about a different child
-    while they watch is worse than one more question.
+    A name the model supplied still wins over the pin, so "and how is Omar?" moves the
+    conversation on even when the previous question was about his sister — that is
+    route 1 of the shared resolver, reached by passing `reference="named"`.
     """
     if not students:
         return None
-    if not student_name:
-        if len(students) == 1:
-            return students[0]
-        if remembered:
-            found = next((s for s in students if s.student_id == remembered), None)
-            if found is not None:
-                return found
+    pin = getattr(ctx, "child", None)
+    found = resolve_child(
+        reference="named" if student_name else "context",
+        child_name=student_name,
+        roster=students,
+        pin=pin,
+    )
+    if not found.resolved:
         return None
-
-    needle = student_name.strip().casefold()
-    matches = [
-        s
-        for s in students
-        if needle in s.label.casefold() or needle == s.student_id.casefold()
-    ]
-    return matches[0] if len(matches) == 1 else None
+    return next((s for s in students if s.student_id == found.student_id), None)
 
 
 def make_get_student_records(ctx: ChatRequestContext):
@@ -179,9 +168,7 @@ def make_get_student_records(ctx: ChatRequestContext):
         if not students:
             return render_prompt("tools/records_result.j2", outcome="no_students")
 
-        student = _match_student(
-            students, student_name, remembered=ctx.remembered_child
-        )
+        student = _match_student(students, student_name, ctx=ctx)
         if student is None:
             # Either several children and no name, or a name matching more than one.
             # Both are questions for the parent, never a coin flip.

@@ -78,6 +78,11 @@ class RagTraceFields(StrictSchema):
     turn_scope_options: Optional[List[str]] = None
     turn_language: Optional[str] = None
     turn_capture_user_info: Optional[bool] = None
+    # Whether the turn settled on one child, and whether it had to ask. The NAME is
+    # deliberately absent for the same reason it is absent from the request half:
+    # this trace is persisted per message and streamed to the browser.
+    turn_child_resolved: Optional[bool] = None
+    turn_child_asked: Optional[bool] = None
     turn_reason: Optional[str] = None
     # What the turn was taken to be about, once references were resolved against the
     # conversation, and the conditions inherited with it.

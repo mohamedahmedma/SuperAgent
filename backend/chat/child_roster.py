@@ -206,6 +206,65 @@ def load_roster(
     return outcome, _as_options(rows)
 
 
+class _Prefetch:
+    """A roster read already in flight.
+
+    A bare thread rather than a pooled executor. There is exactly one of these per
+    parent turn, it is joined a second or two later by the code that started it, and a
+    module-level pool would add a fixed resource with an exhaustion mode — a queue of
+    turns waiting on a full pool — in exchange for saving a thread creation that costs
+    microseconds against a network call that costs seconds.
+    """
+
+    __slots__ = ("_thread", "_result")
+
+    def __init__(self, ctx, fetch=None):
+        import threading
+
+        self._result: Tuple[str, List[ChildOption]] = (UNAVAILABLE, [])
+
+        def run() -> None:
+            try:
+                self._result = load_roster(ctx, fetch=fetch)
+            except Exception:  # pragma: no cover - load_roster does not raise
+                logger.warning("child roster prefetch failed", exc_info=True)
+
+        self._thread = threading.Thread(
+            target=run, name="child-roster-prefetch", daemon=True
+        )
+        self._thread.start()
+
+    def result(self, timeout: float | None = None) -> Tuple[str, List[ChildOption]]:
+        """What came back, or `unavailable` if it has not by now.
+
+        Daemon and never joined beyond the timeout, so a hung facade cannot hold a turn
+        open past its own deadline; the thread dies with the process. The timeout here
+        is a second ceiling on top of the HTTP one, because a socket that never returns
+        does not respect a read timeout.
+        """
+        self._thread.join(timeout if timeout is not None else ROSTER_TIMEOUT_SECONDS)
+        return self._result
+
+
+def prefetch(ctx, *, fetch=None) -> Optional[_Prefetch]:
+    """Begin reading the roster now, to be collected later in the turn.
+
+    Started speculatively, before anything knows whether this turn is about a child,
+    because the only moment that can overlap the wait is *before* the classifier runs —
+    and by the time the classifier has answered, the answer is already here.
+
+    Speculating is close to free. The read is cached per guardian, so on every turn but
+    the first of a conversation this is a Redis lookup; and on the first, it is a call
+    the tool would have made anyway a moment later.
+
+    Returns None for anyone who is not a signed-in parent, so a staff session, a
+    background job or a test starts no thread and touches no network.
+    """
+    if not (getattr(ctx, "guardian_id", "") and getattr(ctx, "guardian_token", "")):
+        return None
+    return _Prefetch(ctx, fetch=fetch)
+
+
 def forget(ctx) -> None:
     """Drop the cached roster for this guardian.
 
@@ -222,6 +281,7 @@ def forget(ctx) -> None:
 
 __all__ = [
     "NONE",
+    "prefetch",
     "NOT_AUTHORIZED",
     "OK",
     "ROSTER_TTL_SECONDS",
