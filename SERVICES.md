@@ -110,6 +110,37 @@ SIS subject code — details in [records/README.md](records/README.md#records_lm
 `IDENTITY_ISSUER` and `IDENTITY_AUDIENCE` must match across identity and records. They
 default to `school-identity` / `school-services` on both sides.
 
+## How a parent signs in
+
+Parents have no password. They prove they hold a number the school already has on file, by
+sending one WhatsApp message:
+
+```
+browser  -> identity  POST /v1/auth/whatsapp/start
+                      <- a wa.me link carrying a nonce, and a poll secret for the browser
+
+parent   -> WhatsApp  taps the link and sends the pre-filled message
+                      (WhatsApp never sends it for them)
+
+Meta     -> identity  POST /v1/auth/whatsapp/webhook, signed
+identity -> sis       POST /v1/guardians/resolve { phone }
+                      <- the guardian's stable public_id, or 404
+
+identity -> WhatsApp  a six-digit code, free: the parent opened the service window
+browser  -> identity  POST /v1/auth/whatsapp/verify { poll_secret, code }
+                      <- the same token a password login returns, carrying guardian_id
+```
+
+Two secrets on purpose. The nonce goes out in a link and comes back over WhatsApp; the poll
+secret never leaves the browser. Someone who forwards the link cannot finish the sign-in,
+and someone who tricks a parent into sending theirs cannot read the code that results.
+
+It costs nothing because the parent messages first: replies inside the 24-hour customer
+service window are not template messages, and Meta does not charge for those. It creates
+nobody — a number `sis/` does not hold is refused, because whose parent somebody is stays
+the registrar's fact. Setup, and the reason the number must carry its `+`, are in
+[identity/README.md](identity/README.md#parent-login-by-whatsapp).
+
 ## First-run setup
 
 ```bash
