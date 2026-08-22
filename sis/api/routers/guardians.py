@@ -32,6 +32,8 @@ from sis.application.ports.unit_of_work import UnitOfWork
 from sis.application.services import QueryService
 from sis.application.services.queries import GuardianIdentity, GuardianLink
 from sis.domain.errors import UnknownReference
+from datetime import UTC, datetime
+
 from sis.domain.people import Gender
 from sis.domain.guardians import RelationshipType
 from sis.domain.value_objects import Phone, StudentNumber
@@ -115,6 +117,14 @@ class GuardianChildOut(BaseModel):
     #: registrar uploads it, and a reader must treat it as "not said" rather than as a
     #: default — see `sis.domain.people.Gender`.
     gender: Gender = Gender.UNSPECIFIED
+    #: Her year group as of today — "Year 4", "الصف الرابع" — Arabic first, falling back
+    #: to her class's own name when the school's ladder has no matching rung.
+    #:
+    #: Empty is an ordinary answer, not an error: a child enrolled for next September
+    #: has no placement today. A reader must leave the year out of whatever it asks
+    #: rather than guessing one, because a wrong year narrows a fee table to the wrong
+    #: row and answers a parent confidently with somebody else's number.
+    year_level: str = ""
     relationship_type: RelationshipType
     relationship_label: str = ""
     can_view_records: bool
@@ -126,6 +136,7 @@ class GuardianChildOut(BaseModel):
             full_name_ar=entry.student.full_name_ar if entry.student else "",
             full_name_en=entry.student.full_name_en if entry.student else "",
             gender=entry.student.gender if entry.student else Gender.UNSPECIFIED,
+            year_level=entry.year_label,
             relationship_type=entry.link.relationship_type,
             relationship_label=entry.link.relationship_label,
             can_view_records=entry.link.can_view_records,
@@ -270,7 +281,11 @@ def read_guardian_students(
         # previous response, not something a human types, so it is validated rather than
         # normalised. A national-format number here would silently resolve to nobody.
         parsed = Phone(phone)
-        entries = queries.guardian_students(parsed, viewable_only=not include_restricted)
+        entries = queries.guardian_students(
+            parsed,
+            viewable_only=not include_restricted,
+            on_date=datetime.now(UTC).date(),
+        )
     first = entries[0].guardian if entries else None
     return GuardianChildrenOut(
         phone=str(parsed),
@@ -298,7 +313,13 @@ def read_guardian_students_by_id(
 ) -> GuardianChildrenOut:
     with domain_errors():
         entries = queries.guardian_students_by_id(
-            public_id, viewable_only=not include_restricted
+            public_id,
+            viewable_only=not include_restricted,
+            # This layer is the one allowed to know what today is — the same rule
+            # `StudentOut.of` states for a child's age. "Which class is she in" has a
+            # different answer in June and in September, and a query that read a clock
+            # could not be tested for either.
+            on_date=datetime.now(UTC).date(),
         )
     first = entries[0].guardian if entries else None
     return GuardianChildrenOut(

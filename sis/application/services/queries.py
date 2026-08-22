@@ -173,10 +173,33 @@ class GuardianLink:
     link: StudentGuardian
     guardian: Guardian | None = None
     student: Student | None = None
+    #: Where she is *today*, when the caller asked for it and she has a placement.
+    #: `None` covers three different real states — the caller did not ask, she has no
+    #: open placement (a child enrolled for next September has none today), or her
+    #: section could not be loaded — and none of them is an error.
+    class_section: ClassSection | None = None
+    #: The rung she stands on, resolved from that section. Separate from it because a
+    #: parent thinks in year groups ("Year 4") and a registrar thinks in rooms ("4B"),
+    #: and the corpus a parent's question is answered from is written in the first.
+    year_level: YearLevel | None = None
 
     @property
     def phone(self) -> str:
         return str(self.link.guardian_phone)
+
+    @property
+    def year_label(self) -> str:
+        """What to call her year group, Arabic first, or `""` when nothing is known.
+
+        Falls back to the class section's own name rather than to the year code: "4B"
+        is something a parent recognises and `Y4` is an internal string. Empty rather
+        than a guess — a wrong year narrows a fee table to the wrong row.
+        """
+        if self.year_level is not None:
+            return self.year_level.name_ar or self.year_level.name_en
+        if self.class_section is not None:
+            return self.class_section.name_ar or self.class_section.name_en
+        return ""
 
     @property
     def phones(self) -> tuple[str, ...]:
@@ -517,7 +540,7 @@ class QueryService:
         return self.student_term_grades(student_number, term_code)
 
     def guardian_students_by_id(
-        self, public_id: str, *, viewable_only: bool = True
+        self, public_id: str, *, viewable_only: bool = True, on_date: date | None = None
     ) -> Sequence[GuardianLink]:
         """The same answer as `guardian_students`, asked with a handle instead of a number.
 
@@ -536,16 +559,24 @@ class QueryService:
             raise UnknownReference(
                 "no guardian is on file under that reference", field="guardian_id"
             )
-        return self.guardian_students(phone, viewable_only=viewable_only)
+        return self.guardian_students(
+            phone, viewable_only=viewable_only, on_date=on_date
+        )
 
     def guardian_students(
-        self, phone: Phone, *, viewable_only: bool = True
+        self, phone: Phone, *, viewable_only: bool = True, on_date: date | None = None
     ) -> Sequence[GuardianLink]:
         """Which children this number may ask about — the parent-facing question.
 
         Raises when the number reaches nobody, so a caller can tell "not a guardian here"
         from "a guardian barred from every child on file". Those need different answers:
         the first is a wrong number, the second is a custody restriction working.
+
+        `on_date` asks for each child's year group as of that day, and is optional
+        because most callers do not need it and it costs two more queries. Passed in
+        rather than read from a clock, like every other date-sensitive question in this
+        service: "which class is she in" has a different answer in June and in September,
+        and a query that reads `date.today()` cannot be tested for either.
         """
         with self._uow_factory() as uow:
             guardian = uow.guardians.get(phone)
@@ -554,21 +585,80 @@ class QueryService:
             links = uow.student_guardians.list_students_for_guardian(
                 phone, viewable_only=viewable_only
             )
-            students = uow.students.get_many(
-                [
-                    link.student_number
-                    for link in links
-                    if isinstance(link.student_number, StudentNumber)
-                ]
-            )
+            numbers = [
+                link.student_number
+                for link in links
+                if isinstance(link.student_number, StudentNumber)
+            ]
+            students = uow.students.get_many(numbers)
+            sections, levels = self._placements(uow, numbers, on_date)
         return tuple(
             GuardianLink(
                 link=link,
                 guardian=guardian,
                 student=students.get(str(link.student_number)),
+                class_section=sections.get(str(link.student_number)),
+                year_level=levels.get(str(link.student_number)),
             )
             for link in links
         )
+
+    @staticmethod
+    def _placements(
+        uow: UnitOfWork,
+        numbers: Sequence[StudentNumber],
+        on_date: date | None,
+    ) -> tuple[Mapping[str, ClassSection], Mapping[str, YearLevel]]:
+        """Each child's class today, and the year group that class sits on.
+
+        Three bulk queries for the whole family rather than three per child, using the
+        transfer-aware `class_sections_on` — a child who moved 4A -> 4B in March resolves
+        to the room she is in now, not to whichever placement was written first.
+
+        The year level takes two hops because the schema refuses to shortcut them, and
+        both refusals are deliberate: a class is scoped to an academic year (so `3A` of
+        2025-2026 is a different group of children from `3A` of 2026-2027), while a year
+        LEVEL is scoped to a school and not to a year (so "Year 3" is the same rung every
+        year, and cross-year comparisons are a filter rather than a text match). Getting
+        from one to the other therefore goes through the academic year, which is the only
+        thing that names the school.
+
+        Every step degrades to "not known" rather than raising. A child with no open
+        placement is an ordinary state — one enrolled for next September has none today —
+        and so is a school whose ladder was never uploaded.
+        """
+        if not numbers or on_date is None:
+            return {}, {}
+        sections = uow.enrolments.class_sections_on(numbers, on_date)
+        if not sections:
+            return {}, {}
+
+        years = uow.academic_years.get_many(
+            {section.academic_year_code for section in sections.values()}
+        )
+        # Year levels are keyed by (school, code), so they are fetched a school at a
+        # time. A family is almost always in one school; the loop exists for the branch
+        # transfer that is not.
+        wanted: dict[str, set] = {}
+        for section in sections.values():
+            year = years.get(str(section.academic_year_code))
+            if year is not None:
+                wanted.setdefault(str(year.school_code), set()).add(section.year_level_code)
+
+        by_school: dict[str, Mapping[str, YearLevel]] = {
+            school: uow.year_levels.get_many(codes, school)
+            for school, codes in wanted.items()
+        }
+
+        levels: dict[str, YearLevel] = {}
+        for number, section in sections.items():
+            year = years.get(str(section.academic_year_code))
+            if year is None:
+                continue
+            found = by_school.get(str(year.school_code), {}).get(str(section.year_level_code))
+            if found is not None:
+                levels[number] = found
+        return sections, levels
 
     # -- Grades ------------------------------------------------------------
 
