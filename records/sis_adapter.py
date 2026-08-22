@@ -30,10 +30,13 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from records.lms import LmsUnavailable, SubjectAttendance, SubjectGrade
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from records.calendar import SchoolCalendar
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +80,11 @@ class SisAdapter:
     a window in which a corrected mark is stale for a parent already on the phone.
     """
 
+    #: SIS stores marks against the school's own subject codes, per term, so it already
+    #: knows which subjects a child takes and what each is called in both scripts. There
+    #: is no flat course list to disambiguate and no `CourseBinding` to consult.
+    reports_own_subjects = True
+
     #: Connections held open to the SIS. Sized for concurrent parents in one worker, not
     #: for throughput — a pool larger than the SIS's own worker count only queues.
     POOL_SIZE = 10
@@ -91,7 +99,16 @@ class SisAdapter:
         api_key: str,
         timeout_seconds: float | None = None,
         pool_size: int | None = None,
+        calendar: "SchoolCalendar | None" = None,
     ):
+        """`calendar` answers when a term runs, and is required for attendance.
+
+        Injected rather than constructed here, and rather than reached for through the
+        module-level slot, because this adapter is one of two components that need term
+        dates and they must not resolve them separately. A caller that only reads grades
+        may leave it `None`; attendance then reports nothing, which is the honest answer
+        for a deployment that never wired one.
+        """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds or float(
@@ -101,6 +118,7 @@ class SisAdapter:
 
         self._lock = threading.Lock()
         self._session: Any = None
+        self._calendar = calendar
 
     # -- transport ----------------------------------------------------------
 
@@ -219,18 +237,96 @@ class SisAdapter:
         return [self._to_subject_grade(row) for row in payload.get("grades") or []]
 
     def get_subject_attendance(self, *, student_ref: str, term: str) -> list[SubjectAttendance]:
-        """Refuses, loudly, because the alternative is a comfortable lie.
+        """The daily register for a term, as one term-level entry.
 
-        SIS records grades only — attendance stays in the systems that own it. Returning
-        `[]` would be read by the assembler as "no register has anything against this
-        child" and reported to a parent as a clean record, which is the same sentence a
-        school would use for a child with perfect attendance. `LmsUnavailable` produces
-        "I cannot reach the school records right now" instead: unhelpful, and true.
+        **The shapes genuinely differ, and the mapping is a decision rather than a
+        translation.** Moodle records attendance per *subject*: forty registers in maths,
+        two in the elective, and the contract aggregates them by points so the elective
+        cannot mask a term of absences. SIS records one mark per *day* for the whole
+        school day — there is no per-subject register to aggregate.
+
+        So this returns a single entry standing for the term. That is not a subject
+        pretending to be one: it is the register SIS actually keeps, reported at the
+        granularity it is kept. Every term-level figure the parent-facing contract
+        publishes — present, absent, late, excused, sessions, rate — comes out exactly
+        right, because summing one entry is summing the whole register.
+
+        `points` and `max_points` carry days-in-the-room over days-recorded, which is the
+        same ratio the contract's `attendance_rate` publishes. `recorded` is the only
+        denominator SIS will state: it counts days a mark exists for, so an unmarked
+        Tuesday is never silently counted as a holiday or as an absence.
+
+        The term is resolved to a date window first, because SIS's register is addressed
+        by dates and knows nothing about term codes.
         """
-        raise LmsUnavailable(
-            "SIS does not serve attendance in this phase — it records grades only. "
-            "Attendance is unavailable while RECORDS_LMS=sis."
-        )
+        window = self._term_window(term)
+        if window is None:
+            # No such term, so no window to ask about. Empty rather than an exception:
+            # a term the school has not configured has no register, which is a real
+            # answer and not an outage.
+            return []
+        from_date, to_date = window
+
+        path = f"/v1/students/{quote(student_ref, safe='')}/attendance"
+        payload = self._get(path, {"from": from_date, "to": to_date})
+        if payload is None:
+            return []
+
+        counts = payload.get("counts") or {}
+        recorded = int(counts.get("recorded") or 0)
+        if recorded <= 0:
+            # Nobody has taken a register for this child this term. Empty, so the
+            # contract reports `attendance_rate: null` rather than 0% — a child cannot be
+            # absent from classes nobody recorded.
+            return []
+
+        # Everything except an unexcused absence. **Not** SIS's `in_the_room`, which is
+        # present-plus-late and treats an excused day as missed.
+        #
+        # The two services genuinely disagree here, and this contract's answer is the one
+        # a parent is shown. `AttendanceAssembler.PRESENT_LIKE` counts excused as present,
+        # and the template that renders this says so out loud: "Excused absences are
+        # authorised by the school and are counted as attended in that percentage."
+        # Mapping SIS's narrower figure through would have published 80% where the
+        # contract promises 90% — a child with a doctor's note shown to her parent as
+        # having missed school.
+        attended = max(recorded - int(counts.get("absent") or 0), 0)
+
+        return [
+            SubjectAttendance(
+                course_ref=term,
+                subject_name="",
+                percentage=round((attended / recorded) * 100, 2),
+                taken_sessions=recorded,
+                by_status=(
+                    {"description": "Present", "count": int(counts.get("present") or 0)},
+                    {"description": "Absent", "count": int(counts.get("absent") or 0)},
+                    {"description": "Late", "count": int(counts.get("late") or 0)},
+                    {"description": "Excused", "count": int(counts.get("excused") or 0)},
+                ),
+                points=float(attended),
+                max_points=float(recorded),
+            )
+        ]
+
+    def _term_window(self, term_code: str) -> tuple[str, str] | None:
+        """A term code as the pair of dates SIS's register is addressed by.
+
+        Delegated to the injected calendar, which is the one component that knows when a
+        term runs. Caching lives there too, so the dates this adapter uses and the dates
+        the route reports can never drift apart.
+        """
+        if self._calendar is None:
+            logger.warning(
+                "No calendar was supplied to the SIS adapter; attendance cannot be "
+                "resolved to a date window and is reported as unavailable."
+            )
+            return None
+
+        term = self._calendar.term(term_code)
+        if term is None or term.starts_on is None or term.ends_on is None:
+            return None
+        return (term.starts_on.date().isoformat(), term.ends_on.date().isoformat())
 
     # -- reshaping ----------------------------------------------------------
 
@@ -268,6 +364,7 @@ class SisAdapter:
             # The protocol has one name slot and SIS is bilingual. English first because
             # the assembler overrides it from the binding whenever one carries a label;
             # this is the fallback that keeps a line from being nameless.
+            subject_name_ar=str(row.get("subject_name_ar") or ""),
             subject_name=str(
                 row.get("subject_name_en")
                 or row.get("subject_name_ar")

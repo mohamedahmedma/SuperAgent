@@ -47,6 +47,13 @@ from jose import jwt  # noqa: E402
 from records import auth, lms  # noqa: E402
 from records.app import app  # noqa: E402
 from records.db import Base, SessionLocal, engine  # noqa: E402
+from records import calendar as school_calendar  # noqa: E402
+from records import guardian_directory  # noqa: E402
+from records.calendar import FakeSchoolCalendar, SchoolTerm  # noqa: E402
+from records.guardian_directory import (  # noqa: E402
+    FakeGuardianDirectory,
+    PermittedStudent,
+)
 from records.models import ApiKey, CourseBinding, Guardian, GuardianStudent, Student, Term  # noqa: E402
 
 AGENT_KEY = "agentkey-fixture-0000000000000000"
@@ -145,6 +152,25 @@ def seeded(db):
     db.add(term)
     db.flush()
 
+    # The calendar moved out of this service too. The row above is kept only because
+    # report cards still key on `term.id`; every parent-facing read now asks the school
+    # what a term is, so the same term is seeded into the calendar it asks.
+    school_calendar.set_calendar(
+        FakeSchoolCalendar(
+            [
+                SchoolTerm(
+                    code=term.code,
+                    name_ar=term.name_ar,
+                    name_en=term.name_en,
+                    academic_year=term.academic_year,
+                    starts_on=term.starts_on,
+                    ends_on=term.ends_on,
+                    is_closed=term.is_closed,
+                )
+            ]
+        )
+    )
+
     student = Student(
         external_id="S-1001",
         lms_user_id=501,
@@ -164,23 +190,32 @@ def seeded(db):
     db.add_all([student, other_student])
     db.flush()
 
-    permitted = Guardian(external_id="G-1", full_name_en="Permitted Parent")
-    restricted = Guardian(external_id="G-2", full_name_en="Restricted Parent")
-    unrelated = Guardian(external_id="G-3", full_name_en="Unrelated Parent")
-    db.add_all([permitted, restricted, unrelated])
-    db.flush()
-
-    db.add_all(
-        [
-            GuardianStudent(guardian_id=permitted.id, student_id=student.id, can_view_records=True),
-            # Linked — a real guardian on file — but barred from academic records.
-            GuardianStudent(
-                guardian_id=restricted.id,
-                student_id=student.id,
-                can_view_records=False,
-                restriction_note="Court order 2025/114",
-            ),
-        ]
+    # Guardian links no longer live in this service. It asks SIS on every request, so the
+    # three parents below are seeded into the directory it asks rather than into a table
+    # it reads — see records/guardian_directory.py for why the data moved.
+    #
+    #   G-1  permitted   — may be told about Layla
+    #   G-2  restricted  — a real guardian of Layla's, barred by a court order. SIS filters
+    #                      restricted links out, so she arrives here holding no children,
+    #                      which is what makes "restricted" and "not a parent" look alike
+    #                      from outside.
+    #   G-3  unrelated   — a parent of somebody else entirely
+    guardian_directory.set_directory(
+        FakeGuardianDirectory(
+            {
+                "G-1": [
+                    PermittedStudent(
+                        student_id="S-1001",
+                        full_name_en="Layla Hassan",
+                        full_name_ar="ليلى حسن",
+                        grade_level="G7",
+                        section="A",
+                    )
+                ],
+                "G-2": [],
+                "G-3": [],
+            }
+        )
     )
 
     db.add(

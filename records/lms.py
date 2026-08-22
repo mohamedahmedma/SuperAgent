@@ -68,8 +68,19 @@ class SubjectGrade:
     """
 
     course_ref: str
+    #: The subject's name as the backend reports it. Singular because Moodle's is: one
+    #: course title, whatever a teacher typed, rarely bilingual — and on that path the
+    #: school's own names come from `CourseBinding` rather than from here.
     subject_name: str
     percentage: float | None
+    #: The Arabic name, when the backend keeps one. Empty for Moodle, which does not.
+    #:
+    #: Separate rather than folded into `subject_name` because a backend that has both and
+    #: must pick one always picks wrong for somebody: this school reads Arabic, and a
+    #: report card headed "Mathematics" is one a parent has to decode. Where there is no
+    #: binding to supply the school's own wording — see `GradeAssembler.assemble_unbound` —
+    #: this is the only place it can come from.
+    subject_name_ar: str = ""
     academic_percentage: float | None = None
     academic_unavailable: str = ""
     graded_count: int = 0
@@ -109,6 +120,21 @@ class SubjectAttendance:
 
 
 class LmsAdapter(Protocol):
+    #: Does this backend name its own subjects?
+    #:
+    #: `False` for Moodle, whose course list is flat and whose titles are whatever a
+    #: teacher typed — the school decides what each course *is* and whether a parent may
+    #: see it, and `CourseBinding` is where it says so.
+    #:
+    #: `True` for a system of record that already stores marks against the school's own
+    #: subject codes. Requiring bindings there would mean re-entering the curriculum into
+    #: this service, which is supposed to hold no data of its own, and dropping every
+    #: subject until somebody did.
+    #:
+    #: Declared on the port rather than discovered with `isinstance`, so a route asks what
+    #: a backend can do instead of which class it happens to be.
+    reports_own_subjects: bool = False
+
     """What the facade needs from a system of record. Nothing more.
 
     Both calls take the SCHOOL's student reference — the number on a letter home — not
@@ -136,6 +162,9 @@ class LmsAdapter(Protocol):
 
 @dataclass
 class FakeLms:
+    #: Bindings apply, like Moodle — the fixture exists to exercise that path.
+    reports_own_subjects = False
+
     """Deterministic fixtures, so the service and its tests need no Moodle.
 
     Also the reference for what a correct adapter returns — particularly a subject
@@ -166,6 +195,9 @@ class FakeLms:
 
 
 class MoodleAdapter:
+    #: Moodle is the reason `CourseBinding` exists. See the port.
+    reports_own_subjects = False
+
     """Talks to `local_schoolapi` on a Moodle instance.
 
     Deliberately thin. Every figure it returns was computed by Moodle or by the plugin
