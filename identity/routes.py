@@ -7,11 +7,17 @@ accept a bearer token as a credential in the first place.
 """
 from datetime import datetime, timezone
 
+import logging
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
 from identity import auth, keys, tokens
+from identity import verification as verify_flow
+from identity import whatsapp as wa
 from identity.db import get_db
+from identity.deps import get_verification_service
 from identity.models import Account, RefreshToken
 from identity.schemas import (
     AccessTokenOut,
@@ -23,11 +29,17 @@ from identity.schemas import (
     RefreshIn,
     RegisterIn,
     TokenOut,
+    WhatsAppStartOut,
+    WhatsAppStatusIn,
+    WhatsAppStatusOut,
+    WhatsAppVerifyIn,
 )
 
 public_router = APIRouter(prefix="/v1/auth", tags=["auth"])
 admin_router = APIRouter(prefix="/v1/admin", tags=["admin"])
 wellknown_router = APIRouter(tags=["keys"])
+
+logger = logging.getLogger(__name__)
 
 _AUTH_RESPONSES = {
     401: {"model": ErrorOut, "description": "Invalid credentials."},
@@ -355,3 +367,243 @@ def unbind_guardian(
     db.commit()
     auth.write_audit(db, username=username, event="guardian_unbind", reason="ok", succeeded=True)
     return {"username": username, "guardian_id": None}
+
+
+# ---------------------------------------------------------------------------
+# Parent login by WhatsApp
+# ---------------------------------------------------------------------------
+#
+# Why this exists beside the password login above: a parent has no password and should
+# never be given one. The school already holds their phone number, entered by a registrar
+# from paperwork, and WhatsApp can prove somebody controls that number for nothing. See
+# identity/verification.py for the flow and for why it takes two secrets rather than one.
+
+whatsapp_router = APIRouter(prefix="/v1/auth/whatsapp", tags=["auth"])
+
+
+def _verification_error(error: verify_flow.VerificationError) -> HTTPException:
+    """Every refusal in this flow is a 400 carrying a code the page can branch on.
+
+    One status for all of them on purpose. "No such verification", "wrong code" and
+    "expired" would each justify a different status in isolation, but distinguishing them
+    by status lets somebody holding a stolen poll secret learn which of their guesses was
+    structurally wrong rather than merely incorrect.
+    """
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={"code": error.code, "message": error.message},
+    )
+
+
+@whatsapp_router.post("/start", response_model=WhatsAppStartOut, status_code=201)
+def start_whatsapp_verification(
+    db: Session = Depends(get_db),
+    service: verify_flow.VerificationService = Depends(get_verification_service),
+) -> WhatsAppStartOut:
+    """Begin a verification. Takes no phone number, and that is the point.
+
+    Because the caller states nothing, there is nothing here to probe: this endpoint cannot
+    be used to ask whether a given number belongs to a parent. That question is answered
+    only to somebody who can actually send a WhatsApp message from the number, and it is
+    answered over WhatsApp rather than in this response.
+    """
+    started = service.start(db)
+    return WhatsAppStartOut(
+        poll_secret=started.poll_secret,
+        link=started.link,
+        message=started.message,
+        business_number=service.business_number,
+        expires_at=started.expires_at,
+    )
+
+
+@whatsapp_router.get("/webhook", include_in_schema=False)
+def verify_whatsapp_webhook(request: Request) -> Response:
+    """Meta's subscription handshake.
+
+    Answered with the bare `hub.challenge` as plain text — no JSON, no quotes. Meta
+    compares the body byte for byte, and a JSON-wrapped answer fails the subscription with
+    no explanation beyond "the callback URL could not be validated".
+    """
+    params = request.query_params
+    expected = wa.get_verify_token()
+    if (
+        params.get("hub.mode") == "subscribe"
+        and expected
+        and params.get("hub.verify_token") == expected
+    ):
+        return PlainTextResponse(params.get("hub.challenge") or "")
+    return PlainTextResponse("", status_code=status.HTTP_403_FORBIDDEN)
+
+
+@whatsapp_router.post("/webhook", include_in_schema=False)
+async def receive_whatsapp_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+    service: verify_flow.VerificationService = Depends(get_verification_service),
+) -> dict:
+    """Inbound WhatsApp messages.
+
+    **Always answers 200 once the signature checks out.** Meta retries any delivery it does
+    not see acknowledged, for up to seven days, so returning an error for a message we
+    simply cannot use would have that message replayed for a week.
+
+    The signature is computed over the raw bytes. Re-serialising the parsed JSON produces
+    different bytes — Meta escapes non-ASCII — so an Arabic name in a parent's WhatsApp
+    profile is enough to break a signature checked against re-encoded JSON, and it breaks
+    for only some parents, which is the worst way to find out.
+    """
+    raw = await request.body()
+    if not wa.signature_is_valid(
+        raw_body=raw,
+        header=request.headers.get("X-Hub-Signature-256"),
+        app_secret=wa.get_app_secret(),
+    ):
+        # 403 and nothing more. An unsigned caller is not Meta, and Meta does not retry a
+        # 403 the way it retries a 5xx.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "not_authorized", "message": "Bad signature."},
+        )
+
+    for sender, text, message_id in wa.inbound_text_messages(raw):
+        outcome = service.claim(db, wa_id=sender, body=text, message_id=message_id)
+        # The number is deliberately not logged: it is a parent's phone and this line goes
+        # wherever logs go. The message id is enough to trace one delivery.
+        logger.info(
+            "WhatsApp verification: outcome=%s message_id=%s", outcome, message_id
+        )
+    return {"received": True}
+
+
+@whatsapp_router.post("/status", response_model=WhatsAppStatusOut)
+def whatsapp_verification_status(
+    body: WhatsAppStatusIn,
+    db: Session = Depends(get_db),
+    service: verify_flow.VerificationService = Depends(get_verification_service),
+) -> WhatsAppStatusOut:
+    """Where has this verification got to? Polled while the parent goes to tap send."""
+    try:
+        challenge = service.status(db, poll_secret=body.poll_secret)
+    except verify_flow.VerificationError as error:
+        raise _verification_error(error) from error
+    return WhatsAppStatusOut(
+        status=challenge.status,
+        display_name=challenge.display_name,
+        expires_at=challenge.expires_at,
+    )
+
+
+@whatsapp_router.post("/verify", response_model=TokenOut, responses=_AUTH_RESPONSES)
+def complete_whatsapp_verification(
+    body: WhatsAppVerifyIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    service: verify_flow.VerificationService = Depends(get_verification_service),
+) -> TokenOut:
+    """The code, and the tokens if it is right.
+
+    The account is created here on first use rather than by an administrator, and the
+    binding written onto it does not come from this request: it came from the school's own
+    records, keyed on a number WhatsApp proved. That is the invariant identity/models.py
+    states — an account never names its own guardian — held through a second authority
+    rather than broken by one.
+    """
+    ip = _client_ip(request)
+    try:
+        challenge = service.verify(db, poll_secret=body.poll_secret, code=body.code)
+    except verify_flow.VerificationError as error:
+        auth.write_audit(
+            db,
+            username="",
+            event="whatsapp_verify",
+            reason=error.code,
+            succeeded=False,
+            client_ip=ip,
+        )
+        raise _verification_error(error) from error
+
+    account = _account_for_guardian(db, challenge)
+
+    access_token, expires_at = tokens.mint_access_token(
+        subject=account.username,
+        role=account.role,
+        guardian_external_id=account.guardian_external_id,
+        display_name=account.display_name,
+    )
+    raw_refresh, refresh_hash, refresh_expires = tokens.mint_refresh_token()
+    db.add(
+        RefreshToken(
+            account_id=account.id, token_hash=refresh_hash, expires_at=refresh_expires
+        )
+    )
+    db.commit()
+
+    auth.write_audit(
+        db,
+        username=account.username,
+        event="whatsapp_verify",
+        reason="ok",
+        succeeded=True,
+        client_ip=ip,
+    )
+    return TokenOut(
+        access_token=access_token,
+        refresh_token=raw_refresh,
+        expires_at=expires_at,
+        username=account.username,
+        role=account.role,
+        guardian_id=account.guardian_external_id,
+        display_name=account.display_name,
+    )
+
+
+def _account_for_guardian(db: Session, challenge) -> Account:
+    """Find or create the account this guardian signs in through.
+
+    Keyed on the guardian handle rather than on the phone number, so a parent who verifies
+    her second number lands in the account she already had instead of acquiring a duplicate
+    holding half her history. The username is derived from the handle for the same reason:
+    a username built from a phone would have to change when she changes number, and a
+    username is a join key elsewhere.
+
+    The account carries no password. `verify_password` cannot succeed against the empty
+    hash stored here, so the password route stays shut for parents — this is the only door
+    they have, and it is one the school closes by removing a guardian link rather than by
+    resetting anything.
+
+    The binding is **re-asserted on every sign-in**, deliberately. A registrar who corrects
+    a guardian record in sis/ should see it take effect the next time that parent signs in,
+    without an administrator having to touch this service as well.
+    """
+    username = f"guardian:{challenge.guardian_external_id}"
+    account = db.query(Account).filter(Account.username == username).first()
+    if account is None:
+        account = Account(
+            username=username,
+            phone="",
+            password_hash="",
+            role="parent",
+            guardian_external_id=challenge.guardian_external_id,
+            display_name=challenge.display_name,
+            preferred_language=challenge.preferred_language or "ar",
+            is_active=True,
+        )
+        db.add(account)
+        db.commit()
+        db.refresh(account)
+        return account
+
+    # An account an administrator disabled stays disabled: re-verifying a phone must not
+    # become a way to walk back that decision.
+    if not account.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "not_authorized", "message": "That account is disabled."},
+        )
+    account.guardian_external_id = challenge.guardian_external_id
+    if challenge.display_name:
+        account.display_name = challenge.display_name
+    db.commit()
+    db.refresh(account)
+    return account

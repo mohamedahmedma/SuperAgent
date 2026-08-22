@@ -83,6 +83,12 @@ POST /v1/auth/refresh                                    re-reads the binding
 POST /v1/auth/logout                                     revokes a refresh token
 GET  /v1/auth/me                                         decode your own token
 
+POST /v1/auth/whatsapp/start                             begin a parent verification
+GET  /v1/auth/whatsapp/webhook                           Meta's subscription handshake
+POST /v1/auth/whatsapp/webhook                           inbound messages, signed
+POST /v1/auth/whatsapp/status                            poll a verification
+POST /v1/auth/whatsapp/verify                            code -> tokens
+
 POST   /v1/admin/accounts                                admin key
 PUT    /v1/admin/accounts/{username}/guardian-binding    admin key
 DELETE /v1/admin/accounts/{username}/guardian-binding    admin key; revokes sessions
@@ -104,8 +110,106 @@ DELETE /v1/admin/accounts/{username}/guardian-binding    admin key; revokes sess
 - **Access tokens cannot be revoked**, because verification is offline. Keeping them
   short is what bounds that window; refresh revocation is the real control.
 
+## Parent login by WhatsApp
+
+Parents have no password and are never given one. The school already holds their phone
+number, entered by a registrar from paperwork, and WhatsApp proves control of that number
+at no cost.
+
+```
+browser  POST /v1/auth/whatsapp/start
+         <- { poll_secret, link, message, business_number, expires_at }
+
+parent   taps the link; WhatsApp opens with the message already typed; parent taps send
+         (WhatsApp never sends it for them -- say so on the page)
+
+Meta     POST /v1/auth/whatsapp/webhook   signed with X-Hub-Signature-256
+         identity asks sis: POST /v1/guardians/resolve { phone }
+         known   -> reply over WhatsApp with a six-digit code
+         unknown -> reply "contact the school office", challenge rejected
+
+browser  POST /v1/auth/whatsapp/status  { poll_secret }   -> pending | code_sent | ...
+browser  POST /v1/auth/whatsapp/verify  { poll_secret, code }  -> the same TokenOut
+                                                                  as a password login
+```
+
+### Two secrets, and why
+
+`nonce` travels out in the link and back over WhatsApp. `poll_secret` never leaves the
+browser. Holding one without the other is worth nothing:
+
+- A nonce lifted from a screenshot and sent from the attacker's own phone delivers the code
+  to **their** WhatsApp — but they have no poll secret, so they cannot finish. The parent
+  whose nonce it was is merely blocked, not impersonated.
+- A parent tricked into sending an attacker's nonce delivers the code to **the parent's**
+  WhatsApp, which the attacker cannot read.
+
+### Why it costs nothing
+
+The parent messages first, which opens a 24-hour customer service window. Meta made
+service conversations free on 1 November 2024, and under the per-message pricing that
+started on 1 July 2025 "All non-template messages are free". We never send a template, so
+we are never billed. That is a policy rather than a contract — `WhatsAppUnavailable` is a
+handled outcome, and `identity/whatsapp.py` is the only file that would have to change.
+
+### It never creates a guardian
+
+An account never names its own guardian — the invariant `identity/models.py` has always
+stated. This is a second authority for that column, not an exception to it: the binding
+comes from the school's own records, keyed on a number WhatsApp proved, and a number `sis/`
+does not hold is refused. The binding is re-asserted on every sign-in, so a registrar's
+correction takes effect without an administrator touching this service.
+
+### Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `IDENTITY_WHATSAPP_NUMBER` | — | The school's number, **E.164 with a leading `+`**, e.g. `+201288339613`. Refused at startup otherwise; see below. |
+| `IDENTITY_WHATSAPP_PHONE_NUMBER_ID` | — | Meta's own id for that number. Not the number. |
+| `IDENTITY_WHATSAPP_TOKEN` | — | A **System User** token. The dashboard's token expires in under 24 hours. |
+| `IDENTITY_WHATSAPP_APP_SECRET` | — | Signs every inbound webhook. Unset means every message is rejected. |
+| `IDENTITY_WHATSAPP_VERIFY_TOKEN` | — | Any string; must match what you type into the App Dashboard. |
+| `IDENTITY_SIS_BASE_URL` | — | Where `sis/` lives, e.g. `http://localhost:8300`. Unset means every parent is refused. |
+| `IDENTITY_SIS_API_KEY` | — | Sent as `X-API-Key`. `sis/` does not currently check it. |
+| `IDENTITY_VERIFICATION_TTL_MINUTES` | `10` | How long a challenge lives. |
+
+**The number must carry its `+`.** `01288339613` produces a link to `wa.me/01288339613`,
+which is a different number that does not exist — the link opens, the chat is empty, no
+message ever arrives, and nothing logs an error. `e164_or_raise` refuses it at startup so
+that a silent estate-wide outage becomes a deploy that does not come up.
+
+With no credentials the flow still runs end to end against a recording gateway and an empty
+directory: developable with no Meta account, and an unconfigured production refuses every
+parent rather than authenticating them against nothing.
+
+### Going live
+
+1. Meta business portfolio -> an app -> a WhatsApp Business Account.
+2. Register the number. **It must not be active on WhatsApp Messenger or the WhatsApp
+   Business app** — delete it there first, which destroys that number's message history and
+   cannot be undone while it is on Cloud API. If staff currently chat to parents on it, use
+   a different number.
+3. Set a 6-digit two-step PIN during registration and keep it; re-registering needs it.
+4. Create a **System User**, assign the app and the WABA, and generate a never-expiring
+   token with `whatsapp_business_messaging`.
+5. Point the webhook at `https://<host>/v1/auth/whatsapp/webhook` with your verify token,
+   and **subscribe to the `messages` field** — nothing arrives otherwise. Public HTTPS on
+   443 with a real certificate; `ngrok` for local work.
+6. New portfolios start at a 250-recipient tier until business verification. Replies inside
+   an open service window should not count against it — worth confirming before a rollout.
+
+### Operational notes
+
+- Meta retries an unacknowledged webhook for up to **seven days**, so duplicates are
+  guaranteed. Deduplicated on the message id; without that, one parent tap sends several
+  conflicting codes.
+- The webhook answers 200 for anything it cannot use, and 403 only for a bad signature.
+- WhatsApp throttles replies to one user to roughly one every six seconds.
+- A parent sending from a number the school does not hold — dad's work phone — is refused
+  by design. The fix is a registrar adding that number, not a looser rule here.
+
 ## Not built yet
 
-Phone OTP login, which is what parents will actually want; password reset; and per-IP
-rate limiting in front of `/v1/auth/login`. The lockout policy limits damage per
-account but does nothing about a broad sweep across many accounts.
+Password reset, and per-IP rate limiting in front of `/v1/auth/login`. The lockout policy
+limits damage per account but does nothing about a broad sweep across many accounts.
+(Parent login by WhatsApp, formerly listed here, is above.)
