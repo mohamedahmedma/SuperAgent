@@ -32,7 +32,7 @@ from sqlalchemy.exc import IntegrityError
 from sis.config import reset_settings_cache
 from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
 from sis.domain.people import Student
-from sis.domain.structure import AcademicYear, ClassSection, YearLevel
+from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.domain.value_objects import AcademicYearCode, Phone, StudentNumber
 from sis.infrastructure.db.session import get_engine, reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
@@ -79,10 +79,12 @@ def _count(table: str) -> int:
 def two_children(sis_database: None) -> None:
     """Two children on the roll. Guardians attach to students; they never create them."""
     with SqlAlchemyUnitOfWork() as uow:
+        uow.schools.upsert_many([School(code="MAIN", name_en="Main School", name_ar="المدرسة")])
         uow.academic_years.upsert_many(
             [
                 AcademicYear(
                     code=YEAR,
+                    school_code="MAIN",
                     name_en="2025-2026",
                     name_ar="٢٠٢٥-٢٠٢٦",
                     starts_on=date(2025, 9, 1),
@@ -92,7 +94,7 @@ def two_children(sis_database: None) -> None:
             ]
         )
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", name_en="Year 3", name_ar="السنة الثالثة", display_order=3)]
+            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة الثالثة", display_order=3)]
         )
         uow.class_sections.upsert_many(
             [

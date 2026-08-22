@@ -20,13 +20,14 @@ import logging
 import secrets
 from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Final
 
 from fastapi import Depends
 
 from sis.application.dto import Page, PageRequest
 from sis.application.ports.unit_of_work import UnitOfWork
+from sis.application.services.attendance import AttendanceService
 from sis.application.services.grade_import import GradeImportService
 from sis.application.services.guardian_import import GuardianImportService
 from sis.application.services.queries import QueryService
@@ -36,7 +37,21 @@ from sis.config import get_settings
 from sis.domain.auth import PREFIX_LENGTH, ApiKey, Scope
 from sis.domain.errors import ImportBatchNotFound
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
-from sis.domain.structure import AcademicYear, Subject, Term
+from sis.domain.people import ClassEnrolment, Student
+from sis.domain.structure import (
+    AcademicYear,
+    ClassSection,
+    School,
+    Subject,
+    Term,
+    YearLevel,
+)
+from sis.domain.value_objects import (
+    AcademicYearCode,
+    ClassCode,
+    SchoolCode,
+    StudentNumber,
+)
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from sis.infrastructure.parsers import (
     SpreadsheetGradeParser,
@@ -288,10 +303,82 @@ class StructureCatalogue:
         return bool(created.get(str(term.code), False))
 
     def create_subject(self, subject: Subject) -> bool:
+        """Store one subject in one academic year; `True` when this call created it.
+
+        A subject that names a year with no row raises `UnknownReference` from the
+        repository's code resolution, naming `academic_year_code` — which is what puts the
+        message under the right field on the form rather than surfacing as an integrity
+        error about a foreign key.
+        """
         with self._uow_factory() as uow:
             created = uow.subjects.upsert_many([subject])
             uow.commit()
         return bool(created.get(str(subject.code), False))
+
+    def create_class_section(self, section: ClassSection) -> bool:
+        """Add one class to a year; `True` when this call created it.
+
+        The generator exists for building a whole year at once and is the right tool for
+        September. This is the other half of the job: the extra section a school opens in
+        November because an intake arrived, which the generator cannot express without
+        being told to rebuild the entire ladder — and which it would then report as
+        forty-one items already present and one created.
+
+        An upsert on `(year, level, code)`, so re-posting `3C` corrects its labels instead
+        of failing, for the same reason terms and subjects upsert.
+        """
+        with self._uow_factory() as uow:
+            created = uow.class_sections.upsert_many([section])
+            uow.commit()
+        return bool(created.get(section.identity, False))
+
+    def rename_class_section(
+        self,
+        academic_year_code: AcademicYearCode,
+        code: ClassCode,
+        *,
+        name_en: str | None = None,
+        name_ar: str | None = None,
+    ) -> ClassSection:
+        """Relabel one class. The code cannot be reached from here — invariant 6.
+
+        Renaming "3A" to "Falcons" is a label edit that detaches no student and no grade,
+        and the repository enforces that by updating only the two name columns.
+        """
+        with self._uow_factory() as uow:
+            section = uow.class_sections.rename(
+                academic_year_code, code, name_en=name_en, name_ar=name_ar
+            )
+            uow.commit()
+        return section
+    def create_school(self, school: School) -> bool:
+        """Store one school; `True` when this call created it.
+
+        The outermost act in the service, and an upsert like every other structural write:
+        re-posting a code corrects its labels and detaches nothing, because everything below
+        a school points at its surrogate id and not at the name on the sign.
+
+        There is no delete. Closing a branch is `is_active: false`, and the RESTRICT on every
+        year and rung pointing at it means the database refuses the alternative anyway — the
+        registers taken and marks stated in the years it ran are still true.
+        """
+        with self._uow_factory() as uow:
+            created = uow.schools.upsert_many([school])
+            uow.commit()
+        return bool(created.get(str(school.code), False))
+
+    def create_year_level(self, level: YearLevel) -> bool:
+        """Add or relabel one rung of one school's ladder; `True` when created.
+
+        The generator builds a whole ladder and is right for a new school. This is the rung
+        added afterwards — a school opening a kindergarten, or classifying a rung into a
+        stage it had left unspecified — and it is an upsert so the second act is the same
+        call as the first.
+        """
+        with self._uow_factory() as uow:
+            created = uow.year_levels.upsert_many([level])
+            uow.commit()
+        return bool(created.get(str(level.code), False))
 
     def create_academic_year(self, year: AcademicYear, *, make_current: bool) -> bool:
         """Store the year; `True` when this call created it.
@@ -311,6 +398,117 @@ class StructureCatalogue:
                 uow.academic_years.set_current(year.code)
             uow.commit()
         return bool(created.get(str(year.code), False))
+
+
+
+
+class StudentDesk:
+    """Single-student writes: the registrar correcting one child's file by hand.
+
+    Every write in this service used to arrive as a spreadsheet. That is right for a
+    September roster of nine hundred children and absurd for the two cases that actually
+    fill a registrar's day — a misspelt name, and one child arriving in November — where it
+    means building a one-row .xlsx, previewing it, and committing a batch to change a
+    letter. This class is the direct path for those, and it deliberately does not replace
+    the import: an import still owns anything touching more than one child, because that is
+    where a per-row report earns its keep.
+
+    What is preserved is the part that matters. Placement is still a dated membership
+    (invariant 2), so a transfer is the open placement ended and a new one opened, never a
+    class code rewritten in place — the repository will not do the latter, and this service
+    does not ask it to.
+    """
+
+    def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
+        self._uow_factory = uow_factory
+
+    def save_student(self, student: Student) -> bool:
+        """Create or correct one child by student number; `True` when created.
+
+        An upsert, so the form that adds a child and the form that fixes her name are the
+        same call. The repository leaves rows whose values already match out of its UPDATE,
+        so saving a form nobody edited does not stamp `updated_at` and does not lie about
+        when her details last changed.
+        """
+        with self._uow_factory() as uow:
+            created = uow.students.upsert_many([student])
+            uow.commit()
+        return bool(created.get(str(student.student_number), False))
+
+    def set_student_active(
+        self, student_number: StudentNumber, *, is_active: bool
+    ) -> Student:
+        """Mark a child as having left the school, or having come back.
+
+        There is no delete, and there should not be: her marks, her placements and her
+        guardians are all still true statements about a term that happened. `is_active`
+        takes her out of the pickers and leaves the record standing.
+        """
+        with self._uow_factory() as uow:
+            student = uow.students.set_active(student_number, is_active=is_active)
+            uow.commit()
+        return student
+
+    def place_student(self, enrolment: ClassEnrolment) -> bool:
+        """Open a placement. `True` when this call created it.
+
+        Refuses nothing itself: the partial unique index means a second *open* placement
+        for the same child is rejected by the database, which is the guarantee worth having
+        — it holds against two registrars clicking at once, and a check in Python would not.
+        """
+        with self._uow_factory() as uow:
+            created = uow.enrolments.upsert_many([enrolment])
+            uow.commit()
+        return bool(next(iter(created.values()), False))
+
+    def end_placement(
+        self, student_number: StudentNumber, *, ends_on: date
+    ) -> ClassEnrolment | None:
+        """Close the child's open placement on her last day; `None` if she had none.
+
+        `ends_on` is her **last day in the class**, not the day after. The distinction is
+        the one thing about this route worth getting right: off by one, and a report card
+        for the term that ended that week resolves to the wrong class.
+        """
+        with self._uow_factory() as uow:
+            closed = uow.enrolments.close_open_enrolment(student_number, ends_on=ends_on)
+            uow.commit()
+        return closed
+
+    def transfer_student(
+        self,
+        student_number: StudentNumber,
+        *,
+        academic_year_code: AcademicYearCode,
+        to_class: ClassCode,
+        on_date: date,
+    ) -> tuple[ClassEnrolment | None, ClassEnrolment]:
+        """Move a child to another class from `on_date`, in one transaction.
+
+        This is the whole reason a transfer is not two API calls. Between "end 3A" and
+        "start 3B" the child is in no class at all, and a marks upload landing in that
+        window resolves no placement and rejects every one of her rows. One transaction, or
+        a registrar's afternoon spent explaining why a child vanished from the register.
+
+        The old placement ends the day *before* she starts in the new class, so the two
+        windows do not both contain `on_date` — two placements covering the same day is
+        exactly what `resolve_section_for_term` cannot answer, and it would make her Term
+        marks ambiguous rather than wrong, which is harder to notice.
+        """
+        opened = ClassEnrolment(
+            student_number=student_number,
+            academic_year_code=academic_year_code,
+            class_code=to_class,
+            starts_on=on_date,
+        )
+        with self._uow_factory() as uow:
+            closed = uow.enrolments.close_open_enrolment(
+                student_number, ends_on=on_date - timedelta(days=1)
+            )
+            uow.enrolments.upsert_many([opened])
+            uow.commit()
+        return closed, opened
+
 
 
 class ApiKeyMinter:
@@ -359,6 +557,16 @@ def get_structure_catalogue() -> StructureCatalogue:
     return StructureCatalogue(get_unit_of_work_factory())
 
 
+def get_attendance_service() -> AttendanceService:
+    """The daily register. A factory, like every other service here."""
+    return AttendanceService(get_unit_of_work_factory())
+
+
+def get_student_desk() -> StudentDesk:
+    """Single-student and single-placement writes, committed per call."""
+    return StudentDesk(get_unit_of_work_factory())
+
+
 def get_api_key_minter() -> ApiKeyMinter:
     """The only path that creates a credential."""
     return ApiKeyMinter(get_unit_of_work_factory())
@@ -379,6 +587,8 @@ MaxUploadBytesDep = Annotated[int, Depends(get_max_upload_bytes)]
 ApiKeyMinterDep = Annotated[ApiKeyMinter, Depends(get_api_key_minter)]
 ImportReportsDep = Annotated[ImportReports, Depends(get_import_reports)]
 StructureCatalogueDep = Annotated[StructureCatalogue, Depends(get_structure_catalogue)]
+StudentDeskDep = Annotated[StudentDesk, Depends(get_student_desk)]
+AttendanceServiceDep = Annotated[AttendanceService, Depends(get_attendance_service)]
 
 QueryServiceDep = Annotated[QueryService, Depends(get_query_service)]
 StructureServiceDep = Annotated[StructureGenerationService, Depends(get_structure_service)]

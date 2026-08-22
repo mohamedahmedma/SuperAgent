@@ -118,6 +118,7 @@ def all_routers() -> tuple["APIRouter", ...]:
     """
     from sis.api.routers import (
         admin,
+        attendance,
         grades,
         guardians,
         health,
@@ -136,6 +137,7 @@ def all_routers() -> tuple["APIRouter", ...]:
         students.router,
         guardians.router,
         grades.router,
+        attendance.router,
         imports.router,
         admin.router,
     )

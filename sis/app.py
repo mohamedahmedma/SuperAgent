@@ -24,11 +24,13 @@ import logging
 import os
 import pathlib
 import pkgutil
+import re
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 log = logging.getLogger("sis.app")
@@ -226,6 +228,72 @@ def _include_routers(app: FastAPI) -> None:
     log.info("mounted %d router(s): %s", len(included), ", ".join(included))
 
 
+class _ConsoleStaticFiles(StaticFiles):
+    """`StaticFiles`, plus the one header it does not send: `Cache-Control`.
+
+    Starlette sends `ETag` and `Last-Modified` and stops there. With no `Cache-Control` a
+    browser is entitled to guess how long the file stays fresh — the heuristic in every
+    major engine is a fraction of the file's age — and it serves the cached copy **without
+    asking the server**. The symptom is the one that actually happened: a stylesheet was
+    edited on disk, the page was refreshed, and the old design came back, because the
+    request never left the browser. It is the worst kind of caching bug, because everything
+    is working correctly and the only evidence is that nothing changed.
+
+    The console is a Vite build, so there are two populations of file here and they want
+    opposite policies:
+
+    **`assets/*` are content-hashed** — `index-DFBO-eQN.js` changes its name whenever its
+    bytes change. A URL that can never mean anything else is safe to cache for a year, and
+    `immutable` additionally tells the browser not to revalidate even on a manual reload.
+    These are the megabyte or so of every page load, and this is what makes the second visit
+    free.
+
+    **`index.html` is not hashed**, because it is the file that names the hashed ones. It
+    gets `no-cache`, which is not `no-store`: cache it, but revalidate before every use. So
+    the browser still asks with its ETag and still gets a 304 with an empty body when nothing
+    has changed. One conditional request buys the guarantee that a deploy is visible on
+    refresh — and since the entry point names new hashed assets, revalidating it is enough to
+    pull the whole new build through.
+
+    Getting these two the wrong way round is not a symmetric mistake. An immutable
+    `index.html` is a console that cannot be updated without renaming the deployment; a
+    `no-cache` bundle is merely slower.
+    """
+
+    #: Where Vite writes its content-hashed output. Everything under it is immutable.
+    _HASHED = "assets"
+
+    #: One year, the maximum any cache is expected to honour.
+    _FOREVER = "public, max-age=31536000, immutable"
+
+    _REVALIDATE = "no-cache, must-revalidate"
+
+    def file_response(self, full_path, stat_result, scope, *args, **kwargs):  # noqa: ANN001, ANN201
+        response = super().file_response(full_path, stat_result, scope, *args, **kwargs)
+        path = scope.get("path", "") if isinstance(scope, dict) else ""
+        hashed = f"/{self._HASHED}/" in path and _looks_hashed(path)
+        response.headers.setdefault(
+            "Cache-Control", self._FOREVER if hashed else self._REVALIDATE
+        )
+        return response
+
+
+def _looks_hashed(path: str) -> bool:
+    """True when the filename carries a content hash, so the URL can never be reused.
+
+    Checked rather than assumed: `assets/` is Vite's convention, but a file copied in by
+    hand — a logo, a font, a favicon — lands in the same directory under its own plain name,
+    and telling a browser to keep that for a year is how a logo becomes unchangeable. The
+    shape is Vite's: `name-HASH.ext`, where HASH is exactly eight characters of the base64url
+    alphabet. Note that the hash itself may contain a dash — `index-DFBO-eQN.js` is one file,
+    not two — so this reads the last eight characters rather than splitting on the separator.
+    """
+    stem = path.rsplit("/", 1)[-1].split(".", 1)[0]
+    if len(stem) < 10 or stem[-9] != "-":
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9_-]{8}", stem[-8:]))
+
+
 def _mount_ui(app: FastAPI) -> None:
     """Serve the registrar UI from `/ui`, if it has been built into `sis/web/`.
 
@@ -236,7 +304,30 @@ def _mount_ui(app: FastAPI) -> None:
         log.warning("no static UI at %s — /ui will not be served", _WEB_ROOT)
         return
     # html=True so `/ui/` resolves index.html rather than 404ing on a directory.
-    app.mount("/ui", StaticFiles(directory=str(_WEB_ROOT), html=True), name="ui")
+    app.mount(
+        "/ui",
+        _ConsoleStaticFiles(directory=str(_WEB_ROOT), html=True),
+        name="ui",
+    )
+
+
+def _configure_compression(app: FastAPI) -> None:
+    """Compress text responses, which is most of what this service sends.
+
+    The console is deliberately unbundled and unminified — the files under `sis/web/` are
+    the files the browser gets, so a technician can read them on the machine that is
+    misbehaving. Uncompressed that is about 250 KB of stylesheet and script on a first
+    load; gzipped it is closer to 65 KB, and the school wifi it arrives over is the
+    reason that difference is worth a middleware.
+
+    It earns its place on the API side too: a class register of four hundred children is
+    tens of kilobytes of JSON with a very small alphabet, and compresses by roughly five
+    to one.
+
+    `minimum_size` keeps it off the small stuff. Compressing a 200-byte health check
+    costs CPU on both ends and makes the response bigger.
+    """
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 def _configure_cors(app: FastAPI) -> None:
@@ -289,6 +380,7 @@ def create_app() -> FastAPI:
     _register_error_handlers(app)
     _include_routers(app)
     _mount_ui(app)
+    _configure_compression(app)
     _configure_cors(app)
     return app
 

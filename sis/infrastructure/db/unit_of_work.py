@@ -29,6 +29,7 @@ from sis.infrastructure.db.session import get_sessionmaker
 if TYPE_CHECKING:
     from sis.application.ports.repositories import (
         AcademicYearRepository,
+        AttendanceRepository,
         ApiKeyRepository,
         ClassSectionRepository,
         EnrolmentRepository,
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
         ImportBatchRepository,
         StudentGuardianRepository,
         StudentRepository,
+        SchoolRepository,
         SubjectRepository,
         TermRepository,
         YearLevelRepository,
@@ -46,6 +48,7 @@ if TYPE_CHECKING:
 # "you forgot the `with`" apart from "you misspelled the repository".
 _REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
+        "schools",
         "academic_years",
         "year_levels",
         "class_sections",
@@ -56,6 +59,7 @@ _REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset(
         "guardians",
         "student_guardians",
         "grades",
+        "attendance",
         "imports",
         "api_keys",
     }
@@ -71,6 +75,7 @@ class SqlAlchemyUnitOfWork:
 
     # Annotations only, deliberately: the attributes exist between `__enter__` and
     # `__exit__` and nowhere else, so `__getattr__` below can catch misuse.
+    schools: SchoolRepository
     academic_years: AcademicYearRepository
     year_levels: YearLevelRepository
     class_sections: ClassSectionRepository
@@ -81,6 +86,7 @@ class SqlAlchemyUnitOfWork:
     guardians: GuardianRepository
     student_guardians: StudentGuardianRepository
     grades: GradeRepository
+    attendance: AttendanceRepository
     imports: ImportBatchRepository
     api_keys: ApiKeyRepository
 
@@ -150,6 +156,7 @@ class SqlAlchemyUnitOfWork:
         # free to import from `sis.infrastructure.db` without a cycle.
         from sis.infrastructure import repositories as repo
 
+        self.schools = repo.SqlAlchemySchoolRepository(session)
         self.academic_years = repo.SqlAlchemyAcademicYearRepository(session)
         self.year_levels = repo.SqlAlchemyYearLevelRepository(session)
         self.class_sections = repo.SqlAlchemyClassSectionRepository(session)
@@ -160,6 +167,7 @@ class SqlAlchemyUnitOfWork:
         self.guardians = repo.SqlAlchemyGuardianRepository(session)
         self.student_guardians = repo.SqlAlchemyStudentGuardianRepository(session)
         self.grades = repo.SqlAlchemyGradeRepository(session)
+        self.attendance = repo.SqlAlchemyAttendanceRepository(session)
         self.imports = repo.SqlAlchemyImportBatchRepository(session)
         self.api_keys = repo.SqlAlchemyApiKeyRepository(session)
 

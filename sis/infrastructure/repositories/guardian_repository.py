@@ -171,6 +171,43 @@ class SqlAlchemyGuardianRepository:
                 found[row.phone] = row.guardian_id
         return found
 
+    def primary_phone_for(self, public_id: str) -> Phone | None:
+        """One join back from the handle to the number that identifies her.
+
+        Filtered to the primary number rather than any of them: the domain names a guardian
+        by exactly one, and returning whichever row the database happened to order first
+        would make two reads of the same guardian disagree.
+        """
+        if not public_id:
+            return None
+        found = self._session.scalars(
+            select(models.GuardianPhone.phone)
+            .select_from(models.Guardian)
+            .join(
+                models.GuardianPhone,
+                models.GuardianPhone.guardian_id == models.Guardian.id,
+            )
+            .where(
+                models.Guardian.public_id == public_id,
+                models.GuardianPhone.is_primary.is_(True),
+            )
+        ).first()
+        return Phone(found) if found else None
+
+    def public_id_for(self, phone: Phone) -> str | None:
+        """One join: the number, through `guardian_phones`, to the guardian's handle.
+
+        Deliberately does not go through `_load`. The caller wants a reference, not a
+        person, and rebuilding the whole `Guardian` — a second query for every number she
+        holds — to read one column off it would be three statements where one does.
+        """
+        return self._session.scalars(
+            select(models.Guardian.public_id)
+            .select_from(models.GuardianPhone)
+            .join(models.Guardian, models.Guardian.id == models.GuardianPhone.guardian_id)
+            .where(models.GuardianPhone.phone == str(phone))
+        ).first()
+
     def upsert_many(self, guardians: Sequence[Guardian]) -> Mapping[str, bool]:
         """Insert or update by primary phone; `True` marks the ones this call created.
 

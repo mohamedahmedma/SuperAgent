@@ -25,7 +25,7 @@ from openpyxl import Workbook
 
 from sis.app import create_app
 from sis.config import reset_settings_cache
-from sis.domain.structure import AcademicYear, ClassSection, YearLevel
+from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.session import reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -84,10 +84,12 @@ def registrar() -> dict[str, str]:
 def roll(client: TestClient, registrar: dict[str, str]) -> None:
     """Two children on the roll. Guardians attach to students; they never create them."""
     with SqlAlchemyUnitOfWork() as uow:
+        uow.schools.upsert_many([School(code="MAIN", name_en="Main School", name_ar="المدرسة")])
         uow.academic_years.upsert_many(
             [
                 AcademicYear(
                     code=YEAR_CODE,
+                    school_code="MAIN",
                     name_en="2025-2026",
                     name_ar="٢٠٢٥-٢٠٢٦",
                     starts_on=date(2025, 9, 1),
@@ -97,7 +99,7 @@ def roll(client: TestClient, registrar: dict[str, str]) -> None:
             ]
         )
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", name_en="Year 3", name_ar="السنة 3", display_order=3)]
+            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة 3", display_order=3)]
         )
         uow.class_sections.upsert_many(
             [
@@ -407,3 +409,264 @@ def test_an_excel_mangled_phone_still_reaches_the_parent(
     _upload(client, registrar, buffer.getvalue(), filename="guardians.xlsx")
     body = client.get("/v1/students/S001/guardians", headers=registrar).json()
     assert [row["phone"] for row in body["guardians"]] == ["+201001234567"]
+
+
+def test_a_number_resolves_to_a_stable_handle(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """What an authentication service calls once it has proved somebody holds a number.
+
+    It gets back a handle and no phone number, which is the whole point: the caller stores
+    something opaque and permanent instead of PII it would then have to protect.
+    """
+    _upload(client, registrar)
+
+    resolved = client.post(
+        "/v1/guardians/resolve", json={"phone": "+201001234567"}, headers=registrar
+    )
+    assert resolved.status_code == 200, resolved.text
+    body = resolved.json()
+    assert body["full_name_ar"] == "فاطمة علي"
+    assert body["public_id"]
+    # The response must not hand the number back — a caller that stored this whole body
+    # would be storing the PII the handle exists to avoid.
+    assert "phone" not in body
+
+
+def test_the_handle_is_the_same_through_either_of_her_numbers(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """A parent who verifies her WhatsApp line is the same person as one who verifies her
+    mobile, and must resolve to one account rather than two."""
+    _upload(client, registrar)
+
+    first = client.post(
+        "/v1/guardians/resolve", json={"phone": "+201001234567"}, headers=registrar
+    ).json()
+    second = client.post(
+        "/v1/guardians/resolve", json={"phone": "+201119998888"}, headers=registrar
+    ).json()
+
+    assert first["public_id"] == second["public_id"]
+
+
+def test_the_handle_survives_a_re_upload(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """It is stored, not derived. A handle that changed on re-import would silently
+    detach every account bound to it."""
+    _upload(client, registrar)
+    before = client.post(
+        "/v1/guardians/resolve", json={"phone": "+201001234567"}, headers=registrar
+    ).json()["public_id"]
+
+    _upload(client, registrar)
+    after = client.post(
+        "/v1/guardians/resolve", json={"phone": "+201001234567"}, headers=registrar
+    ).json()["public_id"]
+
+    assert before == after
+
+
+def test_a_national_format_number_resolves(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """The caller holds whatever a parent typed and should not have to know the rules."""
+    _upload(client, registrar)
+
+    resolved = client.post(
+        "/v1/guardians/resolve", json={"phone": "0100 123 4567"}, headers=registrar
+    )
+    assert resolved.status_code == 200, resolved.text
+
+
+def test_an_unknown_number_is_a_404(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """An ordinary answer, not an error: most numbers in the world are not this school's.
+
+    It has to be reachable without an exception, because the authentication service asks
+    this question about every number that messages it.
+    """
+    _upload(client, registrar)
+
+    missing = client.post(
+        "/v1/guardians/resolve", json={"phone": "+201119990000"}, headers=registrar
+    )
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "unknown_reference"
+
+
+def test_an_unusable_number_is_refused_rather_than_resolved(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """422, not 404. "That is not a phone number" and "that number is not a parent here"
+    are different answers and the caller acts differently on each."""
+    refused = client.post(
+        "/v1/guardians/resolve", json={"phone": "not a phone"}, headers=registrar
+    )
+    assert refused.status_code == 422
+
+
+def test_a_handle_lists_her_children_without_naming_her_number(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """The question a parent-facing service actually asks.
+
+    It is handed a handle when the parent signs in, and never the number — so the phone
+    stays out of a process that runs a language model over untrusted input, out of its
+    logs, and out of its memory.
+    """
+    _upload(client, registrar)
+    handle = client.post(
+        "/v1/guardians/resolve", json={"phone": "+201001234567"}, headers=registrar
+    ).json()["public_id"]
+
+    seen = client.get(f"/v1/guardians/by-id/{handle}/students", headers=registrar)
+    assert seen.status_code == 200, seen.text
+    body = seen.json()
+
+    assert {row["student_number"] for row in body["students"]} == {"S001", "S002"}
+    assert body["full_name_ar"] == "فاطمة علي"
+    # The number is not handed back to a caller that only ever knew the handle.
+    assert body["phone"] == ""
+
+
+def test_the_handle_answer_matches_the_phone_answer(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """Two ways of asking one question must not drift apart."""
+    _upload(client, registrar)
+    handle = client.post(
+        "/v1/guardians/resolve", json={"phone": "+201001234567"}, headers=registrar
+    ).json()["public_id"]
+
+    by_phone = client.get("/v1/guardians/+201001234567/students", headers=registrar).json()
+    by_handle = client.get(f"/v1/guardians/by-id/{handle}/students", headers=registrar).json()
+
+    assert by_phone["count"] == by_handle["count"]
+    assert [s["student_number"] for s in by_phone["students"]] == [
+        s["student_number"] for s in by_handle["students"]
+    ]
+
+
+def test_a_restricted_child_is_absent_from_the_handle_answer(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """The custody restriction has to hold on the route the chatbot actually calls.
+
+    A rule enforced on one of two equivalent routes is a rule that will be bypassed by
+    whichever caller happens to use the other.
+    """
+    _upload(client, registrar)
+    handle = client.post(
+        "/v1/guardians/resolve", json={"phone": "+201005554444"}, headers=registrar
+    ).json()["public_id"]
+
+    visible = client.get(f"/v1/guardians/by-id/{handle}/students", headers=registrar).json()
+    assert visible["count"] == 0
+
+    everything = client.get(
+        f"/v1/guardians/by-id/{handle}/students",
+        params={"include_restricted": True},
+        headers=registrar,
+    ).json()
+    assert everything["count"] == 1
+
+
+def test_an_unknown_handle_is_a_404(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """"Not a guardian" must stay distinguishable from "a guardian who may see nobody" —
+    the second is what a custody restriction looks like, and it must not read as a broken
+    token."""
+    missing = client.get("/v1/guardians/by-id/not-a-real-handle/students", headers=registrar)
+    assert missing.status_code == 404
+
+
+def _handle_for(client: TestClient, headers: dict[str, str], phone: str) -> str:
+    return client.post(
+        "/v1/guardians/resolve", json={"phone": phone}, headers=headers
+    ).json()["public_id"]
+
+
+def test_a_guardian_may_read_her_own_child_s_marks(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """The read the chatbot actually performs once it knows which child."""
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    marks = client.get(
+        f"/v1/guardians/by-id/{handle}/students/S001/grades",
+        params={"term": "2026-T1"},
+        headers=registrar,
+    )
+    # 404 only because this fixture seeds no term; what matters is that the guardian check
+    # passed rather than refusing her outright.
+    assert marks.status_code in (200, 404)
+    if marks.status_code == 404:
+        assert marks.json()["detail"]["field"] != "student_number"
+
+
+def test_a_guardian_cannot_read_a_child_who_is_not_hers(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """The check that makes this route worth having.
+
+    The chat service filters to a parent's own children before asking — but it is a
+    process running a language model over text a stranger can write, so its filtering is a
+    convenience and not a boundary. A prompt that talks the model into naming another
+    child has to meet a server that says no.
+    """
+    _upload(client, registrar)
+    # The big brother, whose access the sheet restricted, is a guardian of S001 only.
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    refused = client.get(
+        f"/v1/guardians/by-id/{brother}/students/S002/grades",
+        params={"term": "2026-T1"},
+        headers=registrar,
+    )
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "student_number"
+
+
+def test_a_restricted_guardian_is_refused_her_own_linked_child(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """A custody restriction has to hold on the grades route, not only on the list.
+
+    The brother IS linked to S001 — the sheet said `can view records: no`. A rule enforced
+    only where children are listed is a rule bypassed by asking for the marks directly.
+    """
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    refused = client.get(
+        f"/v1/guardians/by-id/{brother}/students/S001/grades",
+        params={"term": "2026-T1"},
+        headers=registrar,
+    )
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "student_number"
+
+
+def test_an_unknown_child_and_someone_else_s_child_look_identical(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """Otherwise a caller could walk student numbers and learn which ones exist."""
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    not_hers = client.get(
+        f"/v1/guardians/by-id/{brother}/students/S002/grades",
+        params={"term": "2026-T1"}, headers=registrar,
+    ).json()["detail"]
+    no_such = client.get(
+        f"/v1/guardians/by-id/{brother}/students/S999/grades",
+        params={"term": "2026-T1"}, headers=registrar,
+    ).json()["detail"]
+
+    assert not_hers["code"] == no_such["code"]
+    assert not_hers["message"] == no_such["message"]

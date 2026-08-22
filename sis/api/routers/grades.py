@@ -135,6 +135,40 @@ class StudentTermGradesOut(BaseModel):
 
 
 @router.get(
+    "/guardians/by-id/{public_id}/students/{student_number}/grades",
+    response_model=StudentTermGradesOut,
+    summary="A child's marks, read by one of her guardians",
+    description="The same figures as the route below, for a caller who holds a guardian "
+    "handle rather than a registrar's authority. The guardian-to-child link is re-checked "
+    "on this request: a caller that names a child who is not hers, or whose access has "
+    "been restricted, gets the same 404 as one naming a child who does not exist.\n\n"
+    "This is the route a parent-facing chat service should use. It never needs the "
+    "parent's phone number, and it does not rely on that service having filtered "
+    "correctly before asking.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def read_guardian_student_term_grades(
+    public_id: str,
+    student_number: str,
+    queries: Queries,
+    caller: Reader,
+    term: Annotated[
+        str,
+        Query(
+            description="Term code. Required, for the reason the registrar route gives: "
+            "a bare 'this term' would be answered from a clock.",
+            examples=["2026-T1"],
+        ),
+    ],
+) -> StudentTermGradesOut:
+    with domain_errors():
+        report = queries.guardian_student_term_grades(
+            public_id, StudentNumber(student_number), TermCode(term)
+        )
+    return StudentTermGradesOut.of(report)
+
+
+@router.get(
     "/students/{student_number}/grades",
     response_model=StudentTermGradesOut,
     summary="A child's stated marks for one term",

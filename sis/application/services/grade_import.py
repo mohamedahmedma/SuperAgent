@@ -63,6 +63,7 @@ from sis.domain.imports import (
 from sis.domain.people import Student
 from sis.domain.structure import ClassSection, Subject, Term
 from sis.domain.value_objects import (
+    AcademicYearCode,
     ClassCode,
     Percentage,
     StudentNumber,
@@ -302,7 +303,12 @@ class GradeImportService:
         # point — a late write would silently change what last term's report card said.
         self._assert_terms_open(terms.values())
         students = uow.students.get_many({r.row.student_number for r in requests})
-        subjects = uow.subjects.get_many({r.row.subject_code for r in requests})
+        # Keyed by `(academic year, subject code)`, because a subject belongs to a year and
+        # a sheet may name its own term per row — so one upload can legitimately span two
+        # years, and `MATH` means a different row in each. One query per distinct year
+        # rather than one per row: a marks upload names one term in practice, occasionally
+        # two, never forty.
+        subjects = self._subjects_by_year(uow, requests, terms)
         sections = self._sections_by_term(uow, requests, terms, students)
         section_ids = uow.class_sections.ids_for({s.identity for s in sections.values()})
         existing = uow.grades.get_many(
@@ -332,7 +338,7 @@ class GradeImportService:
         *,
         terms: Mapping[str, Term],
         students: Mapping[str, Student],
-        subjects: Mapping[str, Subject],
+        subjects: Mapping[tuple[str, str], Subject],
         sections: Mapping[tuple[str, str], ClassSection],
         section_ids: Mapping[tuple[str, str], int],
         existing: Mapping[GradeKey, SubjectGrade],
@@ -360,10 +366,14 @@ class GradeImportService:
                 line, payload, RowCode.UNKNOWN_STUDENT, RowOutcome.REJECTED,
                 f"no student {row.student_number} on file", "student_number",
             )
-        if str(row.subject_code) not in subjects:
+        # Under the term's year, not globally: a subject the school teaches this year is
+        # not on file for last year's marks, and reporting it as present would write a
+        # grade against a subject that year never taught.
+        if (str(term.academic_year_code), str(row.subject_code)) not in subjects:
             return _Assessment(
                 line, payload, RowCode.UNKNOWN_SUBJECT, RowOutcome.REJECTED,
-                f"no subject {row.subject_code} on file", "subject_code",
+                f"no subject {row.subject_code} in {term.academic_year_code}",
+                "subject_code",
             )
 
         key = self._key(row)
@@ -525,6 +535,37 @@ class GradeImportService:
             points=row.points,
             max_points=row.max_points,
         )
+
+    @staticmethod
+    def _subjects_by_year(
+        uow: UnitOfWork,
+        requests: Sequence[_Request],
+        terms: Mapping[str, Term],
+    ) -> dict[tuple[str, str], Subject]:
+        """Resolve each named subject inside the year of the term the row is for.
+
+        Keyed by `(academic year, subject code)` for the same reason `_sections_by_term` is
+        keyed by term: the answer differs per year, and a cache keyed on the code alone
+        would hand a row from last term's sheet whichever year's `MATH` happened to load.
+
+        A row whose term is unknown contributes nothing — `_assess_row` rejects it on the
+        term before it ever looks at the subject, so there is no year to ask under and
+        nothing useful to fetch.
+        """
+        wanted: dict[str, set[SubjectCode]] = {}
+        for request in requests:
+            term = terms.get(str(request.row.term_code))
+            if term is None or request.row.subject_code is None:
+                continue
+            wanted.setdefault(str(term.academic_year_code), set()).add(
+                request.row.subject_code
+            )
+
+        resolved: dict[tuple[str, str], Subject] = {}
+        for year_code, codes in wanted.items():
+            for code, subject in uow.subjects.get_many(codes, AcademicYearCode(year_code)).items():
+                resolved[(year_code, code)] = subject
+        return resolved
 
     def _sections_by_term(
         self,

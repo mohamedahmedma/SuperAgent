@@ -35,11 +35,18 @@ from sis.application.services import QueryService, StructureGenerationService
 from sis.domain.structure import (
     AcademicYear,
     ClassSection,
+    School,
+    Stage,
     Subject,
     Term,
     YearLevel,
 )
-from sis.domain.value_objects import AcademicYearCode, YearCode
+from sis.domain.value_objects import (
+    AcademicYearCode,
+    ClassCode,
+    SchoolCode,
+    YearCode,
+)
 
 router = APIRouter(prefix="/v1", tags=["structure"])
 
@@ -78,6 +85,10 @@ Catalogue = Annotated[StructureCatalogue, Depends(get_structure_catalogue)]
 
 class AcademicYearOut(BaseModel):
     code: str
+    school_code: str = Field(
+        description="The school this year belongs to. Year codes are globally unique, so a "
+        "code names one year at one school — this says which."
+    )
     name_ar: str
     name_en: str
     starts_on: date
@@ -88,6 +99,7 @@ class AcademicYearOut(BaseModel):
     def of(cls, year: AcademicYear) -> "AcademicYearOut":
         return cls(
             code=str(year.code),
+            school_code=str(year.school_code),
             name_ar=year.name_ar,
             name_en=year.name_en,
             starts_on=year.starts_on,
@@ -104,7 +116,15 @@ class AcademicYearIn(BaseModel):
     year beside the one every class already points at.
     """
 
-    code: str = Field(description="Academic year code.", examples=["2025-2026"])
+    code: str = Field(
+        description="Academic year code. Globally unique, so it names one year at one "
+        "school — two branches cannot both use `2025-2026` and must distinguish them.",
+        examples=["2025-2026"],
+    )
+    school_code: str = Field(
+        description="The school this year belongs to. Must already exist.",
+        examples=["MAIN"],
+    )
     name_en: str = Field(default="", description="English label.")
     name_ar: str = Field(default="", description="Arabic label.")
     starts_on: date = Field(description="First day of the year.")
@@ -118,6 +138,14 @@ class AcademicYearIn(BaseModel):
 
 class YearLevelOut(BaseModel):
     code: str
+    school_code: str = Field(
+        description="Rung codes are unique *within* a school, because 'Year 1' exists at "
+        "every branch. This is the half of the identity the code does not carry."
+    )
+    stage: str = Field(
+        description="garden / primary / preparatory / secondary, or `unspecified`. A label "
+        "for grouping a long ladder on screen; it carries no rules."
+    )
     name_ar: str
     name_en: str
     display_order: int = Field(
@@ -129,6 +157,8 @@ class YearLevelOut(BaseModel):
     def of(cls, level: YearLevel) -> "YearLevelOut":
         return cls(
             code=str(level.code),
+            school_code=str(level.school_code),
+            stage=str(level.stage),
             name_ar=level.name_ar,
             name_en=level.name_en,
             display_order=level.display_order,
@@ -277,19 +307,32 @@ class TermOut(BaseModel):
 
 
 class SubjectIn(BaseModel):
+    """One subject as one academic year teaches it.
+
+    `academic_year_code` is required and is half of the subject's identity. The same code
+    in two years is two subjects, so posting `MATH` for 2026-2027 creates a row rather than
+    colliding with the `MATH` of 2025-2026 — and a mark stated against one of them is not a
+    mark on the other.
+    """
+
     code: str = Field(examples=["MATH"])
+    academic_year_code: str = Field(
+        examples=["2025-2026"],
+        description="The year that teaches this subject. Part of its identity, not a tag.",
+    )
     name_ar: str = ""
     name_en: str = ""
     display_order: int = 0
     is_active: bool = Field(
         default=True,
         description="Retire a subject with `false` rather than deleting it; marks already "
-        "stated against it must keep resolving, or last year's report card loses a heading.",
+        "stated against it must keep resolving, or that year's report card loses a heading.",
     )
 
 
 class SubjectOut(BaseModel):
     code: str
+    academic_year_code: str
     name_ar: str
     name_en: str
     display_order: int
@@ -299,6 +342,7 @@ class SubjectOut(BaseModel):
     def of(cls, subject: Subject) -> "SubjectOut":
         return cls(
             code=str(subject.code),
+            academic_year_code=str(subject.academic_year_code),
             name_ar=subject.name_ar,
             name_en=subject.name_en,
             display_order=subject.display_order,
@@ -346,15 +390,31 @@ def generate_structure(
     "/structure/years",
     response_model=StructureYearsOut,
     summary="Academic years and year levels",
-    description="Both lists in one body so the two selects on a structure screen cannot "
-    "be fetched a moment apart and disagree.",
-    responses=error_responses(401, 403),
+    description="Both lists in one body so the two selects on a structure screen cannot be "
+    "fetched a moment apart and disagree.\n\n"
+    "`school` narrows both to one school and is optional: without it the years of every "
+    "school are returned and `year_levels` is empty, because a ladder only means something "
+    "inside a school and merging several would put two branches' `Y1` side by side with "
+    "nothing to tell them apart. The school picker itself is the caller that omits it.",
+    responses=error_responses(401, 403, 404, 422),
 )
-def list_years(queries: Queries, caller: Reader) -> StructureYearsOut:
+def list_years(
+    queries: Queries,
+    caller: Reader,
+    school: Annotated[
+        str | None,
+        Query(description="School code. Omit to list the years of every school."),
+    ] = None,
+) -> StructureYearsOut:
     with domain_errors():
-        academic_years = queries.list_academic_years()
-        year_levels = queries.list_year_levels()
-        current = queries.current_academic_year()
+        school_code = None if school is None else SchoolCode(school)
+        academic_years = queries.list_academic_years(school_code)
+        # Empty rather than "every school's rungs" when no school is named. See the route
+        # description: a merged ladder is a list a registrar cannot act on.
+        year_levels = (
+            queries.list_year_levels(school_code) if school_code is not None else ()
+        )
+        current = queries.current_academic_year(school_code)
     return StructureYearsOut(
         academic_years=[AcademicYearOut.of(year) for year in academic_years],
         year_levels=[YearLevelOut.of(level) for level in year_levels],
@@ -430,6 +490,7 @@ def create_academic_year(
     with domain_errors():
         year = AcademicYear(
             code=AcademicYearCode(body.code),
+            school_code=SchoolCode(body.school_code),
             name_ar=body.name_ar,
             name_en=body.name_en,
             starts_on=body.starts_on,
@@ -474,6 +535,7 @@ def create_subject(
     with domain_errors():
         subject = Subject(
             code=body.code,
+            academic_year_code=body.academic_year_code,
             name_ar=body.name_ar,
             name_en=body.name_en,
             display_order=body.display_order,
@@ -488,13 +550,269 @@ def create_subject(
 @router.get(
     "/subjects",
     response_model=list[SubjectOut],
-    summary="Subjects, in report-card order",
-    description="Retired subjects are omitted unless asked for by name.",
-    responses=error_responses(401, 403),
+    summary="One year's subjects, in report-card order",
+    description="`academic_year` is required: the catalogue is per-year, so `MATH` alone "
+    "names a different subject each September and 'the subjects' is not a question with an "
+    "answer. Retired subjects are omitted unless asked for by name. Unknown year is a 404, "
+    "never an empty list — a typo and a year with no catalogue read identically on screen.",
+    responses=error_responses(401, 403, 404, 422),
 )
 def list_subjects(
-    queries: Queries, caller: Reader, include_inactive: bool = False
+    queries: Queries,
+    caller: Reader,
+    academic_year: Annotated[str, Query(examples=["2025-2026"])],
+    include_inactive: bool = False,
 ) -> list[SubjectOut]:
     with domain_errors():
-        subjects = queries.list_subjects(include_inactive=include_inactive)
+        subjects = queries.list_subjects(
+            AcademicYearCode(academic_year), include_inactive=include_inactive
+        )
     return [SubjectOut.of(subject) for subject in subjects]
+
+
+# -- One class at a time ----------------------------------------------------
+#
+# The generator above builds a whole ladder and is the right tool for September. These two
+# are the rest of the year: the extra section a school opens in November, and the label a
+# registrar corrects. Expressing either through the generator would mean asking it to
+# rebuild every level to add one room, and reading back "forty-one already present".
+
+
+class ClassSectionIn(BaseModel):
+    """One class section, in one academic year, on one year level."""
+
+    code: str = Field(
+        examples=["3C"],
+        description="Unique within the academic year, and immutable once created. "
+        "Renaming is a label change through PATCH; the code is identity.",
+    )
+    academic_year_code: str = Field(examples=["2025-2026"])
+    year_level_code: str = Field(
+        examples=["Y3"], description="The rung this section sits on. Must already exist."
+    )
+    name_ar: str = ""
+    name_en: str = ""
+    capacity: int | None = Field(
+        default=None,
+        ge=0,
+        description="Places in the room. `null` means nobody has stated one, which is not "
+        "the same as `0` — a capacity of zero is a section that admits nobody, and a "
+        "registrar can legitimately mean it.",
+    )
+
+
+class ClassSectionPatch(BaseModel):
+    """Labels only. There is deliberately no `code` and no `year_level_code` here.
+
+    Moving a class to another rung or renaming its code would carry every enrolment and
+    every mark with it, under a class the children were never in. Both are new sections
+    plus a roster change, and neither is an edit.
+    """
+
+    name_ar: str | None = None
+    name_en: str | None = None
+
+
+@router.post(
+    "/structure/classes",
+    response_model=ClassSectionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add one class section to a year",
+    description="201 when the section is new, 200 when one with this code already existed "
+    "in this year — in which case its labels are corrected and no enrolment is touched. "
+    "An unknown year or year level is a 404: this route will not invent the rung a class "
+    "sits on.",
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+def create_class_section(
+    body: ClassSectionIn, catalogue: Catalogue, caller: Registrar, response: Response
+) -> ClassSectionOut:
+    with domain_errors():
+        section = ClassSection(
+            code=body.code,
+            academic_year_code=body.academic_year_code,
+            year_level_code=body.year_level_code,
+            name_ar=body.name_ar,
+            name_en=body.name_en,
+            capacity=body.capacity,
+        )
+        created = catalogue.create_class_section(section)
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return ClassSectionOut.of(section)
+
+@router.patch(
+    "/structure/classes/{class_code}",
+    response_model=ClassSectionOut,
+    summary="Relabel one class section",
+    description="Renaming `3A` to `Falcons` changes a label and detaches no student and no "
+    "grade — the code is what everything points at, and this route cannot reach it. "
+    "`academic_year` is required, because a class code names a different room each year.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def rename_class_section(
+    class_code: str,
+    body: ClassSectionPatch,
+    catalogue: Catalogue,
+    caller: Registrar,
+    academic_year: Annotated[str, Query(examples=["2025-2026"])],
+) -> ClassSectionOut:
+    with domain_errors():
+        section = catalogue.rename_class_section(
+            AcademicYearCode(academic_year),
+            ClassCode(class_code),
+            name_en=body.name_en,
+            name_ar=body.name_ar,
+        )
+    return ClassSectionOut.of(section)
+
+# -- Schools ----------------------------------------------------------------
+#
+# The outermost scope, and the newest. Everything above belongs to one school, reached
+# through a year or a rung; a student does not, because a child is a person rather than a
+# school's property, and a child moving between branches is a transfer.
+
+
+class SchoolIn(BaseModel):
+    """Create or relabel one school."""
+
+    code: str = Field(
+        description="Immutable identity. Every year and rung in the school points at it.",
+        examples=["MAIN"],
+    )
+    name_en: str = Field(default="", description="English label.")
+    name_ar: str = Field(default="", description="Arabic label.")
+    is_active: bool = Field(
+        default=True,
+        description="Set false to close a branch. Nothing is deleted: the registers taken "
+        "and marks stated in the years it ran are still true, and the database refuses a "
+        "delete while any year or rung points at it.",
+    )
+
+
+class SchoolOut(BaseModel):
+    code: str
+    name_ar: str
+    name_en: str
+    is_active: bool
+
+    @classmethod
+    def of(cls, school: School) -> "SchoolOut":
+        return cls(
+            code=str(school.code),
+            name_ar=school.name_ar,
+            name_en=school.name_en,
+            is_active=school.is_active,
+        )
+
+
+class YearLevelIn(BaseModel):
+    """Add or relabel one rung of one school's ladder."""
+
+    code: str = Field(
+        description="Unique within the school, not globally: `Y1` exists at every branch.",
+        examples=["Y1"],
+    )
+    school_code: str = Field(examples=["MAIN"])
+    name_en: str = Field(default="", description="English label.")
+    name_ar: str = Field(default="", description="Arabic label.")
+    display_order: int = Field(
+        default=0,
+        description="Order within the stage. Stated, not derived from the code: `Y10` sorts "
+        "before `Y9` as text.",
+    )
+    stage: str = Field(
+        default="unspecified",
+        description="garden / primary / preparatory / secondary, or `unspecified`. Grouping "
+        "only — no rule anywhere depends on it. An unrecognised value is refused rather "
+        "than silently treated as unspecified.",
+        examples=["primary"],
+    )
+
+
+@router.get(
+    "/schools",
+    response_model=list[SchoolOut],
+    summary="Every school",
+    description="Closed branches are omitted unless `include_inactive` asks for them.",
+    responses=error_responses(401, 403),
+)
+def list_schools(
+    queries: Queries, caller: Reader, include_inactive: bool = False
+) -> list[SchoolOut]:
+    with domain_errors():
+        schools = queries.list_schools(include_inactive=include_inactive)
+    return [SchoolOut.of(school) for school in schools]
+
+
+@router.post(
+    "/schools",
+    response_model=SchoolOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create or relabel a school",
+    description="201 when the school is new, 200 when this code already existed and its "
+    "labels were corrected — which detaches nothing, because every year and rung points at "
+    "the row rather than at the name. There is no delete; close a branch with "
+    "`is_active: false`.",
+    responses=error_responses(401, 403, 409, 422),
+)
+def create_school(
+    body: SchoolIn, catalogue: Catalogue, caller: Registrar, response: Response
+) -> SchoolOut:
+    with domain_errors():
+        school = School(
+            code=body.code,
+            name_ar=body.name_ar,
+            name_en=body.name_en,
+            is_active=body.is_active,
+        )
+        created = catalogue.create_school(school)
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return SchoolOut.of(school)
+
+
+@router.get(
+    "/schools/{school_code}/levels",
+    response_model=list[YearLevelOut],
+    summary="One school's ladder, grouped by stage",
+    description="Ordered by stage — garden, primary, preparatory, secondary, then anything "
+    "unclassified — and by `display_order` within each. Unknown school is a 404, never an "
+    "empty ladder.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def list_school_levels(
+    school_code: str, queries: Queries, caller: Reader
+) -> list[YearLevelOut]:
+    with domain_errors():
+        levels = queries.list_year_levels(SchoolCode(school_code))
+    return [YearLevelOut.of(level) for level in levels]
+
+
+@router.post(
+    "/structure/levels",
+    response_model=YearLevelOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add or relabel one rung",
+    description="201 when the rung is new in this school, 200 when it already existed and "
+    "its labels, order or stage were corrected — none of which detaches a class or a mark, "
+    "because those point at the rung's row. The generator builds a whole ladder at once; "
+    "this is for the single rung a school adds afterwards.",
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+def create_year_level(
+    body: YearLevelIn, catalogue: Catalogue, caller: Registrar, response: Response
+) -> YearLevelOut:
+    with domain_errors():
+        level = YearLevel(
+            code=body.code,
+            school_code=body.school_code,
+            name_ar=body.name_ar,
+            name_en=body.name_en,
+            display_order=body.display_order,
+            stage=body.stage,
+        )
+        created = catalogue.create_year_level(level)
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return YearLevelOut.of(level)

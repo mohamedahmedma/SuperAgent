@@ -28,7 +28,7 @@ from fastapi.testclient import TestClient
 
 from sis.app import create_app
 from sis.config import reset_settings_cache
-from sis.domain.structure import AcademicYear, ClassSection, YearLevel
+from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.session import reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -93,10 +93,12 @@ def registrar() -> dict[str, str]:
 def _seed_academic_year() -> None:
     """The one thing the HTTP surface cannot create, and everything else hangs from it."""
     with SqlAlchemyUnitOfWork() as uow:
+        uow.schools.upsert_many([School(code="MAIN", name_en="Main School", name_ar="المدرسة")])
         uow.academic_years.upsert_many(
             [
                 AcademicYear(
                     code=YEAR_CODE,
+                    school_code="MAIN",
                     name_en="2025-2026",
                     name_ar="٢٠٢٥-٢٠٢٦",
                     starts_on=date(2025, 9, 1),
@@ -118,7 +120,7 @@ def _seed_generated_structure() -> None:
     """
     with SqlAlchemyUnitOfWork() as uow:
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", name_en="Year 3", name_ar="السنة 3", display_order=3)]
+            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة 3", display_order=3)]
         )
         uow.class_sections.upsert_many(
             [
@@ -160,7 +162,13 @@ def test_a_registrar_key_reads_structure(
     _seed_academic_year()
 
     assert client.get("/v1/structure/years", headers=registrar).status_code == 200
-    assert client.get("/v1/subjects", headers=registrar).status_code == 200
+    # `academic_year` is required: the catalogue is per-year, so a bare /v1/subjects is not
+    # a question with an answer and the route says so with a 422 rather than guessing.
+    assert (
+        client.get(f"/v1/subjects?academic_year={YEAR_CODE}", headers=registrar).status_code
+        == 200
+    )
+    assert client.get("/v1/subjects", headers=registrar).status_code == 422
 
 
 def test_an_oversized_upload_is_refused_before_it_is_buffered(
@@ -275,7 +283,12 @@ def test_registrar_imports_a_roster_then_marks_and_reads_back_the_report_card(
     ):
         created = client.post(
             "/v1/subjects",
-            json={"code": code, "name_en": name_en, "name_ar": name_ar},
+            json={
+                "code": code,
+                "academic_year_code": YEAR_CODE,
+                "name_en": name_en,
+                "name_ar": name_ar,
+            },
             headers=registrar,
         )
         assert created.status_code == 201, created.text

@@ -1,0 +1,67 @@
+/*
+ * Document-level rules Bootstrap's Reboot does not cover.
+ *
+ * This file was 300 lines and is now short, because almost all of it was a reset Bootstrap
+ * already ships: the box-sizing rule, the margin zeroing, the heading and paragraph
+ * normalisation, the focus-visible handling, the scrollbar styling and the print block are
+ * all Reboot's job now, and keeping a second copy would mean two files racing to define the
+ * same thing.
+ *
+ * What is left is what a general-purpose reset has no reason to know: this console runs in
+ * two writing directions, its data is bilingual, and its chrome is a scrolling table rather
+ * than a document.
+ */
+
+html {
+  /* Anchors are hash routes here, so smooth scrolling would animate every navigation. The
+     router manages scroll position instead. */
+  scroll-behavior: auto;
+}
+
+body {
+  /* The theme can flip mid-session from the header toggle. Animating it stops the flip
+     reading as a flash of the wrong page. */
+  transition: background-color var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out);
+}
+
+/*
+ * The page direction follows `<html dir>`, flipped by the language toggle. There is no second
+ * RTL stylesheet and no RTL build of Bootstrap: every layout in the console is built from
+ * Bootstrap's flex and grid utilities, which use logical properties throughout and therefore
+ * mirror themselves. The `sis-name-*` rules in sis.css handle the part that does not — a
+ * bilingual cell, where the *content* has a direction of its own.
+ */
+[dir="rtl"] body {
+  text-align: right;
+}
+
+/*
+ * Scrollbars, thinned. Not cosmetic: these tables scroll constantly and the default Windows
+ * scrollbar is wide enough to cost a column of a register on a 1366px screen.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--grey-400) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--grey-300);
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--grey-400);
+  background-clip: content-box;
+}

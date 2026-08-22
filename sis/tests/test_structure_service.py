@@ -49,8 +49,22 @@ class _Levels:
         self.rows: dict[str, YearLevel] = {str(l.code): l for l in levels}
         self.writes: list[tuple[str, ...]] = []
 
-    def list_all(self) -> Sequence[YearLevel]:
-        return sorted(self.rows.values(), key=lambda level: level.sort_key)
+    def list_for_school(self, school_code: object) -> Sequence[YearLevel]:
+        """One school's rungs, and only that school's.
+
+        The filter is real rather than ignored, because the failure it guards against is
+        the one the generator would otherwise have: reading across every school, another
+        branch's `Y1` reports as "already present" and nothing is generated — leaving a new
+        school with a year, no rungs, and a run that claimed success.
+        """
+        return sorted(
+            (
+                level
+                for level in self.rows.values()
+                if str(level.school_code) == str(school_code)
+            ),
+            key=lambda level: level.sort_key,
+        )
 
     def upsert_many(self, levels: Sequence[YearLevel]) -> Mapping[str, bool]:
         self.writes.append(tuple(str(l.code) for l in levels))
@@ -92,6 +106,7 @@ class _Uow:
         self.academic_years = _Years(
             AcademicYear(
                 code=YEAR,
+                school_code="MAIN",
                 name_en="2025-2026",
                 name_ar="٢٠٢٥-٢٠٢٦",
                 starts_on=date(2025, 9, 1),
@@ -241,7 +256,7 @@ def test_a_conflicting_code_convention_is_refused_before_any_write() -> None:
     """
     uow = _school(
         levels=[
-            YearLevel(code=YearCode(f"G{n}"), name_en=f"Grade {n}", name_ar=f"صف {n}", display_order=n)
+            YearLevel(code=YearCode(f"G{n}"), school_code="MAIN", name_en=f"Grade {n}", name_ar=f"صف {n}", display_order=n)
             for n in (1, 2, 3)
         ]
     )
@@ -261,7 +276,7 @@ def test_a_conflicting_code_convention_is_refused_before_any_write() -> None:
 
 def test_a_second_ladder_is_built_when_a_human_states_it_explicitly() -> None:
     uow = _school(
-        levels=[YearLevel(code=YearCode("G1"), name_en="Grade 1", name_ar="صف ١", display_order=1)]
+        levels=[YearLevel(code=YearCode("G1"), school_code="MAIN", name_en="Grade 1", name_ar="صف ١", display_order=1)]
     )
 
     result = _generate(

@@ -42,16 +42,25 @@ from collections.abc import Collection, Mapping, Sequence
 from datetime import date, datetime
 from typing import Protocol
 
+from sis.domain.attendance import AttendanceMark
 from sis.domain.auth import ApiKey
 from sis.domain.grades import SubjectGrade
 from sis.domain.guardians import Guardian, StudentGuardian
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import ClassEnrolment, Student
-from sis.domain.structure import AcademicYear, ClassSection, Subject, Term, YearLevel
+from sis.domain.structure import (
+    AcademicYear,
+    ClassSection,
+    School,
+    Subject,
+    Term,
+    YearLevel,
+)
 from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,
     Phone,
+    SchoolCode,
     StudentNumber,
     SubjectCode,
     TermCode,
@@ -77,6 +86,75 @@ type EnrolmentKey = tuple[str, str, str, date]
 type StudentGuardianKey = tuple[str, str]
 
 
+class SchoolRepository(Protocol):
+    """Schools: the outermost scope, and the boundary nothing but a child crosses.
+
+    There is no `delete`. Closing a branch is `is_active = False` through `upsert_many`,
+    because the years it ran, the registers taken in them and the marks stated against them
+    are all still true — and the RESTRICT on every year and rung pointing at a school means
+    the database refuses a delete regardless.
+    """
+
+    def get(self, code: SchoolCode) -> School | None:
+        """The school, or `None` when no such code is on file."""
+
+    def get_many(self, codes: Collection[SchoolCode]) -> Mapping[str, School]:
+        """The schools that exist, keyed by code; absent codes are simply missing."""
+
+    def list_all(self, *, include_inactive: bool = False) -> Sequence[School]:
+        """Every school by code; closed branches only when asked for by name."""
+
+    def upsert_many(self, schools: Sequence[School]) -> Mapping[str, bool]:
+        """Insert or update by code; `True` marks the ones this call created."""
+
+
+class AttendanceRepository(Protocol):
+    """The daily register: one mark per child per day, and no row meaning "unmarked".
+
+    A child with no row for a day is a child nobody marked, which is a different statement
+    from every state this port can hold. That is why nothing here has an `unknown` state and
+    why every count a caller builds from these reads has to carry how many days it counted:
+    a rate divided by "school days" would be divided by a number this service does not hold.
+    """
+
+    def marks_for_class(
+        self, class_section_id: int, on_date: date
+    ) -> Mapping[str, AttendanceMark]:
+        """What was recorded for one class on one day, keyed by student number.
+
+        Keyed rather than listed because the caller is merging it into a register built from
+        the enrolments: a child absent from this mapping is one nobody marked, and the screen
+        must show that as blank rather than as present.
+        """
+
+    def marks_for_student(
+        self,
+        student_number: StudentNumber,
+        *,
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> Sequence[AttendanceMark]:
+        """One child's marks, oldest first. Both bounds inclusive when given."""
+
+    def marks_for_students(
+        self,
+        student_numbers: Collection[StudentNumber],
+        *,
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> Sequence[AttendanceMark]:
+        """The same read for many children in one statement, for a class-wide summary."""
+
+    def upsert_many(
+        self, marks: Sequence[AttendanceMark], *, recorded_by: str = ""
+    ) -> Mapping[tuple[str, date], bool]:
+        """Write a day's register; `True` marks the entries this call created.
+
+        Keyed on `(student number, day)` — the pair that is unique — so taking the register
+        twice on one morning corrects it rather than writing a second, contradictory mark.
+        """
+
+
 class AcademicYearRepository(Protocol):
     """The school years everything else hangs from."""
 
@@ -88,11 +166,20 @@ class AcademicYearRepository(Protocol):
     ) -> Mapping[str, AcademicYear]:
         """The years that exist, keyed by code; absent codes are simply missing."""
 
-    def list_all(self) -> Sequence[AcademicYear]:
-        """Every year, most recent start date first."""
+    def list_all(self, school_code: SchoolCode | None = None) -> Sequence[AcademicYear]:
+        """Every year, most recent start date first; one school's when asked for.
 
-    def current(self) -> AcademicYear | None:
-        """The year flagged current, or `None` before a registrar has chosen one."""
+        The filter is optional rather than required because the school picker needs the
+        unfiltered list to know which schools have any years at all.
+        """
+
+    def current(self, school_code: SchoolCode | None = None) -> AcademicYear | None:
+        """The year flagged current, or `None` before a registrar has chosen one.
+
+        Per school when asked: two branches each have a current year and they need not be
+        the same one, because a school that starts a fortnight later is still mid-changeover
+        while the other has moved on.
+        """
 
     def set_current(self, code: AcademicYearCode) -> AcademicYear:
         """Make this the current year and clear the previous flag in the same write.
@@ -109,19 +196,30 @@ class AcademicYearRepository(Protocol):
 
 
 class YearLevelRepository(Protocol):
-    """The rungs of the ladder — `Y1`..`Y6` — shared by every academic year."""
+    """The rungs of one school's ladder — `Y1`..`Y6` — shared by every academic year in it.
 
-    def get(self, code: YearCode) -> YearLevel | None:
-        """The year level, or `None`."""
+    Rungs are still not scoped to a *year*, which is the decision `YearLevel`'s docstring
+    defends: "Year 3" is the same rung in 2025-2026 as in 2030-2031. They are scoped to a
+    school, because "Year 3" at one branch is a different room of children from "Year 3" at
+    another, and the two ladders are maintained separately.
 
-    def get_many(self, codes: Collection[YearCode]) -> Mapping[str, YearLevel]:
-        """Bulk existence check for an import, keyed by code."""
+    Every method therefore takes the school. Callers always have it: a rung is reached
+    through an academic year, and a year names exactly one school.
+    """
 
-    def list_all(self) -> Sequence[YearLevel]:
-        """Every level in `display_order`, so `Y10` follows `Y9` rather than preceding it."""
+    def get(self, code: YearCode, school_code: SchoolCode) -> YearLevel | None:
+        """The year level in that school, or `None`."""
+
+    def get_many(
+        self, codes: Collection[YearCode], school_code: SchoolCode
+    ) -> Mapping[str, YearLevel]:
+        """Bulk existence check within one school, keyed by code."""
+
+    def list_for_school(self, school_code: SchoolCode) -> Sequence[YearLevel]:
+        """One school's ladder, by stage then `display_order`, so `Y10` follows `Y9`."""
 
     def upsert_many(self, levels: Sequence[YearLevel]) -> Mapping[str, bool]:
-        """Insert or update by code; `True` marks the ones this call created."""
+        """Insert or update by `(school_code, code)`; `True` marks the new ones."""
 
 
 class ClassSectionRepository(Protocol):
@@ -196,19 +294,41 @@ class TermRepository(Protocol):
 
 
 class SubjectRepository(Protocol):
-    """Subjects, global rather than scoped to a year level."""
+    """Subjects, scoped to the academic year that teaches them.
 
-    def get(self, code: SubjectCode) -> Subject | None:
-        """The subject, or `None`."""
+    Every method takes the year, and that is the whole shape of the decision: `(year, code)`
+    is a subject's identity, so a lookup by code alone has no answer. A caller holding only
+    a code has to say which year it means — usually the year of the term whose marks it is
+    resolving, which is the only year the code can be about.
+    """
 
-    def get_many(self, codes: Collection[SubjectCode]) -> Mapping[str, Subject]:
-        """Resolve every subject column of a grade sheet in one query."""
+    def get(
+        self, code: SubjectCode, academic_year_code: AcademicYearCode
+    ) -> Subject | None:
+        """The subject as that year teaches it, or `None`."""
 
-    def list_all(self, *, include_inactive: bool = False) -> Sequence[Subject]:
-        """Subjects in `display_order`; retired ones only when explicitly asked for."""
+    def get_many(
+        self, codes: Collection[SubjectCode], academic_year_code: AcademicYearCode
+    ) -> Mapping[str, Subject]:
+        """Resolve every subject column of one year's grade sheet, keyed by code.
+
+        Keyed by code rather than by `(year, code)` because the year is the argument: the
+        caller has already narrowed to one, and a two-part key would only be unpacked again
+        at every call site.
+        """
+
+    def list_for_year(
+        self, academic_year_code: AcademicYearCode, *, include_inactive: bool = False
+    ) -> Sequence[Subject]:
+        """The year's subjects in `display_order`; retired ones only when asked for."""
 
     def upsert_many(self, subjects: Sequence[Subject]) -> Mapping[str, bool]:
-        """Insert or update by code; `True` marks the ones this call created."""
+        """Insert or update by `(academic_year_code, code)`; `True` marks the new ones.
+
+        Keyed in the returned mapping by code alone, which is unambiguous because a single
+        call is not expected to span years — and the service that writes one subject at a
+        time is the only caller.
+        """
 
 
 class StudentRepository(Protocol):
@@ -349,6 +469,28 @@ class GuardianRepository(Protocol):
         Additional numbers on a guardian are inserted alongside, never replacing the set:
         an upload that mentions only her mobile must not silently drop the second line an
         earlier one recorded.
+        """
+
+    def primary_phone_for(self, public_id: str) -> Phone | None:
+        """The number that identifies this guardian, from her handle. The inverse of
+        `public_id_for`.
+
+        Exists because a caller who was given a handle has no other way back to her. The
+        chat service holds one from the moment a parent signs in and never learns the
+        number behind it, which is the property that keeps a parent's phone out of a
+        process that talks to a language model.
+        """
+
+    def public_id_for(self, phone: Phone) -> str | None:
+        """The guardian's stable external handle, or `None` when the number reaches nobody.
+
+        Exists so another service can hold a reference to a parent without holding her
+        phone number. `public_id` is opaque and permanent; a number is neither — she may
+        add a second line or change carrier, and a phone in a URL is PII in every access
+        log and browser history it passes through.
+
+        Resolves through every number on file, like `get`, so a parent who verifies the
+        second line she gave the school is the same person as one who verifies the first.
         """
 
 

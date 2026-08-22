@@ -72,11 +72,28 @@ class FakeStudents:
 
 
 class FakeSubjects:
-    def __init__(self, *subjects: Subject) -> None:
-        self._by_code = {str(s.code): s for s in subjects}
+    """Keyed by `(academic year, code)`, matching the port.
 
-    def get_many(self, codes: Collection[SubjectCode]) -> Mapping[str, Subject]:
-        return {str(c): self._by_code[str(c)] for c in codes if str(c) in self._by_code}
+    The year is not decoration here. The import resolves a subject inside the year of the
+    row's term, so a fake that answered by code alone would return `MATH` for a term in a
+    year that never taught it — and the test asserting an unknown subject is rejected would
+    pass while the service was doing the opposite.
+    """
+
+    def __init__(self, *subjects: Subject) -> None:
+        self._rows = {
+            (str(s.academic_year_code), str(s.code)): s for s in subjects
+        }
+
+    def get_many(
+        self, codes: Collection[SubjectCode], academic_year_code: object
+    ) -> Mapping[str, Subject]:
+        year = str(academic_year_code)
+        return {
+            str(code): self._rows[(year, str(code))]
+            for code in codes
+            if (year, str(code)) in self._rows
+        }
 
 
 class FakeEnrolments:
@@ -256,7 +273,14 @@ def uow() -> FakeUnitOfWork:
             Student("0071", "سلمى أحمد", "Salma Ahmed"),
             Student("0072", "ليان محمد", "Layan Mohamed"),
         ),
-        subjects=FakeSubjects(Subject(code="MATH", name_en="Maths", name_ar="رياضيات")),
+        subjects=FakeSubjects(
+            Subject(
+                code="MATH",
+                academic_year_code=YEAR,
+                name_en="Maths",
+                name_ar="رياضيات",
+            )
+        ),
         enrolments=FakeEnrolments({"0071": section, "0072": section}),
         class_sections=FakeClassSections({(YEAR, CLASS): SECTION_ID}),
         grades=FakeGrades(),

@@ -111,16 +111,26 @@ class StructureGenerationService:
         requested = command.resolved_counts()
 
         with self._uow_factory() as uow:
-            if uow.academic_years.get(academic_year_code) is None:
+            year = uow.academic_years.get(academic_year_code)
+            if year is None:
                 raise UnknownReference(
                     f"no academic year is on file under {academic_year_code}; create the "
                     "year before generating its classes",
                     field="academic_year_code",
                 )
 
-            # `list_all` serves two purposes at once: the convention check below, and the
-            # stored labels reported for rungs that already exist.
-            existing_levels = {str(l.code): l for l in uow.year_levels.list_all()}
+            # The school comes from the year rather than from the command, and that is what
+            # keeps this whole service unchanged by multi-school: a year names exactly one
+            # school, so a caller that could already generate a ladder can still do it with
+            # the same arguments, and cannot generate into the wrong branch by omission.
+            school_code = year.school_code
+
+            # One school's ladder, and only that school's. Read across all schools this
+            # would report another branch's `Y1` as "already present" and generate nothing
+            # — leaving a new school with a year, no rungs, and a run that claimed success.
+            existing_levels = {
+                str(l.code): l for l in uow.year_levels.list_for_school(school_code)
+            }
             self._refuse_parallel_ladder(
                 requested, existing_levels, allowed=allow_new_convention
             )
@@ -160,6 +170,7 @@ class StructureGenerationService:
                 if level is None:
                     level = YearLevel(
                         code=year_code,
+                        school_code=school_code,
                         name_en=self._format(
                             command.year_name_en_template,
                             "year_name_en_template",

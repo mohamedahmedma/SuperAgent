@@ -16,6 +16,8 @@ from sis.application.ports.parsers import (
 )
 from sis.application.ports.repositories import (
     AcademicYearRepository,
+    SchoolRepository,
+    AttendanceRepository,
     ApiKeyRepository,
     ClassSectionKey,
     ClassSectionRepository,
@@ -36,6 +38,8 @@ from sis.application.ports.unit_of_work import UnitOfWork
 
 __all__ = [
     "AcademicYearRepository",
+    "SchoolRepository",
+    "AttendanceRepository",
     "ApiKeyRepository",
     "ClassSectionKey",
     "ClassSectionRepository",

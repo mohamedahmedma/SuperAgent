@@ -31,6 +31,7 @@ os.environ["SIS_DATABASE_URL"] = f"sqlite:///{_LIVE_DB}"
 os.environ.pop("SIS_BOOTSTRAP_REGISTRAR_KEY", None)
 
 import csv  # noqa: E402
+from hashlib import sha1  # noqa: E402
 import io  # noqa: E402
 import shutil  # noqa: E402
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence  # noqa: E402
@@ -61,7 +62,8 @@ from sis.domain.guardians import (  # noqa: E402
 )
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome  # noqa: E402
 from sis.domain.people import ClassEnrolment, Student  # noqa: E402
-from sis.domain.structure import (  # noqa: E402
+from sis.domain.structure import (
+    School,  # noqa: E402
     AcademicYear,
     ClassSection,
     Subject,
@@ -433,13 +435,59 @@ class FakeTermRepository(_ByCode[Term]):
         return self._rows[str(code)]
 
 
-class FakeSubjectRepository(_ByCode[Subject]):
-    def list_all(self, *, include_inactive: bool = False) -> Sequence[Subject]:
-        found = [s for s in self.all() if include_inactive or s.is_active]
+class FakeSubjectRepository(_InMemory):
+    """Keyed by `(academic year, code)`, because that pair is a subject's identity.
+
+    Deliberately not built on `_ByCode` like its siblings. Keying this fake by code alone
+    would let a test store `MATH` in two years and silently get one row back, which is the
+    exact confusion the real schema now refuses — a fake that is more permissive than the
+    database it stands in for makes the tests that pass against it worthless.
+    """
+
+    def __init__(self, subjects: Sequence[Subject] = ()) -> None:
+        super().__init__()
+        for subject in subjects:
+            self._rows[self._key(subject)] = subject
+
+    @staticmethod
+    def _key(subject: Subject) -> tuple[str, str]:
+        return (str(subject.academic_year_code), str(subject.code))
+
+    def get(self, code: object, academic_year_code: object) -> Subject | None:
+        return self._rows.get((str(academic_year_code), str(code)))
+
+    def get_many(
+        self, codes: Collection[object], academic_year_code: object
+    ) -> Mapping[str, Subject]:
+        year = str(academic_year_code)
+        found = {}
+        for code in codes:
+            subject = self._rows.get((year, str(code)))
+            if subject is not None:
+                found[str(code)] = subject
+        return found
+
+    def list_for_year(
+        self, academic_year_code: object, *, include_inactive: bool = False
+    ) -> Sequence[Subject]:
+        year = str(academic_year_code)
+        found = [
+            subject
+            for (subject_year, _), subject in self._rows.items()
+            if subject_year == year and (include_inactive or subject.is_active)
+        ]
         return sorted(found, key=lambda subject: subject.sort_key)
 
     def upsert_many(self, subjects: Sequence[Subject]) -> Mapping[str, bool]:
-        return self._upsert(subjects)
+        created: dict[str, bool] = {}
+        for subject in subjects:
+            key = self._key(subject)
+            created[str(subject.code)] = key not in self._rows
+            self._rows[key] = subject
+        return created
+
+    def all(self) -> tuple[Subject, ...]:
+        return tuple(self._rows.values())
 
 
 class FakeStudentRepository(_InMemory):
@@ -627,6 +675,27 @@ class FakeGuardianRepository(_InMemory):
             if owner is not None:
                 found[str(phone)] = owner
         return found
+
+    def primary_phone_for(self, public_id: str) -> object | None:
+        """The inverse of the fake's derived handle, found by scanning.
+
+        A scan rather than a reverse map because the fake is small and a second index is a
+        second thing to keep in step with `upsert_many`.
+        """
+        for guardian in self._rows.values():
+            if self.public_id_for(guardian.primary_phone) == public_id:
+                return guardian.primary_phone
+        return None
+
+    def public_id_for(self, phone: object) -> str | None:
+        """A stable handle per guardian, derived from her identity so it survives a reload.
+
+        Derived rather than random on purpose: the real repository reads a stored column,
+        so a fake that minted a fresh value per call would let a test pass while the
+        service under test held two different handles for one woman.
+        """
+        owner = self._owner_of(phone)
+        return None if owner is None else "fake-" + sha1(owner.identity.encode()).hexdigest()
 
     def upsert_many(self, guardians: Sequence[Guardian]) -> Mapping[str, bool]:
         created: dict[str, bool] = {}
@@ -993,13 +1062,14 @@ def seeded_fakes(fake_uow: FakeUnitOfWork) -> FakeUnitOfWork:
     """
     year = AcademicYear(
         code=AcademicYearCode("2025-2026"),
+        school_code="MAIN",
         name_en="2025/2026",
         name_ar="٢٠٢٥/٢٠٢٦",
         starts_on=date(2025, 9, 1),
         ends_on=date(2026, 6, 30),
         is_current=True,
     )
-    level = YearLevel(code=YearCode("Y3"), name_en="Year 3", name_ar="السنة الثالثة", display_order=3)
+    level = YearLevel(code=YearCode("Y3"), school_code="MAIN", name_en="Year 3", name_ar="السنة الثالثة", display_order=3)
     sections = [
         ClassSection(
             code=ClassCode(code_text),
@@ -1030,9 +1100,23 @@ def seeded_fakes(fake_uow: FakeUnitOfWork) -> FakeUnitOfWork:
             sequence=2,
         ),
     ]
+    # Both in `year`, because a subject belongs to one: the fixture's marks are stated in
+    # this year's terms, and a subject filed under any other year would not resolve for them.
     subjects = [
-        Subject(code=SubjectCode("MATH"), name_en="Mathematics", name_ar="الرياضيات", display_order=1),
-        Subject(code=SubjectCode("ARB"), name_en="Arabic", name_ar="اللغة العربية", display_order=2),
+        Subject(
+            code=SubjectCode("MATH"),
+            academic_year_code=year.code,
+            name_en="Mathematics",
+            name_ar="الرياضيات",
+            display_order=1,
+        ),
+        Subject(
+            code=SubjectCode("ARB"),
+            academic_year_code=year.code,
+            name_en="Arabic",
+            name_ar="اللغة العربية",
+            display_order=2,
+        ),
     ]
     students = [
         Student(
@@ -1068,6 +1152,7 @@ def seeded_fakes(fake_uow: FakeUnitOfWork) -> FakeUnitOfWork:
         ),
     ]
 
+    fake_uow.schools.upsert_many([School(code="MAIN", name_en="Main School", name_ar="المدرسة")])
     fake_uow.academic_years.upsert_many([year])
     fake_uow.year_levels.upsert_many([level])
     fake_uow.class_sections.upsert_many(sections)

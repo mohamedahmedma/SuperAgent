@@ -169,6 +169,7 @@ class _Uow:
         self.academic_years = _Years(
             AcademicYear(
                 code=YEAR,
+                school_code="MAIN",
                 name_en="2025-2026",
                 name_ar="٢٠٢٥-٢٠٢٦",
                 starts_on=YEAR_STARTS,
