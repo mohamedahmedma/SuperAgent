@@ -238,7 +238,38 @@ def _serve(app, port: str) -> uvicorn.Server:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def estate():
+def _own_the_environment():
+    """Claim this file's service URLs, before anything is built from them.
+
+    They are set at module scope too, but the variables are process-global and
+    `sis/tests` names its own database the same way. pytest imports every collected
+    module before running anything, so in a session covering both suites, whichever
+    imported last owns the variable — and the loser fails somewhere that says nothing
+    about environment variables.
+
+    **Session-scoped, and `estate` depends on it**, because ordering is the whole point.
+    As a per-test fixture this ran *after* the session-scoped `estate`, which had
+    already migrated and served whichever database it inherited: the servers came up on
+    the other suite's file and every guardian lookup failed with `no such table`.
+
+    Resetting the two caches is as necessary as setting the variable. `sis.config`
+    memoises its settings and `sis.infrastructure.db.session` memoises an engine built
+    from them, so a suite that ran earlier leaves both pointing at its own database.
+    """
+    os.environ.update(
+        SIS_DATABASE_URL=f"sqlite:///{_TMP}/sis.db",
+        RECORDS_DATABASE_URL=f"sqlite:///{_TMP}/records.db",
+        IDENTITY_DATABASE_URL=f"sqlite:///{_TMP}/identity.db",
+    )
+    from sis.config import reset_settings_cache
+    from sis.infrastructure.db.session import reset_engine
+
+    reset_settings_cache()
+    reset_engine()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def estate(_own_the_environment):
     """sis/ and records/ running for real, for the whole session.
 
     Session-scoped because starting two ASGI servers per test would dominate the runtime
