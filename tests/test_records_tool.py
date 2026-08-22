@@ -15,6 +15,18 @@ from backend.tools.records import make_get_student_records
 PARENT_TOKEN = "signed.identity.token"
 
 
+@pytest.fixture(autouse=True)
+def no_roster_cache(monkeypatch):
+    """Every case in this file drives the facade through a canned `requests.get`.
+
+    The roster now sits behind a short cache, and a cache shared with whatever Redis
+    happens to be running on the machine would carry one case's children into the next
+    — which is exactly how this suite started reporting "which child?" for a test about
+    a 500. Turning the TTL off is the supported way to say "read it fresh".
+    """
+    monkeypatch.setenv("CHILD_ROSTER_TTL_SECONDS", "0")
+
+
 class _Response:
     def __init__(self, status_code: int, payload=None):
         self.status_code = status_code

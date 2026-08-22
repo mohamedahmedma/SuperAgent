@@ -480,6 +480,12 @@ export const useChatStore = defineStore('chat', {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${authStore.token}`,
+            // The conversation this message belongs to. The server keys everything it
+            // remembers about a thread on this — including which child a parent's
+            // questions are about — so it has to be the same value for every message
+            // in one conversation. Still sent in the body too, because the header is
+            // the newer spelling and a server that predates it reads the body.
+            'X-Thread-ID': requestSessionId,
           },
           body: JSON.stringify({
             message: text,

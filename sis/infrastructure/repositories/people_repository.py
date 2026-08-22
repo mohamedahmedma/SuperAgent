@@ -67,6 +67,7 @@ def _to_student(row: models.Student) -> Student:
         full_name_en=row.full_name_en,
         is_active=row.is_active,
         date_of_birth=row.date_of_birth,
+        gender=row.gender,
         contact_phone=row.contact_phone,
         contact_email=row.contact_email,
         address=row.address,
@@ -82,6 +83,9 @@ _STUDENT_DETAIL_COLUMNS = (
     "full_name_en",
     "is_active",
     "date_of_birth",
+    # A StrEnum, so it binds to the String column as its value and compares equal to the
+    # string read back — no special case needed in the generic loops below.
+    "gender",
     "contact_phone",
     "contact_email",
     "address",

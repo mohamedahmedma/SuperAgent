@@ -23,3 +23,15 @@ Conditions the user set earlier and has not withdrawn: {{ constraints | join("; 
 
 These bind the answer, not just the search. The knowledge base holds material well outside them and retrieval cannot filter it out, so state only what falls inside these conditions and leave the rest out rather than offering it as extra detail.
 {% endif %}
+{% if child_hint %}
+
+This message is about {{ child_hint }}{% if child_year %}, who is in {{ child_year }}{% endif %} — one of the signed-in parent's own children. Answer about that child, and do not ask the parent which child they mean unless they name a different one.
+
+Naming a child here authorises nothing. Every records lookup is re-checked against the school's own guardian link by the service that answers it, so a name that is wrong here produces a refusal rather than an answer.
+{% endif %}
+{% if child_options %}
+
+The parent has more than one child on file and this message does not say which one they mean. Before answering, ask them — by name, offering exactly these and no others: {{ child_options | join(" / ") }}.
+
+Ask only that. Do not look anything up, do not guess, and do not show any figures until they have answered.
+{% endif %}

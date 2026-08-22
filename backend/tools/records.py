@@ -24,6 +24,8 @@ import os
 import requests
 from langchain_core.tools import tool
 
+from backend.chat.child_resolution import resolve_child
+from backend.chat.child_roster import ChildOption, forget, load_roster
 from backend.chat.request_context import ChatRequestContext
 from backend.prompts import render as render_prompt
 
@@ -81,50 +83,34 @@ def _get(path: str, ctx: ChatRequestContext, params: dict | None = None) -> tupl
 
 
 def _match_student(
-    students: list, student_name: str, *, remembered: str = ""
-) -> dict | None:
-    """Pick the child the parent meant.
+    students: list[ChildOption], student_name: str, *, ctx=None
+) -> ChildOption | None:
+    """Pick the child the parent meant, using the turn's one resolver.
 
-    Substring match across both scripts, because a parent writing in Arabic and a record
-    stored with a Latin transliteration are the normal case in this school, not the
-    exception. Returns None when the answer is not unambiguous — the caller then asks
-    rather than guessing, since guessing means showing one child's grades while naming
-    another.
+    A thin adapter over `backend.chat.child_resolution.resolve_child` rather than a
+    second route table. There used to be one here and another in the planner, and two
+    matchers with different rules drift — which here means the prompt naming one child
+    while the tool answers about a different one, in the same turn.
 
-    Three routes to a child, in order of how firmly the parent stated it:
+    Returns None when the answer is not unambiguous. The caller then asks rather than
+    guessing, since guessing means showing one child's grades while naming another.
 
-    1. **A name they just used.** Always wins, so "and how is Omar?" moves the
-       conversation on even when the previous question was about his sister.
-    2. **An only child.** Nothing to disambiguate, so they are never asked at all.
-    3. **The child already under discussion.** A parent who answered "Layla" once is not
-       asked again on their next question.
-
-    A name matching nobody falls through to `None` rather than quietly keeping the
-    remembered child: the parent named somebody, and answering about a different child
-    while they watch is worse than one more question.
+    A name the model supplied still wins over the pin, so "and how is Omar?" moves the
+    conversation on even when the previous question was about his sister — that is
+    route 1 of the shared resolver, reached by passing `reference="named"`.
     """
     if not students:
         return None
-    if not student_name:
-        if len(students) == 1:
-            return students[0]
-        if remembered:
-            found = next(
-                (s for s in students if (s.get("student_id") or "") == remembered), None
-            )
-            if found is not None:
-                return found
+    pin = getattr(ctx, "child", None)
+    found = resolve_child(
+        reference="named" if student_name else "context",
+        child_name=student_name,
+        roster=students,
+        pin=pin,
+    )
+    if not found.resolved:
         return None
-
-    needle = student_name.strip().casefold()
-    matches = [
-        s
-        for s in students
-        if needle in (s.get("full_name_ar") or "").casefold()
-        or needle in (s.get("full_name_en") or "").casefold()
-        or needle == (s.get("student_id") or "").casefold()
-    ]
-    return matches[0] if len(matches) == 1 else None
+    return next((s for s in students if s.student_id == found.student_id), None)
 
 
 def make_get_student_records(ctx: ChatRequestContext):
@@ -157,36 +143,50 @@ def make_get_student_records(ctx: ChatRequestContext):
         if not ctx.guardian_token or not ctx.guardian_id:
             return render_prompt("tools/records_result.j2", outcome="not_a_parent")
 
-        base = f"/v1/guardians/{ctx.guardian_id}"
+        def _refused(outcome: str) -> str:
+            """A refusal is evidence the cached roster is stale; an outage is not.
 
-        outcome, payload = _get(f"{base}/students", ctx)
-        if outcome != "ok":
+            The pin is dropped only here too, and deliberately not on `unavailable`: a
+            hint the reader re-checks anyway is not worth discarding over a timeout, and
+            doing so would re-ask the parent for a reason they could never see.
+            """
+            if outcome == "not_authorized":
+                forget(ctx)
+                ctx.forget_child()
             return render_prompt("tools/records_result.j2", outcome=outcome)
 
-        students = payload.get("students") or []
+        base = f"/v1/guardians/{ctx.guardian_id}"
+
+        # One cached read per conversation, shared with anything else in the turn that
+        # needs to know who this parent's children are. This was a fresh HTTP round trip
+        # on every one of the tool's four permitted calls.
+        roster_outcome, students = load_roster(ctx)
+        # The roster's outcome names are the template's outcome names, so a refusal or
+        # an outage relays unchanged and keeps its own careful wording.
+        if roster_outcome in ("unavailable", "not_authorized"):
+            return _refused(roster_outcome)
         if not students:
             return render_prompt("tools/records_result.j2", outcome="no_students")
 
-        student = _match_student(
-            students, student_name, remembered=ctx.remembered_child
-        )
+        student = _match_student(students, student_name, ctx=ctx)
         if student is None:
             # Either several children and no name, or a name matching more than one.
             # Both are questions for the parent, never a coin flip.
             return render_prompt(
                 "tools/records_result.j2",
                 outcome="which_student",
-                options=[
-                    s.get("full_name_ar") or s.get("full_name_en") or s.get("student_id")
-                    for s in students
-                ],
+                options=[s.label for s in students],
             )
 
-        student_id = student.get("student_id")
+        student_id = student.student_id
         # Pinned for the rest of the conversation, so a parent who answered "Layla" once
         # is not asked again. Recorded only after a child has actually been resolved, so a
         # turn that failed to identify one leaves nothing wrong pinned behind it.
-        ctx.remember_child(student_id)
+        #
+        # The label rides along because the pin is now durable: a later turn that wants to
+        # say which child it is answering about would otherwise have only an opaque
+        # student number to show a parent.
+        ctx.remember_child(student_id, label=student.label, gender=student.gender)
         kind = (record_type or "grades").strip().lower()
 
         if kind == "attendance":
@@ -195,7 +195,7 @@ def make_get_student_records(ctx: ChatRequestContext):
         elif kind == "subject":
             grades_outcome, grades = _get(f"{base}/students/{student_id}/grades", ctx)
             if grades_outcome != "ok":
-                return render_prompt("tools/records_result.j2", outcome=grades_outcome)
+                return _refused(grades_outcome)
 
             needle = (subject or "").strip().casefold()
             course = next(
@@ -230,12 +230,12 @@ def make_get_student_records(ctx: ChatRequestContext):
             template_outcome = "grades"
 
         if outcome != "ok":
-            return render_prompt("tools/records_result.j2", outcome=outcome)
+            return _refused(outcome)
 
         return render_prompt(
             "tools/records_result.j2",
             outcome=template_outcome,
-            **_render_context(student, data),
+            **_render_context(student.label, data),
         )
 
     return get_student_records
@@ -250,7 +250,7 @@ def _label(record: dict, *keys: str) -> str:
     return ""
 
 
-def _render_context(student: dict, data: dict) -> dict:
+def _render_context(student_label: str, data: dict) -> dict:
     """Flatten the payload into what the template renders.
 
     Labels and the two summary flags are resolved here rather than in Jinja for the
@@ -262,7 +262,7 @@ def _render_context(student: dict, data: dict) -> dict:
     course = data.get("course") or {}
 
     return {
-        "student_label": _label(student, "full_name_ar", "full_name_en", "student_id"),
+        "student_label": student_label,
         "term_label": _label(data.get("term") or {}, "name_ar", "name_en", "term_id"),
         "courses": courses,
         # Precomputed so the template states each caveat only when it is true, and

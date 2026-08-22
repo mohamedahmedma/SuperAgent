@@ -53,13 +53,61 @@ agent:
   # A school assistant is asked plenty that the corpus is not about — homework help,
   # general knowledge, chat. Without this the catalogue rung can only admit, so those
   # reach the agent and get answered on general knowledge in the school's voice.
+  #
+  # This profile ships no scope catalogue, so the classifier node judges against
+  # `coverage` below rather than against indexed questions and similarity scores.
   request_envelope_enabled: true
+
+  # What the classifier compares a message against. Load-bearing on this profile and
+  # nowhere else: with a catalogue the node is shown real questions the corpus is known
+  # to answer, and this description is a poor substitute for that. Without one it is
+  # the only thing standing between the classifier and a guess — an empty string here
+  # is how an assistant starts refusing valid questions for want of anything to compare
+  # them to.
+  #
+  # Written as prose rather than a topic list because the node has to judge messages
+  # phrased in words nobody listed, in either language.
+  coverage: >-
+    Everything a parent or guardian asks a school: term dates, holidays and the
+    calendar; fees, payment plans and discounts; admissions and registration; uniform,
+    books and equipment; transport and bus routes; the school day, timetables and
+    lateness; attendance and absence rules; exams, results and report cards; subjects
+    and curriculum; trips and activities; medical, dietary and allergy policy; contact
+    details and how to reach a teacher or the office. It also answers questions about a
+    specific child's own marks, attendance and report card, for the parent signed in as
+    that child's guardian.
+
+  # Reported by the classifier when a message discloses one, and used to decide whether
+  # a post-turn profile capture is worth paying for. A closed list, because free text
+  # here would make the node an extractor — a different and far harder job.
+  personal_data_fields:
+    - child_name
+    - year_group
+    - phone
+    - email
+    - preferred_language
+
+  # This deployment has children to talk about, so the classifier is asked whether a
+  # message is about one. Deployment data, not identity: it says nothing about who is
+  # asking, which is why a detector is allowed to read it.
+  child_context_enabled: true
 
   # Two knowledge calls, because a parent question often has a policy half and a
   # records half ("is she allowed to miss Thursday, and how many days has she
   # missed?"). The records tool has its own separate budget — see
   # ChatRequestContext.acquire_records_tool_slot.
   max_knowledge_calls_per_turn: 2
+
+  # Six turns of conversation, which is TWELVE messages — this is counted in messages,
+  # not exchanges, and setting it to 6 would give a parent three turns of memory.
+  #
+  # Six is chosen rather than inherited because this is the profile where the history
+  # window does real work: it is what lets the model follow "and what about his
+  # timetable?" back to the child settled two turns ago, without anything having to
+  # detect the Arabic enclitic possessive that question takes. The durable pin
+  # (backend/chat/child_context.py) is the mechanism; this window is what makes the
+  # model's own reading of the conversation agree with it.
+  context_window_messages: 12
 
 retrieval:
   # School corpora are small and repetitive — fee tables, calendars, policy pages

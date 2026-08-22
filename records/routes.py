@@ -76,6 +76,7 @@ def _student_ref(student: Student) -> StudentRef:
         full_name_en=student.full_name_en,
         grade_level=student.grade_level,
         section=student.section,
+        gender=getattr(student, "gender", "") or "unspecified",
     )
 
 

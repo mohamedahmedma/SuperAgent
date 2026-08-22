@@ -24,6 +24,7 @@ from backend.chat.assets_bridge import (
     trace_for_storage,
 )
 from backend.chat.caller_identity import CallerIdentity
+from backend.chat.child_context import load_child_state, save_child_state
 from backend.chat.orchestrator import plan_turn, resolve_turn_question
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import ResolvedQuestion, conversation_text
@@ -450,13 +451,21 @@ def _turn_context_message(turn_plan) -> SystemMessage | None:
         return None
     resolved = (getattr(turn_plan, "resolved_question", "") or "").strip()
     constraints = [str(item) for item in (getattr(turn_plan, "carried_constraints", None) or [])]
-    if not resolved and not constraints:
+    child_hint = (getattr(turn_plan, "child_hint", "") or "").strip()
+    child_year = (getattr(turn_plan, "child_year", "") or "").strip()
+    child_options = [str(item) for item in (getattr(turn_plan, "child_options", None) or [])]
+    # This condition is the feature's single point of failure: a plan carrying a child
+    # and nothing else renders nothing at all unless the child is named here too.
+    if not resolved and not constraints and not child_hint and not child_options:
         return None
     rendered = resolve_prompt(
         "",
         "agent/turn_context.j2",
         resolved_question=resolved,
         constraints=constraints,
+        child_hint=child_hint,
+        child_year=child_year,
+        child_options=child_options,
     )
     return SystemMessage(content=rendered) if rendered else None
 
@@ -596,6 +605,9 @@ def chat_with_agent(
     caller, user_id = _resolve_caller(caller, user_id)
     messages, metadata = storage.load_with_meta(user_id, session_id)
     asset_state = load_asset_state(metadata)
+    # The pin travels by reference into the turn's context and back out into
+    # `save_meta`, so a turn that resolves a child has already recorded it.
+    child_state = load_child_state(metadata, guardian_id=caller.guardian_id if caller else "")
     persistent_note = metadata.get("persistent_note", "")
     is_first_message = len(messages) == 0
     entry = _enter_turn(user_text, messages, metadata)
@@ -609,7 +621,11 @@ def chat_with_agent(
     history_for_answer = list(messages)
 
     ctx = ChatRequestContext.for_sync(
-        user_id=user_id, session_id=session_id, asset_state=asset_state, caller=caller
+        user_id=user_id,
+        session_id=session_id,
+        asset_state=asset_state,
+        caller=caller,
+        child=child_state,
     )
     ctx.reset_knowledge_tool_budget()
 
@@ -702,6 +718,7 @@ def chat_with_agent(
 
         save_meta = dict(metadata)
         save_asset_state(save_meta, asset_state)
+        save_child_state(save_meta, child_state)
         if invalid_pending_hitl:
             save_meta[PENDING_HITL_KEY] = None
         if is_first_message:
@@ -772,6 +789,9 @@ async def chat_with_agent_stream(
 
     messages, metadata = storage.load_with_meta(user_id, session_id)
     asset_state = load_asset_state(metadata)
+    # The pin travels by reference into the turn's context and back out into
+    # `save_meta`, so a turn that resolves a child has already recorded it.
+    child_state = load_child_state(metadata, guardian_id=caller.guardian_id if caller else "")
     capabilities = effective_capabilities(client_capabilities, _PROFILE.assets.delivery)
     persistent_note = metadata.get("persistent_note", "")
     is_first_message = len(messages) == 0
@@ -795,6 +815,7 @@ async def chat_with_agent_stream(
         output_queue=output_queue,
         asset_state=asset_state,
         caller=caller,
+        child=child_state,
     )
     ctx.reset_knowledge_tool_budget()
 
@@ -883,6 +904,7 @@ async def chat_with_agent_stream(
 
             save_meta = dict(metadata)
             save_asset_state(save_meta, asset_state)
+            save_child_state(save_meta, child_state)
             if invalid_pending_hitl:
                 save_meta[PENDING_HITL_KEY] = None
             if next_pending_hitl:
@@ -1052,6 +1074,7 @@ async def chat_with_agent_stream(
 
         save_meta = dict(metadata)
         save_asset_state(save_meta, asset_state)
+        save_child_state(save_meta, child_state)
         if invalid_pending_hitl:
             save_meta[PENDING_HITL_KEY] = None
         if session_title:

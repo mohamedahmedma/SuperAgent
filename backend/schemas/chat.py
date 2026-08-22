@@ -78,6 +78,11 @@ class RagTraceFields(StrictSchema):
     turn_scope_options: Optional[List[str]] = None
     turn_language: Optional[str] = None
     turn_capture_user_info: Optional[bool] = None
+    # Whether the turn settled on one child, and whether it had to ask. The NAME is
+    # deliberately absent for the same reason it is absent from the request half:
+    # this trace is persisted per message and streamed to the browser.
+    turn_child_resolved: Optional[bool] = None
+    turn_child_asked: Optional[bool] = None
     turn_reason: Optional[str] = None
     # What the turn was taken to be about, once references were resolved against the
     # conversation, and the conditions inherited with it.
@@ -89,6 +94,16 @@ class RagTraceFields(StrictSchema):
     request_language: Optional[str] = None
     request_is_social: Optional[bool] = None
     request_personal_data: Optional[List[str]] = None
+    # Whether the classifier read this message as being about one of the caller's own
+    # children, and how it was referred to. Anything not declared in this model is
+    # silently dropped, so a signal that is not here cannot be debugged from a trace.
+    #
+    # The child's NAME is deliberately absent. This trace is persisted per message and
+    # streamed to the browser, and a turn may resolve a child silently without ever
+    # showing that name — putting it here would disclose it anyway. The boolean and the
+    # reference kind answer every question a name would.
+    request_about_child: Optional[bool] = None
+    request_child_reference: Optional[str] = None
     request_candidate_sections: Optional[List[str]] = None
     request_scope_options: Optional[List[str]] = None
     request_top_match: Optional[dict] = None

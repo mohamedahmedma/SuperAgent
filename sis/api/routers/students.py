@@ -33,7 +33,7 @@ from sis.api.routers import domain_errors, error_responses
 from sis.application.services import QueryService
 from sis.application.services.queries import ClassRosterEntry
 from sis.domain.errors import UnknownReference
-from sis.domain.people import ClassEnrolment, Student
+from sis.domain.people import ClassEnrolment, Gender, Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
 
 router = APIRouter(prefix="/v1", tags=["students"])
@@ -191,6 +191,7 @@ class StudentOut(BaseModel):
     full_name_ar: str
     full_name_en: str
     is_active: bool
+    gender: Gender = Gender.UNSPECIFIED
     date_of_birth: date | None = None
     age: int | None = Field(
         default=None,
@@ -211,6 +212,7 @@ class StudentOut(BaseModel):
             full_name_ar=student.full_name_ar,
             full_name_en=student.full_name_en,
             is_active=student.is_active,
+            gender=student.gender,
             date_of_birth=student.date_of_birth,
             age=student.age_on(datetime.now(UTC).date()),
             contact_phone=student.contact_phone,

@@ -15,9 +15,34 @@ supplies.
 """
 from dataclasses import dataclass
 from datetime import date
+from enum import StrEnum
 
 from sis.domain.errors import InvalidDateRange, ValidationError
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
+
+
+class Gender(StrEnum):
+    """The child's sex, as the school recorded it.
+
+    Closed, for the reason `RelationshipType` states: this is a field that gets counted,
+    and free text tallies "male", "Male" and "ذكر" as three different things.
+
+    **`UNSPECIFIED` is a first-class value, not a null.** A school roster arrives with
+    this column blank far more often than not, and every child already on file is in
+    exactly this state until a registrar re-uploads. Callers must therefore treat it as
+    "the school has not said", never as a default sex — a reader that lets `UNSPECIFIED`
+    satisfy a filter for "her daughters" will name the wrong child, and a reader that
+    excludes it from both will silently lose half the school.
+
+    No third named sex, and that is a recording decision rather than a claim: this field
+    exists to be matched against what a parent typed in a chat message ("my son"), and
+    the Egyptian school records it is loaded from carry two values and a blank. A school
+    holding richer data would extend this enum, not overload the blank.
+    """
+
+    MALE = "male"
+    FEMALE = "female"
+    UNSPECIFIED = "unspecified"
 
 
 def _coerce(entity: object, field: str, kind: type) -> None:
@@ -72,6 +97,12 @@ class Student:
     #: instead would be a number that is wrong from the day after it is written.
     date_of_birth: date | None = None
 
+    #: What the school recorded, or that it recorded nothing. Not inferred from her name:
+    #: Arabic given names are strongly gendered right up until they are not — «ماريز» sits
+    #: in this school's own roll transliterated as "Mario" — and the cost of guessing here
+    #: is showing one family's records while naming another child.
+    gender: "Gender" = Gender.UNSPECIFIED
+
     #: The child's own contact details, which are **not** her guardian's. A school holds
     #: both, they differ, and merging them is how a message meant for a parent goes to a
     #: nine-year-old's tablet. Guardian numbers live in `sis.domain.guardians`, where the
@@ -82,6 +113,15 @@ class Student:
 
     def __post_init__(self) -> None:
         _coerce(self, "student_number", StudentNumber)
+        # A stored string becomes the enum, so a row read back from the database compares
+        # equal to one a service constructed — the same contract `_coerce` gives the
+        # codes. An unrecognised value degrades to UNSPECIFIED rather than raising: it is
+        # lossless (the school simply has not said), and refusing the row would make one
+        # bad cell cost a child her whole record.
+        try:
+            object.__setattr__(self, "gender", Gender(str(self.gender or "").lower()))
+        except ValueError:
+            object.__setattr__(self, "gender", Gender.UNSPECIFIED)
         name_ar = _clean_name(self.full_name_ar, field="full_name_ar")
         name_en = _clean_name(self.full_name_en, field="full_name_en")
         # Both names are wanted (decision 7) but only one is *required*: a roster

@@ -46,7 +46,7 @@ from jose import jwt  # noqa: E402
 
 from records import auth, lms  # noqa: E402
 from records.app import app  # noqa: E402
-from records.db import Base, SessionLocal, engine  # noqa: E402
+from records.db import Base, get_engine, new_session, reset_engine  # noqa: E402
 from records import calendar as school_calendar  # noqa: E402
 from records import guardian_directory  # noqa: E402
 from records.calendar import FakeSchoolCalendar, SchoolTerm  # noqa: E402
@@ -55,6 +55,22 @@ from records.guardian_directory import (  # noqa: E402
     PermittedStudent,
 )
 from records.models import ApiKey, CourseBinding, Guardian, GuardianStudent, Student, Term  # noqa: E402
+
+def _claim_database() -> None:
+    """Point RECORDS_DATABASE_URL back at this suite's database, and drop any engine built from another.
+
+    Set at import above, and re-asserted here because the variable is process-global and
+    this is not the only suite that wants one. pytest imports every collected module
+    before running anything, so in a session covering several suites the last import
+    silently owns it — and the loser fails a long way from the cause, with `no such
+    table` from a server pointed at somebody else's file.
+
+    Now that the engine is built lazily, re-asserting actually works: before, the engine
+    was captured at import and no later environment change could move it.
+    """
+    os.environ["RECORDS_DATABASE_URL"] = f"sqlite:///{_TMPDIR}/test.db"
+    reset_engine()
+
 
 AGENT_KEY = "agentkey-fixture-0000000000000000"
 ADMIN_KEY = "adminkey-fixture-0000000000000000"
@@ -123,9 +139,10 @@ def _pin_verification_key():
 
 @pytest.fixture()
 def db():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    session = SessionLocal()
+    _claim_database()
+    Base.metadata.drop_all(bind=get_engine())
+    Base.metadata.create_all(bind=get_engine())
+    session = new_session()
     try:
         yield session
     finally:

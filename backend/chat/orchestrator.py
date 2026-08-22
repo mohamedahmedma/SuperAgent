@@ -27,6 +27,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional, Sequence
 
+import backend.chat.child_roster as child_roster
+from backend.chat.child_resolution import ResolvedChild, no_child, resolve_child
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import ResolvedQuestion, resolve_question, unresolved
 from backend.chat.signals import RequestSignals, SignalContext, build_ladder
@@ -44,6 +46,7 @@ def plan_turn(
     envelope_invoke=None,
     resolve_invoke=None,
     resolution: Optional[ResolvedQuestion] = None,
+    roster_fetch=None,
 ) -> tuple:
     """Decide how this turn should run. Returns `(plan, signals)`.
 
@@ -61,6 +64,16 @@ def plan_turn(
     behaviour that existed before this module.
     """
     profile = get_profile()
+    # Started BEFORE anything else, and before anything knows whether this turn is even
+    # about a child. That is the whole point: the only stretch that can absorb an HTTP
+    # wait is the one where the resolver and the classifier are already talking to a
+    # model, and by the time the classifier has answered, this has too.
+    #
+    # Speculating costs almost nothing. The read is cached per guardian, so on every
+    # turn but a conversation's first it is a Redis lookup; on the first it is a call
+    # the records tool would have made a moment later anyway. Non-parents start no
+    # thread at all.
+    roster_ahead = _start_roster(ctx, roster_fetch)
     try:
         config = _LadderConfig(profile.agent, profile.rag)
         messages = list(history or [])
@@ -78,11 +91,13 @@ def plan_turn(
             )
         )
         signals.reasons.insert(0, f"resolution: {resolved.reason}")
+        child = _settle_child(ctx, signals, roster_ahead)
         plan = resolve_turn(
             signals,
             agent_config=profile.agent,
             copy_config=profile.user_copy,
             rag_config=profile.rag,
+            child=child,
         )
     except Exception:
         logger.warning("turn planning failed; running the turn unchanged", exc_info=True)
@@ -165,6 +180,61 @@ class _LadderConfig:
         return getattr(self._rag, name)
 
 
+def _start_roster(ctx: Optional[ChatRequestContext], roster_fetch):
+    """Begin the roster read, or decline to.
+
+    Guarded rather than attempted-and-caught, and the guard earns its place three times
+    over: it keeps a hand-built context in a unit test off the network, it stops an
+    empty guardian id producing the shared cache key `…:guardian_students:` and the
+    unroutable path `/v1/guardians//students`, and it means a staff session never
+    starts a thread for a question about a child it could not read anyway.
+    """
+    if ctx is None or not getattr(ctx, "is_parent", False):
+        return None
+    try:
+        return child_roster.prefetch(ctx, fetch=roster_fetch)
+    except Exception:  # pragma: no cover - a speculative read must never break a turn
+        logger.warning("could not start the child roster read", exc_info=True)
+        return None
+
+
+def _settle_child(
+    ctx: Optional[ChatRequestContext], signals: RequestSignals, roster_ahead
+) -> ResolvedChild:
+    """Which child this turn is about, decided once, here.
+
+    This is the only address in the planner holding both a verified identity and the
+    classifier's verdict, which is why the resolution happens here rather than in the
+    ladder (`SignalContext` carries no identity, deliberately) or in policy
+    (`resolve_turn` is pure and takes no context, deliberately).
+
+    Its own try/except, not the caller's: the outer handler in `plan_turn` throws away
+    the retrieval hints and the language too, and losing those because a roster read
+    misbehaved would be a much larger regression than the one being contained. The same
+    reason `_hand_to_graph` guards itself.
+
+    Never calls `acquire_records_tool_slot` — the planner's read must not silently spend
+    one of the tool's four calls for the turn.
+    """
+    if roster_ahead is None or not signals.about_child:
+        return no_child("not a turn about a child")
+    try:
+        outcome, roster = roster_ahead.result()
+        if outcome != child_roster.OK:
+            # An outage or a refusal. Say nothing about a child rather than guessing
+            # from a roster nobody answered for; the tool will report it properly.
+            return no_child(f"roster {outcome}")
+        return resolve_child(
+            reference=signals.child_reference,
+            child_name=signals.child_name,
+            roster=roster,
+            pin=getattr(ctx, "child", None),
+        )
+    except Exception:  # pragma: no cover - resolution must never break a turn
+        logger.warning("could not settle which child this turn is about", exc_info=True)
+        return no_child("child resolution error")
+
+
 def _emit(ctx: Optional[ChatRequestContext], signals: RequestSignals, plan: TurnPlan) -> None:
     """Surface the decision as a progress step, and only when it changed something.
 
@@ -174,6 +244,15 @@ def _emit(ctx: Optional[ChatRequestContext], signals: RequestSignals, plan: Turn
     if ctx is None:
         return
     try:
+        # Emitted first, and separately from the rest: in a streamed turn this is the
+        # only stage between `initial_step` and the agent, so a parent watching sees
+        # why the pause happened.
+        if plan.child_hint:
+            ctx.emit_rag_step("👤", "Reading one child's details", plan.child_hint)
+        elif plan.child_options:
+            ctx.emit_rag_step(
+                "👥", "Asking which child", f"{len(plan.child_options)} on file"
+            )
         if plan.short_circuit:
             ctx.emit_rag_step("🚪", "Answered without searching", "; ".join(plan.reasons)[:90])
         elif plan.exposed_tools is not None:

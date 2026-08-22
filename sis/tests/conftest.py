@@ -141,11 +141,31 @@ def csv_bytes(
 # ---------------------------------------------------------------------------
 
 
+def _claim_database_url() -> None:
+    """Point `SIS_DATABASE_URL` back at this suite's database.
+
+    Set at import (line 30) and re-asserted here, because the variable is
+    process-global and this is not the only suite that wants one. `tests/` contains a
+    cross-service journey test that names its own SIS database at module scope, and
+    pytest imports every collected module before running anything — so in a session
+    covering both, whichever imported last silently owns the variable.
+
+    That produced a failure with no useful message: alembic migrated the OTHER suite's
+    file, and the template copy then failed with `FileNotFoundError` on a path nobody
+    had written. Re-asserting is a line; deducing that from the traceback is an evening.
+
+    A fixture that needs a specific database claims it rather than trusting the
+    environment it inherited. The journey test does the same for itself.
+    """
+    os.environ["SIS_DATABASE_URL"] = f"sqlite:///{_LIVE_DB}"
+    reset_settings_cache()
+
+
 def _run_alembic_upgrade() -> None:
     from alembic import command
     from alembic.config import Config as AlembicConfig
 
-    reset_settings_cache()  # env.py resolves the URL through sis.config
+    _claim_database_url()  # env.py resolves the URL through sis.config
     command.upgrade(AlembicConfig(str(_ALEMBIC_INI)), "head")
 
 
@@ -173,6 +193,9 @@ def database(_migrated_template: str) -> Iterator[str]:
     an open SQLite handle makes the file unreplaceable, and the failure reads as a
     permission error in whichever test happens to run next rather than as leaked state.
     """
+    # Per test, not once per session: another suite in the same run may have pointed the
+    # variable elsewhere between one test and the next. See `_claim_database_url`.
+    _claim_database_url()
     reset_engine()
     reset_settings_cache()
     shutil.copyfile(_migrated_template, _LIVE_DB)

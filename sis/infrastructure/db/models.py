@@ -58,6 +58,10 @@ _STAGE_LEN = 16  # Longest `Stage` member is "preparatory".
 _ATTENDANCE_STATE_LEN = 16  # Longest `AttendanceState` member is "present".
 _ADDRESS_LEN = 500
 _PHONE_LEN = 16  # `Phone.MAX_LENGTH`: '+' plus E.164's fifteen digits.
+# Sized from the longest member of `sis.domain.people.Gender` with room to spare. No
+# CHECK constraint beside it: the domain already degrades an unrecognised value to
+# `unspecified`, and a constraint would turn that graceful loss into a failed import.
+_GENDER_LEN = 16
 _RELATIONSHIP_LEN = 16  # Longest `RelationshipType` member is "grandparent".
 _PUBLIC_ID_LEN = 32
 
@@ -346,6 +350,15 @@ class Student(Base):
     # Nullable, and no age column beside it: an age is right for one year and silently
     # wrong afterwards, so it is computed from this date at the moment of asking.
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # NOT NULL with a server default of "unspecified" rather than a nullable column, so
+    # there is one spelling of "the school has not said" instead of two — `NULL` on the
+    # rows that predate this and `""` on the ones that do not. Same reasoning as the
+    # three contact columns below, and the same reason the server default is required:
+    # this is added to a populated table.
+    gender: Mapped[str] = mapped_column(
+        String(_GENDER_LEN), default="unspecified", server_default="unspecified", nullable=False
+    )
 
     # The child's own details, which are **not** her guardian's. A school holds both and
     # they differ; merging them is how a message meant for a parent reaches a nine-year-old.

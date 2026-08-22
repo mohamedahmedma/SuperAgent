@@ -35,9 +35,22 @@ from datetime import date
 import pytest
 
 # --------------------------------------------------------------------------
-# Environment, before any service is imported. Each of them reads it once, at
-# import, into a module-global engine — the same reason sis/tests/conftest.py
-# does this at the top of the file rather than in a fixture.
+# What this file needs the three services configured with — DECLARED here and
+# APPLIED in a fixture, never at import.
+#
+# It used to be applied here, because each service read its database URL once at
+# import into a module-global engine, so a fixture would have been too late. That is
+# no longer true: all three build their engine on first use.
+#
+# Applying it at import was actively harmful. pytest imports every collected module
+# before running anything, so in a session that also collects `records/tests` or
+# `identity/tests`, these values reached those suites too — and configured them.
+# `records/` then started against a real SIS over HTTP instead of its fake and failed
+# with `not_configured` where it expected `lms_unavailable`; three separate variables
+# caused three separate rounds of that before the pattern was worth naming.
+#
+# A test file may configure the process while its own tests run. It may not configure
+# it for everybody else's.
 # --------------------------------------------------------------------------
 
 _TMP = tempfile.mkdtemp(prefix="parent-journey-")
@@ -56,19 +69,19 @@ APP_SECRET = "journey-app-secret"
 VERIFY_TOKEN = "journey-verify-token"
 SCHOOL_NUMBER = "+201288339613"
 
-os.environ.update(
-    SIS_DATABASE_URL=f"sqlite:///{_TMP}/sis.db",
-    SIS_DEFAULT_COUNTRY_CODE="+20",
-    RECORDS_DATABASE_URL=f"sqlite:///{_TMP}/records.db",
-    RECORDS_BOOTSTRAP_ADMIN_KEY="journey-records-admin",
-    RECORDS_LMS="sis",
-    SIS_BASE_URL=f"http://127.0.0.1:{SIS_PORT}",
-    SIS_API_KEY="journey-reader",
-    IDENTITY_DATABASE_URL=f"sqlite:///{_TMP}/identity.db",
-    IDENTITY_DEV_KEY_FILE=f"{_TMP}/dev-key.pem",
-    IDENTITY_ISSUER="school-identity",
-    IDENTITY_AUDIENCE="school-services",
-)
+ENVIRONMENT = {
+    "SIS_DATABASE_URL": f"sqlite:///{_TMP}/sis.db",
+    "SIS_DEFAULT_COUNTRY_CODE": "+20",
+    "RECORDS_DATABASE_URL": f"sqlite:///{_TMP}/records.db",
+    "RECORDS_BOOTSTRAP_ADMIN_KEY": "journey-records-admin",
+    "RECORDS_LMS": "sis",
+    "SIS_BASE_URL": f"http://127.0.0.1:{SIS_PORT}",
+    "SIS_API_KEY": "journey-reader",
+    "IDENTITY_DATABASE_URL": f"sqlite:///{_TMP}/identity.db",
+    "IDENTITY_DEV_KEY_FILE": f"{_TMP}/dev-key.pem",
+    "IDENTITY_ISSUER": "school-identity",
+    "IDENTITY_AUDIENCE": "school-services",
+}
 
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
@@ -238,7 +251,50 @@ def _serve(app, port: str) -> uvicorn.Server:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def estate():
+def _own_the_environment():
+    """Configure the three services for this file, and put it back afterwards.
+
+    **Session-scoped, and `estate` depends on it**, because ordering is the point. As a
+    per-test fixture this ran after the session-scoped `estate`, which had already
+    migrated and served whichever database it inherited: the servers came up on another
+    suite's file and every guardian lookup failed with `no such table`.
+
+    Restored on the way out, so a suite that runs after this one in the same session
+    gets the environment it expected rather than this file's. `records/` in particular
+    reads `RECORDS_LMS` and `SIS_BASE_URL` when its app starts up, so a leaked value
+    silently swaps its fake adapter for a real HTTP client.
+
+    The engines are dropped as well as the variables set. All three services memoise an
+    engine built from their own variable, so resetting one leaves the other two serving
+    whichever database their own suite bound them to.
+    """
+    import identity.db
+    import records.db
+    from sis.config import reset_settings_cache
+    from sis.infrastructure.db.session import reset_engine
+
+    def _drop_engines() -> None:
+        reset_settings_cache()
+        reset_engine()
+        records.db.reset_engine()
+        identity.db.reset_engine()
+
+    previous = {key: os.environ.get(key) for key in ENVIRONMENT}
+    os.environ.update(ENVIRONMENT)
+    _drop_engines()
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        _drop_engines()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def estate(_own_the_environment):
     """sis/ and records/ running for real, for the whole session.
 
     Session-scoped because starting two ASGI servers per test would dominate the runtime
@@ -289,7 +345,7 @@ def _fresh_challenges():
     behaviour and should not be softened to suit a test, and it keeps its own coverage in
     identity's own suite where a fake clock can exercise it honestly.
     """
-    from identity.db import SessionLocal, init_db
+    from identity.db import init_db, new_session
 
     # Identity builds its own schema in its lifespan, which has not run yet the first time
     # this fixture fires. `init_db` is `create_all` and idempotent, so calling it here
@@ -298,7 +354,7 @@ def _fresh_challenges():
 
     from identity.models import VerificationChallenge
 
-    session = SessionLocal()
+    session = new_session()
     try:
         session.query(VerificationChallenge).delete()
         session.commit()

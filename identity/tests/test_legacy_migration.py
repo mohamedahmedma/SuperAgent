@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from identity import auth
-from identity.db import SessionLocal
+from identity.db import new_session
 from identity.import_legacy_accounts import import_accounts
 from identity.models import Account
 from identity.tests.conftest import ADMIN_HEADERS
@@ -89,7 +89,7 @@ def test_logging_in_upgrades_a_legacy_hash_in_place(client, db):
     response = client.post("/v1/auth/login", json={"username": "legacy-user", "password": PASSWORD})
     assert response.status_code == 200
 
-    fresh = SessionLocal()
+    fresh = new_session()
     try:
         stored = fresh.query(Account).filter(Account.username == "legacy-user").first().password_hash
     finally:
@@ -107,7 +107,7 @@ def test_a_wrong_password_does_not_upgrade_anything(client, db):
 
     client.post("/v1/auth/login", json={"username": "legacy-two", "password": "wrong"})
 
-    fresh = SessionLocal()
+    fresh = new_session()
     try:
         assert fresh.query(Account).filter(Account.username == "legacy-two").first().password_hash == legacy
     finally:
