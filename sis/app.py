@@ -33,6 +33,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from sis.env import load_env
+
+# Before anything reads the environment. `sis.config` memoises its settings on
+# first use, so a `.env` loaded after that point would be read too late — see
+# sis/env.py.
+load_env()
+
 log = logging.getLogger("sis.app")
 
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -106,21 +113,58 @@ def verify_database_is_migrated() -> None:
         log.warning("SIS_SKIP_MIGRATION_CHECK is set — starting without a schema check")
         return
 
+    from sis.tenancy import get_registry
+
+    registry = get_registry()
+    if not registry.is_multi_school:
+        _check_one_database(None, "SIS_DATABASE_URL")
+        return
+
+    # Every school, not just the first. Physical separation means a migration can succeed
+    # for four schools and fail for the fifth, leaving the estate on two schema versions at
+    # once — and the school left behind is the one whose registrar meets the missing column
+    # mid-import. Checking them all turns that into a startup failure naming the school.
+    #
+    # All of them are checked before any is reported, so an operator fixes every stale
+    # school in one pass instead of restarting once per school to discover the next.
+    failures: list[str] = []
+    for tenant in registry.tenants:
+        try:
+            _check_one_database(
+                tenant.code, f"SIS_DATABASE_URL_{tenant.code.replace('.', '_').replace('-', '_')}"
+            )
+        except RuntimeError as exc:
+            failures.append(str(exc))
+    if failures:
+        raise RuntimeError(
+            f"{len(failures)} of {len(registry.tenants)} school database(s) are not ready:"
+            "\n\n" + "\n\n".join(failures)
+        )
+
+
+def _check_one_database(school_code: str | None, setting: str) -> None:
+    """The schema gate for one database. `school_code` is `None` for single-school mode."""
     from alembic.runtime.migration import MigrationContext
 
     from sis.infrastructure.db.session import get_engine
 
-    engine = get_engine()
+    engine = get_engine(school_code)
     where = _sanitised_url(engine.url)
-    upgrade = f'alembic -c "{_ALEMBIC_INI}" upgrade head'
+    named = f"school {school_code}: " if school_code else ""
+    upgrade = (
+        "python scripts/schools.py migrate"
+        if school_code
+        else f'alembic -c "{_ALEMBIC_INI}" upgrade head'
+    )
 
     try:
         with engine.connect() as connection:
             applied = set(MigrationContext.configure(connection).get_current_heads())
     except Exception as exc:  # noqa: BLE001 -- reported with the URL, which the driver omits
         raise RuntimeError(
-            f"Cannot reach the SIS database at {where} ({type(exc).__name__}: {exc}).\n"
-            "Check SIS_DATABASE_URL and that the database is accepting connections."
+            f"{named}cannot reach the database at {where} "
+            f"({type(exc).__name__}: {exc}).\n"
+            f"Check {setting} and that the database is accepting connections."
         ) from exc
 
     expected = _expected_heads()
@@ -129,7 +173,7 @@ def verify_database_is_migrated() -> None:
 
     state = ", ".join(sorted(applied)) if applied else "<none — never migrated>"
     raise RuntimeError(
-        "The SIS database schema does not match this build.\n"
+        f"{named}the database schema does not match this build.\n"
         f"  database: {where}\n"
         f"  applied:  {state}\n"
         f"  expected: {', '.join(sorted(expected)) or '<no migrations found>'}\n"

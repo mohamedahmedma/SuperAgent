@@ -179,6 +179,25 @@ def _require(mapping: Mapping[str, int], code: str, field: str) -> int:
     return resolved
 
 
+def _require_level(
+    mapping: Mapping[tuple[str, str], int], year_code: str, level_code: str
+) -> int:
+    """Resolve a rung within one academic year's school, or say so naming both.
+
+    The message names the year as well as the rung because "no year level 'Y1' on file"
+    is baffling to a registrar looking at a screen that lists Y1 — the rung exists, just
+    not at the school this year belongs to.
+    """
+    resolved = mapping.get((year_code, level_code))
+    if resolved is None:
+        raise UnknownReference(
+            f"no year level {level_code!r} at the school that owns academic year "
+            f"{year_code!r}",
+            field="year_level_code",
+        )
+    return resolved
+
+
 def _ids_by_code(session: Session, model: type[Any], codes: Collection[str]) -> dict[str, int]:
     """One statement resolving many codes to surrogate ids; absent codes are simply missing."""
     if not codes:
@@ -187,6 +206,42 @@ def _ids_by_code(session: Session, model: type[Any], codes: Collection[str]) -> 
         select(model.code, model.id).where(model.code.in_(set(codes)))
     ).all()
     return {code: identifier for code, identifier in rows}
+
+
+def _level_ids_by_year(
+    session: Session,
+    year_codes: Collection[str],
+    level_codes: Collection[str],
+) -> dict[tuple[str, str], int]:
+    """Resolve rung codes *within the school that owns each academic year*.
+
+    Rung codes are unique per school, not globally (`uq_year_levels_school_code`): "Y1"
+    exists at every branch. `_ids_by_code` keys purely on the code string, so with two
+    schools in one database it collapses every branch's `Y1` into whichever row the
+    database returned last — and structure generation for a new school then wired its
+    classes to *another school's* rungs. The visible symptom was a school where nobody
+    had created a class reporting the main school's class counts.
+
+    Keying on `(academic_year_code, year_level_code)` closes that: the academic year names
+    the school, so the pair names exactly one rung. Still one statement, so the "four
+    statements regardless of size" property of `upsert_many` is unchanged.
+
+    Physical separation makes the collision impossible in a deployed multi-school estate —
+    the branches are in different files. This matters for the database that still holds
+    several schools: a deployment before the split, and any single-database install.
+    """
+    if not year_codes or not level_codes:
+        return {}
+    rows = session.execute(
+        select(models.AcademicYear.code, models.YearLevel.code, models.YearLevel.id)
+        .join(models.School, models.AcademicYear.school_id == models.School.id)
+        .join(models.YearLevel, models.YearLevel.school_id == models.School.id)
+        .where(
+            models.AcademicYear.code.in_(set(year_codes)),
+            models.YearLevel.code.in_(set(level_codes)),
+        )
+    ).all()
+    return {(year_code, level_code): identifier for year_code, level_code, identifier in rows}
 
 
 # ---------------------------------------------------------------------------
@@ -658,9 +713,11 @@ class SqlAlchemyClassSectionRepository:
             models.AcademicYear,
             {str(section.academic_year_code) for section in sections},
         )
-        level_ids = _ids_by_code(
+        # Keyed by (year, rung) rather than by rung alone: a bare rung code names a
+        # different rung at every school. See `_level_ids_by_year`.
+        level_ids = _level_ids_by_year(
             self._session,
-            models.YearLevel,
+            {str(section.academic_year_code) for section in sections},
             {str(section.year_level_code) for section in sections},
         )
         now = _utcnow()
@@ -671,8 +728,8 @@ class SqlAlchemyClassSectionRepository:
             rows.append(
                 {
                     "academic_year_id": _require(year_ids, year_code, "academic_year_code"),
-                    "year_level_id": _require(
-                        level_ids, str(section.year_level_code), "year_level_code"
+                    "year_level_id": _require_level(
+                        level_ids, year_code, str(section.year_level_code)
                     ),
                     "code": str(section.code),
                     "name_en": section.name_en,

@@ -25,6 +25,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
@@ -219,6 +220,99 @@ def test_two_schools_each_run_their_own_Y1_and_3A(
 
     assert register(NC_YEAR) == ["NC-1"]
     assert register(MD_YEAR) == [], "a child leaked across the school boundary"
+
+
+def test_a_class_is_wired_to_its_own_schools_rung(two_schools: TestClient) -> None:
+    """Each branch's `3A` points at *its own* `Y1`, not at whichever the database returned.
+
+    The regression this pins: class sections resolved their rung by bare code, and rung
+    codes are unique per school rather than globally (`uq_year_levels_school_code`). With
+    a `Y1` at both branches the lookup collapsed them into one id, so generating a ladder
+    for a newly created school attached its classes to the *other* school's rungs.
+
+    What that looked like to a registrar is the reason it went unnoticed for so long: the
+    rung codes printed on screen were identical either way, so the only visible symptom was
+    a brand-new school — one where nobody had created a single class — reporting the main
+    school's class counts.
+
+    Asserted against the stored foreign key rather than through the API, because every
+    screen renders the rung's *code*, and both schools' codes read `Y1`. The wrong wiring
+    is invisible in the response and unambiguous in the row.
+    """
+    with SqlAlchemyUnitOfWork() as uow:
+        session = uow._session
+        assert session is not None
+        rows = session.execute(
+            text(
+                """
+                SELECT year_school.code AS rung_school, class_school.code AS class_school
+                FROM class_sections
+                JOIN year_levels ON class_sections.year_level_id = year_levels.id
+                JOIN schools AS year_school ON year_levels.school_id = year_school.id
+                JOIN academic_years ON class_sections.academic_year_id = academic_years.id
+                JOIN schools AS class_school ON academic_years.school_id = class_school.id
+                """
+            )
+        ).all()
+
+    assert rows, "the fixture seeded no classes, so this proves nothing"
+    crossed = [row for row in rows if row.rung_school != row.class_school]
+    assert not crossed, (
+        "a class is attached to another school's rung: "
+        + ", ".join(f"class at {row.class_school} -> rung at {row.rung_school}" for row in crossed)
+    )
+
+
+def test_a_new_school_starts_with_no_classes_of_its_own(two_schools: TestClient) -> None:
+    """An empty branch reports zero classes even while another branch has a full ladder.
+
+    A guard rather than a reproduction, and worth being precise about which: this passed
+    even with the rung lookup bug above, because `list_for_year` filters on the academic
+    year code and *that* is globally unique, so the wrongly-wired rung never changed which
+    year a class was listed under. The reported symptom — a newly created school showing
+    the main school's class count — therefore comes from the client rather than from here.
+
+    It stays because it pins the property the split depends on: a school with a ladder and
+    no classes answers "no classes", whatever the neighbouring branches hold.
+    """
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.schools.upsert_many(
+            [School(code="ALX", name_en="Alexandria", name_ar="الإسكندرية")]
+        )
+        uow.academic_years.upsert_many(
+            [
+                AcademicYear(
+                    code="ALX-2025-2026",
+                    school_code="ALX",
+                    name_en="2025-2026 Alexandria",
+                    name_ar="٢٠٢٥",
+                    starts_on=date(2025, 9, 1),
+                    ends_on=date(2026, 6, 30),
+                    is_current=True,
+                )
+            ]
+        )
+        # The same rung code the other two branches already use, which is exactly the
+        # condition that made the old lookup ambiguous.
+        uow.year_levels.upsert_many(
+            [
+                YearLevel(
+                    code="Y1",
+                    school_code="ALX",
+                    name_en="Year 1",
+                    name_ar="السنة ١",
+                    display_order=1,
+                    stage="primary",
+                )
+            ]
+        )
+        uow.commit()
+
+    with SqlAlchemyUnitOfWork() as uow:
+        assert list(uow.class_sections.list_for_year("ALX-2025-2026")) == []
+        # And the schools that *do* have a class still have exactly the one each.
+        assert len(list(uow.class_sections.list_for_year(NC_YEAR))) == 1
+        assert len(list(uow.class_sections.list_for_year(MD_YEAR))) == 1
 
 
 def test_the_years_route_narrows_to_one_school(
