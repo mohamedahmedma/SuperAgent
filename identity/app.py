@@ -12,8 +12,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from identity import guardians, whatsapp
+from identity import guardians, schools, whatsapp
 from identity.db import init_db
+from identity.env import load_env
+
+# Before anything below reads the environment. This service is deployed as its own
+# process, so nothing else has loaded the project's `.env` for it — see identity/env.py
+# for what that cost.
+load_env()
 from identity.routes import (
     admin_router,
     public_router,
@@ -25,13 +31,13 @@ logger = logging.getLogger(__name__)
 
 
 def _configure_whatsapp() -> None:
-    """Choose the gateway this process will send through, and install the webhook secrets.
+    """Choose the gateways this process sends through, and install the webhook secrets.
 
     The environment is read here and in `identity/deps.py`, and nowhere else. This is the
     composition root, so a misconfiguration is meant to stop the deploy rather than surface
     as a parent's login failing at eight in the morning.
 
-    `e164_or_raise` is applied to the school's number at startup for exactly that reason:
+    `e164_or_raise` is applied to every school's number at startup for exactly that reason:
     the national spelling `01288339613` produces `wa.me/01288339613`, which is a different
     number that does not exist, and the resulting failure is completely silent — the link
     opens, the chat is empty, no message ever arrives, and nothing logs anything.
@@ -40,9 +46,21 @@ def _configure_whatsapp() -> None:
     end, which is what makes this developable without a Meta account. It is a loud warning
     rather than a hard failure because that is also the state every test runs in.
     """
+    registry = schools.get_registry()
+    if registry.is_multi_school:
+        _configure_whatsapp_per_school(registry)
+        return
+
     number = os.getenv("IDENTITY_WHATSAPP_NUMBER") or ""
     if number:
         number = whatsapp.e164_or_raise(number, setting="IDENTITY_WHATSAPP_NUMBER")
+    else:
+        logger.warning(
+            "IDENTITY_WHATSAPP_NUMBER is not set. Parent sign-in is DISABLED: without "
+            "the school's number a click-to-chat link opens WhatsApp's contact picker "
+            "instead of a chat, so /v1/auth/whatsapp/start will refuse rather than hand "
+            "a parent a link that cannot work."
+        )
 
     whatsapp.configure(
         verify_token=os.getenv("IDENTITY_WHATSAPP_VERIFY_TOKEN") or "",
@@ -60,10 +78,94 @@ def _configure_whatsapp() -> None:
         )
         return
 
+    # Without a Meta account the code is generated and then thrown away, which makes the
+    # flow impossible to try end to end on a laptop. This turns it into a log line
+    # instead. Off unless asked for, because the body IS the verification code: anywhere
+    # a real parent can be verified, this writes their credential into a file that is
+    # backed up, shipped to a log aggregator, and read by people who are not them.
+    log_codes = (os.getenv("IDENTITY_WHATSAPP_LOG_CODES") or "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    whatsapp.set_gateway(whatsapp.RecordingWhatsAppGateway(log_bodies=log_codes))
     logger.warning(
         "WhatsApp is not configured (IDENTITY_WHATSAPP_PHONE_NUMBER_ID and "
-        "IDENTITY_WHATSAPP_TOKEN); verification codes will be discarded rather than sent. "
-        "Parent login by WhatsApp cannot work in this state."
+        "IDENTITY_WHATSAPP_TOKEN); verification codes are %s. Parent login by WhatsApp "
+        "cannot reach a real phone in this state.",
+        "WRITTEN TO THIS LOG (IDENTITY_WHATSAPP_LOG_CODES is on — never do this in "
+        "production)" if log_codes
+        else "discarded. Set IDENTITY_WHATSAPP_LOG_CODES=true to read them here while "
+             "developing",
+    )
+
+
+def _configure_whatsapp_per_school(registry: schools.SchoolRegistry) -> None:
+    """One number, one gateway, one webhook — several schools.
+
+    The webhook secrets stay estate-wide: one Meta app delivers every school's messages to
+    one endpoint, and which school a delivery belongs to is read from its own
+    `phone_number_id` rather than from a separate endpoint per school. What is per school
+    is the pair that has to travel together — the number a parent messages, and the
+    credentials a reply goes back out through. Split those and a code for one school's
+    parent is sent from another school's number, arriving in a conversation the parent is
+    not looking at.
+
+    A school with no credentials gets no gateway of its own and falls back to the recording
+    gateway, exactly as an unconfigured single-school deployment does. It is logged per
+    school rather than once, because "WhatsApp is configured" stops being a single fact the
+    moment there are several schools, and an estate where one branch silently cannot
+    deliver codes is the failure worth naming.
+    """
+    whatsapp.configure(
+        verify_token=os.getenv("IDENTITY_WHATSAPP_VERIFY_TOKEN") or "",
+        app_secret=os.getenv("IDENTITY_WHATSAPP_APP_SECRET") or "",
+        # No single business number exists here. `start` resolves each school's own from
+        # the registry; this stays empty so anything still reading the process-wide value
+        # in a multi-school deployment refuses rather than handing out one school's number
+        # to every school's parents.
+        business_number="",
+    )
+
+    log_codes = _log_codes_enabled()
+    live: list[str] = []
+    recording: list[str] = []
+    for school in registry.schools:
+        if school.can_send:
+            whatsapp.set_gateway(
+                whatsapp.CloudApiWhatsAppGateway(
+                    phone_number_id=school.phone_number_id,
+                    access_token=school.access_token,
+                ),
+                school.code,
+            )
+            live.append(school.code)
+        else:
+            whatsapp.set_gateway(
+                whatsapp.RecordingWhatsAppGateway(log_bodies=log_codes), school.code
+            )
+            recording.append(school.code)
+
+    logger.info(
+        "WhatsApp is configured for %d school(s): %s deliver to real phones.",
+        len(registry.schools),
+        ", ".join(live) or "none",
+    )
+    if recording:
+        logger.warning(
+            "These schools have no WhatsApp credentials and cannot deliver a verification "
+            "code to a real phone: %s. Parent login is effectively DISABLED for them.",
+            ", ".join(recording),
+        )
+
+
+def _log_codes_enabled() -> bool:
+    """Whether the recording gateway may write verification codes into the log.
+
+    Off unless asked for, because the body IS the verification code: anywhere a real parent
+    can be verified, this writes their credential into a file that is backed up, shipped to
+    a log aggregator, and read by people who are not them.
+    """
+    return (os.getenv("IDENTITY_WHATSAPP_LOG_CODES") or "").strip().lower() in (
+        "1", "true", "yes", "on",
     )
 
 

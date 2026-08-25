@@ -67,16 +67,77 @@ class GuardianRef:
         return self.full_name_ar or self.full_name_en
 
 
+@dataclass(frozen=True, slots=True)
+class ChildRef:
+    """One child, as much of her as belongs in a token and no more.
+
+    A name to greet her by, the year she is in, and whether she is a son or a daughter —
+    exactly what is needed to understand a parent who writes "my son" rather than a name.
+
+    Nothing about her RECORD is here: no marks, no attendance, no birth date, no contact
+    details. This travels in a bearer token that lives in a browser and rides every
+    request into every access log, so what it carries is the minimum that makes the
+    feature work, and the reader is expected to fetch anything else it needs.
+    """
+
+    student_id: str
+    full_name_ar: str = ""
+    full_name_en: str = ""
+    year_level: str = ""
+    gender: str = "unspecified"
+
+    @property
+    def display_name(self) -> str:
+        return self.full_name_ar or self.full_name_en or self.student_id
+
+    def as_claim(self) -> dict:
+        """The compact form that goes into the token. Short keys, because this is paid
+        on every request a parent's browser makes."""
+        return {
+            "id": self.student_id,
+            "ar": self.full_name_ar,
+            "en": self.full_name_en,
+            "yr": self.year_level,
+            "g": self.gender,
+        }
+
+
 class GuardianDirectory(Protocol):
     """Resolving a verified phone number to the parent the school has on file."""
 
-    def resolve(self, phone_e164: str) -> GuardianRef | None:
+    def children_of(
+        self, public_id: str, *, school_code: str | None = None
+    ) -> list[ChildRef]:
+        """Every child this guardian may be told about, by her opaque handle.
+
+        Empty is an ordinary answer — a parent whose only link carries a custody
+        restriction has no children *to be told about* — and is not distinguishable here
+        from having none, deliberately.
+
+        Raises `GuardianDirectoryUnavailable` when the question could not be put, so a
+        caller can tell an outage from an empty family. A token minted during an outage
+        simply carries no children; it must never carry an empty list as though that were
+        the answer.
+
+        `school_code` selects which school's database answers. Schools are separated
+        physically, so a handle only means anything inside the school that issued it:
+        asked of another school's database the same handle resolves to nobody, which is
+        the isolation working rather than a failure. `None` is a single-school deployment.
+        """
+
+    def resolve(
+        self, phone_e164: str, *, school_code: str | None = None
+    ) -> GuardianRef | None:
         """The guardian reachable on this number, or `None` when it reaches nobody.
 
         `None` is an ordinary answer, not an error: most numbers in the world are not this
         school's parents, and the flow that calls this has to say so politely rather than
         fail. Raises `GuardianDirectoryUnavailable` when the question could not be put at
         all, which is a different situation and gets a different reply.
+
+        `school_code` selects the database. A number that reaches a parent at one branch
+        legitimately reaches nobody at another, and under physical separation that is the
+        only answer this service can give: the row is not in the file it is connected to.
         """
 
 
@@ -118,6 +179,19 @@ class SisGuardianDirectory:
         self._client = None
         self._lock = threading.Lock()
 
+    def _headers(self, school_code: str | None) -> dict[str, str]:
+        """The headers every call to SIS carries.
+
+        `X-School-Code` is what carries physical separation across the wire: SIS resolves
+        it to one school's database and answers from that and nothing else. Sent only when
+        there is a school to name, so a single-school SIS — which ignores the header
+        entirely — keeps answering exactly as it did before.
+        """
+        headers = {"X-API-Key": self._api_key} if self._api_key else {}
+        if school_code:
+            headers["X-School-Code"] = school_code
+        return headers
+
     def _http(self):
         """One pooled client per process, built on first use and under a lock."""
         import httpx
@@ -134,10 +208,12 @@ class SisGuardianDirectory:
                 )
             return self._client
 
-    def resolve(self, phone_e164: str) -> GuardianRef | None:
+    def resolve(
+        self, phone_e164: str, *, school_code: str | None = None
+    ) -> GuardianRef | None:
         import httpx
 
-        headers = {"X-API-Key": self._api_key} if self._api_key else {}
+        headers = self._headers(school_code)
         try:
             response = self._http().post(
                 "/v1/guardians/resolve", json={"phone": phone_e164}, headers=headers
@@ -190,6 +266,63 @@ class SisGuardianDirectory:
             preferred_language=str(body.get("preferred_language") or "ar"),
         )
 
+    def children_of(
+        self, public_id: str, *, school_code: str | None = None
+    ) -> list[ChildRef]:
+        """Ask SIS by the opaque handle, never by the number that found her.
+
+        The same discipline `GuardianRef` states: once the phone number has resolved to a
+        handle it has done its job, and nothing downstream — token, account row, audit
+        line, or this call — needs to know it again.
+
+        Reads `year_level` and `gender` because they are what let a parent say "my son"
+        or ask about "the fees" and be understood. Ignores everything else SIS returns.
+        """
+        import httpx
+
+        headers = self._headers(school_code)
+        try:
+            response = self._http().get(
+                f"/v1/guardians/by-id/{public_id}/students", headers=headers
+            )
+        except httpx.HTTPError as error:
+            raise GuardianDirectoryUnavailable(
+                f"The children lookup could not reach the school: {error}"
+            ) from error
+
+        if response.status_code == 404:
+            # No such handle. Not an outage, and not this method's business to explain.
+            return []
+        if response.status_code >= 400:
+            raise GuardianDirectoryUnavailable(
+                f"The children lookup failed with status {response.status_code}."
+            )
+
+        try:
+            rows = (response.json() or {}).get("students") or []
+        except Exception as error:  # noqa: BLE001 - any unreadable body is one outcome
+            raise GuardianDirectoryUnavailable(
+                "The children lookup returned a body this service could not read."
+            ) from error
+
+        found: list[ChildRef] = []
+        for row in rows:
+            student_id = str(row.get("student_number") or "").strip()
+            if not student_id:
+                continue
+            found.append(
+                ChildRef(
+                    student_id=student_id,
+                    full_name_ar=str(row.get("full_name_ar") or "").strip(),
+                    full_name_en=str(row.get("full_name_en") or "").strip(),
+                    year_level=str(row.get("year_level") or "").strip(),
+                    gender=str(row.get("gender") or "unspecified").strip() or "unspecified",
+                )
+            )
+        return found
+
+
+
 
 def _error_code(response: object) -> str:
     """`sis/`'s error code, or `""` when the body is not the expected envelope.
@@ -203,7 +336,6 @@ def _error_code(response: object) -> str:
         return str(detail.get("code", "")) if isinstance(detail, dict) else ""
     except Exception:  # noqa: BLE001 - never fail while reporting a failure
         return ""
-
 
 class FakeGuardianDirectory:
     """A directory held in a dict. The default when no SIS is configured.
@@ -221,17 +353,34 @@ class FakeGuardianDirectory:
         self,
         guardians: dict[str, GuardianRef] | None = None,
         *,
+        children: dict[str, list["ChildRef"]] | None = None,
         unavailable: bool = False,
     ) -> None:
         self.guardians = dict(guardians or {})
         self.unavailable = unavailable
         self.asked: list[str] = []
+        #: Which school each lookup was scoped to, so a test can assert that the school
+        #: reached the directory and not merely that a lookup happened.
+        self.asked_schools: list[str | None] = []
+        #: `{public_id: [ChildRef, ...]}`. Empty by default, so a test that only cares
+        #: about sign-in gets a token with no children rather than having to say so.
+        self.children: dict[str, list[ChildRef]] = dict(children or {})
 
-    def resolve(self, phone_e164: str) -> GuardianRef | None:
+    def resolve(
+        self, phone_e164: str, *, school_code: str | None = None
+    ) -> GuardianRef | None:
         self.asked.append(phone_e164)
+        self.asked_schools.append(school_code)
         if self.unavailable:
             raise GuardianDirectoryUnavailable("The fake directory is switched off.")
         return self.guardians.get(phone_e164)
+
+    def children_of(
+        self, public_id: str, *, school_code: str | None = None
+    ) -> list[ChildRef]:
+        if self.unavailable:
+            raise GuardianDirectoryUnavailable("The fake directory is switched off.")
+        return list(self.children.get(public_id, ()))
 
 
 # Chosen once at startup by `app.py`, read per request. A module-level slot rather than a

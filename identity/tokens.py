@@ -13,6 +13,7 @@ import hashlib
 import os
 import secrets
 import uuid
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
@@ -34,7 +35,13 @@ def _now() -> datetime:
 
 
 def mint_access_token(
-    *, subject: str, role: str, guardian_external_id: str | None, display_name: str = ""
+    *,
+    subject: str,
+    role: str,
+    guardian_external_id: str | None,
+    display_name: str = "",
+    children: Sequence[Mapping[str, str]] = (),
+    school_code: str | None = None,
 ) -> tuple[str, datetime]:
     """Sign a short-lived access token. Returns `(token, expires_at)`.
 
@@ -42,6 +49,44 @@ def mint_access_token(
     included as null or empty string. An absent claim fails a verifier's required-claim
     check loudly; an empty one invites a downstream `if guardian_id:` that someone
     eventually writes as `if guardian_id is not None:`.
+
+    ## `children`, and the rule that makes it safe
+
+    **It authorises nothing.** It says which children this parent was known to have when
+    the token was signed; it is not permission to read any of them. Every records lookup
+    is still re-checked against the school's own guardian link by the service that answers
+    it, so a claim that is wrong — or stale — produces a refusal, not a disclosure.
+
+    That rule is load-bearing rather than decorative. This claim is the one piece of the
+    token that can go out of date within its lifetime: a custody order revoking access
+    takes effect at the school immediately, and a token already in a browser keeps
+    asserting the old family until it expires. `ACCESS_TTL_MINUTES` is what bounds that,
+    and it is why this claim belongs in a short-lived access token and never in a refresh
+    token.
+
+    It is also PII about minors in a bearer credential that rides every request into every
+    access log, which is why `ChildRef.as_claim` carries a name, a year and a sex and
+    nothing else — no marks, no attendance, no birth date, no contact details.
+
+    Omitted entirely when empty, for the same reason `guardian_id` is: a staff token, or a
+    parent whose children could not be looked up during an outage, should carry no claim
+    rather than an empty list that reads as "this parent has no children".
+
+    ## `school`
+
+    Which school's database answers for this token. Schools are separated physically — one
+    database each, no query spanning two — so every request made on this parent's behalf
+    has to name a school before it can be answered, and this claim is where the answer
+    comes from after sign-in. It is settled once, at sign-in, from the WhatsApp number the
+    parent messaged, so no later request has to re-derive it or be trusted to state it.
+
+    Unlike `children` this claim *does* gate access, in the only sense available here: it
+    selects the database. That makes it safe in a way `children` is not — a stale or wrong
+    school code reaches a database where this parent's guardian link does not exist, so the
+    lookup refuses. It cannot widen access to another school; it can only fail.
+
+    Omitted when absent, like the two claims above, so a single-school deployment mints
+    exactly the tokens it always did.
     """
     expires_at = _now() + timedelta(minutes=ACCESS_TTL_MINUTES)
     claims = {
@@ -58,6 +103,10 @@ def mint_access_token(
     }
     if guardian_external_id:
         claims["guardian_id"] = guardian_external_id
+    if children:
+        claims["children"] = [dict(child) for child in children]
+    if school_code:
+        claims["school"] = school_code
 
     token = jwt.encode(
         claims,

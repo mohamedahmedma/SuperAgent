@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import os
 
-from identity import guardians, whatsapp as wa
-from identity.verification import DEFAULT_TTL_MINUTES, VerificationService
+from identity import guardians, schools, whatsapp as wa
+from identity.verification import DEFAULT_TTL_MINUTES, SchoolChannel, VerificationService
 
 
 def _ttl_minutes() -> int:
@@ -36,16 +36,47 @@ def _ttl_minutes() -> int:
     return value if value > 0 else DEFAULT_TTL_MINUTES
 
 
+def _channel_for(school_code: str | None) -> SchoolChannel:
+    """Everything the flow needs to talk to one school: number, gateway, directory.
+
+    In single-school mode `school_code` is `None` and this is the process-wide trio, which
+    is exactly what the service was handed before schools were separated.
+
+    In multi-school mode the number and the gateway come from that school's own settings,
+    so a code goes back out through the number the parent messaged. The directory is the
+    shared HTTP client either way — one SIS base URL — because the school travels on the
+    request as `X-School-Code` rather than by pointing at a different service. That is what
+    lets a school be moved to its own database, or later its own server, by changing SIS's
+    registry and nothing here.
+    """
+    if school_code is None:
+        return SchoolChannel(
+            code=None,
+            business_number=wa.get_business_number(),
+            gateway=wa.get_gateway(),
+            directory=guardians.get_directory(),
+        )
+    school = schools.get_registry().by_code(school_code)
+    return SchoolChannel(
+        code=school.code,
+        business_number=school.number,
+        gateway=wa.get_gateway(school.code),
+        directory=guardians.get_directory(),
+    )
+
+
 def get_verification_service() -> VerificationService:
-    """One service per request, over the process-wide gateway and directory.
+    """One service per request, over the process-wide gateways and directory.
 
     Cheap to build — it holds no connection of its own; both seams keep their own pooled
     clients — so there is nothing to gain from caching it and something to lose: a cached
-    instance would pin whichever gateway was selected the first time a request arrived.
+    instance would pin whichever gateways were selected the first time a request arrived.
+
+    The resolver is passed rather than a fixed channel, so the school is chosen per call
+    from what the request actually proves — the login page for `start`, the WhatsApp number
+    the message arrived on for `claim` — instead of being fixed when this object is built.
     """
     return VerificationService(
-        gateway=wa.get_gateway(),
-        directory=guardians.get_directory(),
-        business_number=wa.get_business_number(),
+        channel_for=_channel_for,
         ttl_minutes=_ttl_minutes(),
     )
