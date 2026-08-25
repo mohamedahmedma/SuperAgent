@@ -115,6 +115,10 @@ const MESSAGES: Record<string, string> = {
   not_ready: 'لم نستلم رسالتك بعد. أرسل الرسالة من واتساب أولًا.',
   not_found: 'انتهت هذه الجلسة. ابدأ من جديد.',
   rejected: 'هذا الرقم غير مسجّل لدى المدرسة. تواصل مع إدارة المدرسة لإضافته.',
+  // The server, not the parent. Nothing they type will help, so the message points them
+  // at the only thing that can — the school — instead of showing them a sentence about
+  // an environment variable they have never heard of.
+  not_configured: 'الدخول عبر واتساب غير متاح حاليًا. برجاء التواصل مع إدارة المدرسة.',
 };
 
 const errorText = computed(() => MESSAGES[wa.value.errorCode] || wa.value.error);
