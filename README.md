@@ -1,6 +1,25 @@
-# SuperAgent Project Documentation
+# SuperMew
 
-An Agent project log, kept up to date for ongoing development and demos.
+A school assistant a parent talks to over WhatsApp, and the four services behind it.
+
+A parent asks about their child — marks, attendance, what the school's handbook says —
+and gets an answer grounded in the school's own records and corpus, or an honest refusal.
+Nothing is guessed.
+
+**This file documents the chat backend and its RAG engine.** For how the four services
+fit together, who trusts whom, and where a request travels, read
+[SERVICES.md](SERVICES.md) first — it is the shorter document and the one that explains
+the shape of the system.
+
+| Service | Port | What it owns |
+| --- | --- | --- |
+| `backend/` | 8000 | The agent, the RAG pipeline, chat sessions, document ingest |
+| `records/` | 8100 | The academic records facade: authorisation, terms, report cards |
+| `identity/` | 8200 | Accounts, tokens, and WhatsApp parent sign-in |
+| `sis/` | 8300 | The school's own student information system and registrar console |
+
+Two frontends: `frontend/` is the parent-facing chat UI (Vue 3), and `sis/frontend/` is
+the registrar console (React), built into `sis/web/` and served by `sis` at `/ui`.
 
 [![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/icey1287/SuperMew)
 
@@ -87,20 +106,39 @@ npm run build
 
 Once the build finishes, the output is saved automatically under `frontend/dist/`; the backend mounts this directory automatically on startup.
 
-### 6) Start the app and access it
-Once Milvus is running and the frontend has been built, go back to the project root and run the backend app:
+### 6) Start the estate and access it
+
+**All four services at once (Windows):**
+
+```bat
+run_all.bat
+```
+
+It starts the infra containers, applies the SIS migrations, and opens one window per
+service. It sets no environment variable of its own — every service reads `.env` for
+itself — and it refuses to start if a previous run still holds a port, because a stale
+process answering with stale settings reads exactly like an edit to `.env` being ignored.
+
+**Or one service at a time:**
 
 ```bash
-# If you're currently in the frontend directory, go back to the project root first
-cd ..
+# Database migrations for the SIS, once per schema change
+uv run alembic -c sis/alembic.ini upgrade head
 
-# Run the backend app
-uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn identity.app:app --port 8200
+uv run uvicorn records.app:app  --port 8100
+uv run uvicorn sis.app:app      --port 8300
+uv run uvicorn backend.app:app  --host 0.0.0.0 --port 8000 --reload
 ```
 
 Open in a browser:
-- Frontend page: `http://127.0.0.1:8000/` (the backend serves the built `frontend/dist` assets statically)
-- API docs: `http://127.0.0.1:8000/docs`
+
+| | |
+| --- | --- |
+| Parent chat UI | `http://localhost:3000` (dev server) or `http://127.0.0.1:8000/` (built) |
+| Chat API docs | `http://127.0.0.1:8000/docs` |
+| Registrar console | `http://localhost:8300/ui` |
+| SIS / records / identity docs | `:8300/docs`, `:8100/docs`, `:8200/docs` |
 
 ### 7) Frontend development & debugging (optional)
 The frontend is built with Vite + Vue 3. To develop and debug the frontend code:
@@ -121,7 +159,7 @@ npm run build
   - Uploaded documents go through three-tier sliding-window chunking; leaf chunks are embedded and written to Milvus, and parent chunks are written to PostgreSQL.
   - User registration/login, JWT authentication, role-based RBAC access control (admin/user).
   - Session memory and summarization; chat and history persist to PostgreSQL, with Redis caching hot sessions and parent documents.
-- **Deployment shape**: FastAPI backend + a modern, engineered frontend (Vite + Vue 3 + TypeScript + Pinia) + Milvus vector store.
+- **Deployment shape**: four independent FastAPI services + two frontends (Vue 3 for parents, React for registrars) + PostgreSQL, Redis and Milvus.
 
 ## Key Innovations
 - **Hybrid retrieval in production**: dense vectors + BM25 sparse vectors, Milvus Hybrid Search + RRF ranking, balancing semantic and lexical matching.
@@ -137,7 +175,7 @@ npm run build
 - **Milvus 2.5+ native BM25 hybrid retrieval**: entirely drops the tedious pattern of hand-rolled client-side BM25 serialization and statistics syncing. By binding a `FunctionType.BM25` function to the `text` field in the Milvus collection schema, the vector database extracts sparse features natively on the server side, guaranteeing efficient Dense + Sparse hybrid retrieval with perfectly aligned statistics.
 - **Three-tier chunking + Auto-merging**: three-tier sliding-window splitting (L1/L2/L3); retrieval prioritizes L3 recall and automatically merges up to the parent chunk (L3->L2->L1) once a threshold is met.
 - **Leaf-only vector storage**: only leaf chunks are written to Milvus, while parent chunks go to the DocStore, reducing vector redundancy while preserving the ability to aggregate context.
-- **Extensible tools**: a weather-lookup example plus knowledge-base retrieval, making it easy to add third-party APIs or enterprise data sources as needed.
+- **Extensible tools**: knowledge-base retrieval, figure reading, and a student-records tool that reaches the records facade, all bound per domain profile — a deployment declares the tool names it wants and the registry resolves them.
 - **Observable RAG process**: retrieval, grading, rewriting, and source information are all logged; the frontend can expand to inspect every step's details.
 - **Query rewriting system**: when evidence is insufficient, FAST_MODEL picks a single method (Step-back or HyDE) and runs only one secondary retrieval, keeping model-call counts and worst-case latency in check.
 - **Relevance-score gating**: structured-output `grade_documents` determines whether a rewrite-and-retry retrieval is needed.
@@ -229,12 +267,28 @@ npm run build
     - [document_loader.py](backend/indexing/document_loader.py): PDF/Word/Excel chunking.
     - [milvus_client.py](backend/indexing/milvus_client.py), [milvus_writer.py](backend/indexing/milvus_writer.py).
     - [parent_chunk_store.py](backend/indexing/parent_chunk_store.py): the parent-chunk DocStore.
-  - `tools/`: `@tool`-decorated functions callable by the LangChain Agent (weather, knowledge-base retrieval).
+  - `tools/`: `@tool`-decorated functions callable by the LangChain Agent. Bound per
+    profile through `TOOL_BUILDERS` in [tools/__init__.py](backend/tools/__init__.py) —
+    knowledge-base retrieval, figure reading, and student records.
+  - `profiles/`: the domain profile system. A YAML file per deployment declares which
+    tools are bound, which RAG rungs run, and what the assistant is called. `school` is
+    the profile this deployment runs; see [registry.py](backend/profiles/registry.py).
   - `infra/`: [database.py](backend/infra/database.py), [cache.py](backend/infra/cache.py), [auth.py](backend/infra/auth.py).
   - `db/`: [models.py](backend/db/models.py): ORM models.
-  - `schemas/`: Pydantic request/response schemas (auth / chat / documents).
+  - `schemas/`: Pydantic request/response schemas (chat / documents).
   - `jobs/`: [upload_jobs.py](backend/jobs/upload_jobs.py): async upload/delete job progress.
-- Frontend: `frontend/`
+- The other three services, each deployable on its own and documented in its own README:
+  - `identity/` — accounts, JWT signing and verification, and the WhatsApp sign-in flow
+    that lets a parent authenticate without a password. See [identity/README.md](identity/README.md).
+  - `records/` — the academic records facade. Owns guardian authorisation, terms, report
+    card snapshots and the access audit; owns no grades. Reads the system of record
+    through `LmsAdapter`. See [records/README.md](records/README.md).
+  - `sis/` — the school's own student information system: roster, structure, attendance,
+    marks and guardians, plus the registrar console. See [sis/README.md](sis/README.md).
+  - `scripts/` — operator tooling: estate health check, school provisioning, and a
+    WhatsApp webhook simulator.
+- Frontend: `frontend/` — the parent-facing chat UI. (The registrar console is a
+  separate React app under `sis/frontend/`, built into `sis/web/`.)
   - Built with a modern, engineered stack (Vite + Vue 3 + TypeScript + Pinia + Axios + Sass).
   - **Frontend architecture & state flow**:
     - **Pinia stores**:
