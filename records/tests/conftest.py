@@ -71,6 +71,17 @@ def _claim_database() -> None:
     os.environ["RECORDS_DATABASE_URL"] = f"sqlite:///{_TMPDIR}/test.db"
     reset_engine()
 
+    # And the settings that decide WHO this service talks to, not just where its rows
+    # live. `records/app.py` now loads the project's `.env`, which is right for a
+    # deployment and wrong for a suite: `SIS_BASE_URL` there makes the lifespan install a
+    # real `SisGuardianDirectory` over the fake these tests just registered, so every
+    # guardian lookup leaves the process and fails against a school that is not running.
+    #
+    # Blanked rather than pointed somewhere harmless: an unset value is what makes the
+    # in-memory fake the default, and a fake is what these tests are asserting against.
+    for name in ("SIS_BASE_URL", "SIS_API_KEY", "IDENTITY_JWKS_URL"):
+        os.environ[name] = ""
+
 
 AGENT_KEY = "agentkey-fixture-0000000000000000"
 ADMIN_KEY = "adminkey-fixture-0000000000000000"

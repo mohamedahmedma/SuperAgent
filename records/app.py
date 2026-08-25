@@ -25,6 +25,12 @@ from fastapi import FastAPI
 
 from records import calendar as school_calendar
 from records import guardian_directory, lms
+from records.env import load_env
+
+# Before anything below reads the environment. This service is deployed as its own
+# process, so nothing else has loaded the project's `.env` for it.
+load_env()
+
 from records.db import init_db, new_session
 from records.routes import admin_router, agent_router
 from records.sis_adapter import SisAdapter
@@ -74,12 +80,20 @@ def _configure_adapter() -> None:
 
     if backend == "sis":
         base_url = os.getenv("SIS_BASE_URL", "")
-        # A `reader`-scoped key. A registrar key would also read grades, and handing the
-        # school's write credential to the process that answers parents is how a
-        # read-only integration becomes the blast radius of a leak.
+        # A `reader`-scoped key, when SIS is checking one. It is sent on every request and
+        # is deliberately not a registrar key: a registrar key also WRITES, and handing the
+        # school's write credential to the process that answers parents is how a read-only
+        # integration becomes the blast radius of a leak.
+        #
+        # Optional, because SIS currently admits every caller as a registrar and verifies
+        # no key at all (`sis/api/deps.py`: "No API key is required"). Demanding one here
+        # meant demanding a credential nothing checks — a deployment either invented a
+        # value to get past this line, or the service refused to boot over a setting that
+        # could not affect anything. The header is still sent when a key is configured, so
+        # the day SIS starts enforcing again, setting it is the whole change.
         api_key = os.getenv("SIS_API_KEY", "")
-        if not base_url or not api_key:
-            raise RuntimeError("RECORDS_LMS=sis requires SIS_BASE_URL and SIS_API_KEY.")
+        if not base_url:
+            raise RuntimeError("RECORDS_LMS=sis requires SIS_BASE_URL.")
         # The same calendar the routes read, handed to the adapter rather than letting it
         # build a second one: attendance is addressed by dates, and two components
         # resolving one term separately is how they come to disagree about it.

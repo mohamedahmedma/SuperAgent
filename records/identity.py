@@ -116,3 +116,18 @@ def guardian_id_from_claims(claims: dict) -> str:
     if not guardian_id or not isinstance(guardian_id, str):
         raise IdentityError("Token carries no guardian binding.")
     return guardian_id
+
+
+def school_from_claims(claims: dict) -> str | None:
+    """Which school's database answers for this token; `None` in a single-school estate.
+
+    Absent rather than required, because a single-school deployment mints exactly the
+    tokens it always did and this service must keep accepting them.
+
+    Unlike the guardian binding, a wrong value here cannot widen access — it selects a
+    database, and in the wrong one this parent's guardian link does not exist, so the
+    lookup refuses. That is why it can be read straight off the token without a second
+    check: the failure mode is a refusal, never a disclosure.
+    """
+    school = claims.get("school")
+    return school if school and isinstance(school, str) else None
