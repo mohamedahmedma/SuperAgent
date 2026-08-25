@@ -203,7 +203,45 @@ def load_roster(
         cache.set_json(key, rows, ttl=ttl)
     if outcome == OK and not rows:
         outcome = NONE
+    if outcome == UNAVAILABLE:
+        # The facade did not answer. The signed-in token already says who this parent's
+        # children were when it was minted, so use that rather than telling a parent
+        # nothing at all.
+        #
+        # Only on an outage, and deliberately not as the primary source. The token lives
+        # for thirty minutes and this cache for ninety seconds, so the token is the more
+        # stale of the two — preferring it would make a revoked custody arrangement
+        # visible for longer, not shorter.
+        #
+        # It costs nothing in authorisation terms: naming a child here does not permit
+        # reading her, and the read that follows goes to the same facade that is
+        # currently down. What it buys is a parent hearing "I can't reach the records for
+        # Layla right now" instead of "I don't know who your children are".
+        from_token = _as_options(_claimed_children(ctx))
+        if from_token:
+            logger.info("child roster unavailable; falling back to the token's claim")
+            return OK, from_token
     return outcome, _as_options(rows)
+
+
+def _claimed_children(ctx) -> list:
+    """The children the caller's token asserts, in the shape `_as_options` reads.
+
+    Translating here rather than at the boundary keeps `CallerIdentity` free of any
+    opinion about what a roster row looks like.
+    """
+    claimed = getattr(getattr(ctx, "caller", None), "children", ()) or ()
+    return [
+        {
+            "student_id": child.get("student_id", ""),
+            "full_name_ar": child.get("full_name_ar", ""),
+            "full_name_en": child.get("full_name_en", ""),
+            "gender": child.get("gender", "unspecified"),
+            "year_level": child.get("year_level", ""),
+        }
+        for child in claimed
+        if isinstance(child, dict)
+    ]
 
 
 class _Prefetch:

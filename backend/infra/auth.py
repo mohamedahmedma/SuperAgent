@@ -68,19 +68,26 @@ class AuthenticatedUser:
     coupling this refactor removed.
     """
 
-    __slots__ = ("username", "role", "guardian_id", "display_name", "access_token")
+    __slots__ = (
+        "username", "role", "guardian_id", "display_name", "access_token", "children",
+    )
 
     def __init__(
         self,
         username: str,
         role: str,
         guardian_id: str = "",
+        children: tuple = (),
         display_name: str = "",
         access_token: str = "",
     ):
         self.username = username
         self.role = role
         self.guardian_id = guardian_id
+        # What identity knew about this parent's family when the token was signed.
+        # A HINT and never permission — see `mint_access_token`. Held as a tuple so a
+        # caller cannot mutate one request's view of a family.
+        self.children = tuple(children or ())
         self.display_name = display_name
         # The verified token, kept so it can be relayed to the records facade on this
         # user's behalf. The chat backend cannot forge one and cannot alter whose
@@ -97,6 +104,37 @@ class AuthenticatedUser:
             f"AuthenticatedUser(username={self.username!r}, role={self.role!r}, "
             f"guardian_id={self.guardian_id!r})"
         )
+
+
+def _children_from(claims: dict) -> tuple:
+    """Read the `children` claim, distrusting its shape.
+
+    The token is signed, so this is not about tampering — a bad shape here means identity
+    and this service disagree about the contract, and the honest response is to carry
+    nothing rather than half a family. The roster is fetched from the records facade
+    anyway; this claim only ever saves that call or covers for it being down.
+    """
+    raw = claims.get("children")
+    if not isinstance(raw, list):
+        return ()
+    found = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        student_id = str(item.get("id") or "").strip()
+        if not student_id:
+            continue
+        found.append(
+            {
+                "student_id": student_id,
+                "full_name_ar": str(item.get("ar") or "").strip(),
+                "full_name_en": str(item.get("en") or "").strip(),
+                "year_level": str(item.get("yr") or "").strip(),
+                "gender": str(item.get("g") or "unspecified").strip() or "unspecified",
+            }
+        )
+    return tuple(found)
+
 
 
 def _ensure_projection_row(db: Session, username: str) -> None:
@@ -163,6 +201,7 @@ def get_current_user(
         username=username,
         role=claims.get("role") or "user",
         guardian_id=claims.get("guardian_id") or "",
+        children=_children_from(claims),
         display_name=claims.get("name") or "",
         access_token=token,
     )

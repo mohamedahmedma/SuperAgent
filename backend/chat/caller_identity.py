@@ -42,6 +42,13 @@ class CallerIdentity:
     user_id: str
     guardian_id: str = ""
     guardian_token: str = ""
+    #: The family identity asserted when the token was signed, as plain dicts. A HINT,
+    #: never permission: every records read is re-checked against the school's own
+    #: guardian link, so a stale claim produces a refusal rather than a disclosure.
+    #:
+    #: A tuple, so a frozen identity really is frozen — a list here would let a tool
+    #: hand back a context whose family had been edited.
+    children: tuple = ()
 
     @property
     def is_parent(self) -> bool:
@@ -79,6 +86,7 @@ class CallerIdentity:
             user_id=str(getattr(principal, "username", "") or ""),
             guardian_id=str(getattr(principal, "guardian_id", "") or ""),
             guardian_token=str(getattr(principal, "access_token", "") or ""),
+            children=tuple(getattr(principal, "children", ()) or ()),
         )
 
     def without_credentials(self) -> CallerIdentity:
