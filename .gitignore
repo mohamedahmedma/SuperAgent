@@ -23,11 +23,6 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 
-# Generated diagram output (draw_rag_graph.py / draw_state_graph.py)
-diagrams/
-rag_pipeline_graph
-rag_pipeline_graph.png
-
 # Knowledge-base source documents. Corpus content is deployment data, often
 # contains real personal information, and is loaded through the ingest API — it
 # does not belong in the repository.
