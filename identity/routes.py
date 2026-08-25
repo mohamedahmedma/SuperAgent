@@ -9,11 +9,12 @@ from datetime import datetime, timezone
 
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
-from identity import auth, keys, tokens
+from identity import auth, guardians, keys, tokens
+from identity import schools as identity_schools
 from identity import verification as verify_flow
 from identity import whatsapp as wa
 from identity.db import get_db
@@ -395,24 +396,92 @@ def _verification_error(error: verify_flow.VerificationError) -> HTTPException:
     )
 
 
+
+def _children_claim(
+    guardian_external_id: str | None, school_code: str | None = None
+) -> list[dict]:
+    """The children to stamp into a token, or nothing at all.
+
+    Never raises, and never returns a partial answer as though it were complete. A
+    directory outage yields `[]`, which `mint_access_token` then omits — so the token
+    says nothing about this parent's family rather than saying they have none. The chat
+    backend reads the roster itself and will simply do so a moment later.
+
+    Signing in must not depend on this. A parent whose sign-in failed because a
+    convenience claim could not be assembled would be locked out by a feature that exists
+    to save them one HTTP call.
+    """
+    if not guardian_external_id:
+        return []
+    try:
+        found = guardians.get_directory().children_of(
+            guardian_external_id, school_code=school_code
+        )
+    except guardians.GuardianDirectoryUnavailable:
+        logger.warning(
+            "Could not read this parent's children while minting a token; the token "
+            "will carry none and the chat backend will look them up itself."
+        )
+        return []
+    except Exception:  # noqa: BLE001 - a convenience claim must never break sign-in
+        logger.exception("Unexpected failure assembling the children claim")
+        return []
+    return [child.as_claim() for child in found]
+
+
 @whatsapp_router.post("/start", response_model=WhatsAppStartOut, status_code=201)
 def start_whatsapp_verification(
     db: Session = Depends(get_db),
     service: verify_flow.VerificationService = Depends(get_verification_service),
+    school: str | None = Query(
+        default=None,
+        description=(
+            "Which school the parent is signing in to. Required where this server holds "
+            "several; omitted where it holds one. It selects the WhatsApp number the "
+            "link points at, and is checked again when the parent's message arrives."
+        ),
+    ),
 ) -> WhatsAppStartOut:
     """Begin a verification. Takes no phone number, and that is the point.
 
-    Because the caller states nothing, there is nothing here to probe: this endpoint cannot
-    be used to ask whether a given number belongs to a parent. That question is answered
-    only to somebody who can actually send a WhatsApp message from the number, and it is
-    answered over WhatsApp rather than in this response.
+    Because the caller states nothing about a *parent*, there is nothing here to probe:
+    this endpoint cannot be used to ask whether a given number belongs to a parent. That
+    question is answered only to somebody who can actually send a WhatsApp message from the
+    number, and it is answered over WhatsApp rather than in this response.
+
+    The school is not a secret and does not weaken that: it names the login page the parent
+    is standing on, which is public. What it buys is the pairing — the school recorded here
+    must match the school that owns the number the parent's message arrives on, so a nonce
+    steered to the wrong school's number is refused rather than resolved against a database
+    the parent's children are not in.
     """
-    started = service.start(db)
+    try:
+        started = service.start(db, school_code=school)
+        channel = service.channel(school)
+    except verify_flow.NotConfigured as error:
+        # 503, not 400: nothing the caller sent is wrong, and nothing they can send will
+        # help. The operator has to configure the school's number. The code is stable so
+        # the sign-in screen can say something a parent can act on — "contact the school"
+        # — rather than showing them a server message about an environment variable.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "not_configured", "message": str(error)},
+        ) from error
+    except LookupError as error:
+        # An unknown school code. A 404 rather than a 503: the caller asked for something
+        # that does not exist here, which is their problem to fix and not the operator's.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "unknown_school",
+                "message": "This server does not serve that school.",
+            },
+        ) from error
     return WhatsAppStartOut(
         poll_secret=started.poll_secret,
         link=started.link,
         message=started.message,
-        business_number=service.business_number,
+        business_number=channel.business_number,
         expires_at=started.expires_at,
     )
 
@@ -466,14 +535,60 @@ async def receive_whatsapp_webhook(
             detail={"code": "not_authorized", "message": "Bad signature."},
         )
 
-    for sender, text, message_id in wa.inbound_text_messages(raw):
-        outcome = service.claim(db, wa_id=sender, body=text, message_id=message_id)
+    for message in wa.inbound_text_messages(raw):
+        school_code = _school_for_delivery(message.phone_number_id)
+        outcome = service.claim(
+            db,
+            wa_id=message.wa_id,
+            body=message.text,
+            message_id=message.message_id,
+            school_code=school_code,
+        )
         # The number is deliberately not logged: it is a parent's phone and this line goes
-        # wherever logs go. The message id is enough to trace one delivery.
+        # wherever logs go. The message id is enough to trace one delivery, and the school
+        # is safe to name — it is ours, not the parent's.
         logger.info(
-            "WhatsApp verification: outcome=%s message_id=%s", outcome, message_id
+            "WhatsApp verification: outcome=%s message_id=%s school=%s",
+            outcome,
+            message.message_id,
+            school_code or "-",
         )
     return {"received": True}
+
+
+#: Returned when a delivery arrives on a WhatsApp number no configured school owns.
+#: Deliberately not a legal school code — SIS codes are upper-case alphanumerics plus
+#: '.', '-' and '_' — so it can never equal the code stored on a challenge, and the
+#: delivery fails the school cross-check instead of being attributed to somebody.
+UNATTRIBUTABLE_SCHOOL: str = "?unknown"
+
+
+def _school_for_delivery(phone_number_id: str) -> str | None:
+    """Which school a delivery is for, from the number of ours it was addressed to.
+
+    `None` in a single-school deployment, where there is nothing to choose between.
+
+    An unrecognised `phone_number_id` returns a sentinel that no challenge can match,
+    rather than `None`. Returning `None` would mean "the single school" to everything
+    downstream, so an unmapped number — in practice a school onboarded at Meta and never
+    added to `.env` — would have its parents resolved against whichever database happened
+    to be the default. The sentinel makes the delivery fail as a mismatch instead, which is
+    visible in the outcome log and harmless.
+    """
+    registry = identity_schools.get_registry()
+    if not registry.is_multi_school:
+        return None
+    try:
+        return registry.by_phone_number_id(phone_number_id).code
+    except identity_schools.UnknownSchool:
+        logger.error(
+            "A WhatsApp delivery arrived on phone_number_id %r, which no configured "
+            "school owns. Parents messaging that number cannot sign in until it is added "
+            "to %s and its per-school settings.",
+            phone_number_id,
+            identity_schools.SCHOOLS_VAR,
+        )
+        return UNATTRIBUTABLE_SCHOOL
 
 
 @whatsapp_router.post("/status", response_model=WhatsAppStatusOut)
@@ -525,11 +640,19 @@ def complete_whatsapp_verification(
 
     account = _account_for_guardian(db, challenge)
 
+    # The school the challenge was proved against, and the only one this token can reach.
+    # Read off the stored challenge rather than from anything the browser sent: by this
+    # point it has been agreed by both halves of the flow — the page that started it and
+    # the WhatsApp number the parent's message arrived on.
+    school_code = (challenge.school_code or "") or None
+
     access_token, expires_at = tokens.mint_access_token(
         subject=account.username,
         role=account.role,
         guardian_external_id=account.guardian_external_id,
         display_name=account.display_name,
+        children=_children_claim(account.guardian_external_id, school_code),
+        school_code=school_code,
     )
     raw_refresh, refresh_hash, refresh_expires = tokens.mint_refresh_token()
     db.add(

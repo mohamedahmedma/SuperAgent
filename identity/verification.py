@@ -45,6 +45,7 @@ import hashlib
 import hmac
 import logging
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Final
@@ -86,6 +87,15 @@ STATUS_PENDING: Final[str] = "pending"
 STATUS_CODE_SENT: Final[str] = "code_sent"
 STATUS_VERIFIED: Final[str] = "verified"
 STATUS_REJECTED: Final[str] = "rejected"
+
+
+class NotConfigured(RuntimeError):
+    """This server cannot run the WhatsApp sign-in at all.
+
+    Distinct from every other refusal in this module, which are about one challenge or
+    one caller. This one is about the deployment, so it is a 503 rather than a 400 and
+    the operator, not the parent, is the one who has to act.
+    """
 
 
 class VerificationError(RuntimeError):
@@ -181,37 +191,116 @@ def extract_nonce(body: str) -> str | None:
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class SchoolChannel:
+    """Everything the flow needs in order to talk to one school.
+
+    Schools are separated physically, so none of these three is shared: the number a
+    parent messages, the credentials a code goes back out through, and the guardian
+    directory their number is looked up in all belong to one school and must agree. A
+    channel that mixed them — one school's number with another's directory — would resolve
+    a parent against a database their children are not in, which is the whole failure the
+    separation exists to prevent.
+
+    `code` is `None` in a single-school deployment, which is what the rest of this service
+    means by "no school".
+    """
+
+    code: str | None
+    business_number: str
+    gateway: wa.WhatsAppGateway
+    directory: GuardianDirectory
+
+
 class VerificationService:
     """The whole flow. Depends on two Protocols, a session factory's session, and a clock."""
 
     def __init__(
         self,
         *,
-        gateway: wa.WhatsAppGateway,
-        directory: GuardianDirectory,
-        business_number: str,
+        gateway: wa.WhatsAppGateway | None = None,
+        directory: GuardianDirectory | None = None,
+        business_number: str = "",
+        channel_for: Callable[[str | None], SchoolChannel] | None = None,
         ttl_minutes: int = DEFAULT_TTL_MINUTES,
         clock=lambda: datetime.now(timezone.utc),
     ) -> None:
-        self._gateway = gateway
-        self._directory = directory
-        self._business_number = business_number
+        """Either one school's pieces, or a resolver that supplies them per school.
+
+        `channel_for` is how a multi-school deployment binds each step to the school the
+        parent is actually talking to. Without it the three single-school arguments are
+        wrapped into one fixed channel and every step resolves to it — which is exactly
+        what this service did before schools were separated, and what a laptop, the test
+        suite and any unsplit deployment still get.
+        """
+        if channel_for is None:
+            if gateway is None or directory is None:
+                raise TypeError(
+                    "VerificationService needs either channel_for, or both gateway and "
+                    "directory for the single school this process serves."
+                )
+            fixed = SchoolChannel(
+                code=None,
+                business_number=business_number,
+                gateway=gateway,
+                directory=directory,
+            )
+
+            def channel_for(school_code: str | None) -> SchoolChannel:
+                if school_code is not None:
+                    # Not a fallback. A named school arriving at a service configured for
+                    # one is a deployment that half-believes it is split, and answering it
+                    # from the only database present is the cross-school read itself.
+                    raise NotConfigured(
+                        f"this server serves a single school, so it cannot answer for "
+                        f"school {school_code!r}."
+                    )
+                return fixed
+
+        self._channel_for = channel_for
         self._ttl = timedelta(minutes=ttl_minutes)
         self._clock = clock
 
+    def channel(self, school_code: str | None = None) -> SchoolChannel:
+        """The channel for one school. Raises rather than guessing at an unknown one."""
+        return self._channel_for(school_code)
+
     @property
     def business_number(self) -> str:
-        """The school's own number, for the page's manual fallback.
+        """The single school's own number, for the page's manual fallback.
 
         Shown beside the link because an in-app browser will sometimes swallow the
         handoff, and a parent who can see the number and the message can send it by hand.
+
+        Single-school only; a multi-school deployment has no such thing and must ask for
+        `channel(school_code).business_number` instead, because the number is exactly what
+        distinguishes the schools.
         """
-        return self._business_number
+        return self._channel_for(None).business_number
 
     # -- the browser's first step -------------------------------------------
 
-    def start(self, db: Session) -> StartedChallenge:
-        """Mint a challenge. Takes no phone number, which is what makes it unprobeable."""
+    def start(self, db: Session, *, school_code: str | None = None) -> StartedChallenge:
+        """Mint a challenge. Takes no phone number, which is what makes it unprobeable.
+
+        Refuses outright when the school's own number is not configured. The alternative
+        is a link to `wa.me/` with no number, which opens WhatsApp's contact picker and
+        asks the parent to choose who to send a verification code to — a question they
+        cannot answer, from a screen where everything looks like it worked.
+
+        Refusing costs one error message. Not refusing costs every parent, silently.
+
+        The school is stamped onto the row here, where it is known for free: the login page
+        the parent is standing on belongs to one school. That recorded value is what the
+        webhook checks the inbound number against, so the two halves of the flow have to
+        agree about which school this is before any code is issued.
+        """
+        channel = self._channel_for(school_code)
+        if not (channel.business_number or "").strip():
+            raise NotConfigured(
+                "Parent sign-in is not available: the school's WhatsApp number is not "
+                "configured on this server."
+            )
         now = self._clock()
         nonce = _new_nonce()
         poll_secret = secrets.token_urlsafe(32)
@@ -220,6 +309,7 @@ class VerificationService:
             nonce=nonce,
             poll_secret_hash=_hash(poll_secret),
             status=STATUS_PENDING,
+            school_code=channel.code or "",
             expires_at=now + self._ttl,
         )
         db.add(challenge)
@@ -229,20 +319,33 @@ class VerificationService:
         return StartedChallenge(
             nonce=nonce,
             poll_secret=poll_secret,
-            link=wa.click_to_chat_link(self._business_number, message),
+            link=wa.click_to_chat_link(channel.business_number, message),
             message=message,
             expires_at=challenge.expires_at,
         )
 
     # -- what the webhook calls ---------------------------------------------
 
-    def claim(self, db: Session, *, wa_id: str, body: str, message_id: str) -> str:
+    def claim(
+        self,
+        db: Session,
+        *,
+        wa_id: str,
+        body: str,
+        message_id: str,
+        school_code: str | None = None,
+    ) -> str:
         """Handle one inbound WhatsApp message. Returns a short outcome for the log.
 
         **Never raises for a bad message.** Meta retries any webhook it does not see
         acknowledged, for up to seven days, so an exception here becomes a delivery that is
         replayed indefinitely. Every outcome — no nonce, unknown nonce, expired, not a
-        parent — is a recorded string and a 200.
+        parent, wrong school — is a recorded string and a 200.
+
+        `school_code` is the school that owns the WhatsApp number this message arrived on,
+        which the caller reads from the delivery's `phone_number_id`. It decides which
+        school's directory the sender's number is looked up in, and it is checked against
+        the school recorded when the challenge was started.
         """
         now = self._clock()
 
@@ -273,9 +376,26 @@ class VerificationService:
             return "unknown_nonce"
         if challenge.status != STATUS_PENDING:
             return "already_claimed"
+        # Two independent facts have to agree about which school this is: the one the
+        # browser was on when the challenge was minted, and the one that owns the number
+        # the parent actually messaged. A mismatch means the nonce reached the wrong
+        # school — the multi-school shape of "a parent tricked into sending an attacker's
+        # nonce" — and resolving it would look this parent up in a database their children
+        # are not in. Rejected rather than ignored, so the nonce is spent either way.
+        if (challenge.school_code or "") != (school_code or ""):
+            self._reject(db, challenge, "wrong_school", message_id)
+            return "wrong_school"
+
+        try:
+            channel = self._channel_for(school_code)
+        except Exception:  # noqa: BLE001 - an unknown school must not retry for a week
+            # Only reachable when a school was removed from the configuration between the
+            # challenge being started and the parent replying. Logged by the caller.
+            self._reject(db, challenge, "unknown_school", message_id)
+            return "unknown_school"
         if _aware(challenge.expires_at) <= now:
             self._reject(db, challenge, "expired", message_id)
-            self._say(wa_id, "That link has expired. Please start again from the school app.")
+            self._say(channel, wa_id, "That link has expired. Please start again from the school app.")
             return "expired"
 
         if self._too_many_recently(db, wa_id=wa_id, now=now):
@@ -284,13 +404,14 @@ class VerificationService:
 
         phone = _e164(wa_id)
         try:
-            guardian = self._directory.resolve(phone)
+            guardian = channel.directory.resolve(phone, school_code=channel.code)
         except GuardianDirectoryUnavailable as error:
             # Left pending on purpose: the school's records were unreachable, which is our
             # problem and not the parent's, and the challenge is still good if they try
             # again inside its window.
             logger.warning("Guardian lookup failed during verification: %s", error)
             self._say(
+                channel,
                 wa_id,
                 "We could not reach the school's records just now. Please try again in a "
                 "few minutes.",
@@ -303,6 +424,7 @@ class VerificationService:
             # nothing about which numbers *are* registered, and it points them at the one
             # channel that can actually fix it.
             self._say(
+                channel,
                 wa_id,
                 "This number is not registered with the school. Please contact the school "
                 "office to be added.",
@@ -320,7 +442,10 @@ class VerificationService:
         db.commit()
 
         try:
-            self._gateway.send_text(wa_id, f"Your school verification code is {code}")
+            # Sent through *this school's* credentials. Knowing which number the parent
+            # used is not enough: a code sent out through another school's number arrives
+            # in a different conversation, and the parent never sees it.
+            channel.gateway.send_text(wa_id, f"Your school verification code is {code}")
         except wa.WhatsAppUnavailable as error:
             # The code was stored but never delivered, so the challenge is unusable. Marked
             # rejected rather than left pending: a parent staring at a code entry box that
@@ -390,14 +515,19 @@ class VerificationService:
             challenge.wa_message_id = message_id
         db.commit()
 
-    def _say(self, wa_id: str, text: str) -> None:
+    def _say(self, channel: SchoolChannel, wa_id: str, text: str) -> None:
         """Reply to the parent, and never let a failed reply fail the webhook.
 
         A raised exception here would leave Meta retrying the delivery for days over a
         message we merely could not answer.
+
+        The channel is passed rather than read off the service because the reply has to go
+        back out through the number the parent messaged. Sent through any other school's
+        credentials it would land in a different conversation, and the parent would be left
+        watching a chat where nothing ever arrives.
         """
         try:
-            self._gateway.send_text(wa_id, text)
+            channel.gateway.send_text(wa_id, text)
         except wa.WhatsAppUnavailable as error:
             logger.warning("Could not reply over WhatsApp: %s", error)
 

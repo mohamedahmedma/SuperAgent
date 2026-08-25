@@ -190,7 +190,7 @@ export const useAuthStore = defineStore('auth', {
      * number they hold by messaging from it. That is also why this cannot be used to ask
      * whether a given number belongs to a parent.
      */
-    async startWhatsAppLogin() {
+    async startWhatsAppLogin(school?: string) {
       if (this.whatsapp.busy) return;
       stopPolling();
       this.whatsapp.busy = true;
@@ -200,7 +200,21 @@ export const useAuthStore = defineStore('auth', {
       this.whatsapp.displayName = '';
 
       try {
-        const { data } = await identityApi.post('/v1/auth/whatsapp/start');
+        /* The school this login page belongs to, where the estate has several. It picks
+           the WhatsApp number the link points at, and identity checks it again against the
+           number the parent's message actually arrives on — so a link steered at the wrong
+           school is refused rather than resolving the parent against a database their
+           children are not in. Omitted where the estate holds one school, which is the
+           default and needs no configuration. */
+        const configured = (import.meta.env.VITE_SCHOOL_CODE as string | undefined) || '';
+        const code = (school || configured).trim();
+        /* Called with exactly one argument when no school is configured, so a
+           single-school estate makes the identical request it always made. */
+        const { data } = code
+          ? await identityApi.post('/v1/auth/whatsapp/start', undefined, {
+              params: { school: code },
+            })
+          : await identityApi.post('/v1/auth/whatsapp/start');
         this.whatsapp.pollSecret = data.poll_secret;
         this.whatsapp.link = data.link;
         this.whatsapp.message = data.message;

@@ -79,7 +79,9 @@ class PermittedStudent:
 class GuardianDirectory(Protocol):
     """The two authorization questions this service asks, and nothing else."""
 
-    def children_of(self, guardian_id: str) -> list[PermittedStudent]:
+    def children_of(
+        self, guardian_id: str, *, school_code: str | None = None
+    ) -> list[PermittedStudent]:
         """Every child this guardian may be told about. Empty when there are none.
 
         Empty is an ordinary answer: a parent whose only link carries a custody restriction
@@ -130,13 +132,20 @@ class SisGuardianDirectory:
                 )
             return self._client
 
-    def children_of(self, guardian_id: str) -> list[PermittedStudent]:
+    def children_of(
+        self, guardian_id: str, *, school_code: str | None = None
+    ) -> list[PermittedStudent]:
         import httpx
 
         if not guardian_id:
             return []
         path = f"/v1/guardians/by-id/{quote(guardian_id, safe='')}/students"
         headers = {"X-API-Key": self._api_key} if self._api_key else {}
+        if school_code:
+            # Schools are separated physically: this header picks the database SIS
+            # answers from. Without it a split SIS refuses, which is the right failure —
+            # far better than an unscoped read that silently reaches the wrong branch.
+            headers["X-School-Code"] = school_code
         try:
             response = self._http().get(path, headers=headers)
         except httpx.HTTPError as error:
@@ -231,7 +240,9 @@ class FakeGuardianDirectory:
         self.children = dict(children or {})
         self.unavailable = unavailable
 
-    def children_of(self, guardian_id: str) -> list[PermittedStudent]:
+    def children_of(
+        self, guardian_id: str, *, school_code: str | None = None
+    ) -> list[PermittedStudent]:
         if self.unavailable:
             raise GuardianDirectoryUnavailable("The fake directory is switched off.")
         return list(self.children.get(guardian_id, ()))

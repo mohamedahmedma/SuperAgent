@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Final
 
-from fastapi import Depends
+from fastapi import Depends, Header
 
 from sis.application.dto import Page, PageRequest
 from sis.application.ports.unit_of_work import UnitOfWork
@@ -35,7 +35,7 @@ from sis.application.services.roster_import import RosterImportService
 from sis.application.services.structure import StructureGenerationService
 from sis.config import get_settings
 from sis.domain.auth import PREFIX_LENGTH, ApiKey, Scope
-from sis.domain.errors import ImportBatchNotFound
+from sis.domain.errors import ImportBatchNotFound, ValidationError
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import ClassEnrolment, Student
 from sis.domain.structure import (
@@ -58,12 +58,33 @@ from sis.infrastructure.parsers import (
     SpreadsheetGuardianParser,
     SpreadsheetRosterParser,
 )
+from sis.tenancy import get_registry
 
 logger = logging.getLogger(__name__)
 
 _KEY_BYTES: Final[int] = 32
 
 API_KEY_HEADER: Final[str] = "X-API-Key"
+
+SCHOOL_HEADER: Final[str] = "X-School-Code"
+"""Names the school a request is about, and therefore the database that answers it."""
+
+
+class MissingSchoolHeader(ValidationError):
+    """A multi-school deployment was asked a question that names no school.
+
+    Refused rather than defaulted. The tempting fallbacks — the first configured school,
+    or "the only one" while there happens to be one — are both a request meant for one
+    branch answered out of another branch's database the day a second school is added,
+    and nothing in the response would say so.
+    """
+
+    def __init__(self, known: Collection[str]) -> None:
+        super().__init__(
+            f"this service holds several schools, so {SCHOOL_HEADER} is required. "
+            f"Configured schools: {', '.join(sorted(known)) or 'none'}.",
+            field="school_code",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -148,26 +169,89 @@ require_read_access = _require_scopes(Scope.REGISTRAR, Scope.READER)
 # ---------------------------------------------------------------------------
 
 
-def get_unit_of_work() -> Iterator[UnitOfWork]:
+# ---------------------------------------------------------------------------
+# Which school — and therefore which database
+# ---------------------------------------------------------------------------
+
+
+def get_school_code(
+    x_school_code: Annotated[str | None, Header(alias=SCHOOL_HEADER)] = None,
+) -> str | None:
+    """The school this request is about, and the database it will be answered from.
+
+    Schools are separated physically, so this header does not narrow a query — it
+    chooses the connection. Everything downstream is then bound to one school's database
+    and cannot reach another's rows at all, which is why no service or repository in this
+    package takes a school argument.
+
+    In single-school mode (`SIS_SCHOOLS` unset) the header is ignored entirely and this
+    returns `None`, the process-wide database. That is what keeps a development laptop
+    and the existing test suite working untouched.
+
+    In multi-school mode the header is **required**, and an absent or unknown one is a
+    refusal rather than a default. Both fallbacks that suggest themselves — "use the
+    first school", "use the only school" — answer a request meant for one branch out of
+    another branch's database the day a second school is added, which is the single
+    failure this whole design exists to prevent.
+    """
+    registry = get_registry()
+    if not registry.is_multi_school:
+        return None
+
+    presented = (x_school_code or "").strip()
+    if not presented:
+        raise MissingSchoolHeader(registry.codes)
+    # Raises `UnknownSchool`, which `sis.api.errors` renders as a 404 — the same answer
+    # an unknown school code gets anywhere else in the service.
+    return registry.get(presented).code
+
+
+SchoolCodeDep = Annotated[str | None, Depends(get_school_code)]
+"""The resolved school for this request; `None` in single-school mode."""
+
+
+def get_unit_of_work(school_code: SchoolCodeDep) -> Iterator[UnitOfWork]:
     """One entered transaction for the life of the request; rolled back unless committed.
 
     FastAPI throws the handler's exception back into this generator, so the `with`
     block's `__exit__` runs on the failure path too — a route that raises `TermClosed`
     after twelve writes leaves nothing behind, without having remembered to catch
     anything.
+
+    The transaction is opened against the school named by `X-School-Code`. That is the
+    whole of the isolation: a handler cannot read across schools because the connection
+    it was handed does not reach them.
     """
-    with SqlAlchemyUnitOfWork() as uow:
+    with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
         yield uow
 
 
-def get_unit_of_work_factory() -> Callable[[], UnitOfWork]:
+def get_unit_of_work_factory(school_code: SchoolCodeDep) -> Callable[[], UnitOfWork]:
     """A *factory*, for services whose steps are separate transactions.
 
     Preview and commit are two requests and two transactions, and every query wants its
     own so it cannot see another's half-written state. Those services therefore take a
     callable and open a unit of work per operation rather than being handed a live one.
+
+    The school is bound into the factory here rather than passed to each service, so a
+    service that opens five transactions opens all five against the same school without
+    having to know that schools exist.
     """
-    return SqlAlchemyUnitOfWork
+
+    def factory() -> UnitOfWork:
+        return SqlAlchemyUnitOfWork(school_code=school_code)
+
+    return factory
+
+
+UowFactoryDep = Annotated[Callable[[], UnitOfWork], Depends(get_unit_of_work_factory)]
+"""A unit-of-work factory already bound to this request's school.
+
+Every service provider below takes this rather than calling `get_unit_of_work_factory()`
+itself. That is deliberate: called directly it is an ordinary function and FastAPI never
+resolves its `X-School-Code` dependency, so the service would quietly compose against the
+process-wide database and read the wrong school's rows.
+"""
 
 
 def get_max_upload_bytes() -> int:
@@ -175,12 +259,12 @@ def get_max_upload_bytes() -> int:
     return get_settings().max_upload_bytes
 
 
-def get_query_service() -> QueryService:
+def get_query_service(uow_factory: UowFactoryDep) -> QueryService:
     """Every read, and no writes at all."""
-    return QueryService(get_unit_of_work_factory())
+    return QueryService(uow_factory)
 
 
-def get_structure_service() -> StructureGenerationService:
+def get_structure_service(uow_factory: UowFactoryDep) -> StructureGenerationService:
     """A factory, like every other service here.
 
     This previously depended on `get_unit_of_work` and handed over the transaction that
@@ -189,10 +273,10 @@ def get_structure_service() -> StructureGenerationService:
     500. The service opens and owns its own transaction, which is also what makes a
     generated ladder atomic.
     """
-    return StructureGenerationService(get_unit_of_work_factory())
+    return StructureGenerationService(uow_factory)
 
 
-def get_roster_import_service() -> RosterImportService:
+def get_roster_import_service(uow_factory: UowFactoryDep) -> RosterImportService:
     """Composed per request from configuration this layer alone is allowed to read.
 
     The TTL and the size ceiling are constructor arguments rather than values the
@@ -202,14 +286,14 @@ def get_roster_import_service() -> RosterImportService:
     """
     settings = get_settings()
     return RosterImportService(
-        get_unit_of_work_factory(),
+        uow_factory,
         SpreadsheetRosterParser(),
         preview_ttl=timedelta(minutes=settings.import_preview_ttl_minutes),
         max_upload_bytes=settings.max_upload_bytes,
     )
 
 
-def get_guardian_import_service() -> GuardianImportService:
+def get_guardian_import_service(uow_factory: UowFactoryDep) -> GuardianImportService:
     """Composed per request, like the roster importer above.
 
     `default_country_code` joins the TTL and the size ceiling as a constructor argument
@@ -219,7 +303,7 @@ def get_guardian_import_service() -> GuardianImportService:
     """
     settings = get_settings()
     return GuardianImportService(
-        get_unit_of_work_factory(),
+        uow_factory,
         SpreadsheetGuardianParser(
             default_country_code=settings.default_country_code
         ),
@@ -228,11 +312,11 @@ def get_guardian_import_service() -> GuardianImportService:
     )
 
 
-def get_grade_import_service() -> GradeImportService:
+def get_grade_import_service(uow_factory: UowFactoryDep) -> GradeImportService:
     """As above, for marks. Parser defaults stay unset: the request names the subject."""
     settings = get_settings()
     return GradeImportService(
-        get_unit_of_work_factory(),
+        uow_factory,
         SpreadsheetGradeParser(),
         preview_ttl=timedelta(minutes=settings.import_preview_ttl_minutes),
         max_upload_bytes=settings.max_upload_bytes,
@@ -547,29 +631,29 @@ class ApiKeyMinter:
         return stored, raw
 
 
-def get_import_reports() -> ImportReports:
+def get_import_reports(uow_factory: UowFactoryDep) -> ImportReports:
     """Read-only; each report is its own transaction."""
-    return ImportReports(get_unit_of_work_factory())
+    return ImportReports(uow_factory)
 
 
-def get_structure_catalogue() -> StructureCatalogue:
+def get_structure_catalogue(uow_factory: UowFactoryDep) -> StructureCatalogue:
     """Term and subject upserts, committed per call."""
-    return StructureCatalogue(get_unit_of_work_factory())
+    return StructureCatalogue(uow_factory)
 
 
-def get_attendance_service() -> AttendanceService:
+def get_attendance_service(uow_factory: UowFactoryDep) -> AttendanceService:
     """The daily register. A factory, like every other service here."""
-    return AttendanceService(get_unit_of_work_factory())
+    return AttendanceService(uow_factory)
 
 
-def get_student_desk() -> StudentDesk:
+def get_student_desk(uow_factory: UowFactoryDep) -> StudentDesk:
     """Single-student and single-placement writes, committed per call."""
-    return StudentDesk(get_unit_of_work_factory())
+    return StudentDesk(uow_factory)
 
 
-def get_api_key_minter() -> ApiKeyMinter:
+def get_api_key_minter(uow_factory: UowFactoryDep) -> ApiKeyMinter:
     """The only path that creates a credential."""
-    return ApiKeyMinter(get_unit_of_work_factory())
+    return ApiKeyMinter(uow_factory)
 
 
 # ---------------------------------------------------------------------------

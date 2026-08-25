@@ -1,10 +1,21 @@
-"""Engine and session lifecycle.
+"""Engine and session lifecycle, one engine per school.
 
-The engine is built lazily and cached, never at import time. `sis.config` reads the
-environment lazily for the same reason: alembic's `env.py`, pytest fixtures and
-`uvicorn --reload` all set `SIS_DATABASE_URL` after the package is first imported,
-and an import-time engine would silently bind to the wrong database — in tests, to
-the developer's real `sis.db`.
+Schools are separated **physically**: one database each, the same schema in every one,
+and no query that spans two. The engine is therefore what enforces the boundary.
+`get_sessionmaker(school_code)` returns a factory bound to that school's database and to
+no other, which is why no repository in this service takes a school argument — a query
+cannot reach another school's rows because those rows are not in the file it is connected
+to. Isolation stops being a `WHERE` clause somebody can forget.
+
+`school_code=None` means the process-wide database at `SIS_DATABASE_URL`: single-school
+mode, the default, and what every existing caller and test already asks for. See
+`sis.tenancy` for how the two modes are chosen.
+
+Engines are built lazily and cached per school, never at import time. `sis.config` reads
+the environment lazily for the same reason: alembic's `env.py`, pytest fixtures and
+`uvicorn --reload` all set variables after this package is first imported, and an
+import-time engine would silently bind to the wrong database — in tests, to the
+developer's real `sis.db`.
 
 Nothing in this module creates tables. Alembic owns the schema; see `base.py`.
 """
@@ -12,6 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from threading import Lock
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
@@ -19,9 +31,29 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from sis.config import Settings, get_settings
+from sis.tenancy import get_registry
 
-_engine: Engine | None = None
-_session_factory: sessionmaker[Session] | None = None
+#: Engines and session factories keyed by school code; `None` is single-school mode.
+#: Guarded by `_lock` because FastAPI serves sync endpoints from a threadpool, so the
+#: first request for a school can arrive on several threads at once — and two engines
+#: for one SQLite file means two pools, which is how a test sees a table that another
+#: connection has not committed yet.
+_engines: dict[str | None, Engine] = {}
+_session_factories: dict[str | None, sessionmaker[Session]] = {}
+_lock = Lock()
+
+
+def _database_url(school_code: str | None) -> str:
+    """Which database this school's rows live in.
+
+    A named school always resolves through the registry, and an unknown one raises
+    `UnknownSchool` rather than falling back to the default database. The fallback is
+    the failure worth naming: it would answer a request meant for one branch out of
+    another's file, which is the single thing physical separation exists to prevent.
+    """
+    if school_code is None:
+        return get_settings().database_url
+    return get_registry().get(school_code).database_url
 
 
 def _is_memory_sqlite(url: str) -> bool:
@@ -51,9 +83,17 @@ def _enable_sqlite_foreign_keys(dbapi_connection: Any, _record: Any) -> None:
         cursor.close()
 
 
-def _engine_kwargs(settings: Settings) -> dict[str, Any]:
-    """Pool configuration, which differs by driver rather than by preference."""
-    if settings.is_sqlite:
+def _engine_kwargs(url: str, settings: Settings) -> dict[str, Any]:
+    """Pool configuration, which differs by driver rather than by preference.
+
+    The URL is passed rather than read off `settings`, because in multi-school mode the
+    driver is a property of the school's own database: one school may still be on a
+    SQLite file while another has been moved to Postgres, and sizing a pool for the
+    wrong one of those is either a crash or a silently serialised service. The pool
+    *numbers* stay global — they describe this process's appetite for connections, not
+    any one school's.
+    """
+    if url.startswith("sqlite"):
         kwargs: dict[str, Any] = {
             # FastAPI runs sync endpoints in a threadpool, so the connection that
             # opened a session is rarely the thread that uses it. SQLAlchemy's pool
@@ -61,7 +101,7 @@ def _engine_kwargs(settings: Settings) -> dict[str, Any]:
             # sqlite3's own check is redundant here and only produces false errors.
             "connect_args": {"check_same_thread": False},
         }
-        if _is_memory_sqlite(settings.database_url):
+        if _is_memory_sqlite(url):
             # An in-memory database lives inside a single connection. Without a
             # StaticPool the pool hands out a fresh, *empty* database on the second
             # checkout and the migrations a test just ran appear to have vanished.
@@ -79,44 +119,61 @@ def _engine_kwargs(settings: Settings) -> dict[str, Any]:
     }
 
 
-def get_engine() -> Engine:
-    """The process-wide engine, built on first use."""
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_engine(
-            settings.database_url,
-            future=True,
-            **_engine_kwargs(settings),
-        )
-    return _engine
+def get_engine(school_code: str | None = None) -> Engine:
+    """The engine for one school's database, built on first use and cached.
+
+    `None` is the process-wide database — single-school mode, and every caller that
+    predates physical separation.
+    """
+    # Resolved before the lock: an unknown school must raise rather than wait on a lock
+    # to find that out, and `_database_url` reads caches of its own.
+    url = _database_url(school_code)
+    with _lock:
+        engine = _engines.get(school_code)
+        if engine is None:
+            engine = create_engine(
+                url,
+                future=True,
+                **_engine_kwargs(url, get_settings()),
+            )
+            _engines[school_code] = engine
+        return engine
 
 
-def get_sessionmaker() -> sessionmaker[Session]:
-    """The session factory bound to the process engine."""
-    global _session_factory
-    if _session_factory is None:
-        _session_factory = sessionmaker(
-            bind=get_engine(),
-            autoflush=False,
-            # Attributes stay readable after commit. An API handler that commits and
-            # then serialises the object it just wrote would otherwise trigger a
-            # refresh against a closed session and raise mid-response.
-            expire_on_commit=False,
-            class_=Session,
-        )
-    return _session_factory
+def get_sessionmaker(school_code: str | None = None) -> sessionmaker[Session]:
+    """The session factory bound to one school's engine.
+
+    This is the seam physical separation is built on. Every repository is constructed
+    against a session from here, so binding the factory to a school binds every read and
+    write in that unit of work to that school's database — without a single repository
+    knowing schools exist.
+    """
+    engine = get_engine(school_code)
+    with _lock:
+        factory = _session_factories.get(school_code)
+        if factory is None:
+            factory = sessionmaker(
+                bind=engine,
+                autoflush=False,
+                # Attributes stay readable after commit. An API handler that commits and
+                # then serialises the object it just wrote would otherwise trigger a
+                # refresh against a closed session and raise mid-response.
+                expire_on_commit=False,
+                class_=Session,
+            )
+            _session_factories[school_code] = factory
+        return factory
 
 
-def get_session() -> Iterator[Session]:
-    """FastAPI dependency yielding one session per request.
+def get_session(school_code: str | None = None) -> Iterator[Session]:
+    """FastAPI dependency yielding one session per request, on one school's database.
 
     The rollback on exception is what makes a partially applied import safe: a row
     that raised after three inserts leaves nothing behind. Committing is the caller's
     job — a dependency that auto-commits would persist work an endpoint decided to
     abandon after validation failed.
     """
-    session = get_sessionmaker()()
+    session = get_sessionmaker(school_code)()
     try:
         yield session
     except Exception:
@@ -127,9 +184,9 @@ def get_session() -> Iterator[Session]:
 
 
 @contextmanager
-def session_scope() -> Iterator[Session]:
+def session_scope(school_code: str | None = None) -> Iterator[Session]:
     """Transactional session for code outside a request — CLI tasks, bootstrap."""
-    session = get_sessionmaker()()
+    session = get_sessionmaker(school_code)()
     try:
         yield session
         session.commit()
@@ -141,16 +198,18 @@ def session_scope() -> Iterator[Session]:
 
 
 def reset_engine() -> None:
-    """Drop the cached engine and factory so a test can repoint the service.
+    """Drop every cached engine and factory so a test can repoint the service.
 
-    Pairs with `reset_settings_cache()`: clearing the settings alone changes nothing,
-    because the engine already holds a connection to the old URL.
+    Pairs with `reset_settings_cache()` and `sis.tenancy.reset_registry_cache()`:
+    clearing those alone changes nothing, because the engines already hold connections
+    to the old URLs. All schools are dropped rather than one, because a test that
+    repoints the service is repointing the whole registry.
     """
-    global _engine, _session_factory
-    if _engine is not None:
-        _engine.dispose()
-    _engine = None
-    _session_factory = None
+    with _lock:
+        for engine in _engines.values():
+            engine.dispose()
+        _engines.clear()
+        _session_factories.clear()
 
 
 __all__ = [

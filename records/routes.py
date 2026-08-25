@@ -266,7 +266,9 @@ def list_students(
     The agent's first call in any conversation. An unknown guardian and a guardian
     with no visible children both return an empty list — see `permitted_students`.
     """
-    students = auth.permitted_students(db, guardian_external_id=subject.guardian_id)
+    students = auth.permitted_students(
+        db, guardian_external_id=subject.guardian_id, school_code=subject.school_code
+    )
     return StudentListOut(
         guardian_id=subject.guardian_id, students=[_student_ref(s) for s in students]
     )
@@ -292,6 +294,7 @@ def get_grades(
         student_external_id=student_id,
         caller=subject.caller,
         endpoint=str(request.url.path),
+        school_code=subject.school_code,
     )
     resolved_term = _resolve_term(db, term)
     adapter = _adapter_or_503()
@@ -377,6 +380,7 @@ def get_course_detail(
         student_external_id=student_id,
         caller=subject.caller,
         endpoint=str(request.url.path),
+        school_code=subject.school_code,
     )
     resolved_term = _resolve_term(db, term)
     adapter = _adapter_or_503()
@@ -461,6 +465,7 @@ def get_attendance(
         student_external_id=student_id,
         caller=subject.caller,
         endpoint=str(request.url.path),
+        school_code=subject.school_code,
     )
     resolved_term = _resolve_term(db, term)
     adapter = _adapter_or_503()
@@ -524,6 +529,7 @@ def get_report_card(
         student_external_id=student_id,
         caller=subject.caller,
         endpoint=str(request.url.path),
+        school_code=subject.school_code,
     )
     term = _resolve_term(db, term_id)
 

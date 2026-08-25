@@ -29,6 +29,7 @@ import hashlib
 import hmac
 import logging
 import threading
+from dataclasses import dataclass
 from typing import Final, Protocol
 from urllib.parse import quote
 
@@ -123,7 +124,23 @@ def click_to_chat_link(business_number: str, message: str) -> str:
     `quote` with `safe=""` rather than `urlencode`, because every reserved character has to
     be escaped: an unescaped `&` or `#` truncates the message at exactly the point where
     the nonce would have been, and the resulting message arrives looking almost right.
+
+    **An empty number is refused rather than rendered.** `https://wa.me/?text=...` is a
+    valid URL that WhatsApp answers by opening the contact picker — the parent is asked to
+    choose who to send the school's verification code to, which in production they cannot
+    possibly know. Every visible sign says the feature works: the button opens WhatsApp,
+    the message is prefilled, nothing logs. Only the chat is with nobody.
+
+    Raising here rather than checking at the call site because this is the function whose
+    output is the bug, and a guard anywhere else leaves the broken string one new caller
+    away.
     """
+    if not (business_number or "").strip():
+        raise ValueError(
+            "click_to_chat_link needs the school's number. Without it the link opens "
+            "WhatsApp's contact picker instead of a chat, and no parent can complete "
+            "sign-in. Set IDENTITY_WHATSAPP_NUMBER."
+        )
     return f"https://wa.me/{wa_id_of(business_number)}?text={quote(message, safe='')}"
 
 
@@ -298,17 +315,56 @@ class RecordingWhatsAppGateway:
 _gateway: WhatsAppGateway = RecordingWhatsAppGateway()
 
 
-def set_gateway(gateway: WhatsAppGateway) -> None:
+def set_gateway(gateway: WhatsAppGateway, school_code: str | None = None) -> None:
+    """Install the gateway for one school, or the process-wide one when unnamed."""
     global _gateway
-    _gateway = gateway
+    if school_code is None:
+        _gateway = gateway
+        return
+    _gateways[school_code] = gateway
 
 
-def get_gateway() -> WhatsAppGateway:
-    return _gateway
+def get_gateway(school_code: str | None = None) -> WhatsAppGateway:
+    """The gateway a message to this school goes out through.
+
+    A named school with no gateway installed falls back to the process-wide one, which in
+    that state is the recording gateway — codes are written to a log or discarded, never
+    delivered. That is the right failure: it is the state a laptop and the test suite run
+    in, and it keeps the flow exercisable end to end without a Meta account.
+
+    Note what it is *not* a fallback to. `_gateways` never holds the single-school gateway,
+    so this cannot quietly send one school's verification code out through another school's
+    number — the only thing an unconfigured school can reach is a gateway that delivers to
+    nobody at all.
+    """
+    if school_code is None:
+        return _gateway
+    return _gateways.get(school_code, _gateway)
 
 
-def inbound_text_messages(raw_body: bytes) -> list[tuple[str, str, str]]:
-    """Every text message in one webhook delivery, as `(wa_id, text, message_id)`.
+@dataclass(frozen=True, slots=True)
+class InboundMessage:
+    """One text message a parent sent, and the number of ours they sent it to.
+
+    `phone_number_id` is the field this type exists for. Meta stamps every delivery with
+    `value.metadata.phone_number_id`, naming which of our WhatsApp numbers received the
+    message — and with one number per school that *is* the school, decided before any
+    database is opened. See `identity/schools.py`.
+
+    It deserves the same trust as `wa_id` and for the same reason: both come from Meta,
+    inside a body whose signature was checked against the app secret, and neither is ever
+    supplied by a browser. It is `""` on a delivery that carries no metadata, which a
+    caller must treat as "unknown school" and refuse — never as "the default school".
+    """
+
+    wa_id: str
+    text: str
+    message_id: str
+    phone_number_id: str = ""
+
+
+def inbound_text_messages(raw_body: bytes) -> list[InboundMessage]:
+    """Every text message in one webhook delivery.
 
     Defensive at every level, because this parses a payload from outside the estate and
     runs on a path that must never raise: Meta replays a delivery it does not see
@@ -320,7 +376,9 @@ def inbound_text_messages(raw_body: bytes) -> list[tuple[str, str, str]]:
 
     One delivery can legitimately carry several messages — the shape is
     `entry[] -> changes[] -> value.messages[]` — which is why this returns a list rather
-    than the first message it finds.
+    than the first message it finds. `value.metadata` sits alongside `value.messages`, so
+    the school is read from the same dict the messages come out of and applies to all of
+    them: one delivery is addressed to exactly one of our numbers.
     """
     import json
 
@@ -331,12 +389,16 @@ def inbound_text_messages(raw_body: bytes) -> list[tuple[str, str, str]]:
     if not isinstance(payload, dict):
         return []
 
-    found: list[tuple[str, str, str]] = []
+    found: list[InboundMessage] = []
     for entry in _as_list(payload.get("entry")):
         for change in _as_list(_get(entry, "changes")):
             value = _get(change, "value")
             if not isinstance(value, dict):
                 continue
+            metadata = _get(value, "metadata")
+            phone_number_id = str(
+                (metadata.get("phone_number_id") if isinstance(metadata, dict) else "") or ""
+            )
             for message in _as_list(value.get("messages")):
                 if not isinstance(message, dict) or message.get("type") != "text":
                     continue
@@ -346,7 +408,14 @@ def inbound_text_messages(raw_body: bytes) -> list[tuple[str, str, str]]:
                 # browser told us, which is the entire basis for trusting the number.
                 sender = str(message.get("from") or "")
                 if sender:
-                    found.append((sender, str(body or ""), str(message.get("id") or "")))
+                    found.append(
+                        InboundMessage(
+                            wa_id=sender,
+                            text=str(body or ""),
+                            message_id=str(message.get("id") or ""),
+                            phone_number_id=phone_number_id,
+                        )
+                    )
     return found
 
 
@@ -370,10 +439,19 @@ def _get(container: object, key: str) -> object:
 _verify_token: str = ""
 _app_secret: str = ""
 _business_number: str = ""
+#: Gateways keyed by school code, for a deployment that serves several. The single-school
+#: gateway stays in its own slot rather than living in here under a `None` key, so nothing
+#: about the unsplit path changes and a lookup miss cannot silently resolve to it.
+_gateways: dict[str, "WhatsAppGateway"] = {}
 
 
 def configure(*, verify_token: str, app_secret: str, business_number: str) -> None:
-    """Install the webhook secrets and the school's own number.
+    """Install the webhook secrets and, in a single-school deployment, its own number.
+
+    The secrets are estate-wide: one Meta app receives every school's deliveries on one
+    webhook, so there is one verify token and one app secret however many schools there
+    are. Only the *numbers* are per school, and those live in `identity/schools.py`.
+
 
     `business_number` must already have been through `e164_or_raise`; this does not
     re-check it, because the composition root is the place where a bad value should stop a

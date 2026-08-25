@@ -175,6 +175,18 @@ class VerificationChallenge(Base):
     code_hash: Mapped[str] = mapped_column(String(128), default="", nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    #: Which school this challenge belongs to; `""` in a single-school deployment.
+    #:
+    #: Set when the browser starts the challenge, because the login page already knows
+    #: which school it is rendering for. It is checked again when the parent's message
+    #: arrives, against the school that owns the WhatsApp number they sent it to — so two
+    #: independent facts have to agree before a code is issued. That closes the
+    #: multi-school shape of the attack this table's docstring already worries about: a
+    #: parent talked into sending somebody else's nonce to a *different* school's number
+    #: would otherwise have their identity resolved against a database they have no
+    #: children in.
+    school_code: Mapped[str] = mapped_column(String(16), default="", nullable=False)
+
     #: The inbound WhatsApp message that claimed this challenge, for retry deduplication.
     wa_message_id: Mapped[str] = mapped_column(String(128), default="", nullable=False)
     #: Why a rejected challenge was rejected. Shown to nobody; read when a parent phones

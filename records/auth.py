@@ -187,9 +187,14 @@ require_admin_key = _require_scope("admin")
 class ParentSubject:
     """A verified (system, parent) pair. Both halves proved, neither assumed."""
 
-    def __init__(self, caller: Caller, guardian_id: str):
+    def __init__(self, caller: Caller, guardian_id: str, school_code: str | None = None):
         self.caller = caller
         self.guardian_id = guardian_id
+        #: Which school's database answers for this parent, off the token's `school`
+        #: claim. `None` in a single-school estate. Carried here rather than looked up,
+        #: because it was settled at sign-in from the WhatsApp number the parent messaged
+        #: and nothing since has been in a position to know better.
+        self.school_code = school_code
 
 
 def require_parent_subject(
@@ -270,7 +275,11 @@ def require_parent_subject(
             detail={"code": "not_authorized", "message": "Token does not authorise this guardian."},
         )
 
-    return ParentSubject(caller=caller, guardian_id=claimed_guardian)
+    return ParentSubject(
+        caller=caller,
+        guardian_id=claimed_guardian,
+        school_code=identity.school_from_claims(claims),
+    )
 
 
 def resolve_permitted_student(
@@ -280,6 +289,7 @@ def resolve_permitted_student(
     student_external_id: str,
     caller: Caller,
     endpoint: str,
+    school_code: str | None = None,
 ) -> PermittedStudent:
     """The chokepoint. Every parent-facing read passes through here first.
 
@@ -309,7 +319,9 @@ def resolve_permitted_student(
         # the reason is the part that matters later: a run of `no_children` against one
         # guardian is somebody probing with a handle that reaches nobody, while a run of
         # `no_link` is somebody walking student numbers against a real parent's handle.
-        children = get_directory().children_of(guardian_external_id)
+        children = get_directory().children_of(
+            guardian_external_id, school_code=school_code
+        )
         student = next(
             (child for child in children if child.student_id == str(student_external_id)),
             None,
@@ -366,7 +378,7 @@ def resolve_permitted_student(
 
 
 def permitted_students(
-    db: Session, *, guardian_external_id: str
+    db: Session, *, guardian_external_id: str, school_code: str | None = None
 ) -> list[PermittedStudent]:
     """Every child this guardian may ask about. Restricted links are already excluded.
 
@@ -379,7 +391,9 @@ def permitted_students(
     which is recoverable. The read routes below it raise properly.
     """
     try:
-        return list(get_directory().children_of(guardian_external_id))
+        return list(
+            get_directory().children_of(guardian_external_id, school_code=school_code)
+        )
     except GuardianDirectoryUnavailable as error:
         logger.error("Guardian directory unavailable while listing children: %s", error)
         return []

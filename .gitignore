@@ -44,3 +44,10 @@ rag_pipeline_graph.png
 # SIS local database and scratch verification files
 sis.db
 .sis_*.db
+
+# Local SQLite databases and pre-test snapshots that .gitignore did not cover.
+records.db
+*.db.before-*
+
+# Vite dependency-optimisation cache for the SIS console.
+sis/frontend/.vite/

@@ -438,10 +438,27 @@ export function School({ params = {} }) {
 
   const levels = useResource(Store.keys.levels(code), () => api.schoolLevels(code), !!code);
   const years = useResource(Store.keys.years(code), () => api.years(code), !!code);
+
+  /* The remembered year, but only once it is known to be one of *this* school's.
+     `Store.setSchool` drops the year when the school changes, and says why. It runs in the
+     effect above, though, which is after the first render -- so arriving at another school
+     by URL renders once with the previous school's year still selected. That render fetched
+     `classes` for the school just left and counted them per rung below, and because rung
+     codes are unique per school rather than globally ("Y1" exists at every branch) the
+     counts landed on this school's cards under matching codes. A newly created school, with
+     no classes at all, showed the class counts of the school the registrar came from.
+     Deriving the year from the list this school actually returned closes that: until the
+     years arrive, no year is active, and `null` renders as "pick a year" rather than as a
+     number belonging to somebody else. */
+  const yearBelongsToSchool = ((years.value && years.value.academic_years) || []).some(
+    function (row) { return row.code === state.year; }
+  );
+  const activeYear = yearBelongsToSchool ? state.year : null;
+
   const classes = useResource(
-    Store.keys.classes(state.year),
-    () => api.classes(state.year),
-    !!state.year
+    Store.keys.classes(activeYear),
+    () => api.classes(activeYear),
+    !!activeYear
   );
 
   if (schools.ready && !schoolList.length) {
@@ -613,7 +630,7 @@ export function School({ params = {} }) {
                   label={t('Classes')}
                   value={(classes.value || []).length}
                   loading={classes.loading && !classes.ready}
-                  note={state.year ? t('In {0}', [state.year]) : t('Pick a year')}
+                  note={activeYear ? t('In {0}', [activeYear]) : t('Pick a year')}
                 />
               </div>
             </Card>
@@ -652,9 +669,9 @@ export function School({ params = {} }) {
                   key={level.code}
                   level={level}
                   school={code}
-                  year={state.year}
+                  year={activeYear}
                   lang={state.lang}
-                  classCount={state.year ? perLevel[level.code] || 0 : null}
+                  classCount={activeYear ? perLevel[level.code] || 0 : null}
                 />
               ))}
             </div>

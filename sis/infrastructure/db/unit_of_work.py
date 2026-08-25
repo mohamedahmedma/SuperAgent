@@ -15,6 +15,12 @@ pool exhaustion that looks like the database being slow.
 The factory is a parameter so a test can point one unit of work at its own engine
 without touching process-wide state; it defaults to the shared sessionmaker, resolved at
 enter time so `reset_engine()` between tests is honoured.
+
+`school_code` chooses *which school's database* that default resolves to. It is the only
+place the school appears in the persistence layer: the repositories below take a session
+and know nothing about schools, so binding the unit of work binds every read and write
+inside it. Physical separation is therefore enforced by the connection rather than by a
+filter each repository has to remember — see `sis.infrastructure.db.session`.
 """
 from __future__ import annotations
 
@@ -90,9 +96,25 @@ class SqlAlchemyUnitOfWork:
     imports: ImportBatchRepository
     api_keys: ApiKeyRepository
 
-    def __init__(self, session_factory: Callable[[], Session] | None = None) -> None:
+    def __init__(
+        self,
+        session_factory: Callable[[], Session] | None = None,
+        *,
+        school_code: str | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._school_code = school_code
         self._session: Session | None = None
+
+    @property
+    def school_code(self) -> str | None:
+        """Which school's database this unit of work is bound to; `None` is the default.
+
+        Read-only, and fixed at construction. A unit of work that could be repointed
+        mid-transaction would be one whose repositories no longer agree about which
+        school they are writing to.
+        """
+        return self._school_code
 
     def __enter__(self) -> "SqlAlchemyUnitOfWork":
         """Open the session and build the repositories bound to it."""
@@ -102,7 +124,9 @@ class SqlAlchemyUnitOfWork:
             # then close the wrong one.
             raise RuntimeError("This unit of work is already open; use a new one.")
 
-        factory = self._session_factory or get_sessionmaker()
+        # Resolved at enter time rather than in `__init__`, so `reset_engine()` between
+        # tests is honoured and so an unentered unit of work never touches a pool.
+        factory = self._session_factory or get_sessionmaker(self._school_code)
         session = factory()
         self._session = session
         self._bind(session)

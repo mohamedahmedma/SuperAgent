@@ -12,11 +12,57 @@ REM service; closing this launcher window does not stop the others.
 
 cd /d "%~dp0"
 
+REM Needed for !BUSY! below: a variable built inside a for-loop is
+REM only readable with delayed expansion.
+setlocal enabledelayedexpansion
+
 if not exist ".venv" (
     echo [warn] .venv not found - run "uv sync" first.
 )
 if not exist "frontend\node_modules" (
     echo [warn] frontend\node_modules not found - run "npm install" in frontend\ first.
+)
+
+REM Every service now reads .env for itself (identity/env.py, records/env.py,
+REM sis/env.py, backend/env.py). Nothing is set here any more, deliberately: a variable
+REM exported in this window BEATS the file, so the keys that used to be pinned here won
+REM silently over whatever .env said — which is how records came to hold a bootstrap
+REM admin key that nobody had written down and nobody could use.
+REM
+REM Configure the estate in .env. This file only starts processes.
+
+REM A service reads .env once, at startup. If an older copy still holds the port, the
+REM new one cannot bind, exits into its own window, and the OLD one keeps answering with
+REM the OLD settings - which looks exactly like an edit to .env not working.
+REM
+REM So this stops rather than starting half an estate. It offers to free the ports
+REM because the alternative is a netstat/taskkill line nobody should have to retype.
+
+set "BUSY="
+for %%P in (8000 8100 8200 8300) do (
+    netstat -ano -p TCP | findstr /R /C:"LISTENING" | findstr /C:":%%P " >nul && set "BUSY=!BUSY! %%P"
+)
+
+if defined BUSY (
+    echo.
+    echo [busy] These ports are already in use:!BUSY!
+    echo        A previous run is still going. Starting now would leave the OLD services
+    echo        answering with the OLD .env - which reads exactly like your edit being
+    echo        ignored.
+    echo.
+    choice /c YN /m "Stop them and start fresh"
+    if errorlevel 2 (
+        echo Left running. Nothing was started.
+        pause
+        exit /b 1
+    )
+    for %%P in (8000 8100 8200 8300) do (
+        for /f "tokens=5" %%i in ('netstat -ano -p TCP ^| findstr /C:":%%P " ^| findstr LISTENING') do (
+            taskkill /PID %%i /F >nul 2>&1
+        )
+    )
+    echo Stopped. Their windows will show the shutdown; you can close them.
+    timeout /t 2 >nul
 )
 
 echo Starting infra (postgres, redis, milvus)...
@@ -26,10 +72,10 @@ echo Applying sis database migrations...
 call .venv\Scripts\alembic.exe -c sis\alembic.ini upgrade head
 
 echo Starting identity :8200 ...
-start "identity :8200" cmd /k "cd /d "%~dp0" && call .venv\Scripts\activate.bat && set IDENTITY_ADMIN_KEY=dev-admin-key && uvicorn identity.app:app --port 8200"
+start "identity :8200" cmd /k "cd /d "%~dp0" && call .venv\Scripts\activate.bat && uvicorn identity.app:app --port 8200"
 
 echo Starting records :8100 ...
-start "records :8100" cmd /k "cd /d "%~dp0" && call .venv\Scripts\activate.bat && set RECORDS_BOOTSTRAP_ADMIN_KEY=dev-records-admin && set IDENTITY_JWKS_URL=http://localhost:8200/.well-known/jwks.json && uvicorn records.app:app --port 8100"
+start "records :8100" cmd /k "cd /d "%~dp0" && call .venv\Scripts\activate.bat && uvicorn records.app:app --port 8100"
 
 echo Starting sis :8300 (UI at /ui, no API key required) ...
 start "sis :8300" cmd /k "cd /d "%~dp0" && call .venv\Scripts\activate.bat && uvicorn sis.app:app --port 8300"
