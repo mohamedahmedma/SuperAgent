@@ -45,6 +45,12 @@ var STORAGE_KEY = 'sis.api_key';
 
 var DASH = '—'; // em dash: the one rendering of "no mark was recorded"
 
+/* The slot `store.js` keeps the selected school in. Duplicated as a literal rather than
+   imported because `api.js` is the lower layer — the store imports it, not the other way
+   round — and a cycle between them would break the module graph. Kept in step by name:
+   both spell it `sis.school`. */
+var SCHOOL_STORAGE_KEY = 'sis.school';
+
 function storedKey() {
   try {
     var raw = window.sessionStorage.getItem(STORAGE_KEY);
@@ -57,6 +63,29 @@ function storedKey() {
 /** The key every request actually sends: what the registrar typed, else the default. */
 function getKey() {
   return storedKey() || DEFAULT_KEY;
+}
+
+/**
+ * The school every request is answered from.
+ *
+ * Schools are separated physically — one database each — so this header does not narrow a
+ * query, it chooses the connection. Read from the same `localStorage` slot the store keeps
+ * the selected school in (`store.js`, SCHOOL_KEY) rather than being passed down through
+ * every call site: the school is a property of the whole session, and threading it through
+ * forty functions would mean forty chances to forget it, each one a request answered from
+ * whichever database the service picked.
+ *
+ * Empty when no school has been chosen, and omitted from the request entirely — a
+ * single-school service ignores the header, and a multi-school one refuses the request
+ * rather than guessing, which is the answer that surfaces the problem instead of hiding it.
+ */
+function schoolCode() {
+  try {
+    var raw = window.localStorage.getItem(SCHOOL_STORAGE_KEY);
+    return raw === null || raw === undefined ? '' : String(raw).trim();
+  } catch (e) {
+    return ''; // Private mode / storage disabled: behave as "nothing chosen".
+  }
 }
 
 /**
@@ -332,6 +361,12 @@ function request(path, options) {
      which a request leaves without the header and 401s for a reason the page cannot
      explain. */
   headers['X-API-Key'] = getKey();
+  /* Conditional, unlike the key above, because there is no sensible default school. A
+     service holding one school ignores this; a service holding several refuses a request
+     that names none, which is what makes "I forgot to pick a school" a visible error
+     rather than one branch's data appearing under another's name. */
+  var school = schoolCode();
+  if (school) headers['X-School-Code'] = school;
 
   var init = { method: opts.method || 'GET', headers: headers };
 
