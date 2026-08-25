@@ -27,13 +27,13 @@ grep -rn "from records\|from identity\|from sis" backend/        # nothing
 
 `sis/` is the school's own registrar-facing system of record: year levels, classes,
 subjects, terms, time-bounded class placements, spreadsheet imports, the marks a teacher
-stated, and the guardians a child may be contacted through. It is a peer of Moodle, not a
+stated, and the guardians a child may be contacted through. It is a peer of the gradebook, not a
 layer over it — `records/` reads it through the same `LmsAdapter` seam, and `sis/` does
 not know `records/` exists.
 
 Guardians live in `sis/` and are **not** the same table as `records/`'s. A student on the
 SIS roll need not exist in `records/` at all, which is the intended state rather than
-something to reconcile: `records/` is the Moodle-era facade and its own guardian model is
+something to reconcile: `records/` is the older facade and its own guardian model is
 on its way out. Three tables carry it — `guardians`, `guardian_phones` and
 `student_guardians` — and the split is what lets one parent hold two numbers and one child
 have any number of adults, each with their own relationship and their own permission to
@@ -57,13 +57,13 @@ parent → frontend → backend    chat turn, Authorization: Bearer <token>
                               public key, checks guardian_id claim == path, then
                               checks the guardian↔student link.
 
-                    records → Moodle   grades and attendance, read live
-                            (or → sis) GET /v1/students/{number}/grades?term=
+                    records → sis     grades and attendance, read live
+                                       GET /v1/students/{number}/grades?term=
                                        X-API-Key: a reader-scoped SIS key
 ```
 
 Which system of record answers that last hop is `RECORDS_LMS`, and it is the only thing
-that changes: `fake`, `moodle`, or `sis`. No route, tool schema or parent-facing contract
+that changes: `fake` or `sis`. No route, tool schema or parent-facing contract
 differs between them.
 
 The chat backend is the process running a language model on untrusted input. It holds
@@ -73,7 +73,7 @@ that token authorises. That is the point of the split.
 ## Starting everything
 
 Each service is independent, so start them in any order — `records` serves report card
-snapshots while Moodle is down, and verifies tokens while `identity` is down.
+snapshots while the system of record is down, and verifies tokens while `identity` is down.
 
 ```bash
 # 1. identity  :8200
@@ -160,7 +160,7 @@ curl -X PUT localhost:8200/v1/admin/accounts/0501234567/guardian-binding \
 ```
 
 Then link the guardian to a student in records (`POST /v1/admin/guardians/G-1/students`
-with `can_view_records: true` — it defaults to false), and bind the Moodle courses.
+with `can_view_records: true` — it defaults to false), and bind the courses.
 
 ## Enabling the tool
 
@@ -182,16 +182,13 @@ decided elsewhere and cannot be reached from a profile:
 | --- | --- |
 | Is this session a parent? | identity service — the `guardian_id` claim |
 | Which students may they see? | records facade — the guardian link table |
-| Does the school even have the data? | Moodle, through `LmsAdapter` |
+| Does the school even have the data? | the SIS, through `LmsAdapter` |
 
 A signed-in user with no guardian binding gets `NOT_A_PARENT_SESSION` with the tool
 fully bound, and so does a session holding a guardian id but no token.
 
 ## What still needs building
 
-- `records/lms.py::MoodleAdapter` — a skeleton that raises. See `records/README.md` for
-  what to verify on the school's live Moodle first. **This is the critical path**;
-  everything else on this list is smaller than it.
 - Bulk loaders: terms, course bindings, students, guardian links, parent accounts.
   Only single-record admin routes exist, and a real school is thousands of rows.
 - Postgres and deployment config for `records/` and `identity/`; both still default to
