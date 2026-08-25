@@ -1,22 +1,21 @@
 """The swap seam.
 
-Everything LMS-shaped is behind `LmsAdapter`. Routes never import a Moodle symbol,
-never see a web-service function name, never handle a Moodle error type. That is what
-makes "replace Moodle later" a real option rather than an intention: the blast radius
-of the swap is this one file.
+Everything LMS-shaped is behind `LmsAdapter`. Routes never import a backend's symbol,
+never see its web-service function names, never handle its error types. That is what
+makes "replace the system of record later" a real option rather than an intention: the
+blast radius of the swap is this one file.
 
-THE PROTOCOL CHANGED, AND WHY.
-Its first shape was per-course lists of assignments, which the facade then aggregated
-itself — because that was the only shape core Moodle's web services could produce.
-Measuring against a live instance showed that shape was unusable: the exclusion flag is
-not exposed at all, so an excused assignment is indistinguishable from a counted one,
-and re-deriving a percentage from the numbers that ARE exposed gives 50% or 30% for a
-child genuinely on 90%.
+WHAT THE PROTOCOL ASKS FOR, AND WHY.
+It asks for one call per student per term, returning a figure the gradebook itself
+computed. Its first shape was per-course lists of assignments that the facade then
+aggregated, and measuring against a live instance showed that shape was unusable: the
+exclusion flag was not exposed at all, so an excused assignment was indistinguishable
+from a counted one, and re-deriving a percentage from the numbers that WERE exposed
+gave 50% or 30% for a child genuinely on 90%.
 
-So `local_schoolapi` was written to answer per student per term, returning a figure
-Moodle itself computed. This protocol now matches that: one call, already correct.
-`records.grading` no longer aggregates anything for the Moodle path — the arithmetic
-it used to do is arithmetic nobody should be doing outside the gradebook.
+So the rule is: the gradebook says what the number is, and this service transports it.
+`records.grading` aggregates nothing — the arithmetic it used to do is arithmetic nobody
+should be doing outside the gradebook.
 
 Failures are normalised to one exception on purpose. `LmsUnavailable` is what makes the
 honest-failure path possible end to end: the route turns it into a 503 with
@@ -25,14 +24,8 @@ records right now" — never into a plausible-sounding grade.
 """
 from __future__ import annotations
 
-import logging
-import os
-import threading
-import time
 from dataclasses import dataclass, field
-from typing import Any, Protocol
-
-logger = logging.getLogger(__name__)
+from typing import Protocol
 
 
 class LmsUnavailable(RuntimeError):
@@ -68,12 +61,12 @@ class SubjectGrade:
     """
 
     course_ref: str
-    #: The subject's name as the backend reports it. Singular because Moodle's is: one
+    #: The subject's name as the backend reports it. Singular because a flat course
     #: course title, whatever a teacher typed, rarely bilingual — and on that path the
     #: school's own names come from `CourseBinding` rather than from here.
     subject_name: str
     percentage: float | None
-    #: The Arabic name, when the backend keeps one. Empty for Moodle, which does not.
+    #: The Arabic name, when the backend keeps one. Empty where the backend has none.
     #:
     #: Separate rather than folded into `subject_name` because a backend that has both and
     #: must pick one always picks wrong for somebody: this school reads Arabic, and a
@@ -87,7 +80,7 @@ class SubjectGrade:
     excluded_count: int = 0
     pending_count: int = 0
     is_complete: bool = False
-    # Moodle's own gradebook-category subtotals. Exact under every aggregation scheme,
+    # The gradebook's own category subtotals. Exact under every aggregation scheme,
     # so this is the reliable route to a partial subject grade when the derived
     # `academic_percentage` is unavailable.
     categories: tuple[dict, ...] = ()
@@ -122,7 +115,7 @@ class SubjectAttendance:
 class LmsAdapter(Protocol):
     #: Does this backend name its own subjects?
     #:
-    #: `False` for Moodle, whose course list is flat and whose titles are whatever a
+    #: `False` for a backend whose course list is flat and whose titles are whatever a
     #: teacher typed — the school decides what each course *is* and whether a parent may
     #: see it, and `CourseBinding` is where it says so.
     #:
@@ -138,7 +131,7 @@ class LmsAdapter(Protocol):
     """What the facade needs from a system of record. Nothing more.
 
     Both calls take the SCHOOL's student reference — the number on a letter home — not
-    an internal LMS id. That keeps the contract free of Moodle and lets the facade key
+    an internal LMS id. That keeps the contract backend-agnostic and lets the facade key
     everything on the identifier a registrar can actually look up.
 
     The adapter is not an authorisation boundary and must never be asked to be one. The
@@ -162,10 +155,10 @@ class LmsAdapter(Protocol):
 
 @dataclass
 class FakeLms:
-    #: Bindings apply, like Moodle — the fixture exists to exercise that path.
+    #: Bindings apply — the fixture exists to exercise that path.
     reports_own_subjects = False
 
-    """Deterministic fixtures, so the service and its tests need no Moodle.
+    """Deterministic fixtures, so the service and its tests need no live LMS.
 
     Also the reference for what a correct adapter returns — particularly a subject
     where `percentage` and `academic_percentage` differ, which is the case a real
@@ -187,211 +180,6 @@ class FakeLms:
         if self.unavailable:
             raise LmsUnavailable("FakeLms configured as unavailable")
         return list(self.attendance.get((student_ref, term), []))
-
-
-# ---------------------------------------------------------------------------
-# Moodle
-# ---------------------------------------------------------------------------
-
-
-class MoodleAdapter:
-    #: Moodle is the reason `CourseBinding` exists. See the port.
-    reports_own_subjects = False
-
-    """Talks to `local_schoolapi` on a Moodle instance.
-
-    Deliberately thin. Every figure it returns was computed by Moodle or by the plugin
-    reading Moodle's own aggregates; this class transports and reshapes, and does no
-    arithmetic whatsoever. The moment it starts calculating a percentage is the moment
-    it can disagree with the gradebook a teacher is looking at.
-
-    Two Moodle behaviours it has to know about, both of which look like bugs elsewhere:
-
-    Moodle signals FAILURE WITH HTTP 200 and an `exception` key in the body. A client
-    that trusts the status code treats every refusal as success and returns an empty
-    result — which the assistant would report to a parent as "no grades recorded".
-
-    Moodle REDIRECTS any request whose host is not `$CFG->wwwroot`, answering with an
-    HTML page instead of JSON. Calling 127.0.0.1 when wwwroot says localhost produces
-    something that parses as neither, and reads exactly like a broken endpoint.
-    """
-
-    #: How long a student's payload stays cached. Short: the plugin already caches
-    #: server-side and invalidates on the grade event, so this exists only to stop one
-    #: chat turn — list children, then grades, then attendance — making the same call
-    #: three times. Long enough to help, short enough that a corrected mark is not stale
-    #: for a parent already on the phone to the school.
-    CACHE_TTL_SECONDS = 30
-
-    def __init__(
-        self,
-        base_url: str,
-        token: str,
-        timeout_seconds: float | None = None,
-        cache_ttl_seconds: float | None = None,
-    ):
-        self.base_url = base_url.rstrip("/")
-        self.token = token
-        # A hung call must not hang a chat turn. The parent is waiting on a streamed
-        # answer, so failing at 15s with "I can't reach the records" beats succeeding
-        # at 90s.
-        self.timeout_seconds = timeout_seconds or float(os.getenv("MOODLE_TIMEOUT_SECONDS") or 15)
-        self.cache_ttl_seconds = (
-            self.CACHE_TTL_SECONDS if cache_ttl_seconds is None else cache_ttl_seconds
-        )
-
-        self._lock = threading.Lock()
-        self._cache: dict[tuple[str, str, str], tuple[float, Any]] = {}
-
-    # -- transport ----------------------------------------------------------
-
-    def _call(self, function: str, **params) -> Any:
-        """One web service call. Every failure becomes LmsUnavailable.
-
-        Including a refusal: a token whose capability was revoked, a function removed
-        from the external service, a student the plugin declined to resolve. From the
-        parent's side these are indistinguishable from the server being down, and
-        distinguishing them in the response would let a caller probe Moodle's
-        configuration through this service.
-        """
-        import requests
-
-        payload = {
-            "wstoken": self.token,
-            "wsfunction": function,
-            "moodlewsrestformat": "json",
-            **params,
-        }
-
-        try:
-            response = requests.post(
-                f"{self.base_url}/webservice/rest/server.php",
-                data=payload,
-                timeout=self.timeout_seconds,
-                # Do NOT follow redirects. Moodle bounces a wrong host to its wwwroot
-                # and answers with HTML; following it turns a configuration error into
-                # a confusing parse failure instead of a clear one.
-                allow_redirects=False,
-            )
-        except Exception as exc:
-            raise LmsUnavailable(f"{function}: transport failure — {exc}") from exc
-
-        if response.status_code in (301, 302, 303, 307, 308):
-            raise LmsUnavailable(
-                f"{function}: Moodle redirected to {response.headers.get('location')!r}. "
-                "MOODLE_BASE_URL must match the site's configured wwwroot exactly."
-            )
-
-        if response.status_code != 200:
-            raise LmsUnavailable(f"{function}: HTTP {response.status_code}")
-
-        try:
-            body = response.json()
-        except ValueError as exc:
-            raise LmsUnavailable(f"{function}: response was not JSON") from exc
-
-        # The one that catches people out: HTTP 200, and an error in the body.
-        if isinstance(body, dict) and "exception" in body:
-            logger.warning(
-                "Moodle refused %s: %s — %s",
-                function, body.get("errorcode"), body.get("message"),
-            )
-            raise LmsUnavailable(f"{function}: {body.get('errorcode')}")
-
-        return body
-
-    def _cached(self, function: str, student_ref: str, term: str) -> Any:
-        key = (function, student_ref, term)
-        now = time.monotonic()
-
-        with self._lock:
-            hit = self._cache.get(key)
-            if hit and (now - hit[0]) < self.cache_ttl_seconds:
-                return hit[1]
-
-        # Deliberately outside the lock: a slow Moodle would otherwise block every other
-        # student's request behind this one. The cost is that two concurrent requests
-        # for the same student may both call — which is a wasted call, not a wrong
-        # answer, and far cheaper than serialising the whole service.
-        payload = self._call(function, studentidnumber=student_ref, term=term)
-
-        with self._lock:
-            self._cache[key] = (now, payload)
-            # The cache is per-process and per-request-burst, not a store. Trimming
-            # keeps a long-lived worker from accumulating every student it ever served.
-            if len(self._cache) > 512:
-                cutoff = now - self.cache_ttl_seconds
-                self._cache = {k: v for k, v in self._cache.items() if v[0] >= cutoff}
-
-        return payload
-
-    # -- the protocol -------------------------------------------------------
-
-    def get_subject_grades(self, *, student_ref: str, term: str) -> list[SubjectGrade]:
-        payload = self._cached("local_schoolapi_get_student_grades", student_ref, term)
-
-        # `found: false` means no such active student. That is NOT an error and must not
-        # become one: the facade deliberately makes "no such student", "not your child"
-        # and "records restricted" indistinguishable, and raising here would leak the
-        # difference back to a caller who could then enumerate the school roll.
-        if not isinstance(payload, dict) or not payload.get("found"):
-            return []
-
-        return [self._to_subject_grade(row) for row in payload.get("subjects") or []]
-
-    def get_subject_attendance(self, *, student_ref: str, term: str) -> list[SubjectAttendance]:
-        payload = self._cached("local_schoolapi_get_student_attendance", student_ref, term)
-
-        if not isinstance(payload, dict) or not payload.get("found"):
-            return []
-
-        return [self._to_subject_attendance(row) for row in payload.get("subjects") or []]
-
-    # -- reshaping ----------------------------------------------------------
-
-    @staticmethod
-    def _as_float(value: Any) -> float | None:
-        """None stays None. Zero stays zero.
-
-        The distinction this preserves is the whole point: a null percentage means
-        nothing has been graded, a zero means the child scored nothing. Coercing with
-        `float(value or 0)` collapses them and tells a parent their child got nothing
-        when in truth nothing has been marked.
-        """
-        if value is None or value == "":
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    @classmethod
-    def _to_subject_grade(cls, row: dict) -> SubjectGrade:
-        academic = row.get("academic") or {}
-        return SubjectGrade(
-            course_ref=str(row.get("idnumber") or row.get("courseid") or ""),
-            subject_name=str(row.get("fullname") or row.get("shortname") or ""),
-            percentage=cls._as_float(row.get("percentage")),
-            academic_percentage=cls._as_float(academic.get("percentage")),
-            academic_unavailable=str(academic.get("unavailable") or ""),
-            graded_count=int(row.get("gradedcount") or 0),
-            excluded_count=int(row.get("excludedcount") or 0),
-            pending_count=int(row.get("pendingcount") or 0),
-            is_complete=bool(row.get("iscomplete")),
-            categories=tuple(row.get("categories") or ()),
-        )
-
-    @classmethod
-    def _to_subject_attendance(cls, row: dict) -> SubjectAttendance:
-        return SubjectAttendance(
-            course_ref=str(row.get("idnumber") or row.get("courseid") or ""),
-            subject_name=str(row.get("fullname") or row.get("shortname") or ""),
-            percentage=cls._as_float(row.get("percentage")),
-            taken_sessions=int(row.get("takensessions") or 0),
-            by_status=tuple(row.get("bystatus") or ()),
-            points=cls._as_float(row.get("points")) or 0.0,
-            max_points=cls._as_float(row.get("maxpoints")) or 0.0,
-        )
 
 
 # The process-wide adapter. `app.py` sets it at startup; tests override it. A

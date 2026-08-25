@@ -7,11 +7,11 @@ unaffected.
 
     uvicorn records.app:app --port 8100
 
-`RECORDS_LMS` selects the adapter — `fake`, `moodle`, or `sis` for the school's own
-Student Information Service on :8300. It defaults to `fake`, which is the right default
-for a service whose real adapter is still a skeleton: an explicit fixture backend is
-honest, whereas defaulting to a half-built Moodle client would fail at the first
-parent question instead of at startup.
+`RECORDS_LMS` selects the adapter — `fake`, or `sis` for the school's own Student
+Information Service on :8300. It defaults to `fake`, so a deployment that has not said
+which system of record it runs against gets an explicit fixture backend rather than a
+half-configured live one that would fail at the first parent question instead of at
+startup.
 
 Each backend's credentials are demanded here, at startup, rather than discovered on the
 first parent question. A misconfigured deployment should refuse to start; the failure
@@ -69,14 +69,6 @@ def _configure_guardian_directory() -> None:
 
 def _configure_adapter() -> None:
     backend = (os.getenv("RECORDS_LMS") or "fake").strip().lower()
-
-    if backend == "moodle":
-        base_url = os.getenv("MOODLE_BASE_URL", "")
-        token = os.getenv("MOODLE_TOKEN", "")
-        if not base_url or not token:
-            raise RuntimeError("RECORDS_LMS=moodle requires MOODLE_BASE_URL and MOODLE_TOKEN.")
-        lms.set_adapter(lms.MoodleAdapter(base_url=base_url, token=token))
-        return
 
     if backend == "sis":
         base_url = os.getenv("SIS_BASE_URL", "")
@@ -157,9 +149,9 @@ app.include_router(admin_router)
 def health() -> dict:
     """Liveness only.
 
-    Deliberately does not probe the LMS. A health check that fails when Moodle is
-    down would take this service out of rotation exactly when it is still perfectly
-    able to serve report card snapshots and to tell the agent, honestly, that live
-    grades are unavailable.
+    Deliberately does not probe the LMS. A health check that fails when the system of
+    record is down would take this service out of rotation exactly when it is still
+    perfectly able to serve report card snapshots and to tell the agent, honestly, that
+    live grades are unavailable.
     """
     return {"status": "ok", "service": "records-facade"}

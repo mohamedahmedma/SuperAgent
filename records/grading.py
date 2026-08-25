@@ -3,12 +3,13 @@
 This module used to aggregate assignments into a subject percentage. It no longer
 does, and the deletion is the point: the system of record already computed that figure,
 applying category weights, drop-lowest and exclusions, and any second implementation of
-the same sum is a second answer waiting to contradict the first. Measured on a live
-Moodle, the two plausible re-derivations gave 50% and 30% for a child genuinely on 90%.
+the same sum is a second answer waiting to contradict the first. Measured against a
+live gradebook, the two plausible re-derivations gave 50% and 30% for a child genuinely
+on 90%.
 
 What remains is the half the LMS genuinely does not own:
 
-    the gradebook says WHAT the number is        -> Moodle, via local_schoolapi
+    the gradebook says WHAT the number is        -> the system of record
     the school says WHAT THE NUMBER MEANS        -> here
 
 Letter boundaries and the pass mark are school policy. Two schools reading the same

@@ -48,10 +48,9 @@ _UNKNOWN_REFERENCE = "unknown_reference"
 def _as_float(value: Any) -> float | None:
     """None stays None. Zero stays zero.
 
-    The same rule `MoodleAdapter._as_float` enforces, restated rather than imported so
-    neither adapter reaches into the other's internals. Both exist because
-    `float(value or 0)` is the one-character mistake that tells a parent their child
-    scored nothing in a subject nobody has marked.
+    Kept local to this adapter rather than shared, so no adapter reaches into another's
+    internals. It exists because `float(value or 0)` is the one-character mistake that
+    tells a parent their child scored nothing in a subject nobody has marked.
     """
     if value is None or value == "":
         return None

@@ -1,14 +1,14 @@
 """Tables the records facade owns.
 
-The split this file encodes: **Moodle owns academic facts, the facade owns who may
-see them.** Grades, attendance and enrolments are never copied here — they are read
-through the LMS adapter at request time. What lives here is the part Moodle has no
-good answer for:
+The split this file encodes: **the system of record owns academic facts, the facade
+owns who may see them.** Grades, attendance and enrolments are never copied here — they
+are read through the LMS adapter at request time. What lives here is the part a
+gradebook has no good answer for:
 
   * the guardian relationship, including the custody restrictions that make it an
     authorisation model rather than a contact list,
-  * terms, which Moodle does not model at all,
-  * the course-naming convention that maps a flat Moodle course list back onto
+  * terms, which a gradebook typically does not model at all,
+  * the course-naming convention that maps a flat course list back onto
     "subject x section x term",
   * an append-only record of every student record an agent read,
   * report cards, which must be frozen snapshots rather than live recomputations.

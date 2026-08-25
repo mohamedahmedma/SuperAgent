@@ -1,7 +1,7 @@
 """Sending a WhatsApp message, and proving that an inbound one really came from Meta.
 
 The seam is a `Protocol` and the implementation is a plain class that satisfies it
-structurally, which is the pattern `records/lms.py` established for Moodle: the service
+structurally, which is the pattern `records/lms.py` established for the LMS: the service
 that decides *what* to say never imports an HTTP client, so the rule "a code goes only to
 the number that asked for it" is testable with a list.
 
