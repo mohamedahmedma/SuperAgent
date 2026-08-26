@@ -53,7 +53,10 @@ study = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["backend*"]
+# `schoolauth` ships with the backend because the backend imports it: it is the shared
+# token verifier every enforcement point compiles in. Leaving it out builds a wheel that
+# imports fine until the first authenticated request.
+include = ["backend*", "schoolauth*"]
 exclude = ["frontend*", "tests*"]
 
 # Templates and profile definitions are data, not modules, so packages.find alone does
