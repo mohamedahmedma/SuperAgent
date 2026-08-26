@@ -153,8 +153,9 @@ app = FastAPI(
         "behalf of — and its `guardian_id` claim must match the `guardian_id` in the path. "
         "Neither alone grants anything: a leaked API key cannot choose a guardian, and a "
         "parent's token cannot be presented without a valid system key. The permitted "
-        "student set is then resolved server-side from the link table on every request, "
-        "and is never supplied by the caller.\n\n"
+        "student set is then resolved from the school's own records on every request, "
+        "never supplied by the caller and never cached — and the guardian travels with the "
+        "read, so the system of record checks the link again before it answers.\n\n"
         "**On failure, do not improvise.** A 503 with `code: lms_unavailable` means the "
         "system of record could not be reached. The correct response to a parent is that "
         "records are temporarily unavailable, never a remembered or inferred figure."
@@ -170,9 +171,9 @@ app.include_router(admin_router)
 def health() -> dict:
     """Liveness only.
 
-    Deliberately does not probe the LMS. A health check that fails when the system of
+    Deliberately does not probe the SIS. A health check that fails when the system of
     record is down would take this service out of rotation exactly when it is still
-    perfectly able to serve report card snapshots and to tell the agent, honestly, that
-    live grades are unavailable.
+    able to do the one useful thing left — tell the agent, honestly, that live grades are
+    unavailable, so it says that to a parent instead of inventing a figure.
     """
     return {"status": "ok", "service": "records-facade"}

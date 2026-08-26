@@ -23,16 +23,7 @@ from records.calendar import (
 from records.assembler import AttendanceAssembler, GradeAssembler, term_prefix
 from records.db import get_db
 from records.grading import DEFAULT_POLICY
-from records.models import (
-    AccessAudit,
-    ApiKey,
-    CourseBinding,
-    Guardian,
-    GuardianStudent,
-    ReportCard,
-    Student,
-    Term,
-)
+from records.models import AccessAudit, ApiKey, CourseBinding
 from records.schemas import (
     ApiKeyIn,
     ApiKeyOut,
@@ -41,9 +32,6 @@ from records.schemas import (
     CourseGrade,
     CourseGradeDetailOut,
     ErrorOut,
-    GuardianIn,
-    GuardianLinkIn,
-    ReportCardOut,
     StudentGradesOut,
     StudentListOut,
     StudentRef,
@@ -69,7 +57,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _student_ref(student: Student) -> StudentRef:
+def _student_ref(student: PermittedStudent) -> StudentRef:
     return StudentRef(
         student_id=student.external_id,
         full_name_ar=student.full_name_ar,
@@ -163,19 +151,6 @@ def _term_argument(adapter: object, term: SchoolTerm) -> str:
     return term_prefix(term.code)
 
 
-def _local_term_id(db: Session, term_code: str) -> int | None:
-    """This service's own row id for a term, or `None` when it has none.
-
-    Terms themselves now come from the school's calendar, but two tables here still key
-    on a local id: `course_bindings`, which is Moodle-mapping data this service genuinely
-    owns, and `report_cards`, which are frozen snapshots it published. Both are looked up
-    by the code the calendar reports rather than by an id the caller carries, so the local
-    row is an implementation detail of those two features and not part of the term.
-    """
-    row = db.query(Term).filter(Term.code == term_code).first()
-    return row.id if row is not None else None
-
-
 def _bindings_for(
     db: Session, student: PermittedStudent, term: SchoolTerm
 ) -> list[CourseBinding]:
@@ -185,16 +160,16 @@ def _bindings_for(
     term's courses, or a teacher's sandbox, cannot reach a parent.
 
     Only ever reached on a backend that does *not* name its own subjects; see
-    `LmsAdapter.reports_own_subjects`. A school with no local term row has no bindings
-    either, which is the same empty answer by a shorter route.
+    `LmsAdapter.reports_own_subjects`.
+
+    Keyed on the calendar's term CODE. It used to resolve that code to a local `terms` row
+    first, which was the last thing keeping a copy of the school calendar in this service's
+    database — and a copy whose dates could disagree with the registrar's.
     """
-    term_id = _local_term_id(db, term.code)
-    if term_id is None:
-        return []
     return (
         db.query(CourseBinding)
         .filter(
-            CourseBinding.term_id == term_id,
+            CourseBinding.term_code == term.code,
             CourseBinding.grade_level == student.grade_level,
             CourseBinding.section == student.section,
             CourseBinding.is_published.is_(True),
@@ -203,7 +178,7 @@ def _bindings_for(
     )
 
 
-def _lms_ref(student: Student) -> str:
+def _lms_ref(student: PermittedStudent) -> str:
     """What the LMS is asked about.
 
     The school's own student number, never an internal LMS id. Keeping the contract on
@@ -512,56 +487,6 @@ def get_attendance(
         attendance_rate=assembler.term_percentage(visible),
         recent_days=assembler.recent_days(visible),
         as_of=_now(),
-    )
-
-
-@agent_router.get(
-    "/guardians/{guardian_id}/students/{student_id}/report-cards/{term_id}",
-    response_model=ReportCardOut,
-    responses=_AGENT_RESPONSES,
-)
-def get_report_card(
-    guardian_id: str,
-    student_id: str,
-    term_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    subject: auth.ParentSubject = Depends(auth.require_parent_subject),
-) -> ReportCardOut:
-    """The published snapshot for a term. Served frozen — never recomputed."""
-    student = auth.resolve_permitted_student(
-        db,
-        guardian_external_id=subject.guardian_id,
-        student_external_id=student_id,
-        caller=subject.caller,
-        endpoint=str(request.url.path),
-        school_code=subject.school_code,
-    )
-    term = _resolve_term(db, term_id)
-
-    card = (
-        db.query(ReportCard)
-        .filter(
-            ReportCard.student_id == student.id,
-            ReportCard.term_id == _local_term_id(db, term.code),
-            ReportCard.superseded_at.is_(None),
-        )
-        .order_by(ReportCard.version.desc())
-        .first()
-    )
-    if card is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "not_found", "message": "No published report card for this term."},
-        )
-
-    return ReportCardOut(
-        student=_student_ref(student),
-        term=_term_out(term),
-        version=card.version,
-        published_at=card.published_at,
-        is_superseded=card.superseded_at is not None,
-        payload=card.payload or {},
     )
 
 

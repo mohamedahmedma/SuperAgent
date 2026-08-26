@@ -18,7 +18,7 @@ def binding(idnumber: str = "2026-T1-G7A-MATH", course_id: int = 9001, **kwargs)
     return CourseBinding(
         lms_course_id=course_id,
         lms_idnumber=idnumber,
-        term_id=1,
+        term_code="2026-T1",
         subject_code=kwargs.get("subject_code", "MATH"),
         subject_name_ar=kwargs.get("subject_name_ar", "الرياضيات"),
         subject_name_en=kwargs.get("subject_name_en", "Mathematics"),

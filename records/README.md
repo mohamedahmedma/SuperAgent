@@ -18,14 +18,25 @@ coupling is the HTTP contract in [openapi.json](openapi.json).
 Three jobs, none of which belongs in the chat backend and none of which Moodle does
 well:
 
-1. **Authorisation.** Which guardian may see which student, including the custody
-   restrictions that make this a legal question rather than a lookup.
-2. **The school's vocabulary.** Terms, subjects and report cards — none of which
-   Moodle models — mapped onto Moodle's flat course list.
-3. **An audit trail.** Every attempt to read a student record, allowed or denied.
+1. **Enforcement.** Two credentials on every parent-facing read — a key proving which
+   *system* is calling, and a signed token proving *which parent* it asks for — plus a
+   refusal for anything it cannot justify.
+2. **The school's vocabulary.** Grading policy (letter bands, the pass mark, which of the
+   two percentages leads), and the course binding that maps a flat course list onto
+   "subject x section x term" for a backend whose titles are whatever a teacher typed.
+3. **An audit trail.** Every attempt to read a student record, allowed or denied,
+   correlated back to the chat turn that caused it.
 
-Grades and attendance are *not* stored here. They are read from the LMS at request
-time. Copying them is how two systems start disagreeing about a child's transcript.
+**Authorisation is no longer on that list, and that is the important change.** Which
+guardian may see which student is the registrar's fact: entered from paperwork, amended by
+custody decisions, and audited in `sis/`. This service asks rather than remembers, and
+since the guardian handle now travels with every read, `sis/` re-checks the answer before
+returning a mark. Two independent refusals from one source of truth, instead of a second
+copy that goes stale the first time a court order is applied to the other one.
+
+Grades, attendance, guardians, students and the academic calendar are *not* stored here.
+They are read at request time. Copying them is how two systems start disagreeing about a
+child.
 
 ## The rule everything else follows
 
@@ -90,11 +101,13 @@ GET  /v1/guardians/{gid}/students
 GET  /v1/guardians/{gid}/students/{sid}/grades?term=
 GET  /v1/guardians/{gid}/students/{sid}/grades/{course_id}
 GET  /v1/guardians/{gid}/students/{sid}/attendance?term=
-GET  /v1/guardians/{gid}/students/{sid}/report-cards/{term_id}
 ```
 
-Admin routes (`/v1/admin/...`) manage guardians, links, keys and audit reads. **Scopes
-do not nest**: an admin key cannot read a student record, and an agent key cannot grant
+Admin routes (`/v1/admin/...`) mint keys and read the audit. The three that used to manage
+guardians and links answer **410**, naming the SIS routes that replaced them — a 404 would
+read as "wrong URL" and invite a retry, and accepting the write silently would leave a
+registrar believing a parent had been granted access when nobody had. **Scopes do not
+nest**: an admin key cannot read a student record, and an agent key cannot grant
 itself access. Making admin a superset would mean the school's most widely copied
 credential is also the one that reads every record.
 
@@ -122,11 +135,10 @@ These are the ones that are cheap now and brutal to retrofit once real data land
 - **Denials are indistinguishable to the caller.** Unknown, unrelated and restricted all
   return the same 404 with the same message; the audit records which actually happened.
   A caller who could tell them apart could enumerate the student body.
-- **Report cards are frozen snapshots, versioned.** A correction creates a new version;
-  the old one stays readable. Live recomputation would let a policy change next year
-  silently rewrite what last year's report card said.
-- **Course bindings are explicit.** An unbound or unpublished Moodle course is invisible
-  to parents, so a teacher's sandbox cannot reach a report card.
+- **Course bindings are explicit.** An unbound or unpublished course is invisible to
+  parents, so a teacher's sandbox cannot reach a rollup. Unused on the SIS path, which
+  reports its own subjects against the school's own codes — and kept for exactly that
+  reason, since it is what a *different* system of record would need.
 - **The audit is append-only.** No code path updates or deletes a row; admin exposes read
   only. Denials are logged as loudly as successes — a run of them is how probing shows up.
 
@@ -162,9 +174,13 @@ Build caching and a hard timeout into that adapter from the first line. These ca
 chatty; a parent asking three questions should not trigger thirty round trips, and a
 hung call must raise `LmsUnavailable` rather than hang a chat turn.
 
-Also still open: report card publication (the write path that freezes a term), a
-`GradingPolicy` loaded per school rather than per process, and rate limiting per
-`(key, guardian)`.
+Also still open: a `GradingPolicy` loaded per school rather than per process, and rate
+limiting per `(key, guardian)`.
+
+Report cards were removed rather than finished. The read route had been broken since the
+guardian tables stopped being populated — it looked up `student.id` on an object with no
+`id` — and nothing tested it. Freezing a published term is a real requirement, but it is a
+write path over marks, and it belongs where the marks are.
 
 ## Swapping the LMS
 

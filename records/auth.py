@@ -12,10 +12,19 @@ from the database, on every request. There is no code path in which the caller s
 the answer to "which students may I see".
 
 The corollary, which matters because the caller is a language model: the permitted set
-is applied *before* the LMS is queried, not as a filter over results. Nothing the model
-says — no clever phrasing, no injected instruction inside a chat message — reaches this
-decision, because the decision is made from the URL's guardian id and the link table,
-and the LMS is never asked about a student that check excluded.
+is applied *before* the system of record is queried, not as a filter over results.
+Nothing the model says — no clever phrasing, no injected instruction inside a chat
+message — reaches this decision, because the decision is made from the URL's guardian id
+and the school's own link, and the system of record is never asked about a student that
+check excluded.
+
+**And it is no longer the only check.** The guardian handle now travels with the read, so
+`sis/` re-checks the link itself before answering — see `records/sis_adapter.py`. Two
+refusals made independently from the same registrar data, rather than one made here and
+trusted downstream. Nothing below is redundant because of it: this check is what stops a
+request early, writes the audit row, and keeps the failure modes distinguishable to an
+operator while staying indistinguishable to a caller. What the second one buys is that a
+fully compromised facade reaches one family instead of the school.
 """
 import hashlib
 import hmac
@@ -291,11 +300,18 @@ def resolve_permitted_student(
     endpoint: str,
     school_code: str | None = None,
 ) -> PermittedStudent:
-    """The chokepoint. Every parent-facing read passes through here first.
+    """The first of two checks. Every parent-facing read passes through here.
 
     Returns the child only when the school's system of record says this guardian may be
     told about her. Anything else raises, and every outcome — including the successful
     one — is written to the audit before this function returns.
+
+    It stopped being *the* chokepoint when the guardian handle started travelling with the
+    read: `sis/` makes the same decision again, from the same data, before answering. This
+    one still earns its place — it fails the request before a second service is troubled,
+    it is where the audit is written, and it is where the reason behind a refusal is
+    recorded. It is no longer the only thing standing between a compromised caller and
+    another family's child.
 
     **The answer is asked for, never remembered.** This service used to hold guardian links
     in its own tables; it now puts the question to SIS on every request, so a registrar

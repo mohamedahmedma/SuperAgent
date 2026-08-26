@@ -54,7 +54,7 @@ from records.guardian_directory import (  # noqa: E402
     FakeGuardianDirectory,
     PermittedStudent,
 )
-from records.models import ApiKey, CourseBinding, Guardian, GuardianStudent, Student, Term  # noqa: E402
+from records.models import ApiKey, CourseBinding  # noqa: E402
 
 def _claim_database() -> None:
     """Point RECORDS_DATABASE_URL back at this suite's database, and drop any engine built from another.
@@ -162,14 +162,23 @@ def db():
 
 @pytest.fixture()
 def seeded(db):
-    """One term, one course, two students, three guardians with different rights.
+    """One term, one course binding, two API keys, and three guardians in the directory.
 
-    The three guardians are the whole point: one permitted, one linked but
-    restricted, one linked to nobody. Every authorisation test is a comparison
-    between them.
+    The three guardians are the whole point: one permitted, one linked but restricted, one
+    linked to nobody. Every authorisation test is a comparison between them.
+
+    Note what is NOT seeded any more: no students, no guardians, no links, no terms as
+    rows. This service holds none of that. The children come back from the guardian
+    directory it asks, the term from the calendar it asks, and the only rows written here
+    are the two things it genuinely owns — a key that says which system is calling, and a
+    binding that names a course.
     """
     now = datetime.now(timezone.utc)
-    term = Term(
+
+    # The calendar is the school's, asked over HTTP in a deployment and faked here. There
+    # is no local `terms` table left to seed it from: that row survived only because
+    # report cards keyed on its id, and both are gone.
+    term = SchoolTerm(
         code="2026-T1",
         name_en="Term 1",
         name_ar="الفصل الأول",
@@ -177,46 +186,7 @@ def seeded(db):
         starts_on=now - timedelta(days=30),
         ends_on=now + timedelta(days=60),
     )
-    db.add(term)
-    db.flush()
-
-    # The calendar moved out of this service too. The row above is kept only because
-    # report cards still key on `term.id`; every parent-facing read now asks the school
-    # what a term is, so the same term is seeded into the calendar it asks.
-    school_calendar.set_calendar(
-        FakeSchoolCalendar(
-            [
-                SchoolTerm(
-                    code=term.code,
-                    name_ar=term.name_ar,
-                    name_en=term.name_en,
-                    academic_year=term.academic_year,
-                    starts_on=term.starts_on,
-                    ends_on=term.ends_on,
-                    is_closed=term.is_closed,
-                )
-            ]
-        )
-    )
-
-    student = Student(
-        external_id="S-1001",
-        lms_user_id=501,
-        full_name_en="Layla Hassan",
-        full_name_ar="ليلى حسن",
-        grade_level="G7",
-        section="A",
-    )
-    other_student = Student(
-        external_id="S-2002",
-        lms_user_id=502,
-        full_name_en="Omar Khaled",
-        full_name_ar="عمر خالد",
-        grade_level="G7",
-        section="A",
-    )
-    db.add_all([student, other_student])
-    db.flush()
+    school_calendar.set_calendar(FakeSchoolCalendar([term]))
 
     # Guardian links no longer live in this service. It asks SIS on every request, so the
     # three parents below are seeded into the directory it asks rather than into a table
@@ -250,7 +220,7 @@ def seeded(db):
         CourseBinding(
             lms_course_id=9001,
             lms_idnumber="2026-T1-G7A-MATH",
-            term_id=term.id,
+            term_code=term.code,
             subject_code="MATH",
             subject_name_en="Mathematics",
             subject_name_ar="الرياضيات",
@@ -271,7 +241,7 @@ def seeded(db):
         )
 
     db.commit()
-    return {"term": term, "student": student, "other_student": other_student}
+    return {"term": term}
 
 
 @pytest.fixture()

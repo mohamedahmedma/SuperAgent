@@ -210,7 +210,7 @@ decided elsewhere and cannot be reached from a profile:
 | Question | Answered by |
 | --- | --- |
 | Is this session a parent? | identity service — the `guardian_id` claim |
-| Which students may they see? | records facade — the guardian link table |
+| Which students may they see? | the SIS — the registrar's own guardian link, checked twice |
 | Does the school even have the data? | the SIS, through `LmsAdapter` |
 
 A signed-in user with no guardian binding gets `NOT_A_PARENT_SESSION` with the tool
