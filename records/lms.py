@@ -134,17 +134,35 @@ class LmsAdapter(Protocol):
     an internal LMS id. That keeps the contract backend-agnostic and lets the facade key
     everything on the identifier a registrar can actually look up.
 
-    The adapter is not an authorisation boundary and must never be asked to be one. The
-    facade has already decided this guardian may see this student before either method
-    is called.
+    ## `guardian_ref`, and why it is on the port
+
+    Both calls also name the parent the read is **on behalf of**, and a backend that can
+    use it is expected to.
+
+    This used to say the adapter "is not an authorisation boundary and must never be asked
+    to be one", because the facade had already decided. The facade still decides — nothing
+    below removes that check — but deciding in one place and then asking the system of
+    record a question that names no parent throws the answer away at the last hop. A
+    backend that re-checks the link cannot, and a leaked adapter credential reaches one
+    family instead of the school.
+
+    So the rule is now the stronger one: **the subject travels all the way to the system of
+    record.** Two independent refusals, made from the same registrar data, rather than one
+    made here and trusted downstream. A backend with no notion of guardians ignores the
+    argument; it is on the port so that forgetting to pass it is impossible rather than
+    merely unlikely.
     """
 
-    def get_subject_grades(self, *, student_ref: str, term: str) -> list[SubjectGrade]:
-        """Every subject's result for one student in one term."""
+    def get_subject_grades(
+        self, *, student_ref: str, term: str, guardian_ref: str
+    ) -> list[SubjectGrade]:
+        """Every subject's result for one student in one term, read for one guardian."""
         ...
 
-    def get_subject_attendance(self, *, student_ref: str, term: str) -> list[SubjectAttendance]:
-        """Every subject's attendance for one student in one term."""
+    def get_subject_attendance(
+        self, *, student_ref: str, term: str, guardian_ref: str
+    ) -> list[SubjectAttendance]:
+        """Every subject's attendance for one student in one term, read for one guardian."""
         ...
 
 
@@ -171,12 +189,24 @@ class FakeLms:
     # without taking a real service down.
     unavailable: bool = False
 
-    def get_subject_grades(self, *, student_ref: str, term: str) -> list[SubjectGrade]:
+    #: Every `(student_ref, term, guardian_ref)` this fixture was asked for, in order.
+    #: A test asserts against it that the guardian actually reaches the backend — the
+    #: whole point of the argument is lost silently if a route stops passing it, and
+    #: nothing else would fail.
+    asked: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def get_subject_grades(
+        self, *, student_ref: str, term: str, guardian_ref: str = ""
+    ) -> list[SubjectGrade]:
+        self.asked.append((student_ref, term, guardian_ref))
         if self.unavailable:
             raise LmsUnavailable("FakeLms configured as unavailable")
         return list(self.grades.get((student_ref, term), []))
 
-    def get_subject_attendance(self, *, student_ref: str, term: str) -> list[SubjectAttendance]:
+    def get_subject_attendance(
+        self, *, student_ref: str, term: str, guardian_ref: str = ""
+    ) -> list[SubjectAttendance]:
+        self.asked.append((student_ref, term, guardian_ref))
         if self.unavailable:
             raise LmsUnavailable("FakeLms configured as unavailable")
         return list(self.attendance.get((student_ref, term), []))

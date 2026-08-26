@@ -128,3 +128,70 @@ def test_the_statuses_a_parent_is_shown_are_carried_through(adapter: SisAdapter)
 
     counts = {row["description"]: row["count"] for row in subject.by_status}
     assert counts == {"Present": 7, "Absent": 1, "Late": 1, "Excused": 1}
+
+
+# ---------------------------------------------------------------------------
+# Which URL is actually asked
+# ---------------------------------------------------------------------------
+#
+# The adapter used to call SIS's registrar-scoped routes — `/v1/students/{n}/...` — so
+# this service resolved which children a parent may see and then asked a question that
+# named no parent. SIS re-checks the link on the guardian-scoped routes, and these pin
+# that the adapter reaches those. A regression here is invisible from every other suite:
+# the data comes back identical, and only the second check disappears.
+
+
+def _path_asked(adapter: SisAdapter, method: str, **kwargs) -> str:
+    seen: list[str] = []
+
+    def _capture(self, path, params):  # noqa: ANN001 - patching an instance method
+        seen.append(path)
+        return _tally(present=5)
+
+    with patch.object(SisAdapter, "_get", _capture):
+        getattr(adapter, method)(**kwargs)
+    return seen[0]
+
+
+def test_grades_are_read_through_the_guardian_scoped_route(adapter: SisAdapter) -> None:
+    path = _path_asked(
+        adapter, "get_subject_grades",
+        student_ref="S-1001", term="2026-T1", guardian_ref="G-1",
+    )
+    assert path == "/v1/guardians/by-id/G-1/students/S-1001/grades"
+
+
+def test_attendance_is_read_through_the_guardian_scoped_route(adapter: SisAdapter) -> None:
+    path = _path_asked(
+        adapter, "get_subject_attendance",
+        student_ref="S-1001", term="2026-T1", guardian_ref="G-1",
+    )
+    assert path == "/v1/guardians/by-id/G-1/students/S-1001/attendance"
+
+
+def test_a_handle_with_a_slash_cannot_rewrite_the_path(adapter: SisAdapter) -> None:
+    """A handle is opaque and comes off a token. Quoting it is not optional.
+
+    Unquoted, `../..` in a handle would climb out of the guardian prefix and reach the
+    registrar route — which is the one place where a crafted value turns a scoped read
+    into an unscoped one.
+    """
+    path = _path_asked(
+        adapter, "get_subject_grades",
+        student_ref="S-1001", term="2026-T1", guardian_ref="../..",
+    )
+    assert path == "/v1/guardians/by-id/..%2F../students/S-1001/grades"
+    assert "/v1/students/" not in path
+
+
+def test_no_guardian_falls_back_to_the_registrar_route(adapter: SisAdapter) -> None:
+    """For an internal caller with no parent in hand. Parent-facing routes always have one.
+
+    Pinned rather than left implicit, because the fallback is the shape a bug would take:
+    a route that stopped passing the handle would silently read through here and still
+    return the right data.
+    """
+    path = _path_asked(
+        adapter, "get_subject_grades", student_ref="S-1001", term="2026-T1",
+    )
+    assert path == "/v1/students/S-1001/grades"

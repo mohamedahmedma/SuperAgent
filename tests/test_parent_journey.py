@@ -69,6 +69,14 @@ APP_SECRET = "journey-app-secret"
 VERIFY_TOKEN = "journey-verify-token"
 SCHOOL_NUMBER = "+201288339613"
 
+#: The registrar's own SIS credential — uploads, commits, custody changes.
+#:
+#: Separate from `SIS_API_KEY` below, and that separation is now load-bearing rather than
+#: tidy: `Scope.permits` is exact equality, so the reader key `records/` holds is *refused*
+#: by every route this one reaches. The journey exercises both, which is the only way to
+#: notice if that stopped being true.
+SIS_REGISTRAR_KEY = "journey-registrar"
+
 ENVIRONMENT = {
     "SIS_DATABASE_URL": f"sqlite:///{_TMP}/sis.db",
     "SIS_DEFAULT_COUNTRY_CODE": "+20",
@@ -81,6 +89,12 @@ ENVIRONMENT = {
     "IDENTITY_DEV_KEY_FILE": f"{_TMP}/dev-key.pem",
     "IDENTITY_ISSUER": "school-identity",
     "IDENTITY_AUDIENCE": "school-services",
+    # Blanked, not pointed at the SIS below. The `gateway` fixture installs its own
+    # directory *after* identity's lifespan has run, and a base URL here would make the
+    # lifespan build a second one first — and, since a base URL without a key is now a
+    # startup failure by design, take the whole suite down before any of that.
+    "IDENTITY_SIS_BASE_URL": "",
+    "IDENTITY_SIS_API_KEY": "",
 }
 
 import httpx  # noqa: E402
@@ -237,6 +251,48 @@ def _seed_sis() -> None:
         uow.attendance.upsert_many(marks, recorded_by="journey")
         uow.commit()
 
+    _seed_sis_api_keys()
+
+
+def _seed_sis_api_keys() -> None:
+    """The two credentials this estate presents to `sis/`, stored so they verify.
+
+    `SIS_API_KEY` used to be a value nothing checked. `sis/` authenticates every caller
+    again, so the journey only proves something if the keys it sends are keys SIS accepts —
+    unstored ones would 401 on every hop and this suite would be asserting that a broken
+    estate fails politely.
+
+    **Two keys, on purpose.** `records/` holds a `reader`; the registrar's uploads and
+    custody changes hold a `registrar`. `Scope.permits` is exact equality, so the reader is
+    refused by every write route — which means the process answering parents cannot rewrite
+    a term's marks even if it is fully compromised. Giving both jobs one key would pass
+    this suite and quietly delete that property.
+    """
+    from datetime import UTC, datetime
+
+    from sis.api.deps import hash_api_key, key_prefix
+    from sis.domain.auth import ApiKey, Scope
+    from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+
+    minted = (
+        (ENVIRONMENT["SIS_API_KEY"], Scope.READER, "records adapter (journey)"),
+        (SIS_REGISTRAR_KEY, Scope.REGISTRAR, "registrar office (journey)"),
+    )
+    with SqlAlchemyUnitOfWork() as uow:
+        for raw, scope, label in minted:
+            uow.api_keys.add(
+                ApiKey(
+                    prefix=key_prefix(raw),
+                    key_hash=hash_api_key(raw),
+                    label=label,
+                    scope=scope,
+                    is_active=True,
+                    expires_at=None,
+                    created_at=datetime.now(UTC),
+                )
+            )
+        uow.commit()
+
 
 def _serve(app, port: str) -> uvicorn.Server:
     server = uvicorn.Server(
@@ -371,7 +427,9 @@ def gateway():
     wa.configure(verify_token=VERIFY_TOKEN, app_secret=APP_SECRET,
                  business_number=SCHOOL_NUMBER)
     identity_directory.set_directory(
-        identity_directory.SisGuardianDirectory(base_url=f"http://127.0.0.1:{SIS_PORT}")
+        identity_directory.SisGuardianDirectory(
+            base_url=f"http://127.0.0.1:{SIS_PORT}", api_key=ENVIRONMENT["SIS_API_KEY"]
+        )
     )
     return sender
 
@@ -387,7 +445,9 @@ def identity(gateway):
         wa.configure(verify_token=VERIFY_TOKEN, app_secret=APP_SECRET,
                      business_number=SCHOOL_NUMBER)
         identity_directory.set_directory(
-            identity_directory.SisGuardianDirectory(base_url=f"http://127.0.0.1:{SIS_PORT}")
+            identity_directory.SisGuardianDirectory(
+            base_url=f"http://127.0.0.1:{SIS_PORT}", api_key=ENVIRONMENT["SIS_API_KEY"]
+        )
         )
         yield client
 
@@ -407,7 +467,16 @@ def agent_key() -> str:
 
 @pytest.fixture()
 def sis_client():
-    with httpx.Client(base_url=f"http://127.0.0.1:{SIS_PORT}", timeout=10) as client:
+    """The registrar's own client: uploads, commits, and custody changes.
+
+    Carries the `registrar` key, not the `reader` one `records/` uses — these are write
+    routes and the reader is refused by them, which is the separation working.
+    """
+    with httpx.Client(
+        base_url=f"http://127.0.0.1:{SIS_PORT}",
+        timeout=10,
+        headers={"X-API-Key": SIS_REGISTRAR_KEY},
+    ) as client:
         yield client
 
 

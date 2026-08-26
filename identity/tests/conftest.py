@@ -15,6 +15,18 @@ os.environ["IDENTITY_AUDIENCE"] = "test-services"
 # Low enough to trigger in a test without a loop of thirty requests.
 os.environ["IDENTITY_MAX_FAILED_ATTEMPTS"] = "3"
 
+# `identity/app.py` loads the project's `.env`, which is right for a deployment and wrong
+# for a suite: `IDENTITY_SIS_BASE_URL` there makes the lifespan install a real
+# `SisGuardianDirectory` over the fake these tests register, so every guardian lookup
+# leaves the process and fails against a school that is not running.
+#
+# Blanked rather than pointed somewhere harmless, because an unset base URL is exactly
+# what makes the in-memory fake the default — and a fake is what these tests assert
+# against. The matching key is blanked too, since a base URL without one is now a startup
+# failure by design (SIS authenticates its callers).
+for _name in ("IDENTITY_SIS_BASE_URL", "IDENTITY_SIS_API_KEY"):
+    os.environ[_name] = ""
+
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 

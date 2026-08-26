@@ -72,8 +72,10 @@ that token authorises. That is the point of the split.
 
 ## Starting everything
 
-Each service is independent, so start them in any order — `records` serves report card
-snapshots while the system of record is down, and verifies tokens while `identity` is down.
+Each service is independent at *run* time — `records` keeps verifying tokens while
+`identity` is down, and says so honestly when `sis/` is. Setup has one ordering constraint:
+`sis/` must be up long enough to mint the reader keys the other two now refuse to start
+without.
 
 ```bash
 # 1. identity  :8200
@@ -101,11 +103,38 @@ the setting entirely, so a foreign parent is unaffected at any value, and a bare
 accepted and read as `+20`. Set it wrong and every locally-typed parent number in the
 school points at another country.
 
-To point the facade at it, mint a **`reader`**-scoped key from the SIS admin routes and
-start `records/` with `RECORDS_LMS=sis`, `SIS_BASE_URL` and `SIS_API_KEY`. A registrar
-key would also read grades, which is the reason not to use one: the process answering
-parents should not hold the school's write credential. Course bindings must key on the
-SIS subject code — details in [records/README.md](records/README.md#records_lmssis).
+### SIS authenticates its callers
+
+`sis/` verifies a presented `X-API-Key` against its own `api_keys` table. Two scopes,
+compared by **exact equality** — `registrar` does not satisfy a `reader` check and never
+implies one — and a key is looked up in the school's own database, so a key minted at one
+branch does not exist at another and cannot be made to work there by supplying its
+`X-School-Code`.
+
+Two services call it, and each needs its own **`reader`** key:
+
+```bash
+# `dev-sis-registrar` is the bootstrap key from the SIS start line above.
+curl -X POST localhost:8300/v1/admin/api-keys   -H "X-API-Key: dev-sis-registrar"   -d '{"label":"records adapter","scope":"reader"}'   # -> SIS_API_KEY
+
+curl -X POST localhost:8300/v1/admin/api-keys   -H "X-API-Key: dev-sis-registrar"   -d '{"label":"identity directory","scope":"reader"}' # -> IDENTITY_SIS_API_KEY
+```
+
+A registrar key would also read grades, which is the reason not to use one: the processes
+that answer parents must not hold the school's write credential. Two separate reader keys
+rather than one shared value, so an audit line or a revocation can name a single caller.
+
+Both services **refuse to start** if their base URL is set without a key. That is
+deliberate: an unkeyed caller gets a 401 on every request, which downstream reads as "the
+school has no such child" and "your number is not registered" — a silent, total failure
+dressed as an ordinary answer.
+
+`SIS_BOOTSTRAP_REGISTRAR_KEY` is a full registrar credential for every school, is not in
+the `api_keys` table, and cannot be revoked through the API. Unset it once the keys above
+exist; `sis/` logs a warning at startup for as long as it is configured.
+
+Course bindings must key on the SIS subject code — details in
+[records/README.md](records/README.md#records_lmssis).
 
 `IDENTITY_ISSUER` and `IDENTITY_AUDIENCE` must match across identity and records. They
 default to `school-identity` / `school-services` on both sides.

@@ -25,6 +25,7 @@ from datetime import date
 import pytest
 from fastapi.testclient import TestClient
 
+from sis.tests.conftest import registrar_headers
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -85,14 +86,15 @@ def _seed_two_years_and_two_classes() -> None:
 
 @pytest.fixture()
 def registrar() -> dict[str, str]:
-    """The header every call carries.
+    """The header every call carries, and it is checked again.
 
-    No key is checked today — `sis/api/deps.py` admits every caller as a full registrar —
-    so this is decoration in the strict sense. It is sent anyway, and named, because these
-    routes write a school's records: when the key check comes back, the suite that proves
-    these writes work should already be making the claim that a registrar is making them.
+    This fixture used to send a literal that nothing verified, with a note that it was
+    decoration until the key check came back. It is back: `sis/api/deps.py` authenticates
+    a presented key against the school's own `api_keys` table, so this now resolves to the
+    stored registrar key the suite seeds and these writes are made by a caller that
+    genuinely holds registrar scope.
     """
-    return {"X-API-Key": "bootstrap-fixture-key-000000000"}
+    return registrar_headers()
 
 
 @pytest.fixture()

@@ -27,6 +27,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from sis.tests.conftest import registrar_headers
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -116,7 +117,8 @@ def _seed_two_schools() -> None:
 
 @pytest.fixture()
 def registrar() -> dict[str, str]:
-    return {"X-API-Key": "bootstrap-fixture-key-000000000"}
+    """The stored registrar key, verified for real — see `sis/api/deps.py`."""
+    return registrar_headers()
 
 
 @pytest.fixture()

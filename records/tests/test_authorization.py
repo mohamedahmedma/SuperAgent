@@ -168,3 +168,46 @@ def test_link_without_explicit_grant_reveals_nothing(client):
 
     response = client.get("/v1/guardians/G-3/students", headers=agent_headers("G-3"))
     assert response.json()["students"] == []
+
+
+# ---------------------------------------------------------------------------
+# The subject reaches the system of record
+# ---------------------------------------------------------------------------
+#
+# This service decides whether a read may proceed, and it always did. What it did NOT do
+# was tell the system of record which parent it was reading for — the SIS adapter called
+# the registrar-scoped routes, so the answer to "whose child is this" was computed here
+# and then discarded at the last hop.
+#
+# It is carried now, and SIS re-checks it. These assert the carrying, because that is the
+# half that fails silently: if a route stops passing the handle, every one of these
+# suites still passes and the second check quietly stops happening.
+
+
+def test_the_guardian_reaches_the_backend_on_a_grades_read(client, fake_lms):
+    client.get("/v1/guardians/G-1/students/S-1001/grades", headers=agent_headers("G-1"))
+
+    assert fake_lms.asked, "the backend was never asked at all"
+    assert [guardian for _, _, guardian in fake_lms.asked] == ["G-1"]
+
+
+def test_the_guardian_reaches_the_backend_on_an_attendance_read(client, fake_lms):
+    client.get(
+        "/v1/guardians/G-1/students/S-1001/attendance", headers=agent_headers("G-1")
+    )
+
+    assert fake_lms.asked, "the backend was never asked at all"
+    assert all(guardian == "G-1" for _, _, guardian in fake_lms.asked)
+
+
+def test_the_guardian_sent_is_the_signed_one_not_the_one_in_the_path(client, fake_lms):
+    """The path is a URL; the claim is a signature.
+
+    A mismatch is refused outright, so what this pins is that the value handed onward is
+    the one that was *proved* — not the one a caller typed. If these ever diverged, a
+    compromised caller could satisfy this service with a real token and still name
+    somebody else downstream.
+    """
+    client.get("/v1/guardians/G-2/students/S-1001/grades", headers=agent_headers("G-1"))
+
+    assert fake_lms.asked == [], "a mismatched request reached the system of record"

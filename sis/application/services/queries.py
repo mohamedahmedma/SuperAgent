@@ -513,21 +513,28 @@ class QueryService:
             preferred_language=guardian.preferred_language,
         )
 
-    def guardian_student_term_grades(
-        self, public_id: str, student_number: StudentNumber, term_code: TermCode
-    ) -> StudentTermGrades:
-        """One child's marks for a term, for a caller who is only a guardian handle.
+    def require_guardian_may_see(
+        self, public_id: str, student_number: StudentNumber
+    ) -> None:
+        """Raise unless the school says this guardian may be told about this child.
 
-        The link is re-checked here, on this request, even though every caller is expected
-        to have listed the children first and picked one from that list. The reason is what
-        the caller *is*: a chat service running a language model over text a stranger can
-        write. Its filtering is a convenience for the model, not a security boundary, and a
-        prompt that talks the model into naming another child must meet a server that says
-        no rather than one that trusts the id it was handed.
+        **The authorisation decision for every parent-facing read, in one place.** It is
+        made here rather than by the caller, and it is made on *this* request, even though
+        every caller is expected to have listed the children first and picked one from that
+        list. The reason is what the caller *is*: a chat service running a language model
+        over text a stranger can write. Its filtering is a convenience for the model, not a
+        security boundary, and a prompt that talks the model into naming another child must
+        meet a server that says no rather than one that trusts the id it was handed.
+
+        It is also why the decision belongs here and not in a token or an upstream service.
+        The link it reads is the registrar's own, amended the minute a court order arrives;
+        anything cached, copied or signed elsewhere keeps answering with the old family
+        until it expires.
 
         The refusal is deliberately the same `UnknownReference` a genuinely missing child
         produces. A caller that could tell "not your child" from "no such child" could walk
-        student numbers and learn which ones exist.
+        student numbers and learn which ones exist — and one that could tell either from
+        "her access was restricted" could detect a custody order from outside the school.
         """
         permitted = {
             str(entry.link.student_number)
@@ -537,6 +544,12 @@ class QueryService:
             raise UnknownReference(
                 "no such student for this guardian", field="student_number"
             )
+
+    def guardian_student_term_grades(
+        self, public_id: str, student_number: StudentNumber, term_code: TermCode
+    ) -> StudentTermGrades:
+        """One child's marks for a term, for a caller who is only a guardian handle."""
+        self.require_guardian_may_see(public_id, student_number)
         return self.student_term_grades(student_number, term_code)
 
     def guardian_students_by_id(

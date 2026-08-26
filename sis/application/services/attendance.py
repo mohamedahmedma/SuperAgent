@@ -163,6 +163,35 @@ class AttendanceService:
             counts=tally([entry.mark for entry in entries if entry.mark is not None]),
         )
 
+    def for_guardian_student(
+        self,
+        public_id: str,
+        student_number: StudentNumber,
+        *,
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> StudentAttendance:
+        """The same record, for a caller who holds only a guardian handle.
+
+        The sibling of `QueryService.guardian_student_term_grades`, and it exists for the
+        same reason: the service that answers a parent must not be the service that decides
+        which child it may answer about. The link is re-checked here, against the
+        registrar's own data, on this request.
+
+        Attendance needed this as much as marks did and did not have it. Until it did, the
+        only guardian-scoped read in the service was grades, so anything asking about a
+        child's absences had to be trusted to have filtered correctly first — and the
+        caller doing the asking is a language model's tool.
+
+        The check delegates to `QueryService` rather than repeating the link query. Two
+        implementations of "may this parent see this child" is one more than can ever be
+        right, and the one that drifted would be the one answering a parent.
+        """
+        from sis.application.services.queries import QueryService
+
+        QueryService(self._uow_factory).require_guardian_may_see(public_id, student_number)
+        return self.for_student(student_number, from_date=from_date, to_date=to_date)
+
     def for_student(
         self,
         student_number: StudentNumber,
@@ -170,7 +199,12 @@ class AttendanceService:
         from_date: date | None = None,
         to_date: date | None = None,
     ) -> StudentAttendance:
-        """One child's attendance over a range, with counts. Unknown child is a refusal."""
+        """One child's attendance over a range, with counts. Unknown child is a refusal.
+
+        **Not authorisation-checked.** This is the registrar's view, reached by a registrar
+        or reader key naming any child in the school. A parent-facing caller must use
+        `for_guardian_student`, which re-checks the link first.
+        """
         with self._uow_factory() as uow:
             if uow.students.get(student_number) is None:
                 raise UnknownReference(

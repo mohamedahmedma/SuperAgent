@@ -63,9 +63,19 @@ def _as_float(value: Any) -> float | None:
 class SisAdapter:
     """Reads one student's term marks from the Student Information Service.
 
-    `GET /v1/students/{student_number}/grades?term=` with a `reader`-scoped key, and
-    nothing else. The adapter is not an authorisation boundary: the facade has already
-    decided this guardian may see this student before it is called.
+    `GET /v1/guardians/by-id/{public_id}/students/{student_number}/grades?term=` with a
+    `reader`-scoped key, and its attendance sibling. Nothing else.
+
+    **The guardian handle travels with the request.** It used to not: this adapter called
+    the registrar-scoped `/v1/students/{n}/...` routes, so the facade decided who a parent
+    was allowed to see and then asked SIS a question that named no parent. SIS re-checks
+    the link on these routes, from the registrar's own data, on this request — which means
+    the decision is made twice, independently, and a fully compromised facade reaches one
+    family rather than the school.
+
+    The handle is the `guardian_id` claim off the parent's identity token, which is SIS's
+    own `public_id`. It is never a phone number: this process, and the chat backend beyond
+    it, have no reason to hold one.
 
     Failures normalise to `LmsUnavailable`, the same as the Moodle path, so the route
     degrades exactly as it already does — a 503 with `code: "lms_unavailable"`, which the
@@ -222,12 +232,29 @@ class SisAdapter:
             return str(detail.get("code") or "")
         return ""
 
+    @staticmethod
+    def _guardian_path(guardian_ref: str) -> str:
+        """The prefix both reads hang off, guardian-scoped whenever there is a guardian.
+
+        Falls back to the registrar-scoped prefix when `guardian_ref` is empty, which is
+        what an internal caller with no parent in hand gets — a reconciliation job, or a
+        test. It is not a way for a parent-facing route to opt out: those routes take the
+        handle off a verified token and always have one, and `records.auth` has already
+        refused the request if they do not.
+        """
+        if not guardian_ref:
+            return "/v1"
+        return f"/v1/guardians/by-id/{quote(guardian_ref, safe='')}"
+
     # -- the protocol -------------------------------------------------------
 
-    def get_subject_grades(self, *, student_ref: str, term: str) -> list[SubjectGrade]:
-        # The student number is quoted with no safe characters: a stray "/" in a school's
-        # numbering would otherwise rewrite the path and ask a different question.
-        path = f"/v1/students/{quote(student_ref, safe='')}/grades"
+    def get_subject_grades(
+        self, *, student_ref: str, term: str, guardian_ref: str = ""
+    ) -> list[SubjectGrade]:
+        # Both segments are quoted with no safe characters: a stray "/" in a school's
+        # numbering — or in a handle — would otherwise rewrite the path and ask a
+        # different question.
+        path = f"{self._guardian_path(guardian_ref)}/students/{quote(student_ref, safe='')}/grades"
         payload = self._get(path, {"term": term})
 
         if payload is None:
@@ -235,7 +262,9 @@ class SisAdapter:
 
         return [self._to_subject_grade(row) for row in payload.get("grades") or []]
 
-    def get_subject_attendance(self, *, student_ref: str, term: str) -> list[SubjectAttendance]:
+    def get_subject_attendance(
+        self, *, student_ref: str, term: str, guardian_ref: str = ""
+    ) -> list[SubjectAttendance]:
         """The daily register for a term, as one term-level entry.
 
         **The shapes genuinely differ, and the mapping is a decision rather than a
@@ -266,7 +295,10 @@ class SisAdapter:
             return []
         from_date, to_date = window
 
-        path = f"/v1/students/{quote(student_ref, safe='')}/attendance"
+        path = (
+            f"{self._guardian_path(guardian_ref)}"
+            f"/students/{quote(student_ref, safe='')}/attendance"
+        )
         payload = self._get(path, {"from": from_date, "to": to_date})
         if payload is None:
             return []

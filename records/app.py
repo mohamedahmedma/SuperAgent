@@ -38,6 +38,25 @@ from records.sis_adapter import SisAdapter
 logger = logging.getLogger(__name__)
 
 
+def _sis_api_key() -> str:
+    """The credential this service presents to SIS. Required, and `reader`-scoped.
+
+    Read in one place so the guardian directory, the calendar and the marks adapter cannot
+    end up disagreeing about which key they hold — they are three questions asked of one
+    service, and a deployment that keyed two of them would fail on the third at the first
+    parent question rather than at boot.
+    """
+    api_key = os.getenv("SIS_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "SIS_BASE_URL is set without SIS_API_KEY. SIS authenticates its callers; mint "
+            "a reader-scoped key there and set it here. A registrar key would also work "
+            "and is the wrong answer — this process answers parents and must not hold the "
+            "school's write credential."
+        )
+    return api_key
+
+
 def _configure_guardian_directory() -> None:
     """Choose where "which children are this parent's" is answered.
 
@@ -56,7 +75,7 @@ def _configure_guardian_directory() -> None:
             "and every parent will be told they have no children on file."
         )
         return
-    api_key = os.getenv("SIS_API_KEY", "")
+    api_key = _sis_api_key()
     guardian_directory.set_directory(
         guardian_directory.SisGuardianDirectory(base_url=base_url, api_key=api_key)
     )
@@ -72,20 +91,22 @@ def _configure_adapter() -> None:
 
     if backend == "sis":
         base_url = os.getenv("SIS_BASE_URL", "")
-        # A `reader`-scoped key, when SIS is checking one. It is sent on every request and
-        # is deliberately not a registrar key: a registrar key also WRITES, and handing the
+        if not base_url:
+            raise RuntimeError("RECORDS_LMS=sis requires SIS_BASE_URL.")
+        # A `reader`-scoped key, and required. It is sent on every request and is
+        # deliberately not a registrar key: a registrar key also WRITES, and handing the
         # school's write credential to the process that answers parents is how a read-only
         # integration becomes the blast radius of a leak.
         #
-        # Optional, because SIS currently admits every caller as a registrar and verifies
-        # no key at all (`sis/api/deps.py`: "No API key is required"). Demanding one here
-        # meant demanding a credential nothing checks — a deployment either invented a
-        # value to get past this line, or the service refused to boot over a setting that
-        # could not affect anything. The header is still sent when a key is configured, so
-        # the day SIS starts enforcing again, setting it is the whole change.
-        api_key = os.getenv("SIS_API_KEY", "")
-        if not base_url:
-            raise RuntimeError("RECORDS_LMS=sis requires SIS_BASE_URL.")
+        # It used to be optional, because SIS admitted every caller as a registrar and
+        # verified no key at all — demanding one here meant demanding a credential nothing
+        # checked. SIS authenticates now, so the reverse is true: an unkeyed deployment
+        # gets a 401 on every parent question, and this refuses to start instead.
+        #
+        # Checked after the base URL so a deployment that has configured neither is told
+        # about the URL first: that is the setting it is missing, and naming the key would
+        # send someone to mint a credential for a service they have not pointed at yet.
+        api_key = _sis_api_key()
         # The same calendar the routes read, handed to the adapter rather than letting it
         # build a second one: attendance is addressed by dates, and two components
         # resolving one term separately is how they come to disagree about it.

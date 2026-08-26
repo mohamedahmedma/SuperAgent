@@ -262,6 +262,37 @@ def take_register(
 
 
 @router.get(
+    "/guardians/by-id/{public_id}/students/{student_number}/attendance",
+    response_model=StudentAttendanceOut,
+    summary="A child's attendance, read by one of her guardians",
+    description="The same record as the route below, for a caller who holds a guardian "
+    "handle rather than a registrar's authority. The guardian-to-child link is re-checked "
+    "on this request: a caller that names a child who is not hers, or whose access has "
+    "been restricted, gets the same 404 as one naming a child who does not exist.\n\n"
+    "This is the route a parent-facing service should use. It never needs the parent's "
+    "phone number, and it does not rely on that service having filtered correctly before "
+    "asking — which matters because the caller is a language model's tool, reading text a "
+    "stranger wrote.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def read_guardian_student_attendance(
+    public_id: str,
+    student_number: str,
+    attendance: AttendanceServiceDep,
+    caller: Reader,
+    from_: Annotated[
+        date | None, Query(alias="from", description="First day, inclusive.")
+    ] = None,
+    to: Annotated[date | None, Query(description="Last day, inclusive.")] = None,
+) -> StudentAttendanceOut:
+    with domain_errors():
+        record = attendance.for_guardian_student(
+            public_id, StudentNumber(student_number), from_date=from_, to_date=to
+        )
+    return StudentAttendanceOut.of(record)
+
+
+@router.get(
     "/students/{student_number}/attendance",
     response_model=StudentAttendanceOut,
     summary="One child's attendance over a range",

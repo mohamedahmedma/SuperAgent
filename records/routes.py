@@ -323,6 +323,10 @@ def get_grades(
             subjects = adapter.get_subject_grades(
                 student_ref=_lms_ref(student),
                 term=_term_argument(adapter, resolved_term),
+                # The parent this read is on behalf of, carried to the system of record
+                # so it makes the same decision independently. Taken from the verified
+                # token, never from anything the model or the caller supplied.
+                guardian_ref=subject.guardian_id,
             )
         except lms.LmsUnavailable:
             _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
@@ -414,6 +418,7 @@ def get_course_detail(
         subjects = adapter.get_subject_grades(
             student_ref=_lms_ref(student),
             term=_term_argument(adapter, resolved_term),
+            guardian_ref=subject.guardian_id,
         )
     except lms.LmsUnavailable:
         _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
@@ -484,6 +489,7 @@ def get_attendance(
             subjects = adapter.get_subject_attendance(
                 student_ref=_lms_ref(student),
                 term=_term_argument(adapter, resolved_term),
+                guardian_ref=subject.guardian_id,
             )
         except lms.LmsUnavailable:
             _raise_unavailable(db, subject.caller, request, subject.guardian_id, student_id)
