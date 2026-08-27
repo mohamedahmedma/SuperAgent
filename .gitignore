@@ -49,3 +49,35 @@ sis/frontend/.vite/
 
 # Database backups taken before a migration. Local safety copies, never shared.
 sis.db.backup-*
+
+# Tooling caches. Regenerated on every run, machine-specific, never shared.
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.notebook/
+
+# Coverage reports from local test runs.
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Claude Code local state. settings.json here is an accumulated per-machine
+# permission allowlist plus scheduler locks, not shared project configuration.
+.claude/
+
+# Per-developer environment overrides. .env.example stays tracked as the template.
+.env.local
+.env.*.local
+
+# Editor and IDE state.
+.idea/
+.vscode/
+
+# The root test suite. Development-only material: it is run locally to check the
+# code, and nothing in a deployment imports it.
+#
+# Anchored with a leading slash on purpose. A bare `tests/` matches a directory of
+# that name at ANY depth, which would also untrack identity/tests, records/tests,
+# sis/tests and schoolauth/tests. Those remain tracked.
+/tests/
