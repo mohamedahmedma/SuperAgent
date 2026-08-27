@@ -670,3 +670,75 @@ def test_an_unknown_child_and_someone_else_s_child_look_identical(
 
     assert not_hers["code"] == no_such["code"]
     assert not_hers["message"] == no_such["message"]
+
+
+# ---------------------------------------------------------------------------
+# The same guard, on attendance
+# ---------------------------------------------------------------------------
+#
+# Grades had a guardian-scoped route and attendance did not, so anything asking a parent
+# "how many days has she missed" had to reach the registrar route and be trusted to have
+# filtered first. These assert that the second route enforces exactly what the first does —
+# written as near-copies on purpose, because the failure worth catching is the two drifting.
+
+
+def test_a_guardian_may_read_her_own_child_s_attendance(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    record = client.get(
+        f"/v1/guardians/by-id/{handle}/students/S001/attendance", headers=registrar
+    )
+    assert record.status_code == 200, record.text
+    assert record.json()["student_number"] == "S001"
+
+
+def test_a_guardian_cannot_read_the_attendance_of_a_child_who_is_not_hers(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    refused = client.get(
+        f"/v1/guardians/by-id/{brother}/students/S002/attendance", headers=registrar
+    )
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "student_number"
+
+
+def test_a_restricted_guardian_is_refused_her_own_linked_child_s_attendance(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """The custody restriction has to hold here too.
+
+    The brother IS linked to S001; the sheet said `can view records: no`. Whether a child
+    was in school on Tuesday is exactly the kind of thing a court order bars an adult from
+    being told, and a rule enforced only on grades is a rule with a door beside it.
+    """
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    refused = client.get(
+        f"/v1/guardians/by-id/{brother}/students/S001/attendance", headers=registrar
+    )
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "student_number"
+
+
+def test_an_unknown_child_and_someone_else_s_child_look_identical_on_attendance(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    not_hers = client.get(
+        f"/v1/guardians/by-id/{brother}/students/S002/attendance", headers=registrar
+    ).json()["detail"]
+    no_such = client.get(
+        f"/v1/guardians/by-id/{brother}/students/S999/attendance", headers=registrar
+    ).json()["detail"]
+
+    assert not_hers["code"] == no_such["code"]
+    assert not_hers["message"] == no_such["message"]

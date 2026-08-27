@@ -10,7 +10,6 @@ checks only the signature passes a frightening number of attacks.
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from records.models import AccessAudit
 from records.tests.conftest import agent_headers, mint_token
 
 
@@ -44,13 +43,20 @@ def test_token_for_another_guardian_is_rejected(client):
     assert response.status_code == 403
 
 
-def test_guardian_mismatch_is_audited_under_its_own_reason(client, db):
-    """A relay attempt is the loudest signal in the system. It must be alertable."""
-    client.get("/v1/guardians/G-2/students/S-1001/grades", headers=agent_headers("G-1"))
+def test_guardian_mismatch_is_reported_under_its_own_reason(client, caplog):
+    """A relay attempt is the loudest signal in the system. It must be alertable.
 
-    row = db.query(AccessAudit).filter(AccessAudit.reason == "guardian_mismatch").first()
-    assert row is not None
-    assert row.allowed is False
+    Reported as a structured line rather than a row: this request never becomes a SIS
+    call, so if this service does not say so, nothing does. `sis/` keeps the trail of
+    answers about children; `records.audit` keeps the record of callers who never got
+    that far.
+    """
+    with caplog.at_level("WARNING"):
+        client.get(
+            "/v1/guardians/G-2/students/S-1001/grades", headers=agent_headers("G-1")
+        )
+
+    assert "guardian_mismatch" in caplog.text
 
 
 def test_token_signed_by_a_foreign_key_is_rejected(client):

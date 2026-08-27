@@ -1,7 +1,7 @@
 """Sending a WhatsApp message, and proving that an inbound one really came from Meta.
 
 The seam is a `Protocol` and the implementation is a plain class that satisfies it
-structurally, which is the pattern `records/lms.py` established for Moodle: the service
+structurally, which is the pattern `records/lms.py` established for the LMS: the service
 that decides *what* to say never imports an HTTP client, so the rule "a code goes only to
 the number that asked for it" is testable with a list.
 
@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import threading
 from dataclasses import dataclass
 from typing import Final, Protocol
@@ -38,7 +39,12 @@ logger = logging.getLogger(__name__)
 #: Meta's Graph API version. Pinned rather than floating: an unpinned version silently
 #: changes payload shapes under a service that is not being deployed, and the failure
 #: appears as a parse error in a webhook nobody was touching that week.
-GRAPH_VERSION: Final[str] = "v26.0"
+#: Pinned, never "latest" — Meta ships breaking changes between versions and an
+#: unpinned client starts failing on a date nobody chose. Overridable because the
+#: version a school's app was created against is a fact about that app: the console
+#: shows the one it generated its examples for, and following it removes one variable
+#: from every "why did this stop working" conversation.
+GRAPH_VERSION: Final[str] = os.getenv("IDENTITY_WHATSAPP_GRAPH_VERSION") or "v22.0"
 
 _GRAPH_HOST: Final[str] = "https://graph.facebook.com"
 
@@ -154,8 +160,23 @@ def signature_is_valid(*, raw_body: bytes, header: str | None, app_secret: str) 
 
     Returns `False` rather than raising on a missing or malformed header, so the caller has
     one branch: unsigned and wrongly-signed are the same answer.
+
+    **An unset `app_secret` disables the check and returns True.** That is a deliberate
+    development affordance, and it is the one place in this file where the safe default
+    loses to a usable one: rejecting everything when nothing is configured meant a webhook
+    that verified fine, delivered nothing, and logged a 403 nobody connected to a missing
+    variable.
+
+    What it costs is real and worth stating once. The signature is the only thing that
+    distinguishes Meta from anyone who has found the URL, and this webhook's payload names
+    the sender — so an unsigned deployment lets a caller assert "this parent just sent the
+    code phrase" for any number they like, and sign in as that parent. Set the secret
+    before anyone but you can reach the URL. `identity/routes.py` logs a warning on every
+    unverified delivery so that the state cannot be forgotten quietly.
     """
-    if not header or not app_secret:
+    if not app_secret:
+        return True
+    if not header:
         return False
     prefix = "sha256="
     if not header.startswith(prefix):
@@ -250,14 +271,60 @@ class CloudApiWhatsAppGateway:
             # The status and Meta's own error code, never the token and never the full
             # URL — the phone number id is in the path and the token is in a header, and
             # both end up in an aggregator once they reach a log line.
+            code = _error_code(response)
             logger.warning(
-                "WhatsApp refused a send: status=%s code=%s",
+                "WhatsApp refused a send: status=%s code=%s%s",
                 response.status_code,
-                _error_code(response),
+                code,
+                _diagnosis(code, response.status_code),
             )
             raise WhatsAppUnavailable(
                 f"WhatsApp refused the message with status {response.status_code}."
             )
+
+
+#: Meta's numeric error codes, and what each one actually means for this deployment.
+#: Written out because the raw code is a search away from an answer and a sentence is
+#: not — and because the first of these is not a maybe: a token taken from the App
+#: Dashboard expires in under 24 hours, so a pilot that worked all afternoon stops
+#: overnight with nothing in the logs but `code=190`.
+_DIAGNOSES: Final[dict[str, str]] = {
+    "190": (
+        " — the access token has expired or been revoked. A token copied from the App "
+        "Dashboard lasts under 24 hours; generate a System User token with "
+        "whatsapp_business_messaging and no expiry, and set IDENTITY_WHATSAPP_TOKEN to it."
+    ),
+    "131030": (
+        " — this recipient is not on the app's allowed list. In development mode Cloud "
+        "API only messages numbers added under 'Manage phone number list'."
+    ),
+    "131047": (
+        " — more than 24 hours since the parent's last message, so the service window is "
+        "closed and only a template may be sent. Should be impossible here: the parent "
+        "messages first and the code goes back within seconds."
+    ),
+    "131056": " — too many messages to this number too quickly; WhatsApp is pacing us.",
+    "100": (
+        " — a bad parameter, usually the phone number id. Check "
+        "IDENTITY_WHATSAPP_PHONE_NUMBER_ID is the ID beside the number, not the number."
+    ),
+    "133010": " — the sending number is not registered on Cloud API.",
+    "80007": " — the account has hit its rate limit for this window.",
+}
+
+
+def _diagnosis(code: str, status: int) -> str:
+    """A sentence a person can act on, appended to the log line.
+
+    Falls back to nothing rather than to a guess: an invented explanation for an
+    unfamiliar code is worse than the bare code, which is at least searchable.
+    """
+    known = _DIAGNOSES.get(str(code))
+    if known:
+        return known
+    if status in (401, 403):
+        return " — the token was rejected. Check IDENTITY_WHATSAPP_TOKEN."
+    return ""
 
 
 def _error_code(response: object) -> str:

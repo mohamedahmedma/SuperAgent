@@ -14,9 +14,6 @@ they are told apart only by which database answered.
 """
 from __future__ import annotations
 
-import os
-import shutil
-import tempfile
 from collections.abc import Iterator
 
 import pytest
@@ -24,58 +21,17 @@ from fastapi.testclient import TestClient
 
 from sis import tenancy
 from sis.api.deps import SCHOOL_HEADER
-from sis.infrastructure.db.session import reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+from sis.tests.conftest import MD, NC
 
-NC = "NC"
-MD = "MD"
+# `two_databases` and the two school codes live in `conftest.py`: `test_authentication.py`
+# proves a *key* does not cross between these files, and one copy of the tenancy wiring is
+# what stops the two suites drifting apart about what a split estate looks like.
 
 #: The same number at both branches. A child is a person and her number is the school's own
 #: identifier for her, so two schools using `S-1` is ordinary — and it is exactly the case a
 #: leak would render indistinguishable.
 SHARED_NUMBER = "S-1"
-
-
-@pytest.fixture()
-def two_databases(_migrated_template: str) -> Iterator[dict[str, str]]:
-    """One migrated database per school, and the registry pointing at both.
-
-    Built from the same template the single-school fixture uses, so both schools are on
-    exactly the schema `alembic upgrade head` produces — which is the property this whole
-    design leans on: same schema in every file, so one migration run per school and nothing
-    that has to be kept in sync by hand.
-    """
-    directory = tempfile.mkdtemp(prefix="sis-schools-")
-    urls = {}
-    for code in (NC, MD):
-        path = os.path.join(directory, f"{code}.db")
-        shutil.copyfile(_migrated_template, path)
-        urls[code] = f"sqlite:///{path}"
-
-    previous = {name: os.environ.get(name) for name in (
-        tenancy.SCHOOLS_VAR,
-        f"{tenancy.DATABASE_URL_PREFIX}_{NC}",
-        f"{tenancy.DATABASE_URL_PREFIX}_{MD}",
-    )}
-    os.environ[tenancy.SCHOOLS_VAR] = f"{NC},{MD}"
-    os.environ[f"{tenancy.DATABASE_URL_PREFIX}_{NC}"] = urls[NC]
-    os.environ[f"{tenancy.DATABASE_URL_PREFIX}_{MD}"] = urls[MD]
-    tenancy.reset_registry_cache()
-    reset_engine()
-
-    yield urls
-
-    # Engines first: on Windows an open SQLite handle makes the file unremovable, and the
-    # failure surfaces in whichever test runs next rather than here.
-    reset_engine()
-    tenancy.reset_registry_cache()
-    for name, value in previous.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
-    tenancy.reset_registry_cache()
-    shutil.rmtree(directory, ignore_errors=True)
 
 
 def _seed(school_code: str, name: str) -> None:
@@ -186,17 +142,24 @@ def test_single_school_mode_ignores_the_header(client: TestClient) -> None:
 
 
 @pytest.fixture()
-def split_client(two_databases: dict[str, str]) -> Iterator[TestClient]:
+def split_client(two_databases: dict[str, str], bootstrap_key: str) -> Iterator[TestClient]:
     """The real app, booted against two school databases.
 
     Boots through the lifespan, so the startup schema gate runs for real — and in
     multi-school mode that gate checks *every* school, which is the check that turns "the
     migration succeeded for four schools and failed for the fifth" into a startup failure
     naming the fifth rather than a 500 in front of its registrar.
+
+    Authenticates with the **bootstrap** key rather than a stored one, and that is the
+    separation showing through rather than a convenience. Stored keys live in a school's
+    own database, so there is no single key that reaches both of these files — which is
+    exactly the property `test_a_key_minted_for_one_school_is_refused_at_another` asserts.
+    The bootstrap key is the estate-wide credential that exists before any school has been
+    given one, which is the position a freshly split deployment is in.
     """
     from sis.app import app
 
-    with TestClient(app) as test_client:
+    with TestClient(app, headers={"X-API-Key": bootstrap_key}) as test_client:
         yield test_client
 
 

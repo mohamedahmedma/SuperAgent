@@ -28,6 +28,7 @@ from typing import Protocol
 
 from sis.application.ports.repositories import (
     AcademicYearRepository,
+    AccessAuditRepository,
     ApiKeyRepository,
     AttendanceRepository,
     EnrolmentRepository,
@@ -87,6 +88,11 @@ class UnitOfWork(Protocol):
     imports: ImportBatchRepository
 
     api_keys: ApiKeyRepository
+
+    # Who was told about which child. Append-only, and written in its own short
+    # transaction rather than the request's — see `QueryService.require_guardian_may_see`
+    # for why a refusal's audit row must not be rolled back along with the refusal.
+    access_audit: AccessAuditRepository
 
     def __enter__(self) -> "UnitOfWork":
         """Begin the transaction. The returned object is the one to use inside `with`."""

@@ -1,6 +1,6 @@
 # Deliberately tiny, and deliberately separate from the root pyproject.
 #
-# The whole dependency set is five packages. That is the isolation made concrete:
+# Four packages, and no database among them. That is the isolation made concrete:
 # this service carries no LangChain, no Milvus, no sentence-transformers, no model
 # clients. It can be built, deployed and restarted without any of the machinery the
 # chat backend needs, and its container image is a fraction of the size.
@@ -10,17 +10,19 @@
 
 fastapi>=0.115.0
 uvicorn>=0.30.0
-sqlalchemy>=2.0.36
 pydantic>=2.8.0
 
-# Postgres for anything holding real student records. SQLite is the default only so
-# the service runs with no infrastructure while the Moodle adapter is still a stub.
-psycopg2-binary>=2.9.10
+# No sqlalchemy and no database driver. This service holds no tables: the guardian link,
+# the marks and the academic calendar are all asked of `sis/` at request time, the parent's
+# identity is a signature it verifies offline, and its own credential is one value in the
+# environment. There is nothing here to migrate, back up, or reconcile with the registrar.
 
-# Required by MoodleAdapter once it is implemented, and by the JWKS fetch in
-# records.identity when IDENTITY_PUBLIC_KEY_PEM is not pinned.
+# The SIS adapter, the guardian directory and the school calendar. Not the JWKS fetch:
+# that lives in `schoolauth`, which deliberately uses urllib and pulls in no client.
 httpx>=0.27.0
 
 # Verifying RS256 identity tokens. Public key only — this service holds nothing that
-# could mint a token. See records/identity.py.
+# could mint a token. Used through the repo's own `schoolauth` package, which is the one
+# implementation of that check in the estate; `records/identity.py` supplies this
+# service's issuer and audience and nothing else.
 python-jose[cryptography]>=3.3.0

@@ -52,6 +52,7 @@ from sis.application.ports.repositories import (  # noqa: E402
 )
 from sis.application.ports.unit_of_work import UnitOfWork  # noqa: E402
 from sis.config import get_settings, reset_settings_cache  # noqa: E402
+from sis.domain.access import AccessAttempt  # noqa: E402
 from sis.domain.auth import ApiKey, Scope  # noqa: E402
 from sis.domain.errors import UnknownReference  # noqa: E402
 from sis.domain.grades import SubjectGrade  # noqa: E402
@@ -80,6 +81,7 @@ from sis.domain.value_objects import (  # noqa: E402
     TermCode,
     YearCode,
 )
+from sis import tenancy  # noqa: E402
 from sis.infrastructure.db.session import reset_engine  # noqa: E402
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork  # noqa: E402
 
@@ -268,9 +270,90 @@ def bootstrap_key() -> Iterator[str]:
     reset_settings_cache()
 
 
+# ---------------------------------------------------------------------------
+# A split estate — two schools, two databases
+# ---------------------------------------------------------------------------
+
+#: Codes for the two-school fixtures below. Short and deliberately alike, so anything that
+#: leaks across schools shows up as a row in the wrong file rather than as a plausible one.
+NC = "NC"
+MD = "MD"
+
+@pytest.fixture()
+def two_databases(_migrated_template: str) -> Iterator[dict[str, str]]:
+    """One migrated database per school, and the registry pointing at both.
+
+    Lives here rather than in `test_physical_separation.py` because two suites need it:
+    that one proves data does not cross, and `test_authentication.py` proves a *key* does
+    not either. One copy of the tenancy wiring, so the two cannot drift apart about what a
+    split estate looks like.
+
+    Built from the same template the single-school fixture uses, so both schools are on
+    exactly the schema `alembic upgrade head` produces — which is the property this whole
+    design leans on: same schema in every file, so one migration run per school and nothing
+    that has to be kept in sync by hand.
+    """
+    directory = tempfile.mkdtemp(prefix="sis-schools-")
+    urls = {}
+    for code in (NC, MD):
+        path = os.path.join(directory, f"{code}.db")
+        shutil.copyfile(_migrated_template, path)
+        urls[code] = f"sqlite:///{path}"
+
+    previous = {name: os.environ.get(name) for name in (
+        tenancy.SCHOOLS_VAR,
+        f"{tenancy.DATABASE_URL_PREFIX}_{NC}",
+        f"{tenancy.DATABASE_URL_PREFIX}_{MD}",
+    )}
+    os.environ[tenancy.SCHOOLS_VAR] = f"{NC},{MD}"
+    os.environ[f"{tenancy.DATABASE_URL_PREFIX}_{NC}"] = urls[NC]
+    os.environ[f"{tenancy.DATABASE_URL_PREFIX}_{MD}"] = urls[MD]
+    tenancy.reset_registry_cache()
+    reset_engine()
+
+    yield urls
+
+    # Engines first: on Windows an open SQLite handle makes the file unremovable, and the
+    # failure surfaces in whichever test runs next rather than here.
+    reset_engine()
+    tenancy.reset_registry_cache()
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+    tenancy.reset_registry_cache()
+    shutil.rmtree(directory, ignore_errors=True)
+
+
 @pytest.fixture()
 def client(api_keys: dict[str, str]) -> Iterator[TestClient]:
-    """The real app over the migrated database, lifespan and startup gate included."""
+    """The real app over the migrated database, lifespan and startup gate included.
+
+    Carries the stored **registrar** key by default, so every test that is about
+    something else authenticates for real rather than through a dependency override. The
+    difference matters: an override would make each of these tests agree with itself
+    instead of with `deps.py`, and the day the stored-key path broke they would all still
+    pass.
+
+    A test that is about authentication sends its own header — `reader_headers()` for the
+    scope split, or `headers={}` to present nothing — and the per-request value wins over
+    this default.
+    """
+    from sis.app import app
+
+    with TestClient(app, headers=registrar_headers()) as test_client:
+        yield test_client
+
+
+@pytest.fixture()
+def unauthenticated_client(api_keys: dict[str, str]) -> Iterator[TestClient]:
+    """The same app, presenting no credential at all.
+
+    Exists so "this route refuses an anonymous caller" is asserted against the real
+    dependency rather than assumed. Keys are still seeded, so a refusal here means the
+    header was missing and not that the database was empty.
+    """
     from sis.app import app
 
     with TestClient(app) as test_client:
@@ -970,6 +1053,40 @@ class FakeApiKeyRepository(_InMemory):
         return bool(self._rows)
 
 
+class FakeAccessAuditRepository(_InMemory):
+    """Appended to, read back, and never edited — the port has no other methods.
+
+    Keyed by insertion order rather than by any field: an audit has no natural key, two
+    identical attempts a second apart are two rows, and collapsing them would hide exactly
+    the pattern the table exists to show — a run of refusals against one handle.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._next = 0
+
+    def record(self, attempt: AccessAttempt) -> None:
+        self._rows[self._next] = attempt
+        self._next += 1
+
+    def recent(
+        self,
+        *,
+        guardian_public_id: str | None = None,
+        student_number: str | None = None,
+        allowed: bool | None = None,
+        limit: int = 100,
+    ) -> Sequence[AccessAttempt]:
+        found = [
+            attempt
+            for _, attempt in sorted(self._rows.items(), reverse=True)
+            if (not guardian_public_id or attempt.guardian_public_id == guardian_public_id)
+            and (not student_number or attempt.student_number == student_number)
+            and (allowed is None or attempt.allowed is allowed)
+        ]
+        return found[:limit]
+
+
 class FakeUnitOfWork:
     """Every repository, one transaction, no database.
 
@@ -996,6 +1113,7 @@ class FakeUnitOfWork:
         self.grades = FakeGradeRepository()
         self.imports = FakeImportBatchRepository()
         self.api_keys = FakeApiKeyRepository()
+        self.access_audit = FakeAccessAuditRepository()
         self.commits = 0
         self.rollbacks = 0
         self._committed = False
@@ -1017,6 +1135,7 @@ class FakeUnitOfWork:
                 "grades",
                 "imports",
                 "api_keys",
+                "access_audit",
             )
         )
 

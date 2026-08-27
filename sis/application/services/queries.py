@@ -18,12 +18,14 @@ symptom is a Term 1 mark filed under 3A that prints under 3B.
 Ports only: no sqlalchemy, no fastapi, no `sis.config`. Every method here is exercisable
 against fake repositories.
 """
+import logging
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sis.application.ports.repositories import EnrolmentRepository
 from sis.application.ports.unit_of_work import UnitOfWork
+from sis.domain.access import AccessAttempt, AccessReason
 from sis.domain.errors import UnknownReference
 from sis.domain.grades import SubjectGrade
 from sis.domain.guardians import Guardian, StudentGuardian
@@ -46,6 +48,8 @@ from sis.domain.value_objects import (
     TermCode,
     YearCode,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "ClassRosterEntry",
@@ -513,30 +517,123 @@ class QueryService:
             preferred_language=guardian.preferred_language,
         )
 
-    def guardian_student_term_grades(
-        self, public_id: str, student_number: StudentNumber, term_code: TermCode
-    ) -> StudentTermGrades:
-        """One child's marks for a term, for a caller who is only a guardian handle.
+    def _audit(self, attempt: AccessAttempt) -> None:
+        """Append one decision, in its own transaction, and never fail the request for it.
 
-        The link is re-checked here, on this request, even though every caller is expected
-        to have listed the children first and picked one from that list. The reason is what
-        the caller *is*: a chat service running a language model over text a stranger can
-        write. Its filtering is a convenience for the model, not a security boundary, and a
-        prompt that talks the model into naming another child must meet a server that says
-        no rather than one that trusts the id it was handed.
+        **Committed separately from whatever the request goes on to do.** An audit rolled
+        back alongside a refusal records only the accesses that succeeded, which is exactly
+        backwards — the refusals are the interesting rows. So this opens its own unit of
+        work and commits it before the caller raises.
+
+        Best effort, deliberately. A school whose audit table is briefly unwritable should
+        still be able to tell a parent her daughter's marks; the alternative is an outage
+        caused by bookkeeping. The failure is logged loudly, which is the compromise: a
+        silent gap in an audit is the one thing worse than a noisy one.
+        """
+        try:
+            with self._uow_factory() as uow:
+                uow.access_audit.record(attempt)
+                uow.commit()
+        except Exception:  # noqa: BLE001 - never fail a read because the audit failed
+            logger.exception(
+                "could not record an access attempt: guardian=%s student=%s reason=%s",
+                attempt.guardian_public_id,
+                attempt.student_number,
+                attempt.reason.value,
+            )
+
+    def require_guardian_may_see(
+        self,
+        public_id: str,
+        student_number: StudentNumber,
+        *,
+        actor: str = "",
+        request_id: str = "",
+    ) -> None:
+        """Raise unless the school says this guardian may be told about this child.
+
+        **The authorisation decision for every parent-facing read, in one place.** It is
+        made here rather than by the caller, and it is made on *this* request, even though
+        every caller is expected to have listed the children first and picked one from that
+        list. The reason is what the caller *is*: a chat service running a language model
+        over text a stranger can write. Its filtering is a convenience for the model, not a
+        security boundary, and a prompt that talks the model into naming another child must
+        meet a server that says no rather than one that trusts the id it was handed.
+
+        It is also why the decision belongs here and not in a token or an upstream service.
+        The link it reads is the registrar's own, amended the minute a court order arrives;
+        anything cached, copied or signed elsewhere keeps answering with the old family
+        until it expires.
 
         The refusal is deliberately the same `UnknownReference` a genuinely missing child
         produces. A caller that could tell "not your child" from "no such child" could walk
-        student numbers and learn which ones exist.
+        student numbers and learn which ones exist — and one that could tell either from
+        "her access was restricted" could detect a custody order from outside the school.
+
+        **Every outcome is audited, including the successful one.** The reason recorded is
+        the real one — `no_children` for a handle that reaches nobody, `no_link` for a real
+        parent naming a child who is not hers — even though the caller is told the same
+        thing either way. That asymmetry is the point of keeping the record: the difference
+        between somebody probing with a junk handle and somebody walking student numbers
+        against a real parent's is invisible in the response and obvious in this table.
         """
-        permitted = {
-            str(entry.link.student_number)
-            for entry in self.guardian_students_by_id(public_id, viewable_only=True)
-        }
-        if str(student_number) not in permitted:
+        try:
+            permitted = {
+                str(entry.link.student_number)
+                for entry in self.guardian_students_by_id(public_id, viewable_only=True)
+            }
+        except UnknownReference:
+            # No such guardian handle. Audited under the same reason as a guardian whose
+            # every link is restricted, because those two are one fact from outside — see
+            # `guardian_students_by_id` — and then re-raised unchanged.
+            self._audit(
+                AccessAttempt(
+                    guardian_public_id=public_id or "unknown",
+                    student_number=str(student_number),
+                    reason=AccessReason.NO_CHILDREN,
+                    at=datetime.now(UTC),
+                    actor=actor,
+                    request_id=request_id,
+                )
+            )
+            raise
+
+        if str(student_number) in permitted:
+            reason = AccessReason.OK
+        elif not permitted:
+            reason = AccessReason.NO_CHILDREN
+        else:
+            reason = AccessReason.NO_LINK
+
+        self._audit(
+            AccessAttempt(
+                guardian_public_id=public_id,
+                student_number=str(student_number),
+                reason=reason,
+                at=datetime.now(UTC),
+                actor=actor,
+                request_id=request_id,
+            )
+        )
+
+        if reason is not AccessReason.OK:
             raise UnknownReference(
                 "no such student for this guardian", field="student_number"
             )
+
+    def guardian_student_term_grades(
+        self,
+        public_id: str,
+        student_number: StudentNumber,
+        term_code: TermCode,
+        *,
+        actor: str = "",
+        request_id: str = "",
+    ) -> StudentTermGrades:
+        """One child's marks for a term, for a caller who is only a guardian handle."""
+        self.require_guardian_may_see(
+            public_id, student_number, actor=actor, request_id=request_id
+        )
         return self.student_term_grades(student_number, term_code)
 
     def guardian_students_by_id(

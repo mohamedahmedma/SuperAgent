@@ -36,15 +36,49 @@
         "summary": "Generate a year's levels and class sections",
         "description": "Idempotent and additive: it creates only what is missing, renames nothing, and deletes nothing. Asking for fewer classes than exist removes none.",
         "operationId": "generate_structure_v1_structure_generate_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GenerateStructureIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -136,6 +170,38 @@
               "title": "School"
             },
             "description": "School code. Omit to list the years of every school."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -231,6 +297,38 @@
               ],
               "title": "Year Level"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -297,6 +395,40 @@
         "summary": "Add one class section to a year",
         "description": "201 when the section is new, 200 when one with this code already existed in this year — in which case its labels are corrected and no enrolment is touched. An unknown year or year level is a 404: this route will not invent the rung a class sits on.",
         "operationId": "create_class_section_v1_structure_classes_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -379,6 +511,40 @@
         "summary": "Create or relabel a term",
         "description": "201 when the term is new, 200 when a term with this code already existed and its labels or dates were updated. The code is identity and is never rewritten.",
         "operationId": "create_term_v1_terms_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -461,6 +627,38 @@
               ],
               "title": "Academic Year"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -529,15 +727,49 @@
         "summary": "Create or relabel an academic year",
         "description": "201 when the year is new, 200 when a year with this code already existed and its labels or dates were updated. Every other structural row hangs off a year, so this is the first call when setting a school up.",
         "operationId": "create_academic_year_v1_academic_years_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AcademicYearIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -601,6 +833,40 @@
         "summary": "Create or relabel a subject",
         "description": "201 when the subject is new, 200 when one with this code already existed. Retire a subject with `is_active: false`; there is no delete.",
         "operationId": "create_subject_v1_subjects_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -693,6 +959,38 @@
               "default": false,
               "title": "Include Inactive"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -782,6 +1080,38 @@
               ],
               "title": "Academic Year"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "requestBody": {
@@ -866,6 +1196,38 @@
               "default": false,
               "title": "Include Inactive"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -922,6 +1284,40 @@
         "summary": "Create or relabel a school",
         "description": "201 when the school is new, 200 when this code already existed and its labels were corrected — which detaches nothing, because every year and rung points at the row rather than at the name. There is no delete; close a branch with `is_active: false`.",
         "operationId": "create_school_v1_schools_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1003,6 +1399,38 @@
               "type": "string",
               "title": "School Code"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -1071,15 +1499,49 @@
         "summary": "Add or relabel one rung",
         "description": "201 when the rung is new in this school, 200 when it already existed and its labels, order or stage were corrected — none of which detaches a class or a mark, because those point at the rung's row. The generator builds a whole ladder at once; this is for the single rung a school adds afterwards.",
         "operationId": "create_year_level_v1_structure_levels_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/YearLevelIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -1193,6 +1655,38 @@
               "title": "On"
             },
             "description": "The day to answer for. Defaults to today, echoed as `as_of`."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -1294,6 +1788,38 @@
               "default": false,
               "title": "Include Inactive"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -1346,6 +1872,40 @@
         "summary": "Add or correct one child",
         "description": "201 when the child is new, 200 when this number was already on file — in which case her names are corrected and not one mark, placement or guardian link is touched. Enrolling her in a class is a separate act: `POST /v1/students/{student_number}/placements`.",
         "operationId": "save_student_v1_students_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1427,6 +1987,38 @@
               "type": "string",
               "title": "Student Number"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -1497,6 +2089,38 @@
             "schema": {
               "type": "string",
               "title": "Student Number"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -1581,6 +2205,38 @@
               "type": "string",
               "title": "Student Number"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -1651,6 +2307,38 @@
             "schema": {
               "type": "string",
               "title": "Student Number"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -1745,6 +2433,38 @@
               "type": "string",
               "title": "Student Number"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "requestBody": {
@@ -1838,6 +2558,38 @@
               "type": "string",
               "title": "Student Number"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "requestBody": {
@@ -1912,15 +2664,49 @@
         "summary": "Which guardian does this number reach",
         "description": "For a service that has just proved somebody controls a number and needs to know whether the school has that number on file. Returns her stable `public_id`, which is what the caller should store — never the number itself. A number that reaches nobody is a 404. That is an ordinary answer here, not an error: most numbers in the world are not this school's parents.",
         "operationId": "resolve_guardian_v1_guardians_resolve_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ResolveIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -1992,6 +2778,38 @@
             "schema": {
               "type": "string",
               "title": "Student Number"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -2076,6 +2894,153 @@
               "default": false,
               "title": "Include Restricted"
             }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardianChildrenOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/by-id/{public_id}/students": {
+      "get": {
+        "tags": [
+          "guardians"
+        ],
+        "summary": "Which children this guardian handle may ask about",
+        "description": "The same question as the by-phone route, asked with the opaque handle a token carries. This is the one a parent-facing service should use: it never has to hold, log or transmit a parent's phone number to find out which children are hers.",
+        "operationId": "read_guardian_students_by_id_v1_guardians_by_id__public_id__students_get",
+        "parameters": [
+          {
+            "name": "public_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Public Id"
+            }
+          },
+          {
+            "name": "include_restricted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Restricted"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -2157,6 +3122,38 @@
             "schema": {
               "type": "string",
               "title": "Phone"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
             }
           }
         ],
@@ -2248,11 +3245,187 @@
               "type": "string",
               "title": "Phone"
             }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
           }
         ],
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/by-id/{public_id}/students/{student_number}/grades": {
+      "get": {
+        "tags": [
+          "grades"
+        ],
+        "summary": "A child's marks, read by one of her guardians",
+        "description": "The same figures as the route below, for a caller who holds a guardian handle rather than a registrar's authority. The guardian-to-child link is re-checked on this request: a caller that names a child who is not hers, or whose access has been restricted, gets the same 404 as one naming a child who does not exist.\n\nThis is the route a parent-facing chat service should use. It never needs the parent's phone number, and it does not rely on that service having filtered correctly before asking.",
+        "operationId": "read_guardian_student_term_grades_v1_guardians_by_id__public_id__students__student_number__grades_get",
+        "parameters": [
+          {
+            "name": "public_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Public Id"
+            }
+          },
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Term code. Required, for the reason the registrar route gives: a bare 'this term' would be answered from a clock.",
+              "examples": [
+                "2026-T1"
+              ],
+              "title": "Term"
+            },
+            "description": "Term code. Required, for the reason the registrar route gives: a bare 'this term' would be answered from a clock."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentTermGradesOut"
+                }
+              }
+            }
           },
           "401": {
             "description": "Missing or unknown API key.",
@@ -2328,6 +3501,38 @@
               "title": "Term"
             },
             "description": "Term code. Required: a bare 'this term' would be answered from a clock, and a report is a statement about a named period."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -2432,6 +3637,38 @@
               "title": "On"
             },
             "description": "The day to answer for. Defaults to today, echoed as `on_date`."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -2534,6 +3771,38 @@
               "title": "On"
             },
             "description": "The day being recorded. Defaults to today."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "requestBody": {
@@ -2553,6 +3822,174 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ClassRegisterOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/by-id/{public_id}/students/{student_number}/attendance": {
+      "get": {
+        "tags": [
+          "attendance"
+        ],
+        "summary": "A child's attendance, read by one of her guardians",
+        "description": "The same record as the route below, for a caller who holds a guardian handle rather than a registrar's authority. The guardian-to-child link is re-checked on this request: a caller that names a child who is not hers, or whose access has been restricted, gets the same 404 as one naming a child who does not exist.\n\nThis is the route a parent-facing service should use. It never needs the parent's phone number, and it does not rely on that service having filtered correctly before asking — which matters because the caller is a language model's tool, reading text a stranger wrote.",
+        "operationId": "read_guardian_student_attendance_v1_guardians_by_id__public_id__students__student_number__attendance_get",
+        "parameters": [
+          {
+            "name": "public_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Public Id"
+            }
+          },
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "First day, inclusive.",
+              "title": "From"
+            },
+            "description": "First day, inclusive."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last day, inclusive.",
+              "title": "To"
+            },
+            "description": "Last day, inclusive."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentAttendanceOut"
                 }
               }
             }
@@ -2655,6 +4092,38 @@
               "title": "To"
             },
             "description": "Last day, inclusive."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -2719,39 +4188,40 @@
         "summary": "Preview a roster upload",
         "description": "Multipart. Send the spreadsheet as `file` and `academic_year_code` as a form field; `class_code` when the file is one class per upload, and `default_starts_on` to date the placements it creates. **Nothing is written**: this returns a per-row account and a `batch_id` to commit.",
         "operationId": "preview_roster_v1_imports_roster_preview_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "properties": {
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "The sheet itself: .xlsx or .csv."
-                  },
-                  "academic_year_code": {
-                    "type": "string",
-                    "description": "The year these placements belong to."
-                  },
-                  "class_code": {
-                    "type": "string",
-                    "description": "Target class, when the file is one class per upload. Omitted means every row must name its own class."
-                  },
-                  "default_starts_on": {
-                    "type": "string",
-                    "description": "ISO date for placements whose row states none. Defaults to the academic year's start, never to today."
-                  }
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
                 },
-                "type": "object",
-                "required": [
-                  "file",
-                  "academic_year_code"
-                ]
-              }
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
             }
           },
-          "required": true
-        },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2833,6 +4303,39 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The sheet itself: .xlsx or .csv."
+                  },
+                  "academic_year_code": {
+                    "type": "string",
+                    "description": "The year these placements belong to."
+                  },
+                  "class_code": {
+                    "type": "string",
+                    "description": "Target class, when the file is one class per upload. Omitted means every row must name its own class."
+                  },
+                  "default_starts_on": {
+                    "type": "string",
+                    "description": "ISO date for placements whose row states none. Defaults to the academic year's start, never to today."
+                  }
+                },
+                "required": [
+                  "file",
+                  "academic_year_code"
+                ]
+              }
+            }
+          }
         }
       }
     },
@@ -2852,6 +4355,38 @@
             "schema": {
               "type": "string",
               "title": "Batch Id"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -2937,26 +4472,40 @@
         "summary": "Preview a guardians upload",
         "description": "Multipart. Send the spreadsheet as `file` and nothing else — every row names its own child and its own guardian, so this upload has no target to scope it to. Columns: `student_number`, `phone` (required), a guardian name in either script, and optionally `alt_phone`, `relationship`, `can_view_records`. **Nothing is written**: this returns a per-row account and a `batch_id` to commit.",
         "operationId": "preview_guardians_v1_imports_guardians_preview_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "properties": {
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "The sheet itself: .xlsx or .csv."
-                  }
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
                 },
-                "type": "object",
-                "required": [
-                  "file"
-                ]
-              }
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
             }
           },
-          "required": true
-        },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3038,6 +4587,26 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The sheet itself: .xlsx or .csv."
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
         }
       }
     },
@@ -3057,6 +4626,38 @@
             "schema": {
               "type": "string",
               "title": "Batch Id"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -3142,39 +4743,40 @@
         "summary": "Preview a marks upload",
         "description": "Multipart. Send the sheet as `file` and `term_code` as a form field; `subject_code` and `class_code` narrow the upload so a file sent against the wrong class is refused loudly instead of matched across the whole school. **Nothing is written.** A blank cell previews as not-graded and never as zero.",
         "operationId": "preview_grades_v1_imports_grades_preview_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "properties": {
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "The sheet itself: .xlsx or .csv."
-                  },
-                  "term_code": {
-                    "type": "string",
-                    "description": "The term these marks belong to, e.g. `2026-T1`."
-                  },
-                  "subject_code": {
-                    "type": "string",
-                    "description": "Refuse rows naming any other subject."
-                  },
-                  "class_code": {
-                    "type": "string",
-                    "description": "Refuse rows for children who were in another class this term."
-                  }
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
                 },
-                "type": "object",
-                "required": [
-                  "file",
-                  "term_code"
-                ]
-              }
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
             }
           },
-          "required": true
-        },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3256,6 +4858,39 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The sheet itself: .xlsx or .csv."
+                  },
+                  "term_code": {
+                    "type": "string",
+                    "description": "The term these marks belong to, e.g. `2026-T1`."
+                  },
+                  "subject_code": {
+                    "type": "string",
+                    "description": "Refuse rows naming any other subject."
+                  },
+                  "class_code": {
+                    "type": "string",
+                    "description": "Refuse rows for children who were in another class this term."
+                  }
+                },
+                "required": [
+                  "file",
+                  "term_code"
+                ]
+              }
+            }
+          }
         }
       }
     },
@@ -3275,6 +4910,38 @@
             "schema": {
               "type": "string",
               "title": "Batch Id"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -3412,6 +5079,38 @@
               "title": "Outcome"
             },
             "description": "Repeatable, e.g. `?outcome=rejected&outcome=updated`."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -3476,15 +5175,49 @@
         "summary": "Mint an API key",
         "description": "Returns the only copy of the secret that will ever exist. Requires a `registrar` key — including the bootstrap key, which is how the first one is made.",
         "operationId": "create_api_key_v1_admin_api_keys_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ApiKeyIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -3493,6 +5226,162 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiKeyOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/access-audit": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Who was told about which child, and when",
+        "description": "Newest first. Every filter is optional and they compose.\n\n`allowed=false` on its own is the query worth having: a run of refusals against one guardian handle is somebody probing, and it is invisible if only successful reads are looked at.\n\nAppend-only — this service has no route that edits or deletes a row.",
+        "operationId": "read_access_audit_v1_admin_access_audit_get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "One guardian's handle.",
+              "title": "Guardian Id"
+            },
+            "description": "One guardian's handle."
+          },
+          {
+            "name": "student_number",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "One child.",
+              "title": "Student Number"
+            },
+            "description": "One child."
+          },
+          {
+            "name": "allowed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Refusals only with `false`; successes with `true`.",
+              "title": "Allowed"
+            },
+            "description": "Refusals only with `false`; successes with `true`."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccessAuditOut"
+                  },
+                  "title": "Response Read Access Audit V1 Admin Access Audit Get"
                 }
               }
             }
@@ -3637,6 +5526,55 @@
           "is_current"
         ],
         "title": "AcademicYearOut"
+      },
+      "AccessAuditOut": {
+        "properties": {
+          "guardian_id": {
+            "type": "string",
+            "title": "Guardian Id",
+            "description": "The guardian's opaque handle. Never a phone number — the same discipline that put `public_id` on the guardians table in the first place."
+          },
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "ok | no_children | no_link. A closed vocabulary, so a run of refusals can be counted. `no_children` is a handle that reaches nobody this school will talk about; `no_link` is a real parent naming a child who is not hers. The caller was told the same thing either way."
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor",
+            "description": "The API key prefix that asked. Names a caller; cannot authenticate as one."
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "Correlates back to the chat turn that caused this, when the caller supplied one. Empty for a registrar console read, which has no turn behind it."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "guardian_id",
+          "student_number",
+          "allowed",
+          "reason",
+          "actor",
+          "request_id",
+          "at"
+        ],
+        "title": "AccessAuditOut",
+        "description": "One recorded decision."
       },
       "AccessIn": {
         "properties": {
@@ -4057,6 +5995,16 @@
         "title": "ErrorOut",
         "description": "Every failure this service returns, nested under FastAPI's own `detail` key."
       },
+      "Gender": {
+        "type": "string",
+        "enum": [
+          "male",
+          "female",
+          "unspecified"
+        ],
+        "title": "Gender",
+        "description": "The child's sex, as the school recorded it.\n\nClosed, for the reason `RelationshipType` states: this is a field that gets counted,\nand free text tallies \"male\", \"Male\" and \"ذكر\" as three different things.\n\n**`UNSPECIFIED` is a first-class value, not a null.** A school roster arrives with\nthis column blank far more often than not, and every child already on file is in\nexactly this state until a registrar re-uploads. Callers must therefore treat it as\n\"the school has not said\", never as a default sex — a reader that lets `UNSPECIFIED`\nsatisfy a filter for \"her daughters\" will name the wrong child, and a reader that\nexcludes it from both will silently lose half the school.\n\nNo third named sex, and that is a recording decision rather than a claim: this field\nexists to be matched against what a parent typed in a chat message (\"my son\"), and\nthe Egyptian school records it is loaded from carry two values and a blank. A school\nholding richer data would extend this enum, not overload the blank."
+      },
       "GenerateStructureIn": {
         "properties": {
           "academic_year_code": {
@@ -4370,6 +6318,15 @@
           "full_name_en": {
             "type": "string",
             "title": "Full Name En"
+          },
+          "gender": {
+            "$ref": "#/components/schemas/Gender",
+            "default": "unspecified"
+          },
+          "year_level": {
+            "type": "string",
+            "title": "Year Level",
+            "default": ""
           },
           "relationship_type": {
             "$ref": "#/components/schemas/RelationshipType"
@@ -5516,6 +7473,10 @@
           "is_active": {
             "type": "boolean",
             "title": "Is Active"
+          },
+          "gender": {
+            "$ref": "#/components/schemas/Gender",
+            "default": "unspecified"
           },
           "date_of_birth": {
             "anyOf": [

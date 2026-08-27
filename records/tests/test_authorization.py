@@ -8,8 +8,7 @@ Every parent-facing call now carries two credentials: the agent's API key and a
 signed identity token naming the guardian. Tests for the second live in
 `test_identity.py`; these assume it is valid and exercise the link table behind it.
 """
-from records.models import AccessAudit
-from records.tests.conftest import admin_headers, agent_headers
+from records.tests.conftest import agent_headers
 
 
 def test_no_key_is_rejected(client):
@@ -22,24 +21,24 @@ def test_invalid_key_is_rejected(client):
     assert response.status_code == 401
 
 
-def test_admin_key_cannot_read_student_records(client):
-    """Scopes do not nest.
+def test_there_is_no_credential_that_can_grant_access(client):
+    """This service used to have two scopes, and the pairing was the point: an admin key
+    managed links and could not read records, an agent key read records and could not
+    grant itself access.
 
-    The admin key is the one shared with registrars and scripts. If it also read
-    records, the school's most-copied credential would be its most dangerous one.
+    Both halves are gone, and the property is stronger for it. There is no admin scope
+    because there is nothing to administer — guardians and their custody flags are the
+    registrar's, in `sis/` — so the route that once granted access cannot be reached with
+    any credential at all. **410, not 403.** A refusal invites somebody to find the right
+    key; this says the capability does not exist here.
     """
-    response = client.get("/v1/guardians/G-1/students/S-1001/grades", headers=admin_headers())
-    assert response.status_code == 403
-
-
-def test_agent_key_cannot_manage_links(client):
-    """The reverse direction: a leaked agent key must not be able to grant itself access."""
     response = client.post(
         "/v1/admin/guardians/G-2/students",
         headers=agent_headers(),
         json={"student_id": "S-1001", "can_view_records": True},
     )
-    assert response.status_code == 403
+    assert response.status_code == 410
+    assert response.json()["detail"]["code"] == "moved"
 
 
 def test_permitted_guardian_sees_their_child(client):
@@ -91,50 +90,36 @@ def test_denial_reasons_are_indistinguishable_to_the_caller(client):
     assert len({r.json()["detail"]["message"] for r in responses}) == 1
 
 
-def test_denials_are_audited_with_the_real_reason(client, db):
-    """The response hides why; the audit must not."""
-    client.get("/v1/guardians/G-2/students/S-1001/grades", headers=agent_headers("G-2"))
+def test_a_denial_is_not_reported_twice(client, caplog):
+    """An answer about a child belongs to `sis/`, and only to `sis/`.
 
-    row = (
-        db.query(AccessAudit)
-        .filter(AccessAudit.guardian_external_id == "G-2")
-        .order_by(AccessAudit.id.desc())
-        .first()
-    )
-    assert row is not None
-    assert row.allowed is False
-    # `no_children`, not `records_restricted`. Guardian links moved to SIS, which filters
-    # restricted ones out before answering, so a barred parent and an unknown handle now
-    # arrive here identical. That indistinguishability is the point on the *response* side
-    # and a genuine loss on the *audit* side: this service can no longer record which of
-    # the two it was. The reason worth keeping is still recorded — a run of these against
-    # one handle is somebody probing — and the full detail now lives in SIS's own audit.
-    assert row.reason == "no_children"
+    A refused read is recorded there with the reason that was actually true —
+    `no_link` or `no_children` — in a table a school can query. This service must not
+    also emit it: the response deliberately withholds the distinction, and a log line
+    here would both double-count the event and put back the thing the 404 hides.
 
+    What this service does report is everything that never reaches SIS at all — a bad
+    key, an unverifiable token, a guardian mismatch. Those have nowhere else to go.
+    """
+    with caplog.at_level("WARNING"):
+        response = client.get(
+            "/v1/guardians/G-2/students/S-1001/grades", headers=agent_headers("G-2")
+        )
 
-def test_successful_reads_are_audited(client, db):
-    client.get("/v1/guardians/G-1/students/S-1001/grades", headers=agent_headers("G-1"))
-
-    row = (
-        db.query(AccessAudit)
-        .filter(AccessAudit.guardian_external_id == "G-1", AccessAudit.allowed.is_(True))
-        .order_by(AccessAudit.id.desc())
-        .first()
-    )
-    assert row is not None
-    assert row.student_external_id == "S-1001"
-    assert row.reason == "ok"
+    assert response.status_code == 404
+    assert "records.access.refused" not in caplog.text
 
 
-def test_request_id_is_carried_into_the_audit(client, db):
-    """Ties a records read back to the chat turn that caused it."""
-    client.get(
-        "/v1/guardians/G-1/students/S-1001/grades",
-        headers={**agent_headers("G-1"), "X-Request-Id": "turn-abc-123"},
-    )
+def test_a_bad_key_is_reported_because_sis_never_hears_about_it(client, caplog):
+    """The other half of the split, asserted so the two stay distinguishable."""
+    with caplog.at_level("WARNING"):
+        client.get(
+            "/v1/guardians/G-1/students/S-1001/grades",
+            headers={"X-API-Key": "not-the-configured-secret"},
+        )
 
-    row = db.query(AccessAudit).filter(AccessAudit.request_id == "turn-abc-123").first()
-    assert row is not None
+    assert "records.access.refused" in caplog.text
+    assert "not_authorized" in caplog.text
 
 
 def test_the_old_granting_route_is_gone_rather_than_quietly_useless(client):
@@ -147,7 +132,7 @@ def test_the_old_granting_route_is_gone_rather_than_quietly_useless(client):
     """
     refused = client.post(
         "/v1/admin/guardians/G-3/students",
-        headers=admin_headers(),
+        headers=agent_headers("G-1"),
         json={"student_id": "S-2002", "can_view_records": True},
     )
     assert refused.status_code == 410
@@ -162,9 +147,52 @@ def test_link_without_explicit_grant_reveals_nothing(client):
     """A half-finished import must not leak."""
     client.post(
         "/v1/admin/guardians/G-3/students",
-        headers=admin_headers(),
+        headers=agent_headers("G-1"),
         json={"student_id": "S-2002"},
     )
 
     response = client.get("/v1/guardians/G-3/students", headers=agent_headers("G-3"))
     assert response.json()["students"] == []
+
+
+# ---------------------------------------------------------------------------
+# The subject reaches the system of record
+# ---------------------------------------------------------------------------
+#
+# This service decides whether a read may proceed, and it always did. What it did NOT do
+# was tell the system of record which parent it was reading for — the SIS adapter called
+# the registrar-scoped routes, so the answer to "whose child is this" was computed here
+# and then discarded at the last hop.
+#
+# It is carried now, and SIS re-checks it. These assert the carrying, because that is the
+# half that fails silently: if a route stops passing the handle, every one of these
+# suites still passes and the second check quietly stops happening.
+
+
+def test_the_guardian_reaches_the_backend_on_a_grades_read(client, fake_lms):
+    client.get("/v1/guardians/G-1/students/S-1001/grades", headers=agent_headers("G-1"))
+
+    assert fake_lms.asked, "the backend was never asked at all"
+    assert [guardian for _, _, guardian in fake_lms.asked] == ["G-1"]
+
+
+def test_the_guardian_reaches_the_backend_on_an_attendance_read(client, fake_lms):
+    client.get(
+        "/v1/guardians/G-1/students/S-1001/attendance", headers=agent_headers("G-1")
+    )
+
+    assert fake_lms.asked, "the backend was never asked at all"
+    assert all(guardian == "G-1" for _, _, guardian in fake_lms.asked)
+
+
+def test_the_guardian_sent_is_the_signed_one_not_the_one_in_the_path(client, fake_lms):
+    """The path is a URL; the claim is a signature.
+
+    A mismatch is refused outright, so what this pins is that the value handed onward is
+    the one that was *proved* — not the one a caller typed. If these ever diverged, a
+    compromised caller could satisfy this service with a real token and still name
+    somebody else downstream.
+    """
+    client.get("/v1/guardians/G-2/students/S-1001/grades", headers=agent_headers("G-1"))
+
+    assert fake_lms.asked == [], "a mismatched request reached the system of record"

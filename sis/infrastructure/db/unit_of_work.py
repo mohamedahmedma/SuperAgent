@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from sis.application.ports.repositories import (
         AcademicYearRepository,
         AttendanceRepository,
+        AccessAuditRepository,
         ApiKeyRepository,
         ClassSectionRepository,
         EnrolmentRepository,
@@ -68,6 +69,7 @@ _REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset(
         "attendance",
         "imports",
         "api_keys",
+        "access_audit",
     }
 )
 
@@ -95,6 +97,7 @@ class SqlAlchemyUnitOfWork:
     attendance: AttendanceRepository
     imports: ImportBatchRepository
     api_keys: ApiKeyRepository
+    access_audit: AccessAuditRepository
 
     def __init__(
         self,
@@ -194,6 +197,7 @@ class SqlAlchemyUnitOfWork:
         self.attendance = repo.SqlAlchemyAttendanceRepository(session)
         self.imports = repo.SqlAlchemyImportBatchRepository(session)
         self.api_keys = repo.SqlAlchemyApiKeyRepository(session)
+        self.access_audit = repo.SqlAlchemyAccessAuditRepository(session)
 
     def _unbind(self) -> None:
         """Drop the repositories so a closed unit of work cannot still be written through."""

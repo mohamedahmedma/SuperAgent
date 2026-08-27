@@ -33,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from sis.config import get_settings
 from sis.env import load_env
 
 # Before anything reads the environment. `sis.config` memoises its settings on
@@ -406,9 +407,31 @@ def _configure_cors(app: FastAPI) -> None:
     log.info("CORS enabled for: %s", ", ".join(origins))
 
 
+def warn_if_bootstrap_key_is_set() -> None:
+    """Say so, loudly, while `SIS_BOOTSTRAP_REGISTRAR_KEY` is configured.
+
+    The bootstrap key exists to solve one chicken-and-egg: a registrar key is needed to
+    mint a registrar key. It is estate-wide, it is not stored, it is not scoped to a
+    school, and it cannot be revoked from the API — only by editing the environment and
+    restarting.
+
+    All of which is fine for the ten minutes of first setup and wrong for everything
+    after. Left set, it is a permanent full-registrar credential sitting in an env file,
+    outside the `api_keys` table an operator would think to audit. Nothing else reports
+    that, so this does.
+    """
+    if get_settings().bootstrap_registrar_key:
+        log.warning(
+            "SIS_BOOTSTRAP_REGISTRAR_KEY is set. This is a full registrar credential for "
+            "every school, it is not in the api_keys table, and it cannot be revoked "
+            "through the API. Mint a stored key and unset it once setup is done."
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     verify_database_is_migrated()
+    warn_if_bootstrap_key_is_set()
     yield
 
 
@@ -437,4 +460,10 @@ app = create_app()
 # app — the one a reader of this file would edit — is dead code that still shows up twice
 # in the generated OpenAPI contract.
 
-__all__ = ["app", "create_app", "lifespan", "verify_database_is_migrated"]
+__all__ = [
+    "app",
+    "create_app",
+    "lifespan",
+    "verify_database_is_migrated",
+    "warn_if_bootstrap_key_is_set",
+]

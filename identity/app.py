@@ -184,10 +184,23 @@ def _configure_guardians() -> None:
             "directory and every parent will be told their number is not registered."
         )
         return
-    guardians.set_directory(
-        guardians.SisGuardianDirectory(
-            base_url=base_url, api_key=os.getenv("IDENTITY_SIS_API_KEY") or ""
+
+    api_key = os.getenv("IDENTITY_SIS_API_KEY") or ""
+    if not api_key:
+        # Demanded at startup rather than discovered at the first sign-in. SIS
+        # authenticates every caller now, so an unkeyed directory does not degrade — it
+        # gets a 401 for every parent, which reads downstream as "the school has no such
+        # number" and tells every family in the school they are not registered.
+        #
+        # A `reader` key, deliberately not a registrar one: this service asks whether a
+        # number belongs to a parent and never writes a thing.
+        raise RuntimeError(
+            "IDENTITY_SIS_BASE_URL is set without IDENTITY_SIS_API_KEY. SIS authenticates "
+            "its callers; mint a reader-scoped key there and set it here."
         )
+
+    guardians.set_directory(
+        guardians.SisGuardianDirectory(base_url=base_url, api_key=api_key)
     )
 
 

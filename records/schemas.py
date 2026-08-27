@@ -63,7 +63,7 @@ class TermOut(BaseModel):
     starts_on: datetime
     ends_on: datetime
     is_closed: bool = Field(
-        description="Closed terms are served from frozen report cards, not recomputed."
+        description="Whether the school has closed this term to further marking."
     )
     is_current: bool = False
 
@@ -228,20 +228,6 @@ class AttendanceSummaryOut(BaseModel):
     as_of: datetime
 
 
-class ReportCardOut(BaseModel):
-    """A published snapshot. Never recomputed on read."""
-
-    student: StudentRef
-    term: TermOut
-    version: int
-    published_at: datetime
-    is_superseded: bool = False
-    payload: dict = Field(
-        default_factory=dict,
-        description="The frozen figures exactly as published.",
-    )
-
-
 class StudentListOut(BaseModel):
     """The students one guardian is permitted to ask about.
 
@@ -275,56 +261,14 @@ class ErrorOut(BaseModel):
 # ---------------------------------------------------------------------------
 # Admin-side write shapes. Separate scope, separate key, never reachable with an
 # agent key — see records.auth.
+#
+# `GuardianIn` and `GuardianLinkIn` used to live here. They described writes this service
+# no longer accepts: guardians and their custody flags are the registrar's, entered in
+# `sis/`, and the routes that took these shapes answer 410 naming where they went. The
+# schemas outlived the routes by exactly as long as nobody looked.
 # ---------------------------------------------------------------------------
 
-
-class GuardianIn(BaseModel):
-    external_id: str
-    full_name_ar: str = ""
-    full_name_en: str = ""
-    phone: str = ""
-    email: str = ""
-    preferred_language: str = "ar"
-
-
-class GuardianLinkIn(BaseModel):
-    """Linking a guardian to a student.
-
-    `can_view_records` defaults to False so that creating the link is not, by itself,
-    a grant. Records access is an explicit act with a reason attached.
-    """
-
-    student_id: str
-    relationship_type: str = "parent"
-    can_view_records: bool = False
-    restriction_note: str = ""
-
-
-class ApiKeyIn(BaseModel):
-    label: str
-    scope: str = Field(default="agent", description="agent | admin")
-    expires_in_days: int | None = None
-
-
-class ApiKeyOut(BaseModel):
-    """The only response that ever contains the secret, and only at creation."""
-
-    prefix: str
-    label: str
-    scope: str
-    api_key: str | None = Field(
-        default=None,
-        description="Full secret. Shown once, at creation, and never recoverable.",
-    )
-    expires_at: datetime | None = None
-
-
-class AuditEntryOut(BaseModel):
-    guardian_id: str = ""
-    student_id: str = ""
-    endpoint: str = ""
-    allowed: bool = False
-    reason: str = ""
-    api_key_prefix: str = ""
-    request_id: str = ""
-    created_at: datetime
+# `ApiKeyIn`, `ApiKeyOut` and `AuditEntryOut` used to be here. Their routes are gone with
+# the tables behind them: this service mints no credentials — its own is one secret in the
+# environment, see `records.auth` — and the access audit is kept by `sis/`, where the
+# decision it records is actually made.

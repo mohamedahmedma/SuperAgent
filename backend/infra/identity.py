@@ -1,75 +1,47 @@
-"""Verifying identity tokens minted by the identity service.
+"""This backend's identity configuration. The verification itself lives in `schoolauth`.
 
-Deliberately a near-copy of `records/identity.py` rather than a shared import. The two
-services must be deployable and replaceable independently, and a shared auth library
-is the seam through which that independence quietly disappears — one repo, one version
-bump, three services that have to ship together. Forty lines duplicated across a
-service boundary is the cheaper mistake.
+This file used to say it was "deliberately a near-copy of `records/identity.py` rather
+than a shared import", on the grounds that a shared auth library is the seam through which
+independent deployability quietly disappears. The concern was right; the conclusion was
+not. What was duplicated was a JWKS cache, an RS256 decode and two exception types — none
+of which is a *policy* either service owns, and both copies had already drifted: this one
+fetched with `requests`, the other with `httpx`, and only one of them re-read the pinned
+PEM on every call.
+
+So the split is now by what actually differs. `schoolauth` holds the mechanism and reads
+no environment at all. This module holds the one thing that is genuinely this process's
+own — the issuer and audience it expects — and it is still free to differ from every other
+service's, which is what independent deployability actually required.
 
 Verification is **offline**: this process holds a public key and checks a signature. It
-never calls the identity service per request, so identity being down does not stop
-anyone using a chat session they are already signed in to, and identity is not in the
-latency path of every message.
+never calls the identity service per request, so identity being down does not stop anyone
+using a chat session they are already signed in to.
 
-It **fails closed**. With no verification material configured, authentication fails
-rather than falling back to anything.
+It **fails closed**. With no verification material configured, authentication fails rather
+than falling back to anything.
 """
-import logging
 import os
-import threading
-import time
 
-from jose import JWTError, jwt
+from schoolauth import IdentityConfig, IdentityError, IdentityNotConfigured
+from schoolauth import verify_token as _verify_token
 
-logger = logging.getLogger(__name__)
-
+# Module constants, captured at import. `tests/test_backend_auth.py` reads them back to
+# mint tokens the running configuration will actually accept, and `tests/test_e2e_api.py`
+# copies them onto the identity service so the two agree regardless of collection order.
 ISSUER = os.getenv("IDENTITY_ISSUER", "school-identity")
 AUDIENCE = os.getenv("IDENTITY_AUDIENCE", "school-services")
 JWKS_URL = os.getenv("IDENTITY_JWKS_URL", "")
 JWKS_TTL_SECONDS = int(os.getenv("IDENTITY_JWKS_TTL_SECONDS") or 600)
 
 
-class IdentityError(RuntimeError):
-    """Token missing, malformed, expired, or not signed by the identity service."""
-
-
-class IdentityNotConfigured(RuntimeError):
-    """No verification material available. Fail closed, never fall back."""
-
-
-_lock = threading.Lock()
-_cached_jwks: dict | None = None
-_cached_at: float = 0.0
-
-
-def _fetch_jwks() -> dict:
-    global _cached_jwks, _cached_at
-
-    with _lock:
-        if _cached_jwks is not None and (time.monotonic() - _cached_at) < JWKS_TTL_SECONDS:
-            return _cached_jwks
-
-        if not JWKS_URL:
-            raise IdentityNotConfigured(
-                "Neither IDENTITY_PUBLIC_KEY_PEM nor IDENTITY_JWKS_URL is set."
-            )
-
-        import requests
-
-        try:
-            response = requests.get(JWKS_URL, timeout=5.0)
-            response.raise_for_status()
-            _cached_jwks = response.json()
-            _cached_at = time.monotonic()
-            return _cached_jwks
-        except Exception as exc:
-            # A stale key is still a valid key. Serving from cache through an identity
-            # outage is the difference between "grades unavailable" and "nobody can use
-            # the assistant at all". Only a cold cache is fatal.
-            if _cached_jwks is not None:
-                logger.warning("JWKS refresh failed, using cached keys: %s", exc)
-                return _cached_jwks
-            raise IdentityNotConfigured(f"Could not fetch JWKS: {exc}") from exc
+def _config() -> IdentityConfig:
+    """Built per call, so reassigning `ISSUER` on this module still takes effect."""
+    return IdentityConfig(
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        jwks_url=JWKS_URL,
+        jwks_ttl_seconds=JWKS_TTL_SECONDS,
+    )
 
 
 def verify_token(token: str) -> dict:
@@ -78,13 +50,15 @@ def verify_token(token: str) -> dict:
     `audience` and `issuer` are checked, not just the signature — without the audience
     check, a token minted for one service is replayable against another.
     """
-    if not token:
-        raise IdentityError("Missing token.")
+    return _verify_token(token, _config())
 
-    pem = os.getenv("IDENTITY_PUBLIC_KEY_PEM")
-    key = pem if pem else _fetch_jwks()
 
-    try:
-        return jwt.decode(token, key, algorithms=["RS256"], audience=AUDIENCE, issuer=ISSUER)
-    except JWTError as exc:
-        raise IdentityError(str(exc)) from exc
+__all__ = [
+    "AUDIENCE",
+    "ISSUER",
+    "JWKS_TTL_SECONDS",
+    "JWKS_URL",
+    "IdentityError",
+    "IdentityNotConfigured",
+    "verify_token",
+]

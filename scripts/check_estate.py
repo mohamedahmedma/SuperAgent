@@ -180,13 +180,23 @@ section("5. Can identity resolve that number to a parent?")
 # --------------------------------------------------------------------------
 if guardian_phone:
     try:
+        # SIS authenticates every caller. Reading `SIS_API_KEY` rather than skipping the
+        # header means this check fails when the key is wrong — which is the whole point,
+        # since a wrong key here looks downstream like "the school has no such number".
         resolved = httpx.post(
-            f"{SIS}/v1/guardians/resolve", json={"phone": guardian_phone}, timeout=6
+            f"{SIS}/v1/guardians/resolve",
+            json={"phone": guardian_phone},
+            headers={"X-API-Key": (os.getenv("SIS_API_KEY") or "").strip()},
+            timeout=6,
         )
         if resolved.status_code == 200:
             handle = resolved.json().get("public_id", "")
             report(OK, "sis resolves the number to a guardian handle", handle)
-            kids = httpx.get(f"{SIS}/v1/guardians/by-id/{handle}/students", timeout=6).json()
+            kids = httpx.get(
+                f"{SIS}/v1/guardians/by-id/{handle}/students",
+                headers={"X-API-Key": (os.getenv("SIS_API_KEY") or "").strip()},
+                timeout=6,
+            ).json()
             for child in kids.get("students", []):
                 report(OK, f"  child: {child.get('full_name_ar') or child.get('full_name_en')}",
                        f"gender={child.get('gender')}  year={child.get('year_level') or '(none)'}")
@@ -213,18 +223,32 @@ cloud = {
         "IDENTITY_WHATSAPP_VERIFY_TOKEN",
     )
 }
+# The app secret is the one that is legitimately blank: unset means identity skips the
+# signature check and accepts the delivery, which is how the flow is tested before the
+# real secret is in place. Reported as a warning on its own rather than counted as
+# missing, because "you chose this" and "you forgot this" deserve different words.
+signing = cloud.pop("IDENTITY_WHATSAPP_APP_SECRET")
 missing = [name for name, value in cloud.items() if not value]
 
-if missing == list(cloud):
+if missing == list(cloud) and not signing:
     report(WARN, "Cloud API is not configured — real phones cannot sign in",
            "This is the only part a laptop cannot fake. Until it is set up, use "
            "scripts/simulate_whatsapp.py, which posts the webhook Meta would post.")
 elif missing:
     report(BAD, f"Cloud API is half configured — missing {', '.join(missing)}",
-           "All four are needed: two to send, one to prove an inbound webhook is really "
-           "Meta, one for the subscription handshake.")
+           "Sending needs the phone number id and the token; the subscription handshake "
+           "needs the verify token.")
 else:
-    report(OK, "all four Cloud API settings are present")
+    report(OK, "Cloud API can send: phone number id, token and verify token are set")
+
+if not signing:
+    report(WARN, "webhook signatures are NOT being verified",
+           "IDENTITY_WHATSAPP_APP_SECRET is blank, so identity accepts any caller that "
+           "reaches the webhook URL — including one claiming any phone number sent the "
+           "code phrase. Fine while testing; set it (App settings -> Basic -> App Secret) "
+           "before this URL is reachable by anyone else.")
+else:
+    report(OK, "webhook signatures are verified")
     # Ask Meta whether the credentials actually work. A token that has expired, or a
     # phone number id from a different WABA, looks identical to a correct one in .env.
     try:

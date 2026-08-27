@@ -3,7 +3,7 @@
 This file used to test aggregation: turning a list of assignments into a subject
 percentage. That code is gone, and so are those tests. The system of record computes
 the figure now, applying weights, drop-lowest and exclusions, and the equivalent
-assertions live where the arithmetic does — `moodle-plugin/schoolapi/tests/`.
+assertions belong where the arithmetic does — inside the gradebook, not here.
 
 What is left is the half a school owns rather than a gradebook: what a number MEANS.
 Two schools reading 82% will disagree about whether it is a B or a B+, and neither is
