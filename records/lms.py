@@ -113,21 +113,6 @@ class SubjectAttendance:
 
 
 class LmsAdapter(Protocol):
-    #: Does this backend name its own subjects?
-    #:
-    #: `False` for a backend whose course list is flat and whose titles are whatever a
-    #: teacher typed — the school decides what each course *is* and whether a parent may
-    #: see it, and `CourseBinding` is where it says so.
-    #:
-    #: `True` for a system of record that already stores marks against the school's own
-    #: subject codes. Requiring bindings there would mean re-entering the curriculum into
-    #: this service, which is supposed to hold no data of its own, and dropping every
-    #: subject until somebody did.
-    #:
-    #: Declared on the port rather than discovered with `isinstance`, so a route asks what
-    #: a backend can do instead of which class it happens to be.
-    reports_own_subjects: bool = False
-
     """What the facade needs from a system of record. Nothing more.
 
     Both calls take the SCHOOL's student reference — the number on a letter home — not
@@ -173,9 +158,6 @@ class LmsAdapter(Protocol):
 
 @dataclass
 class FakeLms:
-    #: Bindings apply — the fixture exists to exercise that path.
-    reports_own_subjects = False
-
     """Deterministic fixtures, so the service and its tests need no live LMS.
 
     Also the reference for what a correct adapter returns — particularly a subject

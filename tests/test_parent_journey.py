@@ -80,8 +80,10 @@ SIS_REGISTRAR_KEY = "journey-registrar"
 ENVIRONMENT = {
     "SIS_DATABASE_URL": f"sqlite:///{_TMP}/sis.db",
     "SIS_DEFAULT_COUNTRY_CODE": "+20",
-    "RECORDS_DATABASE_URL": f"sqlite:///{_TMP}/records.db",
-    "RECORDS_BOOTSTRAP_ADMIN_KEY": "journey-records-admin",
+    # No RECORDS_DATABASE_URL: the facade holds no database at all. Its one credential is
+    # this secret, read per request from the environment by both sides — the backend sends
+    # it, records compares against it.
+    "RECORDS_API_KEY": "journey-records-agent",
     "RECORDS_LMS": "sis",
     "SIS_BASE_URL": f"http://127.0.0.1:{SIS_PORT}",
     "SIS_API_KEY": "journey-reader",
@@ -320,19 +322,18 @@ def _own_the_environment():
     reads `RECORDS_LMS` and `SIS_BASE_URL` when its app starts up, so a leaked value
     silently swaps its fake adapter for a real HTTP client.
 
-    The engines are dropped as well as the variables set. All three services memoise an
-    engine built from their own variable, so resetting one leaves the other two serving
-    whichever database their own suite bound them to.
+    The engines are dropped as well as the variables set. `sis/` and `identity/` each
+    memoise an engine built from their own variable, so resetting one leaves the other
+    serving whichever database its own suite bound it to. `records/` needs no reset: it
+    holds no database at all.
     """
     import identity.db
-    import records.db
     from sis.config import reset_settings_cache
     from sis.infrastructure.db.session import reset_engine
 
     def _drop_engines() -> None:
         reset_settings_cache()
         reset_engine()
-        records.db.reset_engine()
         identity.db.reset_engine()
 
     previous = {key: os.environ.get(key) for key in ENVIRONMENT}
@@ -454,15 +455,13 @@ def identity(gateway):
 
 @pytest.fixture(scope="session")
 def agent_key() -> str:
-    """An agent-scoped key for records/, minted the way the chat backend's would be."""
-    response = httpx.post(
-        f"http://127.0.0.1:{RECORDS_PORT}/v1/admin/api-keys",
-        headers={"X-API-Key": "journey-records-admin"},
-        json={"label": "chat backend", "scope": "agent"},
-        timeout=10,
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["api_key"]
+    """The credential the chat backend presents to `records/`.
+
+    Configuration rather than a minted row: `records/` holds no database, so there is no
+    key table to insert into and no admin route to insert through. Both sides read the
+    same variable — the backend to send it, `records/` to compare against it.
+    """
+    return ENVIRONMENT["RECORDS_API_KEY"]
 
 
 @pytest.fixture()
@@ -827,15 +826,25 @@ class TestWhatAParentCannotRead:
 
         assert refused.status_code == 401
 
-    def test_a_parent_token_cannot_reach_the_admin_routes(
+    def test_the_route_that_granted_access_cannot_be_reached_at_all(
         self, identity, gateway, agent_key
     ):
+        """It used to be refused by scope. It is now gone, which is stronger.
+
+        Granting a guardian access to a child is the registrar's act and lives in `sis/`.
+        A 403 would invite somebody to look for the right key; 410 says there is no key,
+        and names where the capability went.
+        """
         session = _sign_in(identity, gateway, MOTHER_WA)
 
         with _parent_client(session["access_token"], agent_key) as parent:
-            refused = parent.post("/v1/admin/api-keys", json={"label": "mine", "scope": "admin"})
+            refused = parent.post(
+                "/v1/admin/guardians/G-1/students",
+                json={"student_id": "S001", "can_view_records": True},
+            )
 
-        assert refused.status_code in (401, 403)
+        assert refused.status_code == 410
+        assert refused.json()["detail"]["code"] == "moved"
 
 
 class TestWhenSomethingIsDown:

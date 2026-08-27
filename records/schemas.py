@@ -268,32 +268,7 @@ class ErrorOut(BaseModel):
 # schemas outlived the routes by exactly as long as nobody looked.
 # ---------------------------------------------------------------------------
 
-
-class ApiKeyIn(BaseModel):
-    label: str
-    scope: str = Field(default="agent", description="agent | admin")
-    expires_in_days: int | None = None
-
-
-class ApiKeyOut(BaseModel):
-    """The only response that ever contains the secret, and only at creation."""
-
-    prefix: str
-    label: str
-    scope: str
-    api_key: str | None = Field(
-        default=None,
-        description="Full secret. Shown once, at creation, and never recoverable.",
-    )
-    expires_at: datetime | None = None
-
-
-class AuditEntryOut(BaseModel):
-    guardian_id: str = ""
-    student_id: str = ""
-    endpoint: str = ""
-    allowed: bool = False
-    reason: str = ""
-    api_key_prefix: str = ""
-    request_id: str = ""
-    created_at: datetime
+# `ApiKeyIn`, `ApiKeyOut` and `AuditEntryOut` used to be here. Their routes are gone with
+# the tables behind them: this service mints no credentials — its own is one secret in the
+# environment, see `records.auth` — and the access audit is kept by `sis/`, where the
+# decision it records is actually made.

@@ -73,21 +73,29 @@ this decision: the LMS is never asked about a student the link check excluded.
 ```bash
 pip install -r records/requirements.txt
 python -m records.export_openapi              # regenerate the contract
-RECORDS_BOOTSTRAP_ADMIN_KEY=... uvicorn records.app:app --port 8100
+RECORDS_API_KEY=... uvicorn records.app:app --port 8100
 pytest records/tests -q
 ```
 
+**There is no database, and no migration to run before starting.** Every fact this service
+serves is asked for at request time, so its entire configuration is who to ask and what
+credentials to ask with.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `RECORDS_DATABASE_URL` | `sqlite:///./records.db` | Point at Postgres for real data. |
-| `RECORDS_LMS` | `fake` | `fake`, `moodle`, or `sis` (the school's own SIS on :8300). |
-| `RECORDS_BOOTSTRAP_ADMIN_KEY` | — | Mints the first admin key, once. |
+| `RECORDS_API_KEY` | — | **Required.** The secret the chat backend presents. Fails closed: unset means every request is refused, not admitted. |
+| `RECORDS_LMS` | `fake` | `fake`, or `sis` (the school's own SIS on :8300). |
 | `IDENTITY_JWKS_URL` | — | **Required.** e.g. `http://localhost:8200/.well-known/jwks.json`. |
 | `IDENTITY_PUBLIC_KEY_PEM` | — | A pinned key instead of JWKS. Takes precedence. |
 | `IDENTITY_ISSUER` / `IDENTITY_AUDIENCE` | `school-identity` / `school-services` | Must match the identity service. |
-| `MOODLE_BASE_URL` / `MOODLE_TOKEN` | — | Required when `RECORDS_LMS=moodle`. |
-| `SIS_BASE_URL` / `SIS_API_KEY` | — | Required when `RECORDS_LMS=sis`. The key must be `reader`-scoped. |
+| `SIS_BASE_URL` / `SIS_API_KEY` | — | Required when `RECORDS_LMS=sis`. The key must be `reader`-scoped, and the service refuses to start with a base URL and no key. |
 | `SIS_TIMEOUT_SECONDS` | `10` | Per-call ceiling. No retries: a retry budget multiplies it. |
+
+`RECORDS_API_KEY` is one shared secret rather than a row in a key table, which is what a
+service holding no state can verify. It buys rotation-by-restart and no revocation list —
+the trade for holding nothing. Minting short-lived service tokens in `identity/` and
+verifying them offline through `schoolauth` is the upgrade path, and `records.auth` is
+shaped so that swapping it changes one function.
 
 ## The contract
 
@@ -103,12 +111,15 @@ GET  /v1/guardians/{gid}/students/{sid}/grades/{course_id}
 GET  /v1/guardians/{gid}/students/{sid}/attendance?term=
 ```
 
-Admin routes (`/v1/admin/...`) mint keys and read the audit. The three that used to manage
-guardians and links answer **410**, naming the SIS routes that replaced them — a 404 would
-read as "wrong URL" and invite a retry, and accepting the write silently would leave a
-registrar believing a parent had been granted access when nobody had. **Scopes do not
-nest**: an admin key cannot read a student record, and an agent key cannot grant
-itself access. Making admin a superset would mean the school's most widely copied
+`/v1/admin/...` holds three routes and all three answer **410**, naming the SIS routes that
+replaced them. A 404 would read as "wrong URL" and invite a retry; accepting the write
+silently would leave a registrar believing a parent had been granted access when nobody
+had. They take no credential — they carry no data, and a caller who cannot authenticate is
+exactly the one most in need of being told the route moved.
+
+There is no key-minting route and no audit route. This service mints no credentials, and
+the access audit is kept by `sis/`, where the decision it records is made:
+`GET /v1/admin/access-audit`. Making admin a superset would mean the school's most widely copied
 credential is also the one that reads every record.
 
 Two conventions in every response, both defences against a model reading a record wrong:
@@ -139,8 +150,10 @@ These are the ones that are cheap now and brutal to retrofit once real data land
   parents, so a teacher's sandbox cannot reach a rollup. Unused on the SIS path, which
   reports its own subjects against the school's own codes — and kept for exactly that
   reason, since it is what a *different* system of record would need.
-- **The audit is append-only.** No code path updates or deletes a row; admin exposes read
-  only. Denials are logged as loudly as successes — a run of them is how probing shows up.
+- **The audit belongs to the decision.** `sis/` records every answer about a child,
+  allowed or refused, with the reason that was really true. What this service reports is
+  only what never reaches SIS — a bad key, an unverifiable token, a guardian mismatch —
+  as structured log lines, because those have nowhere else to be recorded.
 
 ## What is not built yet
 

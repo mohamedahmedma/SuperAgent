@@ -46,3 +46,6 @@ records.db
 
 # Vite dependency-optimisation cache for the SIS console.
 sis/frontend/.vite/
+
+# Database backups taken before a migration. Local safety copies, never shared.
+sis.db.backup-*

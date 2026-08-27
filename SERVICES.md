@@ -82,12 +82,12 @@ without.
 IDENTITY_ADMIN_KEY=dev-admin-key uvicorn identity.app:app --port 8200
 
 # 2. records   :8100
-RECORDS_BOOTSTRAP_ADMIN_KEY=dev-records-admin \
+RECORDS_API_KEY=dev-records-agent \
 IDENTITY_JWKS_URL=http://localhost:8200/.well-known/jwks.json \
   uvicorn records.app:app --port 8100
 
 # 3. backend   :8000
-RECORDS_BASE_URL=http://localhost:8100 RECORDS_API_KEY=<agent key> \
+RECORDS_BASE_URL=http://localhost:8100 RECORDS_API_KEY=dev-records-agent \
   uvicorn backend.app:app --port 8000
 
 # 4. sis       :8300  (only when RECORDS_LMS=sis)
@@ -173,11 +173,6 @@ the registrar's fact. Setup, and the reason the number must carry its `+`, are i
 ## First-run setup
 
 ```bash
-# An agent-scoped key for the chat backend. The secret is shown once.
-curl -X POST localhost:8100/v1/admin/api-keys \
-  -H "X-API-Key: dev-records-admin" \
-  -d '{"label":"chat backend","scope":"agent"}'
-
 # A parent login, then the binding that makes it a guardian. Two calls on purpose.
 curl -X POST localhost:8200/v1/admin/accounts \
   -H "X-Admin-Key: dev-admin-key" \
@@ -188,8 +183,11 @@ curl -X PUT localhost:8200/v1/admin/accounts/0501234567/guardian-binding \
   -d '{"guardian_external_id":"G-1"}'
 ```
 
-Then link the guardian to a student in records (`POST /v1/admin/guardians/G-1/students`
-with `can_view_records: true` — it defaults to false), and bind the courses.
+Then link the guardian to a student **in `sis/`** — upload a guardians sheet, or
+`PATCH /v1/students/{student_number}/guardians/{phone}` with `can_view_records: true`.
+
+`records/` needs nothing set up. It has no database, mints no keys and holds no rows: its
+credential is `RECORDS_API_KEY` in the environment, the same value the chat backend sends.
 
 ## Enabling the tool
 

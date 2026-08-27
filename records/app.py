@@ -31,7 +31,6 @@ from records.env import load_env
 # process, so nothing else has loaded the project's `.env` for it.
 load_env()
 
-from records.db import init_db, new_session
 from records.routes import admin_router, agent_router
 from records.sis_adapter import SisAdapter
 
@@ -124,18 +123,17 @@ def _configure_adapter() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    """Choose what this process talks to. There is nothing to open.
 
-    from records.auth import bootstrap_admin_key
+    This used to create tables and mint a first admin key into them. Both are gone with
+    the storage: the facade holds no guardian links, no API keys and no audit rows, so
+    there is no schema to create and no first row to seed. `records/auth.py` compares the
+    presented key against `RECORDS_API_KEY` directly, and the audit went to `sis/` with
+    the decision it records — a service that no longer decides has nothing to attest.
 
-    db = new_session()
-    try:
-        bootstrap_admin_key(db)
-    finally:
-        db.close()
-
-    # Order matters: the LMS adapter is handed the calendar, so the calendar is
-    # chosen first.
+    What remains is composition, and the ORDER of it matters: the LMS adapter is handed
+    the calendar, so the calendar is chosen first.
+    """
     _configure_guardian_directory()
     _configure_adapter()
     yield

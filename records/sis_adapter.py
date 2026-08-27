@@ -89,11 +89,6 @@ class SisAdapter:
     a window in which a corrected mark is stale for a parent already on the phone.
     """
 
-    #: SIS stores marks against the school's own subject codes, per term, so it already
-    #: knows which subjects a child takes and what each is called in both scripts. There
-    #: is no flat course list to disambiguate and no `CourseBinding` to consult.
-    reports_own_subjects = True
-
     #: Connections held open to the SIS. Sized for concurrent parents in one worker, not
     #: for throughput — a pool larger than the SIS's own worker count only queues.
     POOL_SIZE = 10

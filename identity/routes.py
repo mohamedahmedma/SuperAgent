@@ -523,7 +523,17 @@ async def receive_whatsapp_webhook(
     for only some parents, which is the worst way to find out.
     """
     raw = await request.body()
-    if not wa.signature_is_valid(
+    if not wa.get_app_secret():
+        # Unsigned deliveries are being accepted. Logged on EVERY message rather than once
+        # at startup, because this is the state that must not persist unnoticed: without
+        # the secret, anyone who finds this URL can claim any phone number sent the code
+        # phrase, and sign in as that parent.
+        logger.warning(
+            "Accepting an unverified WhatsApp webhook: IDENTITY_WHATSAPP_APP_SECRET is "
+            "not set, so the sender cannot be proved to be Meta. Fine while testing; set "
+            "it (App settings -> Basic -> App Secret) before anyone else can reach this."
+        )
+    elif not wa.signature_is_valid(
         raw_body=raw,
         header=request.headers.get("X-Hub-Signature-256"),
         app_secret=wa.get_app_secret(),

@@ -27,7 +27,9 @@ REM Every service now reads .env for itself (identity/env.py, records/env.py,
 REM sis/env.py, backend/env.py). Nothing is set here any more, deliberately: a variable
 REM exported in this window BEATS the file, so the keys that used to be pinned here won
 REM silently over whatever .env said — which is how records came to hold a bootstrap
-REM admin key that nobody had written down and nobody could use.
+REM admin key that nobody had written down and nobody could use. That key is gone with
+REM the table behind it; records now has one credential, RECORDS_API_KEY, and it is the
+REM same value the chat backend sends.
 REM
 REM Configure the estate in .env. This file only starts processes.
 

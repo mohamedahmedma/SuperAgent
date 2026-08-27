@@ -7,10 +7,12 @@ a parent; a percentage becomes a letter according to school policy. Routes orche
 the LMS reports, and the decisions in between live here where they can be read in one
 place and tested without a database or a network.
 
-**It is the security-relevant step.** Matching LMS subjects against published bindings
-is what stops a teacher's sandbox course appearing on a report. Doing that in a route,
-between other work, is how it eventually gets skipped in the one route somebody adds
-later.
+**The drop that keeps a teacher's sandbox off a report has moved upstream.** This layer
+used to match reported subjects against a table of published course bindings, because a
+flat course list with free-text idnumbers gave it no other way to tell a real subject from
+somebody's scratch course. The system of record stores marks against the school's own
+subject codes now, so a subject it reports for a child in a term is one the school entered
+against her — there is nothing to match and nothing to drop.
 
 **It has no I/O**, so every rule below is testable as a pure function.
 
@@ -20,39 +22,12 @@ from __future__ import annotations
 
 from records.grading import DEFAULT_POLICY, GradingPolicy
 from records.lms import SubjectAttendance, SubjectGrade
-from records.models import CourseBinding
 from records.schemas import (
     AcademicGrade,
     AttendanceDay,
     CourseGrade,
     GradeCategory,
 )
-
-
-def term_prefix(term_code: str) -> str:
-    """The course-idnumber prefix identifying a term, e.g. "2026-T1" -> "2026-T1-".
-
-    One function because the convention is load-bearing: it is how the LMS narrows a
-    query, how bindings are matched, and how a term's courses are told apart. Spelling
-    it inline in three places is how the trailing hyphen goes missing in one of them and
-    "2026-T1" starts matching "2026-T10".
-    """
-    return f"{term_code}-"
-
-
-def _index_bindings(bindings: list[CourseBinding]) -> dict[str, CourseBinding]:
-    """Bindings keyed by the reference the LMS reports.
-
-    Keyed on `lms_idnumber` first because that is the school's own course key and what
-    the plugin returns; the numeric course id is the fallback for a binding recorded
-    before idnumbers were in use.
-    """
-    index: dict[str, CourseBinding] = {}
-    for binding in bindings:
-        if binding.lms_idnumber:
-            index[str(binding.lms_idnumber)] = binding
-        index.setdefault(str(binding.lms_course_id), binding)
-    return index
 
 
 class GradeAssembler:
@@ -65,49 +40,22 @@ class GradeAssembler:
     def __init__(self, policy: GradingPolicy | None = None):
         self.policy = policy or DEFAULT_POLICY
 
-    def assemble(
-        self, subjects: list[SubjectGrade], bindings: list[CourseBinding]
-    ) -> list[CourseGrade]:
-        """Match reported subjects to published bindings and map them.
+    def assemble(self, subjects: list[SubjectGrade]) -> list[CourseGrade]:
+        """Map the subjects the system of record reported, all of them.
 
-        A subject with no published binding is DROPPED, silently and deliberately. The
-        LMS answers for every course a student is enrolled in; the school decides which
-        of those a parent may see. A teacher's sandbox, a course still being built, a
-        subject whose grades are not yet released — each is a real reason a course
-        exists in the LMS and has no business on a report.
-
-        The drop is not an error. There is nothing for a parent to be told about a
-        course they were never meant to know exists.
-        """
-        index = _index_bindings(bindings)
-
-        assembled: list[CourseGrade] = []
-        for subject in subjects:
-            binding = index.get(subject.course_ref)
-            if binding is None:
-                continue
-            assembled.append(self._to_course_grade(subject, binding))
-        return assembled
-
-    def assemble_unbound(self, subjects: list[SubjectGrade]) -> list[CourseGrade]:
-        """Map subjects a backend has already identified, with no binding table.
-
-        For a system of record that stores marks against the school's own subject codes:
-        every subject it reports is one the school entered against this child for this
-        term, so there is nothing to match and nothing to drop.
-
-        **The drop that protects a parent from a teacher's sandbox is not lost — it moved.**
-        On the Moodle path it happens here, because Moodle answers for every course a
-        student is enrolled in. On this path it happened upstream: a subject with no mark
-        recorded for this child in this term has no row to return.
+        Every subject it returns is one the school entered against this child for this
+        term, so there is nothing to match against and nothing to drop. The filter this
+        replaces existed for a backend whose course list was flat and whose titles were
+        whatever a teacher typed; that backend is gone, and keeping a table to protect
+        against it meant keeping a database for a case that could no longer arise.
 
         Nothing is invented for the fields a binding used to supply. `course_id` is the
         subject code, because that is the identifier this backend answers about and a
         fabricated numeric id would be a key that resolves to nothing.
         """
-        return [self._to_unbound_course_grade(subject) for subject in subjects]
+        return [self._to_course_grade(subject) for subject in subjects]
 
-    def _to_unbound_course_grade(self, subject: SubjectGrade) -> CourseGrade:
+    def _to_course_grade(self, subject: SubjectGrade) -> CourseGrade:
         letter, passed = self.policy.classify(subject.percentage)
         academic_letter, academic_passed = self.policy.classify(subject.academic_percentage)
 
@@ -127,35 +75,16 @@ class GradeAssembler:
                 percentage=subject.academic_percentage,
                 letter_grade=academic_letter,
                 passed=academic_passed,
-                unavailable_reason=subject.academic_unavailable,
-            ),
-            graded_count=subject.graded_count,
-            excused_count=subject.excluded_count,
-            missing_count=subject.pending_count,
-            is_complete=subject.is_complete,
-        )
-
-    def _to_course_grade(self, subject: SubjectGrade, binding: CourseBinding) -> CourseGrade:
-        letter, passed = self.policy.classify(subject.percentage)
-        academic_letter, academic_passed = self.policy.classify(subject.academic_percentage)
-
-        return CourseGrade(
-            course_id=str(binding.lms_course_id),
-            subject_code=binding.subject_code,
-            # Names come from the BINDING, not from the LMS course title. The school
-            # decides what a subject is called in each language; a Moodle fullname is
-            # whatever the teacher typed, and is rarely bilingual.
-            subject_name_ar=binding.subject_name_ar,
-            subject_name_en=binding.subject_name_en or subject.subject_name,
-            computed_percentage=subject.percentage,
-            letter_grade=letter,
-            passed=passed,
-            academic=AcademicGrade(
-                percentage=subject.academic_percentage,
-                letter_grade=academic_letter,
-                passed=academic_passed,
+                # `unavailable`, not `unavailable_reason`. This path spelled it the second
+                # way and pydantic, which ignores unknown keyword arguments, dropped it
+                # silently — so every parent on the SIS backend was shown a blank academic
+                # figure with no explanation of why it could not be derived. The one shape
+                # a caveat must never take is absent.
                 unavailable=subject.academic_unavailable,
             ),
+            # Carried through for the same reason: the gradebook's own category subtotals
+            # are exact under every aggregation scheme, which makes them the reliable route
+            # to a partial subject grade when the derived academic figure is unavailable.
             categories=[
                 GradeCategory(
                     name=str(category.get("name") or ""),
@@ -165,6 +94,9 @@ class GradeAssembler:
             ],
             graded_count=subject.graded_count,
             excused_count=subject.excluded_count,
+            # `pending_count`, not `missing_count`. Two real and different fields on the
+            # contract, and this path was filling the wrong one: "not marked yet" was
+            # being reported as "she did not hand it in".
             pending_count=subject.pending_count,
             is_complete=subject.is_complete,
         )
@@ -183,26 +115,19 @@ class AttendanceAssembler:
     #: into an accusation.
     PRESENT_LIKE = ("present", "late", "excused")
 
-    def __init__(self, bindings: list[CourseBinding], *, unbound: bool = False):
-        """`unbound` for a backend that names its own subjects.
-
-        There is then no binding table to filter against, and nothing to filter: every
-        subject such a backend reports is one the school recorded against this child for
-        this term. The drop that keeps a teacher's sandbox away from a parent still
-        happens — it happens upstream, where a subject with no register taken has no row.
-        """
-        self._index = _index_bindings(bindings)
-        self._unbound = unbound
-
     def visible(self, subjects: list[SubjectAttendance]) -> list[SubjectAttendance]:
-        """Only subjects with a published binding — same rule as grades.
+        """Everything the system of record reported.
 
-        Everything, on the unbound path. Filtering against an empty index there would
-        return nothing at all and report a term of registers as "no attendance recorded".
+        Kept as a named step rather than inlined, because it is where a filter would go
+        if a backend ever needed one again — and because the routes read better saying
+        `visible(subjects)` than passing the raw list into four aggregations.
+
+        There is nothing to filter today. Every subject reported is one the school
+        recorded against this child for this term; the drop that keeps a half-configured
+        course away from a parent happens upstream, where a subject with no register taken
+        has no row at all.
         """
-        if self._unbound:
-            return list(subjects)
-        return [s for s in subjects if s.course_ref in self._index]
+        return list(subjects)
 
     def term_percentage(self, subjects: list[SubjectAttendance]) -> float | None:
         """One attendance figure for the whole term.
