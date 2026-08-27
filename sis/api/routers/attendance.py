@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from sis.api.deps import (
     AttendanceServiceDep,
     Caller,
+    RequestId,
     require_read_access,
     require_registrar,
 )
@@ -280,6 +281,7 @@ def read_guardian_student_attendance(
     student_number: str,
     attendance: AttendanceServiceDep,
     caller: Reader,
+    request_id: RequestId,
     from_: Annotated[
         date | None, Query(alias="from", description="First day, inclusive.")
     ] = None,
@@ -287,7 +289,12 @@ def read_guardian_student_attendance(
 ) -> StudentAttendanceOut:
     with domain_errors():
         record = attendance.for_guardian_student(
-            public_id, StudentNumber(student_number), from_date=from_, to_date=to
+            public_id,
+            StudentNumber(student_number),
+            from_date=from_,
+            to_date=to,
+            actor=caller.prefix,
+            request_id=request_id,
         )
     return StudentAttendanceOut.of(record)
 

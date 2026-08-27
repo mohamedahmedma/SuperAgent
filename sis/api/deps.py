@@ -78,6 +78,34 @@ _KEY_BYTES: Final[int] = 32
 
 API_KEY_HEADER: Final[str] = "X-API-Key"
 
+REQUEST_ID_HEADER: Final[str] = "X-Request-Id"
+"""Correlates an access decision back to whatever caused it, one service further out."""
+
+#: Longest correlation id this service will store. A caller controls this header entirely,
+#: and the audit column is 64 characters — truncating here rather than at the database
+#: keeps an over-long value from failing an authorised read.
+_MAX_REQUEST_ID = 64
+
+
+def get_request_id(
+    x_request_id: Annotated[str | None, Header(alias=REQUEST_ID_HEADER)] = None,
+) -> str:
+    """The caller's correlation id, or `""`.
+
+    Optional on purpose: a registrar reading a report card through the console has no chat
+    turn behind it, and demanding one would refuse a legitimate request over a field that
+    only helps somebody reading an audit later.
+
+    Never trusted for anything but correlation. It is written to the audit and read by a
+    human; nothing branches on it, so a caller inventing one gains nothing.
+    """
+    return (x_request_id or "").strip()[:_MAX_REQUEST_ID]
+
+
+RequestId = Annotated[str, Depends(get_request_id)]
+"""This request's correlation id, already trimmed and length-capped."""
+
+
 SCHOOL_HEADER: Final[str] = "X-School-Code"
 """Names the school a request is about, and therefore the database that answers it."""
 
@@ -820,6 +848,8 @@ GuardianImportServiceDep = Annotated[
 __all__ = [
     "API_KEY_HEADER",
     "ApiKeyMinter",
+    "RequestId",
+    "REQUEST_ID_HEADER",
     "ApiKeyMinterDep",
     "Caller",
     "GradeImportServiceDep",

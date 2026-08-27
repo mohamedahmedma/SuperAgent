@@ -52,6 +52,7 @@ from sis.application.ports.repositories import (  # noqa: E402
 )
 from sis.application.ports.unit_of_work import UnitOfWork  # noqa: E402
 from sis.config import get_settings, reset_settings_cache  # noqa: E402
+from sis.domain.access import AccessAttempt  # noqa: E402
 from sis.domain.auth import ApiKey, Scope  # noqa: E402
 from sis.domain.errors import UnknownReference  # noqa: E402
 from sis.domain.grades import SubjectGrade  # noqa: E402
@@ -1052,6 +1053,40 @@ class FakeApiKeyRepository(_InMemory):
         return bool(self._rows)
 
 
+class FakeAccessAuditRepository(_InMemory):
+    """Appended to, read back, and never edited — the port has no other methods.
+
+    Keyed by insertion order rather than by any field: an audit has no natural key, two
+    identical attempts a second apart are two rows, and collapsing them would hide exactly
+    the pattern the table exists to show — a run of refusals against one handle.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._next = 0
+
+    def record(self, attempt: AccessAttempt) -> None:
+        self._rows[self._next] = attempt
+        self._next += 1
+
+    def recent(
+        self,
+        *,
+        guardian_public_id: str | None = None,
+        student_number: str | None = None,
+        allowed: bool | None = None,
+        limit: int = 100,
+    ) -> Sequence[AccessAttempt]:
+        found = [
+            attempt
+            for _, attempt in sorted(self._rows.items(), reverse=True)
+            if (not guardian_public_id or attempt.guardian_public_id == guardian_public_id)
+            and (not student_number or attempt.student_number == student_number)
+            and (allowed is None or attempt.allowed is allowed)
+        ]
+        return found[:limit]
+
+
 class FakeUnitOfWork:
     """Every repository, one transaction, no database.
 
@@ -1078,6 +1113,7 @@ class FakeUnitOfWork:
         self.grades = FakeGradeRepository()
         self.imports = FakeImportBatchRepository()
         self.api_keys = FakeApiKeyRepository()
+        self.access_audit = FakeAccessAuditRepository()
         self.commits = 0
         self.rollbacks = 0
         self._committed = False
@@ -1099,6 +1135,7 @@ class FakeUnitOfWork:
                 "grades",
                 "imports",
                 "api_keys",
+                "access_audit",
             )
         )
 

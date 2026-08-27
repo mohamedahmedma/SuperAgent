@@ -170,6 +170,8 @@ class AttendanceService:
         *,
         from_date: date | None = None,
         to_date: date | None = None,
+        actor: str = "",
+        request_id: str = "",
     ) -> StudentAttendance:
         """The same record, for a caller who holds only a guardian handle.
 
@@ -189,7 +191,9 @@ class AttendanceService:
         """
         from sis.application.services.queries import QueryService
 
-        QueryService(self._uow_factory).require_guardian_may_see(public_id, student_number)
+        QueryService(self._uow_factory).require_guardian_may_see(
+            public_id, student_number, actor=actor, request_id=request_id
+        )
         return self.for_student(student_number, from_date=from_date, to_date=to_date)
 
     def for_student(

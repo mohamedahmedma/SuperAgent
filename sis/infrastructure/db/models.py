@@ -41,6 +41,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from sis.domain.access import REASON_LENGTH
 from sis.domain.auth import Scope
 from sis.domain.imports import ImportKind, ImportStatus, RowOutcome
 from sis.infrastructure.db.base import Base
@@ -891,8 +892,50 @@ class ApiKey(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
+class AccessAudit(Base):
+    """Append-only: every attempt to read a child's record on a guardian's behalf.
+
+    See `sis.domain.access` for why this lives here rather than in the facade in front of
+    it, and why the refusals are the interesting rows.
+
+    **External identifiers, not foreign keys.** A guardian handle and a student number are
+    stored as text, and deliberately: an audit row has to survive the deletion of the
+    guardian it refers to, and a cascade would erase precisely the history somebody is most
+    likely to want after an account is removed. It also means this table can be copied out
+    of the database for retention without dragging six others with it.
+    """
+
+    __tablename__ = "access_audit"
+    __table_args__ = (
+        # The two questions ever asked of this table: "everything about this child" and
+        # "everything this guardian was told". Both are time-ordered, because the answer
+        # is always a period rather than a total.
+        Index("ix_access_audit_student_time", "student_number", "created_at"),
+        Index("ix_access_audit_guardian_time", "guardian_public_id", "created_at"),
+        # The alerting query: a run of refusals is somebody probing.
+        Index("ix_access_audit_allowed_time", "allowed", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    guardian_public_id: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    student_number: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+
+    allowed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reason: Mapped[str] = mapped_column(String(REASON_LENGTH), default="", nullable=False)
+
+    # The API key prefix that asked. Names a caller; cannot authenticate as one.
+    actor: Mapped[str] = mapped_column(String(16), default="", nullable=False)
+    request_id: Mapped[str] = mapped_column(String(64), default="", nullable=False, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
 __all__ = [
     "AcademicYear",
+    "AccessAudit",
     "ApiKey",
     "ClassEnrolment",
     "ClassSection",

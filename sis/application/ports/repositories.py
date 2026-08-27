@@ -43,6 +43,7 @@ from datetime import date, datetime
 from typing import Protocol
 
 from sis.domain.attendance import AttendanceMark
+from sis.domain.access import AccessAttempt
 from sis.domain.auth import ApiKey
 from sis.domain.grades import SubjectGrade
 from sis.domain.guardians import Guardian, StudentGuardian
@@ -643,3 +644,27 @@ class ApiKeyRepository(Protocol):
 
     def has_any(self) -> bool:
         """Whether any key exists, so bootstrapping the first one stays a one-time act."""
+
+
+class AccessAuditRepository(Protocol):
+    """Access decisions: appended, and read back. **No update and no delete.**
+
+    The append-only rule is enforced by the absence of the methods rather than by everyone
+    remembering not to call them. A retention policy that genuinely has to expire rows
+    should do it as a visible scheduled job against the table, not through a method sitting
+    here waiting to be reached from a request handler.
+    """
+
+    def record(self, attempt: AccessAttempt) -> None:
+        """Append one decision, allowed or refused."""
+
+    def recent(
+        self,
+        *,
+        guardian_public_id: str | None = None,
+        student_number: str | None = None,
+        allowed: bool | None = None,
+        limit: int = 100,
+    ) -> Sequence[AccessAttempt]:
+        """Newest first. Filters are optional and compose; `allowed=False` is the
+        alerting query."""

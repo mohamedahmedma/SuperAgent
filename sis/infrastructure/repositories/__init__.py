@@ -22,6 +22,9 @@ SQLAlchemy class it must never see".
 same shape for students, enrolments and grades, and a second hand-rolled copy is how one
 of them ends up looping per row.
 """
+from sis.infrastructure.repositories.access_audit_repository import (
+    SqlAlchemyAccessAuditRepository,
+)
 from sis.infrastructure.repositories.api_key_repository import SqlAlchemyApiKeyRepository
 from sis.infrastructure.repositories.grade_repository import SqlAlchemyGradeRepository
 from sis.infrastructure.repositories.guardian_repository import (
@@ -50,6 +53,7 @@ from sis.infrastructure.repositories.structure_repository import (
 
 __all__ = [
     "SqlAlchemyAcademicYearRepository",
+    "SqlAlchemyAccessAuditRepository",
     "SqlAlchemyAttendanceRepository",
     "SqlAlchemyApiKeyRepository",
     "SqlAlchemyClassSectionRepository",

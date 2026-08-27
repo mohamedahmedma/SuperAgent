@@ -27,7 +27,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from sis.api.deps import Caller, get_query_service, require_read_access
+from sis.api.deps import Caller, RequestId, get_query_service, require_read_access
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services import QueryService
 from sis.application.services.queries import GradeLine, StudentTermGrades
@@ -152,6 +152,7 @@ def read_guardian_student_term_grades(
     student_number: str,
     queries: Queries,
     caller: Reader,
+    request_id: RequestId,
     term: Annotated[
         str,
         Query(
@@ -163,7 +164,11 @@ def read_guardian_student_term_grades(
 ) -> StudentTermGradesOut:
     with domain_errors():
         report = queries.guardian_student_term_grades(
-            public_id, StudentNumber(student_number), TermCode(term)
+            public_id,
+            StudentNumber(student_number),
+            TermCode(term),
+            actor=caller.prefix,
+            request_id=request_id,
         )
     return StudentTermGradesOut.of(report)
 
