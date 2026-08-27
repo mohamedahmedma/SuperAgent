@@ -74,10 +74,13 @@ htmlcov/
 .idea/
 .vscode/
 
-# The root test suite. Development-only material: it is run locally to check the
-# code, and nothing in a deployment imports it.
+# The root test suite and the retrieval eval harness. Development-only material:
+# both are run locally to check the code, and nothing in a deployment imports
+# either. evals/retrieval_eval.py additionally needs a live indexed Milvus corpus
+# and a reranker key, so it was never runnable from a checkout alone.
 #
 # Anchored with a leading slash on purpose. A bare `tests/` matches a directory of
 # that name at ANY depth, which would also untrack identity/tests, records/tests,
-# sis/tests and schoolauth/tests. Those remain tracked.
+# sis/tests and schoolauth/tests. Those remain tracked, as does scripts/.
 /tests/
+/evals/
