@@ -79,6 +79,9 @@ _DESCRIPTIONS: Final[Mapping[int, str]] = {
     413: "The upload exceeds SIS_MAX_UPLOAD_BYTES.",
     415: "The file extension is not one this service can read.",
     422: "A supplied value is not valid.",
+    # A capability this deployment has not armed, not a fault. Provisioning a school
+    # over HTTP needs a credential the service is allowed not to hold.
+    503: "This deployment is not configured for this operation.",
 }
 
 
@@ -119,6 +122,7 @@ def all_routers() -> tuple["APIRouter", ...]:
     from sis.api.routers import (
         admin,
         attendance,
+        estate,
         grades,
         guardians,
         health,
@@ -140,4 +144,5 @@ def all_routers() -> tuple["APIRouter", ...]:
         attendance.router,
         imports.router,
         admin.router,
+        estate.router,
     )

@@ -3,10 +3,16 @@
 Schools are separated physically — one database each, the same schema in every one — which
 moves three things out of the application and into here:
 
-    python scripts/schools.py list       # what is configured, and what state each file is in
-    python scripts/schools.py migrate    # alembic upgrade head, once per school
-    python scripts/schools.py provision  # create one school's database and its `schools` row
-    python scripts/schools.py split      # carve an existing single-database estate into files
+    python -m sis.schools list       # what is configured, and what state each is in
+    python -m sis.schools migrate    # alembic upgrade head, once per school
+    python -m sis.schools provision  # create one school's database and its `schools` row
+    python -m sis.schools split      # carve an existing single-database estate into files
+
+This is the CLI. The rules it enforces live in `sis.application.services.estate`, which
+performs no I/O and is tested without a server; what is left here is argument parsing,
+printing, and exit codes. `provision` in particular used to require that somebody had
+already hand-written the school into `SIS_SCHOOLS` and `SIS_DATABASE_URL_<CODE>`; it now
+renders the connection from `SIS_DATABASE_URL_TEMPLATE` and writes both itself.
 
 Every command reads the same registry the service does (`sis.tenancy`), so there is exactly
 one statement of which schools exist and where they live, and this script cannot drift from
@@ -38,6 +44,19 @@ load_env()
 from sqlalchemy import create_engine, text  # noqa: E402
 
 from sis import tenancy  # noqa: E402
+from sis.application.services.estate import (  # noqa: E402
+    TEMPLATE_VAR,
+    EstateService,
+    plan_provision,
+)
+from sis.domain.errors import SisError  # noqa: E402
+from sis.infrastructure.estate.seeding import seed_school_row  # noqa: E402
+from sis.infrastructure.estate import (  # noqa: E402
+    ConfigStoreUnavailable,
+    DotEnvConfigStore,
+    ProvisioningFailed,
+    provisioner_for,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -160,63 +179,55 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
 
 def cmd_provision(args: argparse.Namespace) -> int:
-    """Create one school's database, migrate it, and write the single `schools` row in it.
+    """Create one school's database, migrate it, record its connection, seed its row.
 
-    Creating a school stops being an INSERT and becomes this: a file, a migration, and one
-    row. That is the real cost of physical separation and the reason it is a script rather
-    than an API call — it needs the operator's filesystem and their alembic, not a request.
+    What changed: this used to require that somebody had already written the school into
+    `SIS_SCHOOLS` and `SIS_DATABASE_URL_<CODE>` by hand, and it refused otherwise -- so
+    "create a school" was an edit to a file followed by a command, and getting the two out
+    of step produced a service that would not start. It now renders the connection from
+    `SIS_DATABASE_URL_TEMPLATE` and writes both variables itself.
 
-    The `schools` row still exists inside each file, unchanged from the single-database
-    schema. Every file therefore holds exactly one school, and the schema stays identical
-    everywhere, which is what lets one migration run per school with nothing kept in sync
-    by hand.
+    The order is the one `sis.application.ports.estate` argues for: database first,
+    configuration last. A crash in between leaves a database nothing points at, which the
+    next run refuses to overwrite; the other order leaves the service unable to boot.
     """
-    registry = _registry()
-    tenant = registry.get(args.code)
-    path = _sqlite_path(tenant.database_url)
-    if path is not None and path.exists():
-        raise SystemExit(
-            f"{path} already exists. Refusing to touch it — provision creates a school, "
-            "and running it over a live database is how one gets overwritten. Use "
-            "`migrate` to bring an existing school up to date."
-        )
-    if path is not None:
-        path.parent.mkdir(parents=True, exist_ok=True)
+    registry = tenancy.get_registry()
+    existing = registry.codes
+    template = os.getenv(TEMPLATE_VAR, "")
 
-    _alembic_upgrade(tenant.database_url)
+    plan = plan_provision(args.code, template=template, existing_codes=existing)
 
-    engine = create_engine(tenant.database_url, future=True)
-    try:
-        with engine.begin() as connection:
-            existing = connection.execute(
-                text("SELECT code FROM schools LIMIT 1")
-            ).first()
-            if existing is not None:
-                raise SystemExit(
-                    f"This database already holds school {existing[0]!r}. One file holds "
-                    "one school; provisioning another into it would recreate the mixing "
-                    "the split exists to undo."
-                )
-            connection.execute(
-                text(
-                    "INSERT INTO schools (code, name_en, name_ar, is_active, created_at) "
-                    "VALUES (:code, :name_en, :name_ar, 1, CURRENT_TIMESTAMP)"
-                ),
-                {
-                    "code": tenant.code,
-                    "name_en": args.name_en or tenant.code,
-                    "name_ar": args.name_ar or "",
-                },
-            )
-    finally:
-        engine.dispose()
+    if args.dry_run:
+        print(f"would create   {plan.database_url}")
+        print(f"would set      {plan.env_var}={plan.database_url}")
+        print(f"would set      {tenancy.SCHOOLS_VAR}={plan.schools_value}")
+        print("nothing written")
+        return 0
 
-    print(f"{tenant.code}: provisioned at {tenant.database_url}")
+    service = EstateService(
+        provisioner_for(
+            plan.database_url, admin_url=os.getenv("SIS_ADMIN_DATABASE_URL", "")
+        ),
+        DotEnvConfigStore(PROJECT_ROOT / ".env"),
+    )
+    service.provision(args.code, template=template, existing_codes=existing)
+
+    # Make the new school routable in THIS process as well as the next one. The store
+    # wrote the file; without these three lines the seeding below would resolve the code
+    # against a registry that was read before the school existed.
+    os.environ[plan.env_var] = plan.database_url
+    os.environ[tenancy.SCHOOLS_VAR] = plan.schools_value
+    tenancy.reset_registry_cache()
+
+    seed_school_row(plan.code, name_en=args.name_en, name_ar=args.name_ar)
+
+    print(f"{plan.code}: provisioned at {plan.database_url}")
+    print(f"{plan.code}: recorded as {plan.env_var} in .env")
     print(
         "Next: add this school's WhatsApp number and credentials "
-        f"(IDENTITY_WHATSAPP_NUMBER_{tenant.code}, "
-        f"IDENTITY_WHATSAPP_PHONE_NUMBER_ID_{tenant.code}, "
-        f"IDENTITY_WHATSAPP_TOKEN_{tenant.code}) and restart identity."
+        f"(IDENTITY_WHATSAPP_NUMBER_{plan.code}, "
+        f"IDENTITY_WHATSAPP_PHONE_NUMBER_ID_{plan.code}, "
+        f"IDENTITY_WHATSAPP_TOKEN_{plan.code}) and restart identity."
     )
     return 0
 
@@ -289,7 +300,7 @@ def cmd_split(args: argparse.Namespace) -> int:
 
     print(
         "\nThe source database was not modified. Verify each school with "
-        "`python scripts/schools.py list`, then point the service at the new files."
+        "`python -m sis.schools list`, then point the service at the new files."
     )
     return 0
 
@@ -416,6 +427,11 @@ def main(argv: list[str] | None = None) -> int:
     provision.add_argument("code", help="the school code, as named in SIS_SCHOOLS")
     provision.add_argument("--name-en", default="", help="English name for the school")
     provision.add_argument("--name-ar", default="", help="Arabic name for the school")
+    provision.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the database and variables this would write, and write nothing",
+    )
 
     split = sub.add_parser("split", help="carve one database into one per school")
     split.add_argument("--source", help="database to split (default: SIS_DATABASE_URL)")
@@ -426,12 +442,25 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
-    return {
+    handlers = {
         "list": cmd_list,
         "migrate": cmd_migrate,
         "provision": cmd_provision,
         "split": cmd_split,
-    }[args.command](args)
+    }
+    try:
+        return handlers[args.command](args)
+    except (
+        SisError,
+        tenancy.TenancyMisconfigured,
+        ProvisioningFailed,
+        ConfigStoreUnavailable,
+    ) as error:
+        # A refused provision is an answer -- "that school already exists", "the template
+        # has no placeholder" -- and deserves the message rather than a traceback. Bugs
+        # still raise, because a traceback is the right report for those.
+        print(f"error: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

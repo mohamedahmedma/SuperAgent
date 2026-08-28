@@ -26,7 +26,7 @@ Environment shape, with `SIS_SCHOOLS=MAIN,NCS`::
 The suffix is the school code with `.` and `-` folded to `_`, because those are legal in
 a school code and illegal in an environment variable name. Two codes that fold to the
 same suffix are refused at startup rather than silently sharing a database — see
-`_suffix`.
+`env_suffix`.
 """
 from __future__ import annotations
 
@@ -78,8 +78,12 @@ class TenancyMisconfigured(RuntimeError):
     """
 
 
-def _suffix(code: str) -> str:
+def env_suffix(code: str) -> str:
     """The environment-variable suffix for a school code.
+
+    Public because provisioning renders both the variable name and the database name
+    from it (`sis.application.services.estate`), and those two must fold a code the same
+    way or a school ends up pointed at another school's database.
 
     School codes may contain `.` and `-` (`sis.domain.value_objects._CODE_PATTERN`);
     environment variable names may not. Folding both to `_` is the only mapping that
@@ -188,7 +192,7 @@ def get_registry() -> Registry:
     suffixes: dict[str, str] = {}
     missing: list[str] = []
     for code in codes:
-        suffix = _suffix(code)
+        suffix = env_suffix(code)
         clash = suffixes.get(suffix)
         if clash is not None:
             raise TenancyMisconfigured(
@@ -229,6 +233,7 @@ __all__ = [
     "SCHOOLS_VAR",
     "TenancyMisconfigured",
     "Tenant",
+    "env_suffix",
     "UnknownSchool",
     "get_registry",
     "reset_registry_cache",

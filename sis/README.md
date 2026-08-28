@@ -70,6 +70,45 @@ not visible at :5173, the dev server has not been restarted since a config chang
 
 ---
 
+## Adding a school
+
+Schools are separated physically — one database each — so creating one is a database, a
+migration and a row, not an `INSERT`. Two ways in, the same code behind both:
+
+```bash
+python -m sis.schools provision NCS --name-en "Nasr City" --dry-run   # what it would do
+python -m sis.schools provision NCS --name-en "Nasr City"             # do it
+python -m sis.schools list                                            # every school and its revision
+```
+
+```
+POST /v1/admin/schools     {"code": "NCS", "name_en": "Nasr City"}    # registrar scope
+```
+
+The connection is **rendered, never typed**. `SIS_DATABASE_URL_TEMPLATE` holds the one
+connection the estate shares with `{slug}` where the school's part goes, and provisioning
+writes the result into `.env` as `SIS_DATABASE_URL_NCS` alongside an updated `SIS_SCHOOLS`.
+Nobody pastes a URL, so no two schools can end up pointed at one database.
+
+The order is database first, configuration last, and it is not arbitrary: a crash in
+between leaves a database nothing points at, which the next attempt refuses to overwrite.
+The other order leaves `SIS_SCHOOLS` naming a school with no database, and
+`sis.tenancy.get_registry` refuses to start the service at all in that state.
+
+The HTTP route is **off unless armed**. It answers 503 until `SIS_ADMIN_DATABASE_URL` is
+set, because creating a PostgreSQL database needs a role that can also drop one, and the
+process serving parent requests should not hold it. A deployment that prefers a terminal
+simply never sets it.
+
+The rules — naming, the refusals, the ordering — are in
+[`sis/application/services/estate.py`](application/services/estate.py) and do no I/O;
+[`tests/sis/test_estate_provisioning.py`](../tests/sis/test_estate_provisioning.py) drives
+them with strings and fakes.
+
+**One caveat.** `SIS_SCHOOLS` is read once per process. A school created through the API
+is live in the worker that served the request and not in the others until they restart, so
+with more than one worker, provisioning is complete after a rolling restart.
+
 ## Testing
 
 Three suites, each catching something the others cannot.

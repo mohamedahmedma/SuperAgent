@@ -153,7 +153,7 @@ def _check_one_database(school_code: str | None, setting: str) -> None:
     where = _sanitised_url(engine.url)
     named = f"school {school_code}: " if school_code else ""
     upgrade = (
-        "python scripts/schools.py migrate"
+        "python -m sis.schools migrate"
         if school_code
         else f'alembic -c "{_ALEMBIC_INI}" upgrade head'
     )

@@ -285,8 +285,10 @@ npm run build
     through `LmsAdapter`. See [records/README.md](records/README.md).
   - `sis/` — the school's own student information system: roster, structure, attendance,
     marks and guardians, plus the registrar console. See [sis/README.md](sis/README.md).
-  - `scripts/` — operator tooling: estate health check, school provisioning, and a
-    WhatsApp webhook simulator.
+  - `scripts/` — estate-level operator tooling: a health check that walks a parent's
+    sign-in across the running services, and a WhatsApp webhook simulator. Both talk
+    HTTP only and import no service. School provisioning moved into `sis/` (it is
+    `sis` code: `python -m sis.schools`).
 - Frontend: `frontend/` — the parent-facing chat UI. (The registrar console is a
   separate React app under `sis/frontend/`, built into `sis/web/`.)
   - Built with a modern, engineered stack (Vite + Vue 3 + TypeScript + Pinia + Axios + Sass).

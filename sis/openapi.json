@@ -5418,6 +5418,122 @@
           }
         }
       }
+    },
+    "/v1/admin/schools": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create a school's database and record its connection",
+        "description": "Creates one database for the school, migrates it to head, writes its connection into the deployment's `.env`, and seeds the school's own row. Distinct from `POST /v1/schools`, which names a branch inside a database that already exists.\n\n**503** when `SIS_ADMIN_DATABASE_URL` or `SIS_DATABASE_URL_TEMPLATE` is unset — provisioning over HTTP is opt-in, because it needs a role that can create and therefore drop a database.\n\n**409** when the code is already served, or its database already exists. Provisioning never runs over a database that may hold another school's rows.",
+        "operationId": "provision_school_v1_admin_schools_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProvisionSchoolIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvisionSchoolOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "This deployment is not configured for this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6960,6 +7076,72 @@
           "is_open"
         ],
         "title": "PlacementOut"
+      },
+      "ProvisionSchoolIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "The school's code, e.g. `NCS`. Becomes both the database name and the environment variable that points at it, folded the same way for each.",
+            "examples": [
+              "NCS"
+            ]
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "description": "English name; defaults to the code.",
+            "default": ""
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "description": "Arabic name.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ProvisionSchoolIn"
+      },
+      "ProvisionSchoolOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "database": {
+            "type": "string",
+            "title": "Database",
+            "description": "The database created, without its connection."
+          },
+          "env_var": {
+            "type": "string",
+            "title": "Env Var",
+            "description": "The variable now carrying its connection in .env."
+          },
+          "schools": {
+            "type": "string",
+            "title": "Schools",
+            "description": "SIS_SCHOOLS as it now reads."
+          },
+          "restart_required": {
+            "type": "boolean",
+            "title": "Restart Required",
+            "description": "True whenever the service runs more than one worker: the others still hold the registry they read at startup."
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "database",
+          "env_var",
+          "schools",
+          "restart_required"
+        ],
+        "title": "ProvisionSchoolOut"
       },
       "RegisterLineOut": {
         "properties": {
