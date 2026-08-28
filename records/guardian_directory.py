@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from typing import Final, Protocol
 from urllib.parse import quote
 
+from records.env import outbound_pool_size
+
 logger = logging.getLogger(__name__)
 
 #: SIS's own machine-readable code for "that names nothing on file". Recognised explicitly
@@ -120,14 +122,38 @@ class SisGuardianDirectory:
         self._lock = threading.Lock()
 
     def _http(self):
+        """One pooled client per process, built on first use.
+
+        **Read before locking.** The client is built once and read on every request from
+        every worker thread; taking a mutex to re-read an attribute that has not changed
+        since startup serialises the hot path for nothing. The unlocked read is safe
+        because the attribute is only ever assigned a fully-built client, and the second
+        check inside the lock is what stops two threads that both saw `None` from building
+        two pools.
+
+        The limits are stated rather than defaulted, and stated to match the worker pool
+        that calls this. httpx's default keeps only 20 connections alive, so above that
+        concurrency every request pays a fresh TCP handshake to a service on the same
+        network — see `SisAdapter.POOL_SIZE` for the measurement.
+        """
         import httpx
+
+        client = self._client
+        if client is not None:
+            return client
 
         with self._lock:
             if self._client is None:
                 self._client = httpx.Client(
                     base_url=self._base_url,
                     timeout=httpx.Timeout(self._timeout),
-                    transport=httpx.HTTPTransport(retries=0),
+                    transport=httpx.HTTPTransport(
+                        retries=0,
+                        limits=httpx.Limits(
+                            max_connections=outbound_pool_size(),
+                            max_keepalive_connections=outbound_pool_size(),
+                        ),
+                    ),
                     follow_redirects=False,
                 )
             return self._client

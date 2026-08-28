@@ -33,6 +33,7 @@ import threading
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from records.env import outbound_pool_size
 from records.lms import LmsUnavailable, SubjectAttendance, SubjectGrade
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -43,6 +44,26 @@ logger = logging.getLogger(__name__)
 #: The SIS error code for "this code names nothing" — an unknown student, or an unknown
 #: term. The only 404 this adapter is willing to read as "nothing on file".
 _UNKNOWN_REFERENCE = "unknown_reference"
+
+
+def _int_env(name: str, default: int) -> int:
+    """The variable as a positive int, or the documented default on anything unusable.
+
+    A typo'd `SIS_POOL_SIZE=forty` must not take the facade down; it should run with the
+    documented default. The same rule `sis.config._int_env` follows, for the same reason.
+    """
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s is not a number (%r); using %d.", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("%s must be positive (got %d); using %d.", name, value, default)
+        return default
+    return value
 
 
 def _as_float(value: Any) -> float | None:
@@ -89,9 +110,31 @@ class SisAdapter:
     a window in which a corrected mark is stale for a parent already on the phone.
     """
 
-    #: Connections held open to the SIS. Sized for concurrent parents in one worker, not
-    #: for throughput — a pool larger than the SIS's own worker count only queues.
-    POOL_SIZE = 10
+    #: Connections held open to the SIS.
+    #:
+    #: **This must not be smaller than the worker pool that calls it.** It was 10, on the
+    #: reasoning that "a pool larger than the SIS's own worker count only queues" — which
+    #: is true of the SIS end and misses what happens at this one. FastAPI serves sync
+    #: endpoints from an anyio threadpool of 40 by default, so 40 requests can be in flight
+    #: here while only 10 may hold a connection: the other 30 block inside `httpx` waiting
+    #: for one, having already been counted as in-flight. The queue forms on this side of
+    #: the wire, where it is invisible to the SIS and shows up only as latency.
+    #:
+    #: Measured against a stub answering in 20ms, with 40 calling threads:
+    #:
+    #:     max_connections=10   231 req/s   p50  86ms   p95 453ms
+    #:     max_connections=40   715 req/s   p50  47ms   p95  84ms
+    #:
+    #: Three times the throughput and a fifth of the tail, for a number. Sized to the
+    #: caller rather than guessed, and overridable for a SIS that genuinely needs
+    #: protecting — see `SIS_POOL_SIZE`.
+    POOL_SIZE = 40
+
+    #: Beyond this many *idle* connections, close rather than keep. Keepalive is what makes
+    #: the second call in a request skip a TCP and TLS handshake, so it is deliberately the
+    #: full pool: a facade that makes two calls per parent question and then drops the
+    #: connection pays the handshake again on the next one.
+    KEEPALIVE_SIZE = 40
 
     #: A hung call must not hang a chat turn. Failing at 10s with "I can't reach the
     #: records" beats succeeding at 90s to a parent watching a streamed answer.
@@ -118,7 +161,10 @@ class SisAdapter:
         self.timeout_seconds = timeout_seconds or float(
             os.getenv("SIS_TIMEOUT_SECONDS") or self.DEFAULT_TIMEOUT_SECONDS
         )
-        self.pool_size = pool_size or self.POOL_SIZE
+        self.pool_size = pool_size or outbound_pool_size()
+        # Keepalive matches the pool: a facade that makes two calls per parent
+        # question and then drops the connection pays the handshake again next time.
+        self.keepalive_size = self.pool_size
 
         self._lock = threading.Lock()
         self._session: Any = None
@@ -137,7 +183,19 @@ class SisAdapter:
         the point: a retry budget multiplies the timeout by the attempt count, and three
         attempts at 10s is a chat turn nobody waits for. A SIS that is down should be
         reported as down within one timeout.
+
+        **Read before locking.** The client is built once and then read on every request
+        from every worker thread; taking a mutex to re-read an attribute that has not
+        changed since startup serialises the one path that most needs not to be. The
+        unlocked read is safe because the attribute is only ever assigned a fully-built
+        client — a thread either sees `None` and joins the slow path, or sees a client
+        that is ready to use. The lock still guards construction, and the second check
+        inside it is what stops two threads that both saw `None` building two pools.
         """
+        session = self._session
+        if session is not None:
+            return session
+
         with self._lock:
             if self._session is None:
                 import httpx
@@ -150,7 +208,7 @@ class SisAdapter:
                         retries=0,
                         limits=httpx.Limits(
                             max_connections=self.pool_size,
-                            max_keepalive_connections=self.pool_size,
+                            max_keepalive_connections=self.keepalive_size,
                         ),
                     ),
                     # Never follow a redirect: every request carries `X-API-Key`, so a

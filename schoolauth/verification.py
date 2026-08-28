@@ -77,12 +77,16 @@ _lock = threading.Lock()
 #: `{jwks_url: (document, fetched_at_monotonic)}`. Keyed by URL so a process verifying
 #: against two identity services cannot serve one's keys for the other's tokens.
 _cached_jwks: dict[str, tuple[dict, float]] = {}
+#: `{jwks_url: Event}` while a refresh is in flight, so exactly one thread per URL goes to
+#: the network and the rest wait for its result instead of duplicating it.
+_refreshing: dict[str, threading.Event] = {}
 
 
 def reset_key_cache() -> None:
     """Drop every cached JWKS. For tests, and for an operator forcing a key rotation."""
     with _lock:
         _cached_jwks.clear()
+        _refreshing.clear()
 
 
 def _fetch_jwks(url: str, ttl_seconds: int) -> dict:
@@ -91,30 +95,91 @@ def _fetch_jwks(url: str, ttl_seconds: int) -> dict:
     A stale key is still a valid key: serving from cache through an identity outage is the
     difference between "records unavailable" and "nobody can use anything". Only a cold
     cache is fatal.
+
+    ## The fast path takes no lock
+
+    This runs on every verified request in every service that uses this library, and it
+    used to acquire one process-wide mutex to do so — including on the hit, where all it
+    does is read a dict. Worse, it held that mutex **across the network fetch**: when the
+    TTL lapsed, one thread went to the network with a 5-second timeout while every other
+    request in the process blocked behind it on a lock, having nothing to do with keys.
+    A ten-minute TTL turned into a periodic stall of the whole service.
+
+    Now the hit path reads the dict unlocked — safe under CPython, and safe in principle
+    because the value is only ever replaced wholesale with a fully-built tuple, never
+    mutated in place — and the lock is taken only to *decide who fetches*. The fetch
+    itself happens outside it.
+
+    Two threads arriving at an expired entry still do not both fetch: the loser waits on
+    `_refreshing[url]` and then re-reads what the winner stored. That is what stops a
+    burst of traffic at TTL expiry becoming a burst of identical requests at the identity
+    service — the thundering herd this cache exists to prevent in the first place.
     """
+    now = time.monotonic()
+    cached = _cached_jwks.get(url)
+    if cached is not None and (now - cached[1]) < ttl_seconds:
+        return cached[0]
+
+    # Stale or absent. Exactly one thread per URL does the work; the rest wait for it and
+    # then re-read. `_refreshing` is only ever touched under `_lock`.
     with _lock:
         cached = _cached_jwks.get(url)
         if cached is not None and (time.monotonic() - cached[1]) < ttl_seconds:
+            return cached[0]  # somebody refreshed while we waited
+        in_flight = _refreshing.get(url)
+        if in_flight is None:
+            in_flight = threading.Event()
+            _refreshing[url] = in_flight
+            leader = True
+        else:
+            leader = False
+
+    if not leader:
+        # Wait for the leader, bounded by the same budget its fetch has, so a wedged
+        # leader cannot pin every other thread indefinitely.
+        in_flight.wait(timeout=_FETCH_TIMEOUT_SECONDS + 1.0)
+        refreshed = _cached_jwks.get(url)
+        if refreshed is not None:
+            return refreshed[0]
+        if cached is not None:
             return cached[0]
+        raise IdentityNotConfigured(
+            "Could not fetch JWKS: the refresh in progress did not produce keys."
+        )
 
-        try:
-            request = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(request, timeout=_FETCH_TIMEOUT_SECONDS) as response:
-                document = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, ValueError, OSError) as exc:
-            if cached is not None:
-                logger.warning("JWKS refresh failed, using cached keys: %s", exc)
-                return cached[0]
-            raise IdentityNotConfigured(f"Could not fetch JWKS: {exc}") from exc
+    try:
+        return _fetch_and_store(url, cached)
+    finally:
+        with _lock:
+            _refreshing.pop(url, None)
+        in_flight.set()
 
-        if not isinstance(document, dict):
-            if cached is not None:
-                logger.warning("JWKS was not a JSON object; using cached keys")
-                return cached[0]
-            raise IdentityNotConfigured("JWKS was not a JSON object.")
 
-        _cached_jwks[url] = (document, time.monotonic())
-        return document
+def _fetch_and_store(url: str, cached: tuple[dict, float] | None) -> dict:
+    """The network half: run by one thread at a time, and outside the lock.
+
+    Every failure falls back to the cached document when there is one. A stale key is
+    still a valid key, and an identity service that is briefly unreachable must not become
+    an outage in every service that verifies its tokens.
+    """
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=_FETCH_TIMEOUT_SECONDS) as response:
+            document = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, ValueError, OSError) as exc:
+        if cached is not None:
+            logger.warning("JWKS refresh failed, using cached keys: %s", exc)
+            return cached[0]
+        raise IdentityNotConfigured(f"Could not fetch JWKS: {exc}") from exc
+
+    if not isinstance(document, dict):
+        if cached is not None:
+            logger.warning("JWKS was not a JSON object; using cached keys")
+            return cached[0]
+        raise IdentityNotConfigured("JWKS was not a JSON object.")
+
+    _cached_jwks[url] = (document, time.monotonic())
+    return document
 
 
 def _verification_key(config: IdentityConfig) -> str | dict:

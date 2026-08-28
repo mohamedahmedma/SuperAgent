@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from typing import Final, Protocol
 from urllib.parse import quote
 
+from records.env import outbound_pool_size
+
 logger = logging.getLogger(__name__)
 
 
@@ -114,16 +116,43 @@ class SisSchoolCalendar:
         self._lock = threading.Lock()
         self._terms: list[SchoolTerm] = []
         self._loaded_at: float = 0.0
+        #: Set while one thread is refreshing, so the others wait rather than each
+        #: making the same two SIS calls. See `_load`.
+        self._refreshing: threading.Event | None = None
 
     def _http(self):
+        """One pooled client per process, built on first use.
+
+        **Read before locking.** The client is built once and read on every request from
+        every worker thread; taking a mutex to re-read an attribute that has not changed
+        since startup serialises the hot path for nothing. The unlocked read is safe
+        because the attribute is only ever assigned a fully-built client, and the second
+        check inside the lock is what stops two threads that both saw `None` from building
+        two pools.
+
+        The limits are stated rather than defaulted, and stated to match the worker pool
+        that calls this. httpx's default keeps only 20 connections alive, so above that
+        concurrency every request pays a fresh TCP handshake to a service on the same
+        network — see `SisAdapter.POOL_SIZE` for the measurement.
+        """
         import httpx
+
+        client = self._client
+        if client is not None:
+            return client
 
         with self._lock:
             if self._client is None:
                 self._client = httpx.Client(
                     base_url=self._base_url,
                     timeout=httpx.Timeout(self._timeout),
-                    transport=httpx.HTTPTransport(retries=0),
+                    transport=httpx.HTTPTransport(
+                        retries=0,
+                        limits=httpx.Limits(
+                            max_connections=outbound_pool_size(),
+                            max_keepalive_connections=outbound_pool_size(),
+                        ),
+                    ),
                     follow_redirects=False,
                 )
             return self._client
@@ -150,13 +179,56 @@ class SisSchoolCalendar:
             ) from error
 
     def _load(self) -> list[SchoolTerm]:
+        """The school's terms, from cache when fresh and from SIS otherwise.
+
+        ## One refresh at a time
+
+        The cache check released the lock before fetching, so every thread that arrived
+        during a lapsed TTL made the same **two** SIS calls. At 40 workers that is eighty
+        requests to answer one question the school changes twice a year, all issued in the
+        same millisecond, and the burst lands precisely when the service is busiest —
+        cache expiry correlates with nothing except elapsed time.
+
+        Now one thread refreshes and the rest wait for it. A waiter that times out falls
+        back to the stale list rather than fetching its own: term dates that are ten
+        minutes and one second old are not worth a second stampede.
+
+        The fetch stays outside the lock, so a slow SIS delays the refresh rather than
+        blocking every reader of an already-good cache.
+        """
         import time
 
         now = time.monotonic()
-        with self._lock:
-            if self._terms and (now - self._loaded_at) < self.CACHE_SECONDS:
-                return list(self._terms)
+        cached = self._terms
+        if cached and (now - self._loaded_at) < self.CACHE_SECONDS:
+            return list(cached)
 
+        with self._lock:
+            if self._terms and (time.monotonic() - self._loaded_at) < self.CACHE_SECONDS:
+                return list(self._terms)  # somebody refreshed while we waited
+            in_flight = self._refreshing
+            if in_flight is None:
+                in_flight = self._refreshing = threading.Event()
+                leader = True
+            else:
+                leader = False
+
+        if not leader:
+            in_flight.wait(timeout=self._timeout * 2 + 1.0)
+            return list(self._terms)
+
+        try:
+            return self._refresh()
+        finally:
+            with self._lock:
+                self._refreshing = None
+            in_flight.set()
+
+    def _refresh(self) -> list[SchoolTerm]:
+        """The two SIS calls, run by one thread at a time and outside the lock."""
+        import time
+
+        now = time.monotonic()
         years = self._get("/v1/structure/years") or {}
         year_code = years.get("current_academic_year_code") or ""
         if not year_code:
