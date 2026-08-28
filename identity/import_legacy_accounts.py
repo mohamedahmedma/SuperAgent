@@ -5,7 +5,7 @@
 
 **Password hashes are copied verbatim, not reset.** The old backend wrote PBKDF2 in
 the same format this service reads, and older rows may hold passlib bcrypt — which
-`identity.auth.verify_password` also accepts, and upgrades in place on the user's next
+`identity.infrastructure.crypto.passwords` also accepts, and upgrades in place on the user's next
 successful login. So the migration is invisible: nobody is asked to choose a new
 password, and the bcrypt rows drain away on their own as people sign in.
 
@@ -27,9 +27,10 @@ import sys
 
 from sqlalchemy import create_engine, text
 
-from identity.auth import ASSIGNABLE_ROLES
-from identity.db import init_db, new_session
-from identity.models import Account
+from identity.domain.accounts import ASSIGNABLE_ROLES
+from identity.infrastructure.db.models import Account
+from identity.infrastructure.db.schema import init_db
+from identity.infrastructure.db.session import new_session
 
 
 def import_accounts(source_url: str, *, dry_run: bool = False) -> dict:

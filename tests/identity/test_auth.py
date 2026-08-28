@@ -4,8 +4,18 @@ The guardian-binding tests are the ones that matter most: that claim is what the
 records facade trusts, so anything that lets it be set by the wrong party defeats
 every check downstream.
 """
+from identity.app import app
 from tests.identity.conftest import ADMIN_HEADERS
-from identity.tokens import decode_own_token
+
+
+def decode_own_token(token: str) -> dict:
+    """Decode through the issuer the running app built.
+
+    The issuer is no longer a module-level function reading `IDENTITY_AUDIENCE` at
+    import; it is an object on `app.state`, built by the lifespan from resolved
+    settings. Every call below happens after a request, so it is there.
+    """
+    return app.state.token_issuer.decode_own_token(token)
 
 
 def test_login_returns_a_token_carrying_the_guardian_claim(client, parent):

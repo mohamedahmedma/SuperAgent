@@ -12,7 +12,7 @@
           "keys"
         ],
         "summary": "Jwks",
-        "description": "The public signing key.\n\nEvery other service verifies tokens against this and holds nothing that could\nmint one. Public by design — a public key is not a secret.",
+        "description": "The public signing key.\n\nEvery other service verifies tokens against this and holds nothing that could mint\none. Public by design — a public key is not a secret.\n\nVerification elsewhere is **offline**: no service calls this one per request, so\nidentity being down does not take records down, and this service is not in the latency\npath of a parent's question.",
         "operationId": "jwks__well_known_jwks_json_get",
         "responses": {
           "200": {
@@ -36,7 +36,7 @@
           "auth"
         ],
         "summary": "Login",
-        "description": "Exchange credentials for tokens.\n\nAn unknown username and a wrong password produce the same 401 with the same\nmessage. Distinguishing them turns this endpoint into an account enumerator, and\nfor a school that means confirming which parents are registered.",
+        "description": "Exchange credentials for tokens.\n\nAn unknown username and a wrong password produce the same 401 with the same message,\nin the same time. Distinguishing them turns this endpoint into an account enumerator,\nand for a school that means confirming which parents are registered.",
         "operationId": "login_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -98,7 +98,7 @@
           "auth"
         ],
         "summary": "Register",
-        "description": "Self-registration, ported from the old chat backend.\n\nProduces an account that can sign in and read no student records whatsoever: the\nguardian binding is a separate, admin-only write, and nothing on this path can\nreach it. That is what makes leaving self-registration open acceptable — the worst\na stranger gets is a chat account.",
+        "description": "Self-registration, ported from the old chat backend.\n\nProduces an account that can sign in and read no student records whatsoever: the\nguardian binding is a separate, admin-only write, and nothing on this path can reach\nit. That is what makes leaving self-registration open acceptable — the worst a stranger\ngets is a chat account.",
         "operationId": "register_v1_auth_register_post",
         "requestBody": {
           "content": {
@@ -140,7 +140,7 @@
           "auth"
         ],
         "summary": "Refresh",
-        "description": "Exchange a refresh token for a fresh access token.\n\nThe guardian binding is re-read from the account here, not carried over from the\nold token. That is what makes a revoked or corrected binding take effect within\none access-token lifetime instead of persisting until the parent happens to log\nout — the case that matters is a custody change, and it must not wait a month.",
+        "description": "Exchange a refresh token for a fresh access token.\n\nThe guardian binding is re-read from the account, not carried over from the old token.\nThat is what makes a revoked or corrected binding take effect within one access-token\nlifetime instead of persisting until the parent happens to log out — the case that\nmatters is a custody change, and it must not wait a month.",
         "operationId": "refresh_v1_auth_refresh_post",
         "requestBody": {
           "content": {
@@ -202,7 +202,7 @@
           "auth"
         ],
         "summary": "Logout",
-        "description": "Revoke a refresh token.\n\nThe access token already issued stays valid until it expires — offline\nverification is the trade made for not calling this service on every request.\nKeeping access tokens short is what bounds that window.",
+        "description": "Revoke a refresh token.\n\nThe access token already issued stays valid until it expires — offline verification is\nthe trade made for not calling this service on every request. Keeping access tokens\nshort is what bounds that window.",
         "operationId": "logout_v1_auth_logout_post",
         "requestBody": {
           "content": {
@@ -316,8 +316,28 @@
           "auth"
         ],
         "summary": "Start Whatsapp Verification",
-        "description": "Begin a verification. Takes no phone number, and that is the point.\n\nBecause the caller states nothing, there is nothing here to probe: this endpoint cannot\nbe used to ask whether a given number belongs to a parent. That question is answered\nonly to somebody who can actually send a WhatsApp message from the number, and it is\nanswered over WhatsApp rather than in this response.",
+        "description": "Begin a verification. Takes no phone number, and that is the point.\n\nBecause the caller states nothing about a *parent*, there is nothing here to probe:\nthis endpoint cannot be used to ask whether a given number belongs to a parent. That\nquestion is answered only to somebody who can actually send a WhatsApp message from\nthe number, and it is answered over WhatsApp rather than in this response.\n\nThe school is not a secret and does not weaken that: it names the login page the parent\nis standing on, which is public. What it buys is the pairing — the school recorded here\nmust match the school that owns the number the parent's message arrives on, so a nonce\nsteered to the wrong school's number is refused rather than resolved against a database\nthe parent's children are not in.\n\nA missing number is a 503 and an unknown school a 404, both decided in\n`api/errors.py`: the first is the operator's to fix, the second the caller's.",
         "operationId": "start_whatsapp_verification_v1_auth_whatsapp_start_post",
+        "parameters": [
+          {
+            "name": "school",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which school the parent is signing in to. Required where this server holds several; omitted where it holds one. It selects the WhatsApp number the link points at, and is checked again when the parent's message arrives.",
+              "title": "School"
+            },
+            "description": "Which school the parent is signing in to. Required where this server holds several; omitted where it holds one. It selects the WhatsApp number the link points at, and is checked again when the parent's message arrives."
+          }
+        ],
         "responses": {
           "201": {
             "description": "Successful Response",
@@ -325,6 +345,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WhatsAppStartOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -380,7 +410,7 @@
           "auth"
         ],
         "summary": "Complete Whatsapp Verification",
-        "description": "The code, and the tokens if it is right.\n\nThe account is created here on first use rather than by an administrator, and the\nbinding written onto it does not come from this request: it came from the school's own\nrecords, keyed on a number WhatsApp proved. That is the invariant identity/models.py\nstates — an account never names its own guardian — held through a second authority\nrather than broken by one.",
+        "description": "The code, and the tokens if it is right.\n\nThe account is created here on first use rather than by an administrator, and the\nbinding written onto it does not come from this request: it came from the school's own\nrecords, keyed on a number WhatsApp proved. That is the invariant\n`domain/accounts.py` states — an account never names its own guardian — held through a\nsecond authority rather than broken by one.",
         "operationId": "complete_whatsapp_verification_v1_auth_whatsapp_verify_post",
         "requestBody": {
           "content": {
@@ -442,7 +472,7 @@
           "admin"
         ],
         "summary": "Create Account",
-        "description": "Create a login. Note what this route cannot do: bind a guardian.\n\nCreation and binding are deliberately two calls. A bulk parent import that runs\nonly this one produces accounts that can log in and read nothing, which is the\nsafe half-finished state.",
+        "description": "Create a login. Note what this route cannot do: bind a guardian.\n\nCreation and binding are deliberately two calls. A bulk parent import that runs only\nthis one produces accounts that can log in and read nothing, which is the safe\nhalf-finished state.",
         "operationId": "create_account_v1_admin_accounts_post",
         "parameters": [
           {
@@ -478,9 +508,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Create Account V1 Admin Accounts Post"
+                  "$ref": "#/components/schemas/AccountOut"
                 }
               }
             }
@@ -504,7 +532,7 @@
           "admin"
         ],
         "summary": "Bind Guardian",
-        "description": "Bind a login to a guardian. The single most sensitive write in the system.\n\nAudited as its own event type, because \"who decided this parent is that guardian\"\nis the first question anyone asks after a records leak.",
+        "description": "Bind a login to a guardian. The single most sensitive write in the system.\n\nAudited as its own event type, because \"who decided this parent is that guardian\" is\nthe first question anyone asks after a records leak.",
         "operationId": "bind_guardian_v1_admin_accounts__username__guardian_binding_put",
         "parameters": [
           {
@@ -549,9 +577,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Bind Guardian V1 Admin Accounts  Username  Guardian Binding Put"
+                  "$ref": "#/components/schemas/AccountOut"
                 }
               }
             }
@@ -573,7 +599,7 @@
           "admin"
         ],
         "summary": "Unbind Guardian",
-        "description": "Remove a binding — the custody-change path.\n\nTakes effect for new access tokens immediately and for existing ones within their\nremaining lifetime. Revoke the refresh token too when the change is urgent.",
+        "description": "Remove a binding — the custody-change path.\n\nTakes effect for new access tokens immediately, for existing ones within their\nremaining lifetime, and for the session itself now: the refresh tokens are revoked\nhere, so the parent cannot mint a fresh access token to carry on with.",
         "operationId": "unbind_guardian_v1_admin_accounts__username__guardian_binding_delete",
         "parameters": [
           {
@@ -608,9 +634,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Unbind Guardian V1 Admin Accounts  Username  Guardian Binding Delete"
+                  "$ref": "#/components/schemas/AccountOut"
                 }
               }
             }
@@ -634,6 +658,7 @@
           "ops"
         ],
         "summary": "Health",
+        "description": "Deliberately shallow.\n\nIt answers \"is this process serving\" and nothing else — it opens no database\nconnection and calls no dependency. A health check that reached SIS would take this\nservice out of a load balancer because a *different* service was slow, and a health\ncheck that touched the database would be one more connection per poll, forever.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -717,6 +742,36 @@
         ],
         "title": "AccountIn"
       },
+      "AccountOut": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": ""
+          },
+          "guardian_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guardian Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "title": "AccountOut",
+        "description": "What the admin routes echo back. Never a password hash, never a token."
+      },
       "ErrorOut": {
         "properties": {
           "code": {
@@ -734,7 +789,8 @@
         "required": [
           "code"
         ],
-        "title": "ErrorOut"
+        "title": "ErrorOut",
+        "description": "The body behind every refusal this service makes.\n\nOne envelope for all of them, whichever layer raised. A client parses one shape and\nbranches on `code`, never on how the error happened to be produced — see\n`identity/api/errors.py`, which is the only place a domain error becomes a status."
       },
       "GuardianBindingIn": {
         "properties": {

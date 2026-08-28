@@ -1,6 +1,6 @@
 """A verification is only valid at the school it was started for.
 
-`identity/verification.py` already documents the two attacks its split-secret design
+`identity/application/services/whatsapp_login.py` already documents the two attacks its split-secret design
 defeats, and one of them is "a parent tricked into sending an attacker's nonce". Several
 schools give that a new shape: steer the parent's message to a *different* school's
 WhatsApp number, and the flow would look their phone up in a database their children are
@@ -14,25 +14,26 @@ from __future__ import annotations
 
 import pytest
 
-from identity import guardians, whatsapp
-from identity.verification import (
-    SchoolChannel,
-    VerificationService,
-    extract_nonce,
-)
+from identity.application.dto import SchoolChannel
+from identity.application.services.whatsapp_login import WhatsAppLoginService
+from identity.domain.challenges import extract_nonce
+from identity.domain.guardians import GuardianRef
+from identity.infrastructure.db.repositories import SqlChallengeRepository
+from identity.infrastructure.directory.fake import FakeGuardianDirectory
+from identity.infrastructure.whatsapp.gateways import RecordingWhatsAppGateway
 
 NC = "NC"
 MD = "MD"
 
 
-def _service(directories: dict[str | None, guardians.FakeGuardianDirectory]):
+def _service(db, directories: dict[str | None, FakeGuardianDirectory]):
     """A service serving two schools, each with its own gateway and its own directory.
 
     Separate directories are the point: they stand in for the separate databases. A lookup
     that reached the wrong one would find a guardian who is not this school's, which is the
     leak in miniature.
     """
-    gateways = {code: whatsapp.RecordingWhatsAppGateway() for code in directories}
+    gateways = {code: RecordingWhatsAppGateway() for code in directories}
 
     def channel_for(school_code: str | None) -> SchoolChannel:
         if school_code not in directories:
@@ -44,15 +45,20 @@ def _service(directories: dict[str | None, guardians.FakeGuardianDirectory]):
             directory=directories[school_code],
         )
 
-    return VerificationService(channel_for=channel_for), gateways
+    return (
+        WhatsAppLoginService(
+            challenges=SqlChallengeRepository(db), channel_for=channel_for
+        ),
+        gateways,
+    )
 
 
 @pytest.fixture()
 def two_schools():
     """A parent who exists at Nasr City and is a stranger at Maadi."""
-    nc = guardians.FakeGuardianDirectory(
+    nc = FakeGuardianDirectory(
         guardians={
-            "+201000000000": guardians.GuardianRef(
+            "+201000000000": GuardianRef(
                 public_id="nc-guardian",
                 full_name_ar="أم",
                 full_name_en="Mother",
@@ -60,15 +66,15 @@ def two_schools():
             )
         }
     )
-    md = guardians.FakeGuardianDirectory(guardians={})
+    md = FakeGuardianDirectory(guardians={})
     return {NC: nc, MD: md}
 
 
 def test_a_challenge_records_the_school_it_was_started_for(db, two_schools) -> None:
-    service, _ = _service(two_schools)
-    started = service.start(db, school_code=NC)
+    service, _ = _service(db, two_schools)
+    started = service.start(school_code=NC)
 
-    from identity.models import VerificationChallenge
+    from identity.infrastructure.db.models import VerificationChallenge
 
     stored = (
         db.query(VerificationChallenge)
@@ -86,11 +92,10 @@ def test_a_nonce_sent_to_another_schools_number_is_refused(db, two_schools) -> N
     is that the flow refused before it ever asked, so the same result would hold for a
     parent who exists at both.
     """
-    service, gateways = _service(two_schools)
-    started = service.start(db, school_code=NC)
+    service, gateways = _service(db, two_schools)
+    started = service.start(school_code=NC)
 
     outcome = service.claim(
-        db,
         wa_id="+201000000000",
         body=f"SCHOOL VERIFY: {started.nonce}",
         message_id="wamid.CROSSED",
@@ -108,11 +113,10 @@ def test_a_nonce_sent_to_another_schools_number_is_refused(db, two_schools) -> N
 
 def test_the_matching_school_completes_normally(db, two_schools) -> None:
     """The control. Same nonce, same parent, delivered on the right number: a code goes out."""
-    service, gateways = _service(two_schools)
-    started = service.start(db, school_code=NC)
+    service, gateways = _service(db, two_schools)
+    started = service.start(school_code=NC)
 
     outcome = service.claim(
-        db,
         wa_id="+201000000000",
         body=f"SCHOOL VERIFY: {started.nonce}",
         message_id="wamid.CORRECT",
@@ -134,11 +138,10 @@ def test_a_spent_nonce_cannot_be_retried_at_the_right_school(db, two_schools) ->
     Otherwise the refusal is only a delay: the same nonce could be steered at each school
     in turn until one of them answered.
     """
-    service, _ = _service(two_schools)
-    started = service.start(db, school_code=NC)
+    service, _ = _service(db, two_schools)
+    started = service.start(school_code=NC)
 
     assert service.claim(
-        db,
         wa_id="+201000000000",
         body=f"SCHOOL VERIFY: {started.nonce}",
         message_id="wamid.FIRST",
@@ -146,7 +149,6 @@ def test_a_spent_nonce_cannot_be_retried_at_the_right_school(db, two_schools) ->
     ) == "wrong_school"
 
     assert service.claim(
-        db,
         wa_id="+201000000000",
         body=f"SCHOOL VERIFY: {started.nonce}",
         message_id="wamid.SECOND",
@@ -156,9 +158,9 @@ def test_a_spent_nonce_cannot_be_retried_at_the_right_school(db, two_schools) ->
 
 def test_a_single_school_service_still_works_with_no_school_at_all(db) -> None:
     """The unsplit path: no school anywhere, and the flow behaves exactly as before."""
-    directory = guardians.FakeGuardianDirectory(
+    directory = FakeGuardianDirectory(
         guardians={
-            "+201000000000": guardians.GuardianRef(
+            "+201000000000": GuardianRef(
                 public_id="g1",
                 full_name_ar="أم",
                 full_name_en="Mother",
@@ -166,14 +168,19 @@ def test_a_single_school_service_still_works_with_no_school_at_all(db) -> None:
             )
         }
     )
-    gateway = whatsapp.RecordingWhatsAppGateway()
-    service = VerificationService(
-        gateway=gateway, directory=directory, business_number="+201288339613"
+    gateway = RecordingWhatsAppGateway()
+    service = WhatsAppLoginService(
+        challenges=SqlChallengeRepository(db),
+        channel_for=lambda code: SchoolChannel(
+            code=None,
+            business_number="+201288339613",
+            gateway=gateway,
+            directory=directory,
+        ),
     )
 
-    started = service.start(db)
+    started = service.start()
     outcome = service.claim(
-        db,
         wa_id="+201000000000",
         body=f"SCHOOL VERIFY: {started.nonce}",
         message_id="wamid.SINGLE",
@@ -185,6 +192,6 @@ def test_a_single_school_service_still_works_with_no_school_at_all(db) -> None:
 
 def test_the_nonce_survives_what_parents_actually_type(db, two_schools) -> None:
     """Guarding the parser the cross-check depends on: no nonce, no school comparison."""
-    service, _ = _service(two_schools)
-    started = service.start(db, school_code=NC)
+    service, _ = _service(db, two_schools)
+    started = service.start(school_code=NC)
     assert extract_nonce(f"hi SCHOOL VERIFY: {started.nonce} thanks") == started.nonce

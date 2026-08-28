@@ -10,13 +10,18 @@ import tempfile
 import pytest
 from sqlalchemy import create_engine, text
 
-from identity import auth
-from identity.db import new_session
 from identity.import_legacy_accounts import import_accounts
-from identity.models import Account
-from tests.identity.conftest import ADMIN_HEADERS
+from identity.config import settings
+from identity.infrastructure.crypto.passwords import PBKDF2_PREFIX, Pbkdf2PasswordHasher
+from identity.infrastructure.db.models import Account
+from identity.infrastructure.db.session import new_session
+from tests.identity.conftest import ADMIN_HEADERS, use_setting
 
 PASSWORD = "correct-horse-battery"
+
+#: The hasher the running service would build, at the suite's round count.
+PBKDF2_ROUNDS = settings().pbkdf2_rounds
+hasher = Pbkdf2PasswordHasher(rounds=PBKDF2_ROUNDS)
 
 
 def _legacy_bcrypt_hash(password: str) -> str:
@@ -58,21 +63,21 @@ def _legacy_source_db(rows: list[tuple[str, str, str]]) -> str:
 
 def test_a_legacy_bcrypt_password_still_verifies():
     legacy = _legacy_bcrypt_hash(PASSWORD)
-    assert auth.verify_password(PASSWORD, legacy) is True
-    assert auth.verify_password("wrong", legacy) is False
+    assert hasher.verify(PASSWORD, legacy) is True
+    assert hasher.verify("wrong", legacy) is False
 
 
 def test_a_legacy_hash_is_marked_for_upgrade():
-    assert auth.needs_rehash(_legacy_bcrypt_hash(PASSWORD)) is True
-    assert auth.needs_rehash(auth.hash_password(PASSWORD)) is False
+    assert hasher.needs_rehash(_legacy_bcrypt_hash(PASSWORD)) is True
+    assert hasher.needs_rehash(hasher.hash(PASSWORD)) is False
 
 
 def test_a_weaker_pbkdf2_hash_is_marked_for_upgrade(monkeypatch):
     """Raising the round count upgrades everyone as they sign in, not just new users."""
-    weak = auth.hash_password(PASSWORD).replace(
-        f"pbkdf2_sha256${auth.PBKDF2_ROUNDS}$", "pbkdf2_sha256$1000$"
+    weak = hasher.hash(PASSWORD).replace(
+        f"pbkdf2_sha256${PBKDF2_ROUNDS}$", "pbkdf2_sha256$1000$"
     )
-    assert auth.needs_rehash(weak) is True
+    assert hasher.needs_rehash(weak) is True
 
 
 def test_logging_in_upgrades_a_legacy_hash_in_place(client, db):
@@ -95,9 +100,9 @@ def test_logging_in_upgrades_a_legacy_hash_in_place(client, db):
     finally:
         fresh.close()
 
-    assert stored.startswith(auth.PBKDF2_PREFIX)
+    assert stored.startswith(PBKDF2_PREFIX)
     # And the upgraded hash still accepts the same password.
-    assert auth.verify_password(PASSWORD, stored) is True
+    assert hasher.verify(PASSWORD, stored) is True
 
 
 def test_a_wrong_password_does_not_upgrade_anything(client, db):
@@ -122,7 +127,7 @@ def test_a_wrong_password_does_not_upgrade_anything(client, db):
 def test_import_copies_accounts_without_resetting_passwords(client, db):
     source = _legacy_source_db(
         [
-            ("old-admin", auth.hash_password(PASSWORD), "admin"),
+            ("old-admin", hasher.hash(PASSWORD), "admin"),
             ("old-user", _legacy_bcrypt_hash(PASSWORD), "user"),
         ]
     )
@@ -136,7 +141,7 @@ def test_import_copies_accounts_without_resetting_passwords(client, db):
 
 
 def test_import_preserves_the_admin_role(client, db):
-    source = _legacy_source_db([("kept-admin", auth.hash_password(PASSWORD), "admin")])
+    source = _legacy_source_db([("kept-admin", hasher.hash(PASSWORD), "admin")])
     import_accounts(source)
 
     body = client.post("/v1/auth/login", json={"username": "kept-admin", "password": PASSWORD}).json()
@@ -146,7 +151,7 @@ def test_import_preserves_the_admin_role(client, db):
 def test_import_never_creates_a_guardian_binding(client, db):
     """The old system had no guardians. Inventing one during a bulk import is how a
     family's records reach the wrong household."""
-    source = _legacy_source_db([("no-binding", auth.hash_password(PASSWORD), "user")])
+    source = _legacy_source_db([("no-binding", hasher.hash(PASSWORD), "user")])
     import_accounts(source)
 
     body = client.post("/v1/auth/login", json={"username": "no-binding", "password": PASSWORD}).json()
@@ -154,7 +159,7 @@ def test_import_never_creates_a_guardian_binding(client, db):
 
 
 def test_import_is_idempotent_and_never_overwrites(client, db):
-    source = _legacy_source_db([("twice", auth.hash_password(PASSWORD), "user")])
+    source = _legacy_source_db([("twice", hasher.hash(PASSWORD), "user")])
 
     first = import_accounts(source)
     second = import_accounts(source)
@@ -165,7 +170,7 @@ def test_import_is_idempotent_and_never_overwrites(client, db):
 
 
 def test_import_dry_run_writes_nothing(client, db):
-    source = _legacy_source_db([("ghost", auth.hash_password(PASSWORD), "user")])
+    source = _legacy_source_db([("ghost", hasher.hash(PASSWORD), "user")])
     result = import_accounts(source, dry_run=True)
 
     assert result["created"] == 1
@@ -173,7 +178,7 @@ def test_import_dry_run_writes_nothing(client, db):
 
 
 def test_import_does_not_promote_an_unknown_role(client, db):
-    source = _legacy_source_db([("weird", auth.hash_password(PASSWORD), "superuser")])
+    source = _legacy_source_db([("weird", hasher.hash(PASSWORD), "superuser")])
     import_accounts(source)
 
     body = client.post("/v1/auth/login", json={"username": "weird", "password": PASSWORD}).json()
@@ -206,7 +211,7 @@ def test_registration_cannot_produce_a_parent(client):
 
 
 def test_registration_as_admin_requires_the_invite_code(client, monkeypatch):
-    monkeypatch.setattr(auth, "ADMIN_INVITE_CODE", "the-secret-code")
+    use_setting(monkeypatch, "IDENTITY_ADMIN_INVITE_CODE", "the-secret-code")
 
     ok = client.post(
         "/v1/auth/register",
@@ -222,7 +227,7 @@ def test_a_wrong_invite_code_is_refused_not_downgraded(client, monkeypatch):
     An operator then gets an ordinary login, no explanation, and files a bug against
     the wrong system.
     """
-    monkeypatch.setattr(auth, "ADMIN_INVITE_CODE", "the-secret-code")
+    use_setting(monkeypatch, "IDENTITY_ADMIN_INVITE_CODE", "the-secret-code")
 
     response = client.post(
         "/v1/auth/register",
@@ -233,7 +238,7 @@ def test_a_wrong_invite_code_is_refused_not_downgraded(client, monkeypatch):
 
 def test_admin_registration_is_impossible_when_no_code_is_configured(client, monkeypatch):
     """Unset invite code must mean "no self-service admin", never "no check"."""
-    monkeypatch.setattr(auth, "ADMIN_INVITE_CODE", "")
+    use_setting(monkeypatch, "IDENTITY_ADMIN_INVITE_CODE", "")
 
     response = client.post(
         "/v1/auth/register",

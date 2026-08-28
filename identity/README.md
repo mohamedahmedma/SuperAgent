@@ -37,6 +37,53 @@ Verification elsewhere is **offline** — no service calls this one per request.
 being down does not take records down, and it is not in the latency path of a parent's
 question.
 
+## How it is laid out
+
+Clean/onion layering, the same shape `sis/` uses, so an engineer moving between the two
+services meets one convention rather than two.
+
+```
+domain/          the rules, with no I/O at all
+  errors.py        every refusal, as one hierarchy
+  accounts.py      roles, the lockout policy, the guardian-binding invariant
+  challenges.py    the nonce alphabet, the code, the state machine
+  phone.py         E.164, and the one conversion this service may make
+  schools.py       the registry and its three lookups
+  claims.py        what a token says, and what it must not
+  guardians.py     a parent and a child, as values
+
+application/     the use cases, over ports they declare themselves
+  ports/           Protocols — repositories, the directory, the gateway, the hasher
+  dto.py           what a use case returns
+  services/        sessions · whatsapp_login · parent_sessions · administration
+
+infrastructure/  everything that touches the outside world
+  db/              engine, tables, schema, and the repositories behind the ports
+  crypto/          password hashing, the signing key, JWT minting
+  whatsapp/        the Cloud API gateway, inbound parsing, per-school channels
+  directory/       the SIS client, and the in-memory fake it falls back to
+
+api/             routers, wire schemas, the error mapping, the wiring
+config.py        every environment variable, read lazily, in one place
+app.py           the composition root
+```
+
+**Dependencies point inward.** `application/` imports `domain/`; `infrastructure/` and
+`api/` import `application/`; nothing in `domain/` or `application/` imports either of
+those, or `config.py`, or FastAPI, or SQLAlchemy.
+
+That last clause is what the layering buys, and it is worth stating concretely: "does eight
+bad passwords lock the account" is a function of a count and a threshold, so it is tested by
+calling `LockoutPolicy.next_failure` three times — not by making eight HTTP requests against
+a database. The rules are checked rather than described: see
+[`tests/identity/test_layering.py`](../tests/identity/test_layering.py), which reads the
+imports out of the source and fails the build when one points the wrong way.
+
+**`api/deps.py` is the only place that composes.** A router declares the service it needs
+and receives one already bound to this request's transaction; it never builds a repository,
+never reads configuration, and never learns which gateway it is sending through. That is
+what lets a test replace any of it through `app.dependency_overrides`.
+
 ## Running it
 
 ```bash
@@ -53,6 +100,19 @@ pytest tests/identity -q
 | `IDENTITY_ISSUER` / `IDENTITY_AUDIENCE` | `school-identity` / `school-services` | Must match the verifier's settings. |
 | `IDENTITY_ACCESS_TTL_MINUTES` | `30` | Bounds the revocation window. |
 | `IDENTITY_MAX_FAILED_ATTEMPTS` | `8` | Then locked for `IDENTITY_LOCKOUT_MINUTES`. |
+| `IDENTITY_SIS_TIMEOUT_SECONDS` | `5.0` | The guardian lookup a parent's sign-in waits on. |
+| `IDENTITY_SIS_CHILDREN_TIMEOUT_SECONDS` | `1.5` | The children claim, which no sign-in waits on. See below. |
+
+Every one of these is read **lazily, once, in [`config.py`](config.py)** and cached —
+never at import. Junk falls back to the documented default and says so in the log, because
+a typo'd `IDENTITY_ACCESS_TTL_MINUTES=thirty` should not take a school's sign-in down at
+7am.
+
+**The two SIS timeouts are separate on purpose.** `resolve` *is* the sign-in — the parent
+cannot proceed without it, so it gets the full budget. `children_of` only decorates the
+token with a convenience claim that the chat backend looks up for itself anyway, and it
+runs *inside* the latency a parent is waiting on. Under one shared budget, a slow SIS added
+five seconds to every parent's login to save the backend one call it makes regardless.
 
 ## The claim that matters
 
@@ -150,12 +210,13 @@ The parent messages first, which opens a 24-hour customer service window. Meta m
 service conversations free on 1 November 2024, and under the per-message pricing that
 started on 1 July 2025 "All non-template messages are free". We never send a template, so
 we are never billed. That is a policy rather than a contract — `WhatsAppUnavailable` is a
-handled outcome, and `identity/whatsapp.py` is the only file that would have to change.
+handled outcome, and `identity/infrastructure/whatsapp/` is the only package that would
+have to change.
 
 ### It never creates a guardian
 
-An account never names its own guardian — the invariant `identity/models.py` has always
-stated. This is a second authority for that column, not an exception to it: the binding
+An account never names its own guardian — the invariant `identity/domain/accounts.py`
+states. This is a second authority for that column, not an exception to it: the binding
 comes from the school's own records, keyed on a number WhatsApp proved, and a number `sis/`
 does not hold is refused. The binding is re-asserted on every sign-in, so a registrar's
 correction takes effect without an administrator touching this service.

@@ -105,9 +105,20 @@ from alembic import command  # noqa: E402
 from alembic.config import Config as AlembicConfig  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from identity import guardians as identity_directory  # noqa: E402
-from identity import keys as identity_keys  # noqa: E402
-from identity import whatsapp as wa  # noqa: E402
+from identity.config import reset_settings as reset_identity_settings  # noqa: E402
+from identity.config import settings as identity_settings  # noqa: E402
+from identity.infrastructure.crypto.keys import signing_key_from  # noqa: E402
+from identity.infrastructure.directory.fake import (  # noqa: E402
+    FakeGuardianDirectory,
+)
+from identity.infrastructure.directory.sis import SisGuardianDirectory  # noqa: E402
+from identity.domain.schools import SchoolRegistry  # noqa: E402
+from identity.infrastructure.whatsapp.channels import (  # noqa: E402
+    WhatsAppChannels,
+)
+from identity.infrastructure.whatsapp.gateways import (  # noqa: E402
+    RecordingWhatsAppGateway,
+)
 
 # --- the cast --------------------------------------------------------------
 
@@ -327,14 +338,18 @@ def _own_the_environment():
     serving whichever database its own suite bound it to. `records/` needs no reset: it
     holds no database at all.
     """
-    import identity.db
+    import identity.infrastructure.db.session as identity_session
     from sis.config import reset_settings_cache
     from sis.infrastructure.db.session import reset_engine
 
     def _drop_engines() -> None:
         reset_settings_cache()
         reset_engine()
-        identity.db.reset_engine()
+        # Identity's engine and its settings are dropped together: the engine is
+        # rebuilt from the settings, so clearing one without the other would rebuild
+        # against the database it was just pointed away from.
+        reset_identity_settings()
+        identity_session.reset_engine()
 
     previous = {key: os.environ.get(key) for key in ENVIRONMENT}
     os.environ.update(ENVIRONMENT)
@@ -374,7 +389,11 @@ def estate(_own_the_environment):
 
     # records verifies identity's tokens offline. Handing it the public key directly is
     # the documented alternative to a JWKS URL and needs no third server.
-    os.environ["IDENTITY_PUBLIC_KEY_PEM"] = identity_keys.public_pem()
+    # The key the identity app will build for itself, built here so records can be
+    # handed the public half before either process starts.
+    os.environ["IDENTITY_PUBLIC_KEY_PEM"] = signing_key_from(
+        identity_settings()
+    ).public_pem
 
     from records.app import app as records_app
 
@@ -402,14 +421,15 @@ def _fresh_challenges():
     behaviour and should not be softened to suit a test, and it keeps its own coverage in
     identity's own suite where a fake clock can exercise it honestly.
     """
-    from identity.db import init_db, new_session
+    from identity.infrastructure.db.schema import init_db
+    from identity.infrastructure.db.session import new_session
 
     # Identity builds its own schema in its lifespan, which has not run yet the first time
     # this fixture fires. `init_db` is `create_all` and idempotent, so calling it here
     # costs nothing and removes the ordering dependency.
     init_db()
 
-    from identity.models import VerificationChallenge
+    from identity.infrastructure.db.models import VerificationChallenge
 
     session = new_session()
     try:
@@ -420,19 +440,30 @@ def _fresh_challenges():
     yield
 
 
+def _channels(gateway, *, directory=None) -> WhatsAppChannels:
+    """What the identity app would have built, pointed at this test's SIS and gateway.
+
+    The real `SisGuardianDirectory` by default, because this suite is the one place the
+    two services are exercised against each other over a real socket — a fake here would
+    make the journey prove nothing about the seam it exists to prove.
+    """
+    return WhatsAppChannels(
+        registry=SchoolRegistry(),
+        directory=directory
+        or SisGuardianDirectory(
+            base_url=f"http://127.0.0.1:{SIS_PORT}", api_key=ENVIRONMENT["SIS_API_KEY"]
+        ),
+        verify_token=VERIFY_TOKEN,
+        app_secret=APP_SECRET,
+        business_number=SCHOOL_NUMBER,
+        default_gateway=gateway,
+    )
+
+
 @pytest.fixture()
 def gateway():
     """Every WhatsApp message the school would have sent, kept instead of sent."""
-    sender = wa.RecordingWhatsAppGateway()
-    wa.set_gateway(sender)
-    wa.configure(verify_token=VERIFY_TOKEN, app_secret=APP_SECRET,
-                 business_number=SCHOOL_NUMBER)
-    identity_directory.set_directory(
-        identity_directory.SisGuardianDirectory(
-            base_url=f"http://127.0.0.1:{SIS_PORT}", api_key=ENVIRONMENT["SIS_API_KEY"]
-        )
-    )
-    return sender
+    return RecordingWhatsAppGateway()
 
 
 @pytest.fixture()
@@ -440,16 +471,10 @@ def identity(gateway):
     from identity.app import app as identity_app
 
     with TestClient(identity_app) as client:
-        # After the lifespan, so these beat whatever app.py chose from the (unset)
-        # environment.
-        wa.set_gateway(gateway)
-        wa.configure(verify_token=VERIFY_TOKEN, app_secret=APP_SECRET,
-                     business_number=SCHOOL_NUMBER)
-        identity_directory.set_directory(
-            identity_directory.SisGuardianDirectory(
-            base_url=f"http://127.0.0.1:{SIS_PORT}", api_key=ENVIRONMENT["SIS_API_KEY"]
-        )
-        )
+        # After the lifespan, so this beats whatever app.py built from the (unset)
+        # environment. One object holds the gateway, the directory and the webhook
+        # secrets, so they are installed together and cannot disagree.
+        client.app.state.channels = _channels(gateway)
         yield client
 
 
@@ -879,9 +904,9 @@ class TestWhenSomethingIsDown:
 
     def test_an_unreachable_school_leaves_a_login_retryable(self, identity, gateway):
         """Our problem, not the parent's — so the challenge survives for another attempt."""
-        healthy = identity_directory.get_directory()
-        identity_directory.set_directory(
-            identity_directory.FakeGuardianDirectory(unavailable=True)
+        healthy = identity.app.state.channels
+        identity.app.state.channels = _channels(
+            gateway, directory=FakeGuardianDirectory(unavailable=True)
         )
         try:
             started = identity.post("/v1/auth/whatsapp/start").json()
@@ -889,7 +914,7 @@ class TestWhenSomethingIsDown:
             status = identity.post("/v1/auth/whatsapp/status",
                                    json={"poll_secret": started["poll_secret"]}).json()
         finally:
-            identity_directory.set_directory(healthy)
+            identity.app.state.channels = healthy
 
         assert "try again" in gateway.sent[-1][1]
         assert status["status"] == "pending"

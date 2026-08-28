@@ -23,7 +23,11 @@ import json
 
 import pytest
 
-from identity import schools, whatsapp as wa
+from identity import config
+from identity.domain import schools
+from identity.domain.errors import NotConfigured, SchoolsMisconfigured, UnknownSchool
+from identity.infrastructure.whatsapp import inbound as wa
+from identity.infrastructure.whatsapp.channels import build_registry
 
 NC_PHONE_ID = "111111111111111"
 MD_PHONE_ID = "222222222222222"
@@ -70,9 +74,9 @@ def two_schools(monkeypatch) -> schools.SchoolRegistry:
     monkeypatch.setenv("IDENTITY_WHATSAPP_NUMBER_MD", "+201111111111")
     monkeypatch.setenv("IDENTITY_WHATSAPP_PHONE_NUMBER_ID_MD", MD_PHONE_ID)
     monkeypatch.setenv("IDENTITY_WHATSAPP_TOKEN_MD", "token-md")
-    schools.reset_registry_cache()
-    yield schools.get_registry()
-    schools.reset_registry_cache()
+    config.reset_settings()
+    yield build_registry(config.settings())
+    config.reset_settings()
 
 
 # ---------------------------------------------------------------------------
@@ -136,9 +140,9 @@ def test_a_number_resolves_to_the_school_that_owns_it(two_schools) -> None:
 
 def test_an_unknown_number_resolves_to_nobody(two_schools) -> None:
     """Never to a default. Resolving it would answer one branch's parent from another's."""
-    with pytest.raises(schools.UnknownSchool):
+    with pytest.raises(UnknownSchool):
         two_schools.by_phone_number_id("999999999999999")
-    with pytest.raises(schools.UnknownSchool):
+    with pytest.raises(UnknownSchool):
         two_schools.by_phone_number_id("")
 
 
@@ -149,13 +153,13 @@ def test_two_schools_sharing_one_number_are_refused(monkeypatch) -> None:
     monkeypatch.setenv("IDENTITY_WHATSAPP_PHONE_NUMBER_ID_NC", NC_PHONE_ID)
     monkeypatch.setenv("IDENTITY_WHATSAPP_NUMBER_MD", "+201111111111")
     monkeypatch.setenv("IDENTITY_WHATSAPP_PHONE_NUMBER_ID_MD", NC_PHONE_ID)
-    schools.reset_registry_cache()
+    config.reset_settings()
     try:
-        with pytest.raises(schools.SchoolsMisconfigured) as refusal:
-            schools.get_registry()
+        with pytest.raises(SchoolsMisconfigured) as refusal:
+            build_registry(config.settings())
         assert "phone_number_id" in str(refusal.value)
     finally:
-        schools.reset_registry_cache()
+        config.reset_settings()
 
 
 def test_a_school_with_no_number_is_refused(monkeypatch) -> None:
@@ -163,32 +167,32 @@ def test_a_school_with_no_number_is_refused(monkeypatch) -> None:
     monkeypatch.setenv(schools.SCHOOLS_VAR, "NC,MD")
     monkeypatch.setenv("IDENTITY_WHATSAPP_NUMBER_NC", "+201000000000")
     monkeypatch.delenv("IDENTITY_WHATSAPP_NUMBER_MD", raising=False)
-    schools.reset_registry_cache()
+    config.reset_settings()
     try:
-        with pytest.raises(schools.SchoolsMisconfigured) as refusal:
-            schools.get_registry()
+        with pytest.raises(SchoolsMisconfigured) as refusal:
+            build_registry(config.settings())
         assert "MD" in str(refusal.value)
     finally:
-        schools.reset_registry_cache()
+        config.reset_settings()
 
 
 def test_a_national_number_is_refused_at_startup(monkeypatch) -> None:
     """`01288339613` produces a `wa.me` link to a number that does not exist, silently."""
     monkeypatch.setenv(schools.SCHOOLS_VAR, "NC")
     monkeypatch.setenv("IDENTITY_WHATSAPP_NUMBER_NC", "01288339613")
-    schools.reset_registry_cache()
+    config.reset_settings()
     try:
         with pytest.raises(Exception):
-            schools.get_registry()
+            build_registry(config.settings())
     finally:
-        schools.reset_registry_cache()
+        config.reset_settings()
 
 
 def test_no_schools_configured_is_single_school_mode(monkeypatch) -> None:
     """The default, and what keeps every unsplit deployment working untouched."""
     monkeypatch.delenv(schools.SCHOOLS_VAR, raising=False)
-    schools.reset_registry_cache()
+    config.reset_settings()
     try:
-        assert schools.get_registry().is_multi_school is False
+        assert build_registry(config.settings()).is_multi_school is False
     finally:
-        schools.reset_registry_cache()
+        config.reset_settings()

@@ -98,29 +98,39 @@ def _start_identity():
     import, so setting it here takes effect even though the backend package was
     imported long ago.
 
-    Issuer and audience, by contrast, ARE module constants read at import time — and
-    `records/tests/conftest.py` sets both env vars when it is collected. Which value
-    each module captured therefore depends on collection order. Forcing identity's to
-    match the backend's removes the ordering dependency entirely rather than hoping the
-    defaults line up.
+    Issuer and audience used to be module constants identity read at import time, so
+    which value it captured depended on whether `records/tests/conftest.py` had been
+    collected first. They are now resolved lazily from `identity.config`, so setting
+    the variables here — before identity's lifespan runs — is enough, and the ordering
+    dependency is gone rather than merely worked around.
     """
     global _IDENTITY_SERVER, _IDENTITY_BASE, _IDENTITY_THREAD, _SAVED_IDENTITY_KEY
 
     import uvicorn
 
     import backend.infra.identity as backend_identity
-    import identity.keys as identity_keys
-    import identity.tokens as identity_tokens
+    from identity.config import settings as identity_settings
+    from identity.infrastructure.crypto.keys import signing_key_from
+    from identity.infrastructure.db.session import reset_engine
 
     workdir = tempfile.mkdtemp(prefix="e2e-identity-")
     os.environ["IDENTITY_DATABASE_URL"] = f"sqlite:///{workdir}/identity.db"
     os.environ["IDENTITY_DEV_KEY_FILE"] = f"{workdir}/dev-key.pem"
     os.environ.setdefault("IDENTITY_ADMIN_KEY", "e2e-admin-key")
 
-    identity_tokens.ISSUER = backend_identity.ISSUER
-    identity_tokens.AUDIENCE = backend_identity.AUDIENCE
+    # Set as environment variables rather than poked onto a module. Identity now
+    # resolves its issuer and audience lazily from settings, so the values only have
+    # to be in the environment before its lifespan runs — which removes the ordering
+    # dependency this block used to work around rather than merely re-pointing it.
+    os.environ["IDENTITY_ISSUER"] = backend_identity.ISSUER
+    os.environ["IDENTITY_AUDIENCE"] = backend_identity.AUDIENCE
+    # Drops the cached settings *and* any engine another suite built from them, so the
+    # database URL set above is the one this server actually opens.
+    reset_engine()
     _SAVED_IDENTITY_KEY = os.environ.get("IDENTITY_PUBLIC_KEY_PEM")
-    os.environ["IDENTITY_PUBLIC_KEY_PEM"] = identity_keys.public_pem()
+    os.environ["IDENTITY_PUBLIC_KEY_PEM"] = signing_key_from(
+        identity_settings()
+    ).public_pem
 
     from identity.app import app as identity_app
 

@@ -12,14 +12,19 @@ a broken one: whether there is a number in the path.
 import pytest
 from fastapi.testclient import TestClient
 
-from identity import guardians, whatsapp
 from identity.app import app
-from identity.verification import NotConfigured, VerificationService
+from identity.application.dto import SchoolChannel
+from identity.application.services.whatsapp_login import WhatsAppLoginService
+from identity.domain.errors import NotConfigured
+from identity.domain.phone import click_to_chat_link
+from identity.infrastructure.directory.fake import FakeGuardianDirectory
+from identity.infrastructure.whatsapp.gateways import RecordingWhatsAppGateway
+from tests.identity.conftest import install_channels
 
 
 class TestTheLinkItself:
     def test_a_configured_number_opens_a_chat_with_that_number(self):
-        link = whatsapp.click_to_chat_link("+201288339613", "SCHOOL VERIFY: ABC12345")
+        link = click_to_chat_link("+201288339613", "SCHOOL VERIFY: ABC12345")
 
         assert link.startswith("https://wa.me/201288339613?")
         # The digits, with no '+' — wa.me rejects the plus.
@@ -30,12 +35,12 @@ class TestTheLinkItself:
         """`wa.me/?text=` is the bug. It is a valid URL, so nothing downstream can tell
         it apart from a working one — which is why this raises at the source."""
         with pytest.raises(ValueError, match="IDENTITY_WHATSAPP_NUMBER"):
-            whatsapp.click_to_chat_link(empty, "SCHOOL VERIFY: ABC12345")
+            click_to_chat_link(empty, "SCHOOL VERIFY: ABC12345")
 
     def test_the_message_survives_its_reserved_characters(self):
         """An unescaped & or # truncates the message exactly where the nonce was, and
         what arrives looks almost right."""
-        link = whatsapp.click_to_chat_link("+201288339613", "a&b#c d")
+        link = click_to_chat_link("+201288339613", "a&b#c d")
 
         assert "&" not in link.split("?text=", 1)[1]
         assert "#" not in link
@@ -45,22 +50,26 @@ class TestTheEndpoint:
     def test_it_refuses_to_start_a_sign_in_that_cannot_finish(self):
         """503, not 400: nothing the caller sent is wrong and nothing they can send will
         help. Refusing costs one message; not refusing costs every parent, silently."""
-        service = VerificationService(
-            gateway=whatsapp.RecordingWhatsAppGateway(),
-            directory=guardians.FakeGuardianDirectory(),
-            business_number="",
+        service = WhatsAppLoginService(
+            # `None` is safe precisely because of what this asserts: the refusal
+            # happens before any repository method is called.
+            challenges=None,
+            channel_for=lambda code: SchoolChannel(
+                code=None,
+                business_number="",
+                gateway=RecordingWhatsAppGateway(),
+                directory=FakeGuardianDirectory(),
+            ),
         )
 
         # Raised before the database is touched, so a misconfigured server does not
         # write a challenge nobody can ever answer.
         with pytest.raises(NotConfigured):
-            service.start(db=None)
+            service.start()
 
     def test_a_configured_server_hands_back_a_usable_link(self, db):
         with TestClient(app) as client:
-            whatsapp.configure(
-                verify_token="v", app_secret="s", business_number="+201288339613"
-            )
+            install_channels(client, business_number="+201288339613")
             response = client.post("/v1/auth/whatsapp/start")
 
         assert response.status_code == 201
@@ -71,7 +80,7 @@ class TestTheEndpoint:
 
     def test_an_unconfigured_server_says_so_in_a_code_the_screen_can_render(self, db):
         with TestClient(app) as client:
-            whatsapp.configure(verify_token="v", app_secret="s", business_number="")
+            install_channels(client, business_number="")
             response = client.post("/v1/auth/whatsapp/start")
 
         assert response.status_code == 503

@@ -15,11 +15,9 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from identity.guardians import (
-    GuardianDirectoryUnavailable,
-    GuardianRef,
-    SisGuardianDirectory,
-)
+from identity.domain.errors import GuardianDirectoryUnavailable
+from identity.domain.guardians import GuardianRef
+from identity.infrastructure.directory.sis import SisGuardianDirectory
 
 PHONE = "+201001234567"
 
@@ -147,5 +145,5 @@ def test_an_empty_handle_is_refused(directory: SisGuardianDirectory) -> None:
 
 def test_a_missing_base_url_fails_at_construction(directory: SisGuardianDirectory) -> None:
     """At startup, where a human is watching — never at the first parent's login."""
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         SisGuardianDirectory(base_url="")

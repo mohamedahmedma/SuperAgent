@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from identity.db import Base
+from identity.infrastructure.db.base import Base
 
 
 def _now() -> datetime:
@@ -52,7 +52,12 @@ class Account(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # Phone is the realistic login for a parent in a school; username is kept generic
     # so staff and integration accounts fit the same table.
-    username: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    #
+    # No `index=True` here: the `uq_account_username` constraint above already creates a
+    # unique index, and every lookup in this service is an equality match on it. Asking
+    # for both built a second B-tree over the same column, maintained on every insert and
+    # on every failed-login counter update, and serving no query the first did not.
+    username: Mapped[str] = mapped_column(String(120), nullable=False)
     phone: Mapped[str] = mapped_column(String(32), default="", nullable=False, index=True)
 
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)

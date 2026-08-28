@@ -16,11 +16,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from identity import guardians as directory_module
-from identity import whatsapp as wa
-from identity.guardians import FakeGuardianDirectory, GuardianRef
-from identity.models import Account, VerificationChallenge
-from identity.whatsapp import RecordingWhatsAppGateway
+from identity.domain.errors import WhatsAppUnavailable
+from identity.domain.guardians import GuardianRef
+from identity.infrastructure.db.models import Account, VerificationChallenge
+from identity.infrastructure.directory.fake import FakeGuardianDirectory
+from identity.infrastructure.whatsapp.gateways import RecordingWhatsAppGateway
+from tests.identity.conftest import install_channels
 
 APP_SECRET = "test-app-secret"
 VERIFY_TOKEN = "test-verify-token"
@@ -40,22 +41,36 @@ MOTHER = GuardianRef(
 
 
 @pytest.fixture()
-def gateway() -> RecordingWhatsAppGateway:
-    """Every message the school would have sent, kept instead of sent."""
-    sender = RecordingWhatsAppGateway()
-    wa.set_gateway(sender)
-    wa.configure(
-        verify_token=VERIFY_TOKEN, app_secret=APP_SECRET, business_number=SCHOOL_NUMBER
+def wired(client):
+    """The running app, wired to a recording gateway and an in-memory directory.
+
+    One fixture for both halves, because they have to be installed together: the
+    channels object holds the gateway and the directory as one value, so installing
+    them separately would have the second replace the first.
+    """
+    directory = FakeGuardianDirectory({MOTHER_E164: MOTHER, MOTHER_ALT_E164: MOTHER})
+    gateway = RecordingWhatsAppGateway()
+    install_channels(
+        client,
+        gateway=gateway,
+        directory=directory,
+        business_number=SCHOOL_NUMBER,
+        verify_token=VERIFY_TOKEN,
+        app_secret=APP_SECRET,
     )
-    return sender
+    return gateway, directory
 
 
 @pytest.fixture()
-def directory() -> FakeGuardianDirectory:
+def gateway(wired) -> RecordingWhatsAppGateway:
+    """Every message the school would have sent, kept instead of sent."""
+    return wired[0]
+
+
+@pytest.fixture()
+def directory(wired) -> FakeGuardianDirectory:
     """The school's records: one mother, reachable on either of her two numbers."""
-    fake = FakeGuardianDirectory({MOTHER_E164: MOTHER, MOTHER_ALT_E164: MOTHER})
-    directory_module.set_directory(fake)
-    return fake
+    return wired[1]
 
 
 def _signed(payload: dict) -> tuple[bytes, dict[str, str]]:
@@ -242,7 +257,7 @@ def test_either_of_her_numbers_reaches_the_same_account(client, gateway, directo
         assert signed_in.status_code == 200, signed_in.text
 
     accounts = client.app  # noqa: F841 - the assertion below reads the database directly
-    from identity.db import new_session
+    from identity.infrastructure.db.session import new_session
 
     session = new_session()
     try:
@@ -513,7 +528,14 @@ def test_a_non_text_message_is_ignored(client, gateway, directory) -> None:
 
 def test_an_unreachable_directory_leaves_the_challenge_usable(client, gateway) -> None:
     """Our problem, not the parent's — so the challenge survives for a second attempt."""
-    directory_module.set_directory(FakeGuardianDirectory(unavailable=True))
+    install_channels(
+        client,
+        gateway=gateway,
+        directory=FakeGuardianDirectory(unavailable=True),
+        business_number=SCHOOL_NUMBER,
+        verify_token=VERIFY_TOKEN,
+        app_secret=APP_SECRET,
+    )
     started = _start(client)
 
     assert _deliver(client, MOTHER_WA_ID, started["message"]).status_code == 200
@@ -534,11 +556,15 @@ def test_an_undeliverable_code_does_not_leave_a_parent_waiting(client, directory
 
     class BrokenGateway:
         def send_text(self, to_wa_id: str, body: str) -> None:
-            raise wa.WhatsAppUnavailable("no")
+            raise WhatsAppUnavailable("no")
 
-    wa.set_gateway(BrokenGateway())
-    wa.configure(
-        verify_token=VERIFY_TOKEN, app_secret=APP_SECRET, business_number=SCHOOL_NUMBER
+    install_channels(
+        client,
+        gateway=BrokenGateway(),
+        directory=directory,
+        business_number=SCHOOL_NUMBER,
+        verify_token=VERIFY_TOKEN,
+        app_secret=APP_SECRET,
     )
     started = _start(client)
 
