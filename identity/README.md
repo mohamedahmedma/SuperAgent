@@ -42,7 +42,7 @@ question.
 ```bash
 pip install -r identity/requirements.txt
 IDENTITY_ADMIN_KEY=... uvicorn identity.app:app --port 8200
-pytest identity/tests -q
+pytest tests/identity -q
 ```
 
 | Variable | Default | Purpose |

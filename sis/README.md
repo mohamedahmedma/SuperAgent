@@ -76,16 +76,16 @@ Three suites, each catching something the others cannot.
 
 ```bash
 # 1. The service: domain, repositories, routes, migrations.
-python -m pytest sis/tests -q
+python -m pytest tests/sis -q
 
 # 2. The console renders. Mounts the app in jsdom against stubbed responses and walks
 #    every screen, failing on a blank screen or anything written to console.error.
 cd sis/frontend && npm run smoke
 ```
 
-The third is inside the first. `sis/tests/test_ui_contract.py` reads the console's source as
+The third is inside the first. `tests/sis/test_ui_contract.py` reads the console's source as
 text and compares it against `app.openapi()` — it is what catches a screen calling a route
-nobody wrote, or sending a body key the service does not read. `sis/tests/test_ui_fixtures.py`
+nobody wrote, or sending a body key the service does not read. `tests/sis/test_ui_fixtures.py`
 checks the smoke test's stubs against the same document, because a stub that is wrong in the
 same way as the screen certifies the bug instead of catching it.
 
@@ -107,12 +107,12 @@ sis/
     src/styles/   tokens.css (the palette and the motion scale), theme.css (maps them onto
                   Bootstrap's --bs-*), base.css, sis.css
   web/            BUILD OUTPUT. Do not edit.
-  tests/
 ```
 
 The dependency arrow points one way: `api → application → domain`, with `infrastructure`
 plugged in at the edge. `domain/` imports nothing from the layers above it, and the test suite
-would notice if it did.
+would notice if it did — it lives in [`tests/sis/`](../tests/sis/), with every other suite in the
+estate.
 
 ### Design tokens
 

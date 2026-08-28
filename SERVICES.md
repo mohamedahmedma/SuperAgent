@@ -14,7 +14,17 @@ backend/     chat agent + RAG            (existing)  :8000
 records/     academic records facade     :8100
 identity/    authentication              :8200
 sis/         student information service :8300
+
+tests/       every pytest suite in the estate — not a process
 ```
+
+The services hold code. **Every automated check lives in [`tests/`](tests/)**, one
+directory per service plus `general/` for the backend and the cross-service journeys, and
+`evals/` for retrieval scoring. `pytest` from the repository root still runs all of it;
+`python tests/run_regression.py` runs each suite in its own interpreter, which is what the
+pre-merge check should use — the service suites configure themselves through environment
+variables set at import time, so in one shared process what a suite sees depends on which
+suite was collected before it. See [tests/README.md](tests/README.md).
 
 `records/`, `identity/` and `sis/` are independent projects. They have their own
 `requirements.txt`, their own database, their own OpenAPI contract, and no import in

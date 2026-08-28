@@ -5,11 +5,15 @@
 It sets `ACTIVE_PROFILE`, and the only moment that can work is before anything imports
 `backend`. `backend/env.py` loads the project's `.env` at import, `.env` names the
 DEPLOYMENT's profile, and `load_dotenv(override=False)` means whatever is already in the
-environment wins. A conftest under `tests/` is loaded when pytest reaches that directory
-— by which point a service suite collected earlier has already pulled `backend` in, `.env`
-has been read, and setting the variable is too late to matter.
+environment wins. Once `backend` has been imported the variable is too late to matter.
 
 pytest imports the rootdir conftest before collecting anything, which is early enough.
+
+Since every suite moved under `tests/`, a `tests/conftest.py` would in fact also load
+early enough today. It stays here anyway: the rootdir conftest is the earliest hook pytest
+offers and the only one whose timing does not depend on where the suites happen to sit, so
+it keeps working through whatever the next reorganisation is. Moving it buys nothing and
+re-opens a failure whose symptom is a passing test file.
 
 ## Why it matters
 

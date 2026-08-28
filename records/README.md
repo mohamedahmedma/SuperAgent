@@ -74,7 +74,7 @@ this decision: the LMS is never asked about a student the link check excluded.
 pip install -r records/requirements.txt
 python -m records.export_openapi              # regenerate the contract
 RECORDS_API_KEY=... uvicorn records.app:app --port 8100
-pytest records/tests -q
+pytest tests/records -q
 ```
 
 **There is no database, and no migration to run before starting.** Every fact this service
