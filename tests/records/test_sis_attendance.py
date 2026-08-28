@@ -13,8 +13,9 @@ from unittest.mock import patch
 
 import pytest
 
-from records.calendar import FakeSchoolCalendar, SchoolTerm
-from records.sis_adapter import SisAdapter
+from records.adapters.fake.calendar import FakeSchoolCalendar
+from records.domain.terms import SchoolTerm
+from records.adapters.sis.grades import SisAdapter
 
 TERM = SchoolTerm(
     code="2026-T1",

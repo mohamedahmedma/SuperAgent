@@ -7,7 +7,8 @@ record produces a refusal rather than a guess.
 """
 from dataclasses import replace
 
-from records.lms import LmsUnavailable, SubjectGrade
+from records.domain.errors import LmsUnavailable
+from records.domain.marks import SubjectGrade
 from tests.records.conftest import agent_headers
 
 

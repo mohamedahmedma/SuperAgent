@@ -883,13 +883,16 @@ class TestWhenSomethingIsDown:
         Telling a real parent they are unknown because another service blinked is worse
         than telling them to try again.
         """
-        from records import guardian_directory as records_directory
+        from records.adapters.fake.directory import (
+            FakeGuardianDirectory as RecordsFakeDirectory,
+        )
+        from records.app import app as records_app
 
         session = _sign_in(identity, gateway, MOTHER_WA)
-        healthy = records_directory.get_directory()
-        records_directory.set_directory(
-            records_directory.FakeGuardianDirectory(unavailable=True)
-        )
+        # The facade's adapters live on `app.state` now, built by its lifespan. This is
+        # the same object the uvicorn worker is serving, so swapping the field reaches it.
+        healthy = records_app.state.directory
+        records_app.state.directory = RecordsFakeDirectory(unavailable=True)
         try:
             with _parent_client(session["access_token"], agent_key) as parent:
                 refused = parent.get(
@@ -897,7 +900,7 @@ class TestWhenSomethingIsDown:
                     params={"term": TERM},
                 )
         finally:
-            records_directory.set_directory(healthy)
+            records_app.state.directory = healthy
 
         assert refused.status_code == 503
         assert refused.json()["detail"]["code"] == "not_configured"

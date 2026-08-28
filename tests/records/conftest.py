@@ -48,15 +48,13 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from jose import jwt  # noqa: E402
 
-from records import auth, lms  # noqa: E402
+from records.adapters.fake.calendar import FakeSchoolCalendar  # noqa: E402
+from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
+from records.adapters.fake.lms import FakeLms  # noqa: E402
 from records.app import app  # noqa: E402
-from records import calendar as school_calendar  # noqa: E402
-from records import guardian_directory  # noqa: E402
-from records.calendar import FakeSchoolCalendar, SchoolTerm  # noqa: E402
-from records.guardian_directory import (  # noqa: E402
-    FakeGuardianDirectory,
-    PermittedStudent,
-)
+from records.domain.marks import SubjectAttendance, SubjectGrade  # noqa: E402
+from records.domain.people import PermittedStudent  # noqa: E402
+from records.domain.terms import SchoolTerm  # noqa: E402
 
 def _isolate_from_the_environment() -> None:
     """Blank the settings that decide who this service talks to.
@@ -139,6 +137,24 @@ def _pin_verification_key():
         os.environ["IDENTITY_PUBLIC_KEY_PEM"] = previous
 
 
+def install_adapters(test_client, *, calendar=None, directory=None, lms=None):
+    """Point the running app at these fakes.
+
+    The three seams used to be module-level slots a fixture could assign before the app
+    started. They are fields on `app.state` now, built by the lifespan, so a test installs
+    its own **after** the client has started — which is strictly better to test against:
+    the swap is scoped to the app object this test holds, so a suite that forgets to undo
+    it cannot change what a later suite sees.
+    """
+    state = test_client.app.state
+    if calendar is not None:
+        state.calendar = calendar
+    if directory is not None:
+        state.directory = directory
+    if lms is not None:
+        state.lms = lms
+
+
 @pytest.fixture()
 def seeded():
     """The three things this service asks for, answered by fakes.
@@ -163,7 +179,7 @@ def seeded():
         starts_on=now - timedelta(days=30),
         ends_on=now + timedelta(days=60),
     )
-    school_calendar.set_calendar(FakeSchoolCalendar([term]))
+    calendar = FakeSchoolCalendar([term])
 
     #   G-1  permitted   — may be told about Layla
     #   G-2  restricted  — a real guardian of Layla's, barred by a court order. SIS filters
@@ -171,24 +187,22 @@ def seeded():
     #                      which is what makes "restricted" and "not a parent" look alike
     #                      from outside.
     #   G-3  unrelated   — a parent of somebody else entirely
-    guardian_directory.set_directory(
-        FakeGuardianDirectory(
-            {
-                "G-1": [
-                    PermittedStudent(
-                        student_id="S-1001",
-                        full_name_en="Layla Hassan",
-                        full_name_ar="ليلى حسن",
-                        grade_level="G7",
-                        section="A",
-                    )
-                ],
-                "G-2": [],
-                "G-3": [],
-            }
-        )
+    directory = FakeGuardianDirectory(
+        {
+            "G-1": [
+                PermittedStudent(
+                    student_id="S-1001",
+                    full_name_en="Layla Hassan",
+                    full_name_ar="ليلى حسن",
+                    grade_level="G7",
+                    section="A",
+                )
+            ],
+            "G-2": [],
+            "G-3": [],
+        }
     )
-    return {"term": term}
+    return {"term": term, "calendar": calendar, "directory": directory}
 
 
 @pytest.fixture()
@@ -204,10 +218,10 @@ def fake_lms():
     where the two coincided would let a bug that returns one for the other pass
     unnoticed.
     """
-    adapter = lms.FakeLms(
+    adapter = FakeLms(
         grades={
             ("S-1001", "2026-T1"): [
-                lms.SubjectGrade(
+                SubjectGrade(
                     course_ref="2026-T1-G7A-MATH",
                     subject_name="Mathematics",
                     percentage=65.0,
@@ -221,7 +235,7 @@ def fake_lms():
         },
         attendance={
             ("S-1001", "2026-T1"): [
-                lms.SubjectAttendance(
+                SubjectAttendance(
                     course_ref="2026-T1-G7A-MATH",
                     subject_name="Mathematics",
                     percentage=87.5,
@@ -236,14 +250,17 @@ def fake_lms():
             ]
         },
     )
-    lms.set_adapter(adapter)
     return adapter
 
 
 @pytest.fixture()
 def client(seeded, fake_lms):
     with TestClient(app) as test_client:
-        # The app's lifespan resets the adapter to a bare FakeLms; put the fixture
-        # data back so the client and the adapter agree.
-        lms.set_adapter(fake_lms)
+        # After the lifespan, which built its own bare fakes from the (blank) environment.
+        install_adapters(
+            test_client,
+            calendar=seeded["calendar"],
+            directory=seeded["directory"],
+            lms=fake_lms,
+        )
         yield test_client

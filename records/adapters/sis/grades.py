@@ -28,42 +28,22 @@ dropped, silently and deliberately, exactly as it is for Moodle.
 from __future__ import annotations
 
 import logging
-import os
-import threading
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from records.env import outbound_pool_size
-from records.lms import LmsUnavailable, SubjectAttendance, SubjectGrade
+from records.adapters.sis.http import PooledClient, REDIRECT_STATUSES, error_code
+from records.config import settings
+from records.domain.errors import LmsUnavailable
+from records.domain.marks import SubjectAttendance, SubjectGrade
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from records.calendar import SchoolCalendar
+    from records.ports.calendar import SchoolCalendar
 
 logger = logging.getLogger(__name__)
 
 #: The SIS error code for "this code names nothing" — an unknown student, or an unknown
 #: term. The only 404 this adapter is willing to read as "nothing on file".
 _UNKNOWN_REFERENCE = "unknown_reference"
-
-
-def _int_env(name: str, default: int) -> int:
-    """The variable as a positive int, or the documented default on anything unusable.
-
-    A typo'd `SIS_POOL_SIZE=forty` must not take the facade down; it should run with the
-    documented default. The same rule `sis.config._int_env` follows, for the same reason.
-    """
-    raw = (os.getenv(name) or "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        logger.warning("%s is not a number (%r); using %d.", name, raw, default)
-        return default
-    if value <= 0:
-        logger.warning("%s must be positive (got %d); using %d.", name, value, default)
-        return default
-    return value
 
 
 def _as_float(value: Any) -> float | None:
@@ -110,32 +90,9 @@ class SisAdapter:
     a window in which a corrected mark is stale for a parent already on the phone.
     """
 
-    #: Connections held open to the SIS.
-    #:
-    #: **This must not be smaller than the worker pool that calls it.** It was 10, on the
-    #: reasoning that "a pool larger than the SIS's own worker count only queues" — which
-    #: is true of the SIS end and misses what happens at this one. FastAPI serves sync
-    #: endpoints from an anyio threadpool of 40 by default, so 40 requests can be in flight
-    #: here while only 10 may hold a connection: the other 30 block inside `httpx` waiting
-    #: for one, having already been counted as in-flight. The queue forms on this side of
-    #: the wire, where it is invisible to the SIS and shows up only as latency.
-    #:
-    #: Measured against a stub answering in 20ms, with 40 calling threads:
-    #:
-    #:     max_connections=10   231 req/s   p50  86ms   p95 453ms
-    #:     max_connections=40   715 req/s   p50  47ms   p95  84ms
-    #:
-    #: Three times the throughput and a fifth of the tail, for a number. Sized to the
-    #: caller rather than guessed, and overridable for a SIS that genuinely needs
-    #: protecting — see `SIS_POOL_SIZE`.
-    POOL_SIZE = 40
-
-    #: Beyond this many *idle* connections, close rather than keep. Keepalive is what makes
-    #: the second call in a request skip a TCP and TLS handshake, so it is deliberately the
-    #: full pool: a facade that makes two calls per parent question and then drops the
-    #: connection pays the handshake again on the next one.
-    KEEPALIVE_SIZE = 40
-
+    #: Pool size and timeout are `records.config`'s now — one number for all three SIS
+    #: clients, since they are three clients to one service called from one worker pool.
+    #: The measurement that set it is in `config._DEFAULT_POOL_SIZE`.
     #: A hung call must not hang a chat turn. Failing at 10s with "I can't reach the
     #: records" beats succeeding at 90s to a parent watching a streamed answer.
     DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -158,66 +115,21 @@ class SisAdapter:
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.timeout_seconds = timeout_seconds or float(
-            os.getenv("SIS_TIMEOUT_SECONDS") or self.DEFAULT_TIMEOUT_SECONDS
-        )
-        self.pool_size = pool_size or outbound_pool_size()
-        # Keepalive matches the pool: a facade that makes two calls per parent
-        # question and then drops the connection pays the handshake again next time.
-        self.keepalive_size = self.pool_size
+        self.timeout_seconds = timeout_seconds or settings().sis_timeout_seconds
+        self.pool_size = pool_size or settings().pool_size
 
-        self._lock = threading.Lock()
-        self._session: Any = None
+        self._pool = PooledClient(
+            base_url=base_url,
+            timeout_seconds=self.timeout_seconds,
+            headers={"X-API-Key": api_key, "Accept": "application/json"},
+        )
         self._calendar = calendar
 
     # -- transport ----------------------------------------------------------
 
     def _get_session(self) -> Any:
-        """One pooled client for the process, built on first use.
-
-        `httpx`, not `requests`: it is what `records/requirements.txt` already declares,
-        and a second HTTP client in a five-package service is a dependency added for
-        nothing.
-
-        Retries are pinned to zero. httpx already defaults that way, but stating it is
-        the point: a retry budget multiplies the timeout by the attempt count, and three
-        attempts at 10s is a chat turn nobody waits for. A SIS that is down should be
-        reported as down within one timeout.
-
-        **Read before locking.** The client is built once and then read on every request
-        from every worker thread; taking a mutex to re-read an attribute that has not
-        changed since startup serialises the one path that most needs not to be. The
-        unlocked read is safe because the attribute is only ever assigned a fully-built
-        client — a thread either sees `None` and joins the slow path, or sees a client
-        that is ready to use. The lock still guards construction, and the second check
-        inside it is what stops two threads that both saw `None` building two pools.
-        """
-        session = self._session
-        if session is not None:
-            return session
-
-        with self._lock:
-            if self._session is None:
-                import httpx
-
-                self._session = httpx.Client(
-                    base_url=self.base_url,
-                    headers={"X-API-Key": self.api_key, "Accept": "application/json"},
-                    timeout=httpx.Timeout(self.timeout_seconds),
-                    transport=httpx.HTTPTransport(
-                        retries=0,
-                        limits=httpx.Limits(
-                            max_connections=self.pool_size,
-                            max_keepalive_connections=self.keepalive_size,
-                        ),
-                    ),
-                    # Never follow a redirect: every request carries `X-API-Key`, so a
-                    # 302 to another host is a credential handed to whoever controls it.
-                    # A misconfigured base URL must fail, not leak the key.
-                    follow_redirects=False,
-                )
-
-        return self._session
+        """The pooled client. Built once, read unlocked — see `adapters/sis/http.py`."""
+        return self._pool.get()
 
     def _get(self, path: str, params: dict[str, str]) -> dict | None:
         """One SIS call. Returns the body, or None for "nothing on file".
@@ -237,7 +149,7 @@ class SisAdapter:
         except Exception as exc:
             raise LmsUnavailable(f"{path}: transport failure — {exc}") from exc
 
-        if response.status_code in (301, 302, 303, 307, 308):
+        if response.status_code in REDIRECT_STATUSES:
             raise LmsUnavailable(
                 f"{path}: SIS redirected to {response.headers.get('location')!r}. "
                 "SIS_BASE_URL must name the service's own origin."
@@ -252,7 +164,7 @@ class SisAdapter:
                 raise LmsUnavailable(f"{path}: response was not a JSON object")
             return body
 
-        code = self._error_code(response)
+        code = error_code(response)
 
         # "No such student" is not an error here. `records/` deliberately makes "no such
         # student", "not your child" and "records restricted" indistinguishable, and an
@@ -269,21 +181,6 @@ class SisAdapter:
             "SIS refused %s: HTTP %s (%s)", path, response.status_code, code or "no code"
         )
         raise LmsUnavailable(f"{path}: HTTP {response.status_code} ({code or 'no code'})")
-
-    @staticmethod
-    def _error_code(response: Any) -> str:
-        """SIS's machine-readable failure code, or "" if the body did not carry one.
-
-        A body that is not SIS's envelope is itself the finding: something between here
-        and the SIS answered instead of it.
-        """
-        try:
-            detail = (response.json() or {}).get("detail")
-        except ValueError:
-            return ""
-        if isinstance(detail, dict):
-            return str(detail.get("code") or "")
-        return ""
 
     @staticmethod
     def _guardian_path(guardian_ref: str) -> str:
@@ -468,3 +365,7 @@ class SisAdapter:
             pending_count=0 if graded else 1,
             is_complete=graded,
         )
+
+    def close(self) -> None:
+        """Release the pooled client. Called from the app's shutdown hook."""
+        self._pool.close()

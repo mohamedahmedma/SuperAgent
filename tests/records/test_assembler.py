@@ -14,9 +14,9 @@ is one the school entered against her, and there is nothing to match or drop.
 """
 import pytest
 
-from records.assembler import AttendanceAssembler, GradeAssembler
-from records.grading import GradingPolicy
-from records.lms import SubjectAttendance, SubjectGrade
+from records.application.assembly import AttendanceAssembler, GradeAssembler
+from records.domain.grading import GradingPolicy
+from records.domain.marks import SubjectAttendance, SubjectGrade
 
 
 def subject(course_ref: str = "2026-T1-G7A-MATH", **kwargs) -> SubjectGrade:

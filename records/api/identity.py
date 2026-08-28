@@ -19,7 +19,7 @@ It **fails closed**. With no verification material configured, every parent-faci
 returns 503 rather than falling back to trusting the path. A records service that quietly
 accepts unsigned identity is worse than one that is down.
 """
-import os
+from records.config import settings
 
 from schoolauth import (
     IdentityConfig,
@@ -30,24 +30,37 @@ from schoolauth import (
 )
 from schoolauth import verify_token as _verify_token
 
-# Captured at import, exactly as before. `records/tests/conftest.py` sets both variables
-# before this module is first imported, and a later reader would see the deployment's
-# values rather than the suite's.
-ISSUER = os.getenv("IDENTITY_ISSUER", "school-identity")
-AUDIENCE = os.getenv("IDENTITY_AUDIENCE", "school-services")
-JWKS_URL = os.getenv("IDENTITY_JWKS_URL", "")
-JWKS_TTL_SECONDS = int(os.getenv("IDENTITY_JWKS_TTL_SECONDS") or 600)
+#: Module-level overrides, kept for one caller: `tests/general/test_e2e_api.py` forces
+#: this service and the chat backend onto the same issuer and audience without depending
+#: on which suite pytest collected first. `None` means "read the resolved settings",
+#: which is what every deployment does.
+ISSUER: str | None = None
+AUDIENCE: str | None = None
+JWKS_URL: str | None = None
+JWKS_TTL_SECONDS: int | None = None
 
 
 def _config() -> IdentityConfig:
-    """Built per call rather than captured, so a test that reassigns `ISSUER` on this
-    module still changes what is verified — which is how `tests/test_e2e_api.py` makes
-    the backend and identity agree without depending on collection order."""
+    """Built per call rather than captured.
+
+    It used to be four `os.getenv` calls at import, which meant the values a suite set in
+    a fixture arrived too late and which value was verified against depended on collection
+    order. They come from `records.config` now — resolved lazily and cached — so the cost
+    is a dict lookup and the timing problem is gone.
+
+    The four module-level names above still win when set, because one cross-service test
+    legitimately needs to force agreement between two services in one process.
+    """
+    resolved = settings()
     return IdentityConfig(
-        issuer=ISSUER,
-        audience=AUDIENCE,
-        jwks_url=JWKS_URL,
-        jwks_ttl_seconds=JWKS_TTL_SECONDS,
+        issuer=ISSUER if ISSUER is not None else resolved.identity_issuer,
+        audience=AUDIENCE if AUDIENCE is not None else resolved.identity_audience,
+        jwks_url=JWKS_URL if JWKS_URL is not None else resolved.identity_jwks_url,
+        jwks_ttl_seconds=(
+            JWKS_TTL_SECONDS
+            if JWKS_TTL_SECONDS is not None
+            else resolved.identity_jwks_ttl_seconds
+        ),
     )
 
 

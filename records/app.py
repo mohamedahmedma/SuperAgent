@@ -1,9 +1,8 @@
 """The records facade application.
 
-Runs on its own port, against its own database, with its own dependency set. It does
-not import `backend` and `backend` does not import it — if this service is down, chat
-still works and the agent says so; if chat is down, teachers and registrars are
-unaffected.
+Runs on its own port, with its own dependency set. It does not import `backend` and
+`backend` does not import it — if this service is down, chat still works and the agent
+says so; if chat is down, teachers and registrars are unaffected.
 
     uvicorn records.app:app --port 8100
 
@@ -13,31 +12,47 @@ which system of record it runs against gets an explicit fixture backend rather t
 half-configured live one that would fail at the first parent question instead of at
 startup.
 
-Each backend's credentials are demanded here, at startup, rather than discovered on the
-first parent question. A misconfigured deployment should refuse to start; the failure
-mode it replaces is a service that looks healthy until someone asks about a child.
+## This file is the composition root
+
+Every adapter, every pooled HTTP client and every configuration read happens here, once,
+at startup, and lands on `app.state` for `api/deps.py` to hand to a request. Nothing under
+`domain/`, `ports/` or `application/` imports `records.config`, FastAPI or `httpx`.
+
+Each backend's credentials are demanded here rather than discovered on the first parent
+question. A misconfigured deployment should refuse to start; the failure mode it replaces
+is a service that looks healthy until someone asks about a child.
+
+**Order matters in one place**: the marks adapter is handed the calendar, so the calendar
+is built first. Two components resolving a term separately is how they come to disagree
+about it.
 """
+from __future__ import annotations
+
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from records import calendar as school_calendar
-from records import guardian_directory, lms
-from records.env import load_env
+from records.config import load_env, settings
 
 # Before anything below reads the environment. This service is deployed as its own
 # process, so nothing else has loaded the project's `.env` for it.
 load_env()
 
-from records.routes import admin_router, agent_router
-from records.sis_adapter import SisAdapter
+from records.adapters.fake.calendar import FakeSchoolCalendar  # noqa: E402
+from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
+from records.adapters.fake.lms import FakeLms  # noqa: E402
+from records.adapters.sis.calendar import SisSchoolCalendar  # noqa: E402
+from records.adapters.sis.directory import SisGuardianDirectory  # noqa: E402
+from records.adapters.sis.grades import SisAdapter  # noqa: E402
+from records.api import errors  # noqa: E402
+from records.api.routers import admin, records  # noqa: E402
+from records.domain.grading import GradingPolicy  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
-def _sis_api_key() -> str:
+def _sis_api_key(resolved) -> str:
     """The credential this service presents to SIS. Required, and `reader`-scoped.
 
     Read in one place so the guardian directory, the calendar and the marks adapter cannot
@@ -45,98 +60,91 @@ def _sis_api_key() -> str:
     service, and a deployment that keyed two of them would fail on the third at the first
     parent question rather than at boot.
     """
-    api_key = os.getenv("SIS_API_KEY", "").strip()
-    if not api_key:
+    if not resolved.sis_api_key:
         raise RuntimeError(
             "SIS_BASE_URL is set without SIS_API_KEY. SIS authenticates its callers; mint "
             "a reader-scoped key there and set it here. A registrar key would also work "
             "and is the wrong answer — this process answers parents and must not hold the "
             "school's write credential."
         )
-    return api_key
+    return resolved.sis_api_key
 
 
-def _configure_guardian_directory() -> None:
-    """Choose where "which children are this parent's" is answered.
+def _build_calendar(resolved):
+    """Where "when does this term run" is answered.
 
-    Left as the empty in-memory fake when `SIS_BASE_URL` is unset, which makes an
-    unconfigured deployment tell every parent they have no children on file. That is the
-    safe direction: a support call, rather than a service quietly answering from local
-    tables nobody maintains any more.
-
-    The same `SIS_BASE_URL` the LMS adapter uses, because it is the same service — this
-    reads guardians from it while `SisAdapter` reads marks.
+    Left as the in-memory fake when `SIS_BASE_URL` is unset, which is what keeps a laptop
+    and the test suite working with no second service running.
     """
-    base_url = os.getenv("SIS_BASE_URL", "")
-    if not base_url:
+    if not resolved.sis_base_url:
+        return FakeSchoolCalendar()
+    return SisSchoolCalendar(
+        base_url=resolved.sis_base_url, api_key=_sis_api_key(resolved)
+    )
+
+
+def _build_directory(resolved):
+    """Where "which children are this parent's" is answered.
+
+    Left as the empty in-memory fake when `SIS_BASE_URL` is unset, which means an
+    unconfigured deployment tells every parent they have no children on file rather than
+    authorising them against nothing. That is the safe direction.
+    """
+    if not resolved.sis_base_url:
         logger.warning(
             "SIS_BASE_URL is not set; guardian links resolve against an empty directory "
             "and every parent will be told they have no children on file."
         )
-        return
-    api_key = _sis_api_key()
-    guardian_directory.set_directory(
-        guardian_directory.SisGuardianDirectory(base_url=base_url, api_key=api_key)
-    )
-    # The academic calendar comes from the same service, for the same reason: a term
-    # whose dates a registrar corrected must not keep answering from a stale copy here.
-    school_calendar.set_calendar(
-        school_calendar.SisSchoolCalendar(base_url=base_url, api_key=api_key)
+        return FakeGuardianDirectory()
+    return SisGuardianDirectory(
+        base_url=resolved.sis_base_url, api_key=_sis_api_key(resolved)
     )
 
 
-def _configure_adapter() -> None:
-    backend = (os.getenv("RECORDS_LMS") or "fake").strip().lower()
-
-    if backend == "sis":
-        base_url = os.getenv("SIS_BASE_URL", "")
-        if not base_url:
-            raise RuntimeError("RECORDS_LMS=sis requires SIS_BASE_URL.")
-        # A `reader`-scoped key, and required. It is sent on every request and is
-        # deliberately not a registrar key: a registrar key also WRITES, and handing the
-        # school's write credential to the process that answers parents is how a read-only
-        # integration becomes the blast radius of a leak.
-        #
-        # It used to be optional, because SIS admitted every caller as a registrar and
-        # verified no key at all — demanding one here meant demanding a credential nothing
-        # checked. SIS authenticates now, so the reverse is true: an unkeyed deployment
-        # gets a 401 on every parent question, and this refuses to start instead.
-        #
-        # Checked after the base URL so a deployment that has configured neither is told
-        # about the URL first: that is the setting it is missing, and naming the key would
-        # send someone to mint a credential for a service they have not pointed at yet.
-        api_key = _sis_api_key()
-        # The same calendar the routes read, handed to the adapter rather than letting it
-        # build a second one: attendance is addressed by dates, and two components
-        # resolving one term separately is how they come to disagree about it.
-        lms.set_adapter(
-            SisAdapter(
-                base_url=base_url,
-                api_key=api_key,
-                calendar=school_calendar.get_calendar(),
-            )
-        )
-        return
-
-    lms.set_adapter(lms.FakeLms())
+def _build_lms(resolved, calendar):
+    """Which system of record holds the marks."""
+    if not resolved.uses_sis:
+        return FakeLms()
+    if not resolved.sis_base_url:
+        raise RuntimeError("RECORDS_LMS=sis requires SIS_BASE_URL.")
+    # A `reader`-scoped key, and required. It is sent on every request and is deliberately
+    # not a registrar key: a registrar key also WRITES, and handing the school's write
+    # credential to the process that answers parents is how a read-only integration
+    # becomes the blast radius of a leak.
+    return SisAdapter(
+        base_url=resolved.sis_base_url,
+        api_key=_sis_api_key(resolved),
+        # The same calendar the reads use, handed in rather than built a second time:
+        # attendance is addressed by dates, and two components resolving one term
+        # separately is how they come to disagree about it.
+        calendar=calendar,
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Choose what this process talks to. There is nothing to open.
+    """Choose what this process talks to, and close it cleanly.
 
-    This used to create tables and mint a first admin key into them. Both are gone with
-    the storage: the facade holds no guardian links, no API keys and no audit rows, so
-    there is no schema to create and no first row to seed. `records/auth.py` compares the
-    presented key against `RECORDS_API_KEY` directly, and the audit went to `sis/` with
-    the decision it records — a service that no longer decides has nothing to attest.
-
-    What remains is composition, and the ORDER of it matters: the LMS adapter is handed
-    the calendar, so the calendar is chosen first.
+    There is no schema to create and no first row to seed: the facade holds no guardian
+    links, no API keys and no audit rows. What remains is composition.
     """
-    _configure_guardian_directory()
-    _configure_adapter()
-    yield
+    resolved = settings()
+    app.state.settings = resolved
+    app.state.policy = GradingPolicy(primary_figure=resolved.primary_figure)
+
+    app.state.calendar = _build_calendar(resolved)
+    app.state.directory = _build_directory(resolved)
+    app.state.lms = _build_lms(resolved, app.state.calendar)
+
+    try:
+        yield
+    finally:
+        # Release the pooled clients. Without this, `uvicorn --reload` leaks a connection
+        # pool per reload until the process runs out of sockets.
+        for adapter in (app.state.lms, app.state.directory, app.state.calendar):
+            closer = getattr(adapter, "close", None)
+            if callable(closer):
+                closer()
 
 
 app = FastAPI(
@@ -161,8 +169,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(agent_router)
-app.include_router(admin_router)
+# One envelope for every refusal, and one place that decides the status.
+errors.install(app)
+
+app.include_router(records.router)
+app.include_router(admin.router)
 
 
 @app.get("/health", tags=["ops"])
@@ -170,8 +181,8 @@ def health() -> dict:
     """Liveness only.
 
     Deliberately does not probe the SIS. A health check that fails when the system of
-    record is down would take this service out of rotation exactly when it is still
-    able to do the one useful thing left — tell the agent, honestly, that live grades are
+    record is down would take this service out of rotation exactly when it is still able
+    to do the one useful thing left — tell the agent, honestly, that live grades are
     unavailable, so it says that to a parent instead of inventing a figure.
     """
     return {"status": "ok", "service": "records-facade"}

@@ -68,6 +68,78 @@ This matters more than usual because the caller is a language model. No prompt, 
 injected instruction inside a parent's chat message, and no clever phrasing reaches
 this decision: the LMS is never asked about a student the link check excluded.
 
+## How it is laid out
+
+**Hexagonal — ports and adapters.** Not the onion `sis/` and `identity/` use, and the
+difference is the service rather than taste: this one is a stateless translator between
+two contracts. It has no database, no entities with identity and no persistence to invert,
+so a repository layer would be indirection on the latency path of every parent question,
+buying nothing. What it does have is three seams to other systems, which is exactly what
+a hexagon is for.
+
+```
+domain/          the school's vocabulary, no I/O
+  errors.py        every refusal, and the rule that "could not ask" is never "no"
+  grading.py       letter bands, the pass mark, which percentage leads
+  marks.py         SubjectGrade, SubjectAttendance — as a system of record states them
+  terms.py         SchoolTerm
+  people.py        PermittedStudent
+
+ports/           what this facade needs from outside — the driven side
+  lms.py           where the marks are
+  directory.py     which children a guardian may be told about
+  calendar.py      when a term runs
+
+application/     the use cases
+  reads.py         the four reads, and the three-step order that is a security property
+  access.py        the guardian link check
+  assembly.py      domain values -> the wire contract
+  audit.py         what is refused, and why
+
+adapters/        the driven side, implemented
+  sis/             the school's SIS over HTTP, sharing one pooled transport
+  fake/            in-memory, and what an unconfigured deployment falls back to
+
+api/             the driving side: routers, schemas, deps, error mapping
+config.py        every environment variable, read lazily, in one place
+app.py           the composition root
+```
+
+**Dependencies point inward**, and it is checked rather than described:
+[tests/records/test_layering.py](../tests/records/test_layering.py) reads the imports out
+of the source and fails the build when one points the wrong way — including a fourth
+`httpx.Client(...)` appearing anywhere but `adapters/sis/http.py`.
+
+### Why that last rule exists
+
+There were three HTTP clients to one service, built three different ways, and two of them
+were wrong. The marks adapter capped its pool at 10 while FastAPI serves sync endpoints
+from a threadpool of 40, so thirty requests could be in flight and blocked inside `httpx`
+waiting for a connection — a queue on this side of the wire, invisible to the SIS, showing
+up only as latency. Measured against a stub answering in 20ms, with 40 calling threads:
+
+| `max_connections` | throughput | p50 | p95 |
+| --- | --- | --- | --- |
+| 10 | 231 req/s | 86ms | 453ms |
+| 40 | 715 req/s | 47ms | 84ms |
+
+One number now, `RECORDS_POOL_SIZE`, for all three — because they are three clients to
+**one** service called from **one** worker pool, and sizing them separately means two of
+them are wrong. Raise it alongside the worker count; lower it only to protect a SIS that
+genuinely cannot take the concurrency, knowing the queue moves here rather than vanishing.
+
+### What was deliberately not made faster
+
+A grades request makes **two sequential SIS calls** — the link check, then the marks — and
+the second's arguments are all known before the first returns, so they could be issued
+together and the request would be a round trip shorter. They are not. That would ask the
+system of record for a child's marks before establishing that this parent may see them,
+and the caller here is a language model reading untrusted text. The ordering is the
+enforcement, not a formality.
+
+Nor is there a response cache. A guardian link can be revoked the minute a court order
+arrives, and a cached "yes" keeps letting somebody in for as long as the entry lives.
+
 ## Running it
 
 ```bash
@@ -89,12 +161,24 @@ credentials to ask with.
 | `IDENTITY_PUBLIC_KEY_PEM` | — | A pinned key instead of JWKS. Takes precedence. |
 | `IDENTITY_ISSUER` / `IDENTITY_AUDIENCE` | `school-identity` / `school-services` | Must match the identity service. |
 | `SIS_BASE_URL` / `SIS_API_KEY` | — | Required when `RECORDS_LMS=sis`. The key must be `reader`-scoped, and the service refuses to start with a base URL and no key. |
-| `SIS_TIMEOUT_SECONDS` | `10` | Per-call ceiling. No retries: a retry budget multiplies it. |
+| `SIS_TIMEOUT_SECONDS` | `10` | Per-call ceiling for the marks read. No retries: a retry budget multiplies it. |
+| `SIS_LOOKUP_TIMEOUT_SECONDS` | `5` | The guardian-link and calendar reads, which answer smaller questions. |
+| `RECORDS_POOL_SIZE` | `40` | Connections held to the SIS, shared by all three clients. Size it to the worker pool — see [above](#why-that-last-rule-exists). |
+| `RECORDS_CALENDAR_CACHE_SECONDS` | `600` | How long term dates are reused. One refresh at a time; the rest wait. |
+| `RECORDS_PRIMARY_GRADE` | `academic` | `academic` or `official`. Which percentage a parent is shown first. |
+
+Every one of these is read **lazily, once, in [`config.py`](config.py)** and cached, never
+at import — so a value set after the module loads still takes effect, which is what the
+per-call `IdentityConfig` rebuild in the old `identity.py` existed to work around. Junk
+falls back to the documented default and says so in the log.
+
+Two are deliberately read per request instead: `RECORDS_API_KEY`, so rotating it is a
+restart rather than a rebuild, and `IDENTITY_PUBLIC_KEY_PEM`.
 
 `RECORDS_API_KEY` is one shared secret rather than a row in a key table, which is what a
 service holding no state can verify. It buys rotation-by-restart and no revocation list —
 the trade for holding nothing. Minting short-lived service tokens in `identity/` and
-verifying them offline through `schoolauth` is the upgrade path, and `records.auth` is
+verifying them offline through `schoolauth` is the upgrade path, and `records/api/deps.py` is
 shaped so that swapping it changes one function.
 
 ## The contract
@@ -161,7 +245,8 @@ These are the ones that are cheap now and brutal to retrofit once real data land
 have now been answered against a real Moodle 5.1.6 with mod_attendance 2026042100; the
 full findings and a reproducible local instance live in `~/moodle-dev/` inside the
 Ubuntu-22.04 WSL2 distro (moved there off the Windows disk for speed), and the
-implementation notes are in the `MoodleAdapter` docstring in [lms.py](lms.py).
+implementation notes are in the `MoodleAdapter` docstring in
+[ports/lms.py](ports/lms.py).
 
 Two results change this service's design.
 
@@ -172,7 +257,7 @@ exclusions, weights and drop-lowest itself. Measured on a student with 90/100, a
 excluded 10/100 and one ungraded item, the three candidate approaches give **50 %**,
 **30 %** and **90 %** — only the last is right.
 
-So [grading.py](grading.py)'s per-course arithmetic should be replaced by reading that
+So [domain/grading.py](domain/grading.py)'s per-course arithmetic should be replaced by reading that
 figure. Its term-level rollup stays: Moodle still has no concept of a term. The
 `EXCUSED` status survives in the contract because a future SIS may report it, but
 Moodle will never populate it.
@@ -197,14 +282,15 @@ write path over marks, and it belongs where the marks are.
 
 ## Swapping the LMS
 
-Everything LMS-shaped is behind the `LmsAdapter` protocol in [lms.py](lms.py). Routes
+Everything LMS-shaped is behind the `LmsAdapter` protocol in
+[ports/lms.py](ports/lms.py). Routes
 never import a Moodle symbol, never see a web-service function name, never handle a
 Moodle error type. Replacing Moodle means writing one class — the blast radius is that
 file, and the agent's tool layer does not change.
 
 ### `RECORDS_LMS=sis`
 
-[sis_adapter.py](sis_adapter.py) is that claim tested. It reads the school's own Student
+[adapters/sis/grades.py](adapters/sis/grades.py) is that claim tested. It reads the school's own Student
 Information Service (`:8300`, see [../SERVICES.md](../SERVICES.md)) —
 `GET /v1/students/{student_number}/grades?term=` with a `reader`-scoped `X-API-Key` — and
 nothing in the routes, the assembler or the tool layer changed to accommodate it.
@@ -216,7 +302,7 @@ RECORDS_LMS=sis SIS_BASE_URL=http://localhost:8300 SIS_API_KEY=<reader key> \
 
 Four things to know before switching a deployment to it:
 
-- **Bind courses on the subject code.** `records.assembler` matches on the reference the
+- **Bind courses on the subject code.** `records.application.assembly` matches on the reference the
   system of record reports, which for SIS is the subject code (`MATH`), so a
   `CourseBinding` needs `lms_idnumber` set to that. Unbound subjects are dropped, exactly
   as they are under Moodle — a subject the school has not published is not on a report.

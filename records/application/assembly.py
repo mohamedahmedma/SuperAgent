@@ -20,9 +20,9 @@ Nothing here calculates a grade. The LMS computed those; this classifies and res
 """
 from __future__ import annotations
 
-from records.grading import DEFAULT_POLICY, GradingPolicy
-from records.lms import SubjectAttendance, SubjectGrade
-from records.schemas import (
+from records.domain.grading import DEFAULT_POLICY, GradingPolicy
+from records.domain.marks import SubjectAttendance, SubjectGrade
+from records.api.schemas.contract import (
     AcademicGrade,
     AttendanceDay,
     CourseGrade,

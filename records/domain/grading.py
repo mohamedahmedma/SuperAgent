@@ -19,7 +19,6 @@ configuration, not calculation, and it belongs on our side of the seam.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -34,22 +33,6 @@ PRIMARY_ACADEMIC = "academic"
 PRIMARY_OFFICIAL = "official"
 _VALID_PRIMARY = (PRIMARY_ACADEMIC, PRIMARY_OFFICIAL)
 
-
-def _primary_from_env() -> str:
-    """Read the preference, falling back loudly rather than silently.
-
-    A typo here would otherwise change which number a parent is told, quietly, which is
-    the worst possible way for a configuration mistake to present.
-    """
-    raw = (os.getenv("RECORDS_PRIMARY_GRADE") or PRIMARY_ACADEMIC).strip().lower()
-    if raw in _VALID_PRIMARY:
-        return raw
-
-    logger.warning(
-        "RECORDS_PRIMARY_GRADE=%r is not one of %s — falling back to %r",
-        raw, _VALID_PRIMARY, PRIMARY_ACADEMIC,
-    )
-    return PRIMARY_ACADEMIC
 
 
 @dataclass(frozen=True)
@@ -110,4 +93,11 @@ class GradingPolicy:
 #: are deliberately not: they belong per-school in the database alongside terms, and an
 #: env var holding a band table would be unreadable and unversioned. This is the
 #: smallest configuration surface that answers the question actually being asked.
-DEFAULT_POLICY = GradingPolicy(primary_figure=_primary_from_env())
+#: The policy a deployment runs with when nobody hands one in.
+#:
+#: A module-level default rather than an environment read: `records/config.py` resolves
+#: `RECORDS_PRIMARY_FIGURE` and the composition root builds the real policy from it. This
+#: exists so a domain test can say `GradeAssembler(DEFAULT_POLICY)` without arranging an
+#: environment, and so a caller that genuinely has no opinion still gets the documented
+#: bands rather than `None`.
+DEFAULT_POLICY = GradingPolicy()

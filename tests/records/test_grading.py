@@ -9,12 +9,12 @@ What is left is the half a school owns rather than a gradebook: what a number ME
 Two schools reading 82% will disagree about whether it is a B or a B+, and neither is
 wrong.
 """
-from records.grading import (
+from records.config import primary_figure as _primary_from_env
+from records.domain.grading import (
     DEFAULT_POLICY,
     PRIMARY_ACADEMIC,
     PRIMARY_OFFICIAL,
     GradingPolicy,
-    _primary_from_env,
 )
 
 

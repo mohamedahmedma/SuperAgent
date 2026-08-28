@@ -12,7 +12,7 @@
           "records"
         ],
         "summary": "List Terms",
-        "description": "Terms the school has configured. Carries no student data, so needs no subject.\n\nRead from the school's own calendar rather than a table here, like every other term\nin this service. Reading the local table would answer with whatever this service last\nhappened to hold — which, now that terms live in SIS, is nothing.",
+        "description": "Terms the school has configured. Carries no student data, so needs no subject.\n\n`current_term` is the only listing the port promises, so the answer is that term when\nthere is one. A caller wanting the whole year asks SIS, which owns the calendar; this\nroute exists so an agent can name the term it is asking about.",
         "operationId": "list_terms_v1_terms_get",
         "parameters": [
           {
@@ -82,7 +82,7 @@
           "records"
         ],
         "summary": "List Students",
-        "description": "Children this guardian may ask about.\n\nThe agent's first call in any conversation. An unknown guardian and a guardian\nwith no visible children both return an empty list — see `permitted_students`.",
+        "description": "Children this guardian may ask about.\n\nThe agent's first call in any conversation. An unknown guardian and a guardian with no\nvisible children both return an empty list — see `AccessService.permitted_students`.",
         "operationId": "list_students_v1_guardians__guardian_id__students_get",
         "parameters": [
           {
@@ -371,7 +371,7 @@
           "records"
         ],
         "summary": "Get Course Detail",
-        "description": "One subject in detail — the figures behind \"why is her maths grade 72\".\n\nThe per-ASSESSMENT breakdown is not served yet, and returns an empty list rather\nthan a fabricated one. `local_schoolapi` summarises per subject; it has no\nper-assessment endpoint, and the core Moodle call that would provide one cannot\nexpress whether an assessment was excused — so a list built from it would show a\ncounted zero where the child was excused, which is precisely the error this system\nexists to prevent.\n\nAn empty list is honest but not harmless: the agent must say it does not have the\nbreakdown, NOT that there are no assessments. The template that renders this\ndistinguishes the two.\n\nThe subject-level figures below are complete and correct, so \"her maths is 72,\nwith one assessment excused and one still to be marked\" is answerable today; only\nthe item-by-item list is missing.",
+        "description": "One subject in detail — the figures behind \"why is her maths grade 72\".\n\nThe per-ASSESSMENT breakdown is not served yet, and returns an empty list rather than\na fabricated one. `local_schoolapi` summarises per subject; it has no per-assessment\nendpoint, and the core Moodle call that would provide one cannot express whether an\nassessment was excused — so a list built from it would show a counted zero where the\nchild was excused, which is precisely the error this system exists to prevent.\n\nAn empty list is honest but not harmless: the agent must say it does not have the\nbreakdown, NOT that there are no assessments. The template that renders this\ndistinguishes the two.\n\nThe subject-level figures below are complete and correct, so \"her maths is 72, with\none assessment excused and one still to be marked\" is answerable today; only the\nitem-by-item list is missing.",
         "operationId": "get_course_detail_v1_guardians__guardian_id__students__student_id__grades__course_id__get",
         "parameters": [
           {
@@ -815,7 +815,7 @@
           "ops"
         ],
         "summary": "Health",
-        "description": "Liveness only.\n\nDeliberately does not probe the SIS. A health check that fails when the system of\nrecord is down would take this service out of rotation exactly when it is still\nable to do the one useful thing left — tell the agent, honestly, that live grades are\nunavailable, so it says that to a parent instead of inventing a figure.",
+        "description": "Liveness only.\n\nDeliberately does not probe the SIS. A health check that fails when the system of\nrecord is down would take this service out of rotation exactly when it is still able\nto do the one useful thing left — tell the agent, honestly, that live grades are\nunavailable, so it says that to a parent instead of inventing a figure.",
         "operationId": "health_health_get",
         "responses": {
           "200": {

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
 
 logger = logging.getLogger("records.audit")
 
@@ -103,3 +104,35 @@ __all__ = [
     "NOT_AUTHORIZED",
     "refused",
 ]
+
+
+@contextmanager
+def reporting_unavailable(request, subject, student_id: str):
+    """Record a failed read against a system of record, then let it propagate.
+
+    The report matters as much as the error: a spike of `lms_unavailable` against one
+    student is how a sync problem gets noticed before a parent reports it. It is a
+    structured log line rather than a row because this service holds no database, and
+    `sis/` keeps the trail of answers about children.
+
+    A context manager rather than a helper called from an `except` block, because it was
+    the latter at four call sites and one of them is how a read gets added later that
+    fails silently. Wrapping the call means the reporting cannot be forgotten.
+
+    Only upstream failures are reported here. A 404 for a child who is not this guardian's
+    is an *answer*, and `sis/` records it with the real reason — emitting it here too
+    would double-count the one event that already has a proper home.
+    """
+    from records.domain.errors import UpstreamUnavailable
+
+    try:
+        yield
+    except UpstreamUnavailable:
+        refused(
+            LMS_UNAVAILABLE,
+            endpoint=str(request.url.path),
+            guardian_id=subject.guardian_id,
+            student_id=student_id,
+            request_id=subject.caller.request_id,
+        )
+        raise
