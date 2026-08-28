@@ -73,3 +73,5 @@ htmlcov/
 # Editor and IDE state.
 .idea/
 .vscode/
+
+scripts/
