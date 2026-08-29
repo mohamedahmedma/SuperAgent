@@ -75,4 +75,7 @@ htmlcov/
 .idea/
 .vscode/
 
-scripts/
+# Anchored: this was written for the top-level scratch folder that left the index in
+# 5607171. Unanchored it also swallowed deploy/scripts/, which is deployment source and
+# has to ship — a directory silently absent from a release is a hard failure to spot.
+/scripts/
