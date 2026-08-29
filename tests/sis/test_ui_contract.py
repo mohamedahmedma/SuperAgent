@@ -1033,6 +1033,80 @@ def test_one_attribute_carries_the_theme() -> None:
         )
 
 
+def test_appearance_has_exactly_light_and_dark() -> None:
+    """Phase 2 exposes two formal modes and no custom palette disguised as more themes."""
+    store = _strip_comments((SRC / "store.js").read_text(encoding="utf-8"))
+    settings = _strip_comments(
+        (SRC / "components" / "Settings.jsx").read_text(encoding="utf-8")
+    )
+
+    appearances = re.findall(
+        r"value:\s*['\"](light|dark|system)['\"]\s*,\s*label:", settings
+    )
+    assert appearances == ["light", "dark"]
+    assert "setTint" not in store
+    assert "currentTint" not in store
+    assert "matchMedia" not in store
+    assert 'type="color"' not in settings
+    assert "Page colour" not in settings
+
+
+def test_every_literal_ui_sentence_has_an_arabic_translation() -> None:
+    """Arabic mode must not silently fall back to English for static interface copy."""
+    locale = (SRC / "locale" / "ar.js").read_text(encoding="utf-8")
+    translated = set(
+        re.findall(r"(?m)^\s*(?:'([^']+)'|\"([^\"]+)\"|([A-Za-z][A-Za-z ]*))\s*:", locale)
+    )
+    translated_keys = {next(part for part in match if part) for match in translated}
+
+    used: dict[str, list[str]] = {}
+    # Machine identifiers and literal CSV headers stay Latin in both directions so they
+    # continue to match files and records outside the UI.
+    intentionally_latin = {
+        "#",
+        "NC-2025-2026",
+        "percentage",
+        "student_number",
+        "student_number,full_name_ar,full_name_en",
+        "student_number,phone,full_name_ar,full_name_en,relationship,is_primary_contact",
+        "student_number,subject_code,percentage",
+    }
+    literal = re.compile(r"\bt\(\s*(['\"])(.*?)\1", re.DOTALL)
+    for path, body in _sources():
+        if path.endswith("locale/ar.js"):
+            continue
+        for match in literal.finditer(_strip_comments(body)):
+            key = match.group(2).replace("\\'", "'").replace('\\"', '"')
+            used.setdefault(key, []).append(path)
+
+    missing = sorted(
+        key for key in used if key not in translated_keys and key not in intentionally_latin
+    )
+    assert not missing, (
+        "Arabic mode falls back to English for these literal UI strings:\n  "
+        + "\n  ".join(f"{key} ({', '.join(sorted(set(used[key])))})" for key in missing)
+    )
+
+
+def test_language_switch_controls_document_language_and_direction() -> None:
+    store = _strip_comments((SRC / "store.js").read_text(encoding="utf-8"))
+    assert "root.setAttribute('lang', lang)" in store
+    assert "root.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr')" in store
+
+    base = _css("base.css")
+    assert '[dir="rtl"] body' in base
+    assert "text-align: right" in base
+
+
+def test_kg_is_the_stage_label_in_arabic_and_english_ui() -> None:
+    school = (SRC / "views" / "School.jsx").read_text(encoding="utf-8")
+    locale = (SRC / "locale" / "ar.js").read_text(encoding="utf-8")
+    assert "{ key: 'garden', label: 'Garden' }" in school
+    assert re.search(r"'Garden'\s*:\s*'KG'", locale)
+    assert "روضة" not in locale
+    assert "رياض الأطفال" not in locale
+
+
 def test_every_duration_is_scaled_by_one_variable() -> None:
     """Animation timing goes through `--motion-scale`, so one line disables all motion.
 

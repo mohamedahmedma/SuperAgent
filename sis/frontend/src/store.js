@@ -32,29 +32,9 @@ var THEME_KEY = 'sis.theme';
 var LANG_KEY = 'sis.lang';
 var YEAR_KEY = 'sis.year';
 
-/*
- * The page colour, remembered per appearance rather than once.
- *
- * Two keys, because one would be wrong in both directions: a cream chosen for the light theme
- * turns the dark theme cream, and a near-black chosen for the dark theme turns the light theme
- * near-black. What a person means by "the page colour" is "the page colour in the appearance I
- * am looking at", so the store keeps one of each and applies whichever the theme resolves to.
- */
-var TINT_KEYS = { light: 'sis.tint.light', dark: 'sis.tint.dark' };
-
-/*
- * What a stored tint is allowed to be: three or six hex digits, and nothing else.
- *
- * Validated on the way *out* of storage rather than only on the way in. localStorage is
- * editable by anyone with the console open, and this value is written into a style attribute —
- * so a string from it is untrusted input by definition. Anything that does not match is
- * dropped and the stylesheet's own default stands.
- */
-var HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-
-function readTint(theme) {
-  var raw = readLocal(TINT_KEYS[theme], null);
-  return raw && HEX.test(raw) ? raw.toLowerCase() : null;
+function readTheme() {
+  /* Only Light and Dark are valid. Legacy `system` and malformed stored values become Light. */
+  return readLocal(THEME_KEY, 'light') === 'dark' ? 'dark' : 'light';
 }
 
 /*
@@ -99,16 +79,7 @@ var state = {
   school: readLocal(SCHOOL_KEY, null),
   /** The academic year every screen scopes itself to. Null until the years load. */
   year: readLocal(YEAR_KEY, null),
-  theme: readLocal(THEME_KEY, 'system'),
-  /**
-   * The chosen page colour per appearance, or null for "whatever the stylesheet says".
-   *
-   * Null rather than a copy of the default, deliberately. The default lives in tokens.css and
-   * nowhere else; storing null here means resetting is `removeProperty` and the stylesheet
-   * wins again, instead of the store holding a second copy of a value that would then have to
-   * be kept in step with the CSS by hand.
-   */
-  tint: { light: readTint('light'), dark: readTint('dark') },
+  theme: readTheme(),
   lang: readLocal(LANG_KEY, 'en'),
   /** Requests in flight, for the header progress bar. A count, not a boolean: two
       screens loading at once must not have the first one to finish hide the bar. */
@@ -172,74 +143,14 @@ function setYear(code) {
 }
 
 function setTheme(theme) {
-  writeLocal(THEME_KEY, theme);
-  applyTheme(theme);
-  set({ theme: theme });
-  /* After the state, not before: `applyTint` asks `appearance()` which theme is on, and
-     `appearance()` reads the state. */
-  applyTint();
+  var value = theme === 'dark' ? 'dark' : 'light';
+  writeLocal(THEME_KEY, value);
+  applyTheme(value);
+  set({ theme: value });
 }
 
-/* -- The page colour -------------------------------------------------------------- */
+/* -- Appearance ------------------------------------------------------------------- */
 
-/** Which appearance is actually on screen: `theme`, with "system" resolved. */
-function appearance() {
-  if (state.theme === 'dark' || state.theme === 'light') return state.theme;
-  return prefersDark() ? 'dark' : 'light';
-}
-
-/**
- * Set the page colour for the appearance currently on screen.
- *
- * Writes one custom property onto `<html>`; every surface in the console is mixed from it in
- * tokens.css, so this is the whole of "re-skin the app". Passing null clears the override and
- * lets the stylesheet's default stand again.
- */
-function setTint(hex) {
-  var value = hex && HEX.test(hex) ? hex.toLowerCase() : null;
-  var where = appearance();
-  var next = { light: state.tint.light, dark: state.tint.dark };
-  next[where] = value;
-  writeLocal(TINT_KEYS[where], value);
-  set({ tint: next });
-  applyTint();
-}
-
-/** Put the stored tint for the current appearance on the document, or take it off. */
-function applyTint() {
-  var root = window.document.documentElement;
-  var value = state.tint[appearance()];
-  if (value) {
-    root.style.setProperty('--tint', value);
-  } else {
-    root.style.removeProperty('--tint');
-  }
-}
-
-/**
- * The colour the page is actually painted right now, as a hex string.
- *
- * Read back from the computed style rather than from `state.tint`, because the interesting
- * case is the one where state says null: the answer is then the stylesheet's default, which
- * this module deliberately does not know. A colour input needs a concrete value to show.
- */
-function currentTint() {
-  try {
-    var raw = window
-      .getComputedStyle(window.document.documentElement)
-      .getPropertyValue('--tint')
-      .trim();
-    return HEX.test(raw) ? raw.toLowerCase() : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-/*
- * Three states, not two. "system" removes the attribute entirely and lets the
- * `prefers-color-scheme` block in tokens.css decide, which is what a school laptop on a
- * managed dark-mode policy should get by default; an explicit choice pins it.
- */
 function applyTheme(theme) {
   var root = window.document.documentElement;
   /*
@@ -248,23 +159,10 @@ function applyTheme(theme) {
    * disagree about which theme is on — and they would, the first time somebody styled
    * something against one and not the other.
    *
-   * Bootstrap has no "system" value, so the OS preference is resolved here and written as a
-   * concrete light or dark. The media query is re-read on every change, and the listener
-   * below keeps it honest if the OS flips while the tab is open.
+   * The value is normalised again at the DOM boundary so a stale caller cannot introduce a
+   * third appearance.
    */
-  if (theme === 'dark' || theme === 'light') {
-    root.setAttribute('data-bs-theme', theme);
-    return;
-  }
-  root.setAttribute('data-bs-theme', prefersDark() ? 'dark' : 'light');
-}
-
-function prefersDark() {
-  try {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  } catch (e) {
-    return false; // No matchMedia: light is the safer default for a document.
-  }
+  root.setAttribute('data-bs-theme', theme === 'dark' ? 'dark' : 'light');
 }
 
 /*
@@ -601,27 +499,6 @@ var load = {
 
 applyTheme(state.theme);
 applyLang(state.lang);
-applyTint();
-
-/*
- * Follow the OS while the theme is left on "system". Bootstrap resolves nothing itself — it
- * reads the attribute — so a laptop switching to dark at sunset would otherwise leave the
- * console in light until the tab was reloaded.
- */
-try {
-  window
-    .matchMedia('(prefers-color-scheme: dark)')
-    .addEventListener('change', function () {
-      if (state.theme !== 'system') return;
-      applyTheme('system');
-      /* The appearance just changed underneath us, so the other appearance's page colour is
-         the one that should now be on the document. */
-      applyTint();
-      notify();
-    });
-} catch (e) {
-  /* No matchMedia. The explicit toggle still works. */
-}
 
 export const Store = {
   get state() {
@@ -632,9 +509,6 @@ export const Store = {
   setSchool: setSchool,
   setYear: setYear,
   setTheme: setTheme,
-  setTint: setTint,
-  currentTint: currentTint,
-  appearance: appearance,
   setLang: setLang,
   toast: toast,
   dismiss: dismiss,

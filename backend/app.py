@@ -1,5 +1,7 @@
 import os
 import sys
+import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Supports both `python backend/app.py` and `uvicorn backend.app:app` startup methods
@@ -55,13 +57,13 @@ def create_app() -> FastAPI:
     # can only supply it as a default — an explicit env var still wins.
     os.environ.setdefault("LANGSMITH_PROJECT", profile.identity.langsmith_project)
 
-    app = FastAPI(
-        title=profile.identity.api_title,
-        description=profile.identity.description,
-    )
-
-    @app.on_event("startup")
-    async def _startup_init_db():
+    # Defined before the app rather than registered onto it: `lifespan=` is the supported
+    # replacement for the deprecated `@app.on_event("startup")`, and it has to be handed to
+    # the constructor. Everything before the `yield` is what the startup handler used to
+    # run, in the same order; there is nothing after it because this app has never had
+    # shutdown work to do.
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
         init_db()
         # create_all() creates missing TABLES but never adds columns to existing ones,
         # so a model change ships silently and surfaces as UndefinedColumn partway
@@ -85,7 +87,23 @@ def create_app() -> FastAPI:
         # rather than inside whichever request happened to be first.
         from backend.indexing.embedding import embedding_service
 
-        embedding_service.warm_up()
+        # Do not hold FastAPI's startup gate while a cold bge-m3 cache downloads and
+        # loads. Uvicorn only accepts connections after this lifespan yields, so an
+        # inline warm-up makes even /health unreachable. /ready remains the traffic
+        # gate and reports "loading" until this daemon thread finishes.
+        threading.Thread(
+            target=embedding_service.warm_up,
+            name="embedding-warmup",
+            daemon=True,
+        ).start()
+
+        yield
+
+    app = FastAPI(
+        title=profile.identity.api_title,
+        description=profile.identity.description,
+        lifespan=lifespan,
+    )
 
     # This API authenticates with a bearer token in the Authorization header
     # (backend/infra/auth.py), never with a cookie. That is what settles the

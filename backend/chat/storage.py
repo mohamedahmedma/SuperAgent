@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -126,7 +126,9 @@ class ConversationStorage:
 
             serialized = []
             inserted = []
-            now = datetime.utcnow()
+            # Naive UTC, matching the timezone-less DateTime columns these rows write to.
+            # `datetime.utcnow()` produced the same value but is deprecated.
+            now = datetime.now(UTC).replace(tzinfo=None)
             for idx, msg in enumerate(messages):
                 supplied = None
                 if extra_message_data and idx < len(extra_message_data):

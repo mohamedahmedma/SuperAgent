@@ -164,19 +164,13 @@ The page is **a light off-white and the panels on it are grey**: a screen is a s
 slabs with a hairline and a 14px corner, and a form control on one is the page colour (`--field`)
 or it would be the colour of the card behind it.
 
-**The page colour is a setting, not a constant.** `--tint` is the page — #FAF9F7 by default, an
-off-white with a little black in it — and the panel, the hover, the well and the two hairlines
-are all that colour mixed a measured distance toward a grey. The settings dialog writes one
-custom property onto `<html>` and the whole console follows, which is what lets a colour a user
-picked look like part of the design instead of a stripe of their colour laid over one. Each
-appearance remembers its own; the contract suite pins the derivation so a later edit cannot
-quietly hand-set a surface and break the following.
+`--tint` is the formal page colour for each of the two supported modes: Light and Dark. Panels,
+hover states, fields, and hairlines derive from that token, keeping contrast and hierarchy
+consistent without exposing extra colour themes.
 
-The **settings dialog** (the gear in the header) holds the three preferences a person owns rather
-than a school does — appearance, page colour, and which of a child’s two names is shown first.
-Its backdrop blurs rather than dims, because a dialog about what a colour does to the page has to
-leave the page visible, and it carries a working miniature of the console drawn from the same
-tokens the real screens use.
+The **settings dialog** (the gear in the header) holds two browser preferences: Light/Dark
+appearance and Arabic/English interface language. Both choices persist locally and neither is
+sent to the service.
 
 ### Arabic, and the two directions
 

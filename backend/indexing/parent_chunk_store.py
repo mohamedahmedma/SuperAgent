@@ -1,5 +1,5 @@
 """Parent chunk document store (used for the Auto-merging Retriever)"""
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import List
 
 from backend.infra.cache import cache
@@ -57,7 +57,8 @@ class ParentChunkStore:
                     "chunk_idx": int(doc.get("chunk_idx", 0) or 0),
                     "modality": doc.get("modality", "text") or "text",
                     "asset_ids": list(doc.get("asset_ids") or []),
-                    "updated_at": datetime.utcnow(),
+                    # Naive UTC, matching the timezone-less column. `utcnow()` is deprecated.
+                    "updated_at": datetime.now(UTC).replace(tzinfo=None),
                 }
                 cache_payload = {
                     "chunk_id": chunk_id,

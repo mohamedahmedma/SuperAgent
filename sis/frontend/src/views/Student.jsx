@@ -109,15 +109,15 @@ function Finder({ initial }) {
       <ErrorNote error={found.error} onRetry={found.reload} />
 
       {asked ? (
-        <Card title={t('Results')} subtitle={found.value ? `${found.value.count} found` : null} tight>
+        <Card title={t('Results')} subtitle={found.value ? t('{0} found', [found.value.count]) : null} tight>
           <Table
             loading={found.loading}
             rows={students}
             rowKey={(row) => row.student_number}
             rowHref={(row) => Router.href('student', { number: row.student_number })}
-            rowLabel={(row) => `Open ${pickName(row, state.lang) || row.student_number}`}
+            rowLabel={(row) => t('Open {0}', [pickName(row, state.lang) || row.student_number]).join('')}
             empty={
-              <Empty title={`Nothing matches “${asked}”`}>
+              <Empty title={t('Nothing matches “{0}”', [asked])}>
                 {t('Try the student number. A name typed in one script does not match a record that only carries the other.')}
               </Empty>
             }
@@ -250,7 +250,7 @@ function Placements({ studentNumber }) {
   return (
     <Card
       title={t('Placements')}
-      subtitle={`${rows.length} in the record — newest first`}
+      subtitle={t('{0} in the record — newest first', [rows.length])}
       actions={
         <Button size="sm" icon="refresh" onClick={placements.reload}>
           {t('Reload')}
@@ -331,7 +331,7 @@ function Guardians({ studentNumber }) {
   return (
     <Card
       title={t('Guardians')}
-      subtitle={guardians.value ? `${guardians.value.count} on her contact list` : null}
+      subtitle={guardians.value ? t('{0} on her contact list', [guardians.value.count]) : null}
       actions={
         <a className="btn btn-sm btn-quiet" href={Router.href('guardians')}>
           {t('Manage')}
@@ -461,7 +461,7 @@ function Marks({ studentNumber }) {
             value: item.code,
             label: `${item.code}${item.is_closed ? ' (closed)' : ''}`
           }))}
-          placeholder={terms.loading ? 'Loading…' : 'Choose a term'}
+          placeholder={terms.loading ? t('Loading…') : t('Choose a term')}
           onInput={setTerm}
         />
       }
@@ -752,7 +752,7 @@ function Insights({ student, studentNumber }) {
   ].filter(Boolean);
 
   return (
-    <Card title={t('Insights')} subtitle="Counts of what the school recorded — nothing derived" tight>
+    <Card title={t('Insights')} subtitle={t('Counts of what the school recorded — nothing derived')} tight>
       <div className="table-responsive">
         <table className="table table-sm align-middle mb-0">
           <tbody>
@@ -856,7 +856,7 @@ export function Student({ params = {} }) {
 
       {editing ? (
         <div className="mb-3">
-          <Card className="sis-rise" title={`Edit ${student.student_number}`}>
+          <Card className="sis-rise" title={t('Edit {0}', [student.student_number])}>
             <StudentEditor
               student={student}
               onDone={() => {

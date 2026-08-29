@@ -340,7 +340,7 @@ export function ErrorNote({ error, title, onRetry }) {
   const advice = ADVICE[error.kind];
   return (
     <div className="p-3">
-      <Alert tone="bad" title={title || 'That did not work'}>
+      <Alert tone="bad" title={title || t('That did not work')}>
         <div>{error.message}</div>
         {advice ? <div className="small mt-1">{advice}</div> : null}
         {error.field ? (

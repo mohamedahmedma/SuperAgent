@@ -114,7 +114,7 @@ async function bundle() {
   return result.outputFiles[0].text;
 }
 
-function newWindow(script) {
+function newWindow(script, language = 'en') {
   const errors = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on('jsdomError', (error) => errors.push(String(error)));
@@ -161,6 +161,7 @@ function newWindow(script) {
   window.console.error = (...args) => errors.push(args.map(String).join(' '));
   window.console.warn = () => {};
 
+  window.localStorage.setItem('sis.lang', language);
   window.eval(script);
   return { dom, window, errors, requests };
 }
@@ -243,6 +244,18 @@ async function main() {
     requests.some((line) => line.includes(' /v1/')),
     `no request went to /v1 — the client base path may be wrong. Saw: ${requests.slice(0, 3)}`
   );
+
+  /* Boot a second shell from the persisted Arabic preference. This catches the failure where
+     labels translate but the document remains LTR, or direction flips but static chrome falls
+     back to English. The route fixtures are shared; only browser-owned language differs. */
+  const arabic = newWindow(script, 'ar');
+  await settle(arabic.window, 200);
+  assert.equal(arabic.window.document.documentElement.lang, 'ar');
+  assert.equal(arabic.window.document.documentElement.dir, 'rtl');
+  const arabicText = arabic.window.document.body.textContent || '';
+  assert.ok(arabicText.includes('نظام معلومات الطلاب'), 'Arabic shell title did not render');
+  assert.ok(arabicText.includes('المدرسة'), 'Arabic navigation did not render');
+  errors.push(...arabic.errors);
 
   if (unstubbed.length) {
     console.log(`

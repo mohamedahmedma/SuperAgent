@@ -77,7 +77,7 @@ function Register({ year, classCode }) {
           rows={list}
           rowKey={(row) => row.student_number}
           rowHref={(row) => Router.href('student', { number: row.student_number })}
-          rowLabel={(row) => `Open ${pickName(row, state.lang) || row.student_number}`}
+          rowLabel={(row) => t('Open {0}', [pickName(row, state.lang) || row.student_number]).join('')}
           empty={
             <Empty title={t('Nobody is placed in this class')}>
               {t('Upload a roster above, choosing this class, to enrol children into it.')}

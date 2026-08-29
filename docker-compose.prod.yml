@@ -1,0 +1,16 @@
+services:
+  backend:
+    image: ${REGISTRY_IMAGE_PREFIX:?required}/backend:${IMAGE_TAG:?required}
+    pull_policy: always
+  frontend:
+    image: ${REGISTRY_IMAGE_PREFIX:?required}/frontend:${IMAGE_TAG:?required}
+    pull_policy: always
+  identity:
+    image: ${REGISTRY_IMAGE_PREFIX:?required}/identity:${IMAGE_TAG:?required}
+    pull_policy: always
+  records:
+    image: ${REGISTRY_IMAGE_PREFIX:?required}/records:${IMAGE_TAG:?required}
+    pull_policy: always
+  sis:
+    image: ${REGISTRY_IMAGE_PREFIX:?required}/sis:${IMAGE_TAG:?required}
+    pull_policy: always
