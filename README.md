@@ -108,18 +108,9 @@ Once the build finishes, the output is saved automatically under `frontend/dist/
 
 ### 6) Start the estate and access it
 
-**All four services at once (Windows):**
-
-```bat
-run_all.bat
-```
-
-It starts the infra containers, applies the SIS migrations, and opens one window per
-service. It sets no environment variable of its own — every service reads `.env` for
-itself — and it refuses to start if a previous run still holds a port, because a stale
-process answering with stale settings reads exactly like an edit to `.env` being ignored.
-
-**Or one service at a time:**
+Start the infra containers first (step 3 above), then each service in its own terminal.
+None of them takes an environment variable on the command line — every service reads
+`.env` for itself, so there is one place a setting can be wrong:
 
 ```bash
 # Database migrations for the SIS, once per schema change
@@ -130,6 +121,10 @@ uv run uvicorn records.app:app  --port 8100
 uv run uvicorn sis.app:app      --port 8300
 uv run uvicorn backend.app:app  --host 0.0.0.0 --port 8000 --reload
 ```
+
+If a service exits complaining that its port is taken, a previous run is still holding it.
+Stop that process rather than moving the port: a stale process answering with stale
+settings reads exactly like an edit to `.env` being ignored.
 
 Open in a browser:
 

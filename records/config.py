@@ -50,8 +50,8 @@ def load_env() -> None:
     nobody described, reports itself healthy, and answers wrongly.
 
     `override=False`, the default, so a variable already exported wins over the file. That
-    is what keeps `run_all.bat`, a container injecting real secrets, and a test that sets
-    its own value all behaving exactly as before.
+    is what keeps a shell that exports one, a container injecting real secrets, and a test
+    that sets its own value all behaving exactly as before.
     """
     global _LOADED
     if _LOADED:

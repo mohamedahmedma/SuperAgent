@@ -6,8 +6,8 @@ happened to export — which is how a service comes up configured for a deployme
 described, reports itself healthy, and answers wrongly.
 
 `override=False`, the default, so a variable already exported wins over the file. That is
-what keeps `run_all.bat`, a container injecting real secrets, and a test that sets its own
-value all behaving exactly as before.
+what keeps a shell that exports one, a container injecting real secrets, and a test that
+sets its own value all behaving exactly as before.
 """
 import os
 from pathlib import Path
