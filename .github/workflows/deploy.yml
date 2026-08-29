@@ -156,7 +156,12 @@ jobs:
           if [ -n "$pg_pass" ]; then
             $compose up -d postgres
             waited=0
-            until $compose exec -T postgres pg_isready -U "$pg_user" -q; do
+            # `</dev/null` is load-bearing on every exec below. This script reaches the
+            # server on ssh's stdin, via `bash -s`, and `compose exec -T` attaches stdin
+            # and drains it — so an exec that inherits it swallows the unread remainder
+            # of the script. Bash then runs only what it had buffered and exits 0 at the
+            # early EOF: the release never happens and the job still reports success.
+            until $compose exec -T postgres pg_isready -U "$pg_user" -q </dev/null; do
               waited=$((waited + 2))
               if [ "$waited" -gt 120 ]; then
                 echo "postgres did not become ready in ${waited}s"
@@ -176,7 +181,7 @@ jobs:
           fi
 
           release "$image_tag"
-          $compose exec -T sis alembic -c sis/alembic.ini upgrade head
+          $compose exec -T sis alembic -c sis/alembic.ini upgrade head </dev/null
 
           if healthy; then
             printf '%s' "$image_tag" > .current-image-tag
