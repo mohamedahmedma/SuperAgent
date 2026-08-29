@@ -212,6 +212,15 @@ jobs:
           $compose ps
           exit 1
           REMOTE
+      # Read-only, and deliberately before anything is installed. It reports the host
+      # facts the next step depends on — which vhost already claims these names, whether
+      # port 80 can answer an ACME challenge, what certificates exist — so a run that
+      # cannot succeed says why before it has touched nginx at all, and the answer is in
+      # this log rather than on a server someone has to open a session against.
+      - name: Pre-flight the public-domain prerequisites
+        run: |
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "bash '$DEPLOY_PATH/deploy/scripts/preflight-public-domains.sh' '$DEPLOY_HOST'" </dev/null
       # Runs only once the stack above is healthy, so the domains are never pointed at a
       # release that did not come up. The script is executed as a file rather than piped
       # to `bash -s`: a script delivered on stdin is eaten by anything inside it that

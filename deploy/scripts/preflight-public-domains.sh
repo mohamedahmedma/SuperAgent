@@ -10,8 +10,11 @@
 # It changes nothing. No file is written, no service reloaded, no certificate requested.
 # Run it as often as you like.
 #
-#   scp deploy/scripts/preflight-public-domains.sh root@HOST:/tmp/
-#   ssh root@HOST bash /tmp/preflight-public-domains.sh
+# The deployment runs this itself, immediately before configure-public-domains.sh, so its
+# report is in the workflow log of every release and nobody has to open a session on the
+# server to find out why a domain did not come up. It can also be run by hand:
+#
+#   ssh root@HOST bash /opt/superagent/deploy/scripts/preflight-public-domains.sh
 
 set -uo pipefail
 
@@ -101,9 +104,20 @@ fi
 
 # --------------------------------------------------------------------------------------
 head_ "4. port 80 reachable   <-- required for the ACME challenge"
-if ss -lntp 2>/dev/null | grep -q ':80 '; then
+# Pick whichever socket tool the host has. Reporting "nothing is listening" because the
+# tool is missing would fail a deployment over a diagnostic, so an absent tool is a
+# warning and never a failure.
+listeners=""
+if command -v ss >/dev/null 2>&1; then
+  listeners="$(ss -lnt 2>/dev/null)"
+elif command -v netstat >/dev/null 2>&1; then
+  listeners="$(netstat -lnt 2>/dev/null)"
+fi
+if [ -z "$listeners" ]; then
+  warn "neither ss nor netstat is available — cannot confirm port 80 is listening"
+elif printf '%s\n' "$listeners" | grep -qE '[:.]80[[:space:]]'; then
   ok "something is listening on port 80"
-  ss -lntp 2>/dev/null | grep ':80 ' | sed 's/^/        /'
+  printf '%s\n' "$listeners" | grep -E '[:.]80[[:space:]]' | sed 's/^/        /'
 else
   bad "nothing is listening on port 80 — the ACME http-01 challenge cannot be answered"
 fi
