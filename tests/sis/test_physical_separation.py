@@ -142,7 +142,7 @@ def test_single_school_mode_ignores_the_header(client: TestClient) -> None:
 
 
 @pytest.fixture()
-def split_client(two_databases: dict[str, str], bootstrap_key: str) -> Iterator[TestClient]:
+def split_client(two_databases: dict[str, str]) -> Iterator[TestClient]:
     """The real app, booted against two school databases.
 
     Boots through the lifespan, so the startup schema gate runs for real — and in
@@ -150,16 +150,13 @@ def split_client(two_databases: dict[str, str], bootstrap_key: str) -> Iterator[
     migration succeeded for four schools and failed for the fifth" into a startup failure
     naming the fifth rather than a 500 in front of its registrar.
 
-    Authenticates with the **bootstrap** key rather than a stored one, and that is the
-    separation showing through rather than a convenience. Stored keys live in a school's
-    own database, so there is no single key that reaches both of these files — which is
-    exactly the property `test_a_key_minted_for_one_school_is_refused_at_another` asserts.
-    The bootstrap key is the estate-wide credential that exists before any school has been
-    given one, which is the position a freshly split deployment is in.
+    Presents no credential, because this service no longer takes one — see
+    `test_authentication.py`. What is under test here is unaffected either way: separation
+    is the connection a request is answered on, not who asked.
     """
     from sis.app import app
 
-    with TestClient(app, headers={"X-API-Key": bootstrap_key}) as test_client:
+    with TestClient(app) as test_client:
         yield test_client
 
 

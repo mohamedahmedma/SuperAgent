@@ -28,7 +28,6 @@ _TMPDIR = tempfile.mkdtemp(prefix="sis-tests-")
 _LIVE_DB = os.path.join(_TMPDIR, "sis-test.db")
 _TEMPLATE_DB = os.path.join(_TMPDIR, "template.db")
 os.environ["SIS_DATABASE_URL"] = f"sqlite:///{_LIVE_DB}"
-os.environ.pop("SIS_BOOTSTRAP_REGISTRAR_KEY", None)
 
 import csv  # noqa: E402
 from hashlib import sha1  # noqa: E402
@@ -89,7 +88,6 @@ _ALEMBIC_INI = Path(__file__).resolve().parents[2] / "sis" / "alembic.ini"
 
 REGISTRAR_KEY = "registrar-fixture-key-0000000000"
 READER_KEY = "reader-fixture-key-00000000000000"
-BOOTSTRAP_KEY = "bootstrap-fixture-key-000000000"
 
 
 # ---------------------------------------------------------------------------
@@ -253,21 +251,6 @@ def registrar_headers() -> dict[str, str]:
 
 def reader_headers() -> dict[str, str]:
     return {"X-API-Key": READER_KEY}
-
-
-@pytest.fixture()
-def bootstrap_key() -> Iterator[str]:
-    """Enable `SIS_BOOTSTRAP_REGISTRAR_KEY` for one test, then unset it.
-
-    Left unset everywhere else on purpose: a bootstrap key configured for the whole
-    suite would authenticate every registrar test, and the day the stored-key path broke
-    nothing would notice.
-    """
-    os.environ["SIS_BOOTSTRAP_REGISTRAR_KEY"] = BOOTSTRAP_KEY
-    reset_settings_cache()
-    yield BOOTSTRAP_KEY
-    os.environ.pop("SIS_BOOTSTRAP_REGISTRAR_KEY", None)
-    reset_settings_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -1388,7 +1371,6 @@ def seeded_fakes(fake_uow: FakeUnitOfWork) -> FakeUnitOfWork:
 
 
 __all__ = [
-    "BOOTSTRAP_KEY",
     "READER_KEY",
     "REGISTRAR_KEY",
     "FakeAcademicYearRepository",

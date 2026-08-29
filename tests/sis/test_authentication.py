@@ -1,19 +1,18 @@
-"""Who may call this service, and how each way of not being allowed is refused.
+"""This service authenticates nobody, and this file is the proof that it is on purpose.
 
-`188fd45` removed API-key authentication and the tests that asserted it, leaving the note
-that it "needs restoring before the port is reachable by anything else, and certainly
-before parent login makes guardian data a login credential." Both of those have since
-happened: `identity/` resolves a parent's phone against these guardian routes, and
-`records/` reads a child's marks through them.
+API-key checking was removed from `sis/api/deps.py`: `X-API-Key` is not read, the
+`api_keys` table is not consulted on a request, and no route refuses a caller for want
+of a credential. Sign-in with a username and password is meant to replace it.
 
-So this file is the restored claim, plus the two things the original could not assert
-because they did not exist yet: keys live in a school's own database, and the parent-facing
-guardian routes are reachable by a `reader` credential that cannot write.
+The tests below are written the way the refusal tests were — one claim each, stated out
+loud — because a service that admits everyone should say so somewhere that runs. If a
+future change puts authentication back, every test in this file fails at once, which is
+the point: the day the door closes should be a deliberate edit here rather than a
+surprise for whoever is holding the console.
 
-Every refusal here is checked for *how* it refuses as well as whether. An unknown prefix, a
-wrong secret, a revoked key and an expired one all have to answer identically — a caller
-who can tell them apart can enumerate which handles are real and learn that a leaked key
-was noticed, from error text alone.
+**Reading these as reassurance would be the wrong reading.** Everything asserted here is
+also true of anyone else who can reach the port. Until sign-in exists, the only thing
+between this service and the internet is the network it is on.
 """
 from datetime import UTC, datetime, timedelta
 
@@ -23,21 +22,16 @@ from fastapi.testclient import TestClient
 from sis.api.deps import hash_api_key, key_prefix
 from sis.domain.auth import ApiKey, Scope
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
-from tests.sis.conftest import (
-    READER_KEY,
-    REGISTRAR_KEY,
-    reader_headers,
-    registrar_headers,
-)
+from tests.sis.conftest import reader_headers
 
-# A route that only a registrar may reach, and one any reader may. Both are deliberately
-# boring: what is under test is the credential, not the handler.
+# A route that used to require `registrar`, and one that used to require `reader`. Both
+# are deliberately boring: what is under test is who may call them, which is everyone.
 WRITE_ROUTE = "/v1/admin/api-keys"
 READ_ROUTE = "/v1/schools"
 
 
 def _store(raw: str, scope: Scope, **overrides) -> None:
-    """Put a key in the school's database, hashed the way the API authenticates it."""
+    """Put a key in the school's database, hashed the way the API used to check it."""
     fields = {
         "prefix": key_prefix(raw),
         "key_hash": hash_api_key(raw),
@@ -53,257 +47,148 @@ def _store(raw: str, scope: Scope, **overrides) -> None:
         uow.commit()
 
 
-class TestAnonymousCallers:
-    def test_a_read_route_refuses_a_caller_with_no_key(self, unauthenticated_client):
-        response = unauthenticated_client.get(READ_ROUTE)
-        assert response.status_code == 401
-        assert response.json()["detail"]["code"] == "not_authorized"
+class TestNoCredentialIsNeeded:
+    def test_a_read_route_answers_a_caller_with_no_key(self, unauthenticated_client):
+        assert unauthenticated_client.get(READ_ROUTE).status_code == 200
 
-    def test_a_write_route_refuses_a_caller_with_no_key(self, unauthenticated_client):
+    def test_a_write_route_answers_a_caller_with_no_key(self, unauthenticated_client):
+        """The consequential half. Reads being open is a disclosure; writes being open
+        means anyone who can reach the port can change the school's records."""
         response = unauthenticated_client.post(
             WRITE_ROUTE, json={"label": "mine", "scope": "reader"}
         )
-        assert response.status_code == 401
+        assert response.status_code == 201
 
-    def test_the_refusal_names_the_header_to_present(self, unauthenticated_client):
-        """A 401 with no `WWW-Authenticate` leaves an integrator guessing."""
-        response = unauthenticated_client.get(READ_ROUTE)
-        assert response.headers.get("www-authenticate") == "X-API-Key"
-
-    def test_a_guardian_route_is_not_quietly_open(self, unauthenticated_client):
+    def test_a_guardian_route_answers_a_caller_with_no_key(self, unauthenticated_client):
         """The route `identity/` resolves a parent's phone through.
 
-        It answers whether a number belongs to a parent of this school, which is exactly
-        the question an unauthenticated caller must not be able to ask in a loop.
+        It answers whether a number belongs to a parent of this school, and it now
+        answers that to anybody — including in a loop. Recorded here rather than left
+        implicit, because this is the route that turns "open service" into "a stranger
+        can enumerate which families attend".
         """
         response = unauthenticated_client.post(
             "/v1/guardians/resolve", json={"phone": "+201001234567"}
         )
-        assert response.status_code == 401
+        assert response.status_code != 401
 
 
-class TestBadCredentials:
-    """Every wrong key is wrong in the same way, as far as the caller can tell."""
+class TestAKeyIsNotEvenLookedAt:
+    """A key that would once have been refused now makes no difference at all."""
 
-    def _refusal(self, client: TestClient, key: str) -> tuple[int, str]:
-        response = client.get(READ_ROUTE, headers={"X-API-Key": key})
-        return response.status_code, response.json()["detail"]["message"]
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "nothing-like-a-real-key-at-all",
+            "",
+            "dev-sis-registrar",  # what the shipped console sends when nobody typed one
+        ],
+    )
+    def test_an_unknown_key_is_ignored(self, unauthenticated_client, key):
+        response = unauthenticated_client.get(READ_ROUTE, headers={"X-API-Key": key})
+        assert response.status_code == 200
 
-    def test_an_unknown_prefix_is_refused(self, client):
-        status, _ = self._refusal(client, "nothing-like-a-real-key-at-all")
-        assert status == 401
-
-    def test_a_real_prefix_with_a_wrong_secret_is_refused(self, client):
-        forged = REGISTRAR_KEY[:12] + "-but-the-rest-is-invented"
-        status, _ = self._refusal(client, forged)
-        assert status == 401
-
-    def test_a_revoked_key_is_refused(self, client):
+    def test_a_revoked_key_is_ignored(self, client):
         _store("revoked-key-000000000000000000", Scope.READER, is_active=False)
-        status, _ = self._refusal(client, "revoked-key-000000000000000000")
-        assert status == 401
+        response = client.get(
+            READ_ROUTE, headers={"X-API-Key": "revoked-key-000000000000000000"}
+        )
+        assert response.status_code == 200, (
+            "revoking a key changed nothing, which is what removing authentication "
+            "means: there is no revocation left to perform."
+        )
 
-    def test_an_expired_key_is_refused(self, client):
+    def test_an_expired_key_is_ignored(self, client):
         _store(
             "expired-key-000000000000000000",
             Scope.READER,
             expires_at=datetime.now(UTC) - timedelta(days=1),
         )
-        status, _ = self._refusal(client, "expired-key-000000000000000000")
-        assert status == 401
-
-    def test_a_key_expiring_later_still_works(self, client):
-        _store(
-            "future-key-0000000000000000000",
-            Scope.READER,
-            expires_at=datetime.now(UTC) + timedelta(days=1),
-        )
         response = client.get(
-            READ_ROUTE, headers={"X-API-Key": "future-key-0000000000000000000"}
+            READ_ROUTE, headers={"X-API-Key": "expired-key-000000000000000000"}
         )
         assert response.status_code == 200
 
-    def test_every_kind_of_wrong_key_is_indistinguishable(self, client):
-        """The property, stated once.
-
-        Unknown, forged, revoked and expired must produce one answer. If this test fails,
-        the error text has become an oracle: it tells a caller which handles exist, and it
-        tells whoever leaked a key that somebody noticed.
-        """
-        _store("revoked-two-00000000000000000", Scope.READER, is_active=False)
-        _store(
-            "expired-two-00000000000000000",
-            Scope.READER,
-            expires_at=datetime.now(UTC) - timedelta(days=1),
-        )
-        answers = {
-            self._refusal(client, key)
-            for key in (
-                "nothing-like-a-real-key-at-all",
-                REGISTRAR_KEY[:12] + "-but-the-rest-is-invented",
-                "revoked-two-00000000000000000",
-                "expired-two-00000000000000000",
-            )
-        }
-        assert len(answers) == 1, f"these four told a caller different things: {answers}"
-
-    def test_a_non_ascii_key_is_refused_rather_than_crashing(self, client, bootstrap_key):
-        """The header is entirely caller-controlled, and it is not guaranteed ASCII.
+    def test_a_non_ascii_key_does_not_crash_the_request(self, client):
+        """The header is caller-controlled and is not guaranteed ASCII.
 
         Sent as raw bytes because `httpx` refuses to encode a non-ASCII header *string* —
         but nothing stops a hostile client putting those bytes on the wire, and starlette
-        decodes them latin-1 into a `str` that is not ASCII. `secrets.compare_digest`
-        raises `TypeError` on exactly that, which would turn one crafted request into a
-        500 instead of a refusal. The bootstrap key is enabled here because the comparison
-        that would raise is the one guarding it.
+        decodes them latin-1 into a `str` that is not ASCII. Nothing reads the header any
+        more, so the crafted value has to be inert rather than a 500.
         """
         response = client.get(
-            READ_ROUTE, headers={"X-API-Key": "clé-invalide".encode("latin-1")}
+            READ_ROUTE, headers={"X-API-Key": "cle-invalide\xe9".encode("latin-1")}
         )
-        assert response.status_code == 401
+        assert response.status_code == 200
 
 
-class TestScopesDoNotNest:
-    """`registrar` does not imply `reader` and `reader` never implies a write."""
+class TestScopesNoLongerSeparateAnything:
+    """`reader` and `registrar` still name what a route is for. Neither gates it."""
 
-    def test_a_reader_key_cannot_mint_a_key(self, client):
+    def test_a_reader_key_can_mint_a_key(self, client):
         response = client.post(
-            WRITE_ROUTE, json={"label": "mine", "scope": "registrar"}, headers=reader_headers()
+            WRITE_ROUTE,
+            json={"label": "mine", "scope": "registrar"},
+            headers=reader_headers(),
         )
-        assert response.status_code == 403
-        assert response.json()["detail"]["code"] == "not_authorized"
+        assert response.status_code == 201
 
-    def test_a_reader_key_cannot_change_a_guardians_access(self, client):
-        """The custody route. A read-only integration must never reach it.
+    def test_a_reader_key_can_change_a_guardians_access(self, client):
+        """The custody route: it grants and revokes a parent's access to a child's
+        records, and it is now open to whoever asks.
 
-        This is the one `188fd45` removed by name, and it is the most consequential: the
-        route grants and revokes a parent's access to a child's records.
+        Anything but a 403 passes — the request was authorised, and what happens next is
+        about the student handle rather than about the caller.
         """
         response = client.patch(
             "/v1/students/S-1/guardians/+201001234567",
             json={"can_view_records": True, "restriction_note": ""},
             headers=reader_headers(),
         )
-        assert response.status_code == 403
+        assert response.status_code != 403
 
-    def test_a_reader_key_cannot_upload_a_roster(self, client):
+    def test_a_reader_key_can_upload_a_roster(self, client):
+        """A 4xx about the file is fine; a 403 about the credential is what must be gone."""
         response = client.post(
             "/v1/imports/roster/preview",
-            files={"file": ("roster.xlsx", b"not really a workbook", "application/vnd.ms-excel")},
+            files={
+                "file": ("roster.xlsx", b"not really a workbook", "application/vnd.ms-excel")
+            },
             headers=reader_headers(),
         )
-        assert response.status_code == 403
-
-    def test_a_registrar_key_may_still_read(self, client):
-        """Reads a registrar legitimately performs are not locked behind `reader`.
-
-        The registrar console prints report cards. If `require_read_access` narrowed to
-        `reader`, the console would need a second key and somebody would give it a
-        registrar one for everything instead.
-        """
-        assert client.get(READ_ROUTE, headers=registrar_headers()).status_code == 200
-
-    def test_a_reader_key_may_read(self, client):
-        assert client.get(READ_ROUTE, headers=reader_headers()).status_code == 200
-
-    def test_a_reader_key_reaches_the_parent_facing_guardian_route(self, client):
-        """What `records/` holds, and the whole reason `reader` exists.
-
-        A 404 is the pass condition: the credential was accepted and the handle simply
-        names nobody. A 401 or 403 would mean the adapter cannot do its job with a
-        read-only key and would end up holding the school's write credential.
-        """
-        response = client.get(
-            "/v1/guardians/by-id/no-such-handle/students", headers=reader_headers()
-        )
-        assert response.status_code == 404
-        assert response.json()["detail"]["code"] == "unknown_reference"
+        assert response.status_code != 403
 
 
-class TestBootstrapKey:
-    def test_it_authenticates_as_a_registrar(self, client, bootstrap_key):
-        response = client.post(
-            WRITE_ROUTE,
-            json={"label": "first real key", "scope": "reader"},
-            headers={"X-API-Key": bootstrap_key},
-        )
-        assert response.status_code == 201
+class TestSchoolsAreStillSeparated:
+    """Removing authentication did not touch which database answers a request.
 
-    def test_it_does_nothing_when_unset(self, client):
-        """Unsetting the variable revokes it, with no migration and no stored row."""
-        response = client.get(
-            READ_ROUTE, headers={"X-API-Key": "bootstrap-fixture-key-000000000"}
-        )
-        assert response.status_code == 401
+    `X-School-Code` chooses the connection, and always did that job rather than deciding
+    who may ask. It is asserted here so the two are not confused later: this service no
+    longer knows who is calling, and it still knows exactly which school it is answering
+    about.
+    """
 
+    def test_each_school_is_answered_from_its_own_database(self, split_school_client):
+        for code in ("NC", "MD"):
+            response = split_school_client.get(READ_ROUTE, headers={"X-School-Code": code})
+            assert response.status_code == 200
 
-class TestUseIsRecorded:
-    def test_a_successful_call_stamps_last_used(self, client):
-        """So an operator can see which keys are dead weight before revoking one."""
-        client.get(READ_ROUTE, headers=reader_headers())
-        with SqlAlchemyUnitOfWork() as uow:
-            stored = uow.api_keys.get_by_prefix(key_prefix(READER_KEY))
-        assert stored is not None
-        assert stored.last_used_at is not None
-
-    def test_a_refused_call_does_not(self, client):
-        """A wrong secret against a real prefix must not touch the key it guessed at."""
-        client.get(
-            READ_ROUTE, headers={"X-API-Key": REGISTRAR_KEY[:12] + "-wrong-secret-here"}
-        )
-        with SqlAlchemyUnitOfWork() as uow:
-            stored = uow.api_keys.get_by_prefix(key_prefix(REGISTRAR_KEY))
-        assert stored is not None
-        assert stored.last_used_at is None
-
-
-class TestKeysBelongToOneSchool:
-    """Physical separation reaching authentication rather than stopping short of it."""
-
-    def test_a_key_minted_for_one_school_is_refused_at_another(self, split_school_client):
-        client, keys = split_school_client
-        nc_key = keys["NC"]
-
-        assert client.get(
-            READ_ROUTE, headers={"X-API-Key": nc_key, "X-School-Code": "NC"}
-        ).status_code == 200
-
-        crossed = client.get(
-            READ_ROUTE, headers={"X-API-Key": nc_key, "X-School-Code": "MD"}
-        )
-        assert crossed.status_code == 401, (
-            "a key minted at one branch authenticated at another. Physical separation "
-            "stops at the door if the credential is estate-wide."
-        )
+    def test_a_request_naming_no_school_is_still_refused(self, split_school_client):
+        """The one refusal left on this path, and it is not about credentials."""
+        response = split_school_client.get(READ_ROUTE)
+        assert response.status_code == 422
 
 
 @pytest.fixture()
-def split_school_client(two_databases, bootstrap_key):
-    """Two schools, each with its own stored registrar key.
+def split_school_client(two_databases):
+    """Two schools, two databases, no credential anywhere.
 
     Reuses `test_physical_separation`'s fixture rather than building a third split
-    estate — the fixture is the one place that knows how the registry is pointed at two
+    estate — that fixture is the one place that knows how the registry is pointed at two
     files, and a second copy would drift from it.
     """
     from sis.app import app
 
-    minted: dict[str, str] = {}
-    for code in ("NC", "MD"):
-        raw = f"{code.lower()}-school-key-00000000000000"
-        with SqlAlchemyUnitOfWork(school_code=code) as uow:
-            uow.api_keys.add(
-                ApiKey(
-                    prefix=key_prefix(raw),
-                    key_hash=hash_api_key(raw),
-                    label=f"{code} registrar",
-                    scope=Scope.REGISTRAR,
-                    is_active=True,
-                    expires_at=None,
-                    created_at=datetime.now(UTC),
-                )
-            )
-            uow.commit()
-        minted[code] = raw
-
     with TestClient(app) as test_client:
-        yield test_client, minted
+        yield test_client

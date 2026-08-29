@@ -212,14 +212,18 @@ class TestTheDomainRefusesNonsense:
 class TestOverHttp:
     """The route, and who may read it."""
 
-    def test_a_reader_key_cannot_read_the_audit(self, client):
-        """`records/` holds the reader key. It must be able to read a child's marks and
-        must not be able to read the log of who else has been reading them."""
-        response = client.get("/v1/admin/access-audit", headers=reader_headers())
-        assert response.status_code == 403
+    def test_the_audit_is_readable_by_anyone(self, client):
+        """It no longer takes a registrar credential, because nothing does.
 
-    def test_an_anonymous_caller_cannot_read_the_audit(self, unauthenticated_client):
-        assert unauthenticated_client.get("/v1/admin/access-audit").status_code == 401
+        Worth stating rather than deleting: this route is the log of who has been reading
+        which child's records, so an open service publishes that history too. It goes back
+        behind a credential with the rest of the service when sign-in lands.
+        """
+        response = client.get("/v1/admin/access-audit", headers=reader_headers())
+        assert response.status_code == 200
+
+    def test_an_anonymous_caller_reads_the_audit_too(self, unauthenticated_client):
+        assert unauthenticated_client.get("/v1/admin/access-audit").status_code == 200
 
     def test_a_registrar_reads_it(self, client):
         response = client.get("/v1/admin/access-audit", headers=registrar_headers())
