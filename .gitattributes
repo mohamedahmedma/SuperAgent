@@ -1,0 +1,6 @@
+# These files are written on Windows and executed on Linux. A shell script committed with
+# CRLF fails there before it runs a line — the shebang resolves to `/usr/bin/env bash\r`,
+# which does not exist — and nginx rejects a directive whose line ends in a stray return.
+# core.autocrlf is per-clone and cannot be relied on, so the ending is pinned here.
+*.sh text eol=lf
+deploy/nginx/*.conf text eol=lf

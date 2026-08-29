@@ -74,6 +74,9 @@ jobs:
       GHCR_USER: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       IMAGE_TAG: ${{ github.sha }}
+      # Only consulted when a certificate is missing. An estate whose certificates are
+      # already issued deploys without it.
+      LETSENCRYPT_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate deployment configuration
@@ -104,10 +107,16 @@ jobs:
         run: |
           sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
           sshpass -e scp -P "$DEPLOY_PORT" docker-compose.yml docker-compose.prod.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          # The public-domain configuration is repository-managed, so it ships with every
+          # release and an edit made on the server does not survive one.
+          sshpass -e scp -P "$DEPLOY_PORT" -r deploy "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
       - name: Install production environment and authenticate registry
         run: |
           printf '%s' "$PROD_ENV_FILE" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "cat > '$DEPLOY_PATH/.env' && chmod 600 '$DEPLOY_PATH/.env'"
           printf '%s' "$GHCR_TOKEN" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          # Delivered as a file for the same reason as .env: a command line is visible in
+          # the process table, and this is only read when a certificate has to be issued.
+          printf '%s' "$LETSENCRYPT_EMAIL" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "cat > '$DEPLOY_PATH/.letsencrypt-email' && chmod 600 '$DEPLOY_PATH/.letsencrypt-email'"
       - name: Deploy, verify, and roll back on failure
         run: |
           sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" "$IMAGE_TAG" "$IMAGE_PREFIX" <<'REMOTE'
@@ -203,3 +212,31 @@ jobs:
           $compose ps
           exit 1
           REMOTE
+      # Runs only once the stack above is healthy, so the domains are never pointed at a
+      # release that did not come up. The script is executed as a file rather than piped
+      # to `bash -s`: a script delivered on stdin is eaten by anything inside it that
+      # reads stdin, which is how a previous release reported success without deploying.
+      - name: Configure public domains, certificates, and Nginx
+        run: |
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "chmod +x '$DEPLOY_PATH/deploy/scripts/configure-public-domains.sh' && bash '$DEPLOY_PATH/deploy/scripts/configure-public-domains.sh' '$DEPLOY_HOST'" </dev/null
+      # The VPS checked the same URLs from inside its own network. This repeats them from
+      # outside it, which is the only vantage point that also proves 443 is reachable and
+      # the chain verifies against a store the server does not control.
+      - name: Verify public endpoints from outside the VPS
+        run: |
+          fail=0
+          for url in \
+            "https://auth.aurexis.cc/docs" \
+            "https://api.aurexis.cc/docs" \
+            "https://api.aurexis.cc/health" \
+            "https://api.aurexis.cc/ready"; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --retry 5 --retry-delay 5 --retry-all-errors --max-time 20 "$url" || echo 000)"
+            if [ "$code" = "200" ]; then
+              echo "OK  $url -> $code"
+            else
+              echo "::error::$url returned $code (wanted 200)"
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ]
