@@ -33,7 +33,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from sis.config import get_settings
 from sis.env import load_env
 
 # Before anything reads the environment. `sis.config` memoises its settings on
@@ -407,31 +406,26 @@ def _configure_cors(app: FastAPI) -> None:
     log.info("CORS enabled for: %s", ", ".join(origins))
 
 
-def warn_if_bootstrap_key_is_set() -> None:
-    """Say so, loudly, while `SIS_BOOTSTRAP_REGISTRAR_KEY` is configured.
+def warn_that_authentication_is_disabled() -> None:
+    """Say so, on every start: this service refuses nobody.
 
-    The bootstrap key exists to solve one chicken-and-egg: a registrar key is needed to
-    mint a registrar key. It is estate-wide, it is not stored, it is not scoped to a
-    school, and it cannot be revoked from the API — only by editing the environment and
-    restarting.
-
-    All of which is fine for the ten minutes of first setup and wrong for everything
-    after. Left set, it is a permanent full-registrar credential sitting in an env file,
-    outside the `api_keys` table an operator would think to audit. Nothing else reports
-    that, so this does.
+    API-key authentication was removed from `sis/api/deps.py`, so every route — the
+    imports that rewrite a term's marks included — answers whoever reaches the port.
+    That is a deliberate choice while sign-in is being built and a dangerous one to
+    forget, and a log line at boot is the only thing that will keep saying so after the
+    person who made the change has moved on.
     """
-    if get_settings().bootstrap_registrar_key:
-        log.warning(
-            "SIS_BOOTSTRAP_REGISTRAR_KEY is set. This is a full registrar credential for "
-            "every school, it is not in the api_keys table, and it cannot be revoked "
-            "through the API. Mint a stored key and unset it once setup is done."
-        )
+    log.warning(
+        "SIS is running WITHOUT authentication: no API key is required and every "
+        "request is accepted, including writes. Keep this service off the public "
+        "internet until sign-in is in place."
+    )
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     verify_database_is_migrated()
-    warn_if_bootstrap_key_is_set()
+    warn_that_authentication_is_disabled()
     yield
 
 
@@ -465,5 +459,5 @@ __all__ = [
     "create_app",
     "lifespan",
     "verify_database_is_migrated",
-    "warn_if_bootstrap_key_is_set",
+    "warn_that_authentication_is_disabled",
 ]

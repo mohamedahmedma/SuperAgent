@@ -12,11 +12,9 @@ from backend.tools.figures import make_view_figure
 from backend.tools.knowledge import make_search_knowledge_base
 from backend.tools.products import make_search_products
 from backend.tools.records import make_get_student_records
-from backend.tools.weather import get_current_weather_tool as get_current_weather
 
 # name -> builder(ctx) -> tool
 TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
-    "get_current_weather": lambda _ctx: get_current_weather,
     "search_knowledge_base": make_search_knowledge_base,
     "view_figure": make_view_figure,
     "search_products": make_search_products,
@@ -28,13 +26,13 @@ TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
 
 
 # Tools whose results are numbered evidence the answer is expected to cite. This is a
-# property of the TOOL, so it lives next to the registry: whoever adds a fifth tool
+# property of the TOOL, so it lives next to the registry: whoever adds another tool
 # sees both structures together and has to decide which side it falls on.
 #
 # It drives whether the agent's system prompt includes its grounding-and-citation
 # block at all (backend/prompts/templates/agent/system.j2). A deployment binding only
-# get_current_weather has nothing to cite, and paying for citation rules on every one
-# of its turns would be pure waste.
+# view_figure has nothing to cite, and paying for citation rules on every one of its
+# turns would be pure waste.
 GROUNDED_TOOLS: frozenset = frozenset({"search_knowledge_base", "search_products"})
 
 
@@ -63,7 +61,6 @@ __all__ = [
     "GROUNDED_TOOLS",
     "UnknownToolError",
     "build_tools",
-    "get_current_weather",
     "make_search_knowledge_base",
     "make_view_figure",
     "make_search_products",

@@ -34,7 +34,6 @@ class Settings:
     """Resolved configuration. Frozen so nothing mutates it mid-request."""
 
     database_url: str
-    bootstrap_registrar_key: str | None
     max_upload_bytes: int
     import_preview_ttl_minutes: int
     #: Prepended to guardian phone numbers a registrar types in national form. Needed
@@ -89,9 +88,6 @@ def get_settings() -> Settings:
         # SQLite by default so the service runs with no infrastructure at all. Point
         # it at Postgres for anything holding real student records.
         database_url=os.getenv("SIS_DATABASE_URL") or "sqlite:///./sis.db",
-        # Mints the first registrar key, once, and is a no-op afterwards. Solves the
-        # chicken-and-egg of needing a registrar key to create a registrar key.
-        bootstrap_registrar_key=os.getenv("SIS_BOOTSTRAP_REGISTRAR_KEY") or None,
         max_upload_bytes=_int_env("SIS_MAX_UPLOAD_BYTES", _DEFAULT_MAX_UPLOAD_BYTES),
         import_preview_ttl_minutes=_int_env(
             "SIS_IMPORT_PREVIEW_TTL_MINUTES", _DEFAULT_PREVIEW_TTL_MINUTES

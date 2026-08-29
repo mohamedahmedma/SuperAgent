@@ -69,7 +69,7 @@ parent → frontend → backend    chat turn, Authorization: Bearer <token>
 
                     records → sis     grades and attendance, read live
                                        GET /v1/students/{number}/grades?term=
-                                       X-API-Key: a reader-scoped SIS key
+                                       X-API-Key: still sent, no longer checked
 ```
 
 Which system of record answers that last hop is `RECORDS_LMS`, and it is the only thing
@@ -83,9 +83,10 @@ that token authorises. That is the point of the split.
 ## Starting everything
 
 Each service is independent at *run* time — `records` keeps verifying tokens while
-`identity` is down, and says so honestly when `sis/` is. Setup has one ordering constraint:
-`sis/` must be up long enough to mint the reader keys the other two now refuse to start
-without.
+`identity` is down, and says so honestly when `sis/` is. There is no setup ordering
+constraint left: `sis/` issues no credential the others need, so the four start in any
+order. Bring the infra containers up first (`docker compose up -d`), then each service in
+its own terminal.
 
 ```bash
 # 1. identity  :8200
@@ -100,8 +101,8 @@ IDENTITY_JWKS_URL=http://localhost:8200/.well-known/jwks.json \
 RECORDS_BASE_URL=http://localhost:8100 RECORDS_API_KEY=dev-records-agent \
   uvicorn backend.app:app --port 8000
 
-# 4. sis       :8300  (only when RECORDS_LMS=sis)
-SIS_BOOTSTRAP_REGISTRAR_KEY=dev-sis-registrar uvicorn sis.app:app --port 8300
+# 4. sis       :8300  (only when RECORDS_LMS=sis; takes no credential — see below)
+uvicorn sis.app:app --port 8300
 ```
 
 `SIS_DEFAULT_COUNTRY_CODE` (default `+20`, Egypt) is what a guardian's phone number is
@@ -113,35 +114,33 @@ the setting entirely, so a foreign parent is unaffected at any value, and a bare
 accepted and read as `+20`. Set it wrong and every locally-typed parent number in the
 school points at another country.
 
-### SIS authenticates its callers
+### SIS authenticates nobody
 
-`sis/` verifies a presented `X-API-Key` against its own `api_keys` table. Two scopes,
-compared by **exact equality** — `registrar` does not satisfy a `reader` check and never
-implies one — and a key is looked up in the school's own database, so a key minted at one
-branch does not exist at another and cannot be made to work there by supplying its
-`X-School-Code`.
+**`sis/` has no authentication.** API-key checking was removed from `sis/api/deps.py`:
+`X-API-Key` is not read, the `api_keys` table is not consulted on a request, and every
+route answers whoever reaches port 8300 — the imports that rewrite a term's marks and the
+custody route that grants a parent access to a child included. Sign-in with a username and
+password is intended to replace it.
 
-Two services call it, and each needs its own **`reader`** key:
+Until then, the network is the only boundary. Keep 8300 off the public internet: bind it to
+localhost or a private interface, and expose the registrar console only through something
+that authenticates in front of it. This repository ships no reverse-proxy configuration;
+whatever fronts the estate should publish `identity/` and nothing else — do not add a
+server block for `sis/`.
 
-```bash
-# `dev-sis-registrar` is the bootstrap key from the SIS start line above.
-curl -X POST localhost:8300/v1/admin/api-keys   -H "X-API-Key: dev-sis-registrar"   -d '{"label":"records adapter","scope":"reader"}'   # -> SIS_API_KEY
+`SIS_API_KEY` and `IDENTITY_SIS_API_KEY` are still sent by `records/` and `identity/` and
+are simply ignored at the far end. They are kept, rather than deleted, so both services go
+back to presenting a credential the day SIS asks for one again; an unset one now logs a
+warning instead of refusing to start.
 
-curl -X POST localhost:8300/v1/admin/api-keys   -H "X-API-Key: dev-sis-registrar"   -d '{"label":"identity directory","scope":"reader"}' # -> IDENTITY_SIS_API_KEY
-```
+Scopes survive the removal in name only. Each route still declares `registrar`, `reader` or
+both, because that says what the route is *for* and is what a real sign-in will enforce —
+today the scope named first is simply granted. `tests/sis/test_authentication.py` pins all
+of this, so putting authentication back is a deliberate edit there rather than a surprise.
 
-A registrar key would also read grades, which is the reason not to use one: the processes
-that answer parents must not hold the school's write credential. Two separate reader keys
-rather than one shared value, so an audit line or a revocation can name a single caller.
+`X-School-Code` is unaffected and still required in a multi-school estate: it chooses which
+database answers, which was never a question about who is asking.
 
-Both services **refuse to start** if their base URL is set without a key. That is
-deliberate: an unkeyed caller gets a 401 on every request, which downstream reads as "the
-school has no such child" and "your number is not registered" — a silent, total failure
-dressed as an ordinary answer.
-
-`SIS_BOOTSTRAP_REGISTRAR_KEY` is a full registrar credential for every school, is not in
-the `api_keys` table, and cannot be revoked through the API. Unset it once the keys above
-exist; `sis/` logs a warning at startup for as long as it is configured.
 
 Course bindings must key on the SIS subject code — details in
 [records/README.md](records/README.md#records_lmssis).

@@ -87,12 +87,31 @@ class CompositionTests(ProfileTestCase):
 
     def test_lists_replace_rather_than_merge(self):
         """A profile must be able to REMOVE an inherited tool, which append-semantics
-        would make impossible."""
-        base = load_profile("base")
-        child = load_profile("document_kb")
-        self.assertIn("get_current_weather", base.agent.tools)
-        self.assertNotIn("get_current_weather", child.agent.tools)
-        self.assertEqual(["search_knowledge_base", "view_figure"], child.agent.tools)
+        would make impossible.
+
+        Built on a temporary pair rather than on two shipped profiles. It used to assert
+        that `document_kb` drops base's weather tool, and when that tool was deleted the
+        test kept passing while proving nothing — every shipped profile now only ever
+        ADDS to what base binds, so a loader that merged lists would satisfy all of them.
+        A parent and child written here cannot rot that way.
+        """
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "parent.yaml").write_text(
+                'name: parent\nagent:\n  tools: ["search_knowledge_base", "view_figure"]\n',
+                encoding="utf-8",
+            )
+            (tmp_path / "child.yaml").write_text(
+                'extends: parent\nname: child\nagent:\n  tools: ["search_knowledge_base"]\n',
+                encoding="utf-8",
+            )
+            with patch.object(registry, "DEFINITIONS_DIR", tmp_path):
+                parent = load_profile("parent")
+                child = load_profile("child")
+
+        self.assertIn("view_figure", parent.agent.tools)
+        self.assertNotIn("view_figure", child.agent.tools)
+        self.assertEqual(["search_knowledge_base"], child.agent.tools)
 
     def test_ecommerce_declares_its_extra_indexes(self):
         profile = load_profile("ecommerce")
@@ -397,9 +416,9 @@ class ToolRegistryTests(ProfileTestCase):
         from backend.tools import build_tools
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        tools = build_tools(["search_knowledge_base", "get_current_weather"], ctx)
+        tools = build_tools(["view_figure", "search_knowledge_base"], ctx)
         self.assertEqual(
-            ["search_knowledge_base", "get_current_weather"],
+            ["view_figure", "search_knowledge_base"],
             [tool.name for tool in tools],
         )
 

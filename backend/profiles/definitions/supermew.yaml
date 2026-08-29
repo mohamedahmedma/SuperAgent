@@ -24,7 +24,6 @@ identity:
 
 agent:
   tools:
-    - get_current_weather
     - search_knowledge_base
     - view_figure
     - search_products

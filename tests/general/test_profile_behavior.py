@@ -225,16 +225,16 @@ class AgentAssemblyTests(ProfileTestCase):
         """supermew is the full-feature test bed, so it carries every registered tool."""
         kwargs = self._built_kwargs(active_profile("supermew"))
         self.assertEqual(
-            ["get_current_weather", "search_knowledge_base", "view_figure", "search_products"],
+            ["search_knowledge_base", "view_figure", "search_products"],
             [tool.name for tool in kwargs["tools"]],
         )
         self.assertTrue(kwargs["system_prompt"].startswith("You are a helpful knowledge-base assistant"))
 
     def test_tool_order_follows_the_profile_declaration(self):
-        body = 'name: reversed\nagent:\n  tools: ["search_knowledge_base", "get_current_weather"]\n'
+        body = 'name: reversed\nagent:\n  tools: ["view_figure", "search_knowledge_base"]\n'
         kwargs = self._built_kwargs(temp_profile(body))
         self.assertEqual(
-            ["search_knowledge_base", "get_current_weather"],
+            ["view_figure", "search_knowledge_base"],
             [tool.name for tool in kwargs["tools"]],
         )
 

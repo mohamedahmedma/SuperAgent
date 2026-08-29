@@ -292,11 +292,12 @@ file, and the agent's tool layer does not change.
 
 [adapters/sis/grades.py](adapters/sis/grades.py) is that claim tested. It reads the school's own Student
 Information Service (`:8300`, see [../SERVICES.md](../SERVICES.md)) —
-`GET /v1/students/{student_number}/grades?term=` with a `reader`-scoped `X-API-Key` — and
-nothing in the routes, the assembler or the tool layer changed to accommodate it.
+`GET /v1/students/{student_number}/grades?term=`, with a `reader`-scoped `X-API-Key` that
+SIS no longer checks (see [../SERVICES.md](../SERVICES.md)) — and nothing in the routes, the
+assembler or the tool layer changed to accommodate it.
 
 ```bash
-RECORDS_LMS=sis SIS_BASE_URL=http://localhost:8300 SIS_API_KEY=<reader key> \
+RECORDS_LMS=sis SIS_BASE_URL=http://localhost:8300 \
   uvicorn records.app:app --port 8100
 ```
 

@@ -72,7 +72,6 @@ class SchoolProfileTests(ProfileTestCase):
     def test_it_drops_the_tools_a_school_has_no_use_for(self):
         """Lists replace rather than merge, so inheriting base must not drag these in."""
         tools = load_profile("school").agent.tools
-        self.assertNotIn("get_current_weather", tools)
         self.assertNotIn("search_products", tools)
 
     def test_it_still_inherits_from_base(self):

@@ -156,7 +156,7 @@ class AgentConfig(_Section):
     # Prompt for the rolling conversation summary ("persistent note").
     persistent_note_prompt: str = ""
 
-    tools: List[str] = Field(default_factory=lambda: ["get_current_weather", "search_knowledge_base"])
+    tools: List[str] = Field(default_factory=lambda: ["search_knowledge_base"])
 
     recursion_limit: int = 8
     max_knowledge_calls_per_turn: int = 1

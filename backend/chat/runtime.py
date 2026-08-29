@@ -68,7 +68,7 @@ def _end_turn_on_terminal_retrieval(ctx: ChatRequestContext):
         if not status:
             return None
         # Only when the knowledge tool is the sole tool that ran. On a turn that also
-        # called, say, the weather tool, the model still has material to answer from
+        # called, say, a tool with nothing to cite, the model still has material to answer from
         # and cutting it here would throw that away.
         tool_results = sum(1 for message in state["messages"] if isinstance(message, ToolMessage))
         if tool_results != 1:

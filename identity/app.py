@@ -21,11 +21,12 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from identity.api import errors
 from identity.api.routers import admin, auth, health, wellknown, whatsapp
 from identity.config import settings
-from identity.env import load_env
+from identity.env import env_value, load_env
 
 # Before anything below reads the environment. This service is deployed as its own
 # process, so nothing else has loaded the project's `.env` for it — see identity/env.py
@@ -59,16 +60,14 @@ def _build_directory(resolved):
         return FakeGuardianDirectory()
 
     if not resolved.sis_api_key:
-        # Demanded at startup rather than discovered at the first sign-in. SIS
-        # authenticates every caller now, so an unkeyed directory does not degrade — it
-        # gets a 401 for every parent, which reads downstream as "the school has no such
-        # number" and tells every family in the school they are not registered.
-        #
-        # A `reader` key, deliberately not a registrar one: this service asks whether a
-        # number belongs to a parent and never writes a thing.
-        raise RuntimeError(
-            "IDENTITY_SIS_BASE_URL is set without IDENTITY_SIS_API_KEY. SIS authenticates "
-            "its callers; mint a reader-scoped key there and set it here."
+        # It used to be demanded at startup, because SIS answered an unkeyed lookup with a
+        # 401 that read downstream as "the school has no such number" — every family in
+        # the school told they are not registered. SIS no longer authenticates anyone
+        # (`sis/api/deps.py`), so an unset key costs nothing today. Warned rather than
+        # dropped, because it is the line that has to come back when SIS has sign-in.
+        logger.warning(
+            "IDENTITY_SIS_BASE_URL is set without IDENTITY_SIS_API_KEY. Harmless only "
+            "while SIS authenticates nobody; set it again when SIS has sign-in."
         )
 
     return SisGuardianDirectory(
@@ -77,6 +76,27 @@ def _build_directory(resolved):
         timeout_seconds=resolved.directory_timeout_seconds,
         children_timeout_seconds=resolved.children_timeout_seconds,
     )
+
+
+def _cors_origins() -> list[str]:
+    """Origins allowed to call identity, from CORS_ALLOW_ORIGINS (comma-separated).
+
+    The same variable `backend/` reads, and deliberately so: the frontend talks to both,
+    and two variables would let them disagree about which origin is the UI. It is read
+    here rather than imported from `backend.env` because these are independent projects
+    with no import in either direction -- see SERVICES.md. The duplication is the price of
+    that, and it is one function.
+
+    Unset means "any origin", which is the right default for a token-authenticated API
+    that ships not knowing where its UI will live. Set it once the UI has a fixed origin.
+    """
+    raw = env_value("CORS_ALLOW_ORIGINS")
+    if not raw:
+        return ["*"]
+    # An Origin header never carries a trailing slash, so a pasted
+    # "https://aurexis.cc/" would silently match nothing.
+    origins = [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+    return origins or ["*"]
 
 
 @asynccontextmanager
@@ -144,6 +164,32 @@ app = FastAPI(
 
 # One envelope for every refusal, and one place that decides the status. See api/errors.py.
 errors.install(app)
+
+# Cross-origin access for the browser, and the reason it is needed at all: until now the
+# Vue app reached identity through Vite's dev proxy (`/v1` -> :8200 in
+# frontend/vite.config.ts), which made every call same-origin and hid the fact that this
+# service sends no CORS headers. Serve the UI from a real origin and that proxy is gone --
+# every login, every WhatsApp start/status/verify becomes a cross-origin request, the
+# preflight gets no Access-Control-Allow-Origin back, and the browser refuses it. The
+# webhook keeps working throughout, because Meta is a server and never sends an Origin,
+# so the failure arrives as "OTP delivered but nobody can sign in".
+#
+# Added AFTER errors.install so it wraps the refusal envelope too. A 401 without CORS
+# headers is unreadable to the caller, which turns every expired token into a generic
+# network error in the console instead of the 401 the UI knows how to act on.
+#
+# `allow_credentials=False`: this API authenticates with a bearer token in the
+# Authorization header and sets no cookie. Browsers refuse to combine credentialed mode
+# with `allow_origins=["*"]` -- the wildcard is discarded rather than honoured, and every
+# preflight fails. Turning it on is only correct alongside an explicit
+# CORS_ALLOW_ORIGINS list, and only if this service ever starts setting cookies.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(wellknown.router)
 app.include_router(auth.router)
