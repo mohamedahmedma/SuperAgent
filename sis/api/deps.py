@@ -8,26 +8,24 @@ That is what makes every service in this package testable with fakes: the only p
 that knows an environment and a database exist is this file, and a test replaces it
 wholesale through `app.dependency_overrides`.
 
-**Two scopes, compared by exact equality.** `registrar` does not implicitly satisfy
-`reader` — see `Scope.permits` for the incident that rule prevents. A route that
-legitimately accepts either lists both, out loud, via `require_read_access`.
+**This service does not authenticate anyone.** API-key checking was removed on purpose:
+`X-API-Key` is not read, the `api_keys` table is not consulted, and no request is refused
+for want of a credential. Anyone who can reach this process can read and write everything
+in it, so keep it on a network the school controls, or behind a proxy that authenticates
+in front of it, until sign-in with a username and password replaces this. `_require_scopes`
+is the single place that has to change to bring authentication back.
 
-**A key is never logged, echoed or returned.** What may appear in a log line is the
-`prefix`, which names a key so an operator can revoke the right one and is useless for
-authenticating with it. The secret itself exists in this module only as a local variable
-and a SHA-256 digest, and no error message ever quotes it back — an unauthenticated caller
-learns that authentication failed and nothing further, because "your key is almost right"
-is the one hint worth having.
+**The scopes survive the removal.** Each route still names `registrar`, `reader` or both,
+because that is a statement about what the route is for rather than about who is calling,
+and it is what a real sign-in will enforce. Today the first scope named is simply granted.
 
-**A key is found in the school it was minted for.** Authentication opens the same
-per-school connection every other read uses, so a key issued at one branch does not exist
-in another's database and cannot be made to work there by supplying its `X-School-Code`.
-Physical separation reaches authentication rather than stopping just short of it.
+**Which school a request is about is still decided here**, by `X-School-Code`, and is
+unaffected by any of the above: it chooses the database a request is answered from, not
+who may ask.
 """
 from __future__ import annotations
 
 import hashlib
-import hmac
 import logging
 import secrets
 from collections.abc import Callable, Collection, Iterator
@@ -35,7 +33,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Final
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header
 
 from sis.application.dto import Page, PageRequest
 from sis.application.ports.unit_of_work import UnitOfWork
@@ -186,128 +184,40 @@ class Caller:
 # ---------------------------------------------------------------------------
 
 
-def _unauthorised(message: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"code": "not_authorized", "message": message},
-        headers={"WWW-Authenticate": API_KEY_HEADER},
-    )
+ANONYMOUS_CALLER: Final[str] = "anonymous"
+"""The `actor` written to audit rows now that no request names a credential.
 
-
-def _matches_bootstrap(presented: str, configured: str | None) -> bool:
-    """Constant-time comparison against `SIS_BOOTSTRAP_REGISTRAR_KEY`.
-
-    Solves the chicken-and-egg of needing a registrar key to mint a registrar key. The
-    value is compared, never stored: an empty database plus one environment variable is a
-    working registrar, and unsetting the variable revokes it without a migration.
-
-    Estate-wide rather than per-school, and deliberately so — it is the credential that
-    exists before any school's database has a key in it. That is also why it should not
-    survive first setup: see the warning `sis.app` logs while it is set.
-
-    Encoded to bytes first because `secrets.compare_digest` raises `TypeError` on a `str`
-    holding non-ASCII — and the presented value is a header a client controls completely,
-    so the str form turns one hostile request into a 500.
-    """
-    if not configured:
-        return False
-    return secrets.compare_digest(presented.encode("utf-8"), configured.encode("utf-8"))
-
-
-def _lookup_stored_key(presented: str, school_code: str | None) -> ApiKey | None:
-    """Find and verify a stored key, in its own short transaction.
-
-    **Scoped to the school the request names.** Keys live in the per-school database like
-    every other row, so a key minted for one branch is not found in another's file at all.
-    That is physical separation reaching authentication rather than stopping just short of
-    it: a leaked key from one school cannot read a second school's data even if the
-    attacker supplies its `X-School-Code`, because there is nothing to match against.
-
-    Deliberately not the caller's unit of work. Authentication runs before the handler has
-    written anything and must not be able to see — or contaminate — the transaction the
-    handler will later roll back. The session is closed before the route body starts, so a
-    request rejected here never holds a pooled connection for the length of the response.
-    """
-    with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
-        stored = uow.api_keys.get_by_prefix(key_prefix(presented))
-
-    # Hash unconditionally, even when no row matched, so a wrong prefix and a wrong secret
-    # do the same work. Skipping the comparison on a miss turns prefix enumeration into a
-    # timing measurement, which is how an attacker learns which handles are real before
-    # bothering to guess a secret.
-    candidate = hash_api_key(presented)
-    expected = stored.key_hash if stored is not None else _ABSENT_HASH
-    if not hmac.compare_digest(candidate, expected):
-        return None
-    return stored
-
-
-def _record_use(prefix: str, at: datetime, school_code: str | None) -> None:
-    """Best effort, by contract. A failed touch must never fail an authorised request."""
-    try:
-        with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
-            uow.api_keys.touch(prefix, at=at)
-            uow.commit()
-    except Exception:  # noqa: BLE001 - the request is already authorised; do not fail it
-        # The prefix identifies the key; it is not the secret. See the module docstring.
-        logger.warning("Could not record last use of API key %s", prefix)
-
-
-def _check_scope(caller: Caller, allowed: tuple[Scope, ...], required: str) -> None:
-    if any(caller.scope.permits(scope) for scope in allowed):
-        return
-    logger.info(
-        "Key %s refused: scope %s cannot call this route", caller.prefix, caller.scope.value
-    )
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={
-            "code": "not_authorized",
-            "message": f"This endpoint requires an API key with scope {required}.",
-        },
-    )
+Sixteen characters is the audit column's width; this is nine, so nothing truncates.
+It reads as what it is in an import history: nobody in particular.
+"""
 
 
 def _require_scopes(*allowed: Scope) -> Callable[..., Caller]:
-    """Build the dependency that admits exactly the listed scopes and nothing else.
+    """Admit every caller. **This service no longer authenticates anyone.**
 
-    Every allowed scope is spelled out at the call site. There is no ordering, no superset
-    and no "registrar can do anything" shortcut, so reading a route's signature tells you
-    precisely which credentials reach it.
+    API-key authentication was removed deliberately: this deployment is meant to be open
+    to whoever can reach it, until sign-in with a username and password is built. What is
+    left is the shape of the old dependency and nothing behind it — no header is read, no
+    key table is consulted, and no request is ever refused here.
+
+    The scopes a route lists are still spelled out at its call site, because they say what
+    a route is *for* and are what the replacement will enforce. Until then the first one
+    listed is simply granted, so `require_registrar` and `require_read_access` both hand
+    back a caller their routes accept.
+
+    **What this costs.** Every write in this service — rewriting a term's marks, importing
+    a roster, provisioning a school — is now available to anyone who can open a socket to
+    it. Put it behind a network that only the school reaches, or behind a reverse proxy
+    that authenticates in front of it, for as long as this stands.
+
+    To restore authentication, this function is the only place that has to change: give it
+    back a body that identifies the caller and refuses when it cannot.
     """
 
-    allowed_scopes: tuple[Scope, ...] = allowed
-    required = " or ".join(scope.value for scope in allowed_scopes)
+    granted: Scope = allowed[0]
 
-    def dependency(
-        school_code: SchoolCodeDep,
-        x_api_key: Annotated[str | None, Header(alias=API_KEY_HEADER)] = None,
-    ) -> Caller:
-        presented = (x_api_key or "").strip()
-        if not presented:
-            raise _unauthorised(f"Missing {API_KEY_HEADER} header.")
-
-        now = datetime.now(UTC)
-        settings = get_settings()
-
-        if _matches_bootstrap(presented, settings.bootstrap_registrar_key):
-            caller = Caller(
-                prefix=key_prefix(presented), scope=Scope.REGISTRAR, is_bootstrap=True
-            )
-            _check_scope(caller, allowed_scopes, required)
-            return caller
-
-        stored = _lookup_stored_key(presented, school_code)
-        # Unknown prefix, wrong secret, revoked and expired all answer identically. A
-        # caller who can tell them apart can enumerate which handles exist and learn that
-        # a leaked key was noticed, both from error text alone.
-        if stored is None or not stored.is_usable_at(now):
-            raise _unauthorised("Invalid or expired API key.")
-
-        caller = Caller(prefix=stored.prefix, scope=stored.scope)
-        _check_scope(caller, allowed_scopes, required)
-        _record_use(stored.prefix, now, school_code)
-        return caller
+    def dependency() -> Caller:
+        return Caller(prefix=ANONYMOUS_CALLER, scope=granted)
 
     return dependency
 
@@ -316,13 +226,14 @@ require_registrar = _require_scopes(Scope.REGISTRAR)
 """Writes: structure generation, imports, key management."""
 
 require_reader = _require_scopes(Scope.READER)
-"""Read-only integrations. A registrar key is refused here, on purpose."""
+"""Read-only integrations: `records/` and `identity/` ask their questions through here."""
 
 require_read_access = _require_scopes(Scope.REGISTRAR, Scope.READER)
-"""Both scopes, granted explicitly, for reads a registrar also legitimately performs.
+"""Reads that both the console and a parent-facing service legitimately perform.
 
-This is what the parent-facing guardian routes use. `records/` holds a `reader` key and
-the registrar console holds a `registrar` one, and both legitimately read a report card.
+All three of these admit everyone while authentication is switched off. They stay
+distinct because they record what each route is for, and because that is what a
+username-and-password sign-in will have to tell apart when it arrives.
 """
 
 

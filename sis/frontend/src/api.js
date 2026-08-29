@@ -26,9 +26,13 @@ var BASE = '/v1';
 
 /*
  * Security is explicitly out of scope for this UI: there is no login, no session and no
- * cookie, and this default is why. A registrar who opens the page on a fresh machine
- * gets a working screen instead of an empty form they have no way to fill in. Overwrite
- * it in the header field when the school issues a real key.
+ * cookie. The service behind it no longer checks a key either (see SERVICES.md), so this
+ * value is sent and ignored — kept only so the header is already threaded through every
+ * request on the day sign-in lands.
+ *
+ * It is also the bug this default used to cause: a deployment whose SIS did not happen to
+ * accept `dev-sis-registrar` answered 401 on every screen, and this console has no field
+ * to type a real key into.
  */
 var DEFAULT_KEY = 'dev-sis-registrar';
 
