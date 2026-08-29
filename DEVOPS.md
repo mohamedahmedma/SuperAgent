@@ -52,6 +52,12 @@ defaults are host `13.140.153.131`, user `root`, port `22`, and path
 and `PROD_ENV_FILE` are mandatory GitHub Actions secrets. A missing value fails the run
 instead of silently skipping deployment.
 
+The `deploy` job targets the GitHub Environment named `production`. Configure that
+environment with both maintainers as required reviewers; GitHub then pauses after CD and
+either reviewer can select **Approve and deploy**. Reviewers are GitHub users or teams,
+not arbitrary email addresses, and each account receives the request according to its
+GitHub notification settings.
+
 ## Release and rollback
 
 `deploy.yml` builds every service image, tags it with both the commit SHA and

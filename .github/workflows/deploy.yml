@@ -19,13 +19,13 @@ env:
 
 jobs:
   ci:
-    name: CI
+    name: Stage 1 - CI
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
   cd:
-    name: CD - ${{ matrix.name }} image
+    name: Stage 2 - CD - ${{ matrix.name }} image
     needs: ci
     runs-on: ubuntu-latest
     strategy:
@@ -57,15 +57,18 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   deploy:
-    name: Deploy production
+    name: Stage 3 - Deploy production (approval required)
     needs: cd
     runs-on: ubuntu-latest
-    environment: production
+    # Configure `production` in GitHub Settings with both maintainers as required
+    # reviewers. GitHub pauses this job here; either one may approve it.
+    environment:
+      name: production
     env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST || '13.140.153.131' }}
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/superagent' }}
+      DEPLOY_HOST: 13.140.153.131
+      DEPLOY_PORT: '22'
+      DEPLOY_USER: root
+      DEPLOY_PATH: /opt/superagent
       SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
       PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
       GHCR_USER: ${{ github.actor }}
