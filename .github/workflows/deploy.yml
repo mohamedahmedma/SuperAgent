@@ -118,7 +118,12 @@ jobs:
           cd "$deploy_path"
           compose="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
           services="backend frontend identity records sis"
+          # Both are declared `:?required` on every service image, and compose
+          # interpolates the whole file even when a single service is named — so any
+          # compose call before the first release, not just the release itself, needs
+          # them. release() re-exports IMAGE_TAG to roll back to a different tag.
           export REGISTRY_IMAGE_PREFIX="$image_prefix"
+          export IMAGE_TAG="$image_tag"
 
           previous=""
           if [ -f .current-image-tag ]; then previous="$(cat .current-image-tag)"; fi
@@ -141,8 +146,12 @@ jobs:
           # still reports the container healthy, which reads like a broken image rather
           # than a credential. Reconcile the role with what .env now says, so the file is
           # the single source of truth it is already rewritten as on every deploy.
-          pg_user="$(sed -n 's/^POSTGRES_USER=//p' .env | head -1)"
-          pg_pass="$(sed -n 's/^POSTGRES_PASSWORD=//p' .env | head -1)"
+          # PROD_ENV_FILE is commonly authored on Windows, and compose strips the CR it
+          # leaves on each value. Reading the file directly does not, so without `tr` the
+          # role would be set to the password plus a carriage return — matching nothing
+          # the backend ever sends, and failing exactly like the mismatch this repairs.
+          pg_user="$(sed -n 's/^POSTGRES_USER=//p' .env | head -1 | tr -d '\r')"
+          pg_pass="$(sed -n 's/^POSTGRES_PASSWORD=//p' .env | head -1 | tr -d '\r')"
           : "${pg_user:=postgres}"
           if [ -n "$pg_pass" ]; then
             $compose up -d postgres
