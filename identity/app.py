@@ -60,16 +60,14 @@ def _build_directory(resolved):
         return FakeGuardianDirectory()
 
     if not resolved.sis_api_key:
-        # Demanded at startup rather than discovered at the first sign-in. SIS
-        # authenticates every caller now, so an unkeyed directory does not degrade — it
-        # gets a 401 for every parent, which reads downstream as "the school has no such
-        # number" and tells every family in the school they are not registered.
-        #
-        # A `reader` key, deliberately not a registrar one: this service asks whether a
-        # number belongs to a parent and never writes a thing.
-        raise RuntimeError(
-            "IDENTITY_SIS_BASE_URL is set without IDENTITY_SIS_API_KEY. SIS authenticates "
-            "its callers; mint a reader-scoped key there and set it here."
+        # It used to be demanded at startup, because SIS answered an unkeyed lookup with a
+        # 401 that read downstream as "the school has no such number" — every family in
+        # the school told they are not registered. SIS no longer authenticates anyone
+        # (`sis/api/deps.py`), so an unset key costs nothing today. Warned rather than
+        # dropped, because it is the line that has to come back when SIS has sign-in.
+        logger.warning(
+            "IDENTITY_SIS_BASE_URL is set without IDENTITY_SIS_API_KEY. Harmless only "
+            "while SIS authenticates nobody; set it again when SIS has sign-in."
         )
 
     return SisGuardianDirectory(

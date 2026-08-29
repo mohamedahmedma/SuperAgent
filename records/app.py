@@ -53,7 +53,13 @@ logger = logging.getLogger(__name__)
 
 
 def _sis_api_key(resolved) -> str:
-    """The credential this service presents to SIS. Required, and `reader`-scoped.
+    """The credential this service presents to SIS. **No longer required.**
+
+    SIS stopped authenticating its callers — see `sis/api/deps.py` — so `SIS_API_KEY` is
+    now a value SIS ignores rather than one it checks. It is still read and still sent,
+    because it costs nothing and it is what the adapters go back to presenting the day
+    SIS asks for a credential again; an unset one is a warning here and not a refusal to
+    start, so a fresh deployment is not blocked on minting a key nothing verifies.
 
     Read in one place so the guardian directory, the calendar and the marks adapter cannot
     end up disagreeing about which key they hold — they are three questions asked of one
@@ -61,11 +67,9 @@ def _sis_api_key(resolved) -> str:
     parent question rather than at boot.
     """
     if not resolved.sis_api_key:
-        raise RuntimeError(
-            "SIS_BASE_URL is set without SIS_API_KEY. SIS authenticates its callers; mint "
-            "a reader-scoped key there and set it here. A registrar key would also work "
-            "and is the wrong answer — this process answers parents and must not hold the "
-            "school's write credential."
+        logger.warning(
+            "SIS_BASE_URL is set without SIS_API_KEY. That is survivable only because SIS "
+            "currently authenticates nobody; set it again when SIS has sign-in."
         )
     return resolved.sis_api_key
 
