@@ -133,6 +133,39 @@ jobs:
             timeout 300 sh -c 'until wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1 && wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1; do sleep 5; done'
           }
 
+          # Postgres applies POSTGRES_PASSWORD only while initialising an empty data
+          # directory. On an estate whose postgres_data volume already exists, a rotated
+          # password in .env is silently ignored: the role keeps the one it was created
+          # with. The backend is the only service that speaks to postgres, so it is the
+          # only one that fails — and it fails authenticating at boot while pg_isready
+          # still reports the container healthy, which reads like a broken image rather
+          # than a credential. Reconcile the role with what .env now says, so the file is
+          # the single source of truth it is already rewritten as on every deploy.
+          pg_user="$(sed -n 's/^POSTGRES_USER=//p' .env | head -1)"
+          pg_pass="$(sed -n 's/^POSTGRES_PASSWORD=//p' .env | head -1)"
+          : "${pg_user:=postgres}"
+          if [ -n "$pg_pass" ]; then
+            $compose up -d postgres
+            waited=0
+            until $compose exec -T postgres pg_isready -U "$pg_user" -q; do
+              waited=$((waited + 2))
+              if [ "$waited" -gt 120 ]; then
+                echo "postgres did not become ready in ${waited}s"
+                exit 1
+              fi
+              sleep 2
+            done
+            # psql quotes :'pw' itself, so a password containing shell or SQL syntax is
+            # carried through as data rather than parsed. It interpolates only input it
+            # lexes, though — never -c, which goes to the server verbatim and fails on
+            # the colon — so the statement has to arrive on stdin. Output is discarded
+            # rather than logged.
+            echo "ALTER USER CURRENT_USER WITH PASSWORD :'pw';" \
+              | $compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$pg_user" \
+                  -d postgres -v pw="$pg_pass" >/dev/null
+            echo "postgres role '$pg_user' reconciled with .env"
+          fi
+
           release "$image_tag"
           $compose exec -T sis alembic -c sis/alembic.ini upgrade head
 
@@ -144,6 +177,10 @@ jobs:
           fi
 
           echo "Health check failed for $image_tag"
+          # Without this the job ends on "container is unhealthy" and the reason stays on
+          # a server nobody can reach from the run. The logs are the whole diagnosis.
+          echo "--- backend logs (last 100 lines) ---"
+          $compose logs --no-color --tail 100 backend || true
           if [ -n "$previous" ]; then
             echo "Rolling back to $previous"
             release "$previous"
