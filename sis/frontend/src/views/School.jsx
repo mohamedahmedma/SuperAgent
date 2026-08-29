@@ -67,7 +67,7 @@ function SchoolForm({ onSaved }) {
           .then((school) => {
             Store.invalidate('schools:');
             Store.setSchool(school.code);
-            Store.toast('ok', `School ${school.code} saved`);
+            Store.toast('ok', t('School {0} saved', [school.code]));
             form.reset();
             if (onSaved) onSaved(school);
           })
@@ -149,7 +149,7 @@ function YearForm({ school, onSaved }) {
           .then((year) => {
             Store.invalidate('years:');
             Store.setYear(year.code);
-            Store.toast('ok', `Academic year ${year.code} saved`, school);
+            Store.toast('ok', t('Academic year {0} saved', [year.code]), school);
             form.reset();
             if (onSaved) onSaved(year);
           })
@@ -252,7 +252,7 @@ function LevelForm({ school, count, onSaved }) {
           .then((level) => {
             Store.invalidate('levels:');
             Store.invalidate('years:');
-            Store.toast('ok', `Rung ${level.code} saved`, school);
+            Store.toast('ok', t('Rung {0} saved', [level.code]), school);
             form.reset();
             if (onSaved) onSaved(level);
           })
@@ -281,7 +281,7 @@ function LevelForm({ school, count, onSaved }) {
         >
           <Select
             value={form.values.stage}
-            options={STAGES.map((stage) => ({ value: stage.key, label: stage.label }))}
+            options={STAGES.map((stage) => ({ value: stage.key, label: t(stage.label) }))}
             onChange={form.set('stage')}
           />
         </Field>
@@ -330,7 +330,7 @@ function Rung({ level, school, year, lang, classCount }) {
       <a
         className="sis-row-target"
         href={Router.href('level', { school, code: level.code, year })}
-        aria-label={`Open ${level.code} ${pickName(level, lang)}`}
+        aria-label={t('Open {0} {1}', [level.code, pickName(level, lang)]).join('')}
       />
       <div className="card-body d-flex flex-column flex-md-row align-items-md-center gap-2 gap-md-3">
         <span className="d-flex align-items-center gap-3 flex-grow-1">
@@ -363,11 +363,11 @@ function Rung({ level, school, year, lang, classCount }) {
                 })
                 .then(() => {
                   Store.invalidate('levels:');
-                  Store.toast('ok', `${level.code} moved to ${next}`);
+                  Store.toast('ok', t('{0} moved to {1}', [level.code, t(STAGES.find((item) => item.key === next)?.label || next)]));
                 })
                 .catch((error) => {
                   setStage(level.stage);
-                  Store.toast('bad', `Could not move ${level.code}`, error.message);
+                  Store.toast('bad', t('Could not move {0}', [level.code]), error.message);
                 });
             }}
           />
@@ -523,13 +523,13 @@ export function School({ params = {} }) {
         ) : null}
 
         {addingYear && code ? (
-          <Card className="sis-rise" title={`New academic year in ${code}`}>
+          <Card className="sis-rise" title={t('New academic year in {0}', [code])}>
             <YearForm school={code} onSaved={() => setAddingYear(false)} />
           </Card>
         ) : null}
 
         {addingLevel && code ? (
-          <Card className="sis-rise" title={`New rung in ${code}`}>
+          <Card className="sis-rise" title={t('New rung in {0}', [code])}>
             <LevelForm
               school={code}
               count={levelList.length}
@@ -551,7 +551,7 @@ export function School({ params = {} }) {
                 rows={yearList}
                 rowKey={(row) => row.code}
                 rowHref={(row) => Router.href('year', { code: row.code })}
-                rowLabel={(row) => `Open academic year ${row.code}`}
+                rowLabel={(row) => t('Open academic year {0}', [row.code]).join('')}
                 empty={
                   <Empty
                     title={t('No academic years in this school')}

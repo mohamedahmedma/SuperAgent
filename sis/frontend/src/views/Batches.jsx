@@ -140,7 +140,7 @@ export function Batches({ params = {} }) {
         ) : (
           <Card
             className="sis-rise"
-            title={`Batch ${asked}`}
+            title={t('Batch {0}', [asked])}
             subtitle={
               batch ? `${batch.kind} — uploaded by ${batch.actor}` : report.loading ? 'Loading…' : null
             }

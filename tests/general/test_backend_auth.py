@@ -138,9 +138,14 @@ class BackendAuthTests(unittest.TestCase):
     def test_unconfigured_verification_fails_closed(self):
         """No public key must mean "reject", never "trust"."""
         os.environ.pop("IDENTITY_PUBLIC_KEY_PEM", None)
-        with self.assertRaises(HTTPException) as caught:
-            backend_auth.get_current_user(token=mint(), db=self.db)
-        self.assertEqual(503, caught.exception.status_code)
+        saved_jwks_url = backend_identity.JWKS_URL
+        backend_identity.JWKS_URL = ""
+        try:
+            with self.assertRaises(HTTPException) as caught:
+                backend_auth.get_current_user(token=mint(), db=self.db)
+            self.assertEqual(503, caught.exception.status_code)
+        finally:
+            backend_identity.JWKS_URL = saved_jwks_url
 
     def test_a_projection_row_is_created_on_first_sight(self):
         """Session ownership hangs off this row, so it must exist before the first save."""

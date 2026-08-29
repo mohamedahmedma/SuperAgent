@@ -60,7 +60,7 @@ export function StudentEditor({ student, onDone }) {
         onSubmit={(event) => {
           event.preventDefault();
           if (!diff.length) {
-            Store.toast('info', 'Nothing changed');
+            Store.toast('info', t('Nothing changed'));
             if (onDone) onDone();
             return;
           }
@@ -77,7 +77,7 @@ export function StudentEditor({ student, onDone }) {
               api.updateStudent(student.student_number, changed).then(() => {
                 Store.invalidate('roster:');
                 Store.invalidate('student:');
-                Store.toast('ok', `${student.student_number} updated`);
+                Store.toast('ok', t('{0} updated', [student.student_number]));
                 if (onDone) onDone();
               })
           });

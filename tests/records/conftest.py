@@ -52,6 +52,7 @@ from records.adapters.fake.calendar import FakeSchoolCalendar  # noqa: E402
 from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
 from records.adapters.fake.lms import FakeLms  # noqa: E402
 from records.app import app  # noqa: E402
+from records.config import reset_settings  # noqa: E402
 from records.domain.marks import SubjectAttendance, SubjectGrade  # noqa: E402
 from records.domain.people import PermittedStudent  # noqa: E402
 from records.domain.terms import SchoolTerm  # noqa: E402
@@ -120,21 +121,43 @@ def agent_headers(guardian_id: str | None = None, token: str | None = None) -> d
 
 
 @pytest.fixture(autouse=True)
-def _pin_verification_key():
-    """Re-pin this suite's public key for every test.
+def _pin_identity_configuration():
+    """Re-pin this suite's identity configuration for every test.
 
-    It is set at import as well, but `tests/test_e2e_api.py` boots a real identity
-    service and legitimately points the whole process at *its* key. Whichever module
-    runs second would otherwise verify tokens against the other one's key and fail with
-    a signature error that looks nothing like a test-ordering problem.
+    All four values are set at import as well, but another suite in the same process
+    legitimately points the whole process somewhere else — `tests/test_e2e_api.py` boots a
+    real identity service and uses *its* key, and `tests/general/test_parent_journey.py`
+    stands up a whole estate on `school-identity`/`school-services`. Whichever module runs
+    second would otherwise verify this suite's tokens against the other one's settings.
+
+    The key and the API key are read per request, so re-exporting them is enough. **The
+    issuer and the audience are not:** `records.config.settings()` caches, so a value the
+    journey resolved stays cached long after it has restored the environment, and every
+    token this suite mints is then judged against `school-services` — a 401 whose audit
+    line reads `guardian_id: ""`, which looks like broken authentication rather than a
+    test-ordering problem. `reset_settings()` exists for exactly this; the identity and SIS
+    suites already call theirs.
+
+    Reset on the way out as well as in, so this suite hands the next one a cold cache
+    rather than its own.
     """
     previous = os.environ.get("IDENTITY_PUBLIC_KEY_PEM")
     os.environ["IDENTITY_PUBLIC_KEY_PEM"] = PUBLIC_PEM
+    os.environ["IDENTITY_ISSUER"] = "test-identity"
+    os.environ["IDENTITY_AUDIENCE"] = "test-services"
+    os.environ["RECORDS_API_KEY"] = AGENT_KEY
+    # Re-pinned for the same reason, and it is the one the journey leaves behind: it runs
+    # the facade against a real SIS, so a resolve that inherited `sis` here would demand a
+    # SIS_BASE_URL that `_isolate_from_the_environment` has just blanked, and the app would
+    # refuse to start rather than return 401.
+    os.environ["RECORDS_LMS"] = "fake"
+    reset_settings()
     yield
     if previous is None:
         os.environ.pop("IDENTITY_PUBLIC_KEY_PEM", None)
     else:
         os.environ["IDENTITY_PUBLIC_KEY_PEM"] = previous
+    reset_settings()
 
 
 def install_adapters(test_client, *, calendar=None, directory=None, lms=None):

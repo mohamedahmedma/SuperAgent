@@ -9,9 +9,8 @@
  *          rather than on each screen because every screen is scoped to a year, and an
  *          off-screen year selector means a registrar cannot see which year the four hundred
  *          rows below belong to. It grows to fill the row on a phone and shrinks to its
- *          content from `sm` up. The appearance, the page colour and the name language used to
- *          be icon buttons beside it and are now behind the one gear: three preferences that
- *          each need a label do not fit in a row that also has to hold a year.
+ *          content from `sm` up. Appearance and language live behind one labelled settings
+ *          control, keeping the header compact without hiding the current year.
  *
  *   Row 2  the school strip, and only when there is more than one school. A tab strip with
  *          one tab is chrome that teaches nothing.
@@ -179,17 +178,13 @@ function Header({ onOpenSettings }) {
           {/*
             * One button where there were two.
             *
-            * The theme toggle and the EN/ع pair used to live here, and the header was the wrong
-            * room for both: no space for a label, a theme control that cycled through three
-            * states while showing only one icon, and nowhere at all to put a third preference.
-            * They are all in the dialog now, where each one can say what it is — and the page
-            * colour, which needs a demonstration rather than a label, has somewhere to be
-            * demonstrated.
+            * Appearance and language stay in the dialog so both choices have visible labels
+            * and the year selector keeps enough room on a phone.
             */}
           <button
             className="btn btn-sm btn-quiet"
             onClick={onOpenSettings}
-            title={t('Settings — appearance, page colour, names')}
+            title={t('Settings — appearance and language')}
           >
             <Icon name="settings" />
             <span className="visually-hidden">{t('Open settings')}</span>

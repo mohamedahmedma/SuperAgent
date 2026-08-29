@@ -68,7 +68,7 @@ function TermForm({ year, count, onSaved }) {
           .run()
           .then((term) => {
             Store.invalidate('terms:');
-            Store.toast('ok', `Term ${term.code} saved`);
+            Store.toast('ok', t('Term {0} saved', [term.code]));
             form.reset();
             if (onSaved) onSaved(term);
           })
@@ -178,7 +178,7 @@ function SubjectForm({ year, count, onSaved }) {
           .run()
           .then((subject) => {
             Store.invalidate('subjects:');
-            Store.toast('ok', `Subject ${subject.code} added to ${year}`);
+            Store.toast('ok', t('Subject {0} added to {1}', [subject.code, year]));
             form.reset();
             if (onSaved) onSaved(subject);
           })
@@ -523,8 +523,8 @@ export function Year({ params = {} }) {
 
       <div className="vstack gap-3">
         <Section
-          title={`Terms — ${code}`}
-          subtitle={`${termList.length} in this year`}
+          title={t('Terms — {0}', [code])}
+          subtitle={t('{0} in this year', [termList.length])}
           action="Add term"
           form={<TermForm year={code} count={termList.length} />}
         >
@@ -582,8 +582,8 @@ export function Year({ params = {} }) {
         </Section>
 
         <Section
-          title={`Subjects taught in ${code}`}
-          subtitle={`${subjectList.length} in this year`}
+          title={t('Subjects taught in {0}', [code])}
+          subtitle={t('{0} in this year', [subjectList.length])}
           action="Add subject"
           form={<SubjectForm year={code} count={subjectList.length} />}
         >

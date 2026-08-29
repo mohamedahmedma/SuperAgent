@@ -1,0 +1,88 @@
+name: CI
+on:
+  # `main` is listed because Deploy is manual-only: nothing else would run CI on a push to
+  # main. If Deploy is ever switched back to firing on push, remove `main` from here —
+  # Deploy calls this workflow as its first job, and leaving both would race two CI runs.
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [main, develop]
+  # Lets Deploy run this entire suite as a gate before it builds or ships anything.
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {version: "0.8.14", enable-cache: true}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: uv sync --frozen --dev
+      - run: uv run pytest -q
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Kept in step with the sis-frontend job below, which needs >= 22.22.2 for
+          # jsdom. Aligned rather than split so both suites test one runtime.
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Report dependency vulnerabilities
+        run: npm audit --audit-level=critical
+        continue-on-error: true
+  sis-frontend:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: sis/frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # The smoke test mounts the console in jsdom 30, whose undici 8 dependency calls
+          # worker_threads.markAsUncloneable — absent before Node 22. jsdom declares
+          # engines ^22.22.2 || ^24.15.0, undici declares >= 22.19.0, so the 20.19.5 this
+          # used to pin failed with "markAsUncloneable is not a function" before a single
+          # screen rendered. Do not lower this below 22.22.2.
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: sis/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run smoke
+      - run: npm run build
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose
+        env:
+          POSTGRES_PASSWORD: ci-password
+          MINIO_ROOT_USER: ci
+          MINIO_ROOT_PASSWORD: ci-password
+          LOCAL_SERVICE_KEY: ci-service-key
+        run: docker compose config --quiet
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          tags: superagent/backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: false
+          tags: superagent/frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend

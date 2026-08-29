@@ -178,6 +178,21 @@ class YearLevel(Base):
     stage: Mapped[str] = mapped_column(
         String(_STAGE_LEN), default="unspecified", nullable=False
     )
+
+    # Which section of the school this rung belongs to (revision 0007). Nullable because
+    # every rung predating the column belongs to no stated section, and a school that does
+    # not divide itself never fills it in — the naming then falls back to the stored label,
+    # which is exactly what it did before.
+    educational_system_id: Mapped[int | None] = mapped_column(
+        ForeignKey("educational_systems.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    # The rung's number *within its own ladder*: 1 for "First Primary" in an Arabic
+    # section, 3 for "Grade 3" in a language one. Stored rather than parsed out of the
+    # name, because that is the fact the display name is generated from and a name is
+    # something a registrar may retype. Nullable for the same reason as the column above.
+    grade_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
@@ -227,6 +242,12 @@ class ClassSection(Base):
     # Nullable because "no stated capacity" is a real answer and 0 is not; a 0 here would
     # read as "this class is full" to any check that compares against it.
     capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Which room on the rung — the second number in `1/2 ب` (revision 0007). Nullable
+    # because a language section names rooms with letters and stores that in `name_en`
+    # instead; the naming module reads whichever is present.
+    section_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -933,20 +954,427 @@ class AccessAudit(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# Sections of the school, the people who work in it, and what they may do
+#
+# Everything below arrived with revision 0007. Two groups: `educational_systems` is the
+# structural half (a school runs an Arabic section and a language section side by side,
+# and they name their rungs differently), and the rest is the staff half — accounts,
+# roles, scoped grants, teachers and their assignments.
+#
+# The `api_keys` table above is untouched by all of it. Machine callers keep
+# authenticating exactly as they did; a person signing in is a second, separate door.
+# ---------------------------------------------------------------------------
+
+_ROLE_CODE_LEN = 32
+_PERMISSION_CODE_LEN = 48
+_SCOPE_TYPE_LEN = 16  # Longest `ScopeType` member is "class_section".
+_SYSTEM_KIND_LEN = 16  # Longest `EducationalSystemKind` member is "unspecified".
+_USERNAME_LEN = 64  # `sis.domain.staff.USERNAME_MAX_LENGTH`.
+_STAFF_NUMBER_LEN = 32
+_SETTING_KEY_LEN = 64
+
+
+class EducationalSystem(Base):
+    """One section of a school: the Arabic section, the language section.
+
+    A school runs both at once, and that is the case this table exists for. They are not
+    two schools — one head, one building, one roll — but they count their rungs
+    differently, name their rooms differently and cannot share a `YearLevel`.
+
+    `kind` drives naming (`sis/domain/naming.py`); `code` and the names are the school's
+    own words. Keeping them apart is what lets a school call this "National Section"
+    while the service still knows to render `1/2 ب`.
+    """
+
+    __tablename__ = "educational_systems"
+    __table_args__ = (
+        UniqueConstraint("school_id", "code", name="uq_educational_systems_school_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    school_id: Mapped[int] = mapped_column(
+        ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    code: Mapped[str] = mapped_column(String(_LEVEL_CODE_LEN), nullable=False)
+    # arabic / language / unspecified. Not a CHECK constraint: the domain refuses an
+    # unknown value on the way in, and a constraint here would turn adding a third kind
+    # into a table rebuild on every school's database.
+    kind: Mapped[str] = mapped_column(
+        String(_SYSTEM_KIND_LEN), default="unspecified", nullable=False
+    )
+    name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+    name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+    display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class Role(Base):
+    """A named bundle of permissions. Data, so a new role is an insert, not a deploy.
+
+    `is_builtin` marks the seven the service ships with (`sis.domain.rbac.BUILT_IN_ROLES`).
+    They are re-synced on every seed run and must not be deleted — a school that removed
+    "Teacher" would have a hundred `user_roles` rows pointing at nothing.
+    """
+
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(_ROLE_CODE_LEN), unique=True, nullable=False)
+    name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+    name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # The scope the assignment UI offers first. Advisory, never enforced — a school may
+    # legitimately want a school-wide attendance supervisor.
+    default_scope: Mapped[str] = mapped_column(
+        String(_SCOPE_TYPE_LEN), default="school", nullable=False
+    )
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class PermissionRow(Base):
+    """The catalogue of verbs. Named `PermissionRow` so it cannot be mistaken for the enum.
+
+    A table as well as an enum because an administrator's screen has to *list* the
+    permissions a role carries, with a label, in two languages — and because a foreign key
+    from `role_permissions` is what stops a typo becoming a permission nobody holds.
+    """
+
+    __tablename__ = "permissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(
+        String(_PERMISSION_CODE_LEN), unique=True, nullable=False
+    )
+    name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+    name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+
+
+class RolePermission(Base):
+    """Which verbs a role carries. Cascades, because a deleted role's rows mean nothing."""
+
+    __tablename__ = "role_permissions"
+    __table_args__ = (
+        UniqueConstraint("role_id", "permission_id", name="uq_role_permissions_role_permission"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    role_id: Mapped[int] = mapped_column(
+        ForeignKey("roles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    permission_id: Mapped[int] = mapped_column(
+        ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+
+class User(Base):
+    """An account. One per person, however many roles they hold.
+
+    `school_id` is nullable for exactly one reason: the system administrator belongs to no
+    school. Everybody else is bound to one, and that binding is a second wall behind the
+    role scopes rather than a substitute for them.
+
+    The lockout columns are on the account rather than in a side table because they are
+    read on every login attempt and written on most of them; a join for two integers on
+    the hottest path in the auth flow is a cost with nothing on the other side of it.
+    """
+
+    __tablename__ = "users"
+    __table_args__ = (
+        # Serves the login lookup, which is the one query that runs before anything is
+        # authenticated and therefore the one an unauthenticated caller can force.
+        Index("ix_users_username", "username", unique=True),
+        Index("ix_users_school", "school_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(_USERNAME_LEN), nullable=False)
+    # The verifier. Never returned by any route, never logged — see sis/domain/staff.py.
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    full_name_en: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    full_name_ar: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    preferred_language: Mapped[str] = mapped_column(String(8), default="en", nullable=False)
+    school_id: Mapped[int | None] = mapped_column(
+        ForeignKey("schools.id", ondelete="RESTRICT"), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
+class UserRole(Base):
+    """A role granted to a user, bounded to a scope. The additive unit.
+
+    The unique key is the whole grant — user, role, scope type, scope id — so the same
+    role at two different rungs is two rows and granting the same one twice is idempotent.
+    `scope_id` is nullable only because a `global` scope names nothing.
+
+    Nothing here can express a denial. See `sis/domain/rbac.py` for why.
+    """
+
+    __tablename__ = "user_roles"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "role_id",
+            "scope_type",
+            "scope_id",
+            name="uq_user_roles_user_role_scope",
+        ),
+        # Serves the one query every authenticated request makes: "what does this user hold".
+        Index("ix_user_roles_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role_id: Mapped[int] = mapped_column(
+        ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    scope_type: Mapped[str] = mapped_column(
+        String(_SCOPE_TYPE_LEN), default="school", nullable=False
+    )
+    # No foreign key, deliberately: the id means a different table depending on
+    # `scope_type`, and there is no single column a constraint could point at. The service
+    # resolves it, and an assignment to a deleted rung simply covers nothing.
+    scope_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # A username rather than an id, so an audit line reads without a join.
+    granted_by: Mapped[str] = mapped_column(String(_USERNAME_LEN), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class UserSession(Base):
+    """A signed-in browser. The token is hashed; the raw value exists only in the client.
+
+    Revocation is a timestamp rather than a delete, so "this session ended at 16:04"
+    stays a fact after the fact. Expired rows are pruned on login rather than by a job:
+    the table is small, the prune is one indexed delete, and a cron nobody notices has
+    stopped is how a session table becomes a million rows.
+    """
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    client_ip: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class Teacher(Base):
+    """A member of teaching staff. Points at a user; is not one.
+
+    Nullable `user_id` because the two come apart in both directions — a teacher recorded
+    on the timetable before IT creates their account is a real state, and so is a teacher
+    whose account is disabled while their marks stay attached to their name.
+    """
+
+    __tablename__ = "teachers"
+    __table_args__ = (
+        UniqueConstraint("school_id", "staff_number", name="uq_teachers_school_staff_number"),
+        Index("ix_teachers_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    staff_number: Mapped[str] = mapped_column(String(_STAFF_NUMBER_LEN), nullable=False)
+    school_id: Mapped[int] = mapped_column(
+        ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    full_name_en: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    full_name_ar: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    email: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    phone: Mapped[str] = mapped_column(String(_PHONE_LEN), default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class TeacherSubject(Base):
+    """What a teacher teaches. The principal's record.
+
+    Subjects are year-scoped in this schema, so this is per academic year — which is
+    correct rather than incidental: a teacher moves from Science to Physics between years,
+    and last year's marks must stay attached to the subject they were actually awarded in.
+    """
+
+    __tablename__ = "teacher_subjects"
+    __table_args__ = (
+        UniqueConstraint("teacher_id", "subject_id", name="uq_teacher_subjects_teacher_subject"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    teacher_id: Mapped[int] = mapped_column(
+        ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    subject_id: Mapped[int] = mapped_column(
+        ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Denormalised from the subject so "who teaches in 2025-2026" is one indexed read
+    # rather than a join every screen repeats.
+    academic_year_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_years.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class TeacherYearLevel(Base):
+    """Which rungs a teacher teaches their subject on. Also the principal's record.
+
+    This is the outer boundary a year supervisor works inside: the supervisor picks rooms,
+    but only rooms on a rung that appears here. See `sis.domain.staff.assignable_classes`.
+    """
+
+    __tablename__ = "teacher_year_levels"
+    __table_args__ = (
+        UniqueConstraint(
+            "teacher_id",
+            "year_level_id",
+            "subject_id",
+            name="uq_teacher_year_levels_teacher_level_subject",
+        ),
+        Index("ix_teacher_year_levels_level", "year_level_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    teacher_id: Mapped[int] = mapped_column(
+        ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    year_level_id: Mapped[int] = mapped_column(
+        ForeignKey("year_levels.id", ondelete="CASCADE"), nullable=False
+    )
+    subject_id: Mapped[int] = mapped_column(
+        ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class TeacherClassSection(Base):
+    """Which rooms a teacher stands in. The year supervisor's record.
+
+    `assigned_by` is a username rather than an id for the same reason `UserRole` keeps
+    one: "who put this teacher in 4B" is a question asked in a corridor, and the answer
+    should not need a join.
+    """
+
+    __tablename__ = "teacher_class_sections"
+    __table_args__ = (
+        UniqueConstraint(
+            "teacher_id",
+            "class_section_id",
+            "subject_id",
+            name="uq_teacher_class_sections_teacher_class_subject",
+        ),
+        # Serves "who teaches this class", which the class screen asks once per subject.
+        Index("ix_teacher_class_sections_class", "class_section_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    teacher_id: Mapped[int] = mapped_column(
+        ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    class_section_id: Mapped[int] = mapped_column(
+        ForeignKey("class_sections.id", ondelete="CASCADE"), nullable=False
+    )
+    subject_id: Mapped[int] = mapped_column(
+        ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    assigned_by: Mapped[str] = mapped_column(
+        String(_USERNAME_LEN), default="", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class SystemSetting(Base):
+    """Estate-wide switches the administrator can turn, one row per key.
+
+    A key/value table rather than a column per setting: these are read rarely, written
+    rarely, and adding one must not be a migration against every school's database. The
+    only one that exists today is `system.status`.
+    """
+
+    __tablename__ = "system_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(_SETTING_KEY_LEN), unique=True, nullable=False)
+    value: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # Free text the administrator types when pausing: "upgrading to 0.2, back at 18:00".
+    # Shown to everyone who is refused, because a refusal with no reason generates a
+    # phone call to the same administrator.
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    updated_by: Mapped[str] = mapped_column(
+        String(_USERNAME_LEN), default="", nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
 __all__ = [
     "AcademicYear",
     "AccessAudit",
     "ApiKey",
     "ClassEnrolment",
     "ClassSection",
+    "EducationalSystem",
     "Guardian",
     "GuardianPhone",
     "ImportBatch",
     "ImportRow",
+    "PermissionRow",
+    "Role",
+    "RolePermission",
     "Student",
     "StudentGuardian",
     "Subject",
     "SubjectGrade",
+    "SystemSetting",
+    "Teacher",
+    "TeacherClassSection",
+    "TeacherSubject",
+    "TeacherYearLevel",
     "Term",
+    "User",
+    "UserRole",
+    "UserSession",
     "YearLevel",
 ]

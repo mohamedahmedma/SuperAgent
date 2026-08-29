@@ -166,7 +166,7 @@ function TabRegister({ classCode, year }) {
         rows={students}
         rowKey={(row) => row.student_number}
         rowHref={(row) => Router.href('student', { number: row.student_number })}
-        rowLabel={(row) => `Open ${pickName(row, state.lang) || row.student_number}`}
+        rowLabel={(row) => t('Open {0}', [pickName(row, state.lang) || row.student_number]).join('')}
         empty={
           <Empty title={t('Nobody is in this class yet')}>
             {t('Open the class to add a child, or upload a roster.')}
@@ -282,7 +282,7 @@ export function Level({ params = {} }) {
       <Breadcrumbs trail={trail} />
       <PageHead
         title={level ? `${levelCode} — ${pickName(level, state.lang)}` : levelCode}
-        lede={`Classes on this rung in ${year}. A rung belongs to the school and outlives every year; a class belongs to the year.`}
+        lede={t('Classes on this rung in {0}. A rung belongs to the school and outlives every year; a class belongs to the year.', [year])}
         actions={
           <>
             <div className="btn-group" role="group" aria-label={t('How to show the classes')}>
@@ -314,14 +314,14 @@ export function Level({ params = {} }) {
 
       <div className="vstack gap-4">
         {adding ? (
-          <Card className="sis-rise" title={`New class on ${levelCode}`}>
+          <Card className="sis-rise" title={t('New class on {0}', [levelCode])}>
             <ClassForm year={year} level={levelCode} onSaved={() => setAdding(false)} />
           </Card>
         ) : null}
 
         {classes.ready && !onThisRung.length ? (
           <Card>
-            <Empty title={`No classes on ${levelCode} in ${year}`}>
+            <Empty title={t('No classes on {0} in {1}', [levelCode, year])}>
               {t("Add one above, or open the academic year and generate the whole ladder's classes at once.")}
             </Empty>
           </Card>
@@ -329,7 +329,7 @@ export function Level({ params = {} }) {
           <Card
             className="sis-fade"
             title={t('Classes')}
-            subtitle={`${onThisRung.length} on this rung`}
+            subtitle={t('{0} on this rung', [onThisRung.length])}
             tight
           >
             <Table
@@ -337,7 +337,7 @@ export function Level({ params = {} }) {
               rows={onThisRung}
               rowKey={(row) => row.code}
               rowHref={(row) => Router.href('class', { code: row.code, year })}
-              rowLabel={(row) => `Open class ${row.code}`}
+              rowLabel={(row) => t('Open class {0}', [row.code]).join('')}
               columns={[
                 {
                   key: 'code',

@@ -89,7 +89,7 @@ Port reference:
 - Milvus health check: `9091`
 - MinIO API: `9000`
 - MinIO Console: `9001`
-- Attu: `8080`
+- Attu dashboard: `http://localhost:${ATTU_HOST_PORT:-8081}` (`ATTU_HOST_PORT` is configurable in `.env`; default `8081`)
 
 ### 5) Build the frontend (required on first run and after any frontend changes)
 On first run, or after modifying the frontend code, you need to install dependencies and build the frontend so the `frontend/dist` directory (served by the backend) gets generated:
@@ -108,16 +108,16 @@ Once the build finishes, the output is saved automatically under `frontend/dist/
 
 ### 6) Start the estate and access it
 
-**All four services at once (Windows):**
+**Complete Docker stack (Windows):**
 
 ```bat
-run_all.bat
+SUPERAGENT.bat
 ```
 
-It starts the infra containers, applies the SIS migrations, and opens one window per
-service. It sets no environment variable of its own — every service reads `.env` for
-itself — and it refuses to start if a previous run still holds a port, because a stale
-process answering with stale settings reads exactly like an edit to `.env` being ignored.
+Double-click it for the interactive manager, or run `SUPERAGENT.bat start` from a
+terminal. It starts the complete Compose stack, applies SIS migrations, waits for health
+checks, and preserves named volumes on normal stop. Port conflicts are reported without
+terminating the owning application.
 
 **Or one service at a time:**
 
@@ -139,6 +139,7 @@ Open in a browser:
 | Chat API docs | `http://127.0.0.1:8000/docs` |
 | Registrar console | `http://localhost:8300/ui` |
 | SIS / records / identity docs | `:8300/docs`, `:8100/docs`, `:8200/docs` |
+| Attu (Milvus dashboard) | `http://localhost:8081` by default; configure with `ATTU_HOST_PORT` |
 
 ### 7) Frontend development & debugging (optional)
 The frontend is built with Vite + Vue 3. To develop and debug the frontend code:
@@ -383,7 +384,7 @@ Configure these at the repo root or in your runtime environment:
 - Dense vectors: `EMBEDDING_MODEL`, `EMBEDDING_DEVICE`, `DENSE_EMBEDDING_DIM` (must match the `dense_embedding` field dimension in the Milvus collection)
 - Dense and sparse: dense vectors come from the local embedding model; sparse vectors are automatically generated and maintained by Milvus's Chinese analyzer and BM25 Function
 - Rerank-related: `RERANK_MODEL`, `RERANK_BINDING_HOST`, `RERANK_API_KEY`
-- Milvus: `MILVUS_HOST`, `MILVUS_PORT`, `MILVUS_COLLECTION`
+- Milvus: `MILVUS_HOST`, `MILVUS_PORT`, `MILVUS_COLLECTION`; Attu dashboard host port: `ATTU_HOST_PORT` (default `8081`)
 - Database/cache: `DATABASE_URL`, `REDIS_URL`
 - Auth-related: `JWT_SECRET_KEY`, `ADMIN_INVITE_CODE`, `JWT_ALGORITHM`, `JWT_EXPIRE_MINUTES`
 - Password parameters: `PASSWORD_PBKDF2_ROUNDS`

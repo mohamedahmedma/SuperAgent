@@ -34,7 +34,7 @@ export const AR = {
   Year: 'العام',
   Schools: 'المدارس',
   'Open settings': 'فتح الإعدادات',
-  'Settings — appearance, page colour, names': 'الإعدادات — المظهر ولون الصفحة والأسماء',
+  'Settings — appearance and language': 'الإعدادات — المظهر واللغة',
   Screens: 'الشاشات',
   'service online': 'الخدمة متاحة',
   'service unreachable': 'تعذّر الوصول إلى الخدمة',
@@ -49,37 +49,16 @@ export const AR = {
   Appearance: 'المظهر',
   Light: 'فاتح',
   Dark: 'داكن',
-  System: 'حسب الجهاز',
-  'System follows the machine, and changes with it while the tab is open.':
-    'يتبع «حسب الجهاز» إعداد الجهاز نفسه، ويتغيّر معه ما دامت الصفحة مفتوحة.',
-  'Page colour': 'لون الصفحة',
-  'The colour of the page. Every section, hairline and field on it is mixed from this one value, so the whole console follows.':
-    'لون الصفحة. كل قسم وخط فاصل وحقل عليها مشتق من هذه القيمة وحدها، فتتبعها الواجهة كاملة.',
-  'The colour of the dark page. The light one keeps its own, and switching appearance switches between them.':
-    'لون الصفحة الداكنة. وللصفحة الفاتحة لونها الخاص، والتبديل بين المظهرين يبدّل بينهما.',
-  'Any colour': 'أي لون',
-  'Pick any page colour': 'اختر أي لون للصفحة',
-  'Reset to default': 'العودة إلى الأصل',
-  Names: 'الأسماء',
-  'Which of a child’s two recorded names is shown first. The console’s own wording stays in English — a half-translated interface is worse than an untranslated one.':
-    'أيّ الاسمين المسجَّلين للطالب يظهر أولًا، ولغة الواجهة نفسها.',
+  Language: 'اللغة',
+  'Choose a clear light or dark appearance. Your choice is remembered in this browser.':
+    'اختر المظهر الفاتح أو الداكن. سيُحفظ اختيارك في هذا المتصفح.',
+  'Choose the interface language and reading direction.':
+    'اختر لغة الواجهة واتجاه القراءة.',
   'Latin names first': 'الأسماء اللاتينية أولًا',
   'Arabic names first, right to left': 'الأسماء العربية أولًا، من اليمين إلى اليسار',
   'Remembered in this browser. Nothing here is sent to the service.':
     'تُحفظ هذه الإعدادات في هذا المتصفح، ولا يُرسل منها شيء إلى الخدمة.',
   Done: 'تم',
-  'The page, a section on it, a hairline, a field and the one blue — the same tokens every screen is drawn from, at a quarter size.':
-    'الصفحة، وقسم عليها، وخط فاصل، وحقل، واللون الأزرق الوحيد — بالقيم نفسها التي تُرسم بها كل شاشة، بربع الحجم.',
-  Paper: 'ورقي',
-  White: 'أبيض',
-  Mist: 'ضبابي',
-  Cream: 'كريمي',
-  Sand: 'رملي',
-  Charcoal: 'فحمي',
-  Black: 'أسود',
-  Ink: 'حبري',
-  Umber: 'بنّي',
-  Steel: 'فولاذي',
 
   /* -- Fields -------------------------------------------------------------------- */
   'Choose…': 'اختر…',
@@ -754,8 +733,98 @@ export const AR = {
     'مكتوب',
   'ready':
     'جاهز',
+  'That did not work':
+    'لم تنجح العملية',
+  'Loading…':
+    'جارٍ التحميل…',
+  'Choose a term':
+    'اختر فصلًا دراسيًا',
+  'Choose a class':
+    'اختر صفًا',
+  'Nothing changed':
+    'لم يتغير شيء',
+  'Guardian removed':
+    'تمت إزالة ولي الأمر',
+  '{0} found':
+    'تم العثور على {0}',
+  'Open {0}':
+    'فتح {0}',
+  'Open {0} {1}':
+    'فتح {0} {1}',
+  'Open class {0}':
+    'فتح الصف {0}',
+  'Open academic year {0}':
+    'فتح العام الدراسي {0}',
+  'Nothing matches “{0}”':
+    'لا توجد نتائج تطابق «{0}»',
+  '{0} in the record — newest first':
+    '{0} في السجل — الأحدث أولًا',
+  '{0} on her contact list':
+    '{0} في قائمة التواصل',
+  'Counts of what the school recorded — nothing derived':
+    'أعداد ما سجلته المدرسة — دون بيانات مستنتجة',
+  'Edit {0}':
+    'تعديل {0}',
+  'Move {0}':
+    'نقل {0}',
+  'Rename {0}':
+    'إعادة تسمية {0}',
+  'New class on {0}':
+    'صف جديد في {0}',
+  'No classes on {0} in {1}':
+    'لا توجد صفوف في {0} خلال {1}',
+  '{0} on this rung':
+    '{0} في هذا الصف الدراسي',
+  'Classes on this rung in {0}. A rung belongs to the school and outlives every year; a class belongs to the year.':
+    'صفوف هذا المستوى في {0}. المستوى تابع للمدرسة ويستمر بين الأعوام، أما الصف فتابع للعام الدراسي.',
+  'School {0} saved':
+    'تم حفظ المدرسة {0}',
+  'Academic year {0} saved':
+    'تم حفظ العام الدراسي {0}',
+  'Rung {0} saved':
+    'تم حفظ المستوى {0}',
+  '{0} moved to {1}':
+    'تم نقل {0} إلى {1}',
+  'Could not move {0}':
+    'تعذّر نقل {0}',
+  'New academic year in {0}':
+    'عام دراسي جديد في {0}',
+  'New rung in {0}':
+    'مستوى دراسي جديد في {0}',
+  'Term {0} saved':
+    'تم حفظ الفصل الدراسي {0}',
+  'Subject {0} added to {1}':
+    'تمت إضافة المادة {0} إلى {1}',
+  'Terms — {0}':
+    'الفصول الدراسية — {0}',
+  'Subjects taught in {0}':
+    'المواد التي تُدرّس في {0}',
+  '{0} in this year':
+    '{0} في هذا العام',
+  'Batch {0}':
+    'الدفعة {0}',
+  '{0} placed in {1}':
+    'تم إلحاق {0} بالصف {1}',
+  '{0} renamed':
+    'تمت إعادة تسمية {0}',
+  '{0} removed from {1}':
+    'تمت إزالة {0} من {1}',
+  'Nobody is in {0} yet':
+    'لا يوجد أحد في {0} بعد',
+  'Marks for {0}':
+    'درجات {0}',
+  '{0} is closed':
+    '{0} مغلق',
+  'Everything this class does, in {0}.':
+    'كل ما يخص هذا الصف في {0}.',
+  '{0} updated':
+    'تم تحديث {0}',
+  '{0} guardian(s) on file':
+    '{0} من أولياء الأمور مسجلون',
+  '{0} child(ren)':
+    '{0} من الطلاب',
   'Garden':
-    'رياض الأطفال',
+    'KG',
   'Primary':
     'ابتدائي',
   'Preparatory':

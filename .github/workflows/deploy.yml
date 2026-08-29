@@ -1,0 +1,151 @@
+name: Production pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/superagent
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  cd:
+    name: CD - ${{ matrix.name }} image
+    needs: ci
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {name: backend, file: Dockerfile}
+          - {name: frontend, file: frontend/Dockerfile}
+          - {name: identity, file: identity/Dockerfile}
+          - {name: records, file: records/Dockerfile}
+          - {name: sis, file: sis/Dockerfile}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:stable
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    name: Deploy production
+    needs: cd
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST || '13.140.153.131' }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/superagent' }}
+      SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
+      PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
+      GHCR_USER: ${{ github.actor }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate deployment configuration
+        run: |
+          missing=""
+          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_PATH SSHPASS PROD_ENV_FILE; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing deployment configuration:$missing"
+            exit 1
+          fi
+          case "$DEPLOY_PORT" in
+            *[!0-9]*|'') echo "::error::DEPLOY_PORT must be numeric"; exit 1 ;;
+          esac
+      - name: Install SSH password client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+      - name: Trust deployment server
+        run: |
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" > /tmp/hostkeys || true
+          if ! [ -s /tmp/hostkeys ]; then
+            echo "::error::No SSH host key received from $DEPLOY_HOST:$DEPLOY_PORT"
+            exit 1
+          fi
+          cat /tmp/hostkeys >> ~/.ssh/known_hosts
+      - name: Prepare server and copy Compose configuration
+        run: |
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          sshpass -e scp -P "$DEPLOY_PORT" docker-compose.yml docker-compose.prod.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+      - name: Install production environment and authenticate registry
+        run: |
+          printf '%s' "$PROD_ENV_FILE" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "cat > '$DEPLOY_PATH/.env' && chmod 600 '$DEPLOY_PATH/.env'"
+          printf '%s' "$GHCR_TOKEN" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+      - name: Deploy, verify, and roll back on failure
+        run: |
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" "$IMAGE_TAG" "$IMAGE_PREFIX" <<'REMOTE'
+          set -eu
+          deploy_path="$1"
+          image_tag="$2"
+          image_prefix="$3"
+          cd "$deploy_path"
+          compose="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+          services="backend frontend identity records sis"
+          export REGISTRY_IMAGE_PREFIX="$image_prefix"
+
+          previous=""
+          if [ -f .current-image-tag ]; then previous="$(cat .current-image-tag)"; fi
+
+          release() {
+            export IMAGE_TAG="$1"
+            $compose pull $services
+            $compose up -d
+          }
+
+          healthy() {
+            timeout 300 sh -c 'until wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1 && wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1; do sleep 5; done'
+          }
+
+          release "$image_tag"
+          $compose exec -T sis alembic -c sis/alembic.ini upgrade head
+
+          if healthy; then
+            printf '%s' "$image_tag" > .current-image-tag
+            if [ -n "$previous" ]; then printf '%s' "$previous" > .previous-image-tag; fi
+            $compose ps
+            exit 0
+          fi
+
+          echo "Health check failed for $image_tag"
+          if [ -n "$previous" ]; then
+            echo "Rolling back to $previous"
+            release "$previous"
+            healthy || true
+          fi
+          $compose ps
+          exit 1
+          REMOTE

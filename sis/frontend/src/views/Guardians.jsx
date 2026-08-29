@@ -145,7 +145,7 @@ function RemoveCell({ studentNumber, guardian, onChanged }) {
             ),
             run: () =>
               api.unlinkGuardian(studentNumber, guardian.phone).then(() => {
-                Store.toast('ok', 'Guardian removed', guardian.phone);
+                  Store.toast('ok', t('Guardian removed'), guardian.phone);
                 onChanged();
               })
           })
@@ -170,7 +170,7 @@ function StudentLookup({ initial }) {
   return (
     <Card
       title={t('Who may ask about one child')}
-      subtitle={result.value ? `${result.value.count} guardian(s) on file` : null}
+      subtitle={result.value ? t('{0} guardian(s) on file', [result.value.count]) : null}
       actions={
         asked ? (
           <Button size="sm" icon="refresh" onClick={result.reload}>
@@ -310,7 +310,7 @@ function PhoneLookup() {
   return (
     <Card
       title={t('Which children one number may ask about')}
-      subtitle={result.value ? `${result.value.count} child(ren)` : null}
+      subtitle={result.value ? t('{0} child(ren)', [result.value.count]) : null}
       tight
     >
       <div className="card-body vstack gap-3">

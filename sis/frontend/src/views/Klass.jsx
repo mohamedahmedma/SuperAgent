@@ -215,7 +215,7 @@ function PlaceExisting({ classCode, year, onSaved }) {
           .run()
           .then(() => {
             Store.invalidate('roster:');
-            Store.toast('ok', `${form.values.student_number.trim()} placed in ${classCode}`);
+            Store.toast('ok', t('{0} placed in {1}', [form.values.student_number.trim(), classCode]));
             form.reset();
             if (onSaved) onSaved();
           })
@@ -307,7 +307,7 @@ function MoveChild({ student, classCode, year, onDone }) {
             <Select
               value={form.values.to_class_code}
               options={options}
-              placeholder={classes.loading ? 'Loading…' : 'Choose a class'}
+              placeholder={classes.loading ? t('Loading…') : t('Choose a class')}
               onInput={form.set('to_class_code')}
             />
           </Field>
@@ -353,7 +353,7 @@ function RenameClass({ section, year, onDone }) {
         onSubmit={(event) => {
           event.preventDefault();
           if (!diff.length) {
-            Store.toast('info', 'Nothing changed');
+            Store.toast('info', t('Nothing changed'));
             if (onDone) onDone();
             return;
           }
@@ -374,7 +374,7 @@ function RenameClass({ section, year, onDone }) {
                 })
                 .then(() => {
                   Store.invalidate('classes:');
-                  Store.toast('ok', `${section.code} renamed`);
+                  Store.toast('ok', t('{0} renamed', [section.code]));
                   if (onDone) onDone();
                 })
           });
@@ -445,7 +445,7 @@ function Register({ classCode, year }) {
         api.endPlacement(student.student_number, { ends_on: today() }).then(() => {
           Store.invalidate('roster:');
           Store.invalidate('placements:');
-          Store.toast('ok', `${student.student_number} removed from ${classCode}`);
+          Store.toast('ok', t('{0} removed from {1}', [student.student_number, classCode]));
           roster.reload();
         })
     });
@@ -517,10 +517,10 @@ function Register({ classCode, year }) {
           rows={students}
           rowKey={(row) => row.student_number}
           rowHref={(row) => Router.href('student', { number: row.student_number })}
-          rowLabel={(row) => `Open ${pickName(row, state.lang) || row.student_number}`}
+          rowLabel={(row) => t('Open {0}', [pickName(row, state.lang) || row.student_number]).join('')}
           empty={
             <Empty
-              title={`Nobody is in ${classCode} yet`}
+              title={t('Nobody is in {0} yet', [classCode])}
               action={
                 <Button variant="primary" onClick={() => setPanel('add')}>
                   {t('Add the first child')}
@@ -617,7 +617,7 @@ function Register({ classCode, year }) {
       {/* The edit and move forms open under the table rather than inside the row: a form in a
           table cell on a phone is a form in a 90px column. */}
       {editing ? (
-        <Card className="sis-rise" title={`Edit ${editing}`}>
+        <Card className="sis-rise" title={t('Edit {0}', [editing])}>
           {/* The form loads her whole record rather than editing the three columns this table
               happens to carry: a diff whose "was" column is blank because the roster row never
               had a phone number is a diff that lies. */}
@@ -632,7 +632,7 @@ function Register({ classCode, year }) {
       ) : null}
 
       {moving ? (
-        <Card className="sis-rise" title={`Move ${moving}`}>
+        <Card className="sis-rise" title={t('Move {0}', [moving])}>
           <MoveChild
             student={students.find((row) => row.student_number === moving) || {}}
             classCode={classCode}
@@ -673,7 +673,7 @@ function ClassMarks({ classCode, year }) {
 
   return (
     <div className="vstack gap-4">
-      <Alert tone="info" title={`Marks for ${classCode}`}>
+      <Alert tone="info" title={t('Marks for {0}', [classCode])}>
         {t('The class is already fixed, so the file needs two columns:')} <code>{t('student_number')}</code> and{' '}
         <code>{t('percentage')}</code>. A row for a child who is not on this register is rejected rather than filed elsewhere — which is the point of uploading from here rather than from the Marks screen.
       </Alert>
@@ -698,7 +698,7 @@ function ClassMarks({ classCode, year }) {
                   value: item.code,
                   label: `${item.code} — ${labelOf(item)}${item.is_closed ? ' (closed)' : ''}`
                 }))}
-                placeholder={terms.loading ? 'Loading…' : 'Choose a term'}
+                placeholder={terms.loading ? t('Loading…') : t('Choose a term')}
                 onInput={setTerm}
               />
             </Field>
@@ -732,7 +732,7 @@ function ClassMarks({ classCode, year }) {
       />
 
       {chosen && chosen.is_closed ? (
-        <Alert tone="warn" title={`${chosen.code} is closed`}>
+        <Alert tone="warn" title={t('{0} is closed', [chosen.code])}>
           {t("A person marked this term final, so the service will refuse the upload. Reopen the term from the academic year screen if last term's marks are genuinely still arriving.")}
         </Alert>
       ) : null}
@@ -799,7 +799,7 @@ export function Klass({ params = {} }) {
       <Breadcrumbs trail={trail} />
       <PageHead
         title={section ? `${classCode} — ${labelOf(section, state.lang)}` : classCode}
-        lede={`Everything this class does, in ${year}.`}
+        lede={t('Everything this class does, in {0}.', [year])}
         actions={
           <Button variant={renaming ? 'primary' : 'outline'} onClick={() => setRenaming(!renaming)}>
             {renaming ? t('Close') : t('Rename class')}
@@ -819,7 +819,7 @@ export function Klass({ params = {} }) {
 
       {renaming ? (
         <div className="mb-3">
-          <Card className="sis-rise" title={`Rename ${classCode}`}>
+          <Card className="sis-rise" title={t('Rename {0}', [classCode])}>
             <RenameClass
               section={section || { code: classCode }}
               year={year}

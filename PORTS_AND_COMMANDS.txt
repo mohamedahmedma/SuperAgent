@@ -1,0 +1,58 @@
+SUPERAGENT - PORTS AND DOCKER COMMANDS
+=====================================
+For normal daily use, double-click SUPERAGENT.bat. Normal stop preserves data.
+
+PUBLIC URLS
+Frontend (Vue UI):    http://localhost:3000/
+Backend API (chat):   http://localhost:8000/
+Backend API Docs:     http://localhost:8000/docs
+Backend Health Check: http://localhost:8000/health
+Records API Docs:     http://localhost:8100/docs  (academic-records facade)
+Identity API Docs:    http://localhost:8200/docs  (authentication service)
+SIS Console:          http://localhost:8300/ui    (registrar dashboard)
+SIS API Docs:         http://localhost:8300/docs
+Attu:                 http://localhost:8081/       (Milvus dashboard)
+MinIO Console:        http://localhost:9001/       (object-storage dashboard)
+Milvus Health:        http://localhost:9091/healthz
+
+LOCAL TCP PORTS (not normal browser pages)
+PostgreSQL 127.0.0.1:5432; Redis 127.0.0.1:6379;
+MinIO API 127.0.0.1:9000; Milvus 127.0.0.1:19530.
+Docker-only: etcd 2379/2380 and Attu internal port 3000.
+Host ports are configurable in .env; values above are the safe defaults.
+
+LAUNCHER COMMANDS
+SUPERAGENT.bat start
+SUPERAGENT.bat stop
+SUPERAGENT.bat restart
+SUPERAGENT.bat status
+SUPERAGENT.bat logs
+SUPERAGENT.bat rebuild
+
+COMMAND PREFIX
+All commands use: docker compose --env-file .env --env-file .runtime.env
+
+Build: docker compose --env-file .env --env-file .runtime.env build
+Start: docker compose --env-file .env --env-file .runtime.env up -d
+Start and rebuild: docker compose --env-file .env --env-file .runtime.env up -d --build
+Stop preserving data: docker compose --env-file .env --env-file .runtime.env stop
+Restart: docker compose --env-file .env --env-file .runtime.env restart
+Status: docker compose --env-file .env --env-file .runtime.env ps -a
+All logs: docker compose --env-file .env --env-file .runtime.env logs --tail 200
+Follow logs: docker compose --env-file .env --env-file .runtime.env logs -f
+One service log: docker compose --env-file .env --env-file .runtime.env logs --tail 200 backend
+Rebuild backend: docker compose --env-file .env --env-file .runtime.env build backend
+Restart backend: docker compose --env-file .env --env-file .runtime.env up -d --no-deps backend
+Validate: docker compose --env-file .env --env-file .runtime.env config --quiet
+List containers: docker compose --env-file .env --env-file .runtime.env ps
+Remove containers, preserve volumes: docker compose --env-file .env --env-file .runtime.env down
+Clean unused images safely: docker image prune
+
+Health:
+docker inspect --format "{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}" superagent-backend superagent-frontend superagent-postgres superagent-redis superagent-milvus superagent-attu
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+DESTRUCTIVE RESET - DELETES DATABASES, UPLOADS, KEYS, VECTOR DATA,
+AND THE CACHED EMBEDDING MODEL (next start re-downloads it)
+docker compose --env-file .env --env-file .runtime.env down --volumes
+Only run intentionally after backup. SUPERAGENT.bat never runs this.
