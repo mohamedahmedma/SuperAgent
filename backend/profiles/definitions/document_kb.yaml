@@ -1,7 +1,7 @@
 # Document knowledge base — neutral, professional deployment over document corpora.
 #
-# Differences from base are deliberate and few: a plain persona, a slightly wider
-# candidate pool (document corpora reward recall), and no weather tool.
+# Differences from base are deliberate and few: a plain persona and a slightly wider
+# candidate pool (document corpora reward recall).
 
 extends: base
 name: document_kb
@@ -18,7 +18,9 @@ identity:
   langsmith_project: "dockb-rag"
 
 agent:
-  # Lists replace rather than merge, so this drops the weather tool entirely.
+  # Stated in full rather than inherited: lists replace rather than merge, so this is
+  # the whole set and stays put if base ever gains a tool this deployment should not
+  # bind.
   tools:
     - search_knowledge_base
     - view_figure

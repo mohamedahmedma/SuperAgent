@@ -311,8 +311,8 @@ npm run build
 1. The user submits a question in the frontend, calling `POST /chat/stream` (streaming).
 2. FastAPI's `api/routes/chat.py` returns a `StreamingResponse(media_type="text/event-stream")`.
 3. The LangChain Agent decides whether to call a tool based on the question type:
-  - Weather question -> `get_current_weather`
   - Knowledge question -> `search_knowledge_base`
+  - Figure or diagram -> `view_figure`
 4. If the knowledge-base tool is triggered, execution enters `backend/rag/pipeline.py` to run the retrieval workflow, with each stage pushed to the frontend in real time via `ChatRequestContext`.
 5. The retrieval results and RAG trace are returned together, and the Agent streams the final answer (pushed token by token).
 6. The frontend's ReadableStream parses the SSE chunks and renders them in real time with a typewriter effect.
@@ -384,7 +384,6 @@ Configure these at the repo root or in your runtime environment:
 - Password parameters: `PASSWORD_PBKDF2_ROUNDS`
 - Retrieval candidate pool: `RETRIEVAL_CANDIDATE_K` (a fixed candidate count, takes priority), `RETRIEVAL_CANDIDATE_MULTIPLIER` (used when K isn't set: `max(top_k x multiplier, top_k)`, default `3`)
 - Auto-merging: `AUTO_MERGE_ENABLED`, `AUTO_MERGE_THRESHOLD`, `LEAF_RETRIEVE_LEVEL`
-- Tools: `AMAP_WEATHER_API`, `AMAP_API_KEY`
 
 ## API Overview
 - Auth

@@ -39,7 +39,8 @@ identity:
   langsmith_project: "school-assistant"
 
 agent:
-  # Lists replace rather than merge, so this drops the weather tool.
+  # Lists replace rather than merge, so this list is the whole set, not an addition
+  # to base's.
   #
   # `get_student_records` covers grades, subject breakdowns and attendance in one tool
   # rather than three. The model chooses between them with a `record_type` argument, so
