@@ -20,8 +20,14 @@ jobs:
         with: {version: "0.8.14", enable-cache: true}
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: uv sync --frozen --dev
-      - run: uv run pytest -q
+      # --locked, not --frozen. --frozen installs whatever uv.lock says and never checks
+      # it against pyproject.toml, so a dependency added to pyproject without re-locking
+      # is simply not installed. --no-sync then stops `uv run` from quietly re-resolving
+      # and installing the missing package, which is what hid exactly that: CI passed on
+      # a lockfile the production image could not work from, and the backend died at
+      # import on a module the tests had had all along.
+      - run: uv sync --locked --dev
+      - run: uv run --no-sync pytest -q
   frontend:
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: frontend}}

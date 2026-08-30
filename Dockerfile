@@ -5,10 +5,14 @@ COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
+# --locked fails the build when uv.lock does not match pyproject.toml. With --frozen a
+# dependency added to pyproject but never locked is silently left out, and the image
+# builds, ships and then dies at import — which is how a missing snowballstemmer reached
+# production. The check costs nothing and turns that into a failed build.
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-install-project
 COPY backend ./backend
 COPY schoolauth ./schoolauth
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
 
 FROM python:3.12.11-slim-bookworm
 ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1

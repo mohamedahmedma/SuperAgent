@@ -157,8 +157,8 @@ jobs:
 
           release() {
             export IMAGE_TAG="$1"
-            $compose pull $services
-            $compose up -d
+            $compose pull $services || return 1
+            $compose up -d || return 1
           }
 
           healthy() {
@@ -207,13 +207,31 @@ jobs:
             echo "postgres role '$pg_user' reconciled with .env"
           fi
 
-          release "$image_tag"
-          if [ "$current_env_hash" != "$previous_env_hash" ]; then
-            $compose up -d --no-deps --force-recreate backend identity records sis
-          fi
-          $compose exec -T sis alembic -c sis/alembic.ini upgrade head </dev/null
+          # Everything that has to hold for a release to count, behind one status. It is
+          # called as an `if` condition, which is the point: `set -e` is suspended for the
+          # whole call tree of a command being tested, so a step that fails returns here
+          # instead of killing the script. Without that, `compose up` exiting on "container
+          # is unhealthy" ended the run before the diagnosis below — which is exactly how a
+          # failed deploy reported an unhealthy container and not one line of its log.
+          attempt() {
+            release "$1" || return 1
+            # A change to .env reaches nothing on its own: compose hashes a service's own
+            # configuration to decide what to recreate, and the CONTENTS of an env_file are
+            # not part of that hash, so an edited file sits unread behind containers that
+            # compose considers up to date. --no-deps holds the recreate to the application
+            # services; the data services were brought up and waited on by the release.
+            if [ "$current_env_hash" != "$previous_env_hash" ]; then
+              $compose up -d --no-deps --force-recreate $services || return 1
+            fi
+            healthy || return 1
+            # sis runs `alembic upgrade head` in its own entrypoint, so a sis that is
+            # healthy has already migrated. This covers the release where sis was not
+            # recreated at all, and it runs after the health gate rather than before it so
+            # it cannot race a container that is still coming up.
+            $compose exec -T sis alembic -c sis/alembic.ini upgrade head </dev/null || return 1
+          }
 
-          if healthy; then
+          if attempt "$image_tag"; then
             printf '%s' "$image_tag" > .current-image-tag
             printf '%s' "$current_env_hash" > .current-env-sha256
             if [ -n "$previous" ]; then printf '%s' "$previous" > .previous-image-tag; fi
@@ -221,14 +239,20 @@ jobs:
             exit 0
           fi
 
-          echo "Health check failed for $image_tag"
+          echo "Release failed for $image_tag"
           # Without this the job ends on "container is unhealthy" and the reason stays on
-          # a server nobody can reach from the run. The logs are the whole diagnosis.
-          echo "--- backend logs (last 100 lines) ---"
-          $compose logs --no-color --tail 100 backend || true
+          # a server nobody can reach from the run. The logs are the whole diagnosis, and
+          # which service is at fault is not known here — backend is the usual answer
+          # because it is the only one that speaks to postgres, but a release that fails
+          # for another reason should not have to be re-run to say so.
+          $compose ps || true
+          for service in $services; do
+            echo "--- $service logs (last 100 lines) ---"
+            $compose logs --no-color --tail 100 "$service" || true
+          done
           if [ -n "$previous" ]; then
             echo "Rolling back to $previous"
-            release "$previous"
+            release "$previous" || true
             healthy || true
           fi
           $compose ps
