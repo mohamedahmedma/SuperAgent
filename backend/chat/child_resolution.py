@@ -33,6 +33,7 @@ from typing import Sequence, Tuple
 
 from backend.chat.child_context import SessionChild
 from backend.chat.child_roster import ChildOption
+from backend.text_matching import name_key
 
 #: Reference kinds that name a sex. `unknown` on a child matches BOTH of these, so a
 #: half-filled gender column can never select a child by virtue of a blank cell.
@@ -86,21 +87,36 @@ def _found(child: ChildOption, source: str, reason: str) -> ResolvedChild:
 
 
 def _named(roster: Sequence[ChildOption], name: str) -> list:
-    """Children whose label contains `name`, casefolded.
+    """Children whose name contains `name`, compared on a folded key.
 
-    Substring across the whole label because a parent writing "Ali" means the child
+    Substring across the whole name because a parent writing "Ali" means the child
     stored as "Ali Osman", and a school in this country stores a full patronymic. That
     is also why a match is only trusted when it is UNIQUE: «أحمد» is inside both «علي
     أحمد حسن» and «أحمد أحمد حسن», and picking the first would show one child's marks
     while the parent was asking about the other.
+
+    Compared through `name_key` rather than `casefold` because a school's SIS does not
+    spell Arabic consistently and a parent has no way to know how it spelled their
+    child. This deployment's own roster carries «محمد احمد» with a bare alif next to
+    «ليلى أحمد» with a hamza, and «فاطمة» stored as «فاكمه»; a parent typing the name
+    correctly matched none of them. Folding unifies alif, teh marbuta and alif maksura,
+    which is that whole class of failure.
+    («فاكمه» is a typo rather than a spelling variant, so it stays unmatched — repairing
+    that belongs in the SIS row, not in a fuzzy matcher that could select a sibling.)
+
+    `label_en` is searched alongside, so "Layla" finds «ليلى أحمد». Names are folded and
+    never stemmed — see backend/text_matching.py for why stemming one would risk
+    matching the wrong child.
     """
-    needle = (name or "").strip().casefold()
+    needle = name_key(name)
     if not needle:
         return []
     return [
         child
         for child in roster
-        if needle in child.label.casefold() or needle == child.student_id.casefold()
+        if needle in name_key(child.label)
+        or (child.label_en and needle in name_key(child.label_en))
+        or needle == name_key(child.student_id)
     ]
 
 

@@ -44,6 +44,26 @@ dependencies = [
     # arrives transitively via fastapi/langchain today, but backend.prompts imports it
     # directly, so it is declared rather than relied on as someone else's dependency.
     "jinja2>=3.1",
+    # Arabic matching (backend/text_matching.py), on the BM25 and name-lookup lanes.
+    #
+    # camel-tools supplies the standard Arabic IR normalizers (dediac, alef, alef
+    # maksura, teh marbuta). Only `camel_tools.utils.{normalize,dediac}` is imported —
+    # pure Python, no model data, no `camel_data` download at runtime. It declares torch
+    # and transformers, but sentence-transformers already pulls both, so the marginal
+    # weight here is small.
+    #
+    # snowballstemmer supplies the Arabic LIGHT stemmer. The choice matters: NLTK's
+    # ISRI reduces to the triliteral root, which merges طالب (a student) with طلب (an
+    # application) and مدرسة with تدريس. Snowball strips clitics and stops, which is
+    # what BM25 wants. See test_text_matching.LightStemmingTests.
+    "camel-tools>=1.5",
+    "snowballstemmer>=2.2",
+    # Token accounting. The agent system prompt is paid on EVERY turn and the
+    # school profile budgets it at 500 tokens (test_prompt_budget.py), which is
+    # only checkable with the real tokenizer — Arabic runs about three tokens a
+    # word here, so character counts are not a usable proxy. document_loader
+    # already looks for it optionally for CHUNK_STRATEGY=token.
+    "tiktoken>=0.7",
 ]
 
 [project.optional-dependencies]

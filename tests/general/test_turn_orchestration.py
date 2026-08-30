@@ -30,9 +30,16 @@ class RecordingContext:
     def emit_rag_step(self, icon, label, detail="", **kwargs):
         self.steps.append((icon, label, detail))
 
-    def note_turn_plan(self, retrieval_sections, scope_options):
+    # Mirrors ChatRequestContext.note_turn_plan. It has to: the orchestrator swallows
+    # any exception from this call ("a hint must never break a turn"), so a double whose
+    # signature lags the real one does not fail — it silently records nothing.
+    def note_turn_plan(self, retrieval_sections, scope_options, *,
+                       carried_constraints=(), is_followup=False, language=""):
         self.retrieval_sections = list(retrieval_sections or [])
         self.scope_options = list(scope_options or [])
+        self.carried_constraints = list(carried_constraints or [])
+        self.is_followup = bool(is_followup)
+        self.language = language
 
 
 def temp_profile(**agent_overrides):

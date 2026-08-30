@@ -1,12 +1,23 @@
 import { defineStore } from 'pinia';
 import api from '@/utils/api';
-import type { DocumentItem, UploadStep, ActiveDeleteJob, DeleteStep } from '@/types/document';
+import type { DocumentItem, DocumentPair, UploadStep, ActiveDeleteJob, DeleteStep } from '@/types/document';
 
 export const useDocumentStore = defineStore('documents', {
   state: () => ({
     documents: [] as DocumentItem[],
     documentsLoading: false,
     selectedFile: null as File | null,
+    // The bilingual upload row: an Arabic slot, an English slot, and the title that
+    // names the ENTRY rather than either file. Either slot may be left empty — a
+    // single-language entry is normal and permanent, not a half-finished one.
+    selectedFileAr: null as File | null,
+    selectedFileEn: null as File | null,
+    pairTitle: '',
+    // Set when filling in the missing half of an entry that already exists, so the
+    // upload joins that row instead of creating a second one beside it.
+    pairTargetId: '',
+    pairs: [] as DocumentPair[],
+    pairsLoading: false,
     isUploading: false,
     uploadProgress: '',
     uploadSteps: [] as UploadStep[],
@@ -78,6 +89,87 @@ export const useDocumentStore = defineStore('documents', {
         throw new Error(errMsg);
       } finally {
         this.documentsLoading = false;
+      }
+    },
+
+    async loadPairs() {
+      this.pairsLoading = true;
+      try {
+        const response = await api.get('/documents/pairs');
+        this.pairs = response.data.pairs || [];
+      } catch (error: any) {
+        const errMsg = error.response?.data?.detail || error.message || 'Failed to load documents';
+        throw new Error(errMsg);
+      } finally {
+        this.pairsLoading = false;
+      }
+    },
+
+    /** Start filling in the missing language of an existing entry. */
+    startFillingPair(pair: DocumentPair) {
+      this.pairTargetId = pair.pair_id;
+      this.pairTitle = pair.title;
+      this.selectedFileAr = null;
+      this.selectedFileEn = null;
+      this.uploadProgress = '';
+      this.uploadSteps = [];
+      this.activeUploadJobId = '';
+    },
+
+    clearPairSelection() {
+      this.selectedFileAr = null;
+      this.selectedFileEn = null;
+      this.pairTitle = '';
+      this.pairTargetId = '';
+    },
+
+    /**
+     * Upload one entry: an Arabic file, an English file, or both together.
+     *
+     * Both slots go in a single request so the two halves are ingested as one unit —
+     * the backend parses and language-checks both BEFORE indexing either, so a file
+     * dropped in the wrong column rejects the whole upload instead of leaving one side
+     * indexed and the entry unpaired.
+     */
+    async uploadPair() {
+      if (!this.selectedFileAr && !this.selectedFileEn) {
+        throw new Error('Choose an Arabic file, an English file, or both');
+      }
+
+      this.isUploading = true;
+      this.uploadProgress = 'Uploading...';
+      this.uploadSteps = this.createUploadSteps();
+      this.uploadProgressCollapsed = false;
+      this.updateUploadStep('upload', 0, 'running', 'Preparing upload');
+
+      const formData = new FormData();
+      if (this.selectedFileAr) formData.append('file_ar', this.selectedFileAr);
+      if (this.selectedFileEn) formData.append('file_en', this.selectedFileEn);
+      formData.append('title', this.pairTitle);
+      formData.append('pair_id', this.pairTargetId);
+
+      try {
+        const response = await api.post('/documents/upload/pair', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (progressEvent) => {
+            if (!progressEvent.total) return;
+            const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+            this.updateUploadStep('upload', percent, 'running', `Uploaded ${percent}%`);
+          },
+        });
+
+        const data = response.data;
+        this.updateUploadStep('upload', 100, 'completed', 'Upload complete');
+        this.uploadProgress = data.message;
+        this.activeUploadJobId = data.job_id;
+        this.clearPairSelection();
+        this.startUploadJobPolling(data.job_id);
+      } catch (error: any) {
+        const errMsg = error.response?.data?.detail || error.message || 'Upload failed';
+        this.updateUploadStep('upload', 100, 'failed', errMsg);
+        this.uploadProgress = 'Upload failed: ' + errMsg;
+        this.isUploading = false;
+        throw new Error(errMsg);
       }
     },
 

@@ -107,11 +107,64 @@ class OverrideTests(unittest.TestCase):
         self.assertIn("cite [1]", rendered)
 
     def test_the_shipped_profiles_leave_it_to_the_template(self):
-        """A profile that sets system_prompt opts out of per-turn narrowing, so none
-        of the shipped ones do."""
+        """A profile that sets system_prompt opts out of per-turn narrowing, so these
+        leave it alone.
+
+        `school` is the deliberate exception — it needs the whole agent prompt to carry
+        an Egyptian-Arabic register that must not leak into the classifier prompts via
+        persona. What that costs it is pinned by SchoolOverrideKeepsTheContractTests.
+        """
         for name in ("base", "supermew", "document_kb", "ecommerce"):
             with self.subTest(profile=name):
                 self.assertEqual("", load_profile(name).agent.system_prompt)
+
+
+class SchoolOverrideKeepsTheContractTests(unittest.TestCase):
+    """school.yaml sets `agent.system_prompt`, which bypasses agent/system.j2 entirely.
+
+    That is a real trade, taken so the Arabic register reaches the agent WITHOUT going
+    through `identity.persona` — persona is also rendered into request_envelope,
+    resolve_question, scope_check, section_summary and corpus_digest, where style
+    examples would be billed on every classifier call.
+
+    The cost is that agent/_grounding.j2 no longer composes in, so its rules are copied
+    into the YAML. These tests exist because that copy can go stale silently, and the
+    symptom is not a missing sentence: asset delivery parses [n] out of the answer, so
+    losing the citation line stops figures being attached at all.
+    """
+
+    def setUp(self):
+        self.profile = load_profile("school")
+        # language="ar": the Egyptian register is appended only on an Arabic turn, so
+        # rendering without a language would test a prompt that deliberately omits it.
+        self.prompt = self.profile.render_system_prompt(
+            ["search_knowledge_base"], language="ar"
+        )
+
+    def test_every_grounding_rule_survives_the_override(self):
+        """Compared against the fragment itself, so editing _grounding.j2 without
+        updating school.yaml fails here rather than in production."""
+        from backend.prompts import render
+
+        fragment = render("agent/_grounding.j2")
+        rules = [line.strip() for line in fragment.splitlines() if line.strip().startswith("-")]
+        self.assertTrue(rules, "the grounding fragment has no rules to check")
+        for rule in rules:
+            with self.subTest(rule=rule):
+                self.assertIn(rule, self.prompt)
+
+    def test_the_persona_is_still_substituted(self):
+        self.assertNotIn("{persona}", self.prompt)
+        self.assertIn(self.profile.identity.persona[:40], self.prompt)
+
+    def test_the_register_reaches_the_agent(self):
+        """حضرتك is the marker that makes the register semi-formal rather than either
+        stiff MSA or over-familiar slang."""
+        self.assertIn("حضرتك", self.prompt)
+
+    def test_the_register_does_not_reach_the_classifier_prompts(self):
+        """The reason this lives in system_prompt rather than persona."""
+        self.assertNotIn("حضرتك", self.profile.identity.persona)
 
 
 class TemplateEnvironmentTests(unittest.TestCase):

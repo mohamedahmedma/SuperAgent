@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence
 
 from backend.chat.language import detect_language
 from backend.rag.evidence import Certainty
+from backend.text_matching import name_key
 from backend.text_normalization import normalize_query
 
 logger = logging.getLogger(__name__)
@@ -463,15 +464,20 @@ class EnvelopeDetector:
 def _names_the_child(text: str, name: str) -> bool:
     """Whether `name` actually appears in the classified message.
 
-    Normalised on both sides with the same function retrieval uses, so a difference of
-    alif form, tatweel or an invisible character is not read as a different name. A
-    plain containment test after that: the question is only ever "did these words
-    appear", never "who is this".
+    Folded on both sides with the same function the roster matcher uses, so a difference
+    of alif form, teh marbuta, tatweel or an invisible character is not read as a
+    different name. A plain containment test after that: the question is only ever "did
+    these words appear", never "who is this".
+
+    `name_key`, not `normalize_query`: the latter repairs PDF damage but preserves hamza
+    and teh marbuta, so it would still read «أحمد» reported by the classifier and «احمد»
+    typed by the parent as two different names — which is exactly the mismatch this
+    check exists to survive.
     """
     if not name:
         return False
-    haystack = (normalize_query(text) or text or "").casefold()
-    needle = (normalize_query(name) or name).casefold()
+    haystack = name_key(text)
+    needle = name_key(name)
     return bool(needle) and needle in haystack
 
 

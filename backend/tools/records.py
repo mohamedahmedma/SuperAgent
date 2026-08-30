@@ -28,6 +28,7 @@ from backend.chat.child_resolution import resolve_child
 from backend.chat.child_roster import ChildOption, forget, load_roster
 from backend.chat.request_context import ChatRequestContext
 from backend.prompts import render as render_prompt
+from backend.text_matching import name_key
 
 logger = logging.getLogger(__name__)
 
@@ -197,15 +198,20 @@ def make_get_student_records(ctx: ChatRequestContext):
             if grades_outcome != "ok":
                 return _refused(grades_outcome)
 
-            needle = (subject or "").strip().casefold()
+            # Folded, not casefolded: a parent asks about «الرياضيات» however their
+            # keyboard produced it, and the subject table spells it one fixed way. Same
+            # class of failure as the child-name matcher above it, same fix. Folded
+            # rather than stemmed because a subject name is a proper noun — see
+            # backend/text_matching.py.
+            needle = name_key(subject)
             course = next(
                 (
                     c
                     for c in grades.get("courses") or []
                     if needle
                     and (
-                        needle in (c.get("subject_name_ar") or "").casefold()
-                        or needle in (c.get("subject_name_en") or "").casefold()
+                        needle in name_key(c.get("subject_name_ar") or "")
+                        or needle in name_key(c.get("subject_name_en") or "")
                     )
                 ),
                 None,

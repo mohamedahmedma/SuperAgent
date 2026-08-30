@@ -21,6 +21,7 @@ from backend.env import env_bool, env_float
 from backend.indexing.embedding import EmbeddingService, embedding_service as _default_embedding_service
 from backend.indexing.milvus_client import MilvusStore, get_milvus_store
 from backend.profiles import get_profile
+from backend.text_matching import search_key
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,16 @@ class MilvusWriter:
                             "text": doc["text"],
                             # Chunkers that carry no section path (the flat
                             # fallback splitter) index the body as-is.
-                            "bm25_text": doc.get("bm25_text") or doc["text"],
+                            #
+                            # search_key folds and light-stems the Arabic here, at the
+                            # ONE point every insert passes through, rather than in the
+                            # chunkers — the `or doc["text"]` fallback above means a
+                            # chunker that sets no bm25_text would otherwise index raw
+                            # text, and the asset and entity pipelines write through
+                            # here too. `text` is left alone: that is what the model
+                            # reads and what gets cited, and folded Arabic must never
+                            # reach either. See backend/text_matching.py.
+                            "bm25_text": search_key(doc.get("bm25_text") or doc["text"]),
                             "filename": doc["filename"],
                             "file_type": doc["file_type"],
                             "file_path": doc.get("file_path", ""),

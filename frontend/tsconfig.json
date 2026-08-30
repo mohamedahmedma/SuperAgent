@@ -3,7 +3,13 @@
     "target": "ESNext",
     "useDefineForClassFields": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
+    // "Bundler" rather than "Node". Vite resolves imports, not node10, and the two
+    // disagree about the things this app actually does: node10 ignores the "exports"
+    // maps that vue, pinia and vitest publish, and it expects the file extensions that
+    // bundler-resolved source deliberately omits. Pairing "module": "ESNext" with
+    // node10 resolution is the mismatch that produces "cannot find module" on a package
+    // that imports perfectly well at runtime.
+    "moduleResolution": "Bundler",
     "strict": true,
     "jsx": "preserve",
     "resolveJsonModule": true,
@@ -12,6 +18,9 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "noEmit": true,
+    // Kept out of the source tree. `noEmit` stops the .js output but NOT this file,
+    // which `tsc --build` writes regardless.
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
