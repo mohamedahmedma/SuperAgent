@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.7
 FROM node:20.19.5-alpine AS builder
 WORKDIR /app
+ARG VITE_IDENTITY_BASE_URL=""
+ENV VITE_IDENTITY_BASE_URL=${VITE_IDENTITY_BASE_URL}
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/ ./

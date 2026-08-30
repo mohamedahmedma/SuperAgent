@@ -16,6 +16,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/superagent
+  VITE_IDENTITY_BASE_URL: https://auth.aurexis.cc
 
 jobs:
   ci:
@@ -55,6 +56,8 @@ jobs:
             ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:stable
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          build-args: |
+            VITE_IDENTITY_BASE_URL=${{ matrix.name == 'frontend' && env.VITE_IDENTITY_BASE_URL || '' }}
 
   deploy:
     name: Stage 3 - Deploy production (approval required)
@@ -82,7 +85,7 @@ jobs:
       - name: Validate deployment configuration
         run: |
           missing=""
-          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_PATH SSHPASS PROD_ENV_FILE; do
+          for name in DEPLOY_HOST DEPLOY_PORT DEPLOY_USER DEPLOY_PATH SSHPASS; do
             if [ -z "${!name}" ]; then missing="$missing $name"; fi
           done
           if [ -n "$missing" ]; then
@@ -112,7 +115,19 @@ jobs:
           sshpass -e scp -P "$DEPLOY_PORT" -r deploy "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
       - name: Install production environment and authenticate registry
         run: |
-          printf '%s' "$PROD_ENV_FILE" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "cat > '$DEPLOY_PATH/.env' && chmod 600 '$DEPLOY_PATH/.env'"
+          # PROD_ENV_FILE bootstraps a new estate only. Once present, the server's
+          # operator-validated .env is persistent state and must survive deployments.
+          if sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "test -f '$DEPLOY_PATH/.env'"; then
+            sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "chown root:root '$DEPLOY_PATH/.env' && chmod 600 '$DEPLOY_PATH/.env' && test \"\$(stat -c %a '$DEPLOY_PATH/.env')\" = 600"
+          else
+            if [ -z "$PROD_ENV_FILE" ]; then
+              echo "::error::Production .env is absent and PROD_ENV_FILE is not configured"
+              exit 1
+            fi
+            printf '%s' "$PROD_ENV_FILE" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "umask 077; tmp_env='$DEPLOY_PATH/.env.bootstrap.\$\$'; trap 'rm -f \"\$tmp_env\"' EXIT; cat > \"\$tmp_env\"; test -s \"\$tmp_env\"; chown root:root \"\$tmp_env\"; chmod 600 \"\$tmp_env\"; mv -f \"\$tmp_env\" '$DEPLOY_PATH/.env'; trap - EXIT"
+          fi
           printf '%s' "$GHCR_TOKEN" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
           # Delivered as a file for the same reason as .env: a command line is visible in
           # the process table, and this is only read when a certificate has to be issued.
@@ -136,6 +151,9 @@ jobs:
 
           previous=""
           if [ -f .current-image-tag ]; then previous="$(cat .current-image-tag)"; fi
+          current_env_hash="$(sha256sum .env | awk '{print $1}')"
+          previous_env_hash=""
+          if [ -f .current-env-sha256 ]; then previous_env_hash="$(cat .current-env-sha256)"; fi
 
           release() {
             export IMAGE_TAG="$1"
@@ -190,10 +208,14 @@ jobs:
           fi
 
           release "$image_tag"
+          if [ "$current_env_hash" != "$previous_env_hash" ]; then
+            $compose up -d --no-deps --force-recreate backend identity records sis
+          fi
           $compose exec -T sis alembic -c sis/alembic.ini upgrade head </dev/null
 
           if healthy; then
             printf '%s' "$image_tag" > .current-image-tag
+            printf '%s' "$current_env_hash" > .current-env-sha256
             if [ -n "$previous" ]; then printf '%s' "$previous" > .previous-image-tag; fi
             $compose ps
             exit 0

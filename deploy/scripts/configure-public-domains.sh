@@ -406,9 +406,9 @@ main() {
     log "WARN host has no IPv6; [::] listeners omitted"
   fi
 
-  local domain tmp needs_reload=0
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
+  local domain needs_reload=0
+  DOMAIN_CONFIG_TMP="$(mktemp -d)"
+  trap 'rm -rf "$DOMAIN_CONFIG_TMP"' EXIT
 
   # Pass 1 — make sure every domain has a certificate, publishing HTTP-only where one is
   # missing so the challenge can be answered.
@@ -424,8 +424,8 @@ main() {
       continue
     fi
     log "$domain: no certificate; installing HTTP-only bootstrap"
-    write_bootstrap_conf "$domain" "$tmp/$domain.bootstrap"
-    install_conf "$domain" "$tmp/$domain.bootstrap"
+    write_bootstrap_conf "$domain" "$DOMAIN_CONFIG_TMP/$domain.bootstrap"
+    install_conf "$domain" "$DOMAIN_CONFIG_TMP/$domain.bootstrap"
     needs_reload=1
   done
 
@@ -442,13 +442,13 @@ main() {
   for domain in "${DOMAINS[@]}"; do
     cert_exists_at_all "$domain" \
       || fail "$domain still has no certificate; refusing to install a TLS vhost that would break nginx"
-    render_conf "$NGINX_SRC/$domain.conf" "$tmp/$domain.conf"
-    if [ -e "$(conf_path "$domain")" ] && cmp -s "$tmp/$domain.conf" "$(conf_path "$domain")"; then
+    render_conf "$NGINX_SRC/$domain.conf" "$DOMAIN_CONFIG_TMP/$domain.conf"
+    if [ -e "$(conf_path "$domain")" ] && cmp -s "$DOMAIN_CONFIG_TMP/$domain.conf" "$(conf_path "$domain")"; then
       log "$domain: configuration already current"
       continue
     fi
     log "$domain: installing configuration"
-    install_conf "$domain" "$tmp/$domain.conf"
+    install_conf "$domain" "$DOMAIN_CONFIG_TMP/$domain.conf"
     needs_reload=1
   done
 
