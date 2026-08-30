@@ -169,6 +169,170 @@ def test_schools_are_listed_and_created_through_one_upsert(
     assert [row["name_en"] for row in listed.json()] == ["Nasr City Branch"]
 
 
+def test_school_creation_stores_stage_two_configuration(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    response = client.post(
+        "/v1/schools",
+        json={
+            "code": "CFG",
+            "name_en": "Configured School",
+            "name_ar": "مدرسة مهيأة",
+            "language_type": "both",
+            "kg_grade_count": 2,
+            "primary_grade_count": 4,
+            "preparatory_grade_count": 0,
+            "secondary_grade_count": 0,
+            "term_count": 3,
+            "working_days": ["sunday", "monday", "wednesday"],
+        },
+        headers=registrar,
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["language_type"] == "both"
+    assert body["kg_grade_count"] == 2
+    assert body["primary_grade_count"] == 4
+    assert body["preparatory_grade_count"] == 0
+    assert body["secondary_grade_count"] == 0
+    assert body["term_count"] == 3
+    assert body["working_days"] == ["sunday", "monday", "wednesday"]
+
+
+def test_school_creation_validates_levels_terms_and_grade_limits(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    base = {
+        "code": "BAD",
+        "name_en": "Invalid School",
+        "name_ar": "مدرسة غير صالحة",
+        "language_type": "arabic",
+        "kg_grade_count": 0,
+        "primary_grade_count": 0,
+        "preparatory_grade_count": 0,
+        "secondary_grade_count": 0,
+        "term_count": 2,
+        "working_days": ["sunday"],
+    }
+    assert client.post("/v1/schools", json=base, headers=registrar).status_code == 422
+    assert client.post(
+        "/v1/schools", json={**base, "kg_grade_count": 4}, headers=registrar
+    ).status_code == 422
+    assert client.post(
+        "/v1/schools", json={**base, "kg_grade_count": 1, "term_count": 4}, headers=registrar
+    ).status_code == 422
+
+
+def test_closing_a_branch_keeps_the_configuration_it_was_created_with(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    """A POST that mentions only labels must not reset a school to the creation defaults.
+
+    Closing a branch goes through the same upsert as creating one, so a body that says
+    `is_active: false` and nothing else used to carry Pydantic's defaults — four stages, two
+    terms, five working days — over a primary-only, three-term school.
+    """
+    configured = {
+        "code": "KEEP",
+        "name_en": "Primary Only",
+        "name_ar": "ابتدائي فقط",
+        "language_type": "arabic",
+        "kg_grade_count": 0,
+        "primary_grade_count": 6,
+        "preparatory_grade_count": 0,
+        "secondary_grade_count": 0,
+        "term_count": 3,
+        "working_days": ["saturday", "sunday", "monday"],
+    }
+    assert client.post("/v1/schools", json=configured, headers=registrar).status_code == 201
+
+    closed = client.post(
+        "/v1/schools",
+        json={
+            "code": "KEEP",
+            "name_en": "Primary Only",
+            "name_ar": "ابتدائي فقط",
+            "is_active": False,
+        },
+        headers=registrar,
+    )
+    assert closed.status_code == 200, closed.text
+    body = closed.json()
+    assert body["is_active"] is False
+    assert body["language_type"] == "arabic"
+    assert body["primary_grade_count"] == 6
+    assert body["kg_grade_count"] == 0
+    assert body["term_count"] == 3
+    assert body["working_days"] == ["saturday", "sunday", "monday"]
+
+    listed = client.get("/v1/schools?include_inactive=true", headers=registrar).json()
+    stored = next(row for row in listed if row["code"] == "KEEP")
+    assert stored["term_count"] == 3
+    assert stored["working_days"] == ["saturday", "sunday", "monday"]
+
+
+def test_a_stated_configuration_still_overwrites_the_stored_one(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    """Carrying omissions forward is not the same as refusing edits."""
+    client.post(
+        "/v1/schools",
+        json={
+            "code": "EDIT",
+            "name_en": "Editable",
+            "name_ar": "قابلة للتعديل",
+            "term_count": 2,
+            "working_days": ["sunday"],
+        },
+        headers=registrar,
+    )
+    updated = client.post(
+        "/v1/schools",
+        json={
+            "code": "EDIT",
+            "name_en": "Editable",
+            "name_ar": "قابلة للتعديل",
+            "term_count": 3,
+        },
+        headers=registrar,
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["term_count"] == 3
+    # Untouched by an edit that did not mention it.
+    assert updated.json()["working_days"] == ["sunday"]
+
+
+def test_disabled_school_level_cannot_be_added(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    created = client.post(
+        "/v1/schools",
+        json={
+            "code": "PRI",
+            "name_en": "Primary Only",
+            "name_ar": "ابتدائي فقط",
+            "language_type": "arabic",
+            "kg_grade_count": 0,
+            "primary_grade_count": 6,
+            "preparatory_grade_count": 0,
+            "secondary_grade_count": 0,
+            "term_count": 2,
+            "working_days": ["sunday"],
+        },
+        headers=registrar,
+    )
+    assert created.status_code == 201, created.text
+    refused = client.post(
+        "/v1/structure/levels",
+        json={
+            "code": "KG1", "school_code": "PRI", "name_en": "KG 1",
+            "name_ar": "كي جي ١", "display_order": 1, "stage": "garden",
+        },
+        headers=registrar,
+    )
+    assert refused.status_code == 422, refused.text
+
+
 def test_a_closed_branch_is_hidden_but_not_deleted(
     client: TestClient, registrar: dict[str, str]
 ) -> None:

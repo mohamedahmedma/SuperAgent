@@ -42,6 +42,7 @@ from sis.domain.structure import (
     School,
     Subject,
     Term,
+    WorkingDay,
     YearLevel,
 )
 from sis.domain.value_objects import (
@@ -255,6 +256,13 @@ def _to_school(row: models.School) -> School:
         name_en=row.name_en,
         name_ar=row.name_ar,
         is_active=row.is_active,
+        language_type=row.language_type,
+        kg_grade_count=row.kg_grade_count,
+        primary_grade_count=row.primary_grade_count,
+        preparatory_grade_count=row.preparatory_grade_count,
+        secondary_grade_count=row.secondary_grade_count,
+        term_count=row.term_count,
+        working_days=tuple(WorkingDay(day) for day in row.working_days.split(",") if day),
     )
 
 
@@ -1023,6 +1031,13 @@ class SqlAlchemySchoolRepository:
                 "name_en": school.name_en,
                 "name_ar": school.name_ar,
                 "is_active": school.is_active,
+                "language_type": school.language_type.value,
+                "kg_grade_count": school.kg_grade_count,
+                "primary_grade_count": school.primary_grade_count,
+                "preparatory_grade_count": school.preparatory_grade_count,
+                "secondary_grade_count": school.secondary_grade_count,
+                "term_count": school.term_count,
+                "working_days": ",".join(day.value for day in school.working_days),
                 "created_at": now,
             }
             for school in schools
@@ -1034,7 +1049,11 @@ class SqlAlchemySchoolRepository:
             conflict_on=("code",),
             # `is_active` is written here because this port has no `set_active`, exactly as
             # for a subject: upsert is the only way a branch can be closed or reopened.
-            update_columns=("name_en", "name_ar", "is_active"),
+            update_columns=(
+                "name_en", "name_ar", "is_active", "language_type",
+                "kg_grade_count", "primary_grade_count", "preparatory_grade_count",
+                "secondary_grade_count", "term_count", "working_days",
+            ),
         )
         return {row["code"]: (row["code"],) not in existing for row in rows}
 

@@ -126,6 +126,35 @@ class Stage(StrEnum):
         return _STAGE_ORDER[self]
 
 
+class SchoolLanguage(StrEnum):
+    """The teaching-language sections a school operates."""
+
+    ARABIC = "arabic"
+    LANGUAGES = "languages"
+    BOTH = "both"
+
+
+class WorkingDay(StrEnum):
+    """Stable weekday identifiers saved now and consumed by the future timetable."""
+
+    SATURDAY = "saturday"
+    SUNDAY = "sunday"
+    MONDAY = "monday"
+    TUESDAY = "tuesday"
+    WEDNESDAY = "wednesday"
+    THURSDAY = "thursday"
+    FRIDAY = "friday"
+
+
+GRADE_LIMITS: dict[Stage, int] = {
+    Stage.GARDEN: 3,
+    Stage.PRIMARY: 6,
+    Stage.PREPARATORY: 3,
+    # The current Arabic and Languages blueprints each define three secondary grades.
+    Stage.SECONDARY: 3,
+}
+
+
 _STAGE_ORDER = {
     Stage.GARDEN: 0,
     Stage.PRIMARY: 1,
@@ -151,16 +180,110 @@ class School(_Named):
     `is_active` closes a branch without deleting it, for the same reason a retired subject
     is deactivated rather than dropped: the registers and marks of the years it ran are
     still true.
+
+    The rest is what the school states about how it runs, once, when it is created: which
+    teaching-language sections it operates, how many grades it teaches in each stage — zero
+    meaning it does not run that stage at all — how many terms its year is divided into, and
+    which days of the week it opens. Those are answers only the school has, and holding them
+    here is what lets the rest of the service stop assuming a four-stage, two-term, Sunday-to-
+    Thursday school: a rung cannot be added on a stage the school does not teach, and the
+    timetable that comes later reads its week from `working_days` rather than from a constant.
     """
 
     code: SchoolCode | str
     name_en: str
     name_ar: str
     is_active: bool = True
+    language_type: SchoolLanguage | str = SchoolLanguage.BOTH
+    kg_grade_count: int = 3
+    primary_grade_count: int = 6
+    preparatory_grade_count: int = 3
+    secondary_grade_count: int = 3
+    term_count: int = 2
+    working_days: tuple[WorkingDay | str, ...] = (
+        WorkingDay.SUNDAY,
+        WorkingDay.MONDAY,
+        WorkingDay.TUESDAY,
+        WorkingDay.WEDNESDAY,
+        WorkingDay.THURSDAY,
+    )
 
     def __post_init__(self) -> None:
         _coerce("code", SchoolCode, self)
         _coerce_names(self)
+        if not isinstance(self.language_type, SchoolLanguage):
+            try:
+                object.__setattr__(self, "language_type", SchoolLanguage(str(self.language_type)))
+            except ValueError:
+                raise ValidationError(
+                    "language_type must be arabic, languages or both", field="language_type"
+                ) from None
+        counts = {stage: self.grade_count_for(stage) for stage in GRADE_LIMITS}
+        for stage, count in counts.items():
+            # `bool` is an `int` in Python and `True` would pass the range check as 1, which
+            # would read back as a school teaching one year of primary.
+            if isinstance(count, bool) or not isinstance(count, int):
+                raise ValidationError(
+                    f"{stage.value} grade count must be a whole number",
+                    field=f"{stage.value}_grade_count",
+                )
+            if not 0 <= count <= GRADE_LIMITS[stage]:
+                raise ValidationError(
+                    f"{stage.value} grade count must be between 0 and {GRADE_LIMITS[stage]}",
+                    field=f"{stage.value}_grade_count",
+                )
+        if not any(counts.values()):
+            raise ValidationError("at least one educational level is required", field="levels")
+        if self.term_count not in (1, 2, 3):
+            raise ValidationError("term_count must be 1, 2 or 3", field="term_count")
+        # Deduplicated, and in the order the caller gave them: a school that lists Sunday
+        # twice means Sunday once, and nothing here reorders a week the school stated.
+        days: list[WorkingDay] = []
+        for raw in self.working_days:
+            try:
+                day = raw if isinstance(raw, WorkingDay) else WorkingDay(str(raw))
+            except ValueError:
+                raise ValidationError(
+                    f"unknown working day {raw!r}", field="working_days"
+                ) from None
+            if day not in days:
+                days.append(day)
+        if not days:
+            raise ValidationError("at least one working day is required", field="working_days")
+        object.__setattr__(self, "working_days", tuple(days))
+
+    def grade_count_for(self, stage: Stage) -> int:
+        """How many grades this school teaches in `stage`; 0 when it does not run it."""
+        return {
+            Stage.GARDEN: self.kg_grade_count,
+            Stage.PRIMARY: self.primary_grade_count,
+            Stage.PREPARATORY: self.preparatory_grade_count,
+            Stage.SECONDARY: self.secondary_grade_count,
+        }.get(stage, 0)
+
+    def allows_stage(self, stage: Stage) -> bool:
+        """Whether a rung may sit on `stage`.
+
+        `UNSPECIFIED` is always allowed: it is the rung nobody has classified yet, not a
+        claim about a stage, and refusing it would make an unsorted ladder unimportable.
+        """
+        return stage is Stage.UNSPECIFIED or self.grade_count_for(stage) > 0
+
+
+# What a school states about how it runs, as opposed to its code and its two labels. Named
+# once, here, because the write path has to tell the two apart: a school is stored through an
+# upsert, and an upsert that mentions only the labels must not restate the configuration.
+SCHOOL_CONFIGURATION: frozenset[str] = frozenset(
+    {
+        "language_type",
+        "kg_grade_count",
+        "primary_grade_count",
+        "preparatory_grade_count",
+        "secondary_grade_count",
+        "term_count",
+        "working_days",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)

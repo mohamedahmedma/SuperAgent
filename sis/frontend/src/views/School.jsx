@@ -44,15 +44,55 @@ const STAGES = [
   { key: 'unspecified', label: 'Not yet grouped' }
 ];
 
+/* The stages a school can switch on when it is created: the column each one is stored in and
+   the most grades the curriculum defines for it. Derived from STAGES rather than restated, so
+   the two lists cannot drift apart and a stage is named the same word in both. */
+const GRADE_LIMITS = { garden: 3, primary: 6, preparatory: 3, secondary: 3 };
+const SCHOOL_LEVELS = STAGES.filter((stage) => stage.key in GRADE_LIMITS).map((stage) => ({
+  ...stage,
+  column: stage.key === 'garden' ? 'kg_grade_count' : `${stage.key}_grade_count`,
+  max: GRADE_LIMITS[stage.key]
+}));
+/* The week, Saturday first, as an Egyptian school reads it. The value is what the service
+   stores. The labels are built by a call rather than held in a constant because `t` has to run
+   after the language is known, and again on every switch — a module-level table would freeze
+   whichever language happened to be current at import. */
+const WORKING_DAYS = ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+const dayLabels = () => ({
+  saturday: t('Saturday'),
+  sunday: t('Sunday'),
+  monday: t('Monday'),
+  tuesday: t('Tuesday'),
+  wednesday: t('Wednesday'),
+  thursday: t('Thursday'),
+  friday: t('Friday')
+});
+
 /* -- Add a school ---------------------------------------------------------------- */
 
 function SchoolForm({ onSaved }) {
-  const form = useForm({ code: '', name_en: '', name_ar: '' });
+  const form = useForm({
+    code: '', name_en: '', name_ar: '', language_type: '',
+    kg_grade_count: 0, primary_grade_count: 0,
+    preparatory_grade_count: 0, secondary_grade_count: 0,
+    term_count: '', working_days: []
+  });
+  const levelSelected = SCHOOL_LEVELS.some((level) => Number(form.values[level.column]) > 0);
+  const ready = levelSelected && !!form.values.language_type && !!form.values.term_count &&
+    form.values.working_days.length > 0 && !!form.values.name_en.trim() && !!form.values.name_ar.trim();
+  const dayLabel = dayLabels();
   const save = useAction(() =>
     api.createSchool({
       code: form.values.code.trim(),
       name_en: form.values.name_en.trim(),
       name_ar: form.values.name_ar.trim(),
+      language_type: form.values.language_type,
+      kg_grade_count: Number(form.values.kg_grade_count),
+      primary_grade_count: Number(form.values.primary_grade_count),
+      preparatory_grade_count: Number(form.values.preparatory_grade_count),
+      secondary_grade_count: Number(form.values.secondary_grade_count),
+      term_count: Number(form.values.term_count),
+      working_days: form.values.working_days,
       is_active: true
     })
   );
@@ -89,20 +129,77 @@ function SchoolForm({ onSaved }) {
             onInput={form.set('code')}
           />
         </Field>
-        <Field className="col-12 col-sm-4" label={t('Name (English)')}>
-          <Input value={form.values.name_en} onInput={form.set('name_en')} />
+        <Field className="col-12 col-sm-4" label={t('Name (English)')} required>
+          <Input value={form.values.name_en} required onInput={form.set('name_en')} />
         </Field>
-        <Field className="col-12 col-sm-4" label={t('Name (Arabic)')}>
-          <Input className="sis-name-ar" value={form.values.name_ar} onInput={form.set('name_ar')} />
+        <Field className="col-12 col-sm-4" label={t('Name (Arabic)')} required>
+          <Input className="sis-name-ar" value={form.values.name_ar} required onInput={form.set('name_ar')} />
         </Field>
       </div>
+      <fieldset>
+        <legend className="form-label fs-6">{t('School language type')}</legend>
+        <div className="d-flex flex-wrap gap-3">
+          {[
+            ['arabic', t('Arabic')],
+            ['languages', t('Languages')],
+            ['both', t('Arabic and Languages')]
+          ].map(([value, label]) => (
+            <label className="form-check" key={value}>
+              <input className="form-check-input" type="radio" name="school-language" required
+                checked={form.values.language_type === value} onChange={() => form.set('language_type')(value)} />
+              <span className="form-check-label">{label}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend className="form-label fs-6">{t('Educational levels')}</legend>
+        <div className="row g-3">
+          {SCHOOL_LEVELS.map((level) => {
+            const selected = Number(form.values[level.column]) > 0;
+            return <div className="col-12 col-sm-6 col-lg-3" key={level.key}>
+              <label className="form-check mb-2">
+                <input className="form-check-input" type="checkbox" checked={selected}
+                  onChange={(event) => form.set(level.column)(event.target.checked ? 1 : 0)} />
+                <span className="form-check-label">{t(level.label)}</span>
+              </label>
+              {selected ? <Select value={String(form.values[level.column])}
+                options={Array.from({ length: level.max }, (_, index) => ({ value: String(index + 1), label: t('{0} grade(s)', [index + 1]) }))}
+                onChange={(value) => form.set(level.column)(Number(value))} /> : null}
+            </div>;
+          })}
+        </div>
+        {!levelSelected ? <div className="small text-danger mt-2">{t('Select at least one educational level.')}</div> : null}
+      </fieldset>
+      <fieldset>
+        <legend className="form-label fs-6">{t('Number of academic terms')}</legend>
+        <div className="d-flex gap-3">
+          {[1, 2, 3].map((count) => <label className="form-check" key={count}>
+            <input className="form-check-input" type="radio" name="term-count" required
+              checked={Number(form.values.term_count) === count} onChange={() => form.set('term_count')(count)} />
+            <span className="form-check-label">{t('{0} term(s)', [count])}</span>
+          </label>)}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend className="form-label fs-6">{t('School working days')}</legend>
+        <div className="d-flex flex-wrap gap-3">
+          {WORKING_DAYS.map((day) => <label className="form-check" key={day}>
+            <input className="form-check-input" type="checkbox" checked={form.values.working_days.includes(day)}
+              onChange={(event) => form.set('working_days')(event.target.checked
+                ? WORKING_DAYS.filter((item) => item === day || form.values.working_days.includes(item))
+                : form.values.working_days.filter((item) => item !== day))} />
+            <span className="form-check-label">{dayLabel[day]}</span>
+          </label>)}
+        </div>
+      </fieldset>
       <p className="small text-body-tertiary mb-0">
         {t("Year codes are unique across the whole service, so give this school's years a code of their own —")} <span className="sis-code">{t('NC-2025-2026')}</span> rather than{' '}
         <span className="sis-code">2025-2026</span> — if another branch already uses the plain one.
       </p>
       <ErrorNote error={save.error} />
       <div className="d-grid d-sm-block">
-        <Button type="submit" variant="primary" pending={save.pending} pendingLabel={t('Saving…')}>
+        <Button type="submit" variant="primary" disabled={!ready} pending={save.pending} pendingLabel={t('Saving…')}>
           {t('Add school')}
         </Button>
       </div>
@@ -222,13 +319,18 @@ function YearForm({ school, onSaved }) {
 
 /* -- Add a rung ------------------------------------------------------------------ */
 
-function LevelForm({ school, count, onSaved }) {
+function LevelForm({ school, schoolConfig, count, onSaved }) {
+  /* Only the stages this school switched on at creation. A rung the school does not run is
+     not an option here, and the service refuses it anyway. */
+  const enabledStages = SCHOOL_LEVELS.filter(
+    (level) => Number(schoolConfig && schoolConfig[level.column]) > 0
+  );
   const form = useForm({
     code: '',
     name_en: '',
     name_ar: '',
     display_order: String((count || 0) + 1),
-    stage: 'unspecified'
+    stage: enabledStages[0] ? enabledStages[0].key : 'unspecified'
   });
 
   const save = useAction(() =>
@@ -281,7 +383,7 @@ function LevelForm({ school, count, onSaved }) {
         >
           <Select
             value={form.values.stage}
-            options={STAGES.map((stage) => ({ value: stage.key, label: t(stage.label) }))}
+            options={enabledStages.map((stage) => ({ value: stage.key, label: t(stage.label) }))}
             onChange={form.set('stage')}
           />
         </Field>
@@ -532,6 +634,7 @@ export function School({ params = {} }) {
           <Card className="sis-rise" title={t('New rung in {0}', [code])}>
             <LevelForm
               school={code}
+              schoolConfig={school}
               count={levelList.length}
               onSaved={() => setAddingLevel(false)}
             />

@@ -207,6 +207,8 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      args:
+        VITE_IDENTITY_BASE_URL: ${VITE_IDENTITY_BASE_URL:-}
     image: superagent/frontend:${IMAGE_TAG:-local}
     container_name: superagent-frontend
     restart: unless-stopped

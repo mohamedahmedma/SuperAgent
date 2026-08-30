@@ -29,7 +29,7 @@ import hashlib
 import logging
 import secrets
 from collections.abc import Callable, Collection, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Final
 
@@ -45,10 +45,11 @@ from sis.application.services.roster_import import RosterImportService
 from sis.application.services.structure import StructureGenerationService
 from sis.config import get_settings
 from sis.domain.auth import PREFIX_LENGTH, ApiKey, Scope
-from sis.domain.errors import ImportBatchNotFound, ValidationError
+from sis.domain.errors import ImportBatchNotFound, UnknownReference, ValidationError
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import ClassEnrolment, Student
 from sis.domain.structure import (
+    SCHOOL_CONFIGURATION,
     AcademicYear,
     ClassSection,
     School,
@@ -508,8 +509,10 @@ class StructureCatalogue:
             )
             uow.commit()
         return section
-    def create_school(self, school: School) -> bool:
-        """Store one school; `True` when this call created it.
+    def create_school(
+        self, school: School, *, stated: Collection[str] = ()
+    ) -> tuple[School, bool]:
+        """Store one school; the row as written, and `True` when this call created it.
 
         The outermost act in the service, and an upsert like every other structural write:
         re-posting a code corrects its labels and detaches nothing, because everything below
@@ -518,11 +521,26 @@ class StructureCatalogue:
         There is no delete. Closing a branch is `is_active: false`, and the RESTRICT on every
         year and rung pointing at it means the database refuses the alternative anyway — the
         registers taken and marks stated in the years it ran are still true.
+
+        `stated` names the configuration fields the caller actually sent, and everything it
+        does not name is carried over from the school already on file. That is what keeps the
+        upsert safe now that a school carries a configuration as well as labels: closing a
+        branch is a POST that says `is_active: false` and nothing about stages or terms, and
+        without the carry-over it would quietly reset a primary-only school to the four
+        stages, two terms and five working days that a NEW school defaults to. The read and
+        the write share one unit of work, so nothing can land between them.
         """
+        carry_over = SCHOOL_CONFIGURATION - set(stated)
         with self._uow_factory() as uow:
+            if carry_over:
+                existing = uow.schools.get(school.code)
+                if existing is not None:
+                    school = replace(
+                        school, **{name: getattr(existing, name) for name in carry_over}
+                    )
             created = uow.schools.upsert_many([school])
             uow.commit()
-        return bool(created.get(str(school.code), False))
+        return school, bool(created.get(str(school.code), False))
 
     def create_year_level(self, level: YearLevel) -> bool:
         """Add or relabel one rung of one school's ladder; `True` when created.
@@ -533,6 +551,17 @@ class StructureCatalogue:
         call as the first.
         """
         with self._uow_factory() as uow:
+            # A rung can only sit on a stage the school runs. The school states its stages
+            # once, at creation; without this, a primary-only branch could still be given a
+            # KG rung and the ladder would claim a stage the school does not teach.
+            school = uow.schools.get(level.school_code)
+            if school is None:
+                raise UnknownReference(f"no school {level.school_code}", field="school_code")
+            if not school.allows_stage(level.stage):
+                raise ValidationError(
+                    f"{level.stage.value} is not enabled for school {level.school_code}",
+                    field="stage",
+                )
             created = uow.year_levels.upsert_many([level])
             uow.commit()
         return bool(created.get(str(level.code), False))
