@@ -619,7 +619,7 @@ class EntityRetrievalTests(IndexTestCase):
     def _retriever(self, recalled):
         return EntityRetriever(
             profile=self.profile, asset_store=self.store, entity_index=self.index,
-            recall=lambda query, top_k: [
+            recall=lambda query, top_k, language="": [
                 {"asset_ids": [asset_id], "score": score} for asset_id, score in recalled
             ],
         )

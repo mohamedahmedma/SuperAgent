@@ -91,6 +91,17 @@ class ChildOption:
     #: The child's year group, when the facade reports one. Empty is the normal case
     #: today; SIS does not carry it on this route yet.
     year_level: str = ""
+    #: The same child's name as the SIS holds it in Latin script, when it has one.
+    #: Never shown — `label` is the one display name, chosen in `_as_options` so that
+    #: nothing can name the same child two ways in one turn. This exists ONLY so that a
+    #: parent who types "Layla" can be matched to the row stored as «ليلى أحمد»; without
+    #: it the English column is read from the facade and then thrown away, and every
+    #: Latin-script reference to a child fails to resolve.
+    #:
+    #: LAST on purpose. ChildOption is built positionally in several places
+    #: (`ChildOption("S-6", "سارة", "female")`), so a field inserted ahead of `gender`
+    #: silently captures the gender argument instead.
+    label_en: str = ""
 
 
 def _ttl() -> int:
@@ -151,15 +162,16 @@ def _as_options(rows: Sequence[dict]) -> List[ChildOption]:
         student_id = str((row or {}).get("student_id") or "")
         if not student_id:
             continue
-        label = (
-            str(row.get("full_name_ar") or "").strip()
-            or str(row.get("full_name_en") or "").strip()
-            or student_id
-        )
+        name_ar = str(row.get("full_name_ar") or "").strip()
+        name_en = str(row.get("full_name_en") or "").strip()
+        label = name_ar or name_en or student_id
         options.append(
             ChildOption(
                 student_id=student_id,
                 label=label,
+                # Only when it is not already the label, so a roster with no Arabic
+                # name does not carry the same string twice.
+                label_en=name_en if name_en != label else "",
                 gender=str(row.get("gender") or "unknown").strip().lower() or "unknown",
                 year_level=str(row.get("year_level") or row.get("grade_level") or "").strip(),
             )

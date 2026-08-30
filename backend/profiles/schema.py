@@ -150,6 +150,38 @@ class AgentConfig(_Section):
     # wording; a domain that only wants to change part of the prompt should add a
     # template pack and override one block instead.
     system_prompt: str = ""
+
+    # Languages this deployment can be told to answer in BY NAME, as code -> name.
+    #
+    # Empty means "use the global map", which names Arabic and nothing else. That
+    # default is deliberate and explained in backend/chat/language.py: `detect_language`
+    # is a two-way Arabic-script test, so `en` is what it returns when it did not find
+    # Arabic — a fallback, not a detection. Chinese and French both come back `en`, and
+    # the base profile ships Chinese fast-path markers, so naming English globally would
+    # tell a Chinese user to answer in English.
+    #
+    # A deployment that serves exactly two known languages does not have that problem,
+    # and paying for it is expensive: measured on gpt-oss-20b with the school profile,
+    # the vague "Reply in the language the user wrote in" left 3 of 4 English questions
+    # answered in Arabic, because the persona mentions Arabic and the corpus context is
+    # Arabic-first. Naming the language outright is what fixes it.
+    #
+    # Only set this where the set of languages really is closed.
+    language_names: Dict[str, str] = Field(default_factory=dict)
+
+    # Style rules appended ONLY on a turn being answered in Arabic.
+    #
+    # Separate from `system_prompt` because a register instruction has to be written IN
+    # the target language — an English sentence asking a 20B model for Egyptian Arabic
+    # barely moves its output distribution, while the same sentence in Arabic anchors
+    # it. That makes the block useless on an English turn and expensive: measured on the
+    # school profile it is ~256 of the prompt's ~459 tokens, paid on every turn whatever
+    # language the parent wrote in.
+    #
+    # Splitting it means an English turn renders 203 tokens instead of 459 and never
+    # carries instructions it cannot use.
+    arabic_style_prompt: str = ""
+
     # System prompt for the direct-answer path taken when a HITL clarification is
     # resumed — that path bypasses the agent, so it needs its own instructions.
     resume_answer_prompt: str = ""
@@ -842,14 +874,41 @@ class DomainProfile(BaseModel):
         A profile that sets `agent.system_prompt` takes that verbatim. Uses str.replace
         rather than str.format because prompts routinely contain literal braces (JSON
         examples, citation markers) that format() would raise on.
-        """
-        if self.agent.system_prompt:
-            return self.agent.system_prompt.replace("{persona}", self.identity.persona).strip()
 
+        Two placeholders are substituted on that path, `{persona}` and
+        `{language_directive}`. The second exists because an override otherwise loses
+        the ONE thing in the shipped template that varies per turn: the instruction
+        naming the language to answer in. Stating that as prose inside the override
+        ("if the parent writes English, reply in English") asks a small model to
+        evaluate a conditional; the placeholder hands it the answer for THIS turn. A
+        prompt that does not use the placeholder is unaffected.
+        """
         # Imported here, not at module scope: backend.tools pulls in the request context
         # and every tool module, and the profile package is imported by several of them.
-        from backend.chat.language import language_name
+        from backend.chat.language import ARABIC, language_name
         from backend.prompts import render
+
+        # The profile's own map first: a deployment that knows its languages may name
+        # one the global map deliberately will not. See AgentConfig.language_names.
+        named = ""
+        if language:
+            named = self.agent.language_names.get(language) or language_name(language)
+        language_directive = (
+            f"Reply in {named}." if named else "Reply in the language the user wrote in."
+        )
+
+        if self.agent.system_prompt:
+            composed = (
+                self.agent.system_prompt
+                .replace("{persona}", self.identity.persona)
+                .replace("{language_directive}", language_directive)
+                .strip()
+            )
+            # Appended last so it is the nearest instruction to the answer, and only on
+            # a turn actually being answered in Arabic. See `arabic_style_prompt`.
+            if language == ARABIC and self.agent.arabic_style_prompt:
+                composed = f"{composed}\n\n{self.agent.arabic_style_prompt.strip()}"
+            return composed
         from backend.tools import GROUNDED_TOOLS
 
         bound = list(self.agent.tools if tools is None else tools)
@@ -859,7 +918,7 @@ class DomainProfile(BaseModel):
             grounded=any(name in GROUNDED_TOOLS for name in bound),
             # "" for anything the detector cannot positively name, which keeps the
             # generic instruction. See LANGUAGE_NAMES for why that matters.
-            language_name=language_name(language) if language else "",
+            language_name=named,
         )
 
     def as_dict(self) -> Dict[str, Any]:

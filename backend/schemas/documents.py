@@ -14,6 +14,31 @@ class DocumentListResponse(BaseModel):
     documents: List[DocumentInfo]
 
 
+class DocumentPairInfo(BaseModel):
+    """One knowledge-base entry as the admin UI shows it: a row with two language slots.
+
+    `paired` is what retrieval actually keys on — only a row with BOTH sides filled
+    causes one half to be excluded from an answer. A row with one side is a complete,
+    normal entry that answers questions in either language.
+    """
+
+    pair_id: str
+    title: str
+    filename_ar: str = ""
+    filename_en: str = ""
+    paired: bool = False
+    chunk_count_ar: int = 0
+    chunk_count_en: int = 0
+    #: A file indexed outside the pairing system — uploaded through the single-file
+    #: route, or before it existed. Shown so the list describes the whole corpus, and
+    #: flagged so the UI can offer to file it into a row.
+    unassigned: bool = False
+
+
+class DocumentPairListResponse(BaseModel):
+    pairs: List[DocumentPairInfo]
+
+
 class DocumentUploadResponse(BaseModel):
     filename: str
     chunks_processed: int

@@ -130,7 +130,7 @@ class RagShortCircuitTests(unittest.TestCase):
 
     def test_grader_uses_only_grade_model(self):
         pipeline = load_pipeline(
-            retrieve_documents=lambda query, top_k=5: {"docs": [], "meta": _meta(0)}
+            retrieve_documents=lambda query, top_k=5, language="": {"docs": [], "meta": _meta(0)}
         )
         initialized = Mock()
         grader = object()
@@ -158,7 +158,7 @@ class RagShortCircuitTests(unittest.TestCase):
 
     def test_grader_does_not_use_other_models_when_grade_model_is_missing(self):
         pipeline = load_pipeline(
-            retrieve_documents=lambda query, top_k=5: {"docs": [], "meta": _meta(0)}
+            retrieve_documents=lambda query, top_k=5, language="": {"docs": [], "meta": _meta(0)}
         )
         pipeline.API_KEY = "test-key"
         pipeline.FAST_MODEL = "fast-model"
@@ -172,7 +172,7 @@ class RagShortCircuitTests(unittest.TestCase):
     def test_simple_no_retrieval_short_circuits_without_rewrite(self):
         calls = {"retrieve": 0, "step_back": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"] += 1
             return {"docs": [], "meta": _meta(0)}
 
@@ -204,7 +204,7 @@ class RagShortCircuitTests(unittest.TestCase):
         self.assertEqual(0, calls["step_back"])
 
     def test_obvious_simple_question_skips_complexity_model(self):
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [_doc("Danjin is the Imaginary element")], "meta": _meta(1)}
 
         def grade(schema, prompt):
@@ -234,7 +234,7 @@ class RagShortCircuitTests(unittest.TestCase):
         self.assertIn("fast_path", result.get("complexity_reason", ""))
 
     def test_multi_dimension_keyword_query_still_uses_complexity_model(self):
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [_doc("comparison evidence")], "meta": _meta(1)}
 
         def complexity(schema, prompt):
@@ -276,7 +276,7 @@ class RagShortCircuitTests(unittest.TestCase):
     def test_complexity_plan_includes_child_queries(self):
         model_schemas = []
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [_doc(f"evidence for {query}", query)], "meta": _meta(1)}
 
         def plan(schema, prompt):
@@ -315,7 +315,7 @@ class RagShortCircuitTests(unittest.TestCase):
         Asserting only "the model was not called" would also pass if the node ran and
         took its fast path, which is a different (and still billable) system. So the
         graph's own node list is checked too."""
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [_doc("direct answer evidence")], "meta": _meta(1)}
 
         def grade(schema, prompt):
@@ -358,7 +358,7 @@ class RagShortCircuitTests(unittest.TestCase):
     def test_strong_evidence_returns_after_initial_grade(self):
         calls = {"retrieve": 0, "step_back": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"] += 1
             return {"docs": [_doc("direct answer evidence")], "meta": _meta(1)}
 
@@ -394,7 +394,7 @@ class RagShortCircuitTests(unittest.TestCase):
     def test_weak_evidence_rewrites_once_then_answers_from_what_it_has(self):
         calls = {"retrieve": [], "step_back": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"].append(query)
             if query.startswith("rewritten"):
                 return {"docs": [_doc("still partial evidence", "chunk-2")], "meta": _meta(1)}
@@ -458,7 +458,7 @@ class RagShortCircuitTests(unittest.TestCase):
         The chunks now reach the model, marked `partial` so the tool tells it to answer
         from what they establish and name what they leave open.
         """
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [_doc("Our partners include Cairo University and the British Council.",
                                   "chunk-partners")],
                     "meta": _meta(1)}
@@ -500,7 +500,7 @@ class RagShortCircuitTests(unittest.TestCase):
         """
         calls = {"retrieve": 0, "rewrite": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"] += 1
             return {"docs": [_doc("Our partners include Cairo University.", "chunk-1")],
                     "meta": _meta(1)}
@@ -574,7 +574,7 @@ class RagShortCircuitTests(unittest.TestCase):
         """
         calls = {"retrieve": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"] += 1
             return {"docs": [_doc("the school partners are listed here", "chunk-1")],
                     "meta": _meta(1)}
@@ -611,7 +611,7 @@ class RagShortCircuitTests(unittest.TestCase):
         knowledge tool pinned nothing, which is exactly what a denial does. Leaving them
         there is how "the knowledge base has no reliable information on this" arrived
         with the figure that answers the question attached to it."""
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [{**_doc("a page about something else"), "asset_ids": ["asset-1"]}],
                     "meta": _meta(1)}
 
@@ -645,7 +645,7 @@ class RagShortCircuitTests(unittest.TestCase):
     def test_hyde_rewrite_runs_only_selected_retrieval(self):
         calls = {"retrieve": [], "rewrite": 0, "grade": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"].append(query)
             return {"docs": [_doc(f"evidence for {query}")], "meta": _meta(1)}
 
@@ -704,7 +704,7 @@ class RagShortCircuitTests(unittest.TestCase):
             with self.subTest(ambiguity=ambiguity):
                 calls = {"retrieve": 0, "step_back": 0}
 
-                def retrieve(query, top_k=5):
+                def retrieve(query, top_k=5, language=""):
                     calls["retrieve"] += 1
                     return {"docs": [_doc("related but ambiguous")], "meta": _meta(1)}
 
@@ -741,7 +741,7 @@ class RagShortCircuitTests(unittest.TestCase):
                 self.assertEqual(0, calls["step_back"])
 
     def test_hitl_result_includes_only_current_resume_state(self):
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [_doc("Both Danjin and Dan Heng could be relevant", "candidate")], "meta": _meta(1)}
 
         def grade(schema, prompt):
@@ -789,7 +789,7 @@ class RagShortCircuitTests(unittest.TestCase):
     def test_resume_goes_directly_to_targeted_retrieval_after_hitl_answer(self):
         calls = {"retrieve": []}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"].append(query)
             return {"docs": [_doc("Danjin is the Imaginary element", "retrieved")], "meta": _meta(1)}
 
@@ -826,7 +826,7 @@ class RagShortCircuitTests(unittest.TestCase):
     def test_complex_sub_agents_keep_partial_docs_without_rewrite(self):
         calls = {"retrieve": [], "step_back": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"].append(query)
             if query == "known sub":
                 return {"docs": [_doc("partial sub evidence", "known")], "meta": _meta(1)}
@@ -869,7 +869,7 @@ class RagShortCircuitTests(unittest.TestCase):
     def test_complex_all_no_knowledge_synthesizes_no_knowledge(self):
         calls = {"retrieve": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"] += 1
             return {"docs": [], "meta": _meta(0)}
 
@@ -895,7 +895,7 @@ class RagShortCircuitTests(unittest.TestCase):
         self.assertEqual("no_knowledge", result.get("retrieval_status"))
 
     def test_complex_preserves_sub_agent_hitl_when_no_docs_can_be_synthesized(self):
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [_doc("ambiguous related evidence", query)], "meta": _meta(1)}
 
         def complexity(schema, prompt):

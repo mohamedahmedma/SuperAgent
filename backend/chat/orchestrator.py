@@ -154,6 +154,7 @@ def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
             plan.scope_options,
             carried_constraints=plan.carried_constraints,
             is_followup=plan.is_followup,
+            language=plan.language,
         )
     except Exception:  # pragma: no cover - a hint must never break a turn
         logger.debug("could not hand the turn plan to the graph", exc_info=True)

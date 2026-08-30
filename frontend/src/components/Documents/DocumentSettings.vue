@@ -19,9 +19,9 @@
 
     <section class="settings-stats">
       <article>
-        <span>Total documents</span>
-        <strong>{{ documentStore.documents.length }}</strong>
-        <small>Current knowledge space</small>
+        <span>Total entries</span>
+        <strong>{{ documentStore.pairs.length }}</strong>
+        <small>{{ pairedCount }} in both languages</small>
       </article>
       <article>
         <span>Searchable chunks</span>
@@ -45,19 +45,12 @@
         <div class="documents-section-head">
           <div>
             <h2>All documents</h2>
-            <p>{{ filteredDocuments.length }} files available for Agent to search</p>
+            <p>{{ filteredPairs.length }} entries · {{ pairedCount }} in both languages</p>
           </div>
           <label class="document-search">
             <i class="fa-solid fa-magnifying-glass"></i>
             <input v-model="searchQuery" type="search" placeholder="Search document names…" />
           </label>
-        </div>
-
-        <div class="document-table-head">
-          <span>Name</span>
-          <span>Chunks</span>
-          <span>Status</span>
-          <span></span>
         </div>
 
         <div v-if="documentStore.documentsLoading" class="loading-indicator">
@@ -66,17 +59,17 @@
           <p>Reading document and chunk stats from Milvus.</p>
         </div>
 
-        <div v-else-if="filteredDocuments.length === 0" class="empty-documents">
+        <div v-else-if="filteredPairs.length === 0" class="empty-documents">
           <span class="empty-icon"><i class="fa-regular fa-folder-open"></i></span>
           <h3>{{ searchQuery ? 'No matching documents' : 'Your knowledge base is empty' }}</h3>
           <p>{{ searchQuery ? 'Try a different keyword.' : 'Upload your first file on the right to get Agent started.' }}</p>
         </div>
 
         <div v-else class="documents-list">
-          <DocumentItem
-            v-for="doc in filteredDocuments"
-            :key="doc.filename"
-            :doc="doc"
+          <DocumentPairItem
+            v-for="pair in filteredPairs"
+            :key="pair.pair_id || pair.filename_en || pair.filename_ar"
+            :pair="pair"
           />
         </div>
       </section>
@@ -89,7 +82,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import UploadSection from './UploadSection.vue';
-import DocumentItem from './DocumentItem.vue';
+import DocumentPairItem from './DocumentPairItem.vue';
 import { useDocumentStore } from '@/stores/documents';
 
 const documentStore = useDocumentStore();
@@ -100,18 +93,24 @@ const totalChunks = computed(() => documentStore.documents.reduce(
   0
 ));
 
-const filteredDocuments = computed(() => {
+// Searches the title and BOTH filenames: an admin looking for the Arabic version by
+// its own name should not have to know what the entry was titled.
+const filteredPairs = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
-  if (!query) return documentStore.documents;
-  return documentStore.documents.filter((document) =>
-    document.filename.toLowerCase().includes(query)
-    || document.file_type.toLowerCase().includes(query)
+  if (!query) return documentStore.pairs;
+  return documentStore.pairs.filter((pair) =>
+    [pair.title, pair.filename_ar, pair.filename_en]
+      .some((field) => (field || '').toLowerCase().includes(query))
   );
 });
 
+const pairedCount = computed(() => documentStore.pairs.filter((pair) => pair.paired).length);
+
 const onRefresh = async () => {
   try {
-    await documentStore.loadDocuments();
+    // Both: the pair list drives the UI, and `documents` still feeds the chunk-count
+    // stat and the delete-job bookkeeping keyed by filename.
+    await Promise.all([documentStore.loadPairs(), documentStore.loadDocuments()]);
   } catch (error: any) {
     alert(error.message);
   }
