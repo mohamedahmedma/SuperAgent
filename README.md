@@ -355,6 +355,25 @@ npm run build
 6. Milvus automatically and synchronously triggers native BM25 extraction on the server side, dynamically generating and storing sparse vectors in `sparse_embedding` — no client-side statistics tracking required.
 7. Subsequent retrievals can immediately use the new document during recall.
 
+### 3b) Bilingual document pairs and language routing
+A knowledge-base entry is one document in up to two languages. The upload form is a row with an Arabic slot and an English slot, and `document_pairs` records which two files are the same thing said twice.
+
+1. `POST /documents/upload/pair` saves both files, then parses and language-checks BOTH before indexing either — a file dropped in the wrong column rejects the whole upload rather than leaving one side indexed and the entry unpaired (`language_check.py`; declared by column, verified against the parsed text).
+2. Each side is indexed exactly as a single-file upload is. Nothing about language is written onto a chunk.
+3. The `document_pairs` row is written last, so a file that failed to index is never recorded as an entry's Arabic or English half.
+4. At query time `pair_store.superseded_filenames(language)` returns the redundant half of each paired document, and `rag/utils.language_filter_clause` turns it into a `filename not in [...]` filter on the retrieval side.
+
+The rule is an EXCLUSION of the redundant twin, not a filter down to the asked language — filtering to the language would hide every document that exists in one language only:
+
+| Corpus | Question | Answered from |
+| --- | --- | --- |
+| ar + en | English | the English half |
+| ar + en | Arabic | the Arabic half |
+| ar only | Arabic | the Arabic one |
+| en only | Arabic | the English one |
+
+Because the pairing lives in a table rather than on the chunks, pairing or unpairing takes effect on the next question with no re-index — which is what lets the second language be uploaded months after the first.
+
 ### 4) Milvus 2.5+ native BM25 processing
 - **Mechanism**: the project uses Milvus 2.5+'s new built-in full-text search mechanism. When the collection is created, a `FunctionType.BM25` function is defined with `text` as its input field and `sparse_embedding` as its output field.
 - **Automatic alignment**: whenever a new text chunk is inserted or deleted, Milvus automatically tokenizes, tallies statistics, and computes the sparse feature vector on the server side. This delivers efficient dense + sparse dual-tower retrieval with zero client-side statistics burden.
@@ -399,7 +418,9 @@ Configure these at the repo root or in your runtime environment:
   - `DELETE /sessions/{session_id}`: delete a session belonging to the current user.
 - Documents (admin only)
   - `GET /documents`: list ingested documents and their chunk counts.
-  - `POST /documents/upload`: upload and embed a PDF/Word/Excel file.
+  - `GET /documents/pairs`: list knowledge-base entries as bilingual rows (Arabic side, English side, chunk counts per side).
+  - `POST /documents/upload/pair`: upload one entry — `file_ar`, `file_en`, or both, plus `title` and an optional `pair_id` to fill in the missing language of an existing entry.
+  - `POST /documents/upload`: upload and embed a single PDF/Word/Excel file (unpaired).
   - `DELETE /documents/{filename}`: delete a document's vector data (first paginates through chunk text by filename to decrement the persisted BM25 statistics, then deletes from Milvus).
 
 ## Streaming Output & Real-Time Retrieval — Technical Deep Dive

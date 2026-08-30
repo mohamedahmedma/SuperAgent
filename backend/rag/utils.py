@@ -13,6 +13,7 @@ from backend.llm import sampling
 from backend.indexing.parent_chunk_store import ParentChunkStore
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
+from backend.text_matching import search_key
 from backend.text_normalization import normalize_query
 from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
@@ -502,15 +503,57 @@ def _finalize_retrieval(
     return {"docs": final_docs, "meta": meta}
 
 
+def language_filter_clause(language: str) -> str:
+    """The `and ...` that keeps a bilingual corpus from answering twice, or "".
+
+    Excludes the redundant half of a PAIRED document — the one whose twin is in the
+    language being asked in. Everything else stays eligible, so a document that exists
+    in one language only still answers questions asked in the other. See
+    `pair_store.superseded_filenames` for why this is an exclusion and not a filter down
+    to the asked language.
+
+    Returns "" whenever there is nothing to exclude, which is the common case and also
+    every case before an admin has paired anything — so this costs an empty list lookup
+    and changes no behaviour until the feature is actually used.
+    """
+    if not language:
+        return ""
+    try:
+        # Imported per call, not at module scope: this module is re-executed with
+        # `backend.indexing` stubbed by the retrieval symmetry tests, and a caller that
+        # never routes should not pay for the database layer at import.
+        import backend.indexing.pair_store as pair_store
+
+        superseded = pair_store.superseded_filenames(language)
+    except Exception:
+        # A pairing lookup is an optimisation, not a gate. If the table cannot be read
+        # the right outcome is to search the whole corpus and possibly answer from the
+        # other language, never to fail the turn.
+        logger.exception("could not read document pairs; retrieving without language routing")
+        return ""
+    if not superseded:
+        return ""
+    # json.dumps rather than manual quoting: filenames are admin-supplied and a stray
+    # quote or backslash would otherwise produce an expression that is either invalid
+    # or, worse, valid and wrong.
+    return f" and filename not in {json.dumps(superseded, ensure_ascii=False)}"
+
+
 @traceable(name="retrieve_documents", run_type="retriever")
-def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, Any]:
+def retrieve_documents(
+    query: str, top_k: int = RETRIEVAL_TOP_K, language: str = ""
+) -> Dict[str, Any]:
     # Normalize the query with the SAME rules applied to indexed text. Arabic
     # pasted from a PDF arrives as presentation forms / tatweel / zero-width
     # marks, which is a different character sequence from the indexed chunk —
     # without this the BM25 side cannot match and the dense side degrades.
     query = normalize_query(query) or query
     candidate_k, candidate_config = resolve_candidate_k(top_k)
-    filter_expr = f"chunk_level == {LEAF_RETRIEVE_LEVEL}"
+    # Defaulted to "" so every existing caller — a test, a sub-agent, the entity
+    # retriever — keeps searching the whole corpus. Language routing is opt-in per
+    # call, and a caller that does not know the turn's language must not silently get
+    # a narrowed corpus.
+    filter_expr = f"chunk_level == {LEAF_RETRIEVE_LEVEL}" + language_filter_clause(language)
     try:
         # Memoized: the domain gate has usually already embedded this exact normalized
         # text, so this is a dictionary hit rather than a second forward pass.
@@ -546,7 +589,13 @@ def retrieve_documents(query: str, top_k: int = RETRIEVAL_TOP_K) -> Dict[str, An
     try:
         retrieved = _milvus_manager.hybrid_retrieve(
             dense_embedding=dense_embedding,
-            query=query,
+            # The SPARSE half only. `bm25_text` was folded and light-stemmed by
+            # search_key on the way into the index, so the query has to be put through
+            # the same function or the two are different strings and Arabic stops
+            # matching altogether — this is the symmetry backend/text_matching.py exists
+            # to hold. The dense half keeps the natural query above: bge-m3 reads Arabic
+            # morphology, and folding before embedding throws away signal it would use.
+            query=search_key(query),
             top_k=candidate_k,
             filter_expr=filter_expr,
         )

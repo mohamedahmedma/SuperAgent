@@ -183,6 +183,53 @@ class ParentChunk(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class DocumentPair(Base):
+    """One knowledge-base entry, in up to two languages.
+
+    The first thing about documents that this database stores at all. Until now the
+    corpus was described entirely by Milvus: `list_documents` queries the collection
+    and groups chunks by `filename`, so a "document" was whatever chunks happened to
+    carry the same name. That works for a bag of files and cannot express what this
+    table is for — that `fees_ar.docx` and `fees_en.docx` are ONE thing said twice.
+
+    A row is a lasting entry, not an upload event. Both sides may be empty at
+    different times: an admin uploads the English half in September and drops the
+    Arabic half into the same row in January, without re-uploading the first. That is
+    the whole reason this is a table rather than a shared id written onto chunks — a
+    pair id on a chunk can only be set when the chunk is written, so late pairing
+    would mean silently re-indexing a document nobody touched.
+
+    ## What retrieval reads
+
+    Only `filename_ar` and `filename_en`, and only to answer "does this document have a
+    twin in the language being asked in" — see `pair_store.superseded_filenames`. A row
+    with one side filled is UNPAIRED and stays eligible for every question whatever its
+    language, which is what keeps an English-only document answerable in Arabic.
+    """
+
+    __tablename__ = "document_pairs"
+    __table_args__ = (
+        # Both sides are looked up by filename on every upload and delete, to find the
+        # row a file belongs to. Not unique: enforcing that is `pair_store`'s job, and
+        # a UNIQUE over a nullable column behaves differently across backends.
+        Index("ix_document_pairs_ar", "filename_ar"),
+        Index("ix_document_pairs_en", "filename_en"),
+    )
+
+    pair_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    #: What an admin calls this entry, shown in the document list. Defaults to the stem
+    #: of whichever file arrived first; it names the ROW, so it survives either side
+    #: being replaced.
+    title: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    #: "" rather than NULL for an empty side. Every read is a truthiness test, and
+    #: three-valued logic in a filter expression is how a half-filled row starts
+    #: behaving differently on SQLite and Postgres.
+    filename_ar: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    filename_en: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class CorpusDigest(Base):
     """What the WHOLE corpus is about, in prose, plus the scope floor derived from it.
 

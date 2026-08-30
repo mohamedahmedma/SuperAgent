@@ -36,7 +36,7 @@ class RetrievalOutageTests(unittest.TestCase):
     def test_simple_outage_short_circuits_without_grader_or_rewrite(self):
         calls = {"retrieve": 0, "rewrite": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"] += 1
             return {"docs": [], "meta": _failed_meta()}
 
@@ -70,7 +70,7 @@ class RetrievalOutageTests(unittest.TestCase):
     def test_outage_during_rewritten_retrieval_short_circuits_second_grade(self):
         calls = {"retrieve": [], "rewrite": 0, "grade": 0}
 
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             calls["retrieve"].append(query)
             if query.startswith("rewritten"):
                 return {"docs": [], "meta": _failed_meta()}
@@ -114,7 +114,7 @@ class RetrievalOutageTests(unittest.TestCase):
         self.assertEqual([], result.get("docs"))
 
     def test_complex_all_subs_outage_synthesizes_retrieval_error(self):
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [], "meta": _failed_meta()}
 
         def complexity(schema, prompt):
@@ -139,7 +139,7 @@ class RetrievalOutageTests(unittest.TestCase):
         self.assertEqual([], result.get("docs"))
 
     def test_complex_partial_outage_still_answers_from_healthy_sub(self):
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             if query == "healthy sub":
                 return {"docs": [_doc("solid evidence", "healthy")], "meta": _meta(1)}
             return {"docs": [], "meta": _failed_meta()}
@@ -175,7 +175,7 @@ class RetrievalOutageTests(unittest.TestCase):
         self.assertEqual("answer", result.get("route"))
 
     def test_hitl_resume_outage_returns_retrieval_error(self):
-        def retrieve(query, top_k=5):
+        def retrieve(query, top_k=5, language=""):
             return {"docs": [], "meta": _failed_meta("embedding_failed")}
 
         pipeline = load_pipeline(retrieve_documents=retrieve)

@@ -151,6 +151,7 @@ class ChatRequestContext:
         *,
         carried_constraints=(),
         is_followup: bool = False,
+        language: str = "",
     ) -> None:
         """Hand the planner's findings to the RAG graph.
 
@@ -162,6 +163,12 @@ class ChatRequestContext:
         The later arguments are keyword-only and defaulted so that a caller written
         against the two-argument form — a test double, an integrating deployment —
         keeps working and simply carries nothing forward.
+
+        `language` is the turn's detected language, carried for document-pair routing:
+        where a document exists in both Arabic and English, retrieval answers from the
+        half matching the question. Empty means "not established", and searches
+        everything — which is the correct behaviour for a turn nobody classified, not a
+        degraded one.
         """
         with self._lock:
             if not self._active:
@@ -170,6 +177,7 @@ class ChatRequestContext:
             self.scope_options = list(scope_options or [])
             self.carried_constraints = list(carried_constraints or [])
             self.is_followup = bool(is_followup)
+            self.language = (language or "").strip()
 
     def emit_rag_step(
         self,

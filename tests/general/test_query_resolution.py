@@ -528,11 +528,12 @@ class PlanTurnWiringTests(unittest.TestCase):
             self.steps.append((icon, label, detail))
 
         def note_turn_plan(self, retrieval_sections, scope_options, *,
-                           carried_constraints=(), is_followup=False):
+                           carried_constraints=(), is_followup=False, language=""):
             self.retrieval_sections = list(retrieval_sections or [])
             self.scope_options = list(scope_options or [])
             self.carried_constraints = list(carried_constraints or [])
             self.is_followup = bool(is_followup)
+            self.language = language
 
     def test_the_resolution_reaches_the_rag_graph(self):
         from backend.chat.orchestrator import plan_turn

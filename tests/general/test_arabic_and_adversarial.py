@@ -694,7 +694,12 @@ class ArabicTatweelTests(unittest.TestCase):
 class QueryIndexSymmetryTests(unittest.TestCase):
     """Documents were normalized at index time but queries were not, so Arabic
     pasted from a PDF (presentation forms / tatweel / zero-width marks) could
-    never match the chunk it came from."""
+    never match the chunk it came from.
+
+    The two retrieval halves are now prepared DIFFERENTLY and each has to stay in step
+    with its own index side: dense gets the natural query against natural `text`, sparse
+    gets `search_key` against a `bm25_text` that `search_key` also produced. Feeding one
+    lane the other's string is the failure this class guards."""
 
     def test_retrieve_documents_normalizes_the_query(self):
         import importlib.util
@@ -753,10 +758,21 @@ class QueryIndexSymmetryTests(unittest.TestCase):
         # Query as a user would paste it out of an Arabic PDF.
         module.retrieve_documents("ﺍﻟﺮﺳﻮﻡ الدراســية", top_k=3)
 
+        # The DENSE half gets the natural query. bge-m3 reads Arabic morphology, so
+        # folding or stemming before embedding would throw away signal it uses.
         self.assertEqual("الرسوم الدراسية", captured["embedded"],
                          "query not normalized before embedding")
-        self.assertEqual("الرسوم الدراسية", captured["bm25_query"],
-                         "query not normalized before BM25 search")
+
+        # The SPARSE half gets the folded, light-stemmed key, because that is what
+        # milvus_writer put in `bm25_text`. Asserted against search_key itself rather
+        # than a literal: the two sides have to agree with each other, and a literal
+        # here would only pin whatever the stemmer did on the day it was written.
+        from backend.text_matching import search_key
+
+        self.assertEqual(search_key("الرسوم الدراسية"), captured["bm25_query"],
+                         "BM25 query not prepared the same way bm25_text was")
+        self.assertNotEqual(captured["embedded"], captured["bm25_query"],
+                            "the two retrieval halves should be fed differently")
 
     def test_normalize_query_matches_document_sanitization(self):
         from backend.text_normalization import normalize_query, sanitize_text

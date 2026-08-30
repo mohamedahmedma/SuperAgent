@@ -51,6 +51,128 @@ agent:
     - view_figure
     - get_student_records
 
+  # Register and dialect, set here rather than in `identity.persona` because persona is
+  # ALSO rendered into the classifier prompts (request_envelope, resolve_question,
+  # scope_check, section_summary, corpus_digest). Style examples there would be billed
+  # on every classifier call and shown to a node explicitly told it never talks to the
+  # user. `system_prompt` reaches the agent and nothing else.
+  #
+  # THE COST OF SETTING THIS: schema.render_system_prompt returns this string verbatim
+  # and composes nothing, so agent/system.j2 — including agent/_grounding.j2 — is
+  # bypassed. The three grounding rules below are copied from that fragment and must
+  # stay in step with it: asset attribution parses [n] out of the answer, so dropping
+  # the citation line silently breaks figure delivery, not just provenance.
+  #
+  # Written in Arabic on purpose. An English instruction to "reply in Egyptian Arabic"
+  # barely moves a 20B English-centric model's output distribution; the same instruction
+  # in Arabic anchors it. The worked examples are there for the same reason — register
+  # is imitative, and a small model cannot instantiate "friendly semi-formal" from the
+  # adjectives alone. حضرتك is the marker doing most of the work: respectful without
+  # being stiff, which is exactly the target.
+  #
+  # BUDGETED AT 500 TOKENS, rendered, and that ceiling is enforced by
+  # test_prompt_budget.py rather than left to whoever edits this next. It is paid on
+  # every single turn, and Arabic costs roughly three tokens a word on this tokenizer,
+  # so prose here is several times more expensive than it looks — the first draft came
+  # to 588. What survived the trim is what a small model actually acts on: the register
+  # written in Arabic, the use/avoid word lists, ONE three-way contrast (small models
+  # overshoot in one direction, and the contrast is what stops it), and TWO worked
+  # examples. Descriptions of the tone were cut first; they were the part the model
+  # could not use.
+  system_prompt: |
+    {persona}
+
+    {language_directive}
+
+    Search once, then answer from what comes back.
+
+    Grounding rules:
+    - Base every factual claim on the retrieved chunks.
+    - Cite the chunk behind each claim inline by its index: [1], or [2][3].
+    - Say plainly when the retrieved context does not answer the question.
+
+    Keep answers to a few short paragraphs or a bulleted list. Markdown is supported.
+
+  # A school serves parents who write Arabic or English and nobody else, so both can be
+  # named outright. The global map names only Arabic, on the grounds that `en` is what
+  # the detector returns for anything it could not place — true in general, not true
+  # here. Measured: with the vague "Reply in the language the user wrote in", 3 of 4
+  # English questions came back in Arabic, because the persona mentions Arabic and
+  # everything around the turn is Arabic-first.
+  language_names:
+    ar: Arabic
+    en: English
+
+  # Appended only when the turn is being answered in ARABIC. An English turn renders
+  # none of it — 203 tokens instead of 459 — and never carries a register it cannot
+  # use. See AgentConfig.arabic_style_prompt.
+  arabic_style_prompt: |
+    الرد يبقى مصري مهذّب:
+    استخدم: حضرتك، عايز/عايزة، إيه، إمتى، كام، دلوقتي، ممكن، تمام.
+    بلاش فصحى رسمية (يُرجى، نُحيطكم علماً، ماذا، متى، كم) وبلاش عامية زيادة (يا باشا، خالص كده).
+
+      رسمي زيادة: «يُرجى مراجعة إدارة المدرسة»
+      عامي زيادة: «يا باشا كلم المدرسة»
+      المطلوب:    «كلّم حضرتك مكتب المدرسة وهما هيساعدوك»
+
+      «المصاريف كام للصف الرابع؟»
+      «مصاريف الصف الرابع 45 ألف جنيه على تلات دفعات. لو حضرتك عايزة المواعيد أقولك. [1]»
+
+      «ممكن أقابل المس بتاعته؟»
+      «المقابلات بتتنظم عن طريق مكتب المدرسة — كلّم حضرتك المكتب وهما هيحددوا ميعاد. [2]»
+
+    الأرقام والتواريخ والمبالغ زي ما هي في المصدر بالظبط — العامية في الأسلوب مش في المعلومة.
+    خلي كل الرد بنفس الأسلوب ده، مش أول جملة بس.
+
+  # Replaces base's list rather than adding to it, so this is the whole set.
+  #
+  # Matched whole-message after normalisation, and every phrase here is one model call
+  # that never happens. Base ships MSA only, so «إزيك» and «متشكر» — two of the
+  # commonest Egyptian openers — fell through to the classifier.
+  social_phrases:
+    - hi
+    - hello
+    - hey
+    - good morning
+    - good evening
+    - thanks
+    - thank you
+    - ok
+    - okay
+    - bye
+    - goodbye
+    - مرحبا
+    - اهلا
+    - أهلا
+    - اهلا وسهلا
+    - السلام عليكم
+    - صباح الخير
+    - مساء الخير
+    - شكرا
+    - شكرا لك
+    - شكرا جزيلا
+    - تمام
+    - حسنا
+    - طيب
+    - مع السلامة
+    - ازيك
+    - إزيك
+    - ازيك يا فندم
+    - عامل ايه
+    - عاملة ايه
+    - صباح الفل
+    - مساء الفل
+    - متشكر
+    - متشكرة
+    - الف شكر
+    - ألف شكر
+    - ماشي
+    - تسلم
+    - ربنا يخليك
+    - تحت أمرك
+    - سلام
+    - باي
+
   # A school assistant is asked plenty that the corpus is not about — homework help,
   # general knowledge, chat. Without this the catalogue rung can only admit, so those
   # reach the agent and get answered on general knowledge in the school's voice.
@@ -68,6 +190,14 @@ agent:
   #
   # Written as prose rather than a topic list because the node has to judge messages
   # phrased in words nobody listed, in either language.
+  #
+  # Bilingual because this is the ONLY surface an Arabic message is compared against on
+  # this profile (it ships no scope catalogue), and Arabic is the primary language here.
+  # With English-only prose, every Arabic turn asked a small model to judge scope across
+  # a translation gap — and the two mistakes do not cost the same: a wrong
+  # `out_of_domain` refuses a parent outright, while a wrong `in_domain` spends one
+  # search nobody sees. The Arabic half is written in the words parents actually type,
+  # Egyptian included, so the comparison is lexical rather than a translation.
   coverage: >-
     Everything a parent or guardian asks a school: term dates, holidays and the
     calendar; fees, payment plans and discounts; admissions and registration; uniform,
@@ -77,6 +207,13 @@ agent:
     details and how to reach a teacher or the office. It also answers questions about a
     specific child's own marks, attendance and report card, for the parent signed in as
     that child's guardian.
+    نفس المواضيع بالعربي، بالكلمات اللي أولياء الأمور بيستخدموها فعلاً: المصاريف
+    والمصروفات والرسوم والأقساط والخصومات؛ التقديم والتسجيل والقبول؛ مواعيد الترم
+    والفصل الدراسي والإجازات والنتيجة وشهادة الدرجات؛ الزي المدرسي واليونيفورم والكتب
+    والأدوات؛ الباص والأتوبيس والاشتراك والمواصلات؛ جدول الحصص واليوم الدراسي والحضور
+    والغياب والتأخير؛ الامتحانات والدرجات والمواد والمناهج؛ الرحلات والأنشطة؛ الحالة
+    الصحية والحساسية والأكل؛ أرقام التواصل ومقابلة المدرسين ومكتب المدرسة؛ وكمان أسئلة
+    ولي الأمر عن درجات وغياب وجدول ابنه أو بنته هو شخصياً.
 
   # Reported by the classifier when a message discloses one, and used to decide whether
   # a post-turn profile capture is worth paying for. A closed list, because free text
@@ -109,6 +246,49 @@ agent:
   # (backend/chat/child_context.py) is the mechanism; this window is what makes the
   # model's own reading of the conversation agree with it.
   context_window_messages: 12
+
+models:
+  # 0.3 on a 20B model code-switches and drifts grammatically more in Arabic than in
+  # English, and this domain wants fees and dates stated the same way twice rather than
+  # varied. The other roles are already deterministic.
+  answer_temperature: 0.2
+
+# Everything the system says WITHOUT a model composing it.
+#
+# `out_of_domain` and `social` are the only two the schema carries per-language; the
+# rest are single strings, so on an Arabic-first deployment they are written in Arabic.
+# That is a deliberate trade: an English-writing parent gets Arabic on these paths,
+# which is the right way round when Arabic is primary and these are the moments the
+# assistant is least helpful anyway. The two localized fields still switch correctly.
+#
+# Register matches agent.system_prompt above — these sit next to model-written replies
+# in the same conversation, and base's MSA boilerplate reads as a different assistant.
+user_copy:
+  out_of_domain:
+    en: >-
+      That's outside what I can help with here — I answer questions about the school.
+      Ask me about those and I'll do my best.
+    ar: >-
+      ده خارج اللي أقدر أساعد فيه هنا — أنا بجاوب على أسئلة المدرسة زي المصاريف
+      والمواعيد والغياب ودرجات ابنك. اسألني في حاجة من دول وأنا تحت أمرك.
+  social:
+    en: "Happy to help — what would you like to know?"
+    ar: "أهلاً بحضرتك، تحت أمرك — عايز تعرف إيه؟"
+  no_knowledge: >-
+    المعلومة دي مش موجودة في مصادر المدرسة اللي عندي دلوقتي، ومش عايز أقولك حاجة
+    مش متأكد منها. أنصح حضرتك تتواصل مع مكتب المدرسة.
+  retrieval_error: >-
+    في مشكلة تقنية مؤقتة منعتني أوصل لمصادر المدرسة. ممكن حضرتك تجرّب تاني بعد شوية؟
+  hitl_clarify_default: >-
+    لقيت محتوى قريب من سؤالك، بس المعلومات مش كفاية أحدد إجابة أكيدة. ممكن حضرتك
+    تديني تفاصيل أكتر؟
+  hitl_clarify_missing_slots: "لقيت محتوى قريب، بس ناقصني: "
+  hitl_scope_default: "لقيت أكتر من موضوع ممكن يكون ده اللي حضرتك بتسأل عنه. أنهي واحد فيهم؟"
+  hitl_clarify_agent: >-
+    لقيت المعلومة تقريباً، بس ناقصني تفصيلة واحدة عشان أكمّل. ممكن حضرتك توضحهالي؟
+  hitl_scope_agent: "لقيت أكتر من قسم ممكن يكون فيه إجابة سؤالك. تحب أدوّر في أنهي واحد؟"
+  new_session_title: "محادثة جديدة"
+  unsupported_file_type: "الملفات المدعومة هي PDF و Word و Excel و HTML بس"
 
 retrieval:
   # School corpora are small and repetitive — fee tables, calendars, policy pages

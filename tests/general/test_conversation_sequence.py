@@ -160,7 +160,7 @@ def _terms(text: str) -> set:
     return out
 
 
-def retrieve(query, top_k=5):
+def retrieve(query, top_k=5, language=""):
     """Token-overlap retrieval over the fixture corpus.
 
     Crude on purpose. What matters is that it is a pure function of the query STRING,

@@ -225,6 +225,11 @@ class RAGState(TypedDict):
     # Whether this turn inherited its subject from the conversation. Routing reads it to
     # decide whether a choice of corpus directions could possibly narrow anything.
     is_followup: Optional[bool]
+    # The turn's language, for document-pair routing: where the same document was
+    # uploaded in both Arabic and English, retrieval answers from the half that matches
+    # the question rather than letting both compete. Empty searches everything, which is
+    # also what an unpaired corpus does — see rag/utils.language_filter_clause.
+    language: Optional[str]
 
 
 def _format_docs(docs: List[dict]) -> str:
@@ -378,6 +383,7 @@ def _initial_state(
         "scope_options": list(getattr(ctx, "scope_options", None) or []),
         "carried_constraints": list(getattr(ctx, "carried_constraints", None) or []),
         "is_followup": bool(getattr(ctx, "is_followup", False)),
+        "language": str(getattr(ctx, "language", "") or ""),
     }
 
 
@@ -414,7 +420,9 @@ def retrieve_initial(state: RAGState) -> RAGState:
             "Applied when the answer is written, not to the search — "
             + "; ".join(state["carried_constraints"]),
         )
-    retrieved = retrieve_documents(query, top_k=RETRIEVAL_TOP_K)
+    retrieved = retrieve_documents(
+        query, top_k=RETRIEVAL_TOP_K, language=str(state.get("language") or "")
+    )
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
@@ -847,7 +855,9 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
         raise ValueError("rewritten_query is required for rewritten retrieval")
     method_label = "Step-back" if rewrite_method == "step_back" else "HyDE"
     _emit(state, "🔄", f"Re-retrieving with the {method_label} query...")
-    retrieved = retrieve_documents(rewritten_query, top_k=RETRIEVAL_TOP_K)
+    retrieved = retrieve_documents(
+        rewritten_query, top_k=RETRIEVAL_TOP_K, language=str(state.get("language") or "")
+    )
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
@@ -1356,7 +1366,9 @@ def _state_from_resume(
 def _retrieve_resume_query(state: dict) -> dict:
     _emit(state, "🔎", "Running targeted retrieval using the HITL follow-up", "Skipping complexity classification and sub-question decomposition")
     query = _search_query(state)
-    retrieved = retrieve_documents(query, top_k=RETRIEVAL_TOP_K)
+    retrieved = retrieve_documents(
+        query, top_k=RETRIEVAL_TOP_K, language=str(state.get("language") or "")
+    )
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"

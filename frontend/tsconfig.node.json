@@ -1,10 +1,26 @@
 {
+  // The config that types `vite.config.ts`, which runs in Node rather than the browser.
+  //
+  // `composite` is required because tsconfig.json references this project. It also
+  // forces emit — `noEmit` here is rejected outright with TS6310, "referenced project
+  // may not disable emit" — so the output has to go SOMEWHERE. Left at its default it
+  // lands next to the source as `vite.config.js` and `vite.config.d.ts`, and a stray
+  // `vite.config.js` is worse than untidy: Vite resolves a `.js` config too, so a stale
+  // one silently takes over from the `.ts` file everyone is editing. The entries for
+  // both in .gitignore were the previous way round that.
   "compilerOptions": {
     "composite": true,
     "skipLibCheck": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
-    "allowSyntheticDefaultImports": true
+    // "Bundler", not "Node": Vite loads this file, and node10 resolution does not
+    // understand the "exports" maps that vite and @vitejs/plugin-vue ship.
+    "moduleResolution": "Bundler",
+    "allowSyntheticDefaultImports": true,
+    // vite.config.ts uses __dirname and node's `path`. Naming the types explicitly
+    // stops the whole of node_modules/@types being pulled into this project.
+    "types": ["node"],
+    "outDir": "./node_modules/.tmp/tsconfig.node",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
   "include": ["vite.config.ts"]
 }

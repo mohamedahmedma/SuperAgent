@@ -44,14 +44,33 @@ def build_analyzer_params() -> dict:
 
     The English stemmer/stop list is a no-op on Arabic tokens (it only strips
     ASCII suffixes), so this stays correct for the mixed-script corpus.
+
+    Arabic is folded and light-stemmed BEFORE it reaches Milvus, by
+    `backend.text_matching.search_key` — applied to `bm25_text` on the way in and to the
+    sparse query on the way out. It is done there rather than as an analyzer filter for
+    two reasons: Milvus ships no Arabic filter chain to configure, and doing it in
+    Python makes the index side and the query side one tested function instead of two
+    server-side behaviours that have to be trusted to agree. What is left for the
+    analyzer is the stop list, which is genuinely symmetric here because Milvus applies
+    one list to indexed text and query alike.
     """
     if TEXT_ANALYZER_TYPE == "chinese":
         return {"type": "chinese"}
+    # Imported here rather than at module scope: text_matching pulls in camel-tools and
+    # snowballstemmer, and this module is imported by tooling (schema checks, admin
+    # scripts) that never builds an analyzer.
+    from backend.text_matching import arabic_stop_words_for_analyzer
+
     return {
         "tokenizer": "standard",
         "filter": [
             "lowercase",
-            {"type": "stop", "stop_words": ["_english_"] + _QUESTION_STOP_WORDS},
+            {
+                "type": "stop",
+                "stop_words": (
+                    ["_english_"] + _QUESTION_STOP_WORDS + arabic_stop_words_for_analyzer()
+                ),
+            },
             {"type": "stemmer", "language": "english"},
         ],
     }
