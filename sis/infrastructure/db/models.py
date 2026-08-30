@@ -97,6 +97,15 @@ class School(Base):
     # Closes a branch without deleting it: the registers and marks of the years it ran are
     # still true, and every row referencing it has to keep resolving.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    language_type: Mapped[str] = mapped_column(String(16), default="both", nullable=False)
+    kg_grade_count: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    primary_grade_count: Mapped[int] = mapped_column(Integer, default=6, nullable=False)
+    preparatory_grade_count: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    secondary_grade_count: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    term_count: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    working_days: Mapped[str] = mapped_column(
+        String(80), default="sunday,monday,tuesday,wednesday,thursday", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 

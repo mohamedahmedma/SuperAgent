@@ -114,6 +114,8 @@ export const AR = {
     'إضافة أول طالب',
   'Add the first year':
     'إضافة أول عام',
+  'Arabic and Languages':
+    'عربي ولغات',
   "As stored. A national number is matched against the school's dialling code.":
     'كما هو مسجَّل. ويُطابَق الرقم الوطني مع رمز الاتصال الخاص بالمدرسة.',
   'Attendance':
@@ -180,6 +182,8 @@ export const AR = {
     'إمّا أن الرقم غير مسجَّل، وإمّا أن كل طفل مرتبط به ممنوع عنه الاطّلاع.',
   'Either the year has no subjects yet, or nothing has been uploaded against this term.':
     'إمّا أن العام بلا مواد بعد، وإمّا أنه لم يُرفع شيء على هذا الفصل.',
+  'Educational levels':
+    'المراحل التعليمية',
   'Enrol children and place them in classes. A placement is a dated membership: a child who moves from 3A to 3B in March is in 3A for Term 1 and 3B for Term 2, and both stay true.':
     'قيّد الطلاب وألحقهم بالصفوف. الإلحاق عضوية مؤرَّخة: الطالبة التي تنتقل من 3A إلى 3B في مارس هي في 3A للفصل الأول وفي 3B للفصل الثاني، وكلاهما صحيح.',
   "Every mark already stated against it stays exactly as it is — retiring is not deleting, and this year's report cards keep their heading.":
@@ -198,6 +202,8 @@ export const AR = {
     'البحث عن دفعة',
   'First day':
     'أول يوم',
+  'Friday':
+    'الجمعة',
   'From':
     'من',
   'Generate the ladder':
@@ -238,6 +244,8 @@ export const AR = {
     'درجات هذا الفصل نهائية. سيُفحص الرفع كالمعتاد وستوضّح الخدمة سبب رفضها.',
   'Labels only. The service takes no capacity here and no rung — moving a class to another rung would carry every enrolment and every mark with it, under a class the children were never in, so it is a new class plus a roster change rather than an edit.':
     'تسميات فقط. لا تأخذ الخدمة سعةً هنا ولا صفًا دراسيًا — نقل صف إلى صف دراسي آخر يحمل معه كل قيد وكل درجة إلى صف لم يكن الأطفال فيه قط، فهو صف جديد مع تعديل كشف، لا تعديلًا.',
+  'Languages':
+    'لغات',
   'Last day':
     'آخر يوم',
   'Late':
@@ -254,6 +262,8 @@ export const AR = {
     'الدرجات تُسجَّل على فصل دراسي، فلا يمكن رفع أي درجة قبل وجود فصل.',
   "Marks for this term are final. Stated by a person, never derived from the end date — a school enters last term's marks in the first week of this one.":
     'درجات هذا الفصل نهائية. يقرّرها شخص، ولا تُشتق من تاريخ الانتهاء أبدًا — فالمدرسة تُدخل درجات الفصل الماضي في الأسبوع الأول من هذا الفصل.',
+  'Monday':
+    'الاثنين',
   'Move':
     'نقل',
   'Name (Arabic)':
@@ -324,6 +334,8 @@ export const AR = {
     'لا يوجد ما يُعرض',
   'Nothing was written. The report below is still readable, but the batch can no longer be committed — upload the file again to get a fresh preview.':
     'لم يُكتب شيء. التقرير أدناه ما زال قابلًا للقراءة، لكن الدفعة لم تعد قابلة للاعتماد — ارفع الملف من جديد للحصول على معاينة جديدة.',
+  'Number of academic terms':
+    'عدد الفصول الدراسية',
   'On the register':
     'في الكشف',
   "One child's marks":
@@ -408,16 +420,24 @@ export const AR = {
     'رمز الصف الدراسي',
   'Rungs':
     'الصفوف الدراسية',
+  'Saturday':
+    'السبت',
   'Saving…':
     'جارٍ الحفظ…',
   'School code':
     'رمز المدرسة',
+  'School language type':
+    'نظام اللغة بالمدرسة',
+  'School working days':
+    'أيام العمل بالمدرسة',
   'Search':
     'بحث',
   'Section suffixes':
     'لواحق الشُعَب',
   'Sections per level':
     'عدد الشُعَب لكل صف دراسي',
+  'Select at least one educational level.':
+    'اختر مرحلة تعليمية واحدة على الأقل.',
   'Sequence':
     'التسلسل',
   'She has never been placed in a class':
@@ -436,6 +456,8 @@ export const AR = {
     'رقم الطالب أو الاسم',
   'Subject':
     'المادة',
+  'Sunday':
+    'الأحد',
   'Term':
     'الفصل الدراسي',
   'Terms belong to an academic year, and so does a report card. Pick one in the header.':
@@ -468,12 +490,16 @@ export const AR = {
     'لا توجد صفوف دراسية في هذه المدرسة بعد',
   'This term is closed':
     'هذا الفصل الدراسي مغلق',
+  'Thursday':
+    'الخميس',
   'To class':
     'إلى الصف',
   'Try again':
     'حاول مرة أخرى',
   'Try the student number. A name typed in one script does not match a record that only carries the other.':
     'جرّب رقم الطالب. فالاسم المكتوب بكتابة واحدة لا يطابق سجلًّا لا يحمل إلا الأخرى.',
+  'Tuesday':
+    'الثلاثاء',
   'Type a student number and choose a term.':
     'اكتب رقم طالب واختر فصلًا دراسيًا.',
   'Type a student number to see the adults on file for her, and which of them may read her records.':
@@ -488,6 +514,8 @@ export const AR = {
     'ارفع كشف قيد بالأعلى، واختر هذا الصف، لقيد أطفال فيه.',
   'Uploaded':
     'مرفوع',
+  'Wednesday':
+    'الأربعاء',
   'What an upload did, row by row. Filter by outcome to read the rejected rows of a large file without fetching the rest.':
     'ما فعله الرفع، سطرًا سطرًا. صفِّ حسب النتيجة لقراءة السطور المرفوضة من ملف كبير دون جلب الباقي.',
   'Where you are':
@@ -655,8 +683,12 @@ export const AR = {
     '{0} صف',
   '{0} division(s) in use':
     '{0} مرحلة قيد الاستخدام',
+  '{0} grade(s)':
+    '{0} صف/صفوف',
   '{0} in this school':
     '{0} في هذه المدرسة',
+  '{0} term(s)':
+    '{0} فصل/فصول',
   '{0} rung(s)':
     '{0} صف دراسي',
 

@@ -11,6 +11,12 @@ existing system; every item is additive or a targeted edit.
 - [x] **3. Arabic / English** — complete the `ar` table, verify RTL, stage naming.
 - [ ] **4. Flexible educational structure** — educational systems (Arabic / Language),
       stages incl. KG, structured grade + class records.
+  - [x] A school states its own shape at creation: teaching language, which stages it
+        runs and how many grades in each, term count, working days (migration `0008`).
+        A rung is refused on a stage the school does not teach. Omitted fields on a
+        re-POST keep the stored value, so closing a branch cannot reset its configuration.
+  - [ ] Structured grade + class records — the fields Phase 5 parses and renders
+        (`1/1 ب`): grade number and section suffix held separately from the label.
 - [ ] **5. Grade & class naming engine** — parse `1/1 ب`, generate display names
       per language from structured fields.
 - [ ] **6. RBAC core** — users, roles, permissions, user_roles; staff authentication

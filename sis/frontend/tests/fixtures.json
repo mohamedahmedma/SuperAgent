@@ -7,13 +7,27 @@
       "code": "MAIN",
       "name_en": "Main School",
       "name_ar": "المدرسة",
-      "is_active": true
+      "is_active": true,
+      "language_type": "both",
+      "kg_grade_count": 3,
+      "primary_grade_count": 6,
+      "preparatory_grade_count": 3,
+      "secondary_grade_count": 3,
+      "term_count": 2,
+      "working_days": ["sunday", "monday", "tuesday", "wednesday", "thursday"]
     },
     {
       "code": "ANNEX",
       "name_en": "The Annex",
       "name_ar": "الملحق",
-      "is_active": true
+      "is_active": true,
+      "language_type": "both",
+      "kg_grade_count": 3,
+      "primary_grade_count": 6,
+      "preparatory_grade_count": 3,
+      "secondary_grade_count": 3,
+      "term_count": 2,
+      "working_days": ["sunday", "monday", "tuesday", "wednesday", "thursday"]
     }
   ],
   "GET /v1/structure/years": {

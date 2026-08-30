@@ -36,9 +36,11 @@ from sis.domain.structure import (
     AcademicYear,
     ClassSection,
     School,
+    SchoolLanguage,
     Stage,
     Subject,
     Term,
+    WorkingDay,
     YearLevel,
 )
 from sis.domain.value_objects import (
@@ -680,8 +682,20 @@ class SchoolIn(BaseModel):
         description="Immutable identity. Every year and rung in the school points at it.",
         examples=["MAIN"],
     )
-    name_en: str = Field(default="", description="English label.")
-    name_ar: str = Field(default="", description="Arabic label.")
+    name_en: str = Field(min_length=1, description="English school name.")
+    name_ar: str = Field(min_length=1, description="Arabic school name.")
+    language_type: Literal["arabic", "languages", "both"] = "both"
+    kg_grade_count: int = Field(default=3, ge=0, le=3)
+    primary_grade_count: int = Field(default=6, ge=0, le=6)
+    preparatory_grade_count: int = Field(default=3, ge=0, le=3)
+    secondary_grade_count: int = Field(
+        default=3, ge=0, le=3,
+        description="The current curriculum configuration defines three secondary grades.",
+    )
+    term_count: Literal[1, 2, 3] = 2
+    working_days: list[Literal[
+        "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday"
+    ]] = Field(default_factory=lambda: ["sunday", "monday", "tuesday", "wednesday", "thursday"], min_length=1)
     is_active: bool = Field(
         default=True,
         description="Set false to close a branch. Nothing is deleted: the registers taken "
@@ -695,6 +709,13 @@ class SchoolOut(BaseModel):
     name_ar: str
     name_en: str
     is_active: bool
+    language_type: str
+    kg_grade_count: int
+    primary_grade_count: int
+    preparatory_grade_count: int
+    secondary_grade_count: int
+    term_count: int
+    working_days: list[str]
 
     @classmethod
     def of(cls, school: School) -> "SchoolOut":
@@ -703,6 +724,13 @@ class SchoolOut(BaseModel):
             name_ar=school.name_ar,
             name_en=school.name_en,
             is_active=school.is_active,
+            language_type=school.language_type.value,
+            kg_grade_count=school.kg_grade_count,
+            primary_grade_count=school.primary_grade_count,
+            preparatory_grade_count=school.preparatory_grade_count,
+            secondary_grade_count=school.secondary_grade_count,
+            term_count=school.term_count,
+            working_days=[day.value for day in school.working_days],
         )
 
 
@@ -753,7 +781,9 @@ def list_schools(
     description="201 when the school is new, 200 when this code already existed and its "
     "labels were corrected — which detaches nothing, because every year and rung points at "
     "the row rather than at the name. There is no delete; close a branch with "
-    "`is_active: false`.",
+    "`is_active: false`. On an existing school, a field left out of the body keeps the "
+    "value already on file: the defaults below are what a NEW school gets, not what an "
+    "omission resets an existing one to.",
     responses=error_responses(401, 403, 409, 422),
 )
 def create_school(
@@ -765,11 +795,20 @@ def create_school(
             name_ar=body.name_ar,
             name_en=body.name_en,
             is_active=body.is_active,
+            language_type=SchoolLanguage(body.language_type),
+            kg_grade_count=body.kg_grade_count,
+            primary_grade_count=body.primary_grade_count,
+            preparatory_grade_count=body.preparatory_grade_count,
+            secondary_grade_count=body.secondary_grade_count,
+            term_count=body.term_count,
+            working_days=tuple(WorkingDay(day) for day in body.working_days),
         )
-        created = catalogue.create_school(school)
+        # `model_fields_set` is the only thing that can tell "the caller asked for two
+        # terms" apart from "the caller said nothing and Pydantic filled in two".
+        stored, created = catalogue.create_school(school, stated=body.model_fields_set)
     if not created:
         response.status_code = status.HTTP_200_OK
-    return SchoolOut.of(school)
+    return SchoolOut.of(stored)
 
 
 @router.get(
