@@ -52,6 +52,7 @@ from records.adapters.fake.calendar import FakeSchoolCalendar  # noqa: E402
 from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
 from records.adapters.fake.lms import FakeLms  # noqa: E402
 from records.app import app  # noqa: E402
+from records.config import reset_settings  # noqa: E402
 from records.domain.marks import SubjectAttendance, SubjectGrade  # noqa: E402
 from records.domain.people import PermittedStudent  # noqa: E402
 from records.domain.terms import SchoolTerm  # noqa: E402
@@ -119,22 +120,68 @@ def agent_headers(guardian_id: str | None = None, token: str | None = None) -> d
     return headers
 
 
-@pytest.fixture(autouse=True)
-def _pin_verification_key():
-    """Re-pin this suite's public key for every test.
+#: The environment this suite is written against, in one place.
+#:
+#: The same names are set at import, and that used to be enough. It is not, because another
+#: suite in the same run legitimately changes them — `tests/general/test_parent_journey.py`
+#: boots a real sis, records and identity and points the process at all three — so what a
+#: records test actually runs against depended on collection order.
+_SUITE_ENV = {
+    # Fixtures, not a real school. With `sis` here instead, the app's lifespan raises
+    # "RECORDS_LMS=sis requires SIS_BASE_URL" and every test errors in setup.
+    "RECORDS_LMS": "fake",
+    # Read per request by `records.auth`, and the credential every request here presents.
+    "RECORDS_API_KEY": "agentkey-fixture-0000000000000000",
+    # What this suite's tokens are minted with, and so what it must verify against.
+    "IDENTITY_ISSUER": "test-identity",
+    "IDENTITY_AUDIENCE": "test-services",
+    # Blanked, not overridden. An unset base URL is what selects the in-memory fakes these
+    # tests assert against; a real one installs adapters that leave the process.
+    "SIS_BASE_URL": "",
+    "SIS_API_KEY": "",
+    # A JWKS URL would send verification to the network. The pinned PEM wins over it inside
+    # `schoolauth`, but only while the PEM is set, so this is blanked rather than trusted
+    # to be shadowed.
+    "IDENTITY_JWKS_URL": "",
+}
 
-    It is set at import as well, but `tests/test_e2e_api.py` boots a real identity
-    service and legitimately points the whole process at *its* key. Whichever module
-    runs second would otherwise verify tokens against the other one's key and fail with
-    a signature error that looks nothing like a test-ordering problem.
+
+@pytest.fixture(autouse=True)
+def _pin_verification():
+    """Re-pin everything this suite verifies with, for every test.
+
+    The key was already re-pinned here, for a reason the docstring gave: `test_e2e_api.py`
+    boots a real identity service and legitimately points the whole process at *its* key.
+    The same argument applies to every other name in `_SUITE_ENV`, and to the cached
+    settings object that holds them — and until it was extended to those, this suite failed
+    as twenty-five tests whenever it ran after `tests/general/`.
+
+    The mechanism, because the symptom names none of it: `records.config.settings()` is
+    `lru_cache`d. These values are set at import, so the first resolution is correct. Then
+    another suite changes the environment and drops that cache — and the next resolution
+    picks up `IDENTITY_ISSUER` from the project's `.env`, which is unset, so it defaults to
+    `school-identity`. The tokens here still say `test-identity`. Every request comes back
+    401 with `guardian_id: ""` and reason `not_authorized`, which reads exactly like a
+    broken signature and mentions no issuer at all.
+
+    So the cache is dropped on the way IN as well as on the way out: leaving it holding a
+    previous suite's resolution is the whole failure.
     """
-    previous = os.environ.get("IDENTITY_PUBLIC_KEY_PEM")
+    previous = {name: os.environ.get(name) for name in _SUITE_ENV}
+    previous["IDENTITY_PUBLIC_KEY_PEM"] = os.environ.get("IDENTITY_PUBLIC_KEY_PEM")
+
+    os.environ.update(_SUITE_ENV)
     os.environ["IDENTITY_PUBLIC_KEY_PEM"] = PUBLIC_PEM
+    reset_settings()
+
     yield
-    if previous is None:
-        os.environ.pop("IDENTITY_PUBLIC_KEY_PEM", None)
-    else:
-        os.environ["IDENTITY_PUBLIC_KEY_PEM"] = previous
+
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+    reset_settings()
 
 
 def install_adapters(test_client, *, calendar=None, directory=None, lms=None):

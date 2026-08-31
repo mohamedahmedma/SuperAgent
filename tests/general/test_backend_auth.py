@@ -136,10 +136,32 @@ class BackendAuthTests(unittest.TestCase):
         self.assertEqual(401, caught.exception.status_code)
 
     def test_unconfigured_verification_fails_closed(self):
-        """No public key must mean "reject", never "trust"."""
+        """No verification material at all must mean "reject", never "trust".
+
+        BOTH sources are cleared, and the second one is the point. There are two ways to
+        tell this backend how to verify — a pinned PEM, and a JWKS URL to fetch keys from —
+        so clearing only the PEM does not describe an unconfigured deployment. It describes
+        one configured the other way.
+
+        That distinction used to be invisible because the project's `IDENTITY_JWKS_URL`
+        pointed at localhost and nothing answered. It stopped being invisible the day the
+        variable was pointed at the deployed identity service: with a live URL still set,
+        this test reached over the network, fetched a real key document, and failed on a
+        `kid` mismatch with a 401 — the right refusal for the wrong reason, and a test that
+        no longer asserted what its name claims.
+
+        `JWKS_URL` is a module constant captured at import, so the environment variable is
+        not what has to be cleared here — the attribute is. `backend/infra/identity.py`
+        rebuilds its config from these names on every call precisely so a test can do this.
+        """
         os.environ.pop("IDENTITY_PUBLIC_KEY_PEM", None)
+        saved_jwks = backend_identity.JWKS_URL
+        backend_identity.JWKS_URL = ""
+        self.addCleanup(setattr, backend_identity, "JWKS_URL", saved_jwks)
+
         with self.assertRaises(HTTPException) as caught:
             backend_auth.get_current_user(token=mint(), db=self.db)
+
         self.assertEqual(503, caught.exception.status_code)
 
     def test_a_projection_row_is_created_on_first_sight(self):
