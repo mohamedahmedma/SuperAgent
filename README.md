@@ -400,15 +400,24 @@ Configure these at the repo root or in your runtime environment:
 - Milvus: `MILVUS_HOST`, `MILVUS_PORT`, `MILVUS_COLLECTION`
 - Database/cache: `DATABASE_URL`, `REDIS_URL`
 - Auth-related: `JWT_SECRET_KEY`, `ADMIN_INVITE_CODE`, `JWT_ALGORITHM`, `JWT_EXPIRE_MINUTES`
+  — **all legacy and read by nothing.** Authentication moved to `identity/`, which
+  verifies with `IDENTITY_JWKS_URL` and seeds its administrator from
+  `IDENTITY_BOOTSTRAP_ADMIN_USER` / `_PASSWORD`.
 - Password parameters: `PASSWORD_PBKDF2_ROUNDS`
 - Retrieval candidate pool: `RETRIEVAL_CANDIDATE_K` (a fixed candidate count, takes priority), `RETRIEVAL_CANDIDATE_MULTIPLIER` (used when K isn't set: `max(top_k x multiplier, top_k)`, default `3`)
 - Auto-merging: `AUTO_MERGE_ENABLED`, `AUTO_MERGE_THRESHOLD`, `LEAF_RETRIEVE_LEVEL`
 
 ## API Overview
-- Auth
-  - `POST /auth/register`: registration (supports a regular-user mode and an admin invite-code mode).
-  - `POST /auth/login`: login, returns a Bearer token.
-  - `GET /auth/me`: fetch the current logged-in user's info.
+- Auth — **served by `identity/`, not by this backend.** It moved there when the estate
+  split into services; the backend only *verifies* the tokens it is handed. See
+  [identity/README.md](identity/README.md).
+  - `POST /v1/auth/login` on identity: login, returns a Bearer token.
+  - `GET /v1/auth/me` on identity: fetch the current logged-in user's info.
+  - Parents do not use a password at all — they sign in over WhatsApp
+    (`/v1/auth/whatsapp/*`).
+  - There is **no registration endpoint**. Accounts are created by an administrator through
+    `POST /v1/admin/accounts`, and the first administrator is seeded from
+    `IDENTITY_BOOTSTRAP_ADMIN_USER` / `_PASSWORD` on every startup.
 - Chat
   - `POST /chat`: chat (non-streaming), params `message`, `session_id`.
   - `POST /chat/stream`: chat (streaming SSE), same params, returns `text/event-stream`.
