@@ -1,4 +1,4 @@
-"""Password sign-in, registration, refresh, logout, and reading your own token.
+"""Password sign-in, refresh, logout, and reading your own token.
 
 Every handler here is an adapter: read the request, call one use case, map the result to a
 response model. The rules — that an unknown user and a wrong password are
@@ -14,7 +14,6 @@ from identity.api.schemas.auth import (
     LoginIn,
     MeOut,
     RefreshIn,
-    RegisterIn,
     TokenOut,
 )
 from identity.api.schemas.common import ErrorOut
@@ -49,28 +48,6 @@ def login(body: LoginIn, service: SessionServiceDep, ip: ClientIp) -> TokenOut:
     and for a school that means confirming which parents are registered.
     """
     return _token_out(service.login(username=body.username, password=body.password, client_ip=ip))
-
-
-@router.post("/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
-def register(body: RegisterIn, service: SessionServiceDep, ip: ClientIp) -> TokenOut:
-    """Self-registration, ported from the old chat backend.
-
-    Produces an account that can sign in and read no student records whatsoever: the
-    guardian binding is a separate, admin-only write, and nothing on this path can reach
-    it. That is what makes leaving self-registration open acceptable — the worst a stranger
-    gets is a chat account.
-    """
-    return _token_out(
-        service.register(
-            username=body.username,
-            password=body.password,
-            role=body.role,
-            admin_code=body.admin_code,
-            display_name=body.display_name,
-            preferred_language=body.preferred_language,
-            client_ip=ip,
-        )
-    )
 
 
 @router.post("/refresh", response_model=AccessTokenOut, responses=AUTH_RESPONSES)

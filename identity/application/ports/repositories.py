@@ -94,6 +94,38 @@ class AccountRepository(Protocol):
     def register_failure(self, account: Account, policy: LockoutPolicy, *, now: datetime) -> None:
         """Count a bad password and apply `policy`. See `LockoutPolicy.next_failure`."""
 
+    # -- administration -----------------------------------------------------
+    # Everything below serves the admin routes. Note what is absent: there is no method
+    # that writes `guardian_external_id` other than `set_guardian_binding`, so no update
+    # path can reach that column by accident. That is the same reason `create` documents
+    # its single caller — the binding is the one write that decides which family somebody
+    # can read, and it stays a deliberate act with its own route.
+
+    def list_page(self, *, limit: int, offset: int) -> list[Account]:
+        """One page of accounts, ordered stably so paging cannot skip or repeat a row."""
+
+    def count(self) -> int:
+        """How many accounts exist, for the pager."""
+
+    def count_active_admins(self, *, excluding_id: int | None = None) -> int:
+        """Active administrators, optionally ignoring one.
+
+        `excluding_id` is what makes the last-administrator guard answerable: the question
+        is never "how many admins are there" but "how many would remain if this one went".
+        """
+
+    def set_role(self, account: Account, role: str) -> None: ...
+
+    def set_active(self, account: Account, is_active: bool) -> None:
+        """Deactivate or restore. `SessionService.login` refuses an inactive account."""
+
+    def set_phone(self, account: Account, phone: str) -> None: ...
+
+    def set_preferred_language(self, account: Account, preferred_language: str) -> None: ...
+
+    def delete(self, account: Account) -> None:
+        """Remove the row. Callers revoke the refresh tokens first."""
+
 
 class RefreshTokenRepository(Protocol):
     """Opaque refresh tokens, stored only as hashes.

@@ -22,11 +22,6 @@ from typing import Final
 
 from identity.domain.errors import Forbidden
 
-#: Self-registration may produce these and nothing else. "parent" is absent on purpose:
-#: a parent role is paired with a guardian binding, and both are an administrator's
-#: decision. Registration must never be a path to either.
-SELF_REGISTRABLE_ROLES: Final[frozenset[str]] = frozenset({"user", "admin"})
-
 #: What an administrator may assign through the admin route.
 ASSIGNABLE_ROLES: Final[frozenset[str]] = frozenset({"user", "admin", "parent", "staff"})
 
@@ -62,27 +57,33 @@ def assignable_role(requested: str | None) -> str:
     return role if role in ASSIGNABLE_ROLES else DEFAULT_ROLE
 
 
-def resolve_registration_role(
-    requested_role: str | None, admin_code: str | None, *, invite_code: str
-) -> str:
-    """What role a self-registration may claim.
+def guard_last_administrator(
+    *, removing_an_active_admin: bool, other_active_admins: int
+) -> None:
+    """Refuse a change that would leave the estate with no administrator at all.
 
-    Ported from the old backend's `resolve_role`, with one change kept from that port: an
-    incorrect invite code is **rejected** rather than silently downgraded to "user".
-    Silently ignoring it means an operator who mistypes the code gets an ordinary account
-    and no explanation, then files a bug against the wrong system.
+    The three ways to commit that mistake are deleting the last admin, demoting them, and
+    deactivating them — so this is checked by all three rather than by the delete route
+    alone, which is the version of this guard everybody writes first and which the other
+    two walk straight past.
 
-    `invite_code` is passed in rather than read from the environment, which is what lets
-    this be tested by calling it three times with three values.
+    Why it matters more here than in most systems: the admin routes are the ONLY way to
+    bind a parent to their children. Lose every administrator and nobody can onboard a
+    family until somebody edits the database by hand. Recovery is possible — the seeded
+    account returns on the next restart — but only if `IDENTITY_BOOTSTRAP_ADMIN_USER` and
+    `IDENTITY_BOOTSTRAP_ADMIN_PASSWORD` are still set, and a school that has since removed
+    them from `.env` has no way back in at all.
+
+    Counted rather than named, so this stays a rule about the estate and not about who is
+    calling. An administrator IS allowed to demote or delete themselves while another one
+    exists — that is ordinary staff turnover, and forbidding it would mean the last person
+    to leave can never tidy up after themselves.
     """
-    import hmac
-
-    role = (requested_role or "user").strip().lower()
-    if role not in SELF_REGISTRABLE_ROLES or role != "admin":
-        return "user"
-    if invite_code and admin_code and hmac.compare_digest(admin_code, invite_code):
-        return "admin"
-    raise Forbidden("Incorrect administrator invite code.")
+    if removing_an_active_admin and other_active_admins == 0:
+        raise Forbidden(
+            "This is the only administrator left. Create another one before removing, "
+            "demoting or deactivating this account."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,13 +133,12 @@ def as_aware(moment: datetime) -> datetime:
 
 
 __all__ = [
+    "guard_last_administrator",
     "ASSIGNABLE_ROLES",
     "DEFAULT_ROLE",
     "LockoutPolicy",
-    "SELF_REGISTRABLE_ROLES",
     "as_aware",
     "assignable_role",
     "guardian_username",
     "is_guardian_username",
-    "resolve_registration_role",
 ]
