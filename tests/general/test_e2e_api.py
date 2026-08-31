@@ -48,6 +48,11 @@ _IDENTITY_SERVER = None
 _IDENTITY_BASE = None
 _IDENTITY_THREAD = None
 _SAVED_IDENTITY_KEY = None
+_ADMIN_TOKEN = None
+
+#: The administrator identity seeds on startup, and this suite manages accounts as.
+E2E_ADMIN_USER = "e2e-administrator"
+E2E_ADMIN_PASSWORD = "e2e-administrator-password"
 
 
 def _free_port() -> int:
@@ -116,7 +121,15 @@ def _start_identity():
     workdir = tempfile.mkdtemp(prefix="e2e-identity-")
     os.environ["IDENTITY_DATABASE_URL"] = f"sqlite:///{workdir}/identity.db"
     os.environ["IDENTITY_DEV_KEY_FILE"] = f"{workdir}/dev-key.pem"
-    os.environ.setdefault("IDENTITY_ADMIN_KEY", "e2e-admin-key")
+    # There is no shared admin key any more. `/v1/admin/*` takes an administrator's own
+    # access token, so this suite needs a real account — seeded by identity's lifespan
+    # when the server below starts.
+    # Assigned, not `setdefault`. The project's `.env` ships both of these declared and
+    # EMPTY — that is what leaves a real deployment with no administrator until an operator
+    # chooses a password — and `setdefault` treats a declared-but-empty variable as already
+    # set, so it would quietly seed nothing and every account this suite creates would 401.
+    os.environ["IDENTITY_BOOTSTRAP_ADMIN_USER"] = E2E_ADMIN_USER
+    os.environ["IDENTITY_BOOTSTRAP_ADMIN_PASSWORD"] = E2E_ADMIN_PASSWORD
 
     # Set as environment variables rather than poked onto a module. Identity now
     # resolves its issuer and audience lazily from settings, so the values only have
@@ -172,11 +185,42 @@ def identity_url(path: str) -> str:
     return f"{_IDENTITY_BASE}{path}"
 
 
+def admin_token() -> str:
+    """Sign in as the seeded administrator, once per module run.
+
+    Cached because every account this suite creates needs it and a PBKDF2 login is not
+    free. Not cached across modules: the token is bound to this run's identity server.
+    """
+    global _ADMIN_TOKEN
+    if _ADMIN_TOKEN is None:
+        response = requests.post(
+            identity_url("/v1/auth/login"),
+            json={"username": E2E_ADMIN_USER, "password": E2E_ADMIN_PASSWORD},
+            timeout=30,
+        )
+        assert response.status_code == 200, (
+            f"the seeded administrator could not log in: {response.text[:300]}"
+        )
+        _ADMIN_TOKEN = response.json()["access_token"]
+    return _ADMIN_TOKEN
+
+
 def register(username: str, password: str, **kwargs):
-    """Create an account on the identity service."""
+    """Create an ordinary account on the identity service.
+
+    Named `register` still, because that is what it does from this suite's point of view,
+    but it goes through `/v1/admin/accounts` now — `/v1/auth/register` is gone. Self-service
+    account creation was closed when the shared admin key was removed: an administrator is
+    now exactly an account with role=admin, so a public route that could mint one would be a
+    public route into every family's records.
+
+    `role="user"` is explicit because the admin route defaults to "parent", and an ordinary
+    account is what every caller here wants.
+    """
     return requests.post(
-        identity_url("/v1/auth/register"),
-        json={"username": username, "password": password},
+        identity_url("/v1/admin/accounts"),
+        json={"username": username, "password": password, "role": "user"},
+        headers={"Authorization": f"Bearer {admin_token()}"},
         timeout=30,
         **kwargs,
     )
@@ -366,7 +410,11 @@ class AuthTests(unittest.TestCase):
             self.assertEqual(200, response.status_code, response.text[:300])
 
     def test_a_fresh_account_carries_no_guardian_binding(self):
-        """Self-registration must never be a path to a student's records."""
+        """A newly created account must never carry a guardian binding.
+
+        Creation and binding are two separate admin calls precisely so that an
+        interrupted bulk import leaves accounts that can log in and read nothing.
+        """
         with temporary_user() as (username, password):
             register(username, password)
             body = login(username, password).json()
@@ -391,12 +439,12 @@ class ValidationTests(unittest.TestCase):
     """Malformed input must produce a 4xx, never a 500 and never a stack trace."""
 
     def test_a_missing_body_is_a_422_not_a_500(self):
-        response = requests.post(identity_url("/v1/auth/register"), json={}, timeout=15)
+        response = requests.post(identity_url("/v1/auth/login"), json={}, timeout=15)
         self.assertLess(response.status_code, 500)
 
     def test_malformed_json_is_rejected_cleanly(self):
         response = requests.post(
-            identity_url("/v1/auth/register"),
+            identity_url("/v1/auth/login"),
             data="{not json",
             headers={"Content-Type": "application/json"},
             timeout=15,
@@ -483,6 +531,381 @@ class ConcurrencyTests(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=16) as pool:
                 codes = list(pool.map(read, range(32)))
             self.assertEqual({200}, set(codes))
+
+
+class IdentityBackendIntegrationTests(unittest.TestCase):
+    """The two public services talking to each other, wired the way production wires them.
+
+    Every other test in this module hands the backend identity's public key directly, in
+    `IDENTITY_PUBLIC_KEY_PEM`. That is a legitimate shortcut for testing everything else,
+    and it silently skips the one thing that actually connects these two deployments: the
+    backend FETCHING `IDENTITY_JWKS_URL` over HTTP from identity, matching the token's `kid`
+    against what comes back, and caching it.
+
+    In production that fetch is the whole seam. `auth.aurexis.cc` publishes the key,
+    `api.aurexis.cc` goes and gets it, and when that fails every authenticated request in
+    the estate answers 503 "Authentication is temporarily unavailable" — with nothing in the
+    message naming a URL. So this class removes the pinned PEM entirely. If the JWKS fetch
+    does not work, nothing below can pass.
+
+    The journey is the one an operator actually performs: the seeded administrator signs in
+    to identity, creates an account there, and that account then uses the CHAT BACKEND — a
+    token minted by one service, verified by another, over a socket, with the key travelling
+    between them over HTTP.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import backend.infra.identity as backend_identity
+        import schoolauth
+
+        cls._saved_pem = os.environ.get("IDENTITY_PUBLIC_KEY_PEM")
+        cls._saved_jwks = backend_identity.JWKS_URL
+
+        # No pinned key. The JWKS fetch is now the only way a signature can be checked.
+        os.environ.pop("IDENTITY_PUBLIC_KEY_PEM", None)
+        backend_identity.JWKS_URL = identity_url("/.well-known/jwks.json")
+        schoolauth.reset_key_cache()
+
+    @classmethod
+    def tearDownClass(cls):
+        import backend.infra.identity as backend_identity
+        import schoolauth
+
+        backend_identity.JWKS_URL = cls._saved_jwks
+        if cls._saved_pem is None:
+            os.environ.pop("IDENTITY_PUBLIC_KEY_PEM", None)
+        else:
+            os.environ["IDENTITY_PUBLIC_KEY_PEM"] = cls._saved_pem
+        schoolauth.reset_key_cache()
+
+    # -- the key travelling between the services ----------------------------
+
+    def test_identity_publishes_a_jwks_the_backend_can_use(self):
+        """The document itself, as the backend's verifier requires it to be."""
+        response = requests.get(identity_url("/.well-known/jwks.json"), timeout=15)
+
+        self.assertEqual(200, response.status_code, response.text[:300])
+        keys = response.json().get("keys")
+        self.assertTrue(keys, "no keys published")
+        self.assertTrue(keys[0].get("kid"), "a key with no kid cannot be matched to a token")
+        self.assertNotIn("d", keys[0], "the PRIVATE exponent was published")
+
+    # -- the happy path -----------------------------------------------------
+
+    def test_an_admin_created_account_can_use_the_backend(self):
+        """The whole point, end to end, with no shared secret anywhere in it.
+
+        admin signs in -> admin creates an account -> that account signs in -> the backend
+        accepts its token after fetching identity's key over HTTP.
+        """
+        with temporary_user() as (username, password):
+            created = register(username, password)
+            self.assertEqual(201, created.status_code, created.text[:300])
+
+            signed_in = login(username, password)
+            self.assertEqual(200, signed_in.status_code, signed_in.text[:300])
+            token = signed_in.json()["access_token"]
+
+            response = requests.get(
+                url("/sessions"), headers={"Authorization": f"Bearer {token}"}, timeout=30
+            )
+
+        self.assertEqual(
+            200, response.status_code,
+            f"the backend rejected a token identity had just minted: {response.text[:300]}",
+        )
+
+    def test_the_seeded_administrator_reaches_the_backends_admin_routes(self):
+        """The role claim crossing the wire.
+
+        `backend/infra/auth.py` require_admin reads `role` off the signed token, so an
+        administrator minted by identity is an administrator to the backend with nothing
+        configured on the backend side at all.
+        """
+        response = requests.get(
+            url("/documents"),
+            headers={"Authorization": f"Bearer {admin_token()}"},
+            timeout=60,
+        )
+
+        self.assertNotIn(
+            response.status_code, (401, 403),
+            f"the admin role did not survive the trip between services: {response.text[:300]}",
+        )
+
+    # -- the paths that must fail -------------------------------------------
+
+    def test_an_ordinary_account_is_refused_by_the_backends_admin_routes(self):
+        """403, not 401. The credential is genuine; the role is not."""
+        with temporary_user() as (username, password):
+            register(username, password)
+            token = login(username, password).json()["access_token"]
+
+            response = requests.get(
+                url("/documents"),
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=60,
+            )
+
+        self.assertEqual(403, response.status_code, response.text[:300])
+
+    def test_no_credential_is_refused(self):
+        response = requests.get(url("/sessions"), timeout=30)
+        self.assertEqual(401, response.status_code)
+
+    def test_a_garbage_token_is_refused(self):
+        response = requests.get(
+            url("/sessions"),
+            headers={"Authorization": "Bearer not.a.real.token"},
+            timeout=30,
+        )
+        self.assertEqual(401, response.status_code)
+
+    def test_a_token_signed_by_a_foreign_key_is_refused(self):
+        """The attack the JWKS fetch exists to stop.
+
+        Correct issuer, correct audience, correct claims — and a key identity never
+        published. If this passes, the backend is reading claims without checking who
+        signed them, and anyone can mint themselves an administrator.
+        """
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from jose import jwt
+
+        import backend.infra.identity as backend_identity
+
+        forged_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pem = forged_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+
+        now = int(time.time())
+        forged = jwt.encode(
+            {
+                "iss": backend_identity.ISSUER,
+                "aud": backend_identity.AUDIENCE,
+                "sub": "not-a-real-person",
+                "role": "admin",
+                "iat": now,
+                "exp": now + 1800,
+            },
+            pem,
+            algorithm="RS256",
+        )
+
+        response = requests.get(
+            url("/documents"),
+            headers={"Authorization": f"Bearer {forged}"},
+            timeout=30,
+        )
+
+        self.assertEqual(401, response.status_code, response.text[:300])
+
+    def test_a_token_for_another_audience_is_refused(self):
+        """Without the audience check a token minted for one service works against another.
+
+        Same key, same issuer, different intended reader — so this is not a formality.
+        """
+        from jose import jwt
+
+        import backend.infra.identity as backend_identity
+        from identity.config import settings as identity_settings
+        from identity.infrastructure.crypto.keys import signing_key_from
+
+        key = signing_key_from(identity_settings())
+        now = int(time.time())
+        wrong_audience = jwt.encode(
+            {
+                "iss": backend_identity.ISSUER,
+                "aud": "somebody-elses-service",
+                "sub": "someone",
+                "role": "user",
+                "iat": now,
+                "exp": now + 1800,
+            },
+            key.private_pem,
+            algorithm=key.algorithm,
+            headers={"kid": key.kid},
+        )
+
+        response = requests.get(
+            url("/sessions"),
+            headers={"Authorization": f"Bearer {wrong_audience}"},
+            timeout=30,
+        )
+
+        self.assertEqual(401, response.status_code, response.text[:300])
+
+    def test_an_expired_token_is_refused(self):
+        """Signed by the real key, and past its expiry."""
+        from jose import jwt
+
+        import backend.infra.identity as backend_identity
+        from identity.config import settings as identity_settings
+        from identity.infrastructure.crypto.keys import signing_key_from
+
+        key = signing_key_from(identity_settings())
+        now = int(time.time())
+        expired = jwt.encode(
+            {
+                "iss": backend_identity.ISSUER,
+                "aud": backend_identity.AUDIENCE,
+                "sub": "someone",
+                "role": "user",
+                "iat": now - 7200,
+                "exp": now - 300,
+            },
+            key.private_pem,
+            algorithm=key.algorithm,
+            headers={"kid": key.kid},
+        )
+
+        response = requests.get(
+            url("/sessions"),
+            headers={"Authorization": f"Bearer {expired}"},
+            timeout=30,
+        )
+
+        self.assertEqual(401, response.status_code, response.text[:300])
+
+    # -- what happens to a session after the account changes ----------------
+
+    def test_a_deleted_account_cannot_get_a_new_access_token(self):
+        """Deletion on identity has to end the session on the backend too.
+
+        It does so by revoking the refresh token: the access token already in a browser
+        stays valid until it expires — the price of verifying offline — but it cannot be
+        renewed, so the session is bounded rather than indefinite.
+        """
+        with temporary_user() as (username, password):
+            register(username, password)
+            tokens = login(username, password).json()
+
+            deleted = requests.delete(
+                identity_url(f"/v1/admin/accounts/{username}"),
+                headers={"Authorization": f"Bearer {admin_token()}"},
+                timeout=30,
+            )
+            self.assertEqual(204, deleted.status_code, deleted.text[:300])
+
+            refreshed = requests.post(
+                identity_url("/v1/auth/refresh"),
+                json={"refresh_token": tokens["refresh_token"]},
+                timeout=30,
+            )
+
+        self.assertEqual(401, refreshed.status_code, refreshed.text[:300])
+
+    def test_a_deactivated_account_cannot_log_in_or_refresh(self):
+        with temporary_user() as (username, password):
+            register(username, password)
+            tokens = login(username, password).json()
+
+            requests.patch(
+                identity_url(f"/v1/admin/accounts/{username}"),
+                headers={"Authorization": f"Bearer {admin_token()}"},
+                json={"is_active": False},
+                timeout=30,
+            )
+
+            again = login(username, password)
+            refreshed = requests.post(
+                identity_url("/v1/auth/refresh"),
+                json={"refresh_token": tokens["refresh_token"]},
+                timeout=30,
+            )
+
+        self.assertEqual(401, again.status_code, again.text[:300])
+        self.assertEqual(401, refreshed.status_code, refreshed.text[:300])
+
+    # -- what happens when identity is not there ----------------------------
+
+    def test_a_cached_key_survives_an_identity_outage(self):
+        """A stale key is still a valid key. Identity restarting must not stop chat.
+
+        Simulated the way an outage actually presents: the URL is UNCHANGED and the service
+        behind it stops answering. That distinction is the whole test. Pointing the backend
+        at a different, dead URL is not an outage — the cache is keyed by URL
+        (`schoolauth/verification.py` says so, "so a process verifying against two identity
+        services cannot serve one's keys for the other's tokens"), so a new URL is a COLD
+        cache and correctly fails closed. Writing it that way asserts the opposite of what
+        it appears to.
+
+        So: warm the cache through a real request, age the entry past its TTL to force a
+        refresh, and make the network fail. `_fetch_and_store` then falls back to the
+        cached document, which is what keeps every service verifying through an identity
+        restart.
+        """
+        from unittest.mock import patch
+
+        import schoolauth.verification as verification
+
+        import backend.infra.identity as backend_identity
+
+        with temporary_user() as (username, password):
+            register(username, password)
+            token = login(username, password).json()["access_token"]
+
+            warm = requests.get(
+                url("/sessions"), headers={"Authorization": f"Bearer {token}"}, timeout=30
+            )
+            self.assertEqual(200, warm.status_code, warm.text[:300])
+
+            jwks_url = backend_identity.JWKS_URL
+            document, _fetched_at = verification._cached_jwks[jwks_url]
+            # Aged past any TTL, so the next verification MUST attempt a refresh rather
+            # than sailing through on a fresh entry and proving nothing.
+            verification._cached_jwks[jwks_url] = (document, 0.0)
+
+            with patch.object(
+                verification.urllib.request,
+                "urlopen",
+                side_effect=OSError("identity is unreachable"),
+            ):
+                response = requests.get(
+                    url("/sessions"),
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=30,
+                )
+
+        self.assertEqual(
+            200, response.status_code,
+            f"an identity outage took the backend down with it: {response.text[:300]}",
+        )
+
+    def test_it_fails_closed_when_it_has_never_reached_identity(self):
+        """No key, no cache, no verification — and therefore no access.
+
+        The refusal must not be a 200. Whether it presents as 401 or 503 is a judgement the
+        verifier makes; letting the request through is the only wrong answer.
+        """
+        import backend.infra.identity as backend_identity
+        import schoolauth
+
+        with temporary_user() as (username, password):
+            register(username, password)
+            token = login(username, password).json()["access_token"]
+
+            saved = backend_identity.JWKS_URL
+            backend_identity.JWKS_URL = f"http://127.0.0.1:{_free_port()}/nope.json"
+            schoolauth.reset_key_cache()
+            try:
+                response = requests.get(
+                    url("/sessions"),
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=30,
+                )
+            finally:
+                backend_identity.JWKS_URL = saved
+                schoolauth.reset_key_cache()
+
+        self.assertIn(
+            response.status_code, (401, 503),
+            f"unverifiable identity was not refused: {response.text[:300]}",
+        )
 
 
 class LiveChatTests(unittest.TestCase):
