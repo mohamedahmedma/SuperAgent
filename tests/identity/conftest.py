@@ -41,7 +41,18 @@ os.environ["IDENTITY_PBKDF2_ROUNDS"] = "2000"
 # what makes the in-memory fake the default — and a fake is what these tests assert
 # against. The matching key is blanked too, since a base URL without one is now a startup
 # failure by design (SIS authenticates its callers).
-for _name in ("IDENTITY_SIS_BASE_URL", "IDENTITY_SIS_API_KEY"):
+#
+# BOTH spellings are blanked. `identity/config.py` falls back to the shared
+# `SIS_BASE_URL` when the identity-specific name is unset, which is the point of that
+# fallback -- but it means blanking only the specific one would let the deployment's
+# real SIS address through and put a live `SisGuardianDirectory` under a suite that
+# expects the fake.
+for _name in (
+    "IDENTITY_SIS_BASE_URL",
+    "IDENTITY_SIS_API_KEY",
+    "SIS_BASE_URL",
+    "SIS_API_KEY",
+):
     os.environ[_name] = ""
 
 import pytest  # noqa: E402

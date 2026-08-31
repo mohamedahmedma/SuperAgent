@@ -47,15 +47,17 @@ logger = logging.getLogger(__name__)
 def _build_directory(resolved):
     """Point the guardian directory at the school's system of record.
 
-    Left as the in-memory fake when `IDENTITY_SIS_BASE_URL` is unset, which means an
+    Left as the in-memory fake when neither `IDENTITY_SIS_BASE_URL` nor `SIS_BASE_URL`
+    is set, which means an
     unconfigured deployment refuses every parent rather than authenticating them against
     nothing. That is the safe direction: a login that cannot succeed is a support call, and
     a login that succeeds against an empty directory is a stranger holding a token.
     """
     if not resolved.sis_base_url:
         logger.warning(
-            "IDENTITY_SIS_BASE_URL is not set; guardian lookups use an empty in-memory "
-            "directory and every parent will be told their number is not registered."
+            "Neither IDENTITY_SIS_BASE_URL nor SIS_BASE_URL is set; guardian lookups use "
+            "an empty in-memory directory and every parent will be told their number is "
+            "not registered."
         )
         return FakeGuardianDirectory()
 
@@ -66,8 +68,9 @@ def _build_directory(resolved):
         # (`sis/api/deps.py`), so an unset key costs nothing today. Warned rather than
         # dropped, because it is the line that has to come back when SIS has sign-in.
         logger.warning(
-            "IDENTITY_SIS_BASE_URL is set without IDENTITY_SIS_API_KEY. Harmless only "
-            "while SIS authenticates nobody; set it again when SIS has sign-in."
+            "The SIS base URL is set without an API key (IDENTITY_SIS_API_KEY or "
+            "SIS_API_KEY). Harmless only while SIS authenticates nobody; set it again "
+            "when SIS has sign-in."
         )
 
     return SisGuardianDirectory(

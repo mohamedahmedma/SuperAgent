@@ -42,6 +42,8 @@ from typing import Final
 
 from identity.env import env_value, load_env
 
+from schoolauth import DEFAULT_AUDIENCE, DEFAULT_ISSUER
+
 logger = logging.getLogger(__name__)
 
 #: PBKDF2 iterations for new hashes. A password *is* a low-entropy secret, so stretching
@@ -175,6 +177,28 @@ def _bool_env(name: str) -> bool:
     return env_value(name).lower() in _TRUTHY
 
 
+def _first_env(*names: str) -> str:
+    """The first of `names` that is set, or `""`.
+
+    Exists for one shape of setting: the SIS's address and key, which this service and
+    `records/` both need and which used to be spelled twice — `IDENTITY_SIS_BASE_URL` here,
+    `SIS_BASE_URL` there. Two names for one service is not redundancy, it is a
+    disagreement waiting to happen, and a silent one: fill in the records spelling only and
+    identity keeps an empty in-memory directory, so the chat backend answers a parent's
+    questions about marks perfectly while sign-in tells her that her number is not
+    registered.
+
+    The specific name still wins where it is set, because a deployment may legitimately
+    run identity against a different SIS from the records facade — which is the only
+    reason the second name was defensible in the first place.
+    """
+    for name in names:
+        value = env_value(name)
+        if value:
+            return value
+    return ""
+
+
 def _codes_env(name: str) -> tuple[str, ...]:
     """Comma-separated school codes, upper-cased and de-duplicated, in order.
 
@@ -211,8 +235,11 @@ def settings() -> Settings:
         private_key_pem=env_value("IDENTITY_PRIVATE_KEY_PEM"),
         private_key_file=env_value("IDENTITY_PRIVATE_KEY_FILE"),
         dev_key_file=env_value("IDENTITY_DEV_KEY_FILE") or "./identity-dev-key.pem",
-        issuer=env_value("IDENTITY_ISSUER") or "school-identity",
-        audience=env_value("IDENTITY_AUDIENCE") or "school-services",
+        # Defaults from `schoolauth`, the package every verifier in the estate compiles
+        # in. This service MINTS with them, so a literal here drifting from the
+        # verifiers' is the one version of this bug that breaks everything at once.
+        issuer=env_value("IDENTITY_ISSUER") or DEFAULT_ISSUER,
+        audience=env_value("IDENTITY_AUDIENCE") or DEFAULT_AUDIENCE,
         access_ttl_minutes=_int_env("IDENTITY_ACCESS_TTL_MINUTES", _DEFAULT_ACCESS_TTL_MINUTES),
         refresh_ttl_days=_int_env("IDENTITY_REFRESH_TTL_DAYS", _DEFAULT_REFRESH_TTL_DAYS),
         pbkdf2_rounds=_int_env("IDENTITY_PBKDF2_ROUNDS", _DEFAULT_PBKDF2_ROUNDS),
@@ -234,8 +261,8 @@ def settings() -> Settings:
         verification_ttl_minutes=_int_env(
             "IDENTITY_VERIFICATION_TTL_MINUTES", _DEFAULT_VERIFICATION_TTL_MINUTES
         ),
-        sis_base_url=env_value("IDENTITY_SIS_BASE_URL"),
-        sis_api_key=env_value("IDENTITY_SIS_API_KEY"),
+        sis_base_url=_first_env("IDENTITY_SIS_BASE_URL", "SIS_BASE_URL"),
+        sis_api_key=_first_env("IDENTITY_SIS_API_KEY", "SIS_API_KEY"),
         directory_timeout_seconds=_float_env(
             "IDENTITY_SIS_TIMEOUT_SECONDS", _DEFAULT_DIRECTORY_TIMEOUT_SECONDS
         ),
