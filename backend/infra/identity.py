@@ -22,14 +22,24 @@ than falling back to anything.
 """
 import os
 
-from schoolauth import IdentityConfig, IdentityError, IdentityNotConfigured
+from schoolauth import (
+    DEFAULT_AUDIENCE,
+    DEFAULT_ISSUER,
+    IdentityConfig,
+    IdentityError,
+    IdentityNotConfigured,
+)
 from schoolauth import verify_token as _verify_token
 
 # Module constants, captured at import. `tests/test_backend_auth.py` reads them back to
 # mint tokens the running configuration will actually accept, and `tests/test_e2e_api.py`
 # copies them onto the identity service so the two agree regardless of collection order.
-ISSUER = os.getenv("IDENTITY_ISSUER", "school-identity")
-AUDIENCE = os.getenv("IDENTITY_AUDIENCE", "school-services")
+# The default comes from `schoolauth`, not from a literal here. Three services and the
+# minter have to agree on these, and four copies of a string agree right up until one
+# deployment sets IDENTITY_ISSUER on identity and forgets the backend — after which every
+# request is a 401 that says nothing about an issuer and reads like a broken signing key.
+ISSUER = os.getenv("IDENTITY_ISSUER", DEFAULT_ISSUER)
+AUDIENCE = os.getenv("IDENTITY_AUDIENCE", DEFAULT_AUDIENCE)
 JWKS_URL = os.getenv("IDENTITY_JWKS_URL", "")
 JWKS_TTL_SECONDS = int(os.getenv("IDENTITY_JWKS_TTL_SECONDS") or 600)
 

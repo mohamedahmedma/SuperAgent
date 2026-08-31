@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { useAuthStore } from './auth';
 import { useSessionStore } from './sessions';
-import api from '@/utils/api';
+import api, { apiUrl } from '@/utils/api';
 import type { Message, RagStep, GroupedRagStep, HitlRequest, RagTrace, SessionPaging } from '@/types/chat';
 
 // One scroll-back. Opening a chat loads the last screenful; older batches arrive as the
@@ -475,7 +475,10 @@ export const useChatStore = defineStore('chat', {
       let streamHadError = false;
 
       try {
-        const response = await fetch('/chat/stream', {
+        // `apiUrl`, not a bare path: this is the one call in the store that bypasses
+        // axios — it needs the response body as a stream — and so it is also the one
+        // that silently ignored VITE_API_BASE_URL and posted to the UI's own origin.
+        const response = await fetch(apiUrl('/chat/stream'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

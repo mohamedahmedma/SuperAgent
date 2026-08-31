@@ -32,14 +32,14 @@ the next.
 """
 from __future__ import annotations
 
-import hmac
 from collections.abc import Iterator
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from identity.application.dto import SchoolChannel
+from identity.application.dto import SchoolChannel, TokenSubject
 from identity.application.ports.directory import GuardianDirectory
 from identity.application.services.administration import AdministrationService
 from identity.application.services.parent_sessions import ParentSessionService
@@ -120,7 +120,6 @@ def get_session_service(
             max_failed_attempts=resolved.max_failed_attempts,
             lockout_minutes=resolved.lockout_minutes,
         ),
-        admin_invite_code=resolved.admin_invite_code,
     )
 
 
@@ -178,53 +177,100 @@ ParentSessionServiceDep = Annotated[
 # ---------------------------------------------------------------------------
 
 
-def require_admin_key(
-    resolved: SettingsDep,
-    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+
+
+#: Declared so the OpenAPI document says how to authenticate, which is what puts the
+#: "Authorize" button on /docs. Until this existed identity published NO security scheme at
+#: all — every token was read from a raw `Header` parameter — so the one workflow the admin
+#: routes are for, an operator managing accounts through Swagger, could not be performed
+#: there: there was nowhere to put the token.
+#:
+#: `auto_error=False` on purpose. Left to raise on its own, `HTTPBearer` answers with
+#: FastAPI's plain-string `{"detail": "Not authenticated"}`, and every refusal this service
+#: makes is a structured `{"code": ..., "message": ...}` that the Vue app reads a `code` out
+#: of (see `refusal()` in frontend/src/stores/auth.ts). Handling the empty case below keeps
+#: the response byte-identical to what callers already get.
+_bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description="An access token from POST /v1/auth/login.",
+)
+
+
+def bearer_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> str:
-    """Guards account creation and — critically — guardian binding.
+    """The token out of an `Authorization: Bearer` header, or a 401.
 
-    A shared secret rather than a token, because these routes are called by the
-    registrar's tooling and by migration scripts, not by a logged-in user. It is the
-    credential that can bind an account to a guardian, so it is the most dangerous secret
-    in the system: anyone holding it can make themselves any parent.
-
-    Compared with `compare_digest`, not `==`. The comparison is against a value an
-    attacker supplies and can vary a byte at a time, which is exactly the shape a timing
-    oracle needs.
-
-    **An unset key is a 503, not a 401.** Nothing the caller sends will help, and telling
-    them "invalid admin key" for a server that has no admin key sends an operator hunting
-    for a wrong value rather than a missing one.
+    The refusal is unchanged from when this read the header itself: same status, same
+    `code`, same `message`. Only what the OpenAPI document advertises is different.
     """
-    expected = resolved.admin_key
-    if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "not_configured", "message": "IDENTITY_ADMIN_KEY is not set."},
-        )
-    if not x_admin_key or not hmac.compare_digest(x_admin_key, expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "not_authorized", "message": "Invalid admin key."},
-        )
-    return x_admin_key
-
-
-AdminKey = Annotated[str, Depends(require_admin_key)]
-
-
-def bearer_token(authorization: str | None = Header(default=None)) -> str:
-    """The token out of an `Authorization: Bearer` header, or a 401."""
-    if not authorization or not authorization.lower().startswith("bearer "):
+    if credentials is None or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "not_authorized", "message": "Missing bearer token."},
         )
-    return authorization.split(" ", 1)[1].strip()
+    return credentials.credentials
 
 
 BearerToken = Annotated[str, Depends(bearer_token)]
+
+
+def require_admin_token(
+    token: BearerToken,
+    sessions: SessionServiceDep,
+) -> TokenSubject:
+    """Guards account management and — critically — guardian binding.
+
+    Replaces `require_admin_key`, which took a shared `X-Admin-Key` secret. What changed,
+    and what it costs, stated plainly because both matter:
+
+    **What was lost.** The admin routes used to be separated from the public ones by
+    CREDENTIAL TYPE: a parent's token could not reach them at all, because they did not
+    accept a bearer token as a credential in the first place. Now they do, and a parent's
+    token is turned away on its `role` claim instead. That is a weaker kind of separation
+    for the most sensitive write in the system, and it is the price of removing the key.
+
+    **What was gained, and why it is worth more.** A shared secret has no identity. The
+    binding route's own docstring says it is audited because "who decided this parent is
+    that guardian" is the first question anyone asks after a records leak — and with one
+    key held by every script and every operator, that question had no answer. A token names
+    an account. The credential can also now be changed through the API rather than by a
+    redeploy, and it is subject to the lockout policy every other login obeys.
+
+    The subject is returned rather than discarded so the answer to that question can be
+    recorded: callers have the administrator's username without decoding anything.
+
+    Verified through `SessionService.describe_token`, which is the same path `/v1/auth/me`
+    uses — signature, issuer, audience and expiry all checked by `decode_own_token`. Not a
+    second decoder, because two decoders drift and only one of them gets the audience check
+    right.
+    """
+    try:
+        subject = sessions.describe_token(token)
+    except ValueError:
+        # Bad signature, wrong issuer or audience, or expired. Deliberately one answer:
+        # telling a caller WHICH of those failed tells an attacker which half they got right.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "not_authorized", "message": "Invalid or expired token."},
+        ) from None
+
+    if subject.role != "admin":
+        # 403, not 401: the credential is genuine and re-presenting it will not help. This
+        # matches `backend/infra/auth.py` require_admin, so one role check does not mean two
+        # different things in two services.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "not_authorized",
+                "message": "Administrator access required.",
+            },
+        )
+
+    return subject
+
+
+AdminSubject = Annotated[TokenSubject, Depends(require_admin_token)]
 
 
 def client_ip(request: Request) -> str:
@@ -236,7 +282,7 @@ ClientIp = Annotated[str, Depends(client_ip)]
 
 
 __all__ = [
-    "AdminKey",
+    "AdminSubject",
     "AdminServiceDep",
     "BearerToken",
     "ChannelsDep",
@@ -251,5 +297,5 @@ __all__ = [
     "WhatsAppServiceDep",
     "bearer_token",
     "client_ip",
-    "require_admin_key",
+    "require_admin_token",
 ]
