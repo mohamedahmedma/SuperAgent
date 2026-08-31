@@ -22,7 +22,14 @@ import tempfile
 _TMPDIR = tempfile.mkdtemp(prefix="identity-tests-")
 os.environ["IDENTITY_DATABASE_URL"] = f"sqlite:///{_TMPDIR}/test.db"
 os.environ["IDENTITY_DEV_KEY_FILE"] = f"{_TMPDIR}/dev-key.pem"
-os.environ["IDENTITY_ADMIN_KEY"] = "test-admin-key"
+# The administrator this suite manages accounts as. There is no shared admin key any more:
+# `/v1/admin/*` is reached with a real account's access token, so the suite needs a real
+# account. Seeded by the app's own lifespan on every `TestClient(app)` entry, which is also
+# the mechanism under test in `test_bootstrap_admin.py`.
+BOOTSTRAP_ADMIN_USER = "suite-administrator"
+BOOTSTRAP_ADMIN_PASSWORD = "suite-administrator-password"
+os.environ["IDENTITY_BOOTSTRAP_ADMIN_USER"] = BOOTSTRAP_ADMIN_USER
+os.environ["IDENTITY_BOOTSTRAP_ADMIN_PASSWORD"] = BOOTSTRAP_ADMIN_PASSWORD
 os.environ["IDENTITY_ISSUER"] = "test-identity"
 os.environ["IDENTITY_AUDIENCE"] = "test-services"
 # Low enough to trigger in a test without a loop of thirty requests.
@@ -42,11 +49,10 @@ os.environ["IDENTITY_PBKDF2_ROUNDS"] = "2000"
 # against. The matching key is blanked too, since a base URL without one is now a startup
 # failure by design (SIS authenticates its callers).
 #
-# BOTH spellings are blanked. `identity/config.py` falls back to the shared
-# `SIS_BASE_URL` when the identity-specific name is unset, which is the point of that
-# fallback -- but it means blanking only the specific one would let the deployment's
-# real SIS address through and put a live `SisGuardianDirectory` under a suite that
-# expects the fake.
+# BOTH spellings are blanked. `identity/config.py` falls back to the shared `SIS_BASE_URL`
+# when the identity-specific name is unset, which is the point of that fallback — but it
+# means blanking only the specific one would let the deployment's real SIS address through
+# and put a live `SisGuardianDirectory` under a suite that expects the fake.
 for _name in (
     "IDENTITY_SIS_BASE_URL",
     "IDENTITY_SIS_API_KEY",
@@ -73,7 +79,6 @@ from identity.infrastructure.whatsapp.gateways import (  # noqa: E402
 )
 from identity.domain.schools import SchoolRegistry  # noqa: E402
 
-ADMIN_HEADERS = {"X-Admin-Key": "test-admin-key"}
 
 
 def use_setting(monkeypatch, name: str, value: str) -> None:
@@ -92,14 +97,36 @@ def use_setting(monkeypatch, name: str, value: str) -> None:
 
 @pytest.fixture(autouse=True)
 def _fresh_settings():
-    """Every test starts and ends with an unresolved settings cache.
+    """Every test starts and ends with an unresolved settings cache, and this suite's admin.
 
-    Cheap — resolving is a few dozen `os.getenv` calls — and it removes a whole class
-    of ordering failure: a test that changes a variable can no longer leave a frozen
-    `Settings` behind for the next one to resolve against.
+    The cache half is cheap — resolving is a few dozen `os.getenv` calls — and it removes a
+    whole class of ordering failure: a test that changes a variable can no longer leave a
+    frozen `Settings` behind for the next one to resolve against.
+
+    The administrator half exists because these names are set at import, and that is not
+    enough. `tests/general/test_e2e_api.py` boots its own identity server and legitimately
+    assigns IDENTITY_BOOTSTRAP_ADMIN_USER for itself; running after it, every test here
+    seeded one account and tried to log in as another, and the whole suite failed on
+    `admin_headers` with a 401 that named nothing.
+
+    Autouse, so it is in force before `client` starts the app — which is when the lifespan
+    actually seeds the account.
     """
+    previous = {
+        name: os.environ.get(name)
+        for name in ("IDENTITY_BOOTSTRAP_ADMIN_USER", "IDENTITY_BOOTSTRAP_ADMIN_PASSWORD")
+    }
+    os.environ["IDENTITY_BOOTSTRAP_ADMIN_USER"] = BOOTSTRAP_ADMIN_USER
+    os.environ["IDENTITY_BOOTSTRAP_ADMIN_PASSWORD"] = BOOTSTRAP_ADMIN_PASSWORD
     reset_settings()
+
     yield
+
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
     reset_settings()
 
 
@@ -170,27 +197,49 @@ def client(db):
 
 
 @pytest.fixture()
-def parent(client):
+def admin_headers(client):
+    """Authorization header for the seeded administrator.
+
+    This replaced a module-level `{"X-Admin-Key": ...}` constant, and the change is the
+    point rather than an inconvenience: it can no longer be a constant, because the
+    credential is now a real account's access token that has to be obtained by logging in.
+    A test that reaches an admin route therefore proves the whole chain — the account was
+    seeded at startup, the password verifies, the token carries role=admin — instead of
+    proving that a string matched a string.
+    """
+    response = client.post(
+        "/v1/auth/login",
+        json={"username": BOOTSTRAP_ADMIN_USER, "password": BOOTSTRAP_ADMIN_PASSWORD},
+    )
+    assert response.status_code == 200, (
+        "the seeded administrator could not log in; "
+        f"the admin routes are unreachable for this test ({response.text})"
+    )
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture()
+def parent(client, admin_headers):
     """A parent account, created and bound — the normal end state of onboarding."""
     client.post(
         "/v1/admin/accounts",
-        headers=ADMIN_HEADERS,
+        headers=admin_headers,
         json={"username": "0501234567", "password": "correct-horse-battery", "display_name": "Umm Layla"},
     )
     client.put(
         "/v1/admin/accounts/0501234567/guardian-binding",
-        headers=ADMIN_HEADERS,
+        headers=admin_headers,
         json={"guardian_external_id": "G-1"},
     )
     return {"username": "0501234567", "password": "correct-horse-battery"}
 
 
 @pytest.fixture()
-def unbound_parent(client):
+def unbound_parent(client, admin_headers):
     """Created but not yet bound — the safe half-finished state of a bulk import."""
     client.post(
         "/v1/admin/accounts",
-        headers=ADMIN_HEADERS,
+        headers=admin_headers,
         json={"username": "0509999999", "password": "correct-horse-battery"},
     )
     return {"username": "0509999999", "password": "correct-horse-battery"}

@@ -15,7 +15,6 @@ from identity.config import settings
 from identity.infrastructure.crypto.passwords import PBKDF2_PREFIX, Pbkdf2PasswordHasher
 from identity.infrastructure.db.models import Account
 from identity.infrastructure.db.session import new_session
-from tests.identity.conftest import ADMIN_HEADERS, use_setting
 
 PASSWORD = "correct-horse-battery"
 
@@ -186,73 +185,83 @@ def test_import_does_not_promote_an_unknown_role(client, db):
 
 
 # ---------------------------------------------------------------------------
-# Self-registration, ported from the old backend
+# Self-registration, removed
 # ---------------------------------------------------------------------------
+#
+# `/v1/auth/register` used to be here, ported from the old chat backend. It let anyone
+# create a login, and — holding the right invite code — an ADMINISTRATOR login, from the
+# public internet. The argument for leaving it open was that the worst a stranger got was a
+# chat account, because a guardian binding is a separate admin-only write.
+#
+# That argument no longer holds, because the estate no longer has a shared admin key: an
+# administrator is now exactly an account with role=admin, so a route that can mint one is a
+# route that can mint a way into every parent's records. Accounts are created through
+# `/v1/admin/accounts` by somebody who is already an administrator, and the first
+# administrator is seeded from configuration on every boot.
+#
+# The tests that covered registration's rules went with it. What replaces them is the pair
+# below: the door is shut, and the replacement door works.
 
 
-def test_registration_creates_an_ordinary_user(client):
-    response = client.post(
-        "/v1/auth/register", json={"username": "newcomer", "password": PASSWORD}
-    )
-    assert response.status_code == 201
-    assert response.json()["role"] == "user"
-    assert response.json()["username"] == "newcomer"
+def test_self_registration_is_gone(client):
+    """The route must be absent, not merely refusing.
 
-
-def test_registration_cannot_produce_a_parent(client):
-    """A parent role is paired with a guardian binding. Both are an admin's decision."""
-    response = client.post(
-        "/v1/auth/register",
-        json={"username": "pretend-parent", "password": PASSWORD, "role": "parent"},
-    )
-    assert response.status_code == 201
-    assert response.json()["role"] == "user"
-    assert response.json()["guardian_id"] is None
-
-
-def test_registration_as_admin_requires_the_invite_code(client, monkeypatch):
-    use_setting(monkeypatch, "IDENTITY_ADMIN_INVITE_CODE", "the-secret-code")
-
-    ok = client.post(
-        "/v1/auth/register",
-        json={"username": "real-admin", "password": PASSWORD, "role": "admin", "admin_code": "the-secret-code"},
-    )
-    assert ok.status_code == 201
-    assert ok.json()["role"] == "admin"
-
-
-def test_a_wrong_invite_code_is_refused_not_downgraded(client, monkeypatch):
-    """The old backend silently handed out a plain account on a mistyped code.
-
-    An operator then gets an ordinary login, no explanation, and files a bug against
-    the wrong system.
+    A route that still exists and answers 403 is one config flag away from answering 201
+    again, and it keeps a shape in the OpenAPI document that a client will be written
+    against.
     """
-    use_setting(monkeypatch, "IDENTITY_ADMIN_INVITE_CODE", "the-secret-code")
+    response = client.post(
+        "/v1/auth/register", json={"username": "stranger", "password": PASSWORD}
+    )
 
+    assert response.status_code == 404
+
+
+def test_the_openapi_document_no_longer_offers_it(client):
+    """A generated client must not carry a method for an endpoint that cannot work."""
+    paths = client.app.openapi()["paths"]
+
+    assert "/v1/auth/register" not in paths
+
+
+def test_nobody_can_self_promote_to_administrator(client):
+    """The reason this route was closed rather than left open for ordinary users.
+
+    With the shared admin key gone, role=admin IS the credential for the admin routes —
+    and those are the only way to bind a parent to a guardian. A public endpoint that could
+    grant that role would be a public endpoint that grants access to every family's marks.
+    """
     response = client.post(
         "/v1/auth/register",
-        json={"username": "nope", "password": PASSWORD, "role": "admin", "admin_code": "guess"},
+        json={
+            "username": "sneaky",
+            "password": PASSWORD,
+            "role": "admin",
+            "admin_code": "anything",
+        },
     )
-    assert response.status_code == 403
+
+    assert response.status_code == 404
 
 
-def test_admin_registration_is_impossible_when_no_code_is_configured(client, monkeypatch):
-    """Unset invite code must mean "no self-service admin", never "no check"."""
-    use_setting(monkeypatch, "IDENTITY_ADMIN_INVITE_CODE", "")
-
+def test_accounts_are_created_through_the_admin_route_instead(client, admin_headers):
+    """The replacement path, so this file proves a door was moved and not just shut."""
     response = client.post(
-        "/v1/auth/register",
-        json={"username": "sneaky", "password": PASSWORD, "role": "admin", "admin_code": "anything"},
+        "/v1/admin/accounts",
+        headers=admin_headers,
+        json={"username": "newcomer", "password": PASSWORD},
     )
-    assert response.status_code == 403
+
+    assert response.status_code == 201
+    assert client.post(
+        "/v1/auth/login", json={"username": "newcomer", "password": PASSWORD}
+    ).status_code == 200
 
 
-def test_registration_rejects_a_duplicate_username(client):
-    client.post("/v1/auth/register", json={"username": "dup", "password": PASSWORD})
-    again = client.post("/v1/auth/register", json={"username": "dup", "password": PASSWORD})
-    assert again.status_code == 409
+def test_creating_an_account_still_requires_being_an_administrator(client):
+    """Closing registration is worthless if the replacement is open."""
+    response = client.post(
+        "/v1/admin/accounts", json={"username": "stranger", "password": PASSWORD}
+    )
 
-
-def test_registration_rejects_empty_credentials(client):
-    response = client.post("/v1/auth/register", json={"username": "  ", "password": "  "})
-    assert response.status_code == 400
+    assert response.status_code == 401
