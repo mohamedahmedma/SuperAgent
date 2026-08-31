@@ -44,6 +44,7 @@ import { onBeforeUnmount, ref, watch } from 'vue';
 
 import { useAuthStore } from '../../stores/auth';
 import type { AssetReference } from '../../types/chat';
+import { apiUrl } from '../../utils/api';
 
 const props = defineProps<{ assets?: AssetReference[] }>();
 
@@ -73,7 +74,13 @@ const load = async (asset: AssetReference) => {
   }
 
   try {
-    const response = await fetch(asset.url, {
+    /* `asset.url` arrives as a path — `/media/{asset_id}`, built by
+       `backend/assets/delivery.py` — so a bare `fetch` resolves it against the PAGE's
+       origin. On a UI deployed to its own domain that is a request to the static server,
+       and every image renders as "Image unavailable" while the answer's text arrives
+       perfectly. `apiUrl` sends it where the rest of the API goes, and passes an absolute
+       URL through untouched should the backend ever emit one. */
+    const response = await fetch(apiUrl(asset.url), {
       headers: { Authorization: `Bearer ${authStore.token}` },
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
