@@ -32,6 +32,22 @@ logger = logging.getLogger(__name__)
 #: How long a fetched JWKS is reused before another fetch is attempted.
 DEFAULT_JWKS_TTL_SECONDS = 600
 
+#: What a token says about who minted it, and who it is for, when a deployment does not
+#: say. Named here because THREE services and the minter must agree on them, and until
+#: this constant existed each of the four carried its own copy of the literal.
+#:
+#: Four copies that agree look harmless. The failure is what happens when one deployment
+#: sets IDENTITY_ISSUER on the identity service and not on the backend: identity mints
+#: `iss: acme-school`, the backend still expects `school-identity`, and every request in
+#: the estate comes back 401. Nothing in that 401 mentions the issuer, so it reads exactly
+#: like a broken signing key.
+#:
+#: This is a DEFAULT, not configuration. Each service still reads its own environment and
+#: is still free to expect something different — which is what lets one test process hold
+#: two services that legitimately disagree. See `IdentityConfig`.
+DEFAULT_ISSUER = "school-identity"
+DEFAULT_AUDIENCE = "school-services"
+
 #: The JWKS fetch is one small GET of a public document. Short, because a request is
 #: usually waiting on it, and a slow answer is worse than a fast refusal it can act on.
 _FETCH_TIMEOUT_SECONDS = 5.0
