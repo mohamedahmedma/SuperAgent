@@ -108,8 +108,21 @@ class Settings:
     pbkdf2_rounds: int
     max_failed_attempts: int
     lockout_minutes: int
-    admin_key: str
-    admin_invite_code: str
+
+    # -- the seeded administrator -------------------------------------------
+    #: Username and password of the administrator this service guarantees exists.
+    #:
+    #: Seeded on EVERY startup rather than by a migration, because a migration runs once
+    #: per version and the requirement is stronger than that: the account must be there
+    #: however the database arrived — fresh, upgraded, restored from a backup, or with the
+    #: row deleted by accident. `init_db()` already runs every boot and says it is safe to;
+    #: the seed rides along with it.
+    #:
+    #: Seeding NEVER overwrites an existing username, so a password changed through the
+    #: admin routes is not reset on the next restart. That rule is copied deliberately from
+    #: `import_legacy_accounts.py`, which had to answer the same question.
+    bootstrap_admin_user: str
+    bootstrap_admin_password: str
 
     # -- WhatsApp -----------------------------------------------------------
     whatsapp_number: str
@@ -236,8 +249,8 @@ def settings() -> Settings:
         private_key_file=env_value("IDENTITY_PRIVATE_KEY_FILE"),
         dev_key_file=env_value("IDENTITY_DEV_KEY_FILE") or "./identity-dev-key.pem",
         # Defaults from `schoolauth`, the package every verifier in the estate compiles
-        # in. This service MINTS with them, so a literal here drifting from the
-        # verifiers' is the one version of this bug that breaks everything at once.
+        # in. This service MINTS with them, so a literal here drifting from the verifiers'
+        # is the one version of this bug that breaks everything at once.
         issuer=env_value("IDENTITY_ISSUER") or DEFAULT_ISSUER,
         audience=env_value("IDENTITY_AUDIENCE") or DEFAULT_AUDIENCE,
         access_ttl_minutes=_int_env("IDENTITY_ACCESS_TTL_MINUTES", _DEFAULT_ACCESS_TTL_MINUTES),
@@ -247,8 +260,8 @@ def settings() -> Settings:
             "IDENTITY_MAX_FAILED_ATTEMPTS", _DEFAULT_MAX_FAILED_ATTEMPTS
         ),
         lockout_minutes=_int_env("IDENTITY_LOCKOUT_MINUTES", _DEFAULT_LOCKOUT_MINUTES),
-        admin_key=env_value("IDENTITY_ADMIN_KEY"),
-        admin_invite_code=env_value("IDENTITY_ADMIN_INVITE_CODE"),
+        bootstrap_admin_user=env_value("IDENTITY_BOOTSTRAP_ADMIN_USER"),
+        bootstrap_admin_password=env_value("IDENTITY_BOOTSTRAP_ADMIN_PASSWORD"),
         whatsapp_number=env_value("IDENTITY_WHATSAPP_NUMBER"),
         whatsapp_phone_number_id=env_value("IDENTITY_WHATSAPP_PHONE_NUMBER_ID"),
         whatsapp_token=env_value("IDENTITY_WHATSAPP_TOKEN"),
