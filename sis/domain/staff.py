@@ -35,6 +35,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Final
+from enum import StrEnum
 
 from sis.domain.errors import ValidationError
 
@@ -51,6 +52,13 @@ USERNAME_MAX_LENGTH: Final[int] = 64
 # The shortest password this service will store. Stated as a constant so the seed, the
 # API schema and the change-password route cannot disagree about it.
 PASSWORD_MIN_LENGTH: Final[int] = 8
+
+
+class StaffAttendanceState(StrEnum):
+    PRESENT = "present"
+    ABSENT = "absent"
+    LATE = "late"
+    LEAVE = "leave"
 
 
 @dataclass(frozen=True, slots=True)

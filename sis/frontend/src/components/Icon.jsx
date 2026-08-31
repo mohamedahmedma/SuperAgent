@@ -40,7 +40,10 @@ const PATHS = {
   droplet: 'M12 3.2 6.8 8.4a7.3 7.3 0 1 0 10.4 0L12 3.2z',
   /* Points down; the dropdown rotates it 180deg when the menu is open, so one glyph does both
      states and they cannot drift apart. */
-  chevron: 'm6 9 6 6 6-6'
+  chevron: 'm6 9 6 6 6-6',
+  /* A door with an arrow leaving it. The arrow points out of the frame rather than into it,
+     which is the only thing separating "sign out" from "sign in" at 16px. */
+  signout: 'M9 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h4M16 17l5-5-5-5M21 12H9'
 };
 
 export function Icon({ name, size = 16, weight = 1.7 }) {

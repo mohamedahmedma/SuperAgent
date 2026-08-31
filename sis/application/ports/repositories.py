@@ -39,6 +39,7 @@ takes `SubjectCode`, so the parsing failure surfaces at the boundary where the c
 read rather than as an empty result three layers down.
 """
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol
 
@@ -50,6 +51,7 @@ from sis.domain.guardians import Guardian, StudentGuardian
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import ClassEnrolment, Student
 from sis.domain.structure import (
+    AcademicTrack,
     AcademicYear,
     ClassSection,
     School,
@@ -57,6 +59,8 @@ from sis.domain.structure import (
     Term,
     YearLevel,
 )
+from sis.domain.timetable import TimetableEntry, TimetablePeriod, TimetableSlot
+from sis.domain.staff import Teacher
 from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,
@@ -80,6 +84,20 @@ type GradeKey = tuple[str, str, str]
 # of the key: a child who returns to 3A after a term in 3B has two placements in that
 # class, and they are different facts, not a duplicate.
 type EnrolmentKey = tuple[str, str, str, date]
+
+@dataclass(frozen=True, slots=True)
+class GradeSubjects:
+    """One rung and the subjects assigned to it — a read projection, not an entity.
+
+    The track code rides along because every consumer of this list groups by it. It is
+    the rung's own track, read through `year_levels.educational_system_id`: an assignment
+    row has no track column of its own, and giving it one would let the two disagree.
+    """
+
+    year_level_code: str
+    track_code: str | None
+    subjects: Sequence[Subject]
+
 
 # `(student_number, guardian_phone)` — `StudentGuardian.identity`. No date in this key,
 # unlike `EnrolmentKey`: one adult holds one relationship to one child at a time, so a
@@ -107,6 +125,75 @@ class SchoolRepository(Protocol):
 
     def upsert_many(self, schools: Sequence[School]) -> Mapping[str, bool]:
         """Insert or update by code; `True` marks the ones this call created."""
+
+    def sync_tracks(self, school: School) -> None:
+        """Ensure active tracks match the school's selected language type."""
+
+
+@dataclass(frozen=True, slots=True)
+class TeacherTeachingAssignment:
+    """One valid subject/grade assignment, with optional concrete classes."""
+
+    academic_year_code: str
+    subject_code: str
+    year_level_code: str
+    track_code: str | None
+    class_codes: Sequence[str] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TeacherRecord:
+    teacher: Teacher
+    school_code: str
+    username: str | None
+    email: str
+    phone: str
+    assignments: Sequence[TeacherTeachingAssignment]
+
+
+class TeacherRepository(Protocol):
+    """Teaching staff, their optional login, and their teaching scope."""
+
+    def list_for_school(
+        self, school_code: SchoolCode, *, year_level_code: YearCode | None = None
+    ) -> Sequence[TeacherRecord]:
+        """The school's teachers, or only those teaching on one grade.
+
+        `year_level_code` narrows the record as well as the list: each returned teacher
+        carries only their assignments on that grade. It is what a grade-scoped
+        supervisor reads, and the filtering belongs here rather than in the caller so
+        that no route can forget half of it.
+        """
+
+    def get(
+        self,
+        school_code: SchoolCode,
+        staff_number: str,
+        *,
+        year_level_code: YearCode | None = None,
+    ) -> TeacherRecord | None:
+        """One teacher, or `None`. With a grade named, `None` unless they teach on it."""
+
+    def save(
+        self,
+        *,
+        school_code: SchoolCode,
+        staff_number: str,
+        full_name_en: str,
+        full_name_ar: str,
+        email: str,
+        phone: str,
+        is_active: bool,
+        username: str | None,
+        password_hash: str | None,
+        assignments: Sequence[
+            tuple[AcademicYearCode, SubjectCode, YearCode, Sequence[ClassCode]]
+        ],
+        assigned_by: str,
+    ) -> TeacherRecord: ...
+
+    def list_tracks(self, school_code: SchoolCode) -> Sequence[AcademicTrack]:
+        """The school's active academic tracks, in display order."""
 
 
 class AttendanceRepository(Protocol):
@@ -276,7 +363,12 @@ class ClassSectionRepository(Protocol):
 
 
 class TermRepository(Protocol):
-    """Terms of an academic year, each a closed date range."""
+    """Terms of an academic year.
+
+    A term's dates are optional (revision 0011): a school states how many terms it runs
+    before it has decided when they run, so `starts_on` and `ends_on` may both be `None`.
+    `sequence` is what orders them, and always was.
+    """
 
     def get(self, code: TermCode) -> Term | None:
         """The term, or `None`."""
@@ -292,6 +384,77 @@ class TermRepository(Protocol):
 
     def set_closed(self, code: TermCode, *, is_closed: bool) -> Term:
         """Freeze or reopen a term; writes against a closed one are refused upstream."""
+
+    def delete_if_unused(self, code: TermCode) -> bool:
+        """Delete the term only if nothing is stated against it; `True` when deleted.
+
+        The guard is the method. A school dropping from three terms to two must not take a
+        term of marks with it, so "is it safe" and "delete it" cannot be two calls with a
+        gap between them — another registrar's upload lands in that gap. One statement,
+        conditional on the absence of grades, and the answer says which happened.
+
+        A term that is in use is left exactly as it was and reported as `False`. That is a
+        normal outcome, not a failure: the year genuinely still has that term.
+        """
+
+
+class TimetableRepository(Protocol):
+    """The weekly plan: a school's periods, and one lesson per class per slot.
+
+    One repository rather than two because the two tables are never asked about
+    separately — every read of a timetable needs the period grid to draw it against, and
+    every write of a lesson has to know the period exists. Splitting them would mean two
+    repositories that no caller ever uses alone.
+
+    Nothing here reads or writes attendance. A timetable is a plan; the register is a
+    record, and this stage deliberately connects neither to the other.
+    """
+
+    def list_periods(self, school_code: SchoolCode) -> Sequence[TimetablePeriod]:
+        """The school's day, in period order. Empty until a school lays one out."""
+
+    def replace_periods(
+        self, school_code: SchoolCode, periods: Sequence[TimetablePeriod]
+    ) -> Sequence[TimetablePeriod]:
+        """Set the school's whole day at once, returning it as stored.
+
+        Whole-grid rather than per-period upsert, because "we run seven periods, not
+        eight" is one decision and applying it as an upsert plus a guessed delete is how
+        period 8 survives on some schools and not others. Removing a period that lessons
+        are timetabled into is refused — see `DomainRuleViolation` from the service.
+        """
+
+    def list_entries(
+        self,
+        academic_year_code: AcademicYearCode,
+        *,
+        class_code: ClassCode | None = None,
+        term_code: TermCode | None = None,
+        year_level_code: YearCode | None = None,
+    ) -> Sequence[TimetableEntry]:
+        """The year's lessons, narrowed to one class, one term and/or one grade.
+
+        Ordered by class, then day, then period — the order a grid is read in, so a caller
+        can lay one out without sorting. Days sort by the school's own week rather than
+        alphabetically; that ordering is applied by the caller that knows the school.
+        """
+
+    def upsert_entries(self, entries: Sequence[TimetableEntry]) -> Mapping[tuple, bool]:
+        """Insert or update by slot; `True` marks the ones this call created.
+
+        Keyed by `TimetableSlot.key`, because the slot *is* the identity: re-posting
+        Sunday period 2 for 3A replaces what was there rather than adding a second lesson
+        at the same moment. That is what makes laying out a grid idempotent, and it is the
+        same property `uq_timetable_entries_slot` holds in the database.
+        """
+
+    def delete_entries(self, slots: Sequence[TimetableSlot]) -> int:
+        """Clear these slots; the number of lessons actually removed.
+
+        Clearing a slot is not the same as scheduling nothing into it. A row with no
+        subject is a stated free period; no row at all is a slot nobody has planned. Both
+        are reachable, and a caller has to be able to say which it means.
+        """
 
 
 class SubjectRepository(Protocol):
@@ -319,9 +482,19 @@ class SubjectRepository(Protocol):
         """
 
     def list_for_year(
-        self, academic_year_code: AcademicYearCode, *, include_inactive: bool = False
+        self,
+        academic_year_code: AcademicYearCode,
+        *,
+        include_inactive: bool = False,
+        year_level_code: YearCode | None = None,
     ) -> Sequence[Subject]:
-        """The year's subjects in `display_order`; retired ones only when asked for."""
+        """The year's subjects in `display_order`; retired ones only when asked for.
+
+        Naming a rung narrows the answer to the subjects assigned to it. That is a
+        genuinely different question from "the year's catalogue": a school teaches
+        Physics, but only Secondary sits it, and a Primary marks sheet offering it is
+        how a mark ends up filed against a subject that rung never taught.
+        """
 
     def upsert_many(self, subjects: Sequence[Subject]) -> Mapping[str, bool]:
         """Insert or update by `(academic_year_code, code)`; `True` marks the new ones.
@@ -329,6 +502,45 @@ class SubjectRepository(Protocol):
         Keyed in the returned mapping by code alone, which is unambiguous because a single
         call is not expected to span years — and the service that writes one subject at a
         time is the only caller.
+        """
+
+    def assignments_for_year(
+        self, academic_year_code: AcademicYearCode
+    ) -> Sequence[GradeSubjects]:
+        """Every assignment in the year, keyed by the rung code that carries it.
+
+        Rungs belong to one academic track, so the Arabic and Languages sections of a
+        bilingual school appear here as separate keys with separate subject lists —
+        which is the whole of "separate assignments per track" in this schema.
+        """
+
+    def assign_to_level(
+        self,
+        code: SubjectCode,
+        academic_year_code: AcademicYearCode,
+        school_code: SchoolCode,
+        year_level_code: YearCode,
+    ) -> bool:
+        """Assign once; `True` only when this call inserted a new association.
+
+        Idempotent by design and by constraint: `uq_subject_year_levels_assignment` makes
+        a duplicate impossible in the database, and re-assigning an already-assigned
+        subject answers `False` rather than raising, so a double drop on the board is a
+        no-op rather than an error a registrar has to read.
+        """
+
+    def unassign_from_level(
+        self,
+        code: SubjectCode,
+        academic_year_code: AcademicYearCode,
+        school_code: SchoolCode,
+        year_level_code: YearCode,
+    ) -> None:
+        """Remove the association only.
+
+        The subject row and every mark stated against it survive: un-assigning is a
+        statement about next term's timetable, not a retraction of a mark a child was
+        awarded. Retiring the subject itself remains `is_active=False`.
         """
 
 

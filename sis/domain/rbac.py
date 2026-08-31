@@ -72,6 +72,11 @@ class Permission(StrEnum):
     TEACHERS_ASSIGN_SUBJECTS = "teachers.assign_subjects"
     # Which rooms that teacher stands in. The year supervisor's decision.
     TEACHERS_ASSIGN_CLASSES = "teachers.assign_classes"
+    TEACHER_ATTENDANCE_READ = "teacher_attendance.read"
+    TEACHER_ATTENDANCE_WRITE = "teacher_attendance.write"
+
+    TIMETABLE_READ = "timetable.read"
+    TIMETABLE_WRITE = "timetable.write"
 
     ATTENDANCE_READ = "attendance.read"
     ATTENDANCE_WRITE = "attendance.write"
@@ -98,12 +103,53 @@ class ScopeType(StrEnum):
     GLOBAL = "global"
     # One school, all of it.
     SCHOOL = "school"
+    # One academic stream within a school, such as Arabic or Languages.
+    TRACK = "track"
     # One rung of the ladder — "Grade 4" — across every class on it.
     YEAR_LEVEL = "year_level"
     # One classroom.
     CLASS_SECTION = "class_section"
     # One subject, within whatever else bounds the grant.
     SUBJECT = "subject"
+
+
+@dataclass(frozen=True, slots=True)
+class ScopeDescriptor:
+    """One rung of the scope ladder, described well enough to draw a picker from.
+
+    The names a school reads are here rather than in the console, because the console is
+    not the only client — the OpenAPI page, an administration script and a future mobile
+    app all need to say "Grade" for `year_level` and must not each invent their own word
+    for it.
+
+    `names_a` is the noun whose id goes in `scope_id`. It is what turns "pick a scope" into
+    two questions a person can answer: which *kind* of thing, then which one.
+    """
+
+    type: ScopeType
+    name_en: str
+    name_ar: str
+    #: Which table `scope_id` points into. Empty for `global`, which points at nothing.
+    names_a: str
+    #: Widest first. A scope covers every scope with a larger depth that sits under it.
+    depth: int
+
+
+SCOPE_CATALOGUE: Final[tuple[ScopeDescriptor, ...]] = (
+    ScopeDescriptor(ScopeType.GLOBAL, "System", "النظام", "", 0),
+    ScopeDescriptor(ScopeType.SCHOOL, "School", "المدرسة", "school", 1),
+    ScopeDescriptor(ScopeType.TRACK, "Track", "المسار", "educational_system", 2),
+    ScopeDescriptor(ScopeType.YEAR_LEVEL, "Grade", "الصف", "year_level", 3),
+    ScopeDescriptor(ScopeType.CLASS_SECTION, "Class", "الفصل", "class_section", 4),
+    # Deliberately last and not a rung of the ladder: a subject cuts *across* the ladder
+    # rather than sitting on it, so a subject-scoped grant narrows whatever else bounds it
+    # instead of nesting inside a class.
+    ScopeDescriptor(ScopeType.SUBJECT, "Subject", "المادة", "subject", 5),
+)
+
+SCOPE_BY_TYPE: Final[dict[ScopeType, ScopeDescriptor]] = {
+    descriptor.type: descriptor for descriptor in SCOPE_CATALOGUE
+}
 
 
 class RoleCode(StrEnum):
@@ -119,9 +165,46 @@ class RoleCode(StrEnum):
     SCHOOL_OWNER = "school_owner"
     PRINCIPAL = "principal"
     YEAR_SUPERVISOR = "year_supervisor"
+    # Public Stage-9 terminology; kept as an alias so existing grants remain valid.
+    GRADE_SUPERVISOR = "year_supervisor"
     ATTENDANCE_SUPERVISOR = "attendance_supervisor"
     TEACHER = "teacher"
     SUBJECT_COORDINATOR = "subject_coordinator"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "RoleCode | None":
+        """Accept the spellings a person uses for a role this table stores once.
+
+        The same rung of a school has two names in ordinary speech — a *grade* supervisor
+        and a *year* supervisor are one job, and "school manager" and "principal" are one
+        person. Storing both would be two role rows that drift apart the first time
+        somebody edits one of them, so there is one row and this maps the other spellings
+        onto it.
+
+        The mapping is one-way on purpose: `user_roles` only ever holds the stored code, so
+        a grant made as `grade_supervisor` and a grant made as `year_supervisor` are the
+        same row and revoking either revokes both.
+        """
+        if not isinstance(value, str):
+            return None
+        return _ROLE_CODE_ALIASES.get(value.strip().lower().replace("-", "_"))
+
+
+#: Spellings accepted on input that are not themselves stored. Read by `_missing_` above,
+#: and echoed by the role catalogue so a client can show a school its own vocabulary.
+_ROLE_CODE_ALIASES: Final[dict[str, RoleCode]] = {
+    "grade_supervisor": RoleCode.YEAR_SUPERVISOR,
+    "academic_year_supervisor": RoleCode.YEAR_SUPERVISOR,
+    "school_manager": RoleCode.PRINCIPAL,
+    "manager": RoleCode.PRINCIPAL,
+    "owner": RoleCode.SCHOOL_OWNER,
+    "admin": RoleCode.SYSTEM_ADMIN,
+    "system_administrator": RoleCode.SYSTEM_ADMIN,
+}
+
+ROLE_CODE_ALIASES: Final[dict[str, str]] = {
+    spelling: role.value for spelling, role in _ROLE_CODE_ALIASES.items()
+}
 
 
 # The read half of the catalogue, shared by every role that looks and does not touch.
@@ -135,6 +218,8 @@ _READS: Final[tuple[Permission, ...]] = (
     Permission.STRUCTURE_READ,
     Permission.STUDENTS_READ,
     Permission.TEACHERS_READ,
+    Permission.TEACHER_ATTENDANCE_READ,
+    Permission.TIMETABLE_READ,
     Permission.ATTENDANCE_READ,
     Permission.GRADES_READ,
     Permission.GUARDIANS_READ,
@@ -178,19 +263,33 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
     ),
     RoleDefinition(
         code=RoleCode.PRINCIPAL,
-        name_en="School Principal",
+        name_en="School Manager / Principal",
         name_ar="مدير المدرسة",
         description_en=(
-            "Sees everything in their own school, and decides what each teacher teaches "
-            "and on which rungs."
+            "Reads general information and teacher attendance in one school, and adds "
+            "approved teaching and supervisor roles. Changes no ordinary school data."
         ),
         default_scope=ScopeType.SCHOOL,
+        # Everything in the school, and nothing of the estate. The two system permissions
+        # are the whole of the difference between this role and System Administrator, and
+        # they are what stops a principal promoting themselves — see `_authorised_to_grant`
+        # in the access router, which refuses to grant a role carrying a permission the
+        # granter does not already hold.
+        #
+        # The writes are here rather than only on the narrower roles because a principal
+        # who may appoint a teacher but may not correct a mark cannot appoint one: they
+        # would be handing out authority they do not have, which is exactly what that
+        # guard exists to refuse. Delegating a subset of your own authority is the
+        # operation this role performs, so the subset has to be a subset.
         permissions=(
-            *_READS,
+            Permission.SCHOOLS_READ,
+            Permission.STRUCTURE_READ,
+            Permission.TEACHERS_READ,
+            Permission.TEACHERS_ASSIGN_SUBJECTS,
+            Permission.TIMETABLE_READ,
+            Permission.TEACHER_ATTENDANCE_READ,
             Permission.USERS_READ,
             Permission.ROLES_ASSIGN,
-            Permission.TEACHERS_ASSIGN_SUBJECTS,
-            Permission.AUDIT_READ,
         ),
     ),
     RoleDefinition(
@@ -203,7 +302,13 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
         ),
         default_scope=ScopeType.YEAR_LEVEL,
         permissions=(
-            *_READS,
+            Permission.STRUCTURE_READ,
+            Permission.STUDENTS_READ,
+            Permission.TEACHERS_READ,
+            Permission.TIMETABLE_READ,
+            Permission.ATTENDANCE_READ,
+            Permission.GRADES_READ,
+            Permission.REPORTS_READ,
             Permission.TEACHERS_ASSIGN_CLASSES,
         ),
     ),
@@ -217,6 +322,7 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.STRUCTURE_READ,
             Permission.STUDENTS_READ,
             Permission.ATTENDANCE_READ,
+            Permission.TIMETABLE_READ,
             Permission.ATTENDANCE_WRITE,
         ),
     ),
@@ -292,6 +398,8 @@ class Scope:
             return True
         if self.type is ScopeType.SCHOOL:
             return target.school_id is not None and target.school_id == self.id
+        if self.type is ScopeType.TRACK:
+            return target.track_id is not None and target.track_id == self.id
         if self.type is ScopeType.YEAR_LEVEL:
             return target.year_level_id is not None and target.year_level_id == self.id
         if self.type is ScopeType.CLASS_SECTION:
@@ -319,6 +427,7 @@ class Target:
     """
 
     school_id: int | None = None
+    track_id: int | None = None
     year_level_id: int | None = None
     class_section_id: int | None = None
     subject_id: int | None = None
@@ -327,6 +436,7 @@ class Target:
     def is_unlocated(self) -> bool:
         return (
             self.school_id is None
+            and self.track_id is None
             and self.year_level_id is None
             and self.class_section_id is None
             and self.subject_id is None
@@ -391,6 +501,38 @@ class AccessProfile:
         self, permissions: Iterable[Permission], target: "Target" = ANYWHERE
     ) -> bool:
         return any(self.allows(permission, target) for permission in permissions)
+
+    def holds(self, permission: Permission) -> bool:
+        """Whether the user has this permission *at all*, at any scope.
+
+        Distinct from `allows(permission)` and the difference is the whole reason this
+        method exists. `allows` with no target asks "may you do this everywhere", which
+        only a global grant satisfies — so a teacher who holds `grades.write` on one
+        classroom fails it, and a route that gated on it would refuse every teacher in the
+        school while looking like it was checking the right thing.
+
+        This is the question a route gate asks: is it worth letting this request reach the
+        handler at all. The handler then narrows with the ids it knows, through `allows`
+        and a fully-named `Target`. Two checks rather than one, because the wide one can be
+        answered before any database work and the narrow one cannot.
+        """
+        return any(grant.permission is permission for grant in self.grants)
+
+    def widest_scope_for(self, permission: Permission) -> ScopeType | None:
+        """The least-bounded scope this permission is held at, or `None`.
+
+        Lets a caller skip resolving a target it is about to not need: a school-wide grant
+        answers a question about any class in the school without anybody having to look up
+        which rung that class is on.
+        """
+        depths = [
+            SCOPE_BY_TYPE[grant.scope.type].depth
+            for grant in self.grants
+            if grant.permission is permission
+        ]
+        if not depths:
+            return None
+        return SCOPE_CATALOGUE[min(depths)].type
 
     def has_role(self, role_code: str) -> bool:
         return any(assignment.role_code == role_code for assignment in self.assignments)
@@ -504,10 +646,14 @@ __all__ = [
     "Grant",
     "Permission",
     "ROLE_BY_CODE",
+    "ROLE_CODE_ALIASES",
     "RoleAssignment",
     "RoleCode",
     "RoleDefinition",
+    "SCOPE_BY_TYPE",
+    "SCOPE_CATALOGUE",
     "Scope",
+    "ScopeDescriptor",
     "ScopeType",
     "SystemStatus",
     "Target",

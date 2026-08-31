@@ -20,6 +20,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Query, Response, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from sis.api.deps import (
     Caller,
@@ -28,20 +29,25 @@ from sis.api.deps import (
     get_student_desk,
     require_read_access,
     require_registrar,
+    Principal,
+    require_permission,
+    UowFactoryDep,
 )
+from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services import QueryService
 from sis.application.services.queries import ClassRosterEntry
 from sis.domain.errors import UnknownReference
 from sis.domain.people import ClassEnrolment, Gender, Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
+from sis.infrastructure.db import models as m
 
 router = APIRouter(prefix="/v1", tags=["students"])
 
 # Both scopes, spelled out: scope comparison is exact equality, so a reader-only check
 # would refuse the registrar reading her own register.
-Reader = Annotated[Caller, Depends(require_read_access)]
-Registrar = Annotated[Caller, Depends(require_registrar)]
+Reader = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_READ))]
+Registrar = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_WRITE))]
 Queries = Annotated[QueryService, Depends(get_query_service)]
 Desk = Annotated[StudentDesk, Depends(get_student_desk)]
 
@@ -106,6 +112,12 @@ def read_class_roster(
         Query(description="The day to answer for. Defaults to today, echoed as `as_of`."),
     ] = None,
 ) -> ClassRosterOut:
+    caller.narrow(
+        Permission.STUDENTS_READ,
+        lambda scopes: scopes.for_class(
+            academic_year_code=academic_year, class_code=class_code
+        ),
+    )
     on_date = on or datetime.now(UTC).date()
     with domain_errors():
         entries = queries.class_roster(
@@ -304,12 +316,43 @@ class PlacementHistoryOut(BaseModel):
 def search_students(
     queries: Queries,
     caller: Reader,
+    uow_factory: UowFactoryDep,
     q: Annotated[str, Query(description="Number or part of a name.", examples=["ahmed"])] = "",
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     include_inactive: bool = False,
+    academic_year: Annotated[str | None, Query()] = None,
+    year_level: Annotated[str | None, Query()] = None,
 ) -> StudentSearchOut:
+    if academic_year and year_level:
+        caller.narrow(
+            Permission.STUDENTS_READ,
+            lambda scopes: scopes.for_year_level(
+                school_id=caller.school_id, year_level_code=year_level
+            ),
+        )
+    else:
+        caller.narrow(
+            Permission.STUDENTS_READ,
+            lambda scopes: scopes.for_year(academic_year),
+        )
     with domain_errors():
         found = queries.search_students(q, limit=limit, include_inactive=include_inactive)
+    if academic_year and year_level and found:
+        numbers = [str(student.student_number) for student in found]
+        with uow_factory() as uow:
+            allowed = set(uow._session.scalars(
+                select(m.Student.student_number)
+                .join(m.ClassEnrolment)
+                .join(m.ClassSection)
+                .join(m.AcademicYear)
+                .join(m.YearLevel, m.ClassSection.year_level_id == m.YearLevel.id)
+                .where(
+                    m.Student.student_number.in_(numbers),
+                    m.AcademicYear.code == academic_year,
+                    m.YearLevel.code == year_level,
+                )
+            ).all())
+        found = [student for student in found if str(student.student_number) in allowed]
     return StudentSearchOut(
         query=q, count=len(found), students=[StudentOut.of(s) for s in found]
     )
@@ -324,7 +367,16 @@ def search_students(
     "field to read. Ask `/students/{student_number}/placements` for the history.",
     responses=error_responses(401, 403, 404, 422),
 )
-def read_student(student_number: str, queries: Queries, caller: Reader) -> StudentOut:
+def read_student(
+    student_number: str, queries: Queries, caller: Reader,
+    academic_year: Annotated[str | None, Query()] = None,
+) -> StudentOut:
+    caller.narrow(
+        Permission.STUDENTS_READ,
+        lambda scopes: scopes.for_student(
+            academic_year_code=academic_year or "", student_number=student_number
+        ),
+    )
     with domain_errors():
         student = queries.get_student(StudentNumber(student_number))
     return StudentOut.of(student)
@@ -419,6 +471,14 @@ def read_student_placements(
 ) -> PlacementHistoryOut:
     with domain_errors():
         placements = queries.student_placements(StudentNumber(student_number))
+    caller.narrow_all(
+        Permission.STUDENTS_READ,
+        lambda scopes: (
+            scopes.for_class(
+                academic_year_code=str(row.academic_year_code), class_code=str(row.class_code)
+            ) for row in placements
+        ),
+    )
     return PlacementHistoryOut(
         student_number=student_number,
         count=len(placements),

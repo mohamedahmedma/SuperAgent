@@ -199,6 +199,85 @@ def test_school_creation_stores_stage_two_configuration(
     assert body["working_days"] == ["sunday", "monday", "wednesday"]
 
 
+def test_bilingual_school_has_two_independent_academic_tracks(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    created = client.post(
+        "/v1/schools",
+        json={
+            "code": "DUAL",
+            "name_en": "Dual Track School",
+            "name_ar": "مدرسة بمسارين",
+            "language_type": "both",
+            "kg_grade_count": 0,
+            "primary_grade_count": 1,
+            "preparatory_grade_count": 0,
+            "secondary_grade_count": 0,
+            "term_count": 2,
+            "working_days": ["sunday"],
+        },
+        headers=registrar,
+    )
+    assert created.status_code == 201, created.text
+    tracks = client.get("/v1/schools/DUAL/tracks", headers=registrar).json()
+    assert [(track["code"], track["language_type"]) for track in tracks] == [
+        ("AR", "arabic"),
+        ("LANG", "languages"),
+    ]
+
+    for code, track in (("AR-P1", "AR"), ("LG-P1", "LANG")):
+        response = client.post(
+            "/v1/structure/levels",
+            json={
+                "code": code,
+                "school_code": "DUAL",
+                "track_code": track,
+                "name_en": code,
+                "name_ar": code,
+                "display_order": 1,
+                "stage": "primary",
+            },
+            headers=registrar,
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["track_code"] == track
+
+    levels = client.get("/v1/schools/DUAL/levels", headers=registrar).json()
+    assert {(level["code"], level["track_code"]) for level in levels} == {
+        ("AR-P1", "AR"),
+        ("LG-P1", "LANG"),
+    }
+
+
+def test_configured_grade_and_class_creation_uses_only_active_grades(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    client.post("/v1/schools", json={"code":"S4","name_en":"Stage Four","name_ar":"المرحلة الرابعة",
+        "language_type":"languages","kg_grade_count":2,"primary_grade_count":1,
+        "preparatory_grade_count":0,"secondary_grade_count":0,"term_count":2,
+        "working_days":["sunday"]}, headers=registrar)
+    client.post("/v1/academic-years", json={"code":"S4-2026","school_code":"S4",
+        "name_en":"2026","name_ar":"2026","starts_on":"2026-09-01","ends_on":"2027-06-30","is_current":False},
+        headers=registrar)
+    grades = client.get("/v1/schools/S4/tracks/LANG/configured-grades", headers=registrar).json()
+    assert [grade["code"] for grade in grades] == ["LANG-KG1", "LANG-KG2", "LANG-P1"]
+    made = client.post("/v1/structure/configured-classes", json={"academic_year_code":"S4-2026",
+        "track_code":"LANG","mode":"custom","classes_by_grade":{"LANG-KG1":1,"LANG-KG2":2,"LANG-P1":1},
+        "sequence":"alphabetic"}, headers=registrar)
+    assert made.status_code == 200, made.text
+    assert {row["code"] for row in made.json()} == {"LANG-KG1-A","LANG-KG2-A","LANG-KG2-B","LANG-P1-A"}
+    client.post("/v1/subjects", json={"code":"SCI","academic_year_code":"S4-2026",
+        "name_en":"Science","name_ar":"العلوم"}, headers=registrar)
+    assignment = {"academic_year_code":"S4-2026","subject_code":"SCI",
+        "year_level_code":"LANG-P1","assigned":True}
+    assert client.put("/v1/subject-assignments", json=assignment, headers=registrar).status_code == 204
+    assert client.put("/v1/subject-assignments", json=assignment, headers=registrar).status_code == 204
+    assigned = client.get("/v1/subject-assignments?academic_year=S4-2026", headers=registrar).json()
+    assert [(row["year_level_code"], [subject["code"] for subject in row["subjects"]]) for row in assigned] == [
+        ("LANG-P1", ["SCI"])
+    ]
+
+
 def test_school_creation_validates_levels_terms_and_grade_limits(
     client: TestClient, registrar: dict[str, str]
 ) -> None:
@@ -331,6 +410,49 @@ def test_disabled_school_level_cannot_be_added(
         headers=registrar,
     )
     assert refused.status_code == 422, refused.text
+
+
+def test_school_level_count_selected_at_creation_is_enforced_later(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    created = client.post(
+        "/v1/schools",
+        json={
+            "code": "ONE",
+            "name_en": "One Primary Grade",
+            "name_ar": "صف ابتدائي واحد",
+            "language_type": "arabic",
+            "kg_grade_count": 0,
+            "primary_grade_count": 1,
+            "preparatory_grade_count": 0,
+            "secondary_grade_count": 0,
+            "term_count": 2,
+            "working_days": ["sunday"],
+        },
+        headers=registrar,
+    )
+    assert created.status_code == 201, created.text
+
+    def add_level(code: str) -> object:
+        return client.post(
+            "/v1/structure/levels",
+            json={
+                "code": code,
+                "school_code": "ONE",
+                "name_en": code,
+                "name_ar": code,
+                "display_order": 1,
+                "stage": "primary",
+            },
+            headers=registrar,
+        )
+
+    assert add_level("P1").status_code == 201
+    # Reposting the same rung is a relabel, not a second grade.
+    assert add_level("P1").status_code == 200
+    refused = add_level("P2")
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["field"] == "stage"
 
 
 def test_a_closed_branch_is_hidden_but_not_deleted(

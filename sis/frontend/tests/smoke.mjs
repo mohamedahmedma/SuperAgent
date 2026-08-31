@@ -114,7 +114,7 @@ async function bundle() {
   return result.outputFiles[0].text;
 }
 
-function newWindow(script, language = 'en') {
+function newWindow(script, language = 'en', session = '') {
   const errors = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on('jsdomError', (error) => errors.push(String(error)));
@@ -162,6 +162,11 @@ function newWindow(script, language = 'en') {
   window.console.warn = () => {};
 
   window.localStorage.setItem('sis.lang', language);
+  /* A stored session token makes the console redeem it through `/v1/auth/me` on boot and
+     come up as that person, which is the only way to reach the permission-dependent
+     branches from here. The value is never checked — the fixture answers regardless — so
+     any non-empty string does. */
+  if (session) window.sessionStorage.setItem('sis.session_token', session);
   window.eval(script);
   return { dom, window, errors, requests };
 }
@@ -185,7 +190,20 @@ const SCREENS = [
   { hash: '#/roster', expect: ['roster'] },
   { hash: '#/guardians', expect: ['Guardians'] },
   { hash: '#/marks', expect: ['Marks'] },
-  { hash: '#/batches', expect: ['Batches'] }
+  { hash: '#/batches', expect: ['Batches'] },
+  /* A multi-role teacher/principal configuring eligibility before the grade supervisor
+     assigns concrete rooms. This covers the Stage 15 manager handoff in the real router. */
+  { hash: '#/teacherSetup', expect: ['Teacher setup', 'Subject, grade, and track eligibility'] },
+  /* The grade supervisor's screen, walked as somebody holding no year-level grant: it
+     renders its own empty state rather than throwing, which is the branch every other
+     visitor to this route takes. The populated flow needs a profile with a `year_level`
+     grant, and `GET /v1/auth/me` has one fixture for the whole walk, so it is not
+     reachable from here — the Python suite covers that half against the real service. */
+  { hash: '#/gradeAssignments', expect: ['Class assignments', 'No managed grades'] },
+  /* The register workflow, from its own first step: the day/grade/class pickers and the
+     panel underneath, driven by the classes fixture rather than by navigating a structure
+     an attendance supervisor cannot read. */
+  { hash: '#/attendance', expect: ['Take attendance', 'Year 3', '3A'] }
 ];
 
 async function main() {
@@ -256,6 +274,68 @@ async function main() {
   assert.ok(arabicText.includes('نظام معلومات الطلاب'), 'Arabic shell title did not render');
   assert.ok(arabicText.includes('المدرسة'), 'Arabic navigation did not render');
   errors.push(...arabic.errors);
+
+  /*
+   * A third shell, signed in as somebody whose grants reach exactly one classroom.
+   *
+   * `GET /v1/auth/me` in the fixtures answers as one person holding **two** roles at once —
+   * Teacher and Attendance Supervisor — both bounded to class `3A`. That shape is the
+   * point. It is what the console has to render without picking one role to believe, and
+   * it is what makes the two halves of the check separable:
+   *
+   *   the permission union   decides which *screens* exist. This person holds neither
+   *                          `students.write` nor `imports.run`, so Roster and Batches
+   *                          must be gone from the nav.
+   *   the scope on a grant   decides which *controls* are live. `attendance.write` is held
+   *                          on 3A and nowhere else, so the register is writable in 3A and
+   *                          read-only in 3B — a distinction a permission list alone
+   *                          cannot make, and the one every naive console gets wrong.
+   *
+   * Asserted here because this branch is invisible everywhere else: the Python suite proves
+   * the *service* refuses, and nothing but this proves the console stops asking.
+   */
+  const scoped = newWindow(script, 'en', 'a-session-token');
+  await settle(scoped.window, 220);
+  const chrome = scoped.window.document.body.textContent || '';
+  assert.ok(chrome.includes('Nadia Kamal'), 'the signed-in person is not named in the header');
+  /* Both, not the first or the last. A header that printed one title would be the first
+     place in the product to suggest that a second role replaces the first. */
+  assert.ok(
+    chrome.includes('Teacher') && chrome.includes('Attendance Supervisor'),
+    `both held roles must be shown. Header read: ${chrome.slice(0, 200).replace(/\s+/g, ' ')}`
+  );
+
+  const navLabels = [...scoped.window.document.querySelectorAll('nav[aria-label] .nav-link')]
+    .map((node) => node.textContent);
+  assert.ok(
+    navLabels.some((label) => label.includes('Marks')),
+    `a screen this teacher may reach was hidden. Saw: ${JSON.stringify(navLabels)}`
+  );
+  assert.ok(
+    !navLabels.some((label) => label.includes('Batches')),
+    'Batches needs imports.run, which this teacher does not hold, and was still offered'
+  );
+  assert.ok(
+    !navLabels.some((label) => label.includes('Roster')),
+    'Roster needs students.write, which this teacher does not hold, and was still offered'
+  );
+
+  scoped.window.location.hash = `#/class?code=3A&year=${YEAR}&tab=attendance`;
+  await settle(scoped.window, 150);
+  const own = scoped.window.document.body.textContent || '';
+  assert.ok(
+    !own.includes('You can read this register but not record it'),
+    'the teacher of 3A was told 3A is read-only'
+  );
+
+  scoped.window.location.hash = `#/class?code=3B&year=${YEAR}&tab=attendance`;
+  await settle(scoped.window, 150);
+  const other = scoped.window.document.body.textContent || '';
+  assert.ok(
+    other.includes('You can read this register but not record it'),
+    `the teacher of 3A was offered the Save control on 3B. Rendered: ${other.slice(0, 400).replace(/\s+/g, ' ')}`
+  );
+  errors.push(...scoped.errors);
 
   if (unstubbed.length) {
     console.log(`

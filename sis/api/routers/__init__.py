@@ -121,6 +121,7 @@ def all_routers() -> tuple["APIRouter", ...]:
     """
     from sis.api.routers import (
         admin,
+        access,
         attendance,
         estate,
         grades,
@@ -129,6 +130,10 @@ def all_routers() -> tuple["APIRouter", ...]:
         imports,
         structure,
         students,
+        system,
+        timetable,
+        teachers,
+        teaching,
     )
 
     # An explicit tuple, not discovery over the package. A new module that nobody adds
@@ -137,12 +142,21 @@ def all_routers() -> tuple["APIRouter", ...]:
     # rather than trusting this list to be complete.
     return (
         health.router,
+        access.router,
         structure.router,
+        # After structure: the timetable hangs off the classes those routes create, and
+        # the OpenAPI page should read in the order a school is actually set up.
+        timetable.router,
+        teachers.router,
         students.router,
         guardians.router,
         grades.router,
+        # After grades: this is the teacher's own write path onto the same figures those
+        # routes read back, and the OpenAPI page should read in that order.
+        teaching.router,
         attendance.router,
         imports.router,
         admin.router,
+        system.router,
         estate.router,
     )

@@ -1099,9 +1099,13 @@ def test_language_switch_controls_document_language_and_direction() -> None:
 
 
 def test_kg_is_the_stage_label_in_arabic_and_english_ui() -> None:
-    school = (SRC / "views" / "School.jsx").read_text(encoding="utf-8")
+    # The stage vocabulary lives in `structure.js` rather than in a view: the school screen
+    # groups a ladder by it and the subject board groups the same ladder by it, and two
+    # copies would let one screen learn a new division while the other filed it under
+    # "Not yet grouped".
+    stages = (SRC / "structure.js").read_text(encoding="utf-8")
     locale = (SRC / "locale" / "ar.js").read_text(encoding="utf-8")
-    assert "{ key: 'garden', label: 'Garden' }" in school
+    assert "{ key: 'garden', label: 'Garden' }" in stages
     assert re.search(r"'Garden'\s*:\s*'KG'", locale)
     assert "روضة" not in locale
     assert "رياض الأطفال" not in locale

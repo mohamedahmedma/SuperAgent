@@ -26,7 +26,10 @@ from sis.api.deps import (
     get_unit_of_work_factory,
     require_read_access,
     require_registrar,
+    Principal,
+    require_permission,
 )
+from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.application.services import QueryService
@@ -42,8 +45,8 @@ router = APIRouter(prefix="/v1", tags=["guardians"])
 
 # Reads are open to both scopes; writes are the registrar's alone. Scope comparison is
 # exact equality, so a reader-only check would refuse the registrar reading her own list.
-Reader = Annotated[Caller, Depends(require_read_access)]
-Registrar = Annotated[Caller, Depends(require_registrar)]
+Reader = Annotated[Principal, Depends(require_permission(Permission.GUARDIANS_READ))]
+Registrar = Annotated[Principal, Depends(require_permission(Permission.GUARDIANS_WRITE))]
 Queries = Annotated[QueryService, Depends(get_query_service)]
 UnitOfWorkFactory = Annotated[object, Depends(get_unit_of_work_factory)]
 

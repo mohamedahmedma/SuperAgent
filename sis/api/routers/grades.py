@@ -22,14 +22,23 @@ The class on the response is resolved *for the term* rather than read from the c
 current placement (invariant 2). A Term 1 report keeps printing 3A after a March move to
 3B, because that is the room those marks were earned in.
 """
+from dataclasses import replace
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from sis.api.deps import Caller, RequestId, get_query_service, require_read_access
+from sis.api.deps import (
+    Principal,
+    RequestId,
+    get_query_service,
+    get_teaching_service,
+    require_permission,
+)
+from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services import QueryService
+from sis.application.services.teaching import TeachingService
 from sis.application.services.queries import GradeLine, StudentTermGrades
 from sis.domain.value_objects import StudentNumber, TermCode
 
@@ -38,8 +47,9 @@ router = APIRouter(prefix="/v1", tags=["grades"])
 # `require_read_access`, not `require_reader`: `Scope.permits` is exact equality, so a
 # reader-only check refuses the registrar's own key — and the registrar UI printing a
 # report card is the first caller of this route.
-Reader = Annotated[Caller, Depends(require_read_access)]
+Reader = Annotated[Principal, Depends(require_permission(Permission.GRADES_READ))]
 Queries = Annotated[QueryService, Depends(get_query_service)]
+Teaching = Annotated[TeachingService, Depends(get_teaching_service)]
 
 
 class GradeLineOut(BaseModel):
@@ -186,6 +196,7 @@ def read_student_term_grades(
     student_number: str,
     queries: Queries,
     caller: Reader,
+    teaching: Teaching,
     term: Annotated[
         str,
         Query(
@@ -195,8 +206,34 @@ def read_student_term_grades(
         ),
     ],
 ) -> StudentTermGradesOut:
+    # A teacher holds `grades.read` on the rooms they stand in, so a report card is
+    # answered only when the child was in one of them that year. Without this the class
+    # scope would bound nothing on the one screen it most obviously should.
+    caller.narrow(
+        Permission.GRADES_READ,
+        lambda scopes: scopes.for_student_in_term(
+            term_code=term, student_number=student_number
+        ),
+    )
     with domain_errors():
         report = queries.student_term_grades(
             StudentNumber(student_number), TermCode(term)
         )
+    # Class access does not imply access to every colleague's subject. A teacher sees
+    # only the academic lines assigned to them in the child's class for this term.
+    # Non-teaching roles return ``None`` and retain their ordinary scope-based view.
+    if caller.profile is not None and report.class_section is not None:
+        allowed = teaching.subject_codes_in_class(
+            caller.profile.user_id,
+            class_section_id=report.class_section.id,
+        )
+        if allowed is not None:
+            report = replace(
+                report,
+                lines=tuple(
+                    line
+                    for line in report.lines
+                    if str(line.grade.subject_code) in allowed
+                ),
+            )
     return StudentTermGradesOut.of(report)

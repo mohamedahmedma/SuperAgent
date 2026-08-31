@@ -8,16 +8,31 @@ That is what makes every service in this package testable with fakes: the only p
 that knows an environment and a database exist is this file, and a test replaces it
 wholesale through `app.dependency_overrides`.
 
-**This service does not authenticate anyone.** API-key checking was removed on purpose:
-`X-API-Key` is not read, the `api_keys` table is not consulted, and no request is refused
-for want of a credential. Anyone who can reach this process can read and write everything
-in it, so keep it on a network the school controls, or behind a proxy that authenticates
-in front of it, until sign-in with a username and password replaces this. `_require_scopes`
-is the single place that has to change to bring authentication back.
+**There are two doors, and they answer different questions.**
 
-**The scopes survive the removal.** Each route still names `registrar`, `reader` or both,
-because that is a statement about what the route is for rather than about who is calling,
-and it is what a real sign-in will enforce. Today the first scope named is simply granted.
+*The integration door* is `_require_scopes`, and **it authenticates nobody**. `X-API-Key` is
+not read, the `api_keys` table is not consulted on a request, and no caller is refused for
+want of a credential. That was a deliberate removal and it stands: `records/` and
+`identity/` call this service with no credential, and closing this door would stop them.
+Anyone who can reach this process can read and write everything in it through it, so keep
+it on a network the school controls, or behind a proxy that authenticates in front of it.
+`_require_scopes` remains the single place that has to change to bring key checking back,
+and `tests/sis/test_authentication.py` fails the day it does — on purpose, so that day is a
+deliberate edit rather than a surprise.
+
+*The person door* is `Authorization: Bearer <session token>`, minted by
+`POST /v1/auth/login`. A request carrying one is judged by that person's roles: the union
+of every role they hold, each bounded to the school, track, grade, class or subject it was
+granted over. `Principal` is the object both doors produce, so a handler is written once
+and works for either.
+
+**The role layer sits over the old arrangement, not in place of it.** A request with no
+session behaves exactly as it did before roles existed. That is what keeps a nightly import
+working at three in the morning after a permissions change, and it is asserted rather than
+hoped for — see `test_an_integration_is_unaffected_by_any_of_this`.
+
+**The route scopes survive both.** Each route still names `registrar`, `reader` or both,
+because that is a statement about what the route is for rather than about who is calling.
 
 **Which school a request is about is still decided here**, by `X-School-Code`, and is
 unaffected by any of the above: it chooses the database a request is answered from, not
@@ -28,12 +43,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Iterator, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Final
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, HTTPException, status
 
 from sis.application.dto import Page, PageRequest
 from sis.application.ports.unit_of_work import UnitOfWork
@@ -43,6 +58,14 @@ from sis.application.services.guardian_import import GuardianImportService
 from sis.application.services.queries import QueryService
 from sis.application.services.roster_import import RosterImportService
 from sis.application.services.structure import StructureGenerationService
+from sis.application.services.timetable import TimetableService
+from sis.application.services.teachers import TeacherManagementService
+from sis.application.services.marks import MarkSheetService
+from sis.application.services.teaching import TeachingService
+from sis.application.services.access import resolve
+from sis.application.services.scopes import ScopeResolver
+from sis.api.errors import error_detail
+from sis.domain.rbac import ANYWHERE, AccessProfile, Permission, ScopeType, Target
 from sis.config import get_settings
 from sis.domain.auth import PREFIX_LENGTH, ApiKey, Scope
 from sis.domain.errors import ImportBatchNotFound, UnknownReference, ValidationError
@@ -50,9 +73,11 @@ from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import ClassEnrolment, Student
 from sis.domain.structure import (
     SCHOOL_CONFIGURATION,
+    AcademicTrack,
     AcademicYear,
     ClassSection,
     School,
+    Stage,
     Subject,
     Term,
     YearLevel,
@@ -62,7 +87,11 @@ from sis.domain.value_objects import (
     ClassCode,
     SchoolCode,
     StudentNumber,
+    SubjectCode,
+    YearCode,
 )
+from sis.application.ports.repositories import GradeSubjects
+from sis.application.dto import TERM_LABELS, TermPlan, term_code_for
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from sis.infrastructure.parsers import (
     SpreadsheetGradeParser,
@@ -194,25 +223,32 @@ It reads as what it is in an import history: nobody in particular.
 
 
 def _require_scopes(*allowed: Scope) -> Callable[..., Caller]:
-    """Admit every caller. **This service no longer authenticates anyone.**
+    """Admit every caller. **This door authenticates nobody, and that is deliberate.**
 
-    API-key authentication was removed deliberately: this deployment is meant to be open
-    to whoever can reach it, until sign-in with a username and password is built. What is
-    left is the shape of the old dependency and nothing behind it — no header is read, no
-    key table is consulted, and no request is ever refused here.
+    API-key authentication was removed on purpose and has not come back: no header is read,
+    no key table is consulted, and no request is ever refused here. `records/` and
+    `identity/` reach this service through this door with no credential at all.
+
+    Sign-in with a username and password now exists — see `require_permission` — but it was
+    added *beside* this, not in front of it. A request carrying a session is judged by that
+    person's roles; a request carrying nothing behaves exactly as it did before roles
+    existed. Putting the two in series instead would have been the same thing as deleting
+    the integration door, and every job that calls this service would have stopped.
 
     The scopes a route lists are still spelled out at its call site, because they say what
-    a route is *for* and are what the replacement will enforce. Until then the first one
-    listed is simply granted, so `require_registrar` and `require_read_access` both hand
-    back a caller their routes accept.
+    a route is *for*. The first one listed is simply granted, so `require_registrar` and
+    `require_read_access` both hand back a caller their routes accept.
 
-    **What this costs.** Every write in this service — rewriting a term's marks, importing
-    a roster, provisioning a school — is now available to anyone who can open a socket to
-    it. Put it behind a network that only the school reaches, or behind a reverse proxy
-    that authenticates in front of it, for as long as this stands.
+    **What this costs, still.** Every write in this service — rewriting a term's marks,
+    importing a roster, provisioning a school — is available to anyone who can open a
+    socket to it *without* a session. The roles added in Stage 9 bound what a signed-in
+    person may do; they do not narrow this door, and reading them as though they did would
+    be the mistake this paragraph exists to prevent. Put the service behind a network that
+    only the school reaches, or behind a reverse proxy that authenticates in front of it,
+    for as long as this stands.
 
-    To restore authentication, this function is the only place that has to change: give it
-    back a body that identifies the caller and refuses when it cannot.
+    To close it, this function is the only place that has to change: give it back a body
+    that identifies the caller and refuses when it cannot.
     """
 
     granted: Scope = allowed[0]
@@ -236,6 +272,260 @@ All three of these admit everyone while authentication is switched off. They sta
 distinct because they record what each route is for, and because that is what a
 username-and-password sign-in will have to tell apart when it arrives.
 """
+
+
+# ---------------------------------------------------------------------------
+# Who is calling: a signed-in person, or an integration
+# ---------------------------------------------------------------------------
+#
+# Two doors, and the code below keeps them apart rather than merging them.
+#
+# The **integration door** is `_require_scopes` above, unchanged and still open: `records/`
+# and `identity/` call this service with no credential and must keep working. Nothing in
+# this section closes it, and that is deliberate — role-based access is being added *over*
+# the existing arrangement, not in place of it.
+#
+# The **person door** is `Authorization: Bearer <session token>`, minted by
+# `POST /v1/auth/login`. When a request carries one, the person's grants are authoritative
+# and a missing permission is a refusal. Silently falling back to the open door for a
+# signed-in user would make every permission in the service decorative.
+
+
+def get_access_profile(
+    authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+    school_code: SchoolCodeDep = None,
+) -> AccessProfile:
+    """The person behind a bearer token, with every role they hold, flattened.
+
+    One database read per request. The alternative — putting the grants in the token —
+    means a revoked role stays live until the token expires, and "we removed her access an
+    hour ago and she can still change marks" is not a sentence a school should ever have
+    to hear.
+    """
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=error_detail("not_authorized", "A user session is required."),
+        )
+    with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
+        profile = resolve(uow._session, token=token.strip())
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=error_detail("not_authorized", "The user session is invalid or expired."),
+        )
+    return profile
+
+
+SessionProfile = Annotated[AccessProfile, Depends(get_access_profile)]
+"""A signed-in person. Routes that only a person can call declare this."""
+
+
+def _forbidden(permission: Permission) -> HTTPException:
+    """One refusal, naming the permission that was missing.
+
+    The permission code is in the message rather than only in a log, because the person
+    reading it is usually an administrator working out which role to grant, and "403" on
+    its own sends them to whoever holds the server.
+    """
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=error_detail(
+            "not_authorized", f"This account does not hold {permission.value}."
+        ),
+    )
+
+
+def _is_read(permission: Permission) -> bool:
+    """Whether a permission only looks. Decides which API-key scopes the old door accepts."""
+    return permission.value.endswith(".read")
+
+
+@dataclass(frozen=True, slots=True)
+class Principal:
+    """Whoever is behind this request, and what they may do — either door.
+
+    Routers take one of these instead of a `Caller`, so a handler is written once and
+    works for both an integration and a signed-in teacher. Everything a router used of a
+    `Caller` still works: `.prefix` is the audit actor and `str()` is the name in a log.
+
+    **An integration is allowed everything.** `allows` returns `True` when there is no
+    profile, which is exactly the behaviour this service had before roles existed. That is
+    the promise being kept: adding RBAC did not quietly refuse a job that ran last night.
+
+    **A person is allowed what their grants say**, unioned over every role they hold. Two
+    checks make that practical, and the split matters:
+
+      `ensure`  the wide one. "Do you hold this permission anywhere?" Answered from memory
+                before the handler does any work, and it is what the route dependency runs.
+
+      `narrow`  the exact one. "Do you hold it *here* — on this class, this rung?" Needs
+                the school's structure, so it costs a query, and it is only run by routes
+                that name something narrow enough for the answer to differ.
+
+    Running only the wide check would let a teacher of 3A take 3B's register. Running only
+    the narrow one would put a lookup in front of every request including the ones where a
+    school-wide grant already settles it. So both, in that order.
+    """
+
+    caller: Caller | None = None
+    profile: AccessProfile | None = None
+    #: Which school's database this request is answered from; the resolver needs it.
+    school_code: str | None = None
+
+    @property
+    def is_person(self) -> bool:
+        return self.profile is not None
+
+    @property
+    def prefix(self) -> str:
+        """The actor written to the audit trail. A username for a person, a key handle
+        otherwise. Capped at the audit column's width so an authorised write is never
+        refused by the database over the length of a name."""
+        if self.profile is not None:
+            return self.profile.username[:16]
+        return self.caller.prefix if self.caller is not None else ANONYMOUS_CALLER
+
+    @property
+    def username(self) -> str:
+        return self.profile.username if self.profile is not None else self.prefix
+
+    @property
+    def school_id(self) -> int | None:
+        return self.profile.school_id if self.profile is not None else None
+
+    def __str__(self) -> str:
+        return self.prefix
+
+    def allows(self, permission: Permission, target: Target = ANYWHERE) -> bool:
+        if self.profile is None:
+            return True
+        return self.profile.allows(permission, target)
+
+    def ensure(self, permission: Permission, target: Target = ANYWHERE) -> None:
+        if not self.allows(permission, target):
+            raise _forbidden(permission)
+
+    def narrow(
+        self,
+        permission: Permission,
+        locate: Callable[[ScopeResolver], Target | Sequence[Target]],
+    ) -> None:
+        """Refuse unless the caller holds `permission` over the thing `locate` finds.
+
+        `locate` is a callback rather than a `Target` so the lookup it needs is not paid
+        for when it cannot change the answer — a system administrator and a principal are
+        settled from memory, and only a genuinely narrow grant reaches the database.
+
+        It may answer with several places rather than one, and any of them passing is
+        enough. That is not a loosening: a child enrolled in two rooms this year really was
+        in both, so a grant on either is a grant over part of what is being asked about.
+
+        A route calls this *after* its dependency has already run the wide check, so the
+        only thing left to establish is where the caller's grant reaches.
+        """
+        if self._settled_without_lookup(permission):
+            return
+        with SqlAlchemyUnitOfWork(school_code=self.school_code) as uow:
+            located = locate(ScopeResolver(uow._session))
+        candidates = (located,) if isinstance(located, Target) else tuple(located)
+        assert self.profile is not None  # `_settled_without_lookup` returned False
+        if not any(self.profile.allows(permission, target) for target in candidates):
+            raise _forbidden(permission)
+
+    def narrow_all(
+        self,
+        permission: Permission,
+        locate: Callable[[ScopeResolver], Sequence[Target]],
+    ) -> None:
+        """Like `narrow`, but every place found must be permitted.
+
+        The difference is the request shape, not the rule. `narrow` asks about one thing
+        that may sit in several places — a child in two classrooms — and any of them
+        answering is enough. This asks about several *different* things in one request:
+        a timetable posting thirty lessons across eight classes is eight separate
+        permissions to check, and a supervisor holding seven of them may not write the
+        eighth. Partial success is not on offer, because the write is one transaction.
+        """
+        if self._settled_without_lookup(permission):
+            return
+        with SqlAlchemyUnitOfWork(school_code=self.school_code) as uow:
+            required = tuple(locate(ScopeResolver(uow._session)))
+        assert self.profile is not None
+        for target in required:
+            if not self.profile.allows(permission, target):
+                raise _forbidden(permission)
+
+    def _settled_without_lookup(self, permission: Permission) -> bool:
+        """Whether the answer is already known, so no query is needed. Raises on a refusal.
+
+        Three cases end here: an integration (always allowed), somebody holding the
+        permission globally, and somebody holding it over their own whole school — which
+        is most of the staff room. Only a grant narrower than a school reaches the
+        resolver, which is what keeps the cost on the requests that need it.
+        """
+        profile = self.profile
+        if profile is None:
+            return True  # The integration door. Unchanged, on purpose.
+
+        widest = profile.widest_scope_for(permission)
+        if widest is None:
+            raise _forbidden(permission)
+        if widest is ScopeType.GLOBAL:
+            return True
+        return profile.school_id is not None and profile.allows(
+            permission, Target(school_id=profile.school_id)
+        )
+
+
+def require_permission(permission: Permission) -> Callable[..., Principal]:
+    """The route gate. Admits an integration, or a person who holds `permission` somewhere.
+
+    Replaces the pair of scope dependencies at a route's call site without removing them:
+    an unauthenticated caller still goes through `_require_scopes`, which still admits
+    everybody, so nothing that worked yesterday stops working. What is added is that a
+    request carrying a session is judged by that session's roles.
+    """
+
+    def dependency(
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        school_code: SchoolCodeDep = None,
+    ) -> Principal:
+        if not (authorization or "").strip().lower().startswith("bearer "):
+            allowed = (
+                (Scope.REGISTRAR, Scope.READER) if _is_read(permission) else (Scope.REGISTRAR,)
+            )
+            return Principal(caller=_require_scopes(*allowed)(), school_code=school_code)
+
+        profile = get_access_profile(authorization, school_code)
+        # The wide check: held anywhere, at any scope. `allows` with no target would ask
+        # for a global grant and refuse every teacher in the building — see
+        # `AccessProfile.holds`.
+        if not profile.holds(permission):
+            raise _forbidden(permission)
+        return Principal(profile=profile, school_code=school_code)
+
+    return dependency
+
+
+#: The previous name for `require_permission`, kept so an out-of-tree router keeps working.
+permission_or_integration = require_permission
+
+
+def require_user_permission(permission: Permission) -> Callable[..., AccessProfile]:
+    """A gate for routes only a signed-in person may call — managing roles, chiefly.
+
+    No integration fallback: granting a role is an act by somebody, recorded against their
+    name in `user_roles.granted_by`, and an anonymous caller has no name to record.
+    """
+
+    def dependency(profile: SessionProfile) -> AccessProfile:
+        if not profile.holds(permission):
+            raise _forbidden(permission)
+        return profile
+
+    return dependency
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +626,43 @@ def get_max_upload_bytes() -> int:
 def get_query_service(uow_factory: UowFactoryDep) -> QueryService:
     """Every read, and no writes at all."""
     return QueryService(uow_factory)
+
+
+def get_timetable_service(uow_factory: UowFactoryDep) -> TimetableService:
+    """The weekly plan. A factory, like every other service here.
+
+    Its own service rather than more methods on the structure catalogue: the rules it
+    enforces — the school's week, its period grid, stage 5's subject assignments — are read
+    from three different places and are worth testing without a database.
+    """
+    return TimetableService(uow_factory)
+
+
+def get_teacher_management_service(
+    uow_factory: UowFactoryDep,
+) -> TeacherManagementService:
+    return TeacherManagementService(uow_factory)
+
+
+def get_mark_sheet_service(uow_factory: UowFactoryDep) -> MarkSheetService:
+    """One class's marks for one subject and term — the teacher's own write path.
+
+    Separate from `GradeImportService`, which reads a spreadsheet and is the registrar's.
+    A teacher entering eight figures and an office uploading six hundred are different
+    jobs with different failure modes, and one service doing both would owe the teacher a
+    batch report they never asked for.
+    """
+    return MarkSheetService(uow_factory)
+
+
+def get_teaching_service(uow_factory: UowFactoryDep) -> TeachingService:
+    """Which subject a teacher owns in which room — the one check a scope cannot make.
+
+    Its own service rather than a method on teacher management, because that service
+    *writes* assignments and this one reads them for authority. Keeping the grant and the
+    check apart means a bug in either half cannot quietly widen the other.
+    """
+    return TeachingService(uow_factory)
 
 
 def get_structure_service(uow_factory: UowFactoryDep) -> StructureGenerationService:
@@ -473,6 +800,59 @@ class StructureCatalogue:
             uow.commit()
         return bool(created.get(str(subject.code), False))
 
+    def subject_assignments(
+        self, academic_year_code: AcademicYearCode
+    ) -> Sequence[GradeSubjects]:
+        """Every rung of the year that teaches something, and what it teaches.
+
+        An unknown year is a refusal, not an empty board — the same rule the year's
+        other listings follow, and for the same reason: a typo and a year nobody has
+        set a timetable for look identical once the answer is `[]`.
+        """
+        with self._uow_factory() as uow:
+            if uow.academic_years.get(academic_year_code) is None:
+                raise UnknownReference(
+                    f"no academic year {academic_year_code}", field="academic_year_code"
+                )
+            return uow.subjects.assignments_for_year(academic_year_code)
+
+    def set_subject_assignment(
+        self,
+        academic_year_code: AcademicYearCode,
+        subject_code: SubjectCode,
+        year_level_code: YearCode,
+        *,
+        assigned: bool,
+    ) -> bool:
+        """Assign or un-assign one subject on one rung; `True` when this call assigned it.
+
+        The school comes from the year rather than from the caller. It is the one fact
+        that keeps the pair honest — a rung is only ever a rung *of a school*, and letting
+        a client name the school here would let it pair the annexe's Secondary 1 with the
+        main school's Physics.
+
+        Both directions are idempotent, so a board that drops a subject twice, or fires a
+        remove while a slow refresh is still in flight, does not have to distinguish
+        "already true" from "failed".
+        """
+        with self._uow_factory() as uow:
+            year = uow.academic_years.get(academic_year_code)
+            if year is None:
+                raise UnknownReference(
+                    f"no academic year {academic_year_code}", field="academic_year_code"
+                )
+            if assigned:
+                created = uow.subjects.assign_to_level(
+                    subject_code, academic_year_code, year.school_code, year_level_code
+                )
+            else:
+                uow.subjects.unassign_from_level(
+                    subject_code, academic_year_code, year.school_code, year_level_code
+                )
+                created = False
+            uow.commit()
+            return created
+
     def create_class_section(self, section: ClassSection) -> bool:
         """Add one class to a year; `True` when this call created it.
 
@@ -511,7 +891,7 @@ class StructureCatalogue:
         return section
     def create_school(
         self, school: School, *, stated: Collection[str] = ()
-    ) -> tuple[School, bool]:
+    ) -> tuple[School, bool, tuple[TermPlan, ...]]:
         """Store one school; the row as written, and `True` when this call created it.
 
         The outermost act in the service, and an upsert like every other structural write:
@@ -529,18 +909,93 @@ class StructureCatalogue:
         without the carry-over it would quietly reset a primary-only school to the four
         stages, two terms and five working days that a NEW school defaults to. The read and
         the write share one unit of work, so nothing can land between them.
+
+        **Changing the term count re-syncs the school's years**, and only then. That is what
+        "the year structure follows the school's term count" has to mean once a school can
+        be edited: a school moved from two terms to three has years on file that still hold
+        two, and leaving them is a configuration screen that says three and a year screen
+        that shows two. The sync is the same one year creation runs, so a term holding marks
+        is kept rather than deleted — the returned plans say which. Nothing happens at all
+        when the count is unchanged, so an ordinary rename does not walk the year list.
         """
         carry_over = SCHOOL_CONFIGURATION - set(stated)
         with self._uow_factory() as uow:
-            if carry_over:
-                existing = uow.schools.get(school.code)
-                if existing is not None:
-                    school = replace(
-                        school, **{name: getattr(existing, name) for name in carry_over}
-                    )
+            existing = uow.schools.get(school.code)
+            if carry_over and existing is not None:
+                school = replace(
+                    school, **{name: getattr(existing, name) for name in carry_over}
+                )
             created = uow.schools.upsert_many([school])
+            uow.schools.sync_tracks(school)
+            plans: tuple[TermPlan, ...] = ()
+            if existing is not None and existing.term_count != school.term_count:
+                plans = tuple(
+                    self._sync_terms(uow, year)
+                    for year in uow.academic_years.list_all(school.code)
+                )
             uow.commit()
-        return school, bool(created.get(str(school.code), False))
+        return school, bool(created.get(str(school.code), False)), plans
+
+    def list_school_tracks(self, school_code: SchoolCode) -> list[AcademicTrack]:
+        with self._uow_factory() as uow:
+            if uow.schools.get(school_code) is None:
+                raise UnknownReference(f"no school {school_code}", field="school_code")
+            return list(uow.schools.list_tracks(school_code))
+
+    def configured_grades(self, school_code: SchoolCode, track_code: str) -> list[dict[str, object]]:
+        with self._uow_factory() as uow:
+            school = uow.schools.get(school_code)
+            if school is None:
+                raise UnknownReference(f"no school {school_code}", field="school_code")
+            tracks = {track.code for track in uow.schools.list_tracks(school_code)}
+            track = track_code.strip().upper()
+            if track not in tracks:
+                raise ValidationError(f"track {track!r} is not active", field="track_code")
+            prefixes = ((Stage.GARDEN, "KG", "KG"), (Stage.PRIMARY, "P", "Primary"),
+                        (Stage.PREPARATORY, "PREP", "Preparatory"),
+                        (Stage.SECONDARY, "SEC", "Secondary"))
+            return [
+                {"code": f"{track}-{prefix}{number}", "stage": stage.value,
+                 "name_en": f"{label} {number}", "name_ar": f"{label} {number}",
+                 "display_order": stage.order * 10 + number}
+                for stage, prefix, label in prefixes
+                for number in range(1, school.grade_count_for(stage) + 1)
+            ]
+
+    def create_configured_classes(
+        self, academic_year_code: AcademicYearCode, track_code: str,
+        counts: dict[str, int] | None, sequence: str, same_count: int | None = None,
+    ) -> tuple[list[YearLevel], list[ClassSection]]:
+        with self._uow_factory() as uow:
+            year = uow.academic_years.get(academic_year_code)
+            if year is None:
+                raise UnknownReference(f"no academic year {academic_year_code}", field="academic_year_code")
+            specs = self.configured_grades(year.school_code, track_code)
+            expected = {str(spec["code"]) for spec in specs}
+            if same_count is not None:
+                counts = {code: same_count for code in expected}
+            counts = counts or {}
+            if set(counts) != expected:
+                raise ValidationError("class counts must name every active grade and no others", field="classes_by_grade")
+            if sequence not in {"numeric", "alphabetic"}:
+                raise ValidationError("sequence must be numeric or alphabetic", field="sequence")
+            for count in counts.values():
+                if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 60:
+                    raise ValidationError("class count must be between 0 and 60", field="classes_by_grade")
+            levels = [YearLevel(school_code=year.school_code, track_code=track_code,
+                code=str(spec["code"]), stage=str(spec["stage"]), name_en=str(spec["name_en"]),
+                name_ar=str(spec["name_ar"]), display_order=int(spec["display_order"])) for spec in specs]
+            uow.year_levels.upsert_many(levels)
+            sections = []
+            for level in levels:
+                for index in range(1, counts[str(level.code)] + 1):
+                    suffix = str(index) if sequence == "numeric" else chr(64 + index)
+                    sections.append(ClassSection(code=f"{level.code}-{suffix}",
+                        academic_year_code=academic_year_code, year_level_code=level.code,
+                        name_en=suffix, name_ar=suffix))
+            uow.class_sections.upsert_many(sections)
+            uow.commit()
+            return levels, sections
 
     def create_year_level(self, level: YearLevel) -> bool:
         """Add or relabel one rung of one school's ladder; `True` when created.
@@ -562,12 +1017,46 @@ class StructureCatalogue:
                     f"{level.stage.value} is not enabled for school {level.school_code}",
                     field="stage",
                 )
+            tracks = uow.schools.list_tracks(level.school_code)
+            if level.track_code is None:
+                # Old clients predate tracks. Keep their writes deterministic by choosing
+                # Arabic first on a dual-track school; the Stage 3 UI always sends the
+                # visibly selected track and new integrations can do the same.
+                if tracks:
+                    level = replace(level, track_code=tracks[0].code)
+            elif level.track_code not in {track.code for track in tracks}:
+                raise ValidationError(
+                    f"track {level.track_code!r} is not active for school {level.school_code}",
+                    field="track_code",
+                )
+            # The count selected when the school was created is both an enable switch and
+            # the size of that stage.  Enforcing only the switch would let a school saved
+            # with four primary grades acquire a fifth rung later, making the creation
+            # settings untrue.  Relabelling an existing rung remains legal and changing its
+            # stage consumes one place in the destination stage.
+            existing = uow.year_levels.get(level.code, level.school_code)
+            stage_levels = [
+                item
+                for item in uow.year_levels.list_for_school(level.school_code)
+                if item.stage is level.stage
+                and item.track_code == level.track_code
+                and (existing is None or item.code != existing.code)
+            ]
+            allowed = school.grade_count_for(level.stage)
+            if level.stage is not Stage.UNSPECIFIED and len(stage_levels) >= allowed:
+                raise ValidationError(
+                    f"{level.stage.value} is limited to {allowed} grade(s) for school "
+                    f"{level.school_code}",
+                    field="stage",
+                )
             created = uow.year_levels.upsert_many([level])
             uow.commit()
         return bool(created.get(str(level.code), False))
 
-    def create_academic_year(self, year: AcademicYear, *, make_current: bool) -> bool:
-        """Store the year; `True` when this call created it.
+    def create_academic_year(
+        self, year: AcademicYear, *, make_current: bool
+    ) -> tuple[bool, TermPlan]:
+        """Store the year and bring its term sections in line; `True` when newly created.
 
         Every other structural row hangs off an academic year, and `generate` refuses
         without one -- so until this existed the whole structure workflow was unreachable
@@ -577,13 +1066,161 @@ class StructureCatalogue:
         `make_current` is applied in the same transaction as the upsert. Two writes would
         leave a window in which the year exists and nothing is current, and the class
         dropdowns read the current year.
+
+        **The terms are built here, in the same transaction, from the school's own term
+        count.** A year that exists with no terms is a year nothing can be graded against,
+        and asking a registrar to create Term 1, Term 2 and Term 3 by hand — right after
+        answering "how many terms does this school run?" — is asking the same question
+        twice and letting the two answers disagree. `_sync_terms` is idempotent, so
+        re-posting a year to fix its Arabic name does not disturb the terms underneath it.
         """
         with self._uow_factory() as uow:
             created = uow.academic_years.upsert_many([year])
             if make_current:
                 uow.academic_years.set_current(year.code)
+            plan = self._sync_terms(uow, year)
             uow.commit()
-        return bool(created.get(str(year.code), False))
+        return bool(created.get(str(year.code), False)), plan
+
+    @staticmethod
+    def _sync_terms(uow: UnitOfWork, year: AcademicYear) -> TermPlan:
+        """Make the year hold exactly the term sections its school says it runs.
+
+        Three rules, and the second and third are the ones that matter:
+
+        **Missing terms are created, undated.** `term_code_for` derives the code from the
+        year, so a second run recognises what a first run made instead of creating a
+        parallel set beside it. The dates are left `None` because nobody has been asked
+        for them yet — that is the whole reason revision 0011 made them optional, and a
+        default of "the year's own dates" would be three terms all claiming the full year.
+
+        **A surplus term is only removed if nothing is stated against it.** Dropping a
+        school from three terms to two must never take a term of marks with it, so the
+        delete is conditional in SQL (`delete_if_unused`) and a term holding grades is
+        kept and reported. The year then honestly shows three terms and the caller can
+        say why.
+
+        **Labels and dates already on file are never rewritten.** Only the terms this run
+        creates get the default names; a term a registrar has renamed to "First Semester",
+        or dated, keeps both. Upserting all of them would silently undo that edit on every
+        subsequent save of the year.
+        """
+        school = uow.schools.get(SchoolCode(str(year.school_code)))
+        if school is None:
+            raise UnknownReference(
+                f"no school {year.school_code}", field="school_code"
+            )
+        wanted = school.term_count
+        existing = {term.sequence: term for term in uow.terms.list_for_year(year.code)}
+
+        missing = [
+            Term(
+                code=term_code_for(str(year.code), sequence),
+                academic_year_code=year.code,
+                name_en=TERM_LABELS[sequence][0],
+                name_ar=TERM_LABELS[sequence][1],
+                sequence=sequence,
+            )
+            for sequence in range(1, wanted + 1)
+            if sequence not in existing
+        ]
+        if missing:
+            uow.terms.upsert_many(missing)
+
+        removed: list[str] = []
+        kept: list[str] = []
+        for sequence, term in sorted(existing.items()):
+            if sequence <= wanted:
+                continue
+            code = str(term.code)
+            (removed if uow.terms.delete_if_unused(term.code) else kept).append(code)
+
+        return TermPlan(
+            academic_year_code=str(year.code),
+            term_count=wanted,
+            created=tuple(str(term.code) for term in missing),
+            removed=tuple(removed),
+            kept=tuple(kept),
+        )
+
+    def academic_year_detail(self, academic_year_code: AcademicYearCode) -> dict[str, object]:
+        """One year and everything it is attached to, in a single read.
+
+        The year has never been a standalone row — it belongs to a school, its rungs belong
+        to academic tracks, and its classes hang off those rungs — but nothing said so in
+        one place, so a screen wanting to show it issued four requests and stitched them
+        together. Between the first and the last another registrar can add a rung, and the
+        stitched picture is then of a school that never existed at any instant.
+
+        Grouped by **track**, because that is the axis a bilingual school reads its year
+        along: the Arabic section and the Languages section run the same year and share its
+        terms, and share nothing else. A school with one track gets one group and a school
+        whose rungs predate its tracks gets an unnamed group for them, rather than having
+        them silently dropped.
+        """
+        with self._uow_factory() as uow:
+            year = uow.academic_years.get(academic_year_code)
+            if year is None:
+                raise UnknownReference(
+                    f"no academic year {academic_year_code}", field="academic_year_code"
+                )
+            school = uow.schools.get(SchoolCode(str(year.school_code)))
+            if school is None:
+                raise UnknownReference(
+                    f"no school {year.school_code}", field="school_code"
+                )
+            terms = list(uow.terms.list_for_year(year.code))
+            levels = list(uow.year_levels.list_for_school(year.school_code))
+            sections = list(uow.class_sections.list_for_year(year.code))
+            tracks = list(uow.schools.list_tracks(year.school_code))
+
+        classes_per_level: dict[str, int] = {}
+        for section in sections:
+            key = str(section.year_level_code)
+            classes_per_level[key] = classes_per_level.get(key, 0) + 1
+
+        # `None` keys the group for rungs that belong to no track. Kept rather than
+        # dropped: a rung nobody has placed in a section still teaches children.
+        groups: dict[str | None, list[object]] = {}
+        for level in levels:
+            groups.setdefault(level.track_code, []).append(level)
+
+        ordered: list[str | None] = [track.code for track in tracks if track.code in groups]
+        ordered += [code for code in groups if code not in ordered]
+
+        by_track = {track.code: track for track in tracks}
+        return {
+            "year": year,
+            "school": school,
+            "terms": terms,
+            "tracks": [
+                {
+                    "track": by_track.get(code),
+                    "track_code": code,
+                    "levels": groups[code],
+                    "classes_per_level": classes_per_level,
+                }
+                for code in ordered
+            ],
+            "class_count": len(sections),
+        }
+
+    def sync_year_terms(self, academic_year_code: AcademicYearCode) -> TermPlan:
+        """Re-run the term sync for one year that is already on file.
+
+        Exists so a school's term count can change after its years were built: the school
+        write below calls this for each of the school's years, and the API exposes it so a
+        registrar can see the effect without having to re-save the year.
+        """
+        with self._uow_factory() as uow:
+            year = uow.academic_years.get(academic_year_code)
+            if year is None:
+                raise UnknownReference(
+                    f"no academic year {academic_year_code}", field="academic_year_code"
+                )
+            plan = self._sync_terms(uow, year)
+            uow.commit()
+        return plan
 
 
 

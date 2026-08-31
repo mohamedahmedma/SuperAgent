@@ -40,8 +40,19 @@ const STATES = [
   { key: 'excused', label: 'Excused', short: 'E' }
 ];
 
-export function AttendancePanel({ classCode, year, on }) {
+export function AttendancePanel({ classCode, year, on, scope }) {
   const state = useStore();
+  /*
+   * Whether this person may write *this* register — not registers in general.
+   *
+   * `scope` names where the class sits, and the check walks the signed-in person's grants
+   * for one covering it. A form teacher of 3A opening 3B gets the register read-only; the
+   * server refuses the write either way, and this only decides whether they are offered a
+   * Save button that would fail. A missing `scope` falls back to the class code and the
+   * remembered school, which is enough for a class- or school-scoped grant.
+   */
+  const where = scope || { school: state.school, classSection: classCode };
+  const mayWrite = Store.canIn('attendance.write', where);
   const [day, setDay] = useState(on || today());
   /* Local edits, keyed by student number. Empty until a teacher taps something, and cleared
      when the day changes — carrying yesterday's taps into today would be the worst possible bug
@@ -56,7 +67,9 @@ export function AttendancePanel({ classCode, year, on }) {
 
   useEffect(() => setDraft({}), [day, classCode]);
 
-  const save = useAction((entries) => api.takeRegister(classCode, year, day, entries));
+  const save = useAction((entries, closing) =>
+    api.takeRegister(classCode, year, day, entries, closing)
+  );
 
   const report = register.value;
   const lines = (report && report.students) || [];
@@ -83,7 +96,37 @@ export function AttendancePanel({ classCode, year, on }) {
 
   /** What a row shows: the draft if the teacher touched it, else what is on file. */
   const shown = (line) => (draft[line.student_number] || {}).state ?? line.state;
+
   const shownNote = (line) => (draft[line.student_number] || {}).note ?? (line.note || '');
+
+  /* Children who would be recorded absent by "Finish" — blank on file and untouched here.
+     Counted from what is on screen rather than from `report.unmarked`, so the number on the
+     button accounts for the taps not yet saved. */
+  const blanks = lines.filter((line) => !shown(line)).length;
+
+  /** Both buttons, one path. `closing` is the only difference between them. */
+  function submit(closing) {
+    return save
+      .run(
+        pending.map((number) => ({
+          student_number: number,
+          state: draft[number].state,
+          note: draft[number].note || ''
+        })),
+        closing
+      )
+      .then((saved) => {
+        setDraft({});
+        register.reload();
+        Store.toast(
+          'ok',
+          `Register saved for ${day}`,
+          `${saved.counts.recorded} of ${saved.size} marked` +
+            (saved.unmarked ? ` — ${saved.unmarked} still blank` : '')
+        );
+      })
+      .catch(() => {});
+  }
 
   /** Mark every child still blank, without overwriting anything already on file or edited. */
   function fillUntouched(value) {
@@ -114,35 +157,38 @@ export function AttendancePanel({ classCode, year, on }) {
         </div>
       }
       footer={
+        !mayWrite ? (
+          /* Read-only, and said so rather than shown as a dead Save button. A control that
+             is present but permanently disabled reads as a bug in the page; a sentence
+             naming the reason is something a teacher can act on. */
+          <span className="small text-body-tertiary">
+            {t('You can read this register but not record it. Ask whoever manages roles at your school for the classes you take.')}
+          </span>
+        ) : (
         <div className="d-grid gap-2 d-sm-flex align-items-sm-center w-100">
           <Button
             variant="primary"
             disabled={!pending.length}
             pending={save.pending}
             pendingLabel={t('Saving…')}
-            onClick={() =>
-              save
-                .run(
-                  pending.map((number) => ({
-                    student_number: number,
-                    state: draft[number].state,
-                    note: draft[number].note || ''
-                  }))
-                )
-                .then((saved) => {
-                  setDraft({});
-                  register.reload();
-                  Store.toast(
-                    'ok',
-                    `Register saved for ${day}`,
-                    `${saved.counts.recorded} of ${saved.size} marked` +
-                      (saved.unmarked ? ` — ${saved.unmarked} still blank` : '')
-                  );
-                })
-                .catch(() => {})
-            }
+            onClick={() => submit(false)}
           >
             Save {pending.length || ''} mark(s)
+          </Button>
+          {/* The second button is the whole of the supervisor's workflow: name the children
+              in the room, press this, and the rest are recorded absent. It is a separate
+              control rather than a mode on the first because it writes marks for children
+              nobody touched, and that has to be something the user chose in one visible
+              act rather than a side effect of saving. */}
+          <Button
+            variant="secondary"
+            disabled={!blanks}
+            pending={save.pending}
+            pendingLabel={t('Saving…')}
+            onClick={() => submit(true)}
+            title={t('Records every child still blank as absent.')}
+          >
+            {t('Finish — rest absent')} {blanks ? `(${blanks})` : ''}
           </Button>
           <Button variant="quiet" disabled={!pending.length} onClick={() => setDraft({})}>
             {t('Discard changes')}
@@ -153,6 +199,7 @@ export function AttendancePanel({ classCode, year, on }) {
               : 'Nothing is written until you save. Saving again corrects the day rather than adding a second set of marks.'}
           </span>
         </div>
+        )
       }
       tight
     >
@@ -247,6 +294,11 @@ export function AttendancePanel({ classCode, year, on }) {
                               : 'btn-danger'
                             : 'btn-outline-secondary'
                         )}
+                        /* Disabled rather than hidden when this person may not record
+                           the day: the marks already taken are still worth reading, and
+                           removing the buttons would make a read-only register look like
+                           one nobody has started. */
+                        disabled={!mayWrite}
                         onClick={() => mark(row.student_number, option.key)}
                         title={option.label}
                       >

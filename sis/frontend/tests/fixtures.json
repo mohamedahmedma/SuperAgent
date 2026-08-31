@@ -14,7 +14,13 @@
       "preparatory_grade_count": 3,
       "secondary_grade_count": 3,
       "term_count": 2,
-      "working_days": ["sunday", "monday", "tuesday", "wednesday", "thursday"]
+      "working_days": [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday"
+      ]
     },
     {
       "code": "ANNEX",
@@ -27,7 +33,13 @@
       "preparatory_grade_count": 3,
       "secondary_grade_count": 3,
       "term_count": 2,
-      "working_days": ["sunday", "monday", "tuesday", "wednesday", "thursday"]
+      "working_days": [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday"
+      ]
     }
   ],
   "GET /v1/structure/years": {
@@ -49,7 +61,8 @@
         "name_en": "Grade 3",
         "name_ar": "الثالث",
         "stage": "primary",
-        "display_order": 3
+        "display_order": 3,
+        "track_code": "AR"
       }
     ]
   },
@@ -60,7 +73,8 @@
       "name_en": "Grade 3",
       "name_ar": "الثالث",
       "stage": "primary",
-      "display_order": 3
+      "display_order": 3,
+      "track_code": "AR"
     },
     {
       "code": "KG1",
@@ -68,7 +82,8 @@
       "name_en": "Kindergarten 1",
       "name_ar": "روضة",
       "stage": "kindergarten",
-      "display_order": 1
+      "display_order": 1,
+      "track_code": null
     }
   ],
   "GET /v1/structure/classes": [
@@ -91,14 +106,26 @@
   ],
   "GET /v1/terms": [
     {
-      "code": "2025-T1",
+      "code": "2026-T1",
       "academic_year_code": "2025-2026",
       "name_en": "Term 1",
-      "name_ar": "الفصل",
+      "name_ar": "الفصل الأول",
+      "starts_on": "2025-09-01",
+      "ends_on": "2026-01-15",
       "sequence": 1,
       "is_closed": false,
-      "starts_on": "2025-09-01",
-      "ends_on": "2025-12-20"
+      "is_dated": true
+    },
+    {
+      "code": "2026-T2",
+      "academic_year_code": "2025-2026",
+      "name_en": "Term 2",
+      "name_ar": "الفصل الثاني",
+      "starts_on": null,
+      "ends_on": null,
+      "sequence": 2,
+      "is_closed": false,
+      "is_dated": false
     }
   ],
   "GET /v1/subjects": [
@@ -309,6 +336,289 @@
         "starts_on": "2025-09-01",
         "ends_on": null,
         "is_open": true
+      }
+    ]
+  },
+  "GET /v1/schools/MAIN/tracks": [
+    {
+      "code": "AR",
+      "school_code": "MAIN",
+      "language_type": "arabic",
+      "name_en": "Arabic",
+      "name_ar": "العربية",
+      "display_order": 1
+    },
+    {
+      "code": "LANG",
+      "school_code": "MAIN",
+      "language_type": "languages",
+      "name_en": "Languages",
+      "name_ar": "اللغات",
+      "display_order": 2
+    }
+  ],
+  "GET /v1/schools/ANNEX/tracks": [],
+  "GET /v1/schools/MAIN/teachers": [
+    {
+      "staff_number": "T-007",
+      "school_code": "MAIN",
+      "user_id": 7,
+      "username": "nadia.kamal",
+      "full_name_en": "Nadia Kamal",
+      "full_name_ar": "نادية كمال",
+      "email": "nadia@example.test",
+      "phone": "+201000000007",
+      "is_active": true,
+      "assignments": [
+        {
+          "academic_year_code": "2025-2026",
+          "subject_code": "MATH",
+          "year_level_code": "Y3",
+          "track_code": "AR",
+          "class_codes": ["3A"]
+        }
+      ]
+    }
+  ],
+  "GET /v1/subject-assignments": [
+    {
+      "year_level_code": "Y3",
+      "track_code": "AR",
+      "subjects": [
+        {
+          "code": "MATH",
+          "academic_year_code": "2025-2026",
+          "name_en": "Mathematics",
+          "name_ar": "رياضيات",
+          "display_order": 1,
+          "is_active": true
+        }
+      ]
+    }
+  ],
+  "GET /v1/academic-years/2025-2026": {
+    "year": {
+      "code": "2025-2026",
+      "school_code": "MAIN",
+      "name_en": "2025/2026",
+      "name_ar": "٢٠٢٥",
+      "starts_on": "2025-09-01",
+      "ends_on": "2026-06-30",
+      "is_current": true
+    },
+    "school": {
+      "code": "MAIN",
+      "name_en": "Main School",
+      "name_ar": "المدرسة",
+      "is_active": true,
+      "language_type": "both",
+      "kg_grade_count": 1,
+      "primary_grade_count": 6,
+      "preparatory_grade_count": 3,
+      "secondary_grade_count": 3,
+      "term_count": 2,
+      "working_days": [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday"
+      ]
+    },
+    "terms": [
+      {
+        "code": "2026-T1",
+        "academic_year_code": "2025-2026",
+        "name_en": "Term 1",
+        "name_ar": "الفصل الأول",
+        "starts_on": "2025-09-01",
+        "ends_on": "2026-01-15",
+        "sequence": 1,
+        "is_closed": false,
+        "is_dated": true
+      },
+      {
+        "code": "2026-T2",
+        "academic_year_code": "2025-2026",
+        "name_en": "Term 2",
+        "name_ar": "الفصل الثاني",
+        "starts_on": null,
+        "ends_on": null,
+        "sequence": 2,
+        "is_closed": false,
+        "is_dated": false
+      }
+    ],
+    "tracks": [
+      {
+        "track_code": "AR",
+        "name_en": "Arabic",
+        "name_ar": "العربية",
+        "year_levels": [
+          {
+            "code": "Y3",
+            "school_code": "MAIN",
+            "stage": "primary",
+            "track_code": "AR",
+            "name_en": "Grade 3",
+            "name_ar": "الثالث",
+            "display_order": 3
+          }
+        ],
+        "class_count": 2
+      },
+      {
+        "track_code": null,
+        "name_en": "",
+        "name_ar": "",
+        "year_levels": [],
+        "class_count": 0
+      }
+    ],
+    "class_count": 2
+  },
+  "GET /v1/auth/me": {
+    "full_name_en": "Nadia Kamal",
+    "full_name_ar": "نادية كمال",
+    "preferred_language": "en",
+    "school_code": "MAIN",
+    "profile": {
+      "user_id": 7,
+      "username": "nadia.kamal",
+      "school_id": 1,
+      "is_system_admin": false,
+      "roles": [
+        {
+          "role_code": "teacher",
+          "scope_type": "class_section",
+          "scope_id": 11,
+          "scope_code": "3A",
+          "granted_by": "principal.main"
+        },
+        {
+          "role_code": "attendance_supervisor",
+          "scope_type": "class_section",
+          "scope_id": 11,
+          "scope_code": "3A",
+          "granted_by": "principal.main"
+        },
+        {
+          "role_code": "principal",
+          "scope_type": "school",
+          "scope_id": 1,
+          "scope_code": "MAIN",
+          "granted_by": "system.admin"
+        }
+      ],
+      "permissions": [
+        "attendance.read",
+        "attendance.write",
+        "grades.read",
+        "grades.write",
+        "structure.read",
+        "students.read",
+        "teachers.assign_subjects",
+        "teachers.read"
+      ],
+      "grants": [
+        {
+          "permission": "attendance.read",
+          "scope_type": "class_section",
+          "scope_id": 11,
+          "scope_code": "3A"
+        },
+        {
+          "permission": "attendance.write",
+          "scope_type": "class_section",
+          "scope_id": 11,
+          "scope_code": "3A"
+        },
+        {
+          "permission": "grades.read",
+          "scope_type": "class_section",
+          "scope_id": 11,
+          "scope_code": "3A"
+        },
+        {
+          "permission": "grades.write",
+          "scope_type": "class_section",
+          "scope_id": 11,
+          "scope_code": "3A"
+        },
+        {
+          "permission": "structure.read",
+          "scope_type": "class_section",
+          "scope_id": 11,
+          "scope_code": "3A"
+        },
+        {
+          "permission": "students.read",
+          "scope_type": "class_section",
+          "scope_id": 11,
+          "scope_code": "3A"
+        },
+        {
+          "permission": "teachers.assign_subjects",
+          "scope_type": "school",
+          "scope_id": 1,
+          "scope_code": "MAIN"
+        },
+        {
+          "permission": "teachers.read",
+          "scope_type": "school",
+          "scope_id": 1,
+          "scope_code": "MAIN"
+        }
+      ]
+    }
+  },
+  "GET /v1/classes/3B/attendance": {
+    "academic_year_code": "2025-2026",
+    "class_code": "3B",
+    "on_date": "2026-03-01",
+    "size": 0,
+    "unmarked": 0,
+    "is_complete": true,
+    "counts": {
+      "present": 0,
+      "absent": 0,
+      "late": 0,
+      "excused": 0,
+      "recorded": 0,
+      "in_the_room": 0,
+      "away": 0
+    },
+    "students": []
+  },
+  "GET /v1/attendance/classes": {
+    "academic_year_code": "2025-2026",
+    "on_date": "2025-11-20",
+    "classes": [
+      {
+        "class_code": "3A",
+        "class_name_en": "3A",
+        "class_name_ar": "٣أ",
+        "year_level_code": "Y3",
+        "year_level_name_en": "Year 3",
+        "year_level_name_ar": "الصف الثالث",
+        "track_code": null,
+        "may_record": true,
+        "size": 3,
+        "marked": 2,
+        "is_complete": false
+      },
+      {
+        "class_code": "3B",
+        "class_name_en": "3B",
+        "class_name_ar": "٣ب",
+        "year_level_code": "Y3",
+        "year_level_name_en": "Year 3",
+        "year_level_name_ar": "الصف الثالث",
+        "track_code": null,
+        "may_record": false,
+        "size": 0,
+        "marked": 0,
+        "is_complete": false
       }
     ]
   }
