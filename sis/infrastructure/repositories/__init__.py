@@ -46,10 +46,12 @@ from sis.infrastructure.repositories.structure_repository import (
     SqlAlchemyClassSectionRepository,
     SqlAlchemySchoolRepository,
     SqlAlchemySubjectRepository,
+    SqlAlchemyTimetableRepository,
     SqlAlchemyTermRepository,
     SqlAlchemyYearLevelRepository,
     bulk_upsert,
 )
+from sis.infrastructure.repositories.staff_repository import SqlAlchemyTeacherRepository
 
 __all__ = [
     "SqlAlchemyAcademicYearRepository",
@@ -65,6 +67,8 @@ __all__ = [
     "SqlAlchemyStudentGuardianRepository",
     "SqlAlchemyStudentRepository",
     "SqlAlchemySubjectRepository",
+    "SqlAlchemyTimetableRepository",
+    "SqlAlchemyTeacherRepository",
     "SqlAlchemyTermRepository",
     "SqlAlchemyYearLevelRepository",
     "bulk_upsert",

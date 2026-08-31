@@ -48,6 +48,8 @@ if TYPE_CHECKING:
         SchoolRepository,
         SubjectRepository,
         TermRepository,
+        TimetableRepository,
+        TeacherRepository,
         YearLevelRepository,
     )
 
@@ -61,6 +63,8 @@ _REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset(
         "class_sections",
         "terms",
         "subjects",
+        "timetable",
+        "teachers",
         "students",
         "enrolments",
         "guardians",
@@ -89,6 +93,8 @@ class SqlAlchemyUnitOfWork:
     class_sections: ClassSectionRepository
     terms: TermRepository
     subjects: SubjectRepository
+    timetable: TimetableRepository
+    teachers: TeacherRepository
     students: StudentRepository
     enrolments: EnrolmentRepository
     guardians: GuardianRepository
@@ -189,6 +195,8 @@ class SqlAlchemyUnitOfWork:
         self.class_sections = repo.SqlAlchemyClassSectionRepository(session)
         self.terms = repo.SqlAlchemyTermRepository(session)
         self.subjects = repo.SqlAlchemySubjectRepository(session)
+        self.timetable = repo.SqlAlchemyTimetableRepository(session)
+        self.teachers = repo.SqlAlchemyTeacherRepository(session)
         self.students = repo.SqlAlchemyStudentRepository(session)
         self.enrolments = repo.SqlAlchemyEnrolmentRepository(session)
         self.guardians = repo.SqlAlchemyGuardianRepository(session)

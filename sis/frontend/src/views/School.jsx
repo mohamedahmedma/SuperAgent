@@ -34,25 +34,8 @@ import {
   Tile,
   useConfirm
 } from '../components/Ui.jsx';
+import { SCHOOL_LEVELS, STAGES, byStage } from '../structure.js';
 
-/* The order a school lists its own divisions in, and the labels it uses. */
-const STAGES = [
-  { key: 'garden', label: 'Garden' },
-  { key: 'primary', label: 'Primary' },
-  { key: 'preparatory', label: 'Preparatory' },
-  { key: 'secondary', label: 'Secondary' },
-  { key: 'unspecified', label: 'Not yet grouped' }
-];
-
-/* The stages a school can switch on when it is created: the column each one is stored in and
-   the most grades the curriculum defines for it. Derived from STAGES rather than restated, so
-   the two lists cannot drift apart and a stage is named the same word in both. */
-const GRADE_LIMITS = { garden: 3, primary: 6, preparatory: 3, secondary: 3 };
-const SCHOOL_LEVELS = STAGES.filter((stage) => stage.key in GRADE_LIMITS).map((stage) => ({
-  ...stage,
-  column: stage.key === 'garden' ? 'kg_grade_count' : `${stage.key}_grade_count`,
-  max: GRADE_LIMITS[stage.key]
-}));
 /* The week, Saturday first, as an Egyptian school reads it. The value is what the service
    stores. The labels are built by a call rather than held in a constant because `t` has to run
    after the language is known, and again on every switch — a module-level table would freeze
@@ -319,7 +302,7 @@ function YearForm({ school, onSaved }) {
 
 /* -- Add a rung ------------------------------------------------------------------ */
 
-function LevelForm({ school, schoolConfig, count, onSaved }) {
+function LevelForm({ school, schoolConfig, track, count, onSaved }) {
   /* Only the stages this school switched on at creation. A rung the school does not run is
      not an option here, and the service refuses it anyway. */
   const enabledStages = SCHOOL_LEVELS.filter(
@@ -330,13 +313,15 @@ function LevelForm({ school, schoolConfig, count, onSaved }) {
     name_en: '',
     name_ar: '',
     display_order: String((count || 0) + 1),
-    stage: enabledStages[0] ? enabledStages[0].key : 'unspecified'
+    stage: enabledStages[0] ? enabledStages[0].key : 'unspecified',
+    track_code: track
   });
 
   const save = useAction(() =>
     api.createLevel({
       code: form.values.code.trim(),
       school_code: school,
+      track_code: track,
       name_en: form.values.name_en.trim(),
       name_ar: form.values.name_ar.trim(),
       display_order: Number(form.values.display_order) || 0,
@@ -528,6 +513,7 @@ export function School({ params = {} }) {
   const [addingSchool, setAddingSchool] = useState(false);
   const [addingLevel, setAddingLevel] = useState(false);
   const [addingYear, setAddingYear] = useState(false);
+  const [activeTrack, setActiveTrack] = useState('');
 
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const schoolList = schools.value || [];
@@ -539,7 +525,12 @@ export function School({ params = {} }) {
   }, [params.code]);
 
   const levels = useResource(Store.keys.levels(code), () => api.schoolLevels(code), !!code);
+  const tracks = useResource(Store.keys.tracks(code), () => api.schoolTracks(code), !!code);
   const years = useResource(Store.keys.years(code), () => api.years(code), !!code);
+  const trackList = tracks.value || [];
+  const selectedTrack = trackList.some((track) => track.code === activeTrack)
+    ? activeTrack
+    : (trackList[0] && trackList[0].code) || '';
 
   /* The remembered year, but only once it is known to be one of *this* school's.
      `Store.setSchool` drops the year when the school changes, and says why. It runs in the
@@ -579,7 +570,14 @@ export function School({ params = {} }) {
 
   const school = schoolList.find((item) => item.code === code);
   const yearList = (years.value && years.value.academic_years) || [];
-  const levelList = levels.value || [];
+  /* Rungs of the selected track, plus any that belong to no track at all.
+     An untracked rung is one the school had before it declared its sections — revision 0009
+     could only place those where the school runs a single section. Hiding it under every
+     track would make it unreachable from the only screen that lists rungs, which is a worse
+     answer than showing it in both. */
+  const levelList = (levels.value || []).filter(
+    (level) => !selectedTrack || !level.track_code || level.track_code === selectedTrack
+  );
 
   /* Classes per rung, for the count on each card. Counted from the selected year's classes: a
      rung's class count is a statement about a year, not about the rung. */
@@ -588,10 +586,7 @@ export function School({ params = {} }) {
     perLevel[section.year_level_code] = (perLevel[section.year_level_code] || 0) + 1;
   });
 
-  const grouped = STAGES.map((stage) => ({
-    stage,
-    levels: levelList.filter((level) => (level.stage || 'unspecified') === stage.key)
-  })).filter((group) => group.levels.length > 0);
+  const grouped = byStage(levelList);
 
   return (
     <>
@@ -618,6 +613,21 @@ export function School({ params = {} }) {
       />
 
       <div className="vstack gap-4">
+        {trackList.length ? (
+          <Card title={t('Academic track')} subtitle={t('You are managing this structure independently.')}>
+            <div className="btn-group" role="group" aria-label={t('Academic track')}>
+              {trackList.map((track) => (
+                <Button
+                  key={track.code}
+                  variant={track.code === selectedTrack ? 'primary' : 'secondary'}
+                  onClick={() => setActiveTrack(track.code)}
+                >
+                  {pickName(track, state.lang)}
+                </Button>
+              ))}
+            </div>
+          </Card>
+        ) : null}
         {addingSchool ? (
           <Card className="sis-rise" title={t('New school')}>
             <SchoolForm onSaved={() => setAddingSchool(false)} />
@@ -635,6 +645,7 @@ export function School({ params = {} }) {
             <LevelForm
               school={code}
               schoolConfig={school}
+              track={selectedTrack}
               count={levelList.length}
               onSaved={() => setAddingLevel(false)}
             />

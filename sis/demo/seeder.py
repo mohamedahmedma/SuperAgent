@@ -40,6 +40,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from sis.application.services.access import sync_builtin_rbac
 from sis.config import get_settings
 from sis.demo import blueprint as bp
 from sis.demo.names import family_of, guardian_name, student_name
@@ -143,6 +144,7 @@ class Counts:
     year_levels: int = 0
     class_sections: int = 0
     subjects: int = 0
+    subject_year_levels: int = 0
     students: int = 0
     enrolments: int = 0
     guardians: int = 0
@@ -172,63 +174,20 @@ def sync_roles(session: Session) -> tuple[int, int]:
     """Insert or update the built-in roles and the permission catalogue. Idempotent.
 
     Not demo data — a real deployment runs this too, which is why it is a separate
-    function and why `reset` never removes it. Existing rows are updated rather than
-    replaced, so a role a school has granted to forty people keeps its id.
+    function and why `reset` never removes it.
 
-    Returns `(roles touched, permissions touched)`.
+    **The reconcile itself lives in the service**, in `sis/application/services/access.py`,
+    and this delegates to it. It used to be written out again here, and the two copies had
+    already drifted: the service's version wrote a permission's Arabic label as `""` while
+    this one derived a real label, so which name an administrator saw depended on whether
+    a school had been seeded or had merely been logged into. One implementation, called
+    from both places, is the only arrangement where that cannot happen. The dependency
+    runs the right way round — tooling on the service, never the reverse.
+
+    Returns `(roles, permissions)` as counts of the catalogue now in the database.
     """
-    existing_permissions = {
-        row.code: row for row in session.scalars(select(m.PermissionRow)).all()
-    }
-    for permission in Permission:
-        row = existing_permissions.get(permission.value)
-        # The label is derived from the code rather than kept in a second table: "noun.verb"
-        # reads as "Verb noun" and that is a better label than most hand-written ones.
-        noun, _, verb = permission.value.rpartition(".")
-        label = f"{verb.replace('_', ' ').title()} {noun.replace('.', ' ')}"
-        if row is None:
-            session.add(
-                m.PermissionRow(code=permission.value, name_en=label, name_ar=label)
-            )
-        else:
-            row.name_en = row.name_en or label
-    session.flush()
-
-    permission_ids = {
-        row.code: row.id for row in session.scalars(select(m.PermissionRow)).all()
-    }
-
-    roles_touched = 0
-    for definition in BUILT_IN_ROLES:
-        role = session.scalars(
-            select(m.Role).where(m.Role.code == definition.code.value)
-        ).one_or_none()
-        if role is None:
-            role = m.Role(code=definition.code.value)
-            session.add(role)
-        role.name_en = definition.name_en
-        role.name_ar = definition.name_ar
-        role.description = definition.description_en
-        role.default_scope = definition.default_scope.value
-        role.is_builtin = True
-        session.flush()
-        roles_touched += 1
-
-        # Re-stated wholesale rather than diffed: a built-in role's permission set is
-        # owned by the code, and a row somebody added by hand should not survive an
-        # upgrade that removed the permission it grants.
-        session.execute(
-            delete(m.RolePermission).where(m.RolePermission.role_id == role.id)
-        )
-        for permission in definition.permissions:
-            session.add(
-                m.RolePermission(
-                    role_id=role.id, permission_id=permission_ids[permission.value]
-                )
-            )
-
-    session.flush()
-    return roles_touched, len(permission_ids)
+    sync_builtin_rbac(session)
+    return len(BUILT_IN_ROLES), len(list(Permission))
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +416,13 @@ def remove(session: Session) -> int:
     if class_ids:
         wipe(delete(m.ClassSection).where(m.ClassSection.id.in_(class_ids)))
     if subject_ids:
+        # Before the subjects themselves: the assignment rows point at both a subject and a
+        # rung, and the rung outlives this statement by four lines.
+        wipe(
+            delete(m.SubjectYearLevel).where(
+                m.SubjectYearLevel.subject_id.in_(subject_ids)
+            )
+        )
         wipe(delete(m.Subject).where(m.Subject.id.in_(subject_ids)))
     if term_ids:
         wipe(delete(m.Term).where(m.Term.id.in_(term_ids)))
@@ -504,6 +470,7 @@ def load(session: Session, counts: Counts | None = None) -> Counts:
 
     _load_school(session, built, counts, now)
     _load_structure(session, built, counts, now)
+    _load_curriculum(session, built, counts, now)
     _load_students(session, built, counts, now)
     _load_accounts(session, built, counts, now)
     _load_teaching(session, built, counts, now)
@@ -633,6 +600,33 @@ def _load_structure(session: Session, built: _Built, counts: Counts, now: dateti
             session.flush()
             built.rooms[bp.room_ref(rung.code, label_en)] = room.id
             counts.class_sections += 1
+
+
+def _load_curriculum(session: Session, built: _Built, counts: Counts, now: datetime) -> None:
+    """Which subjects each rung is taught — the assignment the grade supervisor picks from.
+
+    Driven by `_SUBJECTS_BY_DEPTH`, the same table the marks are written from, because the
+    two are one fact: a rung marked in Science is a rung taught Science. Seeding them from
+    separate lists is how a demo ends up grading children in a subject their grade is not
+    assigned, which the service would refuse from any other client.
+
+    Without these rows the estate looks complete and is not. Teachers are eligible, classes
+    exist, marks are on file — and the supervisor's subject picker is empty, because it
+    reads this table and nothing else. That was the state before this function: every
+    screen populated except the one the role exists for.
+    """
+    for rung in bp.RUNGS:
+        depth = _depth_for(rung.grade_number, rung.stage.value)
+        for subject_code in _SUBJECTS_BY_DEPTH[depth]:
+            session.add(
+                m.SubjectYearLevel(
+                    subject_id=built.subjects[subject_code],
+                    year_level_id=built.rungs[rung.code],
+                    created_at=now,
+                )
+            )
+            counts.subject_year_levels += 1
+    session.flush()
 
 
 def _load_students(session: Session, built: _Built, counts: Counts, now: datetime) -> None:

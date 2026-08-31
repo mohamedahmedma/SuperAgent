@@ -217,3 +217,63 @@ class GenerateStructureResult:
     @property
     def existing_count(self) -> int:
         return sum(1 for item in self.items if not item.created)
+
+
+# -- The year's term sections -------------------------------------------------------
+#
+# A school states how many terms it runs (`schools.term_count`, 1, 2 or 3). The year's
+# term sections follow that number rather than being typed in a second time, which is the
+# whole of stage 6's first requirement: choosing two terms produces two term sections.
+#
+# Naming is fixed here rather than asked for. A registrar setting a school up has already
+# answered "how many terms"; asking them to name Term 1 "Term 1" three more times is a
+# form that exists only to be filled in identically every time. The labels stay editable
+# afterwards — they are labels, and `code` is the identity.
+
+#: Bilingual labels by sequence. Index 0 is unused so the tuple reads 1-based, matching
+#: `sequence` and the code suffix — an off-by-one here would name Term 2 "الفصل الأول".
+TERM_LABELS: Final[tuple[tuple[str, str], ...]] = (
+    ("", ""),
+    ("Term 1", "الفصل الأول"),
+    ("Term 2", "الفصل الثاني"),
+    ("Term 3", "الفصل الثالث"),
+)
+
+
+def term_code_for(academic_year_code: str, sequence: int) -> str:
+    """`2025-2026` + 2 -> `2025-2026-T2`.
+
+    Derived rather than stored so the same year always produces the same term codes, which
+    is what makes the sync idempotent: a second run finds the codes it would have created
+    already present instead of creating a parallel set beside them. Fits `TermCode`'s 32
+    characters by construction — an academic year code is at most 16.
+    """
+    return f"{academic_year_code}-T{sequence}"
+
+
+@dataclass(frozen=True, slots=True)
+class TermPlan:
+    """What one run of the term sync did, and what it deliberately did not do.
+
+    Returned rather than swallowed because the interesting case is `kept`. Dropping a
+    school from three terms to two cannot silently delete a term that already holds marks
+    — so the sync removes only the empty shells it would itself have created, keeps
+    anything a child has been graded in, and says which. A caller that ignores this gets
+    correct data; a caller that shows it can tell the registrar why the year still has
+    three terms on screen.
+    """
+
+    academic_year_code: str
+    #: What the school asked for: `schools.term_count`.
+    term_count: int
+    #: Codes this run inserted.
+    created: tuple[str, ...] = ()
+    #: Surplus terms removed because nothing referenced them.
+    removed: tuple[str, ...] = ()
+    #: Surplus terms left in place because marks are stated against them.
+    kept: tuple[str, ...] = ()
+
+    @property
+    def changed(self) -> bool:
+        """Whether this run wrote anything. A settled year syncs to nothing at all."""
+        return bool(self.created or self.removed)

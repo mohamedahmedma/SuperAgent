@@ -22,7 +22,7 @@ Two habits this file keeps throughout:
 Alembic owns this schema (decision 8). Nothing here calls `create_all`; the models are
 the source Alembic autogenerates *from*, not a shortcut around it.
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 from sqlalchemy import (
     JSON,
@@ -36,6 +36,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Time,
     UniqueConstraint,
     text,
 )
@@ -57,6 +58,7 @@ _NAME_LEN = 160
 _SCHOOL_CODE_LEN = 16  # `SchoolCode.MAX_LENGTH`.
 _STAGE_LEN = 16  # Longest `Stage` member is "preparatory".
 _ATTENDANCE_STATE_LEN = 16  # Longest `AttendanceState` member is "present".
+_WEEKDAY_LEN = 16  # Longest `WorkingDay` member is "wednesday".
 _ADDRESS_LEN = 500
 _PHONE_LEN = 16  # `Phone.MAX_LENGTH`: '+' plus E.164's fifteen digits.
 # Sized from the longest member of `sis.domain.people.Gender` with room to spare. No
@@ -268,15 +270,32 @@ class ClassSection(Base):
 
 
 class Term(Base):
-    """A dated slice of an academic year; grades hang off it and report cards close on it."""
+    """A slice of an academic year; grades hang off it and report cards close on it.
+
+    A term's identity is `(year, sequence)` in meaning and `code` in storage. Its **dates
+    are optional** (revision 0011): a school states how many terms it runs when it is set
+    up, and the year's term sections are built from that count long before anyone has fixed
+    the calendar. `NULL` means "not stated yet", and it has to be distinguishable from a
+    date — a placeholder typed to satisfy a NOT NULL is indistinguishable from a real
+    boundary, and invariant 2 resolves a child's class against exactly these days.
+
+    What an undated term still does: it orders (by `sequence`), it holds marks, and it
+    closes. What it cannot do alone is answer "which class was she in during it" — the
+    service falls back to the year's own window for that. See `Term.resolution_window`.
+    """
 
     __tablename__ = "terms"
     __table_args__ = (
+        # NULL-safe by construction: with either end absent the comparison is unknown, and
+        # an unknown CHECK passes. So this still forbids an inverted *stated* range and
+        # says nothing about a range nobody has stated, which is exactly the rule.
         CheckConstraint("ends_on >= starts_on", name="ck_terms_dates_ordered"),
-        # Serves "list this year's terms in order", the header of every grade screen.
+        # Serves "list this year's terms in order", the header of every grade screen. This
+        # is the index that matters now: `sequence` orders terms, dates never did.
         Index("ix_terms_year_sequence", "academic_year_id", "sequence"),
         # Serves "which term covers this date" — how an enrolment window is matched to a
-        # term when a grade names a term but the placement names days.
+        # term when a grade names a term but the placement names days. Undated rows sort
+        # together under NULL and are simply never matched by such a lookup.
         Index("ix_terms_window", "starts_on", "ends_on"),
     )
 
@@ -288,8 +307,9 @@ class Term(Base):
     name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
     name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
 
-    starts_on: Mapped[date] = mapped_column(Date, nullable=False)
-    ends_on: Mapped[date] = mapped_column(Date, nullable=False)
+    # NULL means the school has not stated this boundary. See the class docstring.
+    starts_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ends_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     sequence: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     # Closing freezes the term. Writes against a closed term are refused in the service
@@ -346,6 +366,223 @@ class Subject(Base):
     # taught in still have to render a subject name.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class SubjectYearLevel(Base):
+    """Where a subject is taught: one row per (subject, rung) pair the school runs.
+
+    `subjects` says what a school teaches in a year and has never said where. Without this
+    table every screen that offered a subject offered all of them — a Primary marks sheet
+    listed Physics because Secondary sat it, and the Arabic and Languages sections of one
+    school shared a single undivided catalogue. This is that missing sentence.
+
+    **The track is not a column here, and that is the decision.** A `YearLevel` belongs to
+    exactly one `EducationalSystem`, so the rung already names the section: assigning Physics
+    to the Arabic section's Secondary 1 says nothing about the Languages section's. A
+    `track_id` on this row would be a second copy of a fact the rung already carries, and the
+    only thing a second copy can do is disagree with the first.
+
+    **This is where a teacher will attach.** `teacher_subjects` and `teacher_year_levels`
+    (revision 0007) already carry the subject and the rung a teacher works on, and the rung
+    already carries the track — so "this teacher teaches this subject, on this grade, in this
+    section" is expressible today with no new table. What this row adds is the *boundary*:
+    a teacher assignment is only meaningful for a pair that appears here, because a pair that
+    does not appear here is a lesson the school does not run. Teacher management is not part
+    of this stage; when it arrives, this table is the list it should be choosing from rather
+    than the whole catalogue crossed with the whole ladder.
+
+    CASCADE on both sides, unlike the RESTRICT that guards `subject_grades`. This row states
+    an intention about a timetable, not anything a child was awarded, so it should follow
+    whatever it describes out of the database rather than block the delete.
+    """
+
+    __tablename__ = "subject_year_levels"
+    __table_args__ = (
+        # Identity, and the requirement that there are no duplicate assignments. In the
+        # database rather than only in the service, so two registrars dropping the same
+        # subject on the same rung at the same moment cannot produce two rows.
+        UniqueConstraint("subject_id", "year_level_id", name="uq_subject_year_levels_assignment"),
+        # Serves the question every reader actually asks: "what does this rung teach".
+        Index("ix_subject_year_levels_level", "year_level_id"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subject_id: Mapped[int] = mapped_column(
+        ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    year_level_id: Mapped[int] = mapped_column(
+        ForeignKey("year_levels.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class TimetablePeriod(Base):
+    """One slot in a school's day — "period 3", "break" — shared by every class in it.
+
+    Per school rather than per class because the bell is: second period starts at the same
+    moment in 3A and in 5B. Storing the times on each lesson instead would mean a school
+    moving second period edits every class's every day, and the copies would disagree
+    within a week of the first mistake.
+
+    **The times are nullable and that is the same decision term dates carry.** A school
+    settles "we run seven periods" long before it agrees when each one rings, and a
+    placeholder 08:00 is worse than nothing — indistinguishable, afterwards, from a time
+    somebody actually agreed.
+
+    Not scoped to an academic track. The bell rings in a building, not in a section, and a
+    per-track grid would have to answer what happens when the two disagree about when
+    period 4 starts. Track separation lives where it belongs: in the lessons, because a
+    class belongs to a rung and a rung belongs to one track.
+    """
+
+    __tablename__ = "timetable_periods"
+    __table_args__ = (
+        # Identity. A school has one period 3, and re-posting it corrects its times.
+        UniqueConstraint("school_id", "period_number", name="uq_timetable_periods_school_number"),
+        CheckConstraint(
+            "period_number >= 1 AND period_number <= 20",
+            name="ck_timetable_periods_number_range",
+        ),
+        # NULL-safe by construction: with either end absent the comparison is unknown and
+        # an unknown CHECK passes. So this forbids an inverted *stated* range and says
+        # nothing about a range nobody has stated.
+        CheckConstraint("ends_at > starts_at", name="ck_timetable_periods_times_ordered"),
+        # Serves the only read there is: "draw this school's day, in order".
+        Index("ix_timetable_periods_school_order", "school_id", "period_number"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    school_id: Mapped[int] = mapped_column(
+        ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    period_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    name_en: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+    name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), default="", nullable=False)
+
+    # `Time`, not `DateTime`: a bell rings at 09:05 every day of term. Stored as an instant
+    # it would acquire a date and a timezone, and "when does period 2 start" would answer
+    # differently in March — the same trap `Date` avoids for a placement.
+    starts_at: Mapped[time | None] = mapped_column(Time, nullable=True)
+    ends_at: Mapped[time | None] = mapped_column(Time, nullable=True)
+
+    # False for break, assembly, prayer: a slot the day contains and no class schedules a
+    # lesson into. The only rule it carries; it says nothing about supervision.
+    is_teaching: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
+class TimetableEntry(Base):
+    """One lesson in one class's weekly plan.
+
+    A plan, not a record. Nothing here says a lesson happened — attendance remains one mark
+    per child per day and gains nothing from this table in this stage. What it says is where
+    a lesson is *meant* to be, which is what a timetable is for and what makes a clash
+    something the database can refuse.
+
+    **Two unique constraints, and they are the conflict rules** (requirement 5):
+
+    `uq_timetable_entries_slot` — one class, one term, one day, one period, one lesson. A
+    class cannot be in two places at once, and this is the constraint that says so rather
+    than a service check another writer could race past.
+
+    `uq_timetable_entries_teacher_slot` — the same for a teacher, and it works precisely
+    *because* `teacher_id` is nullable. SQL treats two NULLs as distinct, so any number of
+    unassigned lessons may share a slot while one named teacher may not be in two rooms at
+    once. The rule is therefore already enforced for a stage that has not happened yet, and
+    will not need a migration when it does.
+
+    **`academic_year_id` is denormalised from the class section** and set by the service,
+    never by a caller. It is here because it is what makes "the term and the class belong to
+    the same year" a fact the row carries rather than a check somebody remembered to run,
+    and because "this year's whole timetable" is a real question that should not join
+    through `class_sections` to ask.
+
+    **`subject_id` is nullable and means a deliberately free period.** A slot with no *row*
+    is one nobody has planned; a row with no subject is a period the class has off. A screen
+    that rendered those identically would leave a registrar unable to tell a finished
+    timetable from an abandoned one.
+
+    Cascades, not RESTRICT, on everything except the teacher. This is a plan: it should
+    follow whatever it describes out of the database rather than block the delete, which is
+    the same reasoning `subject_year_levels` carries. The teacher is `SET NULL` instead,
+    because a teacher leaving does not cancel the lesson — it leaves it needing somebody.
+    """
+
+    __tablename__ = "timetable_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "class_section_id",
+            "term_id",
+            "day_of_week",
+            "period_number",
+            name="uq_timetable_entries_slot",
+        ),
+        UniqueConstraint(
+            "teacher_id",
+            "term_id",
+            "day_of_week",
+            "period_number",
+            name="uq_timetable_entries_teacher_slot",
+        ),
+        CheckConstraint(
+            "period_number >= 1 AND period_number <= 20",
+            name="ck_timetable_entries_number_range",
+        ),
+        # Serves the screen this exists for: "draw 3A's week", ordered as a grid is read.
+        Index(
+            "ix_timetable_entries_class_week",
+            "class_section_id",
+            "term_id",
+            "day_of_week",
+            "period_number",
+        ),
+        # Serves "the whole school's Tuesday", which is how a clash is found by eye and how
+        # a future teacher-allocation screen will look for a free room.
+        Index(
+            "ix_timetable_entries_year_slot",
+            "academic_year_id",
+            "day_of_week",
+            "period_number",
+        ),
+        # Serves "what does this subject occupy" — the read behind changing a subject's
+        # assignment once it is already timetabled.
+        Index("ix_timetable_entries_subject", "subject_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    class_section_id: Mapped[int] = mapped_column(
+        ForeignKey("class_sections.id", ondelete="CASCADE"), nullable=False
+    )
+    # Denormalised from the class section by the service. See the class docstring.
+    academic_year_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_years.id", ondelete="CASCADE"), nullable=False
+    )
+    term_id: Mapped[int] = mapped_column(
+        ForeignKey("terms.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # `WorkingDay`, stored as its stable string. Which days are *legal* is the school's
+    # answer (`schools.working_days`) and is checked in the service, not here: a CHECK
+    # listing the seven weekdays would still permit a Friday at a school that shuts on it,
+    # and a CHECK that knew the school's week would need a subquery.
+    day_of_week: Mapped[str] = mapped_column(String(_WEEKDAY_LEN), nullable=False)
+    period_number: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # NULL is a stated free period, not an unplanned one. See the class docstring.
+    subject_id: Mapped[int | None] = mapped_column(
+        ForeignKey("subjects.id", ondelete="CASCADE"), nullable=True
+    )
+    # Always NULL in this stage; the column exists so the constraint above already holds.
+    teacher_id: Mapped[int | None] = mapped_column(
+        ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
 
 
 class Student(Base):
@@ -1267,6 +1504,13 @@ class TeacherYearLevel(Base):
 
     This is the outer boundary a year supervisor works inside: the supervisor picks rooms,
     but only rooms on a rung that appears here. See `sis.domain.staff.assignable_classes`.
+
+    `(teacher, rung, subject)` is already the shape "this teacher, this grade, this subject",
+    and the rung names the academic track — so the track needs no column of its own here for
+    the same reason it needs none on `subject_year_levels`. What is *not* enforced yet is
+    that the (subject, rung) pair is one the school actually runs; `subject_year_levels` is
+    the list that answers that, and is where a teacher screen should read its options from.
+    Nothing checks it today because nothing writes these rows today.
     """
 
     __tablename__ = "teacher_year_levels"
@@ -1333,6 +1577,31 @@ class TeacherClassSection(Base):
     )
 
 
+class TeacherAttendance(Base):
+    """One teacher's stated attendance for one school day."""
+
+    __tablename__ = "teacher_attendance"
+    __table_args__ = (
+        UniqueConstraint("teacher_id", "on_date", name="uq_teacher_attendance_teacher_date"),
+        Index("ix_teacher_attendance_school_date", "school_id", "on_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    teacher_id: Mapped[int] = mapped_column(
+        ForeignKey("teachers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    school_id: Mapped[int] = mapped_column(
+        ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    on_date: Mapped[date] = mapped_column(Date, nullable=False)
+    state: Mapped[str] = mapped_column(String(_ATTENDANCE_STATE_LEN), nullable=False)
+    note: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    recorded_by: Mapped[str] = mapped_column(String(_USERNAME_LEN), default="", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
 class SystemSetting(Base):
     """Estate-wide switches the administrator can turn, one row per key.
 
@@ -1375,9 +1644,13 @@ __all__ = [
     "Student",
     "StudentGuardian",
     "Subject",
+    "SubjectYearLevel",
     "SubjectGrade",
     "SystemSetting",
     "Teacher",
+    "TeacherAttendance",
+    "TimetableEntry",
+    "TimetablePeriod",
     "TeacherClassSection",
     "TeacherSubject",
     "TeacherYearLevel",

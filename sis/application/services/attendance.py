@@ -238,6 +238,7 @@ class AttendanceService:
         *,
         notes: Mapping[str, str] | None = None,
         actor: str = "",
+        absent_unlisted: bool = False,
     ) -> ClassRegister:
         """Record a day for a whole class, and return the register as it now stands.
 
@@ -247,12 +248,26 @@ class AttendanceService:
         this service does not offer, because "she was marked present by mistake" is
         corrected by marking her correctly, not by removing the statement.
 
+        **`absent_unlisted` closes the register.** With it, every child still blank at the
+        end of this call is written `absent`, which is how a supervisor takes a register by
+        naming only the children in the room. It is a parameter rather than the default
+        because the two readings of an unnamed child — "not here" and "not looked at yet" —
+        are different facts, and only the caller knows which one it is holding. The default
+        keeps the partial save honest; this flag is a caller stating that the pass is
+        finished.
+
+        It fills blanks and overwrites nothing. A child already marked `excused` this
+        morning stays excused when the register is closed at noon: closing a register is a
+        statement about the children nobody had reached, not a re-statement about the ones
+        somebody had. Without that rule the flag would quietly destroy the notes an earlier
+        pass had typed, which is the kind of loss a register cannot show afterwards.
+
         Every child named must be placed in this class on this day. A name that is not is
         refused with the number in the message — a stale screen or the wrong class, and
         writing it would file her attendance under a room she had left.
         """
         notes = notes or {}
-        if not states:
+        if not states and not absent_unlisted:
             raise ValidationError(
                 "no attendance was stated; the register has nothing to record",
                 field="states",
@@ -284,6 +299,15 @@ class AttendanceService:
                     field="states",
                 )
 
+            stated = dict(states)
+            if absent_unlisted:
+                # Only the children who are blank *after* this call's own entries are
+                # applied: one already on file, and one being marked right now, are both
+                # children somebody has reached.
+                already = set(uow.attendance.marks_for_class(section_id, on_date))
+                for number in sorted(placed - set(stated) - already):
+                    stated[number] = AttendanceState.ABSENT.value
+
             marks = [
                 AttendanceMark(
                     student_number=number,
@@ -293,9 +317,10 @@ class AttendanceService:
                     class_code=class_code,
                     note=notes.get(number, ""),
                 )
-                for number, state in states.items()
+                for number, state in stated.items()
             ]
-            uow.attendance.upsert_many(marks, recorded_by=actor)
+            if marks:
+                uow.attendance.upsert_many(marks, recorded_by=actor)
             uow.commit()
 
         # Read back rather than assembling the answer from what was just written: the

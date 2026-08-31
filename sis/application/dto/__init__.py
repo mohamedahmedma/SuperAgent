@@ -35,12 +35,16 @@ from sis.application.dto.roster import (
     RosterPreviewCommand,
 )
 from sis.application.dto.structure import (
+    TERM_LABELS,
     GeneratedItem,
     GenerateStructureCommand,
     GenerateStructureResult,
+    TermPlan,
+    term_code_for,
 )
 
 __all__ = [
+    "TERM_LABELS",
     "GenerateStructureCommand",
     "GenerateStructureResult",
     "GeneratedItem",
@@ -60,5 +64,7 @@ __all__ = [
     "RosterPreviewCommand",
     "RowCode",
     "RowOutcome",
+    "TermPlan",
     "tally_by_code",
+    "term_code_for",
 ]

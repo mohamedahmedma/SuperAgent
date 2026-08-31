@@ -85,7 +85,11 @@ var state = {
       screens loading at once must not have the first one to finish hide the bar. */
   inflight: 0,
   online: null,
-  toasts: []
+  toasts: [],
+  /** The signed-in account — names, language, school — or null when nobody is. */
+  account: null,
+  /** Their roles, permissions and the scope each is held at. See `can` / `canIn`. */
+  profile: null
 };
 
 var listeners = [];
@@ -140,6 +144,119 @@ function setYear(code) {
   if (code === state.year) return;
   writeLocal(YEAR_KEY, code);
   set({ year: code || null });
+}
+
+/* -- Who is signed in, and what they may do --------------------------------------- */
+
+/*
+ * Everything below decides what the console *draws*. None of it decides what the service
+ * *allows* — every one of these permissions is checked again on the server, and the checks
+ * there are the boundary. Hiding a control the caller may not use is a courtesy: it stops
+ * a teacher clicking Save on a class that was never theirs and reading a 403 they cannot
+ * act on. Treating it as security would mean an editor with dev tools is an administrator.
+ *
+ * Two questions, and the difference between them is the whole of the scope model:
+ *
+ *   can(p)         may this person do `p` anywhere? Decides whether a *screen* exists.
+ *   canIn(p, at)   may they do it to *this* class, this grade? Decides whether the button
+ *                  on the row is live.
+ *
+ * A console built on `can` alone shows a teacher of one classroom an edit control on every
+ * classroom in the school, which is the exact failure the scopes were added to prevent.
+ */
+
+/**
+ * The signed-in account: names, language, school, and the profile inside it.
+ *
+ * `/auth/login` and `/auth/me` answer in the same shape, so this one setter takes either
+ * and the page after a reload is the page before it.
+ */
+function setAccount(account) {
+  set({
+    account: account || null,
+    profile: (account && account.profile) || null
+  });
+}
+
+/** Kept for callers holding a bare profile; the account fields go unset. */
+function setProfile(profile) {
+  set({ profile: profile || null, account: profile ? state.account : null });
+}
+
+function can(permission) {
+  /* No human session means the legacy integration console remains available — the service
+     still admits an unauthenticated caller, and a console that hid everything from one
+     would be refusing what the server allows. */
+  if (!state.profile) return true;
+  var held = state.profile.permissions;
+  return Array.isArray(held) && held.indexOf(permission) >= 0;
+}
+
+/* Which field of a `canIn` question each kind of grant is compared against. */
+var SCOPE_FIELD = {
+  school: 'school',
+  track: 'track',
+  year_level: 'yearLevel',
+  class_section: 'classSection',
+  subject: 'subject'
+};
+
+/*
+ * Does one grant's scope answer for the place being asked about?
+ *
+ * The same rule as `Scope.covers` on the server, and deliberately the same shape so the
+ * two can be read side by side: a wider scope covers a narrower one, but only when the
+ * caller *says* which wider thing it is inside. A question naming nothing is answered by a
+ * global grant alone — the conservative reading, and the one that errs towards hiding a
+ * control rather than towards offering one the server will refuse.
+ *
+ * Compared on **codes**, not on the surrogate ids the grant also carries. A screen here
+ * knows it is showing `P1A` in `AR-P1`; it has never seen class 47, and threading ids
+ * through the whole UI so this one function could use them would be a second identity
+ * system maintained for the sake of a check the server repeats anyway. The server sends
+ * `scope_code` beside `scope_id` for exactly this.
+ */
+function scopeCovers(grant, at) {
+  if (grant.scope_type === 'global') return true;
+  var field = SCOPE_FIELD[grant.scope_type];
+  if (!field) return false;
+  var asked = (at || {})[field];
+  /* A grant whose target has been deleted carries no code and covers nothing. Refusing
+     here hides a control; the alternative — treating a missing code as a match — would
+     show one on every class in the school. */
+  if (asked == null || grant.scope_code == null) return false;
+  return String(asked) === String(grant.scope_code);
+}
+
+/**
+ * May this person do `permission` to the thing at `at`?
+ *
+ * `at` is a plain object of codes, each optional:
+ * `{ school, track, yearLevel, classSection, subject }`. Name as many as the screen knows —
+ * the more it names, the more grants can match, and a narrow grant is invisible to a
+ * question that only says which school.
+ */
+function canIn(permission, at) {
+  if (!state.profile) return true;
+  var grants = state.profile.grants;
+  /* A payload from a service too old to send scopes. Falling back to the unscoped answer
+     keeps the console usable rather than blanking every control; the server is still the
+     boundary, so the worst case is a button that reports a refusal. */
+  if (!Array.isArray(grants)) return can(permission);
+  for (var i = 0; i < grants.length; i += 1) {
+    if (grants[i].permission === permission && scopeCovers(grants[i], at)) return true;
+  }
+  return false;
+}
+
+/** The distinct role codes this person holds, for the header and for a role badge. */
+function roles() {
+  if (!state.profile || !Array.isArray(state.profile.roles)) return [];
+  var seen = [];
+  state.profile.roles.forEach(function (row) {
+    if (seen.indexOf(row.role_code) < 0) seen.push(row.role_code);
+  });
+  return seen;
 }
 
 function setTheme(theme) {
@@ -411,11 +528,33 @@ var keys = {
   terms: function (year) {
     return 'terms:' + (year || '');
   },
+  /* One year and everything attached to it. Under the `years:` prefix so that creating a
+     year — which also builds its terms — drops this with the year list it belongs to. */
+  yearDetail: function (year) {
+    return 'years:detail:' + (year || '');
+  },
   /* The year is in the key because it is in the question. Keyed without it, two years
      would share one cached catalogue and the second screen to load would show the
      first year's subjects under the second year's heading. */
   subjects: function (year, includeInactive) {
     return 'subjects:' + (year || '') + ':' + (includeInactive ? 'all' : 'active');
+  },
+  /* The subjects one rung teaches, which is a different question from the year's whole
+     catalogue and so is a different key. Sharing `subjects:` for both would mean the
+     first marks screen to load decided what every other screen thought the year taught. */
+  gradeSubjects: function (year, yearLevel) {
+    return 'subjects:' + (year || '') + ':grade:' + (yearLevel || '');
+  },
+  /* The assignment board, keyed by year for the same reason the catalogue is. Under the
+     `subjects:` prefix on purpose: assigning a subject changes what a rung teaches, and
+     `invalidate('subjects:')` after any subject write should drop this too. */
+  subjectAssignments: function (year) {
+    return 'subjects:assignments:' + (year || '');
+  },
+  /* A school's Arabic/Languages tracks. Rarely changes, but keyed rather than read
+     one-shot because both the school screen and the assignment board ask for it. */
+  tracks: function (school) {
+    return 'tracks:' + (school || '');
   },
   /*
    * One child's record and the three lists hanging off it. These are keyed — rather than
@@ -492,6 +631,30 @@ var load = {
     };
     register(key, loader);
     return read(key, loader);
+  },
+  gradeSubjects: function (year, yearLevel) {
+    var key = keys.gradeSubjects(year, yearLevel);
+    var loader = function () {
+      return api.subjects(year, false, yearLevel);
+    };
+    register(key, loader);
+    return read(key, loader);
+  },
+  subjectAssignments: function (year) {
+    var key = keys.subjectAssignments(year);
+    var loader = function () {
+      return api.subjectAssignments(year);
+    };
+    register(key, loader);
+    return read(key, loader);
+  },
+  tracks: function (school) {
+    var key = keys.tracks(school);
+    var loader = function () {
+      return api.schoolTracks(school);
+    };
+    register(key, loader);
+    return read(key, loader);
   }
 };
 
@@ -508,6 +671,11 @@ export const Store = {
   set: set,
   setSchool: setSchool,
   setYear: setYear,
+  setProfile: setProfile,
+  setAccount: setAccount,
+  can: can,
+  canIn: canIn,
+  roles: roles,
   setTheme: setTheme,
   setLang: setLang,
   toast: toast,

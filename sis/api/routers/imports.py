@@ -42,7 +42,10 @@ from sis.api.deps import (
     get_import_reports,
     get_roster_import_service,
     require_registrar,
+    Principal,
+    require_permission,
 )
+from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.dto import (
     GradeCommitCommand,
@@ -97,7 +100,7 @@ class ImportReportReader(Protocol):
 
 # Every route in this module writes, or reads a write's audit trail. `registrar` only,
 # and scope is compared by exact equality — a `reader` key reaches none of them.
-Registrar = Annotated[Caller, Depends(require_registrar)]
+Registrar = Annotated[Principal, Depends(require_permission(Permission.IMPORTS_RUN))]
 Config = Annotated[Settings, Depends(get_settings)]
 RosterImports = Annotated[RosterImportService, Depends(get_roster_import_service)]
 GradeImports = Annotated[GradeImportService, Depends(get_grade_import_service)]

@@ -650,12 +650,20 @@ function Register({ classCode, year }) {
 
 /* -- This class's marks upload ---------------------------------------------------- */
 
-function ClassMarks({ classCode, year }) {
+function ClassMarks({ classCode, year, yearLevel }) {
   const [term, setTerm] = useState('');
   const [subject, setSubject] = useState('');
 
   const terms = useResource(Store.keys.terms(year), () => api.terms(year), !!year);
-  const subjects = useResource(Store.keys.subjects(year), () => api.subjects(year), !!year);
+  /* The rung's subjects, not the year's. The class is already fixed on this screen, so its
+     rung is known — and offering a subject that rung does not teach is offering to file a
+     mark against a lesson nobody in this room sat. Falls back to the whole catalogue only
+     while the section is still loading and the rung is genuinely unknown. */
+  const subjects = useResource(
+    yearLevel ? Store.keys.gradeSubjects(year, yearLevel) : Store.keys.subjects(year),
+    () => api.subjects(year, false, yearLevel),
+    !!year
+  );
 
   const termList = (terms.value || [])
     .slice()
@@ -854,9 +862,29 @@ export function Klass({ params = {} }) {
       <div className="sis-fade" key={tab}>
         {tab === 'register' ? <Register classCode={classCode} year={year} /> : null}
         {tab === 'attendance' ? (
-          <AttendancePanel classCode={classCode} year={year} on={params.on} />
+          <AttendancePanel
+            classCode={classCode}
+            year={year}
+            on={params.on}
+            /* Where this class sits, so the panel can ask whether the signed-in person may
+               write *this* register rather than registers in general. The rung matters as
+               much as the room: a grade supervisor holds the rung and no single class, and
+               a question that named only the class would hide the Save button from the
+               person whose job it is. */
+            scope={{
+              school: school,
+              yearLevel: section && section.year_level_code,
+              classSection: classCode
+            }}
+          />
         ) : null}
-        {tab === 'marks' ? <ClassMarks classCode={classCode} year={year} /> : null}
+        {tab === 'marks' ? (
+          <ClassMarks
+            classCode={classCode}
+            year={year}
+            yearLevel={section && section.year_level_code}
+          />
+        ) : null}
       </div>
     </>
   );

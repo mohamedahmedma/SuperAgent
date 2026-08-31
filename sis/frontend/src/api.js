@@ -46,6 +46,7 @@ var DEFAULT_KEY = 'dev-sis-registrar';
  * page with no session has.
  */
 var STORAGE_KEY = 'sis.api_key';
+var SESSION_TOKEN_KEY = 'sis.session_token';
 
 var DASH = '—'; // em dash: the one rendering of "no mark was recorded"
 
@@ -67,6 +68,19 @@ function storedKey() {
 /** The key every request actually sends: what the registrar typed, else the default. */
 function getKey() {
   return storedKey() || DEFAULT_KEY;
+}
+
+function getSessionToken() {
+  try { return String(window.sessionStorage.getItem(SESSION_TOKEN_KEY) || '').trim(); }
+  catch (e) { return ''; }
+}
+
+function setSessionToken(value) {
+  try {
+    var token = String(value || '').trim();
+    if (token) window.sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+    else window.sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  } catch (e) { /* a tab without storage remains signed out */ }
 }
 
 /**
@@ -365,6 +379,8 @@ function request(path, options) {
      which a request leaves without the header and 401s for a reason the page cannot
      explain. */
   headers['X-API-Key'] = getKey();
+  var sessionToken = getSessionToken();
+  if (sessionToken) headers.Authorization = 'Bearer ' + sessionToken;
   /* Conditional, unlike the key above, because there is no sensible default school. A
      service holding one school ignores this; a service holding several refuses a request
      that names none, which is what makes "I forgot to pick a school" a visible error
@@ -467,6 +483,16 @@ function postForm(path, form) {
  * that needs one of those leaves the control out rather than calling a path that 404s.
  */
 var api = {
+  login: function (username, password) {
+    return post('/auth/login', { username: username, password: password }).then(function (result) {
+      setSessionToken(result.token);
+      return result;
+    });
+  },
+  me: function () { return get('/auth/me'); },
+  logout: function () {
+    return post('/auth/logout').then(function () { setSessionToken(''); });
+  },
   /* -- Schools: the outermost scope ------------------------------------------------
    *
    * Everything below a school belongs to exactly one, reached through a year or a rung.
@@ -487,6 +513,9 @@ var api = {
    */
   schoolLevels: function (schoolCode) {
     return get('/schools/' + encodeURIComponent(schoolCode) + '/levels');
+  },
+  schoolTracks: function (schoolCode) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/tracks');
   },
   createLevel: function (body) {
     return post('/structure/levels', body);
@@ -509,6 +538,12 @@ var api = {
   generateStructure: function (body) {
     return post('/structure/generate', body);
   },
+  configuredGrades: function (school, track) {
+    return get('/schools/' + encodeURIComponent(school) + '/tracks/' + encodeURIComponent(track) + '/configured-grades');
+  },
+  createConfiguredClasses: function (body) {
+    return post('/structure/configured-classes', body);
+  },
 
   terms: function (academicYear) {
     return get('/terms', { academic_year: academicYear });
@@ -516,20 +551,48 @@ var api = {
   createTerm: function (body) {
     return post('/terms', body);
   },
+  /* One year with everything it hangs off: its school, its terms, and its ladder grouped
+     by track. One request rather than four, which cannot disagree with itself. */
+  academicYear: function (code) {
+    return get('/academic-years/' + encodeURIComponent(code));
+  },
+  /* Rebuild a year's term sections from its school's term count. Normally unnecessary —
+     the sync runs on both writes that can change the answer. */
+  syncYearTerms: function (code) {
+    return post('/academic-years/' + encodeURIComponent(code) + '/terms/sync');
+  },
   /*
    * The catalogue of one year. `academicYear` is required by the route, not defaulted:
    * a subject belongs to a year, so "the subjects" has no answer, and a client that
    * guessed the current year would quietly show next September's catalogue to a
    * registrar working through last term's marks.
    */
-  subjects: function (academicYear, includeInactive) {
+  /*
+   * The year's catalogue, or — with `yearLevel` — only what that rung is assigned to teach.
+   *
+   * The third argument is what keeps Physics off a Primary marks sheet. Omitting it asks
+   * the wider question and is right on the screen that manages the catalogue itself; any
+   * screen that has a class in hand should be naming its rung.
+   */
+  subjects: function (academicYear, includeInactive, yearLevel) {
     return get('/subjects', {
       academic_year: academicYear,
-      include_inactive: includeInactive ? 'true' : null
+      include_inactive: includeInactive ? 'true' : null,
+      year_level: yearLevel || null
     });
   },
   createSubject: function (body) {
     return post('/subjects', body);
+  },
+  /* The whole board for a year: which rungs teach which subjects. One read rather than
+     one per rung, because the board draws every rung at once. */
+  subjectAssignments: function (academicYear) {
+    return get('/subject-assignments', { academic_year: academicYear });
+  },
+  /* Idempotent in both directions, so the board can fire a drop without first checking
+     whether the subject is already there. */
+  setSubjectAssignment: function (body) {
+    return put('/subject-assignments', body);
   },
 
   /* -- One class at a time ---------------------------------------------------------
@@ -554,14 +617,18 @@ var api = {
    * two things that actually fill a registrar's day — a misspelt name, and one child
    * arriving in November — and the import still owns anything touching many children.
    */
-  searchStudents: function (query, includeInactive) {
+  searchStudents: function (query, includeInactive, academicYear, yearLevel) {
     return get('/students', {
       q: query,
-      include_inactive: includeInactive ? 'true' : null
+      include_inactive: includeInactive ? 'true' : null,
+      academic_year: academicYear || null,
+      year_level: yearLevel || null
     });
   },
-  student: function (studentNumber) {
-    return get('/students/' + encodeURIComponent(studentNumber));
+  student: function (studentNumber, academicYear) {
+    return get('/students/' + encodeURIComponent(studentNumber), {
+      academic_year: academicYear || null
+    });
   },
   saveStudent: function (body) {
     return post('/students', body);
@@ -604,6 +671,23 @@ var api = {
   studentGrades: function (studentNumber, termCode) {
     return get('/students/' + encodeURIComponent(studentNumber) + '/grades', {
       term: termCode
+    });
+  },
+  teachingAssignments: function (academicYear) {
+    return get('/teaching/assignments', { academic_year: academicYear || null });
+  },
+  classMarkSheet: function (classCode, academicYear, termCode, subjectCode) {
+    return get('/classes/' + encodeURIComponent(classCode) + '/grades', {
+      academic_year: academicYear,
+      term: termCode,
+      subject: subjectCode
+    });
+  },
+  recordClassMarks: function (classCode, academicYear, body) {
+    return request('/classes/' + encodeURIComponent(classCode) + '/grades', {
+      method: 'PUT',
+      query: { academic_year: academicYear },
+      body: body
     });
   },
 
@@ -675,6 +759,51 @@ var api = {
     return post('/admin/api-keys', body);
   },
 
+  teachers: function (schoolCode) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers');
+  },
+  saveTeacher: function (schoolCode, staffNumber, body) {
+    return request('/schools/' + encodeURIComponent(schoolCode) + '/teachers/' +
+      encodeURIComponent(staffNumber), { method: 'PUT', body: body });
+  },
+  teacherAttendance: function (schoolCode, fromDate, toDate) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers/attendance', {
+      from: fromDate || null,
+      to: toDate || null
+    });
+  },
+  rbacUsers: function () { return get('/rbac/users'); },
+  rbacRoles: function () { return get('/rbac/roles'); },
+  addUserRole: function (userId, role) {
+    return post('/rbac/users/' + encodeURIComponent(userId) + '/roles', role);
+  },
+  removeUserRole: function (userId, role) {
+    return request('/rbac/users/' + encodeURIComponent(userId) + '/roles', {
+      method: 'DELETE', body: role
+    });
+  },
+  gradeAssignmentOptions: function (schoolCode, gradeCode, academicYear, subjectCode) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/grades/' +
+      encodeURIComponent(gradeCode) + '/teacher-assignment-options', {
+        academic_year: academicYear, subject: subjectCode || null
+      });
+  },
+  assignTeacherClasses: function (schoolCode, gradeCode, body) {
+    return request('/schools/' + encodeURIComponent(schoolCode) + '/grades/' +
+      encodeURIComponent(gradeCode) + '/teacher-class-assignments', {
+        method: 'PUT', body: body
+      });
+  },
+  /* The teaching staff of one grade. `year_level` is not an optional refinement here: it
+   * is what makes the read match a grade supervisor's grant at all, and it also trims each
+   * teacher down to their work on that grade. Omitting it asks for the whole school, which
+   * a supervisor of one rung is refused. */
+  gradeTeachers: function (schoolCode, gradeCode) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers', {
+      year_level: gradeCode
+    });
+  },
+
   /* -- The daily register ----------------------------------------------------------
    *
    * `classRegister` returns every child placed in the class that day, and the ones nobody
@@ -694,12 +823,24 @@ var api = {
    * first. Children left out of `entries` are untouched, which is what lets a teacher
    * save the twelve present so far and finish later.
    */
-  takeRegister: function (classCode, academicYear, onDate, entries) {
+  /* `closeRegister` records every child still blank as absent, which is how the register
+   * screen finishes a pass: the user names the children in the room and the rest are away.
+   * It is a separate argument rather than the default because the service reads an
+   * unnamed child as "not reached yet" unless told otherwise, and the two are different
+   * facts about a morning. */
+  takeRegister: function (classCode, academicYear, onDate, entries, closeRegister) {
     return request('/classes/' + encodeURIComponent(classCode) + '/attendance', {
       method: 'PUT',
-      body: { entries: entries },
+      body: { entries: entries, absent_unlisted: !!closeRegister },
       query: { academic_year: academicYear, on: onDate }
     });
+  },
+  /* Step one of taking a register: the classes this person may take, each carrying its
+   * grade and how far its register has got. Answered from their own grants, so a
+   * class-scoped supervisor gets their four rooms and a registrar gets the school —
+   * neither has to already know a class code to begin. */
+  registerableClasses: function (academicYear, onDate) {
+    return get('/attendance/classes', { academic_year: academicYear, on: onDate });
   },
   studentAttendance: function (studentNumber, fromDate, toDate) {
     return get('/students/' + encodeURIComponent(studentNumber) + '/attendance', {
@@ -727,5 +868,5 @@ var api = {
  * was that it had no module system; with one, an import is checked at build time — a typo in
  * `SIS.gradeTxet` used to be `undefined` at runtime on one screen.
  */
-export { BASE, DEFAULT_KEY, ApiError, getKey, setKey, clearKey, hasKey, isDefaultKey };
+export { BASE, DEFAULT_KEY, ApiError, getKey, setKey, clearKey, hasKey, isDefaultKey, getSessionToken, setSessionToken };
 export { escapeText as escape, gradeText, request, get, post, postForm, api };

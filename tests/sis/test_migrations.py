@@ -293,3 +293,123 @@ def test_a_downgrade_refuses_rather_than_deleting_a_subject_it_cannot_keep(
 
     # And the refusal cost nothing: the marks are all still there.
     assert _marks_on_file() == {"MATH": 88.5, "SCI": 0.0}
+
+
+def test_0010_gives_every_existing_subject_the_grades_it_was_already_taught_on(
+    school_with_marks: str,
+) -> None:
+    """Requirement 5, and the one place it can actually be broken.
+
+    Before 0010 a subject was implicitly taught on every rung of its school — every screen
+    that offered a subject offered all of them. After 0010, anything reading through
+    `subject_year_levels` shows a subject only where a row says so, so an empty table would
+    silently empty every existing school's marks pickers: the subjects would all still be
+    on file, and none of them would appear anywhere.
+
+    So the assertion is not "the table exists" but "the rows say what the school already
+    meant": every (subject, rung) pair of every school, and no pair that crosses schools.
+
+    Asserted after a real downgrade and upgrade rather than against the fixture's own
+    database, because that is the only way to see the backfill *run* — the template these
+    tests copy was migrated before any of these rows existed.
+    """
+    reset_engine()
+    command.downgrade(_alembic(), "0002")
+    reset_engine()
+    command.upgrade(_alembic(), "head")
+    reset_engine()
+
+    from sqlalchemy import text
+
+    from sis.infrastructure.db.session import get_engine
+
+    with get_engine().connect() as connection:
+        pairs = set(
+            connection.execute(
+                text(
+                    """
+                    SELECT s.code, l.code
+                    FROM subject_year_levels a
+                    JOIN subjects s ON s.id = a.subject_id
+                    JOIN year_levels l ON l.id = a.year_level_id
+                    """
+                )
+            ).all()
+        )
+        crossed = connection.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM subject_year_levels a
+                JOIN subjects s ON s.id = a.subject_id
+                JOIN academic_years y ON y.id = s.academic_year_id
+                JOIN year_levels l ON l.id = a.year_level_id
+                WHERE l.school_id <> y.school_id
+                """
+            )
+        ).scalar_one()
+
+    # The fixture teaches MATH and SCI in one school with one rung, `3`. Both subjects were
+    # available on that rung before this revision, and both still are.
+    assert pairs == {("MATH", "3"), ("SCI", "3")}
+    assert crossed == 0, "a subject was assigned to a rung of a school that does not teach it"
+
+    # And the marks the backfill was protecting are untouched by it.
+    assert _marks_on_file() == {"MATH": 88.5, "SCI": 0.0}
+
+
+def test_0011_keeps_the_dates_a_school_already_stated(school_with_marks: str) -> None:
+    """Widening NOT NULL to NULL must not be an excuse to touch a single row.
+
+    The fixture's term has real dates. After a full downgrade and upgrade they are still
+    the same dates — the revision changes what the column *permits*, and a school that has
+    dated its terms notices nothing at all.
+    """
+    reset_engine()
+    command.downgrade(_alembic(), "0002")
+    reset_engine()
+    command.upgrade(_alembic(), "head")
+    reset_engine()
+
+    with SqlAlchemyUnitOfWork() as uow:
+        term = uow.terms.get(TermCode(TERM))
+    assert term is not None
+    assert term.starts_on == date(2025, 9, 1)
+    assert term.ends_on == date(2025, 12, 20)
+    assert term.is_dated is True
+
+
+def test_0011_downgrade_refuses_rather_than_inventing_dates_for_an_undated_term(
+    school_with_marks: str,
+) -> None:
+    """A term nobody has dated cannot be narrowed back to NOT NULL, so the downgrade stops.
+
+    The alternative is the dangerous one and is why this is asserted rather than left to
+    the code review: filling the gap from the year's window would look like a clean
+    downgrade and would turn "not decided yet" into a boundary that decides which class a
+    mark is filed under. A migration that cannot preserve the meaning has to refuse.
+    """
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.terms.upsert_many(
+            [
+                Term(
+                    code="2026-T2",
+                    academic_year_code=YEAR,
+                    name_en="Term 2",
+                    name_ar="الفصل الثاني",
+                    sequence=2,
+                )
+            ]
+        )
+        uow.commit()
+
+    reset_engine()
+    with pytest.raises(RuntimeError, match="cannot restore NOT NULL term dates"):
+        command.downgrade(_alembic(), "0010")
+    reset_engine()
+
+    # The refusal cost nothing: the undated term and every mark are where they were.
+    with SqlAlchemyUnitOfWork() as uow:
+        undated = uow.terms.get(TermCode("2026-T2"))
+    assert undated is not None and undated.is_dated is False
+    assert _marks_on_file() == {"MATH": 88.5, "SCI": 0.0}

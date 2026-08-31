@@ -15,6 +15,7 @@ answer 201 or 200 rather than 201 or 409. Invariant 6 is what makes that safe: t
 identity, the names are labels, and re-posting a term with a corrected Arabic name renames
 it without detaching one grade.
 """
+from collections.abc import Sequence
 from datetime import date
 from typing import Annotated, Literal, Protocol
 
@@ -28,9 +29,12 @@ from sis.api.deps import (
     get_structure_service,
     require_read_access,
     require_registrar,
+    Principal,
+    require_permission,
 )
+from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
-from sis.application.dto import GenerateStructureCommand
+from sis.application.dto import GenerateStructureCommand, TermPlan
 from sis.application.services import QueryService, StructureGenerationService
 from sis.domain.structure import (
     AcademicYear,
@@ -47,6 +51,7 @@ from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,
     SchoolCode,
+    SubjectCode,
     YearCode,
 )
 
@@ -75,8 +80,8 @@ class StructureCatalogue(Protocol):
 # Reads take either scope, named out loud; writes take `registrar` and nothing else.
 # Scope comparison is exact equality, so a reader-only check here would lock the
 # registrar out of the very dropdowns she generates the structure from.
-Reader = Annotated[Caller, Depends(require_read_access)]
-Registrar = Annotated[Caller, Depends(require_registrar)]
+Reader = Annotated[Principal, Depends(require_permission(Permission.STRUCTURE_READ))]
+Registrar = Annotated[Principal, Depends(require_permission(Permission.STRUCTURE_WRITE))]
 Queries = Annotated[QueryService, Depends(get_query_service)]
 Structure = Annotated[StructureGenerationService, Depends(get_structure_service)]
 Catalogue = Annotated[StructureCatalogue, Depends(get_structure_catalogue)]
@@ -96,9 +101,15 @@ class AcademicYearOut(BaseModel):
     starts_on: date
     ends_on: date
     is_current: bool
+    terms: "TermPlanOut | None" = Field(
+        default=None,
+        description="Present only on the write that created or re-synced this year: what "
+        "happened to its term sections. Absent in listings, where the terms themselves are "
+        "the answer and a plan would be a stale record of an older call.",
+    )
 
     @classmethod
-    def of(cls, year: AcademicYear) -> "AcademicYearOut":
+    def of(cls, year: AcademicYear, *, terms: TermPlan | None = None) -> "AcademicYearOut":
         return cls(
             code=str(year.code),
             school_code=str(year.school_code),
@@ -107,6 +118,7 @@ class AcademicYearOut(BaseModel):
             starts_on=year.starts_on,
             ends_on=year.ends_on,
             is_current=year.is_current,
+            terms=None if terms is None else TermPlanOut.of(terms),
         )
 
 
@@ -148,6 +160,9 @@ class YearLevelOut(BaseModel):
         description="garden / primary / preparatory / secondary, or `unspecified`. A label "
         "for grouping a long ladder on screen; it carries no rules."
     )
+    track_code: str | None = Field(
+        default=None, description="Arabic/Languages academic track owning this rung."
+    )
     name_ar: str
     name_en: str
     display_order: int = Field(
@@ -161,6 +176,7 @@ class YearLevelOut(BaseModel):
             code=str(level.code),
             school_code=str(level.school_code),
             stage=str(level.stage),
+            track_code=level.track_code,
             name_ar=level.name_ar,
             name_en=level.name_en,
             display_order=level.display_order,
@@ -265,17 +281,30 @@ class GenerateStructureOut(BaseModel):
     items: list[GeneratedItemOut]
 
 
+#: What both term date fields say, written once so the request and the response cannot
+#: describe the same optionality differently.
+_TERM_DATE_NOTE = (
+    "Optional. `null` means the school has not fixed this boundary yet — a year's term "
+    "sections are created from the school's term count long before the calendar is "
+    "settled. It is never a placeholder: nothing downstream can tell an invented date "
+    "from a real one, and these days decide which class a mark is filed under."
+)
+
+
 class TermIn(BaseModel):
     code: str = Field(examples=["2026-T1"])
     academic_year_code: str = Field(examples=["2025-2026"])
     name_ar: str = ""
     name_en: str = ""
-    starts_on: date
-    ends_on: date
+    starts_on: date | None = Field(default=None, description=f"First day of term. {_TERM_DATE_NOTE}")
+    ends_on: date | None = Field(
+        default=None, description=f"Last day of term, inclusive. {_TERM_DATE_NOTE}"
+    )
     sequence: int = Field(
         default=1,
         description="Chronological order without parsing the code, which schools format "
-        "freely.",
+        "freely. This is what orders terms on every screen — the dates never did, and now "
+        "may not be there to.",
     )
     is_closed: bool = Field(
         default=False,
@@ -289,10 +318,16 @@ class TermOut(BaseModel):
     academic_year_code: str
     name_ar: str
     name_en: str
-    starts_on: date
-    ends_on: date
+    starts_on: date | None = Field(default=None, description=_TERM_DATE_NOTE)
+    ends_on: date | None = Field(default=None, description=_TERM_DATE_NOTE)
     sequence: int
     is_closed: bool
+    is_dated: bool = Field(
+        default=False,
+        description="Whether both boundaries are on file. The supported way to ask — one "
+        "date alone is not a window, and a client testing `starts_on` alone would treat a "
+        "half-filled term as dated.",
+    )
 
     @classmethod
     def of(cls, term: Term) -> "TermOut":
@@ -305,6 +340,36 @@ class TermOut(BaseModel):
             ends_on=term.ends_on,
             sequence=term.sequence,
             is_closed=term.is_closed,
+            is_dated=term.is_dated,
+        )
+
+
+class TermPlanOut(BaseModel):
+    """What creating or re-syncing a year did to its term sections."""
+
+    academic_year_code: str
+    term_count: int = Field(description="The school's stated number of terms.")
+    created: list[str] = Field(
+        default_factory=list, description="Term codes this call created, undated."
+    )
+    removed: list[str] = Field(
+        default_factory=list,
+        description="Surplus terms deleted because nothing was stated against them.",
+    )
+    kept: list[str] = Field(
+        default_factory=list,
+        description="Surplus terms left in place because they hold marks. The year still "
+        "shows them, and this is why — dropping a term count never deletes a grade.",
+    )
+
+    @classmethod
+    def of(cls, plan: TermPlan) -> "TermPlanOut":
+        return cls(
+            academic_year_code=plan.academic_year_code,
+            term_count=plan.term_count,
+            created=list(plan.created),
+            removed=list(plan.removed),
+            kept=list(plan.kept),
         )
 
 
@@ -350,6 +415,34 @@ class SubjectOut(BaseModel):
             display_order=subject.display_order,
             is_active=subject.is_active,
         )
+
+
+class SubjectAssignmentIn(BaseModel):
+    """One statement of the form "this rung teaches this subject", or stops teaching it."""
+
+    academic_year_code: str = Field(examples=["2025-2026"])
+    subject_code: str = Field(examples=["PHYS"])
+    year_level_code: str = Field(
+        examples=["AR-SEC1"],
+        description="The rung, which belongs to exactly one academic track. Assigning to "
+        "the Arabic section's Secondary 1 says nothing about the Languages section's.",
+    )
+    assigned: bool = Field(
+        default=True,
+        description="`false` removes the assignment. The subject row and every mark "
+        "already stated against it survive — this is a statement about the timetable, "
+        "not a retraction of a child's grade.",
+    )
+
+
+class GradeSubjectAssignmentsOut(BaseModel):
+    """One rung and everything it teaches. Rungs with no assignment are omitted."""
+
+    year_level_code: str
+    track_code: str | None = Field(
+        default=None, description="The academic track owning the rung, when it has one."
+    )
+    subjects: list[SubjectOut]
 
 
 # -- Routes -----------------------------------------------------------------
@@ -439,6 +532,15 @@ def list_classes(
     academic_year: Annotated[str, Query(examples=["2025-2026"])],
     year_level: Annotated[str | None, Query(examples=["Y3"])] = None,
 ) -> list[ClassSectionOut]:
+    if year_level is None:
+        caller.narrow(Permission.STRUCTURE_READ, lambda scopes: scopes.for_year(academic_year))
+    else:
+        caller.narrow(
+            Permission.STRUCTURE_READ,
+            lambda scopes: scopes.for_year_level(
+                school_id=caller.school_id, year_level_code=year_level
+            ),
+        )
     with domain_errors():
         sections = queries.list_classes(
             AcademicYearCode(academic_year),
@@ -453,7 +555,11 @@ def list_classes(
     status_code=status.HTTP_201_CREATED,
     summary="Create or relabel a term",
     description="201 when the term is new, 200 when a term with this code already existed "
-    "and its labels or dates were updated. The code is identity and is never rewritten.",
+    "and its labels or dates were updated. The code is identity and is never rewritten."
+    "\n\nA year's terms are normally created for it, from the school's term count, when "
+    "the year is created — this route is how their labels and dates are filled in "
+    "afterwards, and how a school that wants a term the count did not produce adds one. "
+    "Both dates are optional; sending `null` for one clears it.",
     responses=error_responses(401, 403, 409, 422),
 )
 def create_term(
@@ -480,10 +586,17 @@ def create_term(
     "/academic-years",
     response_model=AcademicYearOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Create or relabel an academic year",
+    summary="Create or relabel an academic year, and build its terms",
     description="201 when the year is new, 200 when a year with this code already existed "
     "and its labels or dates were updated. Every other structural row hangs off a year, "
-    "so this is the first call when setting a school up.",
+    "so this is the first call when setting a school up.\n\n"
+    "**The year's term sections are created here, from the school's own `term_count`.** "
+    "One selected term produces one term section, two produce two, three produce three — "
+    "the school answered that question when it was created and is not asked it again. The "
+    "new terms carry no dates: those are optional and are filled in later, per term, when "
+    "the calendar is settled. `terms` on the response says what this call did, including "
+    "any surplus term it kept because marks are already stated against it.\n\n"
+    "Re-posting a year to correct a label does not disturb the terms underneath it.",
     responses=error_responses(401, 403, 409, 422),
 )
 def create_academic_year(
@@ -499,10 +612,27 @@ def create_academic_year(
             ends_on=body.ends_on,
             is_current=body.is_current,
         )
-        created = catalogue.create_academic_year(year, make_current=body.is_current)
+        created, plan = catalogue.create_academic_year(year, make_current=body.is_current)
     if not created:
         response.status_code = status.HTTP_200_OK
-    return AcademicYearOut.of(year)
+    return AcademicYearOut.of(year, terms=plan)
+
+
+@router.post(
+    "/academic-years/{code}/terms/sync",
+    response_model=TermPlanOut,
+    summary="Bring a year's term sections back in line with its school",
+    description="Idempotent, and normally unnecessary: the sync runs when a year is "
+    "created and again for every year of a school whose term count changes. This route is "
+    "for the case those two miss — a year built before the count was corrected, or a "
+    "registrar who wants to see the effect without re-saving anything.\n\n"
+    "It never deletes a term that holds marks. A surplus term with grades stated against "
+    "it is reported in `kept` and left exactly where it is.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def sync_year_terms(code: str, catalogue: Catalogue, caller: Registrar) -> TermPlanOut:
+    with domain_errors():
+        return TermPlanOut.of(catalogue.sync_year_terms(AcademicYearCode(code)))
 
 
 @router.get(
@@ -556,7 +686,11 @@ def create_subject(
     description="`academic_year` is required: the catalogue is per-year, so `MATH` alone "
     "names a different subject each September and 'the subjects' is not a question with an "
     "answer. Retired subjects are omitted unless asked for by name. Unknown year is a 404, "
-    "never an empty list — a typo and a year with no catalogue read identically on screen.",
+    "never an empty list — a typo and a year with no catalogue read identically on screen."
+    "\n\n`year_level` narrows the answer to the subjects **assigned** to that rung, which "
+    "is what a marks screen for one class should ask for: a school teaches Physics, but "
+    "only Secondary sits it. Rungs belong to one academic track, so this is also how the "
+    "Arabic and Languages sections of a bilingual school get different answers.",
     responses=error_responses(401, 403, 404, 422),
 )
 def list_subjects(
@@ -564,12 +698,88 @@ def list_subjects(
     caller: Reader,
     academic_year: Annotated[str, Query(examples=["2025-2026"])],
     include_inactive: bool = False,
+    year_level: Annotated[str | None, Query(examples=["SEC1"])] = None,
 ) -> list[SubjectOut]:
+    if year_level is None:
+        caller.narrow(Permission.STRUCTURE_READ, lambda scopes: scopes.for_year(academic_year))
+    else:
+        caller.narrow(
+            Permission.STRUCTURE_READ,
+            lambda scopes: scopes.for_year_level(
+                school_id=caller.school_id, year_level_code=year_level
+            ),
+        )
     with domain_errors():
         subjects = queries.list_subjects(
-            AcademicYearCode(academic_year), include_inactive=include_inactive
+            AcademicYearCode(academic_year),
+            include_inactive=include_inactive,
+            year_level_code=YearCode(year_level) if year_level else None,
         )
     return [SubjectOut.of(subject) for subject in subjects]
+
+
+@router.get(
+    "/subject-assignments",
+    response_model=list[GradeSubjectAssignmentsOut],
+    summary="Which rungs teach which subjects, for one year",
+    description="The whole board in one read, so the assignment screen does not issue a "
+    "request per rung. Ordered by rung, then by each subject's report-card order.\n\n"
+    "A rung with no assignment is absent rather than present-and-empty: the caller is "
+    "drawing rungs it already has, and an absent key and an empty list mean the same "
+    "thing to it. Unknown year is a 404.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def list_subject_assignments(
+    catalogue: Catalogue,
+    caller: Reader,
+    academic_year: Annotated[str, Query(examples=["2025-2026"])],
+    year_level: Annotated[str | None, Query(examples=["Y3"])] = None,
+) -> list[GradeSubjectAssignmentsOut]:
+    if year_level is None:
+        caller.narrow(Permission.STRUCTURE_READ, lambda scopes: scopes.for_year(academic_year))
+    else:
+        caller.narrow(
+            Permission.STRUCTURE_READ,
+            lambda scopes: scopes.for_year_level(
+                school_id=caller.school_id, year_level_code=year_level
+            ),
+        )
+    with domain_errors():
+        rows = catalogue.subject_assignments(AcademicYearCode(academic_year))
+    if year_level is not None:
+        rows = [row for row in rows if str(row.year_level_code) == year_level]
+    return [
+        GradeSubjectAssignmentsOut(
+            year_level_code=row.year_level_code,
+            track_code=row.track_code,
+            subjects=[SubjectOut.of(subject) for subject in row.subjects],
+        )
+        for row in rows
+    ]
+
+
+@router.put(
+    "/subject-assignments",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Assign one subject to one rung, or take it back off",
+    description="Idempotent in both directions, which is what a drag-and-drop board needs: "
+    "dropping a subject onto a rung that already has it is a no-op, not a 409, and a "
+    "duplicate is impossible in the database besides "
+    "(`uq_subject_year_levels_assignment`).\n\n"
+    "The subject and the rung must belong to the same school, which the year names. A "
+    "rung from another branch is a 404 rather than an assignment nobody can see.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def set_subject_assignment(
+    body: SubjectAssignmentIn, catalogue: Catalogue, caller: Registrar
+) -> None:
+    with domain_errors():
+        catalogue.set_subject_assignment(
+            AcademicYearCode(body.academic_year_code),
+            SubjectCode(body.subject_code),
+            YearCode(body.year_level_code),
+            assigned=body.assigned,
+        )
 
 
 # -- One class at a time ----------------------------------------------------
@@ -716,9 +926,15 @@ class SchoolOut(BaseModel):
     secondary_grade_count: int
     term_count: int
     working_days: list[str]
+    terms: list["TermPlanOut"] = Field(
+        default_factory=list,
+        description="Present only when this write changed `term_count`: one entry per "
+        "academic year of the school whose term sections were brought back in line. Empty "
+        "otherwise — an ordinary rename does not touch a single year.",
+    )
 
     @classmethod
-    def of(cls, school: School) -> "SchoolOut":
+    def of(cls, school: School, *, terms: Sequence[TermPlan] = ()) -> "SchoolOut":
         return cls(
             code=str(school.code),
             name_ar=school.name_ar,
@@ -731,7 +947,81 @@ class SchoolOut(BaseModel):
             secondary_grade_count=school.secondary_grade_count,
             term_count=school.term_count,
             working_days=[day.value for day in school.working_days],
+            terms=[TermPlanOut.of(plan) for plan in terms],
         )
+
+
+class YearTrackOut(BaseModel):
+    """One academic track's share of a year: its rungs, and how many classes each holds."""
+
+    track_code: str | None = Field(
+        description="`null` groups the rungs that belong to no track — a school's rungs "
+        "from before it declared its sections. They are shown, not hidden."
+    )
+    name_en: str = ""
+    name_ar: str = ""
+    year_levels: list[YearLevelOut] = Field(default_factory=list)
+    class_count: int = Field(
+        default=0, description="Classes this track's rungs hold in this year."
+    )
+
+
+class AcademicYearDetailOut(BaseModel):
+    """One year and everything it hangs off, so a screen can draw it from one read."""
+
+    year: AcademicYearOut
+    school: SchoolOut = Field(
+        description="The school that runs this year, including the `term_count` its term "
+        "sections were built from."
+    )
+    terms: list[TermOut] = Field(
+        description="In `sequence` order. One entry per term the school runs; the dates "
+        "may be `null` until someone fills them in."
+    )
+    tracks: list[YearTrackOut] = Field(
+        description="The year's ladder, grouped by academic track. A single-track school "
+        "gets one group; the terms above are shared by all of them."
+    )
+    class_count: int = Field(description="Every class in the year, across all tracks.")
+
+
+@router.get(
+    "/academic-years/{code}",
+    response_model=AcademicYearDetailOut,
+    summary="One year, its school, its terms and its ladder",
+    description="Everything an academic year is attached to, in one body: the school that "
+    "runs it, the term sections built from that school's term count, and the grades and "
+    "classes it carries grouped by academic track.\n\n"
+    "One route rather than four because the four can disagree. A screen that fetches the "
+    "year, then its terms, then its rungs, then its classes can have a rung added under it "
+    "between the second and third call, and will then draw a school that existed at no "
+    "instant. Unknown year is a 404.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def read_academic_year(
+    code: str, catalogue: Catalogue, caller: Reader
+) -> AcademicYearDetailOut:
+    with domain_errors():
+        detail = catalogue.academic_year_detail(AcademicYearCode(code))
+    return AcademicYearDetailOut(
+        year=AcademicYearOut.of(detail["year"]),
+        school=SchoolOut.of(detail["school"]),
+        terms=[TermOut.of(term) for term in detail["terms"]],
+        tracks=[
+            YearTrackOut(
+                track_code=group["track_code"],
+                name_en="" if group["track"] is None else group["track"].name_en,
+                name_ar="" if group["track"] is None else group["track"].name_ar,
+                year_levels=[YearLevelOut.of(level) for level in group["levels"]],
+                class_count=sum(
+                    group["classes_per_level"].get(str(level.code), 0)
+                    for level in group["levels"]
+                ),
+            )
+            for group in detail["tracks"]
+        ],
+        class_count=detail["class_count"],
+    )
 
 
 class YearLevelIn(BaseModel):
@@ -742,6 +1032,10 @@ class YearLevelIn(BaseModel):
         examples=["Y1"],
     )
     school_code: str = Field(examples=["MAIN"])
+    track_code: str | None = Field(
+        default=None,
+        description="AR or LANG. Optional only when the school has one academic track.",
+    )
     name_en: str = Field(default="", description="English label.")
     name_ar: str = Field(default="", description="Arabic label.")
     display_order: int = Field(
@@ -805,10 +1099,83 @@ def create_school(
         )
         # `model_fields_set` is the only thing that can tell "the caller asked for two
         # terms" apart from "the caller said nothing and Pydantic filled in two".
-        stored, created = catalogue.create_school(school, stated=body.model_fields_set)
+        stored, created, plans = catalogue.create_school(
+            school, stated=body.model_fields_set
+        )
     if not created:
         response.status_code = status.HTTP_200_OK
-    return SchoolOut.of(stored)
+    return SchoolOut.of(stored, terms=plans)
+
+
+class AcademicTrackOut(BaseModel):
+    code: str
+    school_code: str
+    language_type: str
+    name_en: str
+    name_ar: str
+    display_order: int
+
+
+class ConfiguredGradeOut(BaseModel):
+    code: str
+    stage: str
+    name_en: str
+    name_ar: str
+    display_order: int
+
+
+class ConfiguredClassesIn(BaseModel):
+    academic_year_code: str
+    track_code: str
+    mode: Literal["same", "custom"]
+    class_count: int | None = Field(default=None, ge=0, le=60)
+    classes_by_grade: dict[str, int] | None = None
+    sequence: Literal["numeric", "alphabetic"]
+
+
+@router.get("/schools/{school_code}/tracks/{track_code}/configured-grades",
+    response_model=list[ConfiguredGradeOut])
+def configured_grades(school_code: str, track_code: str, catalogue: Catalogue, caller: Reader):
+    with domain_errors():
+        return catalogue.configured_grades(SchoolCode(school_code), track_code)
+
+
+@router.post("/structure/configured-classes", response_model=list[ClassSectionOut])
+def create_configured_classes(body: ConfiguredClassesIn, catalogue: Catalogue, caller: Registrar):
+    with domain_errors():
+        if body.mode == "same":
+            if body.class_count is None:
+                raise ValidationError("class_count is required in same mode", field="class_count")
+        _, sections = catalogue.create_configured_classes(
+            AcademicYearCode(body.academic_year_code), body.track_code,
+            body.classes_by_grade if body.mode == "custom" else None, body.sequence,
+            same_count=body.class_count if body.mode == "same" else None,
+        )
+    return [ClassSectionOut.of(section) for section in sections]
+
+
+@router.get(
+    "/schools/{school_code}/tracks",
+    response_model=list[AcademicTrackOut],
+    summary="The school's Arabic/Languages academic tracks",
+    responses=error_responses(401, 403, 404, 422),
+)
+def list_school_tracks(
+    school_code: str, catalogue: Catalogue, caller: Reader
+) -> list[AcademicTrackOut]:
+    with domain_errors():
+        tracks = catalogue.list_school_tracks(SchoolCode(school_code))
+    return [
+        AcademicTrackOut(
+            code=track.code,
+            school_code=str(track.school_code),
+            language_type=track.language_type.value,
+            name_en=track.name_en,
+            name_ar=track.name_ar,
+            display_order=track.display_order,
+        )
+        for track in tracks
+    ]
 
 
 @router.get(
@@ -846,6 +1213,7 @@ def create_year_level(
         level = YearLevel(
             code=body.code,
             school_code=body.school_code,
+            track_code=body.track_code,
             name_ar=body.name_ar,
             name_en=body.name_en,
             display_order=body.display_order,

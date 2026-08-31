@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:20.19.5-alpine AS web-builder
+FROM node:24.19.0-alpine AS web-builder
 WORKDIR /src/frontend
 COPY sis/frontend/package.json sis/frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci

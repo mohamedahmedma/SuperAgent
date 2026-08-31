@@ -27,6 +27,7 @@ parameter rather than making one, so a test drives it against its own database.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -36,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from sis.domain.rbac import (
     AccessProfile,
+    BUILT_IN_ROLES,
     Permission,
     RoleAssignment,
     Scope,
@@ -60,6 +62,11 @@ log = logging.getLogger("sis.access")
 # as a literal rather than imported, because `sis/demo/` is tooling and nothing the
 # service runs may depend on it. Kept in step by name: both spell it `system.status`.
 SYSTEM_STATUS_KEY = "system.status"
+
+
+def _utc(moment: datetime) -> datetime:
+    """SQLite drops timezone metadata; restore UTC before security comparisons."""
+    return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
 
 
 class AuthenticationFailed(Exception):
@@ -96,6 +103,10 @@ def sign_in(
     stopwatch into a list of who works at the school.
     """
     at = now or datetime.now(UTC)
+    # Cheap on all but the first sign-in after an upgrade — see `ensure_catalogue`. It runs
+    # here rather than at startup so a school that has never been seeded still gets a
+    # working role table the first time somebody signs in.
+    ensure_catalogue(session)
     handle = str(username or "").strip()
 
     user = session.scalars(
@@ -182,7 +193,7 @@ def resolve(
     row = session.scalars(
         select(m.UserSession).where(m.UserSession.token_hash == hash_session_token(raw))
     ).one_or_none()
-    if row is None or row.revoked_at is not None or row.expires_at <= at:
+    if row is None or row.revoked_at is not None or _utc(row.expires_at) <= _utc(at):
         return None
 
     user = session.get(m.User, row.user_id)
@@ -246,6 +257,52 @@ def profile_for(session: Session, user: m.User) -> AccessProfile:
     )
 
 
+#: Which table each scope type's `scope_id` points into, and the column holding its code.
+#: `GLOBAL` is absent because it names nothing.
+#:
+#: One table, read by everything that has to turn a scope id into something a person can
+#: read. It was written out twice — once here and once in the access router — and two
+#: copies of "which table does `year_level` mean" is the kind of pair that stays correct
+#: until somebody adds a seventh scope to one of them.
+SCOPE_TABLES: dict[ScopeType, tuple[object, object]] = {
+    ScopeType.SCHOOL: (m.School, m.School.code),
+    ScopeType.TRACK: (m.EducationalSystem, m.EducationalSystem.code),
+    ScopeType.YEAR_LEVEL: (m.YearLevel, m.YearLevel.code),
+    ScopeType.CLASS_SECTION: (m.ClassSection, m.ClassSection.code),
+    ScopeType.SUBJECT: (m.Subject, m.Subject.code),
+}
+
+
+def scope_codes(
+    session: Session, profile: AccessProfile
+) -> dict[tuple[str, int], str]:
+    """The human code behind each scope id this profile is bounded by.
+
+    Exists for the console. A grant is stored against a surrogate id, and a screen holds
+    codes — it navigated to `P1A`, not to class 47 — so without this the browser cannot
+    tell whether a class-scoped grant covers the class it is drawing, and every scope check
+    in the UI degrades to "does this person hold the permission anywhere". Which is the
+    check that shows a teacher of one room an edit button on all of them.
+
+    One query per scope *type* the profile actually uses, not one per grant: a teacher of
+    eight classes costs one statement. Types the profile does not use cost nothing.
+    """
+    wanted: dict[ScopeType, set[int]] = {}
+    for assignment in profile.assignments:
+        if assignment.scope.type is ScopeType.GLOBAL or assignment.scope.id is None:
+            continue
+        wanted.setdefault(assignment.scope.type, set()).add(assignment.scope.id)
+
+    found: dict[tuple[str, int], str] = {}
+    for scope_type, ids in wanted.items():
+        table, code_column = SCOPE_TABLES[scope_type]
+        for identifier, code in session.execute(
+            select(table.id, code_column).where(table.id.in_(sorted(ids)))
+        ).all():
+            found[(scope_type.value, int(identifier))] = code
+    return found
+
+
 def permissions_by_role(session: Session) -> dict[str, tuple[Permission, ...]]:
     """The whole role→permission map, as domain enums.
 
@@ -267,6 +324,140 @@ def permissions_by_role(session: Session) -> dict[str, tuple[Permission, ...]]:
             continue
         mapping.setdefault(role_code, []).append(permission)
     return {role: tuple(permissions) for role, permissions in mapping.items()}
+
+
+#: The `system_settings` key holding the fingerprint of the catalogue currently in the
+#: database. See `ensure_catalogue` for what it buys.
+CATALOGUE_KEY = "rbac.catalogue"
+
+
+def permission_label(permission: Permission) -> str:
+    """A readable name derived from the code rather than written twice.
+
+    `noun.verb` reads as "Verb noun", which is a better label than most hand-written
+    ones and — more to the point — cannot fall out of step with the code it labels.
+    """
+    noun, _, verb = permission.value.rpartition(".")
+    return f"{verb.replace('_', ' ').title()} {noun.replace('.', ' ')}"
+
+
+def catalogue_fingerprint() -> str:
+    """A short digest of the role and permission catalogue this build ships.
+
+    Every permission, and every role with the bundle it carries, in a stable order. Any
+    edit to `sis/domain/rbac.py` changes it; nothing else does.
+    """
+    material = "\n".join(
+        [*(p.value for p in Permission)]
+        + [
+            f"{d.code.value}:{d.default_scope.value}:" + ",".join(p.value for p in d.permissions)
+            for d in BUILT_IN_ROLES
+        ]
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def ensure_catalogue(session: Session) -> bool:
+    """Reconcile the catalogue, but only when this build ships a different one.
+
+    `sync_builtin_rbac` below is a dozen statements and it used to run on **every single
+    sign-in**. Two things were wrong with that. The obvious one is cost on the hottest
+    authenticated path in the service. The one that would have hurt: it writes, so two
+    people signing in at the same moment on Postgres race to insert the same permission
+    row, and the loser's login fails with an integrity error on a table they were only
+    reading from.
+
+    So the reconcile is guarded by a fingerprint of the catalogue in the code, stored in
+    `system_settings`. A matching fingerprint means the tables already say what this build
+    says, and the check is one indexed read. A mismatch — a fresh database, or a release
+    that added a permission — runs the reconcile once and records the new value.
+
+    Returns whether it actually reconciled, which is what the tooling reports.
+    """
+    wanted = catalogue_fingerprint()
+    row = session.scalars(
+        select(m.SystemSetting).where(m.SystemSetting.key == CATALOGUE_KEY)
+    ).one_or_none()
+    if row is not None and row.value == wanted:
+        return False
+
+    sync_builtin_rbac(session)
+    if row is None:
+        row = m.SystemSetting(key=CATALOGUE_KEY)
+        session.add(row)
+    row.value = wanted
+    row.note = "Fingerprint of the built-in role catalogue; managed by the service."
+    row.updated_at = datetime.now(UTC)
+    session.flush()
+    log.info("rbac catalogue reconciled to %s", wanted)
+    return True
+
+
+def sync_builtin_rbac(session: Session) -> None:
+    """Write the built-in role and permission catalogue into the tables. Idempotent.
+
+    **Grants are never touched.** This function only ever writes `permissions`, `roles`
+    and `role_permissions` — the catalogue. `user_roles`, the table that says who is what,
+    is not in any statement below, so an upgrade cannot revoke somebody's access. Roles
+    are updated in place rather than replaced for the same reason: a role a school has
+    granted to forty people keeps its id.
+
+    **A built-in role's bundle is owned by the code**, so a `role_permissions` row that
+    this build does not declare is removed. That is what makes the definitions in
+    `sis/domain/rbac.py` the single statement of what a Principal may do, rather than a
+    starting point that drifts. A school that wants a different bundle adds a role rather
+    than editing a built-in one — nothing here deletes or reconciles a role it did not
+    declare.
+
+    Prefer `ensure_catalogue` as the entry point; this one always writes.
+    """
+    permission_rows = {row.code: row for row in session.scalars(select(m.PermissionRow)).all()}
+    for permission in Permission:
+        row = permission_rows.get(permission.value)
+        label = permission_label(permission)
+        if row is None:
+            row = m.PermissionRow(code=permission.value, name_en=label, name_ar=label)
+            session.add(row)
+            permission_rows[permission.value] = row
+        else:
+            # Only fill a blank. A school that has translated a label keeps it.
+            row.name_en = row.name_en or label
+            row.name_ar = row.name_ar or label
+    session.flush()
+
+    roles = {row.code: row for row in session.scalars(select(m.Role)).all()}
+    for definition in BUILT_IN_ROLES:
+        row = roles.get(definition.code.value)
+        if row is None:
+            row = m.Role(code=definition.code.value, created_at=datetime.now(UTC))
+            session.add(row)
+            roles[definition.code.value] = row
+        row.name_en, row.name_ar = definition.name_en, definition.name_ar
+        row.description, row.default_scope = definition.description_en, definition.default_scope.value
+        row.is_builtin = True
+    session.flush()
+
+    for definition in BUILT_IN_ROLES:
+        role = roles[definition.code.value]
+        wanted = {permission_rows[p.value].id for p in definition.permissions}
+        session.execute(
+            delete(m.RolePermission).where(
+                m.RolePermission.role_id == role.id,
+                m.RolePermission.permission_id.not_in(wanted),
+            )
+        )
+        existing = set(
+            session.scalars(
+                select(m.RolePermission.permission_id).where(
+                    m.RolePermission.role_id == role.id
+                )
+            ).all()
+        )
+        session.add_all(
+            m.RolePermission(role_id=role.id, permission_id=pid)
+            for pid in sorted(wanted - existing)
+        )
+    session.flush()
 
 
 def _school_code(session: Session, school_id: int | None) -> str | None:
@@ -339,15 +530,22 @@ def write_system_state(
 
 
 __all__ = [
+    "CATALOGUE_KEY",
     "SYSTEM_STATUS_KEY",
     "AuthenticationFailed",
     "SignedIn",
     "SystemState",
+    "catalogue_fingerprint",
+    "ensure_catalogue",
+    "permission_label",
     "permissions_by_role",
+    "SCOPE_TABLES",
+    "scope_codes",
     "profile_for",
     "read_system_state",
     "resolve",
     "sign_in",
     "sign_out",
+    "sync_builtin_rbac",
     "write_system_state",
 ]
