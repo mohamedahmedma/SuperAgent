@@ -297,9 +297,11 @@ class AttendanceService:
                 existing = uow.attendance.marks_for_class(section_id, on_date)
                 invalid = sorted(
                     number for number, state in states.items()
-                    if state != AttendanceState.EXCUSED.value
-                    or number not in existing
-                    or existing[number].state != AttendanceState.ABSENT
+                    if not (
+                        state == AttendanceState.EXCUSED.value
+                        and number in existing
+                        and existing[number].state == AttendanceState.ABSENT
+                    )
                 )
                 if absent_unlisted or invalid:
                     raise ValidationError(
