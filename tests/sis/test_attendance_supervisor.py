@@ -25,7 +25,7 @@ from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from tests.sis.test_rbac_api import _grant, _make_user, _sign_in, ids  # noqa: F401
 from tests.sis.test_timetable_api import SCHOOL, YEAR, registrar, school  # noqa: F401
 
-DAY = "2025-11-20"
+DAY = "2026-11-20"
 
 
 @pytest.fixture()

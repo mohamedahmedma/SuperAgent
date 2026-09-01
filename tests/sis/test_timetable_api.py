@@ -35,7 +35,7 @@ from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from tests.sis.conftest import registrar_headers
 
 SCHOOL = "TT"
-YEAR = "TT-2025"
+YEAR = "TT-2026"
 TERM = f"{YEAR}-T1"
 #: Sunday to Wednesday. Deliberately *not* the five-day default, so every assertion that
 #: Thursday is refused is a statement about this school rather than about a constant.
@@ -75,10 +75,10 @@ def school(client: TestClient, registrar: dict[str, str]) -> None:
         json={
             "code": YEAR,
             "school_code": SCHOOL,
-            "name_en": "2025/2026",
-            "name_ar": "٢٠٢٥",
-            "starts_on": "2025-09-01",
-            "ends_on": "2026-06-30",
+            "name_en": "2026/2027",
+            "name_ar": "٢٠٢٦",
+            "starts_on": "2026-09-01",
+            "ends_on": "2027-06-30",
             "is_current": True,
         },
         headers=registrar,

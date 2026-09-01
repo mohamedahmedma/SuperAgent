@@ -507,6 +507,8 @@ STAFF: Final[tuple[StaffSpec, ...]] = (
             RoleGrant(RoleCode.TEACHER, ScopeType.CLASS_SECTION, room_ref("AR-PR3", "Class 1")),
             # Teacher AND attendance supervisor — the second additive case, and a
             # different pair of roles from the one above.
+            RoleGrant(RoleCode.ATTENDANCE_SUPERVISOR, ScopeType.CLASS_SECTION, room_ref("AR-PR1", "Class 1")),
+            RoleGrant(RoleCode.ATTENDANCE_SUPERVISOR, ScopeType.CLASS_SECTION, room_ref("AR-PR2", "Class 1")),
         ),
         staff_number="T-005",
         subject="SS",
