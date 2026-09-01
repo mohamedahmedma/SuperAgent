@@ -1285,7 +1285,7 @@
   border: 1px solid var(--line-strong) !important;
   border-radius: .65rem !important;
   font-weight: 650;
-  transition: background-color .15s ease, border-color .15s ease, transform .15s ease;
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 
 .sis-attendance-states > .btn:not(:disabled):hover {
@@ -1308,7 +1308,7 @@
   background: transparent;
   border: 0;
   border-radius: 50%;
-  transition: color .15s ease, background-color .15s ease;
+  transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease;
 }
 .sis-password-toggle:hover { color: var(--text); background: var(--surface-hover); }
 .sis-password-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

@@ -797,24 +797,6 @@ def add_role(
         subject_user = _subject_user(session, manager, user_id)
         if body.role_code is RoleCode.SUBJECT_COORDINATOR:
             raise _refuse(422, "invalid_value", "Subject Coordinator is no longer an assignable role.")
-        if body.role_code is RoleCode.ATTENDANCE_SUPERVISOR:
-            is_teacher = session.scalar(
-                select(m.Teacher.id).where(m.Teacher.user_id == subject_user.id).limit(1)
-            )
-            has_teacher_role = session.scalar(
-                select(m.UserRole.id)
-                .join(m.Role, m.UserRole.role_id == m.Role.id)
-                .where(
-                    m.UserRole.user_id == subject_user.id,
-                    m.Role.code == RoleCode.TEACHER.value,
-                )
-                .limit(1)
-            )
-            if is_teacher is not None or has_teacher_role is not None:
-                raise _refuse(
-                    422, "invalid_value",
-                    "An attendance supervisor must have a non-teacher account.",
-                )
         _authorised_to_grant(session, manager, body.role_code.value)
         _validate_scope(session, manager, body.scope_type, body.scope_id)
 
