@@ -218,10 +218,7 @@ _READS: Final[tuple[Permission, ...]] = (
     Permission.STRUCTURE_READ,
     Permission.STUDENTS_READ,
     Permission.TEACHERS_READ,
-    Permission.TEACHER_ATTENDANCE_READ,
     Permission.TIMETABLE_READ,
-    Permission.ATTENDANCE_READ,
-    Permission.GRADES_READ,
     Permission.GUARDIANS_READ,
     Permission.REPORTS_READ,
 )
@@ -284,6 +281,7 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
         permissions=(
             Permission.SCHOOLS_READ,
             Permission.STRUCTURE_READ,
+            Permission.STUDENTS_READ,
             Permission.TEACHERS_READ,
             Permission.TEACHERS_ASSIGN_SUBJECTS,
             Permission.TIMETABLE_READ,
@@ -294,8 +292,8 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
     ),
     RoleDefinition(
         code=RoleCode.YEAR_SUPERVISOR,
-        name_en="Academic Year Supervisor",
-        name_ar="موجّه الصف الدراسي",
+        name_en="Class Supervisor",
+        name_ar="مشرف الصف",
         description_en=(
             "Sees everything on one rung of the ladder, and puts that rung teachers into "
             "its classrooms."
@@ -320,9 +318,7 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
         default_scope=ScopeType.CLASS_SECTION,
         permissions=(
             Permission.STRUCTURE_READ,
-            Permission.STUDENTS_READ,
             Permission.ATTENDANCE_READ,
-            Permission.TIMETABLE_READ,
             Permission.ATTENDANCE_WRITE,
         ),
     ),
@@ -338,7 +334,6 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
         permissions=(
             Permission.STRUCTURE_READ,
             Permission.STUDENTS_READ,
-            Permission.ATTENDANCE_READ,
             Permission.GRADES_READ,
             Permission.GRADES_WRITE,
         ),

@@ -21,7 +21,7 @@ of "she is not on Monday's register" does not depend on the day the suite runs.
 """
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.domain.attendance import AttendanceMark, AttendanceState, AttendanceTally, tally
@@ -267,6 +267,9 @@ class AttendanceService:
         writing it would file her attendance under a room she had left.
         """
         notes = notes or {}
+        today = datetime.now(UTC).date()
+        if on_date > today:
+            raise ValidationError("attendance cannot be recorded for a future day", field="on_date")
         if not states and not absent_unlisted:
             raise ValidationError(
                 "no attendance was stated; the register has nothing to record",
@@ -290,6 +293,19 @@ class AttendanceService:
                     academic_year_code, class_code, on_date
                 )
             }
+            if on_date < today:
+                existing = uow.attendance.marks_for_class(section_id, on_date)
+                invalid = sorted(
+                    number for number, state in states.items()
+                    if state != AttendanceState.EXCUSED.value
+                    or number not in existing
+                    or existing[number].state != AttendanceState.ABSENT
+                )
+                if absent_unlisted or invalid:
+                    raise ValidationError(
+                        "past attendance may only change an existing absent mark to excused",
+                        field="states",
+                    )
             strangers = sorted(set(states) - placed)
             if strangers:
                 raise ValidationError(

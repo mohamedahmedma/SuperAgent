@@ -70,6 +70,24 @@ def cmd_load(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_portfolio(args: argparse.Namespace) -> int:
+    """Write the three-school local sales showcase into an empty database."""
+    seeder.guard_environment(allow_remote=args.allow_remote)
+    with seeder.open_session(args.school) as session:
+        if session.query(seeder.m.School).count():
+            print("The showcase loader requires an empty database.", file=sys.stderr)
+            return 1
+        roles, permissions = seeder.sync_roles(session)
+        counts = seeder.load_showcase_portfolio(session)
+        session.commit()
+    print(f"Reference data: {roles} roles, {permissions} permissions.")
+    print("Three-school showcase written:")
+    for line in counts.as_lines():
+        print(line)
+    _print_password_warning()
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     seeder.guard_environment(allow_remote=args.allow_remote)
     with seeder.open_session(args.school) as session:
@@ -190,6 +208,10 @@ def main(argv: list[str] | None = None) -> int:
         help="write even if a demo school is already present (will usually fail)",
     )
     load.set_defaults(handler=cmd_load)
+
+    sub.add_parser(
+        "portfolio", help="write the three populated sales-demo schools into an empty database"
+    ).set_defaults(handler=cmd_portfolio)
 
     sub.add_parser(
         "sync", help="refresh mutable labels without deleting existing demo data"

@@ -66,13 +66,13 @@ const ROUTE_PERMISSION = {
 /* Order is the order of the work: see the school, find a child, put children in classes,
    record who may ask about them, record what they scored, audit what was written. */
 const NAV = [
-  { name: 'school', label: 'School', icon: 'dashboard' },
+  { name: 'school', label: 'School', icon: 'dashboard', roles: ['system_admin', 'school_owner', 'principal'] },
   { name: 'student', label: 'Find a child', icon: 'search' },
   { name: 'roster', label: 'Roster', icon: 'upload' },
   { name: 'guardians', label: 'Guardians', icon: 'people' },
   { name: 'marks', label: 'Marks', icon: 'marks' },
   { name: 'batches', label: 'Batches', icon: 'batches' },
-  { name: 'roles', label: 'Teacher roles', icon: 'people' },
+  { name: 'roles', label: 'Staff roles', icon: 'people', roles: ['system_admin', 'school_owner'] },
   { name: 'teacherSetup', label: 'Teacher setup', icon: 'people' },
   { name: 'gradeAssignments', label: 'Class assignments', icon: 'people' },
   { name: 'attendance', label: 'Take attendance', icon: 'calendar' }
@@ -99,10 +99,9 @@ const ROLE_LABELS = {
   system_admin: 'System Administrator',
   school_owner: 'School Owner',
   principal: 'School Manager',
-  year_supervisor: 'Grade Supervisor',
+  year_supervisor: 'Class Supervisor',
   attendance_supervisor: 'Attendance Supervisor',
-  teacher: 'Teacher',
-  subject_coordinator: 'Subject Coordinator'
+  teacher: 'Teacher'
 };
 
 /**
@@ -119,18 +118,17 @@ const ROLE_LABELS = {
  * Shown as a dialog over the shell rather than as a screen replacing it, for the same
  * reason: the console you were reading is still there behind it.
  */
-function SignIn({ onClose }) {
+function SignIn() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   return (
-    <div className="modal d-block" tabIndex="-1" role="dialog"
-      style={{ background: 'rgba(0,0,0,.4)' }} onClick={onClose}>
-      <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: '26rem' }}
-        onClick={(event) => event.stopPropagation()}>
-        <div className="modal-content">
+    <main className="sis-login-page">
+      <div className="sis-login-card">
+        <div className="modal-content border-0">
           <form
             className="modal-body p-4"
             onSubmit={(event) => {
@@ -138,12 +136,13 @@ function SignIn({ onClose }) {
               setError('');
               setBusy(true);
               api.login(username, password).then(
-                (result) => { Store.setAccount(result); setBusy(false); onClose(); },
+                (result) => { Store.setAccount(result); setBusy(false); },
                 (reason) => { setError(reason.message || t('Sign in failed')); setBusy(false); }
               );
             }}
           >
-            <h1 className="h5 mb-1">{t('Sign in')}</h1>
+            <div className="sis-login-brand mb-4">SIS</div>
+            <h1 className="h4 mb-1">{t('Sign in')}</h1>
             <p className="small text-body-tertiary">
               {t('Signing in shows you the classes and screens your roles cover.')}
             </p>
@@ -152,25 +151,32 @@ function SignIn({ onClose }) {
                 onChange={(event) => setUsername(event.target.value)} required />
             </label>
             <label className="form-label w-100 mt-3">{t('Password')}
-              <input className="form-control" type="password" autoComplete="current-password"
-                value={password} onChange={(event) => setPassword(event.target.value)} required />
+              <span className="sis-password-field mt-1">
+                <input className="form-control sis-password-input" type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password" value={password}
+                  onChange={(event) => setPassword(event.target.value)} required />
+                <button className="sis-password-toggle" type="button"
+                  aria-label={t(showPassword ? 'Hide password' : 'Show password')}
+                  title={t(showPassword ? 'Hide password' : 'Show password')}
+                  aria-pressed={showPassword}
+                  onClick={() => setShowPassword((visible) => !visible)}>
+                  <Icon name={showPassword ? 'eyeOff' : 'eye'} size={18} />
+                </button>
+              </span>
             </label>
             {/* One message for every way a sign-in can fail, because the service answers
                 with one — a form that told a wrong password from an unknown username
                 would be a way to read a school's staff list. */}
             {error ? <div className="alert alert-danger mt-3 py-2 small">{error}</div> : null}
-            <div className="d-flex gap-2 mt-3">
-              <button className="btn btn-primary flex-grow-1" type="submit" disabled={busy}>
+            <div className="d-grid mt-4">
+              <button className="btn btn-primary" type="submit" disabled={busy}>
                 {busy ? t('Signing in…') : t('Sign in')}
-              </button>
-              <button className="btn btn-quiet" type="button" onClick={onClose}>
-                {t('Cancel')}
               </button>
             </div>
           </form>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -178,6 +184,7 @@ function SignIn({ onClose }) {
 
 function SchoolTabs() {
   const state = useStore();
+  const admin = Store.roles().indexOf('system_admin') >= 0;
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const list = schools.value || [];
 
@@ -194,7 +201,7 @@ function SchoolTabs() {
     }
   }, [list.length, state.school]);
 
-  if (list.length < 2) return null;
+  if (!admin || list.length < 2) return null;
 
   return (
     <nav
@@ -394,7 +401,8 @@ function Nav({ active }) {
         className="nav nav-underline flex-nowrap overflow-auto"
         style={{ scrollbarWidth: 'none' }}
       >
-        {NAV.filter((item) => Store.can(ROUTE_PERMISSION[item.name])).map((item) => {
+        {NAV.filter((item) => Store.can(ROUTE_PERMISSION[item.name]) &&
+          (!item.roles || item.roles.some((role) => Store.roles().indexOf(role) >= 0))).map((item) => {
           const current = here === item.name;
           return (
             <li className="nav-item" key={item.name}>
@@ -487,7 +495,6 @@ function Footer() {
 export function App() {
   const [route, setRoute] = useState(Router.current);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [signInOpen, setSignInOpen] = useState(false);
   const [authReady, setAuthReady] = useState(!getSessionToken());
   /*
    * The root subscribes to the store as well as to the router, and the language is why.
@@ -517,6 +524,7 @@ export function App() {
      it a moment later would flash the whole nav and then hide half of it, which reads as
      the console losing screens rather than as it working out who you are. */
   if (!authReady) return null;
+  if (!Store.state.profile) return <SignIn />;
 
   const View = route.route.view;
   /* A screen whose permission this person does not hold is refused here as well as by the
@@ -524,13 +532,17 @@ export function App() {
      to live on the view and not only on the link. A route with no entry in the table is
      one nothing gates — the sign-in screen, say — and is drawn. */
   const needed = ROUTE_PERMISSION[route.route.name];
-  const allowed = !needed || Store.can(needed);
+  const routeItem = NAV.find((item) => item.name === route.route.name);
+  const roleAllowed = !routeItem?.roles || routeItem.roles.some(
+    (role) => Store.roles().indexOf(role) >= 0
+  );
+  const allowed = (!needed || Store.can(needed)) && roleAllowed;
 
   return (
     <div className="sis-app">
       <Header
         onOpenSettings={() => setSettingsOpen(true)}
-        onSignIn={() => setSignInOpen(true)}
+        onSignIn={() => {}}
       />
       <SchoolTabs />
       <Nav active={route.route.name} />
@@ -553,7 +565,6 @@ export function App() {
       {/* Rendered last so its backdrop lies over the whole shell — including the header the
           button that opened it sits in. */}
       {settingsOpen ? <Settings onClose={() => setSettingsOpen(false)} /> : null}
-      {signInOpen ? <SignIn onClose={() => setSignInOpen(false)} /> : null}
     </div>
   );
 }

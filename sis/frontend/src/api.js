@@ -46,7 +46,9 @@ var DEFAULT_KEY = 'dev-sis-registrar';
  * page with no session has.
  */
 var STORAGE_KEY = 'sis.api_key';
-var SESSION_TOKEN_KEY = 'sis.session_token';
+/* Versioned so browsers carrying a session from the pre-login-shell build are forced
+   through the sign-in page once instead of reopening the old anonymous console. */
+var SESSION_TOKEN_KEY = 'sis.session_token.v2';
 
 var DASH = '—'; // em dash: the one rendering of "no mark was recorded"
 
@@ -774,6 +776,9 @@ var api = {
   },
   rbacUsers: function () { return get('/rbac/users'); },
   rbacRoles: function () { return get('/rbac/roles'); },
+  rbacYearLevels: function (schoolCode) {
+    return get('/rbac/year-level-scopes', { school: schoolCode });
+  },
   addUserRole: function (userId, role) {
     return post('/rbac/users/' + encodeURIComponent(userId) + '/roles', role);
   },

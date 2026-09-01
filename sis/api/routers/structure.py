@@ -21,6 +21,7 @@ from typing import Annotated, Literal, Protocol
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from sis.api.deps import (
     Caller,
@@ -31,6 +32,7 @@ from sis.api.deps import (
     require_registrar,
     Principal,
     require_permission,
+    UowFactoryDep,
 )
 from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
@@ -54,6 +56,7 @@ from sis.domain.value_objects import (
     SubjectCode,
     YearCode,
 )
+from sis.infrastructure.db import models as m
 
 router = APIRouter(prefix="/v1", tags=["structure"])
 
@@ -1060,10 +1063,22 @@ class YearLevelIn(BaseModel):
     responses=error_responses(401, 403),
 )
 def list_schools(
-    queries: Queries, caller: Reader, include_inactive: bool = False
+    queries: Queries,
+    caller: Reader,
+    uow_factory: UowFactoryDep,
+    include_inactive: bool = False,
 ) -> list[SchoolOut]:
     with domain_errors():
         schools = queries.list_schools(include_inactive=include_inactive)
+    # A human account belongs to one school. Only the estate administrator may enumerate
+    # the estate; every other response is reduced at the API boundary even if a client
+    # edits its local school code or calls this route directly.
+    if caller.profile is not None and not caller.profile.is_system_admin:
+        with uow_factory() as uow:
+            own_code = uow._session.scalar(
+                select(m.School.code).where(m.School.id == caller.profile.school_id)
+            )
+        schools = [school for school in schools if str(school.code) == own_code]
     return [SchoolOut.of(school) for school in schools]
 
 
