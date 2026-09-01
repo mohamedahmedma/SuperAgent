@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-workspace">
+  <div :class="['chat-workspace', { 'advanced-mode': showAdvanced }]">
     <section class="chat-area">
       <header class="chat-header">
         <div class="header-info">
@@ -12,6 +12,17 @@
           </span>
         </div>
         <div class="chat-header-actions">
+          <label
+            v-if="authStore.isAdmin"
+            class="advanced-mode-toggle"
+            title="Show retrieval details and live evidence"
+          >
+            <span class="advanced-mode-label">Advanced</span>
+            <input v-model="advancedMode" type="checkbox" role="switch" aria-label="Advanced mode" />
+            <span class="advanced-mode-track" aria-hidden="true">
+              <span class="advanced-mode-thumb"></span>
+            </span>
+          </label>
           <button type="button" title="History" aria-label="Open conversation history" @click="openHistory">
             <i class="fa-solid fa-clock-rotate-left"></i>
           </button>
@@ -40,6 +51,7 @@
           :key="index"
           :msg="msg"
           :msg-index="index"
+          :show-advanced="showAdvanced"
           :ref="(el) => { if (el) messageItemRefs[index] = el; }"
           @cite-click="scrollToChunk"
         />
@@ -48,7 +60,7 @@
       <ChatInput />
     </section>
 
-    <KnowledgeContextPanel @cite-click="scrollToChunk" />
+    <KnowledgeContextPanel v-if="showAdvanced" @cite-click="scrollToChunk" />
   </div>
 </template>
 
@@ -60,9 +72,13 @@ import ChatInput from './ChatInput.vue';
 import KnowledgeContextPanel from './KnowledgeContextPanel.vue';
 import { useChatStore } from '@/stores/chat';
 import { useSessionStore } from '@/stores/sessions';
+import { useAuthStore } from '@/stores/auth';
 
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();
+const authStore = useAuthStore();
+const advancedMode = ref(false);
+const showAdvanced = computed(() => authStore.isAdmin && advancedMode.value);
 const chatContainerRef = ref<HTMLDivElement | null>(null);
 const messageItemRefs = ref<any[]>([]);
 
