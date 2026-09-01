@@ -106,12 +106,14 @@ def test_supervisor_cannot_assign_or_list_an_unrelated_grade(
     ).status_code == 403
 
 
-def test_grade_supervisor_has_no_school_write_or_system_permissions(
+def test_grade_supervisor_only_writes_the_timetable_in_their_scope(
     client: TestClient, grade_supervisor: dict[str, str]
 ) -> None:
     permissions = set(client.get("/v1/auth/me", headers=grade_supervisor).json()["profile"]["permissions"])
     assert "teachers.assign_classes" in permissions
-    assert not any(permission.endswith(".write") for permission in permissions)
+    assert {permission for permission in permissions if permission.endswith(".write")} == {
+        "timetable.write"
+    }
     assert "system.manage" not in permissions
 
 

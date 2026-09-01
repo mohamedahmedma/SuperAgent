@@ -110,8 +110,10 @@ export function Timetable() {
   const clear = async (day, period) => {
     setBusySlot(slotKey(day, period)); setActionError(null);
     try {
-      await api.clearTimetableSlots(state.year, [{ class_code: klass, term_code: term,
-        day_of_week: day, period_number: period }]);
+      const slots = [{
+        class_code: klass, term_code: term, day_of_week: day, period_number: period
+      }];
+      await api.clearTimetableSlots(state.year, slots);
       week.reload();
     } catch (error) { setActionError(error); }
     finally { setBusySlot(''); }

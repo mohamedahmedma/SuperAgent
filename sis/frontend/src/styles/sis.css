@@ -1332,8 +1332,3 @@
 .sis-lesson .btn { position: absolute; inset-block-start: .15rem; inset-inline-end: .15rem; width: 1.8rem; height: 1.8rem; padding: 0; }
 .sis-empty-slot { display: grid; min-height: 3.8rem; place-items: center; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: .7rem; font-size: .75rem; }
 .sis-timetable-break { color: var(--muted); background: var(--tint); text-align: center; font-size: .78rem; }
-
-@media (max-width: 575.98px) {
-  .sis-subject-chip { flex: 1 1 calc(50% - .65rem); justify-content: space-between; }
-  .sis-timetable-grid { min-width: 48rem; }
-}
