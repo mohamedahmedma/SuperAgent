@@ -1151,10 +1151,6 @@ class AssetRouteTests(unittest.TestCase):
             set_profile(None)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CitationFilteringTests(unittest.TestCase):
     """Retrieval surfaces every nearby figure; the answer usually rests on one. The
     `[n]` markers the agent already emits say which, at no extra cost."""
@@ -1196,9 +1192,42 @@ class CitationFilteringTests(unittest.TestCase):
     def test_several_citations_attach_all_of_their_assets_in_cited_order(self):
         self.assertEqual(["a3", "a1", "a2"], self._ids("Compare [3] with [1]."))
 
-    def test_citing_a_text_only_chunk_attaches_nothing(self):
-        """A correct answer to 'which images did this use?' is sometimes 'none'."""
-        self.assertEqual([], self._ids("The policy says so. [2]"))
+    def test_citing_only_text_chunks_falls_back_instead_of_showing_nothing(self):
+        """The regression this class exists for now.
+
+        This used to return []: "the answer cited no figure, so it used no figure".
+        That reading is wrong about how a figure reaches the model. It arrives as a
+        text surrogate — caption, description, transcription — and by the time the
+        model picks a marker it looks exactly like a paragraph, so an answer written
+        entirely FROM a caption routinely cites the prose beside it.
+
+        The cost was paid by the question that most wants a picture: a parent asking
+        "فين صورة اللبس؟" got four bullets read off the figure, one [2] pointing at the
+        uniform policy text, and no image at all.
+        """
+        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids("The policy says so. [2]"))
+
+    def test_the_answer_that_lost_its_figure_keeps_it(self):
+        """The deployed shape, verbatim: prose off the figure, one marker on the text
+        chunk, and an image link the model invented because nothing had rendered one."""
+        answer = """الملابس عبارة عن زي رياضي أزرق داكن مع تفاصيل ذهبية.
+تقدر تشوف الصورة هنا:
+![Sports Wear: All Grades - Unisex](/media/kb.docx::p0::img5) [2]"""
+        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids(answer))
+
+    def test_a_figure_citation_beside_a_text_one_still_narrows(self):
+        """The guard on the fallback: it must not swallow the feature it backs up.
+
+        [1] carries figures and [2] does not. The answer named a figure, so the
+        narrowing is real information and the other document's images stay out.
+        """
+        self.assertEqual(["a1", "a2"], self._ids("Both the kit [1] and the rule [2]."))
+
+    def test_the_fallback_hands_back_retrieval_order(self):
+        """Rank order is the only ranking the user gets, so the highest-scoring
+        figure has to be the first one they see."""
+        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids("No markers here."))
+        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids("Text only. [2]"))
 
     def test_an_uncited_answer_falls_back_to_everything_surfaced(self):
         """It may still have leaned on a figure; showing too much beats showing none."""
@@ -1207,7 +1236,11 @@ class CitationFilteringTests(unittest.TestCase):
     def test_out_of_range_citations_are_ignored(self):
         """Models occasionally cite a chunk number that was never returned."""
         self.assertEqual(["a1", "a2"], self._ids("See [1] and [99]."))
-        self.assertEqual([], self._ids("See [42]."))
+
+    def test_citations_that_are_all_out_of_range_fall_back(self):
+        """A marker pointing at nothing is a model mistake, not a statement that the
+        turn had no figures — the same reason a text-only citation falls back."""
+        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids("See [42]."))
 
     def test_the_feature_can_be_switched_off_by_profile(self):
         config = self.delivery.model_copy(update={"attach_only_cited": False})
@@ -1232,3 +1265,148 @@ class CitationFilteringTests(unittest.TestCase):
         from backend.chat.assets_bridge import asset_ids_for_answer
 
         self.assertEqual(["a1", "a2"], asset_ids_for_answer("[1][2]", self.ctx, trace, self.delivery))
+
+
+class AttachmentEdgeCaseTests(unittest.TestCase):
+    """The paths that reach `asset_ids_for_answer` without going through a normal
+    answered turn. Falling back rather than dropping made the fallback load-bearing,
+    so the cases where attaching nothing is still the RIGHT answer are pinned here."""
+
+    def setUp(self):
+        self.delivery = load_profile("base").assets.delivery
+        self.empty_ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
+
+    def _ids(self, answer, ctx, trace, config=None):
+        from backend.chat.assets_bridge import asset_ids_for_answer
+
+        return asset_ids_for_answer(answer, ctx, trace, config or self.delivery)
+
+    def test_a_refusal_turn_attaches_nothing_even_though_retrieval_saw_figures(self):
+        """`decide_route` empties `retrieved_chunks` on no_knowledge, clarify, scope_select
+        and retrieval_error precisely so attachment finds nothing there, and keeps the full
+        set in `initial_retrieved_chunks` for the trace panel.
+
+        That contract now carries more weight than it did: the fallback fires on far more
+        turns, so "the knowledge base has nothing reliable on this" arriving WITH the
+        picture that answers the question is a live failure mode rather than a theoretical
+        one. The knowledge tool returns before it pins anything on these routes, so the
+        context is empty too — both halves are asserted.
+        """
+        trace = {
+            "route": "no_knowledge",
+            "retrieval_status": "no_knowledge",
+            "retrieved_chunks": [],
+            "initial_retrieved_chunks": [{"asset_ids": ["a1"]}, {"asset_ids": ["a2"]}],
+        }
+        self.assertEqual([], self._ids("I don't have that.", self.empty_ctx, trace))
+
+        from backend.chat.assets_bridge import asset_ids_for_turn
+
+        self.assertEqual([], asset_ids_for_turn(self.empty_ctx, trace))
+
+    def test_the_hitl_resume_path_attaches_from_the_trace(self):
+        """Resuming a clarification answers from `docs` without calling the knowledge
+        tool, so nothing is ever pinned on the context. The trace is the only record
+        that the turn had figures at all."""
+        trace = {"retrieved_chunks": [{"asset_ids": ["a1"]}, {"asset_ids": ["a2"]}]}
+        self.assertEqual(["a1"], self._ids("Year 4 it is. [1]", self.empty_ctx, trace))
+        self.assertEqual(["a1", "a2"], self._ids("Year 4 it is.", self.empty_ctx, trace))
+
+    def test_a_turn_with_no_figures_anywhere_attaches_nothing(self):
+        trace = {"retrieved_chunks": [{"asset_ids": []}, {}]}
+        self.assertEqual([], self._ids("Fees are 45,000. [1]", self.empty_ctx, trace))
+
+    def test_chunks_that_never_carried_the_field_are_read_as_no_figure(self):
+        """A chunk stored before `asset_ids` existed, or one restored from a resume
+        snapshot that dropped it, must not raise into a chat turn."""
+        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
+        ctx.note_surfaced_assets(["a1"])
+        for chunks in ([{"filename": "kb.docx"}], [{"asset_ids": None}]):
+            with self.subTest(chunks=chunks):
+                trace = {"retrieved_chunks": chunks}
+                self.assertEqual(["a1"], self._ids("Text. [1]", ctx, trace))
+
+    def test_blank_ids_inside_a_cited_chunk_are_skipped(self):
+        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
+        ctx.note_surfaced_assets(["a1"])
+        trace = {"retrieved_chunks": [{"asset_ids": ["", "a1", None]}]}
+        self.assertEqual(["a1"], self._ids("The kit. [1]", ctx, trace))
+
+    def test_switching_the_feature_off_ignores_citations_entirely(self):
+        """`attach_only_cited: false` is the deployment that resolves assets itself.
+        Neither the narrowing nor the fallback may change what it gets."""
+        config = self.delivery.model_copy(update={"attach_only_cited": False})
+        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
+        ctx.note_surfaced_assets(["a1", "a2"])
+        trace = {"retrieved_chunks": [{"asset_ids": ["a1"]}, {"asset_ids": ["a2"]}]}
+        for answer in ("Cited [1].", "Cited [2].", "Uncited."):
+            with self.subTest(answer=answer):
+                self.assertEqual(["a1", "a2"], self._ids(answer, ctx, trace, config))
+
+
+class FigureInstructionTests(unittest.TestCase):
+    """The other half of the fix: the model is told not to deliver the picture itself.
+
+    It is shown an `asset_id` in every figure chunk header — that is what makes
+    `view_figure` callable, since it can only pass back an id it has seen — and the
+    school prompt tells it markdown is supported. Asked where a picture is, a 20B model
+    puts the id in the answer, usually dressed as an image link. Neither can render: the
+    id is not a URL, and the real endpoint needs a header no `<img>` can send.
+    """
+
+    def _run_tool(self, docs):
+        import sys
+        import types
+
+        from backend.tools.knowledge import make_search_knowledge_base
+
+        fake_pipeline = types.ModuleType("backend.rag.pipeline")
+        fake_pipeline.run_rag_graph = lambda query, ctx: {
+            "docs": docs,
+            "rag_trace": {"retrieval_status": "answer", "route": "answer"},
+        }
+        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
+        try:
+            tool = make_search_knowledge_base(ctx)
+            with patch.dict(sys.modules, {"backend.rag.pipeline": fake_pipeline}):
+                return tool.invoke({"query": "where is the uniform picture"}), ctx
+        finally:
+            ctx.close()
+
+    @staticmethod
+    def _doc(text, asset_ids=()):
+        return {
+            "filename": "kb.docx",
+            "page_number": 0,
+            "text": text,
+            "chunk_id": "c1",
+            "asset_ids": list(asset_ids),
+        }
+
+    def test_a_figure_turn_is_told_not_to_write_the_picture_itself(self):
+        message, ctx = self._run_tool([self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"])])
+        self.assertIn("view_figure asset_id: kb.docx::p0::img5", message)
+        self.assertIn("already shown to the user", message)
+        self.assertIn("never write an image", message)
+        self.assertIn("asset_id", message.split("already shown to the user")[1])
+        self.assertEqual(["kb.docx::p0::img5"], ctx.surfaced_asset_ids())
+
+    def test_a_text_only_turn_does_not_pay_for_the_rule(self):
+        """Rung 3 of the composition ladder: an instruction that is only true when
+        retrieval returned a figure is billed only on those turns."""
+        with_figure, _ = self._run_tool([self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"])])
+        without, ctx = self._run_tool([self._doc("Fees are 45,000 EGP.")])
+        self.assertNotIn("already shown to the user", without)
+        self.assertLess(len(without), len(with_figure))
+        self.assertEqual([], ctx.surfaced_asset_ids())
+
+    def test_one_figure_among_text_chunks_still_triggers_the_rule(self):
+        message, _ = self._run_tool([
+            self._doc("Fees are 45,000 EGP."),
+            self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"]),
+        ])
+        self.assertIn("already shown to the user", message)
+
+
+if __name__ == "__main__":
+    unittest.main()

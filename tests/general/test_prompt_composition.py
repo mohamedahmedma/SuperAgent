@@ -333,6 +333,7 @@ class ToolResultEnvelopeTests(unittest.TestCase):
             "partial": False,
             "constraints": [],
             "discriminate": "unknown",
+            "figures": False,
         }
         fields.update(flags)
         return render(self.TEMPLATE, **fields)
@@ -368,6 +369,43 @@ class ToolResultEnvelopeTests(unittest.TestCase):
             with self.subTest(discriminate=verdict):
                 out = self._chunks(constraints=["girls only"], discriminate=verdict)
                 self.assertIn("girls only", out)
+
+    def test_the_figure_rule_is_paid_only_when_a_figure_was_retrieved(self):
+        """Rung 3 of the ladder in backend/prompts/__init__.py: an instruction that is
+        only true when retrieval returned a figure is billed only on those turns."""
+        without = self._chunks(figures=False)
+        with_rule = self._chunks(figures=True)
+        self.assertNotIn("already shown to the user", without)
+        self.assertIn("already shown to the user", with_rule)
+        self.assertLess(len(without), len(with_rule))
+
+    def test_the_figure_rule_forbids_what_the_model_actually_wrote(self):
+        """Every chunk header carrying a figure names an asset_id, because view_figure
+        can only be called with an id the model has seen. Shown one and told markdown
+        is supported, a small model asked "where is the picture?" writes the id into
+        the answer as an image link — which cannot render: the id is not a URL, and the
+        real endpoint needs a header no <img> can send.
+
+        So the rule has to name all three things it is ruling out, not just the image.
+        """
+        out = self._chunks(figures=True)
+        for forbidden in ("an image", "a link", "a file path", "an asset_id"):
+            with self.subTest(forbidden=forbidden):
+                self.assertIn(forbidden, out)
+        self.assertIn("view_figure", out)
+        self.assertIn("[n]", out)
+
+    def test_the_figure_rule_is_not_hard_wrapped(self):
+        out = self._chunks(figures=True)
+        self.assertIn("already shown to the user next to your answer", out)
+
+    def test_the_figure_rule_reaches_no_other_outcome(self):
+        """A refusal or a clarification shows the model no chunk headers at all, so it
+        has no asset_id to write and no rule to pay for."""
+        for outcome in ("no_knowledge", "retrieval_error", "empty", "call_limit"):
+            with self.subTest(outcome=outcome):
+                out = render(self.TEMPLATE, outcome=outcome, prompt="p", options=[])
+                self.assertNotIn("already shown to the user", out)
 
     def test_the_rewrite_caveat_is_paid_only_when_a_rewrite_happened(self):
         without = self._chunks(rewritten=False)
