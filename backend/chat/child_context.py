@@ -5,10 +5,8 @@ That was the intent behind `ChatRequestContext._remembered_child`, but the pin l
 per-request object and nothing ever loaded or stored it, so it survived the tool calls of
 one turn and died at the turn boundary. This module is where it becomes durable.
 
-State lives in the session metadata beside `pending_hitl` and `asset_context`, which is
-the pattern `backend/chat/asset_context.py` already establishes and states its reason
-for: it survives across requests **and across processes** without standing up a new
-store. That matters more here than it looks. Holding conversation state in an in-process
+State lives in the session metadata beside `pending_hitl`: it survives across requests
+**and across processes** without standing up a new store. That matters more here than it looks. Holding conversation state in an in-process
 registry keyed by thread id would work on one worker and silently lose the pin on the
 next request under any multi-worker deployment — and "the assistant forgot which child"
 is not a failure anyone would think to blame on worker affinity.

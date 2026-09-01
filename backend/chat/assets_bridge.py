@@ -20,18 +20,8 @@ from backend.assets.delivery import (
     collect_asset_ids,
     references_by_id,
 )
-from backend.chat.asset_context import SESSION_ASSET_KEY, SessionAssetState
 
 logger = logging.getLogger(__name__)
-
-
-def load_asset_state(metadata: Optional[dict]) -> SessionAssetState:
-    return SessionAssetState.from_metadata(metadata).begin_turn()
-
-
-def save_asset_state(save_meta: dict, state: SessionAssetState) -> dict:
-    save_meta[SESSION_ASSET_KEY] = state.to_metadata()
-    return save_meta
 
 
 def effective_capabilities(
@@ -82,14 +72,22 @@ def asset_ids_for_answer(
 ) -> List[str]:
     """Assets to attach to THIS answer.
 
-    Retrieval routinely surfaces several figures — a uniform question hits every
-    uniform image in the document — but the answer usually rests on one. Attaching all
-    of them makes the user do the filtering the citation already did.
+    Retrieval routinely surfaces several figures — a question about the sports kit hits
+    every uniform image in the document — but the answer rests on one. Attaching all of
+    them makes the reader do the filtering, and hands a parent asking about PE clothes
+    two pictures of day wear they did not ask for.
 
-    So when the answer's citations point at figures, only those figures are attached.
-    Every other case — no citations at all, or citations that landed only on text —
-    falls back to everything the turn surfaced: the answer may still have rested on a
-    figure, and showing too much beats showing nothing.
+    The answer already says which chunk it used: the `[n]` markers the agent is required
+    to emit. The chunk header tells the model which chunks ARE figures, so citing one is
+    a deliberate choice rather than a coincidence, and no second model call is needed to
+    recover it — the selection rides along with a citation the turn was paying for anyway.
+
+    When the citations cannot select — none emitted, none landing on a figure, or no
+    chunk list to map them against — the BEST-RANKED figure is shown, and only that one.
+    Retrieval ranked it first for this question, which is a weaker signal than a citation
+    but a much better one than showing everything: the turn that asks "where is the
+    picture?" must not come back with none, and the turn that asks about the sports kit
+    must not come back with three.
     """
     surfaced = asset_ids_for_turn(ctx, rag_trace)
     if not surfaced or not getattr(delivery_config, "attach_only_cited", True):
@@ -97,8 +95,6 @@ def asset_ids_for_answer(
 
     chunks = (rag_trace or {}).get("retrieved_chunks") or []
     cited = cited_chunk_indices(answer)
-    if not cited or not chunks:
-        return surfaced
 
     ids: List[str] = []
     for index in cited:
@@ -107,19 +103,7 @@ def asset_ids_for_answer(
                 if asset_id and asset_id not in ids:
                     ids.append(asset_id)
 
-    # Narrowing to the cited chunks is a REFINEMENT, never a veto.
-    #
-    # Citations that land only on text chunks say nothing about the figures — not that
-    # there are none worth showing. A figure enters the context as a text surrogate
-    # (caption, description, transcription), so it reads exactly like a paragraph by
-    # the time the model cites anything, and a model that answered from a caption
-    # routinely cites the prose next to it instead. Returning nothing here is how
-    # "فين صورة اللبس؟" — the question that most wants a picture — got answered with
-    # none, while the figure that produced every word of the answer sat one chunk away.
-    #
-    # So this falls back to what the turn surfaced, which is the rule an uncited answer
-    # already gets and for the same reason: showing too much beats showing nothing.
-    return ids or surfaced
+    return ids or surfaced[:1]
 
 
 def asset_ids_for_turn(ctx, rag_trace: Optional[dict]) -> List[str]:

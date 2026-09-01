@@ -26,11 +26,19 @@ def _format_chunk(index: int, doc: dict) -> str:
         f"[{index}] {doc.get('filename', 'Unknown')} "
         f"(Page {doc.get('page_number', 'N/A')}):\n{doc.get('text', '')}"
     )
-    # Naming the asset_id inline is what makes view_figure callable at all — the model
-    # can only pass back an id it has actually seen.
-    asset_ids = [item for item in (doc.get("asset_ids") or []) if item]
-    if asset_ids:
-        entry += "\n(figure available — view_figure asset_id: " + ", ".join(asset_ids) + ")"
+    # WHETHER this chunk is a figure, and nothing else — no id, no filename, no path.
+    #
+    # The header used to name the asset_id, because view_figure could only be called
+    # with an id the model had seen. Nothing calls it now, and an id in the prompt is
+    # an id in the answer: shown one and told markdown is supported, a small model
+    # writes it straight back as an image link no browser can load.
+    #
+    # A bare marker costs ~3 tokens a chunk and buys the one thing that matters — the
+    # model knows which chunks carry a picture, so its `[n]` becomes a deliberate
+    # choice of which picture to show rather than a coincidence. What the marker MEANS
+    # is stated once in tools/knowledge_result.j2, not repeated on every chunk.
+    if doc.get("asset_ids") or doc.get("modality") == "figure":
+        entry += "\n[FIGURE]"
     return entry
 
 
@@ -127,8 +135,8 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
             # answer was sitting in chunk 3 ended in a denial. Paid only when the
             # grader actually said partial.
             partial=status == "partial",
-            # Only a turn that actually retrieved a figure needs telling not to write
-            # one into the answer, and only such a turn was shown an asset_id to write.
+            # Only a turn that actually retrieved a figure needs telling what [FIGURE]
+            # means. Every other turn pays nothing for it.
             figures=bool(surfaced_assets),
         )
 

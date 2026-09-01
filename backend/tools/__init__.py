@@ -8,7 +8,6 @@ emission) and stateless ones share one signature.
 from typing import Callable, Dict, List
 
 from backend.chat.request_context import ChatRequestContext
-from backend.tools.figures import make_view_figure
 from backend.tools.knowledge import make_search_knowledge_base
 from backend.tools.products import make_search_products
 from backend.tools.records import make_get_student_records
@@ -16,7 +15,6 @@ from backend.tools.records import make_get_student_records
 # name -> builder(ctx) -> tool
 TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
     "search_knowledge_base": make_search_knowledge_base,
-    "view_figure": make_view_figure,
     "search_products": make_search_products,
     # Reads a student's academic record from the records facade. Registered but not
     # bound by any profile yet — a deployment opts in by naming it, which keeps every
@@ -31,8 +29,12 @@ TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
 #
 # It drives whether the agent's system prompt includes its grounding-and-citation
 # block at all (backend/prompts/templates/agent/system.j2). A deployment binding only
-# view_figure has nothing to cite, and paying for citation rules on every one of its
-# turns would be pure waste.
+# get_student_records has nothing to cite, and paying for citation rules on every one
+# of its turns would be pure waste.
+#
+# The citation block is load-bearing for images as well as provenance: which figure a
+# turn attaches is read out of the `[n]` markers (backend/chat/assets_bridge.py), so a
+# grounded tool that drops them silently stops showing pictures.
 GROUNDED_TOOLS: frozenset = frozenset({"search_knowledge_base", "search_products"})
 
 
@@ -62,7 +64,6 @@ __all__ = [
     "UnknownToolError",
     "build_tools",
     "make_search_knowledge_base",
-    "make_view_figure",
     "make_search_products",
     "make_get_student_records",
 ]
