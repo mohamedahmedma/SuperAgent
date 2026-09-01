@@ -27,7 +27,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from tests.sis.conftest import registrar_headers
+from tests.sis.conftest import Clock, registrar_headers
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -627,7 +627,7 @@ def test_a_year_naming_a_school_that_does_not_exist_is_refused_by_field(
             "name_en": "y",
             "name_ar": "y",
             "starts_on": "2026-09-01",
-            "ends_on": "2026-06-30",
+            "ends_on": "2027-06-30",
         },
         headers=registrar,
     )
@@ -908,30 +908,96 @@ def test_a_late_child_was_in_the_room_and_is_not_an_absence(
 
 
 def test_a_child_attendance_record_carries_counts_and_no_rate(
-    two_schools: TestClient, registrar: dict[str, str]
+    two_schools: TestClient, registrar: dict[str, str], clock: Clock
 ) -> None:
     """`recorded` is the only denominator this service can state honestly, so no rate is
-    computed for the caller."""
+    computed for the caller.
+
+    Two days, not two writes to one day: `recorded` counting to 2 is only a claim about a
+    denominator if the register actually spans more than a morning, and an upsert of the
+    same date twice leaves one row however many times it is called. The clock moves
+    between them because a past day is frozen — which is the rule under test's neighbour,
+    not an inconvenience to route around.
+    """
     _add_child(two_schools, registrar, "H-1", "Child H1")
     _place(two_schools, registrar, "H-1", NC_YEAR, "3A", "2026-09-01")
-    for day, state in (("2026-09-01", "present"), ("2026-09-01", "absent")):
-        two_schools.put(
+    for day, state in (("2026-09-01", "present"), ("2026-09-02", "absent")):
+        clock.set(day)
+        response = two_schools.put(
             f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on={day}",
             json={"entries": [{"student_number": "H-1", "state": state}]},
             headers=registrar,
         )
+        assert response.status_code == 200, response.text
 
     record = two_schools.get("/v1/students/H-1/attendance", headers=registrar).json()
     assert record["counts"]["recorded"] == 2
-    assert [day["on_date"] for day in record["days"]] == ["2026-09-01", "2026-09-01"]
+    assert [day["on_date"] for day in record["days"]] == ["2026-09-01", "2026-09-02"]
     assert "rate" not in record["counts"]
     assert "percentage" not in record["counts"]
 
     bounded = two_schools.get(
-        "/v1/students/H-1/attendance?from=2026-09-01&to=2026-09-01", headers=registrar
+        "/v1/students/H-1/attendance?from=2026-09-02&to=2026-09-02", headers=registrar
     ).json()
     assert bounded["counts"]["recorded"] == 1
     assert bounded["counts"]["absent"] == 1
+
+
+def test_a_register_is_refused_for_a_day_that_has_not_happened(
+    two_schools: TestClient, registrar: dict[str, str], clock: Clock
+) -> None:
+    """A register is a record of a room somebody stood in. Tomorrow's has no subject yet,
+    and accepting one would let a term be filled in ahead of itself."""
+    _add_child(two_schools, registrar, "J-1", "Child J1")
+    _place(two_schools, registrar, "J-1", NC_YEAR, "3A", "2026-09-01")
+    clock.set("2026-09-01")
+
+    response = two_schools.put(
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-02",
+        json={"entries": [{"student_number": "J-1", "state": "present"}]},
+        headers=registrar,
+    )
+    assert response.status_code == 422, response.text
+    assert "future" in response.text
+
+
+def test_a_past_day_only_opens_far_enough_to_excuse_an_absence(
+    two_schools: TestClient, registrar: dict[str, str], clock: Clock
+) -> None:
+    """Yesterday's register is closed, with one door left in it.
+
+    A note arriving the next morning is the reason the door exists at all, so excusing a
+    child already marked absent is allowed. Everything else is refused: re-marking a
+    settled day is how an attendance record stops being evidence of anything.
+    """
+    _add_child(two_schools, registrar, "K-1", "Child K1")
+    _place(two_schools, registrar, "K-1", NC_YEAR, "3A", "2026-09-01")
+    clock.set("2026-09-01")
+    url = f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01"
+    assert two_schools.put(
+        url, json={"entries": [{"student_number": "K-1", "state": "absent"}]},
+        headers=registrar,
+    ).status_code == 200
+
+    clock.set("2026-09-02")
+    refused = two_schools.put(
+        url, json={"entries": [{"student_number": "K-1", "state": "present"}]},
+        headers=registrar,
+    )
+    assert refused.status_code == 422, refused.text
+
+    allowed = two_schools.put(
+        url,
+        json={
+            "entries": [
+                {"student_number": "K-1", "state": "excused", "note": "note from home"}
+            ]
+        },
+        headers=registrar,
+    )
+    assert allowed.status_code == 200, allowed.text
+    record = two_schools.get("/v1/students/K-1/attendance", headers=registrar).json()
+    assert record["days"][0]["state"] == "excused"
 
 
 def test_a_mark_keeps_the_class_she_was_in_that_day(

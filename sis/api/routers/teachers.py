@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 
-from sis.api.deps import Principal, UowFactoryDep, get_teacher_management_service, require_permission
+from sis.api.deps import (
+    Principal,
+    TodayDep,
+    UowFactoryDep,
+    get_teacher_management_service,
+    require_permission,
+)
 from sis.api.routers import domain_errors, error_responses
 from sis.application.ports.repositories import TeacherRecord
 from sis.application.services.teachers import TeacherManagementService
@@ -429,12 +435,15 @@ def list_teacher_attendance(
 )
 def record_teacher_attendance(
     school_code: str, staff_number: str, on_date: date, body: TeacherAttendanceIn,
-    caller: AttendanceWriters, uow_factory: UowFactoryDep,
+    caller: AttendanceWriters, uow_factory: UowFactoryDep, today: TodayDep,
 ) -> TeacherAttendanceOut:
     caller.narrow(
         Permission.TEACHER_ATTENDANCE_WRITE, lambda scopes: scopes.for_school(school_code)
     )
-    if on_date > datetime.now(UTC).date():
+    # `today` is injected for the same reason the child register injects it: a refusal
+    # judged against the wall clock is one no suite can state without dating its own
+    # fixtures to the afternoon it was written.
+    if on_date > today:
         from sis.domain.errors import DomainRuleViolation
         raise DomainRuleViolation(
             "teacher attendance cannot be recorded for a future day",

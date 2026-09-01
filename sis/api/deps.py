@@ -1380,9 +1380,25 @@ def get_structure_catalogue(uow_factory: UowFactoryDep) -> StructureCatalogue:
     return StructureCatalogue(uow_factory)
 
 
-def get_attendance_service(uow_factory: UowFactoryDep) -> AttendanceService:
+def get_today() -> date:
+    """The calendar day the register rules are judged against.
+
+    A dependency of its own rather than a `datetime.now` inside the service, so a test can
+    pin it. It is deliberately NOT folded into `get_attendance_service`: overriding the
+    service would swap out the wiring under test, and the point is to move the clock while
+    everything else stays the code that actually ships.
+    """
+    return datetime.now(UTC).date()
+
+
+TodayDep = Annotated[date, Depends(get_today)]
+
+
+def get_attendance_service(
+    uow_factory: UowFactoryDep, today: TodayDep
+) -> AttendanceService:
     """The daily register. A factory, like every other service here."""
-    return AttendanceService(uow_factory)
+    return AttendanceService(uow_factory, today=lambda: today)
 
 
 def get_student_desk(uow_factory: UowFactoryDep) -> StudentDesk:
