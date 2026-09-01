@@ -10,7 +10,7 @@
     <div class="message-column">
       <div v-if="!msg.isUser" class="message-author">
         <span>Agent Assistant</span>
-        <small v-if="msg.ragTrace?.retrieved_chunks?.length">
+        <small v-if="showAdvanced && msg.ragTrace?.retrieved_chunks?.length">
           Cited {{ msg.ragTrace.retrieved_chunks.length }} sources
         </small>
       </div>
@@ -40,12 +40,13 @@
           />
           <MessageAssets :assets="msg.assets" />
           <References
+            v-if="showAdvanced"
             ref="referencesRef"
             :msg="msg"
             :msg-index="msgIndex"
             @cite-click="onCiteClick"
           />
-          <RetrievalTraceDetails :msg="msg" />
+          <RetrievalTraceDetails v-if="showAdvanced" :msg="msg" />
         </template>
       </template>
     </div>
@@ -64,6 +65,7 @@ import type { Message } from '@/types/chat';
 defineProps<{
   msg: Message;
   msgIndex: number;
+  showAdvanced?: boolean;
 }>();
 
 const emit = defineEmits<{
