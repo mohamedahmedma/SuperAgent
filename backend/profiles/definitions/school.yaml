@@ -48,7 +48,6 @@ agent:
   # parent asking about two children in one turn stays inside a single budget.
   tools:
     - search_knowledge_base
-    - view_figure
     - get_student_records
 
   # Register and dialect, set here rather than in `identity.persona` because persona is
@@ -289,6 +288,23 @@ user_copy:
   hitl_scope_agent: "لقيت أكتر من قسم ممكن يكون فيه إجابة سؤالك. تحب أدوّر في أنهي واحد؟"
   new_session_title: "محادثة جديدة"
   unsupported_file_type: "الملفات المدعومة هي PDF و Word و Excel و HTML بس"
+
+assets:
+  figures:
+    # Turns off the qwen3 scratchpad on the vision model this deployment runs
+    # (VISION_MODEL=qwen/qwen3.6-27b on Groq). Ingest sends one vision call per image
+    # and the scratchpad is reserved against the tokens-per-minute quota before any
+    # answer is written, so on a small quota this reclaims more room than raising
+    # vision_max_output_tokens can.
+    #
+    # It has to go here rather than in `vision_reasoning_effort`, and rather than in
+    # VISION_REASONING_EFFORT: that field's validator folds "none" to "", which means
+    # SEND NO reasoning parameter — leaving the model's own default (reasoning on).
+    # Only extra_params can put the literal string on the wire. See
+    # FigurePipelineConfig._validate_vision_effort, and supermew.yaml, which carries
+    # this same block for the same model.
+    vision_extra_params:
+      reasoning_effort: none
 
 retrieval:
   # School corpora are small and repetitive — fee tables, calendars, policy pages

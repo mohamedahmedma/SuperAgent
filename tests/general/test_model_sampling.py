@@ -114,9 +114,9 @@ class EffortValidationTests(SamplingTestCase):
 
 
 class VisionEffortTests(SamplingTestCase):
-    """The vision model is the one per-turn model outside ModelConfig — `view_figure`
-    reaches it mid-turn — so it gets the same knob, kept beside the other vision
-    settings rather than moved in with the text roles."""
+    """The vision model reads figures into text at INGEST — nothing reaches it during
+    a turn any more — so its effort knob is kept beside the other vision settings
+    rather than moved in with the text roles."""
 
     def test_effort_is_env_overridable_through_a_nested_path(self):
         """assets.figures.* is three levels deep; a resolver that split the path once

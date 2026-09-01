@@ -98,7 +98,7 @@ class CompositionTests(ProfileTestCase):
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             (tmp_path / "parent.yaml").write_text(
-                'name: parent\nagent:\n  tools: ["search_knowledge_base", "view_figure"]\n',
+                'name: parent\nagent:\n  tools: ["search_knowledge_base", "search_products"]\n',
                 encoding="utf-8",
             )
             (tmp_path / "child.yaml").write_text(
@@ -109,8 +109,8 @@ class CompositionTests(ProfileTestCase):
                 parent = load_profile("parent")
                 child = load_profile("child")
 
-        self.assertIn("view_figure", parent.agent.tools)
-        self.assertNotIn("view_figure", child.agent.tools)
+        self.assertIn("search_products", parent.agent.tools)
+        self.assertNotIn("search_products", child.agent.tools)
         self.assertEqual(["search_knowledge_base"], child.agent.tools)
 
     def test_ecommerce_declares_its_extra_indexes(self):
@@ -416,9 +416,9 @@ class ToolRegistryTests(ProfileTestCase):
         from backend.tools import build_tools
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        tools = build_tools(["view_figure", "search_knowledge_base"], ctx)
+        tools = build_tools(["search_products", "search_knowledge_base"], ctx)
         self.assertEqual(
-            ["view_figure", "search_knowledge_base"],
+            ["search_products", "search_knowledge_base"],
             [tool.name for tool in tools],
         )
 

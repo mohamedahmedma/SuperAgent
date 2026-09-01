@@ -1,4 +1,4 @@
-"""Phase 4: asset delivery, session asset state, and the view_figure tool.
+"""Asset delivery: renditions, storage round-trips, and which figure an answer shows.
 
 The heaviest class here is `UiIndependenceTests`. The requirement is that replacing
 the frontend — with React, a Slack bot, a CLI, or another service — needs no backend
@@ -41,15 +41,12 @@ from backend.assets.dossier import (
     compute_sha256,
 )
 from backend.assets.store import AssetStore
-from backend.chat.asset_context import SESSION_ASSET_KEY, SessionAssetState
 from backend.chat.assets_bridge import (
     asset_ids_for_turn,
     attach_assets_to_trace,
     build_asset_references,
     effective_capabilities,
-    load_asset_state,
     restore_session_assets,
-    save_asset_state,
     trace_for_storage,
 )
 from backend.chat.request_context import ChatRequestContext
@@ -294,114 +291,19 @@ class CollectAssetIdsTests(unittest.TestCase):
         self.assertEqual([], collect_asset_ids([{"asset_ids": None}, {"asset_ids": [""]}]))
 
 
-class SessionAssetStateTests(unittest.TestCase):
-    def test_pinning_records_the_turn_it_was_first_seen(self):
-        state = SessionAssetState().begin_turn()
-        state.pin("a")
-        state.begin_turn()
-        state.pin("b")
-        self.assertEqual(1, state.get("a").first_seen_turn)
-        self.assertEqual(2, state.get("b").first_seen_turn)
-
-    def test_pinning_is_idempotent(self):
-        state = SessionAssetState()
-        state.pin_many(["a", "a", "b", ""])
-        self.assertEqual({"a", "b"}, set(state.pinned_ids()))
-
-    def test_an_observation_converts_the_image_into_text(self):
-        """The whole point: after one read, later turns answer from text."""
-        state = SessionAssetState()
-        state.record_observation("a", "Q3 dipped to 41%", question="what is Q3?")
-        pinned = state.get("a")
-        self.assertEqual(1, pinned.pixel_reads)
-        self.assertIn("Q3 dipped to 41%", pinned.observation_text())
-
-    def test_the_pixel_budget_is_enforced_per_asset(self):
-        state = SessionAssetState()
-        self.assertTrue(state.can_read_pixels("a", 2))
-        state.record_observation("a", "first")
-        self.assertTrue(state.can_read_pixels("a", 2))
-        state.record_observation("a", "second")
-        self.assertFalse(state.can_read_pixels("a", 2))
-        # A different asset has its own budget.
-        self.assertTrue(state.can_read_pixels("b", 2))
-
-    def test_observations_are_capped_keeping_the_most_recent(self):
-        state = SessionAssetState()
-        for i in range(10):
-            state.record_observation("a", f"note {i}", max_observations=3)
-        observations = state.get("a").observations
-        self.assertEqual(3, len(observations))
-        self.assertEqual("note 9", observations[-1].observation)
-        self.assertEqual(10, state.get("a").pixel_reads)
-
-    def test_an_empty_observation_still_consumes_a_read(self):
-        """A failed read cost a call; not counting it would allow unlimited retries."""
-        state = SessionAssetState()
-        state.record_observation("a", "   ")
-        self.assertEqual(1, state.get("a").pixel_reads)
-        self.assertEqual([], state.get("a").observations)
-
-    def test_state_round_trips_through_session_metadata(self):
-        state = SessionAssetState().begin_turn()
-        state.record_observation("a", "legend: blue=2025", question="what is the legend?")
-        metadata = {SESSION_ASSET_KEY: state.to_metadata()}
-        restored = SessionAssetState.from_metadata(metadata)
-        self.assertEqual(1, restored.get("a").pixel_reads)
-        self.assertIn("blue=2025", restored.get("a").observation_text())
-
-    def test_a_corrupt_payload_degrades_instead_of_raising(self):
-        """Losing the log costs one extra read; raising would cost the user the turn."""
-        self.assertEqual([], SessionAssetState.from_metadata({SESSION_ASSET_KEY: {"assets": "?"}}).pinned_ids())
-        self.assertEqual([], SessionAssetState.from_metadata({SESSION_ASSET_KEY: "nope"}).pinned_ids())
-        self.assertEqual([], SessionAssetState.from_metadata(None).pinned_ids())
-
-    def test_load_begins_a_new_turn(self):
-        state = load_asset_state({SESSION_ASSET_KEY: SessionAssetState(turn=4).to_metadata()})
-        self.assertEqual(5, state.turn)
-
-    def test_save_writes_under_the_session_key(self):
-        state = SessionAssetState()
-        state.pin("a")
-        save_meta = save_asset_state({}, state)
-        self.assertIn(SESSION_ASSET_KEY, save_meta)
-        self.assertIn("a", save_meta[SESSION_ASSET_KEY]["assets"])
-
-    def test_summary_reports_operational_counters(self):
-        state = SessionAssetState()
-        state.pin("a")
-        state.record_observation("b", "saw something")
-        self.assertEqual({"pinned": 2, "pixel_reads": 1, "with_observations": 1}, state.summary())
-
-
 class RequestContextAssetTests(unittest.TestCase):
     def test_surfaced_assets_are_pinned_in_retrieval_order(self):
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         ctx.note_surfaced_assets(["a", "b"])
         ctx.note_surfaced_assets(["b", "c"])
         self.assertEqual(["a", "b", "c"], ctx.surfaced_asset_ids())
-        self.assertEqual({"a", "b", "c"}, set(ctx.asset_state.pinned_ids()))
 
-    def test_the_figure_budget_is_separate_from_the_knowledge_budget(self):
-        """Looking at a figure must not consume the turn's single retrieval."""
+    def test_resetting_restores_the_knowledge_budget(self):
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         self.assertTrue(ctx.acquire_knowledge_tool_slot())
         self.assertFalse(ctx.acquire_knowledge_tool_slot())
-        self.assertTrue(ctx.acquire_figure_tool_slot())
-
-    def test_the_figure_budget_is_profile_driven_and_bounded(self):
-        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        limit = load_profile("base").agent.max_figure_calls_per_turn
-        results = [ctx.acquire_figure_tool_slot() for _ in range(limit + 2)]
-        self.assertEqual([True] * limit + [False, False], results)
-
-    def test_resetting_clears_both_budgets(self):
-        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        ctx.acquire_knowledge_tool_slot()
-        ctx.acquire_figure_tool_slot()
         ctx.reset_knowledge_tool_budget()
         self.assertTrue(ctx.acquire_knowledge_tool_slot())
-        self.assertTrue(ctx.acquire_figure_tool_slot())
 
     def test_a_closed_context_stops_accepting_assets(self):
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
@@ -410,7 +312,10 @@ class RequestContextAssetTests(unittest.TestCase):
         self.assertEqual([], ctx.surfaced_asset_ids())
 
 
-class ViewFigureToolTestCase(unittest.TestCase):
+class AssetStoreTestCase(unittest.TestCase):
+    """A real AssetStore over SQLite with one dossier and its blob in it, so the tests
+    below exercise the actual lookup rather than a stub."""
+
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset
 
@@ -441,111 +346,11 @@ class ViewFigureToolTestCase(unittest.TestCase):
     def tearDown(self):
         from backend.assets.store import set_asset_store
         from backend.assets.blobs import set_blob_store
-        from backend.assets.reader import set_figure_reader
 
         set_asset_store(None)
         set_blob_store(None)
-        set_figure_reader(None)
         self._tmp.cleanup()
         self.engine.dispose()
-
-    def _tool(self, ctx=None):
-        from backend.tools.figures import make_view_figure
-
-        return make_view_figure(ctx or ChatRequestContext.for_sync(user_id="u", session_id="s"))
-
-    def _reader(self, answer):
-        from backend.assets.reader import set_figure_reader
-
-        reader = Mock()
-        reader.available = True
-        reader.read.return_value = answer
-        set_figure_reader(reader)
-        return reader
-
-
-class ViewFigureTests(ViewFigureToolTestCase):
-    def test_without_vision_the_dossier_text_is_returned(self):
-        from backend.assets.reader import FigureReader, set_figure_reader
-
-        set_figure_reader(FigureReader(load_profile("base").assets.figures))
-        result = self._tool().invoke({"asset_id": self.dossier.asset_id})
-        self.assertIn("Fee schedule", result)
-        self.assertIn("Grade | Fee", result)
-        self.assertIn("no vision model is configured", result)
-
-    def test_with_vision_the_pixels_are_read_and_recorded(self):
-        reader = self._reader("The bar for grade 5 reaches 42,000.")
-        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        result = self._tool(ctx).invoke({"asset_id": self.dossier.asset_id, "question": "grade 5?"})
-
-        self.assertIn("42,000", result)
-        reader.read.assert_called_once()
-        pinned = ctx.asset_state.get(self.dossier.asset_id)
-        self.assertEqual(1, pinned.pixel_reads)
-        self.assertIn("42,000", pinned.observation_text())
-
-    def test_a_later_turn_answers_from_observations_without_re_reading(self):
-        """The behaviour the whole session-state design exists for."""
-        reader = self._reader("Q3 dipped to 41%.")
-        state = SessionAssetState()
-        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s", asset_state=state)
-
-        budget = load_profile("base").assets.delivery.max_pixel_reads_per_asset
-        for _ in range(budget):
-            self._tool(ctx).invoke({"asset_id": self.dossier.asset_id})
-        self.assertEqual(budget, reader.read.call_count)
-
-        later = ChatRequestContext.for_sync(user_id="u", session_id="s", asset_state=state)
-        result = self._tool(later).invoke({"asset_id": self.dossier.asset_id})
-        self.assertEqual(budget, reader.read.call_count)  # no further pixel reads
-        self.assertIn("Already observed in this conversation", result)
-        self.assertIn("Q3 dipped to 41%", result)
-
-    def test_an_unknown_asset_id_is_refused_clearly(self):
-        result = self._tool().invoke({"asset_id": "made-up"})
-        self.assertIn("FIGURE_NOT_FOUND", result)
-
-    def test_a_blank_asset_id_is_refused_without_spending_budget(self):
-        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        self.assertIn("FIGURE_NOT_FOUND", self._tool(ctx).invoke({"asset_id": "   "}))
-        limit = load_profile("base").agent.max_figure_calls_per_turn
-        self.assertEqual([True] * limit, [ctx.acquire_figure_tool_slot() for _ in range(limit)])
-
-    def test_the_turn_budget_stops_runaway_calls(self):
-        self._reader("something")
-        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        limit = load_profile("base").agent.max_figure_calls_per_turn
-        tool = self._tool(ctx)
-        for _ in range(limit):
-            tool.invoke({"asset_id": self.dossier.asset_id})
-        self.assertIn("FIGURE_BUDGET_REACHED", tool.invoke({"asset_id": self.dossier.asset_id}))
-
-    def test_a_reader_failure_degrades_to_dossier_text(self):
-        from backend.assets.reader import set_figure_reader
-
-        reader = Mock()
-        reader.available = True
-        reader.read.side_effect = RuntimeError("vision down")
-        set_figure_reader(reader)
-
-        # A reader that raises must not abort the agent's turn.
-        result = self._tool().invoke({"asset_id": self.dossier.asset_id})
-        reader.read.assert_called_once()
-        self.assertIn("Fee schedule", result)
-        self.assertIn("Grade | Fee", result)
-
-    def test_a_reader_returning_nothing_falls_back_to_text(self):
-        self._reader(None)
-        result = self._tool().invoke({"asset_id": self.dossier.asset_id})
-        self.assertIn("Fee schedule", result)
-
-    def test_the_tool_is_registered_and_buildable(self):
-        from backend.tools import TOOL_BUILDERS, build_tools
-
-        self.assertIn("view_figure", TOOL_BUILDERS)
-        tools = build_tools(["view_figure"], ChatRequestContext.for_sync(user_id="u", session_id="s"))
-        self.assertEqual(["view_figure"], [tool.name for tool in tools])
 
 
 class AssetsBridgeTests(unittest.TestCase):
@@ -930,7 +735,7 @@ class StoredConversationAssetTests(unittest.TestCase):
         self.assertLess(len(stored), 200)
 
 
-class StoredPointerRoundTripTests(ViewFigureToolTestCase):
+class StoredPointerRoundTripTests(AssetStoreTestCase):
     """Storing a pointer is only worth it if loading resolves it — by key, in one call.
 
     The setUp inherited here registers a real asset store over SQLite with one dossier
@@ -1152,8 +957,13 @@ class AssetRouteTests(unittest.TestCase):
 
 
 class CitationFilteringTests(unittest.TestCase):
-    """Retrieval surfaces every nearby figure; the answer usually rests on one. The
-    `[n]` markers the agent already emits say which, at no extra cost."""
+    """Retrieval surfaces every nearby figure; the answer rests on one.
+
+    Which one is read out of the `[n]` markers the agent emits anyway — no second model
+    call, and the chunk header's [FIGURE] marker is what makes the choice deliberate.
+    When the markers cannot select, the best-ranked figure is shown and ONLY that one:
+    showing three pictures to someone who asked about the PE kit is the failure this
+    class exists to prevent, and showing none is the other one."""
 
     def setUp(self):
         self.delivery = load_profile("base").assets.delivery
@@ -1204,8 +1014,11 @@ class CitationFilteringTests(unittest.TestCase):
         The cost was paid by the question that most wants a picture: a parent asking
         "فين صورة اللبس؟" got four bullets read off the figure, one [2] pointing at the
         uniform policy text, and no image at all.
+
+        One image, not four: the citation told us nothing, so retrieval's own ranking
+        decides, and it ranked a1's chunk first.
         """
-        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids("The policy says so. [2]"))
+        self.assertEqual(["a1"], self._ids("The policy says so. [2]"))
 
     def test_the_answer_that_lost_its_figure_keeps_it(self):
         """The deployed shape, verbatim: prose off the figure, one marker on the text
@@ -1213,7 +1026,7 @@ class CitationFilteringTests(unittest.TestCase):
         answer = """الملابس عبارة عن زي رياضي أزرق داكن مع تفاصيل ذهبية.
 تقدر تشوف الصورة هنا:
 ![Sports Wear: All Grades - Unisex](/media/kb.docx::p0::img5) [2]"""
-        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids(answer))
+        self.assertEqual(["a1"], self._ids(answer))
 
     def test_a_figure_citation_beside_a_text_one_still_narrows(self):
         """The guard on the fallback: it must not swallow the feature it backs up.
@@ -1223,15 +1036,19 @@ class CitationFilteringTests(unittest.TestCase):
         """
         self.assertEqual(["a1", "a2"], self._ids("Both the kit [1] and the rule [2]."))
 
-    def test_the_fallback_hands_back_retrieval_order(self):
-        """Rank order is the only ranking the user gets, so the highest-scoring
-        figure has to be the first one they see."""
-        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids("No markers here."))
-        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids("Text only. [2]"))
+    def test_the_fallback_shows_one_figure_and_it_is_the_best_ranked(self):
+        """Retrieval's rank is the only signal left once the citation has failed to
+        select, and it is a good one — the chunk it put first is the chunk that matched
+        the question best. Taking all of them instead is what put two pictures of day
+        wear under an answer about the PE kit."""
+        for answer in ("No markers here.", "Text only. [2]", "See [42]."):
+            with self.subTest(answer=answer):
+                self.assertEqual(["a1"], self._ids(answer))
 
-    def test_an_uncited_answer_falls_back_to_everything_surfaced(self):
-        """It may still have leaned on a figure; showing too much beats showing none."""
-        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids("The uniform is navy blue."))
+    def test_an_uncited_answer_still_shows_the_picture_it_probably_used(self):
+        """A model that forgets its markers has not said "no image" — it has said
+        nothing, and the turn still retrieved a figure worth showing."""
+        self.assertEqual(["a1"], self._ids("The uniform is navy blue."))
 
     def test_out_of_range_citations_are_ignored(self):
         """Models occasionally cite a chunk number that was never returned."""
@@ -1240,7 +1057,7 @@ class CitationFilteringTests(unittest.TestCase):
     def test_citations_that_are_all_out_of_range_fall_back(self):
         """A marker pointing at nothing is a model mistake, not a statement that the
         turn had no figures — the same reason a text-only citation falls back."""
-        self.assertEqual(["a1", "a2", "a3", "a4"], self._ids("See [42]."))
+        self.assertEqual(["a1"], self._ids("See [42]."))
 
     def test_the_feature_can_be_switched_off_by_profile(self):
         config = self.delivery.model_copy(update={"attach_only_cited": False})
@@ -1253,10 +1070,11 @@ class CitationFilteringTests(unittest.TestCase):
         self.assertEqual([], asset_ids_for_answer("Answer [1].", empty_ctx, {}, self.delivery))
 
     def test_a_trace_without_chunks_falls_back_rather_than_dropping_everything(self):
+        """Nothing to map the markers against, so the same one-figure fallback applies."""
         from backend.chat.assets_bridge import asset_ids_for_answer
 
         self.assertEqual(
-            ["a1", "a2", "a3", "a4"],
+            ["a1"],
             asset_ids_for_answer("Answer [1].", self.ctx, {}, self.delivery),
         )
 
@@ -1269,8 +1087,8 @@ class CitationFilteringTests(unittest.TestCase):
 
 class AttachmentEdgeCaseTests(unittest.TestCase):
     """The paths that reach `asset_ids_for_answer` without going through a normal
-    answered turn. Falling back rather than dropping made the fallback load-bearing,
-    so the cases where attaching nothing is still the RIGHT answer are pinned here."""
+    answered turn. The fallback shows a figure on more turns than the citation alone
+    would, so the cases where attaching NOTHING is still right are pinned here."""
 
     def setUp(self):
         self.delivery = load_profile("base").assets.delivery
@@ -1310,7 +1128,8 @@ class AttachmentEdgeCaseTests(unittest.TestCase):
         that the turn had figures at all."""
         trace = {"retrieved_chunks": [{"asset_ids": ["a1"]}, {"asset_ids": ["a2"]}]}
         self.assertEqual(["a1"], self._ids("Year 4 it is. [1]", self.empty_ctx, trace))
-        self.assertEqual(["a1", "a2"], self._ids("Year 4 it is.", self.empty_ctx, trace))
+        self.assertEqual(["a2"], self._ids("Year 4 it is. [2]", self.empty_ctx, trace))
+        self.assertEqual(["a1"], self._ids("Year 4 it is.", self.empty_ctx, trace))
 
     def test_a_turn_with_no_figures_anywhere_attaches_nothing(self):
         trace = {"retrieved_chunks": [{"asset_ids": []}, {}]}
@@ -1344,14 +1163,15 @@ class AttachmentEdgeCaseTests(unittest.TestCase):
                 self.assertEqual(["a1", "a2"], self._ids(answer, ctx, trace, config))
 
 
-class FigureInstructionTests(unittest.TestCase):
-    """The other half of the fix: the model is told not to deliver the picture itself.
+class FigureMarkerTests(unittest.TestCase):
+    """What the model is told about a figure, and what it is deliberately NOT told.
 
-    It is shown an `asset_id` in every figure chunk header — that is what makes
-    `view_figure` callable, since it can only pass back an id it has seen — and the
-    school prompt tells it markdown is supported. Asked where a picture is, a 20B model
-    puts the id in the answer, usually dressed as an image link. Neither can render: the
-    id is not a URL, and the real endpoint needs a header no `<img>` can send.
+    It gets a bare [FIGURE] marker: enough to know which chunks carry a picture, so its
+    `[n]` is a deliberate choice of which one to show, and nothing it could try to
+    render itself. The header used to name the asset_id — the argument view_figure
+    needed — and an id in the prompt became an id in the answer: shown one and told
+    markdown is supported, a 20B model wrote it straight back as an image link that no
+    browser could load.
     """
 
     def _run_tool(self, docs):
@@ -1383,20 +1203,39 @@ class FigureInstructionTests(unittest.TestCase):
             "asset_ids": list(asset_ids),
         }
 
-    def test_a_figure_turn_is_told_not_to_write_the_picture_itself(self):
+    def test_a_figure_chunk_is_marked_and_its_id_is_never_shown(self):
         message, ctx = self._run_tool([self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"])])
-        self.assertIn("view_figure asset_id: kb.docx::p0::img5", message)
-        self.assertIn("already shown to the user", message)
-        self.assertIn("never write an image", message)
-        self.assertIn("asset_id", message.split("already shown to the user")[1])
+        self.assertIn("[FIGURE]", message)
+        self.assertNotIn("kb.docx::p0::img5", message)
+        self.assertNotIn("asset_id", message)
+        # Surfaced on the context all the same — that is what a citation resolves
+        # against when the turn decides which picture to attach.
         self.assertEqual(["kb.docx::p0::img5"], ctx.surfaced_asset_ids())
+
+    def test_the_marker_is_explained_as_a_selector_not_a_label(self):
+        """Without this the model cites the prose beside a figure as readily as the
+        figure itself, and the answer describes a picture nobody attached."""
+        message, _ = self._run_tool([self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"])])
+        self.assertIn("shown to the user whenever you cite that chunk", message)
+        self.assertIn("Cite the [FIGURE] chunk you actually described", message)
+
+    def test_a_text_chunk_carries_no_marker(self):
+        message, _ = self._run_tool([self._doc("Fees are 45,000 EGP.")])
+        self.assertNotIn("[FIGURE]", message)
+
+    def test_modality_alone_marks_a_chunk_whose_ids_did_not_survive(self):
+        """A chunk stored before `asset_ids` existed still says what it is."""
+        doc = self._doc("[Figure] Sports Wear")
+        doc["modality"] = "figure"
+        message, _ = self._run_tool([doc])
+        self.assertIn("[FIGURE]", message)
 
     def test_a_text_only_turn_does_not_pay_for_the_rule(self):
         """Rung 3 of the composition ladder: an instruction that is only true when
         retrieval returned a figure is billed only on those turns."""
         with_figure, _ = self._run_tool([self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"])])
         without, ctx = self._run_tool([self._doc("Fees are 45,000 EGP.")])
-        self.assertNotIn("already shown to the user", without)
+        self.assertNotIn("marked [FIGURE]", without)
         self.assertLess(len(without), len(with_figure))
         self.assertEqual([], ctx.surfaced_asset_ids())
 
@@ -1405,7 +1244,7 @@ class FigureInstructionTests(unittest.TestCase):
             self._doc("Fees are 45,000 EGP."),
             self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"]),
         ])
-        self.assertIn("already shown to the user", message)
+        self.assertIn("marked [FIGURE]", message)
 
 
 if __name__ == "__main__":
