@@ -60,7 +60,8 @@ const ROUTE_PERMISSION = {
   gradeAssignments: 'teachers.assign_classes',
   /* Read, not write: a supervisor who may read a register and not record it still has
      somewhere to read it, and the panel decides which of the two they get. */
-  attendance: 'attendance.read'
+  attendance: 'attendance.read',
+  timetable: 'timetable.read'
 };
 
 /* Order is the order of the work: see the school, find a child, put children in classes,
@@ -75,7 +76,8 @@ const NAV = [
   { name: 'roles', label: 'Staff roles', icon: 'people', roles: ['system_admin', 'school_owner'] },
   { name: 'teacherSetup', label: 'Teacher setup', icon: 'people' },
   { name: 'gradeAssignments', label: 'Class assignments', icon: 'people' },
-  { name: 'attendance', label: 'Take attendance', icon: 'calendar' }
+  { name: 'attendance', label: 'Take attendance', icon: 'calendar' },
+  { name: 'timetable', label: 'Timetable', icon: 'calendar', roles: ['year_supervisor', 'teacher'] }
 ];
 
 /* Which nav item is lit for a route that is not in the nav. The drill-down screens are

@@ -1313,3 +1313,27 @@
 .sis-password-toggle:hover { color: var(--text); background: var(--surface-hover); }
 .sis-password-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .sis-role-scope { flex: 1 1 18rem; min-width: 0; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); }
+
+/* Timetable: keep lesson cells usable on phones by scrolling the grid, not crushing it. */
+.sis-subject-tray { display: flex; flex-wrap: wrap; gap: .65rem; }
+.sis-subject-chip { display: inline-flex; align-items: center; gap: .55rem; min-height: 2.65rem; padding: .55rem .8rem; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: .8rem; cursor: grab; font-weight: 650; box-shadow: var(--shadow-sm); }
+.sis-subject-chip:active, .sis-lesson:active { cursor: grabbing; }
+.sis-subject-chip.active { color: var(--info-ink); background: var(--info-wash); border-color: var(--info-line); box-shadow: 0 0 0 2px var(--info-line); }
+.sis-subject-chip small, .sis-lesson small { color: var(--muted); font-size: .68rem; font-weight: 600; }
+.sis-timetable-scroll { width: 100%; overflow-x: auto; }
+.sis-timetable-grid { width: 100%; min-width: 54rem; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.sis-timetable-grid th, .sis-timetable-grid td { padding: .65rem; border-inline-end: 1px solid var(--line); border-block-end: 1px solid var(--line); vertical-align: middle; }
+.sis-timetable-grid thead th { position: sticky; top: 0; z-index: 2; color: var(--muted); background: var(--surface-raised); text-align: center; font-size: .78rem; }
+.sis-timetable-grid th:first-child { width: 8rem; background: var(--surface-raised); }
+.sis-timetable-grid tbody th small { display: block; margin-top: .2rem; color: var(--muted); font-size: .68rem; font-weight: 400; }
+.sis-timetable-slot { height: 5.25rem; background: var(--canvas); transition: background-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease; }
+.sis-timetable-slot.is-drop-ready:hover { background: var(--info-wash); box-shadow: inset 0 0 0 2px var(--action); }
+.sis-lesson { position: relative; display: flex; min-height: 3.8rem; flex-direction: column; justify-content: center; padding: .55rem 2rem .55rem .65rem; color: var(--info-ink); background: var(--info-wash); border: 1px solid var(--info-line); border-radius: .7rem; cursor: grab; }
+.sis-lesson .btn { position: absolute; inset-block-start: .15rem; inset-inline-end: .15rem; width: 1.8rem; height: 1.8rem; padding: 0; }
+.sis-empty-slot { display: grid; min-height: 3.8rem; place-items: center; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: .7rem; font-size: .75rem; }
+.sis-timetable-break { color: var(--muted); background: var(--tint); text-align: center; font-size: .78rem; }
+
+@media (max-width: 575.98px) {
+  .sis-subject-chip { flex: 1 1 calc(50% - .65rem); justify-content: space-between; }
+  .sis-timetable-grid { min-width: 48rem; }
+}

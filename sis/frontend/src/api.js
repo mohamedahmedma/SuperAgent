@@ -463,6 +463,10 @@ function post(path, body, params) {
   return request(path, { method: 'POST', body: body, query: params });
 }
 
+function put(path, body, params) {
+  return request(path, { method: 'PUT', body: body, query: params });
+}
+
 function postForm(path, form) {
   /* Caught here rather than at the service: a plain object serialises to
      "[object FormData]"-shaped nonsense that arrives as an unreadable multipart body,
@@ -677,6 +681,19 @@ var api = {
   },
   teachingAssignments: function (academicYear) {
     return get('/teaching/assignments', { academic_year: academicYear || null });
+  },
+  timetableWeek: function (academicYear, classCode, termCode) {
+    return get('/timetable/week', {
+      academic_year: academicYear,
+      class_code: classCode,
+      term: termCode
+    });
+  },
+  placeTimetableLessons: function (academicYear, entries) {
+    return put('/timetable', { academic_year_code: academicYear, entries: entries });
+  },
+  clearTimetableSlots: function (academicYear, slots) {
+    return post('/timetable/clear', { academic_year_code: academicYear, slots: slots });
   },
   classMarkSheet: function (classCode, academicYear, termCode, subjectCode) {
     return get('/classes/' + encodeURIComponent(classCode) + '/grades', {

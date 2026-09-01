@@ -145,10 +145,13 @@ function newWindow(script, language = 'en', session = '') {
         'structure.read', 'students.read', 'students.write', 'guardians.read',
         'grades.read', 'grades.write', 'imports.run', 'roles.assign', 'users.read',
         'teachers.read', 'teachers.assign_subjects', 'teachers.assign_classes',
-        'attendance.read', 'attendance.write'
+        'attendance.read', 'attendance.write', 'timetable.read', 'timetable.write'
       ];
       payload.profile.is_system_admin = true;
-      payload.profile.roles = [{ role_code: 'system_admin', scope_type: 'global', scope_id: null }];
+      payload.profile.roles = [
+        { role_code: 'system_admin', scope_type: 'global', scope_id: null },
+        { role_code: 'year_supervisor', scope_type: 'global', scope_id: null }
+      ];
       payload.profile.permissions = permissions;
       payload.profile.grants = permissions.map((permission) => ({
         permission, scope_type: 'global', scope_id: null, scope_code: null
@@ -219,7 +222,8 @@ const SCREENS = [
   /* The register workflow, from its own first step: the day/grade/class pickers and the
      panel underneath, driven by the classes fixture rather than by navigating a structure
      an attendance supervisor cannot read. */
-  { hash: '#/attendance', expect: ['Take attendance', 'Year 3', '3A'] }
+  { hash: '#/attendance', expect: ['Take attendance', 'Year 3', '3A'] },
+  { hash: '#/timetable', expect: ['Timetable', 'Weekly timetable', 'Mathematics'] }
 ];
 
 async function main() {

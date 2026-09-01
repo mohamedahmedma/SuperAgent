@@ -621,5 +621,27 @@
         "is_complete": false
       }
     ]
+  },
+  "GET /v1/teaching/assignments": {
+    "is_teaching_staff": true,
+    "assignments": [{
+      "class_code": "3A", "class_name_en": "Falcons", "class_name_ar": "الصقور",
+      "subject_code": "MATH", "subject_name_en": "Mathematics", "subject_name_ar": "الرياضيات",
+      "year_level_code": "Y3", "year_level_name_en": "Grade 3", "year_level_name_ar": "الصف الثالث",
+      "track_code": "AR", "academic_year_code": "2025-2026"
+    }]
+  },
+  "GET /v1/timetable/week": {
+    "academic_year_code": "2025-2026", "class_code": "3A", "term_code": "2026-T1",
+    "days": ["sunday", "monday", "tuesday", "wednesday", "thursday"],
+    "periods": [{
+      "school_code": "MAIN", "period_number": 1, "name_en": "Period 1", "name_ar": "الحصة الأولى",
+      "starts_at": "08:00:00", "ends_at": "08:45:00", "is_teaching": true, "is_timed": true
+    }],
+    "entries": [{
+      "academic_year_code": "2025-2026", "class_code": "3A", "term_code": "2026-T1",
+      "day_of_week": "sunday", "period_number": 1, "subject_code": "MATH", "teacher_staff_number": null
+    }],
+    "teaching_slots": 5
   }
 }
