@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 
-from sis.api.deps import Principal, UowFactoryDep, get_teacher_management_service, require_permission
+from sis.api.deps import (
+    Principal,
+    TodayDep,
+    UowFactoryDep,
+    get_teacher_management_service,
+    require_permission,
+)
 from sis.api.routers import domain_errors, error_responses
 from sis.application.ports.repositories import TeacherRecord
 from sis.application.services.teachers import TeacherManagementService
@@ -28,6 +34,34 @@ ClassAssigners = Annotated[
     Principal, Depends(require_permission(Permission.TEACHERS_ASSIGN_CLASSES))
 ]
 Teachers = Annotated[TeacherManagementService, Depends(get_teacher_management_service)]
+
+
+def _sync_teacher_role_grants(session, teacher: m.Teacher, *, actor: str) -> None:  # noqa: ANN001
+    """Make the Teacher role exactly follow the concrete classrooms they teach in."""
+    if teacher.user_id is None:
+        return
+    role_id = session.scalar(select(m.Role.id).where(m.Role.code == "teacher"))
+    if role_id is None:
+        return
+    desired = set(session.scalars(
+        select(m.TeacherClassSection.class_section_id)
+        .where(m.TeacherClassSection.teacher_id == teacher.id)
+        .distinct()
+    ).all())
+    session.execute(delete(m.UserRole).where(
+        m.UserRole.user_id == teacher.user_id,
+        m.UserRole.role_id == role_id,
+    ))
+    session.add_all(
+        m.UserRole(
+            user_id=teacher.user_id,
+            role_id=role_id,
+            scope_type="class_section",
+            scope_id=class_id,
+            granted_by=actor,
+        )
+        for class_id in sorted(desired)
+    )
 
 
 class TeacherAssignmentIn(BaseModel):
@@ -122,6 +156,7 @@ class GradeAssignmentOptionsOut(BaseModel):
     year_level_name_ar: str
     subjects: list[dict[str, str]]
     classes: list[dict[str, str]]
+    available_classes: list[dict[str, str]] = Field(default_factory=list)
     eligible_teachers: list[EligibleTeacherOut]
 
 
@@ -187,6 +222,9 @@ def grade_assignment_options(
             ).order_by(m.ClassSection.code)
         ).all()
         eligible: list[EligibleTeacherOut] = []
+        available_classes = [
+            {"code": r.code, "name_en": r.name_en, "name_ar": r.name_ar} for r in classes
+        ]
         if subject:
             subject_row = session.scalar(select(m.Subject).where(
                 m.Subject.academic_year_id == year.id, m.Subject.code == subject
@@ -204,6 +242,16 @@ def grade_assignment_options(
                     field="subject_code",
                 )
             if subject_row is not None:
+                occupied = set(session.scalars(
+                    select(m.ClassSection.code)
+                    .join(m.TeacherClassSection)
+                    .where(
+                        m.TeacherClassSection.subject_id == subject_row.id,
+                        m.ClassSection.academic_year_id == year.id,
+                        m.ClassSection.year_level_id == level.id,
+                    )
+                ).all())
+                available_classes = [row for row in available_classes if row["code"] not in occupied]
                 teachers = session.scalars(
                     select(m.Teacher)
                     .join(m.TeacherYearLevel)
@@ -236,6 +284,7 @@ def grade_assignment_options(
             year_level_name_ar=level.name_ar,
             subjects=[{"code": r.code, "name_en": r.name_en, "name_ar": r.name_ar} for r in subjects],
             classes=[{"code": r.code, "name_en": r.name_en, "name_ar": r.name_ar} for r in classes],
+            available_classes=available_classes,
             eligible_teachers=eligible,
         )
 
@@ -301,6 +350,22 @@ def assign_teacher_classes(
         if {row.code for row in classes} != set(body.class_codes):
             from sis.domain.errors import DomainRuleViolation
             raise DomainRuleViolation("one or more classes are outside this grade", field="class_codes")
+        conflict = session.execute(
+            select(m.ClassSection.code, m.Teacher.staff_number)
+            .join(m.TeacherClassSection, m.TeacherClassSection.class_section_id == m.ClassSection.id)
+            .join(m.Teacher, m.Teacher.id == m.TeacherClassSection.teacher_id)
+            .where(
+                m.TeacherClassSection.subject_id == subject.id,
+                m.TeacherClassSection.teacher_id != teacher.id,
+                m.ClassSection.id.in_([row.id for row in classes]),
+            )
+        ).first()
+        if conflict is not None:
+            from sis.domain.errors import DomainRuleViolation
+            raise DomainRuleViolation(
+                f"{conflict.code} already has a {body.subject_code} teacher ({conflict.staff_number})",
+                field="class_codes",
+            )
         existing_ids = session.scalars(select(m.TeacherClassSection.id)
             .join(m.ClassSection)
             .where(
@@ -315,6 +380,8 @@ def assign_teacher_classes(
             teacher_id=teacher.id, class_section_id=section.id, subject_id=subject.id,
             assigned_by=caller.username,
         ) for section in classes)
+        session.flush()
+        _sync_teacher_role_grants(session, teacher, actor=caller.username)
         uow.commit()
     return grade_assignment_options(
         school_code, year_level_code, caller, uow_factory,
@@ -368,11 +435,20 @@ def list_teacher_attendance(
 )
 def record_teacher_attendance(
     school_code: str, staff_number: str, on_date: date, body: TeacherAttendanceIn,
-    caller: AttendanceWriters, uow_factory: UowFactoryDep,
+    caller: AttendanceWriters, uow_factory: UowFactoryDep, today: TodayDep,
 ) -> TeacherAttendanceOut:
     caller.narrow(
         Permission.TEACHER_ATTENDANCE_WRITE, lambda scopes: scopes.for_school(school_code)
     )
+    # `today` is injected for the same reason the child register injects it: a refusal
+    # judged against the wall clock is one no suite can state without dating its own
+    # fixtures to the afternoon it was written.
+    if on_date > today:
+        from sis.domain.errors import DomainRuleViolation
+        raise DomainRuleViolation(
+            "teacher attendance cannot be recorded for a future day",
+            field="on_date",
+        )
     with uow_factory() as uow:
         teacher = uow._session.scalar(
             select(m.Teacher).join(m.School).where(
@@ -479,7 +555,7 @@ def get_teacher(
     description="School-manager operation. Assignments replace the teacher's current subject, grade, and class scope atomically. The selected grade determines the academic track. No role is granted or promoted.",
     responses=error_responses(401, 403, 404, 409, 422))
 def save_teacher(school_code: str, staff_number: str, body: TeacherIn,
-    service: Teachers, caller: Managers) -> TeacherOut:
+    service: Teachers, caller: Managers, uow_factory: UowFactoryDep) -> TeacherOut:
     caller.narrow(
         Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
     )
@@ -492,4 +568,11 @@ def save_teacher(school_code: str, staff_number: str, body: TeacherIn,
             assignments=[(a.academic_year_code, a.subject_code, a.year_level_code, a.class_codes)
                          for a in body.assignments], assigned_by=str(caller),
         )
+    with uow_factory() as uow:
+        teacher = uow._session.scalar(select(m.Teacher).join(m.School).where(
+            m.School.code == school_code, m.Teacher.staff_number == staff_number
+        ))
+        if teacher is not None:
+            _sync_teacher_role_grants(uow._session, teacher, actor=caller.username)
+            uow.commit()
     return TeacherOut.of(row)

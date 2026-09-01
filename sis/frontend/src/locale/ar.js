@@ -30,6 +30,8 @@ export const AR = {
    * always whoever assigns roles at their own school. */
   'Sign in': 'تسجيل الدخول',
   'Sign in failed': 'تعذر تسجيل الدخول',
+  'Show password': 'إظهار كلمة المرور',
+  'Hide password': 'إخفاء كلمة المرور',
   'Signing in…': 'جارٍ تسجيل الدخول…',
   'Sign out': 'تسجيل الخروج',
   'Signing in shows you the classes and screens your roles cover.':
@@ -44,8 +46,13 @@ export const AR = {
   'System Administrator': 'مدير النظام',
   'School Owner': 'مالك المدرسة',
   'School Manager': 'مدير المدرسة',
-  'Grade Supervisor': 'موجّه الصف الدراسي',
+  'Grade Supervisor': 'مشرف الصف',
+  'Class Supervisor': 'مشرف الصف',
+  'A class supervisor may also remain an ordinary teacher.': 'يمكن أن يكون مشرف الصف معلّمًا أيضًا.',
   'Attendance Supervisor': 'مشرف الحضور والغياب',
+  'Choose a grade': 'اختر السنة الدراسية',
+  'This account will only see this grade’s classes and students in attendance.':
+    'سيظهر لهذا الحساب فصول وطلاب هذه السنة فقط في الغياب.',
   Teacher: 'معلّم',
   'Subject Coordinator': 'منسّق المادة',
   Username: 'اسم المستخدم',
@@ -972,6 +979,17 @@ export const AR = {
   'No grades on this track yet.':
     'لا توجد صفوف في هذا المسار بعد.',
   'Teacher roles': 'أدوار المعلّمين',
+  'Staff roles': 'أدوار العاملين',
+  'Choose a grade and subject to review its teachers. Supervisors are managed separately and may also be teachers.':
+    'اختر الصف والمادة لعرض معلّميها. وتُدار قائمة المشرفين بشكل مستقل، ويمكن أن يكون المشرف معلّماً أيضاً.',
+  'Teachers': 'المعلّمون',
+  'Teachers come from their subject and class assignments.': 'تُحدد قائمة المعلّمين حسب المواد والفصول المسندة إليهم.',
+  'Teacher subject': 'مادة المعلّم',
+  'All subjects': 'كل المواد',
+  'No teachers match this grade and subject.': 'لا يوجد معلّمون مطابقون لهذا الصف وهذه المادة.',
+  'Supervisors': 'المشرفون',
+  'A supervisor may also remain an ordinary teacher. Roles are additive.': 'يمكن أن يكون المشرف معلّماً عادياً أيضاً؛ فالأدوار تُضاف ولا يستبدل أحدها الآخر.',
+  'Supervisor scope': 'نطاق الإشراف',
   'Roles are additive. Selecting a supervisor role keeps the Teacher role active.':
     'الأدوار تراكمية؛ اختيار دور إشرافي يُبقي دور المعلّم فعالًا.',
   'Active roles': 'الأدوار الفعالة',
@@ -1015,6 +1033,19 @@ export const AR = {
     'سبق رصد الحضور في هذا اليوم. الحفظ مرة أخرى يصحّح الرصد ولا يكرّره.',
   'Finish — rest absent': 'إنهاء — الباقون غائبون',
   'Records every child still blank as absent.': 'يسجّل كل طالب لم يُعلَّم بعد بوصفه غائبًا.',
+  '{0} change(s) not yet saved.': '{0} تغييرات لم تُحفظ بعد.',
+  'Nothing is written until you save. Saving again corrects the day rather than adding a second set of marks.':
+    'لن يُكتب شيء قبل الحفظ. والحفظ مرة أخرى يصحّح اليوم ولا يضيف سجلاً مكرراً.',
+  '{0} present': '{0} حاضر',
+  '{0} absent': '{0} غائب',
+  '{0} late': '{0} متأخر',
+  '{0} excused': '{0} بعذر',
+  '{0} not yet marked': '{0} لم يُرصد بعد',
+  'An unmarked child shows {0}. The counts use the {1} recorded marks, not all {2} children.':
+    'يظهر الطالب غير المرصود بالعلامة {0}. وتعتمد الأعداد على {1} سجلات محفوظة، لا على كل الطلاب وعددهم {2}.',
+  'Either this class is empty, or nobody was placed in it on {0}.':
+    'إما أن الفصل فارغ، أو لم يكن أي طالب مقيداً فيه يوم {0}.',
+  'name not on file': 'الاسم غير مسجل',
   /* Stage 14 — teacher academic access and mark entry. */
   'Only your assigned classes and subjects are shown.': 'تظهر فقط الفصول والمواد المسندة إليك.',
   'Enter class marks': 'إدخال درجات الفصل',
@@ -1024,6 +1055,14 @@ export const AR = {
   'Student': 'الطالب',
   'Save marks': 'حفظ الدرجات',
   'Marks saved.': 'تم حفظ الدرجات.',
+  'Upload this class marks file': 'رفع ملف درجات هذا الفصل',
+  'CSV only. Columns: student_number, percentage. Only the selected class and your assigned subject are accepted.':
+    'ملف CSV فقط بالأعمدة student_number وpercentage. لا تُقبل إلا درجات الفصل المحدد والمادة المسندة إليك.',
+  'The file has no student rows.': 'الملف لا يحتوي على صفوف طلاب.',
+  'Required columns: student_number and percentage.': 'الأعمدة المطلوبة: student_number وpercentage.',
+  'Every percentage must be between 0 and 100.': 'يجب أن تكون كل درجة بين 0 و100.',
+  'Could not read the marks file.': 'تعذرت قراءة ملف الدرجات.',
+  '{0} marks loaded from the file.': 'تم تحميل {0} درجات من الملف.',
   /* Stage 15 — principal teacher eligibility workflow. */
   'Teacher setup': 'إعداد المعلّم',
   'Define the teacher account, subjects, eligible grades, and track scope. Grade supervisors assign classes afterward.':
@@ -1042,4 +1081,15 @@ export const AR = {
   'Track': 'المسار',
   'Save teacher configuration': 'حفظ إعداد المعلّم',
   'Teacher configuration saved.': 'تم حفظ إعداد المعلّم.',
+  'Assessment name': 'اسم التقييم',
+  'Choose grade': 'اختر الصف',
+  'Choose stage': 'اختر المرحلة',
+  'Choose subject': 'اختر المادة',
+  'Create teacher': 'إنشاء معلّم',
+  'Every mark must be between zero and the maximum mark.': 'يجب أن تكون كل درجة بين صفر والحد الأقصى للدرجات.',
+  'Find a child in your classes': 'ابحث عن طالب في فصولك',
+  'January monthly exam': 'الاختبار الشهري لشهر يناير',
+  'Maximum mark': 'الحد الأقصى للدرجات',
+  'New teacher account': 'حساب معلّم جديد',
+  'This staff number already belongs to another teacher.': 'هذا الرقم الوظيفي مسجّل بالفعل لمعلّم آخر.',
 };

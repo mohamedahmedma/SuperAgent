@@ -138,7 +138,23 @@ function newWindow(script, language = 'en', session = '') {
     const url = String(typeof input === 'string' ? input : input.url);
     const method = (init.method || 'GET').toUpperCase();
     requests.push(`${method} ${url}`);
-    const body = JSON.stringify(answer(method, url));
+    let payload = answer(method, url);
+    if (session === 'smoke-admin' && method === 'GET' && url.includes('/v1/auth/me')) {
+      payload = JSON.parse(JSON.stringify(payload));
+      const permissions = [
+        'structure.read', 'students.read', 'students.write', 'guardians.read',
+        'grades.read', 'grades.write', 'imports.run', 'roles.assign', 'users.read',
+        'teachers.read', 'teachers.assign_subjects', 'teachers.assign_classes',
+        'attendance.read', 'attendance.write'
+      ];
+      payload.profile.is_system_admin = true;
+      payload.profile.roles = [{ role_code: 'system_admin', scope_type: 'global', scope_id: null }];
+      payload.profile.permissions = permissions;
+      payload.profile.grants = permissions.map((permission) => ({
+        permission, scope_type: 'global', scope_id: null, scope_code: null
+      }));
+    }
+    const body = JSON.stringify(payload);
     return Promise.resolve({
       ok: true,
       status: 200,
@@ -166,7 +182,7 @@ function newWindow(script, language = 'en', session = '') {
      come up as that person, which is the only way to reach the permission-dependent
      branches from here. The value is never checked — the fixture answers regardless — so
      any non-empty string does. */
-  if (session) window.sessionStorage.setItem('sis.session_token', session);
+  if (session) window.sessionStorage.setItem('sis.session_token.v2', session);
   window.eval(script);
   return { dom, window, errors, requests };
 }
@@ -211,7 +227,12 @@ async function main() {
   const script = await bundle();
   process.stdout.write(`${(script.length / 1024).toFixed(0)} KB\n`);
 
-  const { window, errors, requests } = newWindow(script);
+  const signedOut = newWindow(script);
+  await settle(signedOut.window, 100);
+  assert.ok(signedOut.window.document.querySelector('.sis-login-page'), 'signed-out visitors must see the sign-in page');
+  assert.ok(!signedOut.window.document.querySelector('.sis-app'), 'the SIS shell must stay hidden before sign-in');
+
+  const { window, errors, requests } = newWindow(script, 'en', 'smoke-admin');
   await settle(window, 200);
 
   const mount = window.document.getElementById('app');
@@ -266,7 +287,7 @@ async function main() {
   /* Boot a second shell from the persisted Arabic preference. This catches the failure where
      labels translate but the document remains LTR, or direction flips but static chrome falls
      back to English. The route fixtures are shared; only browser-owned language differs. */
-  const arabic = newWindow(script, 'ar');
+  const arabic = newWindow(script, 'ar', 'smoke-admin');
   await settle(arabic.window, 200);
   assert.equal(arabic.window.document.documentElement.lang, 'ar');
   assert.equal(arabic.window.document.documentElement.dir, 'rtl');

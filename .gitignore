@@ -79,3 +79,7 @@ htmlcov/
 # 5607171. Unanchored it also swallowed deploy/scripts/, which is deployment source and
 # has to ship — a directory silently absent from a release is a hard failure to spot.
 /scripts/
+
+# pytest run logs; a stray test*.txt at the root is collected as a doctest file
+# and a UTF-16 one fails collection before a single test runs.
+test_output.txt

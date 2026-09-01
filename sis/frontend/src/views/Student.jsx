@@ -24,7 +24,7 @@
  * newest first — a transfer in March leaves October's placement intact rather than rewriting it,
  * and this screen is where that pays off.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, gradeText } from '../api.js';
 import { Router } from '../router.js';
 import { Store } from '../store.js';
@@ -74,9 +74,37 @@ function Finder({ initial }) {
   const state = useStore();
   const [typed, setTyped] = useState(initial || '');
   const [asked, setAsked] = useState('');
+  const [teacherClass, setTeacherClass] = useState('');
+  const isTeacher = Store.roles().indexOf('teacher') >= 0;
+  const teaching = useQuery(() => api.teachingAssignments(state.year), [state.year], isTeacher && !!state.year);
+  const teacherClasses = [...new Map((((teaching.value || {}).assignments) || [])
+    .map((row) => [row.class_code, row])).values()];
+  useEffect(() => {
+    if (!teacherClass && teacherClasses.length) setTeacherClass(teacherClasses[0].class_code);
+  }, [teacherClasses.length]);
+  const roster = useQuery(() => api.classRoster(teacherClass, state.year),
+    [teacherClass, state.year], isTeacher && !!teacherClass && !!state.year);
 
   const found = useQuery(() => api.searchStudents(asked), [asked], !!asked);
   const students = (found.value && found.value.students) || [];
+
+  if (isTeacher) return (
+    <Card title={t('Find a child in your classes')}>
+      <div className="row g-3">
+        <Field className="col-12 col-md-5" label={t('Class')}>
+          <Select value={teacherClass} options={teacherClasses.map((row) => ({
+            value: row.class_code, label: pickName(row, state.lang) || row.class_code
+          }))} onChange={setTeacherClass} />
+        </Field>
+        <Field className="col-12 col-md-7" label={t('Student')}>
+          <Select value="" options={[{ value: '', label: t('Choose…') }, ...(((roster.value || {}).students) || []).map((row) => ({
+            value: row.student_number, label: `${pickName(row, state.lang) || row.student_number} · ${row.student_number}`
+          }))]} onChange={(number) => number && Router.go('student', { number })} />
+        </Field>
+      </div>
+      <ErrorNote error={teaching.error || roster.error} />
+    </Card>
+  );
 
   return (
     <div className="vstack gap-4">
@@ -786,7 +814,11 @@ export function Student({ params = {} }) {
   const number = params.number || '';
   const [editing, setEditing] = useState(false);
 
-  const record = useResource(Store.keys.student(number), () => api.student(number), !!number);
+  const record = useResource(
+    `${Store.keys.student(number)}:${state.year || ''}`,
+    () => api.student(number, state.year),
+    !!number && !!state.year
+  );
 
   /* No number in the URL is not an error: it is the Find-a-child screen, which is what the nav
      link points at. */
@@ -825,6 +857,8 @@ export function Student({ params = {} }) {
   if (!student) return null;
 
   const name = pickName(student, state.lang);
+  const isTeacher = Store.roles().indexOf('teacher') >= 0;
+  const mayEditStudent = Store.can('students.write');
 
   return (
     <>
@@ -844,9 +878,9 @@ export function Student({ params = {} }) {
         }
         actions={
           <>
-            <Button variant={editing ? 'primary' : 'outline'} onClick={() => setEditing(!editing)}>
+            {mayEditStudent ? <Button variant={editing ? 'primary' : 'outline'} onClick={() => setEditing(!editing)}>
               {editing ? t('Close') : t('Edit her record')}
-            </Button>
+            </Button> : null}
             <Button icon="refresh" onClick={record.reload}>
               {t('Reload')}
             </Button>
@@ -874,13 +908,13 @@ export function Student({ params = {} }) {
         <div className="col-12 col-lg-6">
           <div className="vstack gap-3">
             <Identity student={student} />
-            <Guardians studentNumber={number} />
-            <Placements studentNumber={number} />
+            {!isTeacher ? <Guardians studentNumber={number} /> : null}
+            {!isTeacher ? <Placements studentNumber={number} /> : null}
           </div>
         </div>
         <div className="col-12 col-lg-6">
           <div className="vstack gap-3">
-            <Insights student={student} studentNumber={number} />
+            {!isTeacher ? <Insights student={student} studentNumber={number} /> : null}
             <Marks studentNumber={number} />
             <Attendance studentNumber={number} />
           </div>

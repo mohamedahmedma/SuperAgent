@@ -514,6 +514,8 @@ export function School({ params = {} }) {
   const [addingLevel, setAddingLevel] = useState(false);
   const [addingYear, setAddingYear] = useState(false);
   const [activeTrack, setActiveTrack] = useState('');
+  const mayEditStructure = Store.can('structure.write');
+  const isAdmin = Store.roles().indexOf('system_admin') >= 0;
 
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const schoolList = schools.value || [];
@@ -598,24 +600,24 @@ export function School({ params = {} }) {
             : t('This school is not on file.')
         }
         actions={
-          <>
-            <Button onClick={() => setAddingSchool(!addingSchool)}>
+          mayEditStructure ? <>
+            {isAdmin ? <Button onClick={() => setAddingSchool(!addingSchool)}>
               {addingSchool ? t('Close') : t('Add school')}
-            </Button>
+            </Button> : null}
             <Button disabled={!code} onClick={() => setAddingLevel(!addingLevel)}>
               {addingLevel ? t('Close') : t('Add rung')}
             </Button>
             <Button variant="primary" disabled={!code} onClick={() => setAddingYear(!addingYear)}>
               {addingYear ? t('Close') : t('Add academic year')}
             </Button>
-          </>
+          </> : null
         }
       />
 
       <div className="vstack gap-4">
         {trackList.length ? (
           <Card title={t('Academic track')} subtitle={t('You are managing this structure independently.')}>
-            <div className="btn-group" role="group" aria-label={t('Academic track')}>
+            <div className="btn-group sis-segmented" role="group" aria-label={t('Academic track')}>
               {trackList.map((track) => (
                 <Button
                   key={track.code}

@@ -257,6 +257,8 @@ function TeacherMarks() {
   const year = state.year;
   const [term, setTerm] = useState('');
   const [assignmentKey, setAssignmentKey] = useState('');
+  const [assessmentName, setAssessmentName] = useState('');
+  const [maxPoints, setMaxPoints] = useState('');
   const [draft, setDraft] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -266,6 +268,11 @@ function TeacherMarks() {
   const selected = assignments.find((row) =>
     `${row.class_code}\u0000${row.subject_code}` === assignmentKey
   );
+  const invalidMarks = Object.values(draft).some((value) =>
+    value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0 ||
+      !Number(maxPoints) || Number(value) > Number(maxPoints))
+  );
+  const enteredMarks = Object.entries(draft).filter(([, value]) => value !== '');
   const sheet = useQuery(
     () => api.classMarkSheet(selected.class_code, year, term, selected.subject_code),
     [year, term, assignmentKey],
@@ -283,7 +290,7 @@ function TeacherMarks() {
   useEffect(() => {
     const next = {};
     ((sheet.value && sheet.value.students) || []).forEach((student) => {
-      next[student.student_number] = student.is_graded ? String(student.percentage) : '';
+      next[student.student_number] = '';
     });
     setDraft(next);
   }, [sheet.value]);
@@ -297,10 +304,11 @@ function TeacherMarks() {
       await api.recordClassMarks(selected.class_code, year, {
         term_code: term,
         subject_code: selected.subject_code,
-        marks: Object.keys(draft).map((number) => ({
+        marks: enteredMarks.map(([number, value]) => ({
           student_number: number,
-          percentage: draft[number] === '' ? null : Number(draft[number]),
-          clear: draft[number] === ''
+          points: Number(value),
+          max_points: Number(maxPoints),
+          clear: false
         }))
       });
       Store.toast(t('Marks saved.'), 'success');
@@ -316,7 +324,13 @@ function TeacherMarks() {
     <PageHead title={t('Marks')} lede={t('Only your assigned classes and subjects are shown.')} />
     <Card title={t('Enter class marks')} tight>
       <div className="card-body row g-3">
-        <Field className="col-12 col-md-8" label={t('Assigned class and subject')}>
+        <Field className="col-12 col-md-8" label={t('Assessment name')}>
+          <Input value={assessmentName} placeholder={t('January monthly exam')} onInput={setAssessmentName} />
+        </Field>
+        <Field className="col-12 col-md-4" label={t('Maximum mark')} required>
+          <Input type="number" min="0.01" step="0.01" value={maxPoints} onInput={setMaxPoints} />
+        </Field>
+        <Field className="col-12 col-md-8" label={t('Class')}>
           <Select value={assignmentKey} strict options={assignments.map((row) => ({
             value: `${row.class_code}\u0000${row.subject_code}`,
             label: `${pickName(row, state.lang) || row.class_code} · ${state.lang === 'ar' ? (row.subject_name_ar || row.subject_code) : (row.subject_name_en || row.subject_code)} · ${row.year_level_code}`
@@ -335,13 +349,16 @@ function TeacherMarks() {
           rowKey={(row) => row.student_number} columns={[
             { key: 'number', header: t('Student number'), className: 'sis-code', cell: (row) => row.student_number },
             { key: 'name', header: t('Student'), cell: (row) => pickName(row, state.lang) },
-            { key: 'mark', header: t('Mark'), cell: (row) => <Input type="number" min="0" max="100" step="0.01"
+            { key: 'mark', header: assessmentName ? `${assessmentName} / ${maxPoints || '—'}` : t('Mark'), cell: (row) => <Input type="number" min="0" max={maxPoints || undefined} step="0.01"
               value={draft[row.student_number] === undefined ? '' : draft[row.student_number]}
               disabled={!sheet.value || !sheet.value.may_record || sheet.value.term_is_closed}
               onInput={(value) => setDraft((old) => ({ ...old, [row.student_number]: value }))} /> }
           ]} />}
-      {sheet.value ? <div className="card-body d-flex justify-content-end">
-        <Button variant="primary" icon="save" disabled={saving || !sheet.value.may_record || sheet.value.term_is_closed}
+      {sheet.value ? <div className="card-body d-flex flex-column align-items-end gap-2">
+        {invalidMarks ? <span className="small text-danger">
+          {t('Every mark must be between zero and the maximum mark.')}
+        </span> : null}
+        <Button variant="primary" icon="save" disabled={saving || !enteredMarks.length || invalidMarks || !maxPoints || !assessmentName.trim() || !sheet.value.may_record || sheet.value.term_is_closed}
           onClick={save}>{saving ? t('Saving…') : t('Save marks')}</Button>
       </div> : null}
     </Card>
@@ -508,7 +525,7 @@ function RegistrarMarks({ params = {} }) {
 
 export function Marks({ params = {} }) {
   useStore();
-  return Store.roles().indexOf('teacher') >= 0
-    ? <TeacherMarks />
-    : <RegistrarMarks params={params} />;
+  if (Store.roles().indexOf('teacher') >= 0) return <TeacherMarks />;
+  if (Store.can('grades.write')) return <RegistrarMarks params={params} />;
+  return <><PageHead title={t('Marks')} /><StudentMarks initial={params.student} initialTerm={params.term} /></>;
 }
