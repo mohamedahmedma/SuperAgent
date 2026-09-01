@@ -94,7 +94,8 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         # answered entirely from the caption.
         from backend.assets.delivery import collect_asset_ids
 
-        ctx.note_surfaced_assets(collect_asset_ids(docs))
+        surfaced_assets = collect_asset_ids(docs)
+        ctx.note_surfaced_assets(surfaced_assets)
 
         return render_prompt(
             "tools/knowledge_result.j2",
@@ -126,6 +127,9 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
             # answer was sitting in chunk 3 ended in a denial. Paid only when the
             # grader actually said partial.
             partial=status == "partial",
+            # Only a turn that actually retrieved a figure needs telling not to write
+            # one into the answer, and only such a turn was shown an asset_id to write.
+            figures=bool(surfaced_assets),
         )
 
     return search_knowledge_base

@@ -86,9 +86,10 @@ def asset_ids_for_answer(
     uniform image in the document — but the answer usually rests on one. Attaching all
     of them makes the user do the filtering the citation already did.
 
-    So when the answer cites its sources, only the cited chunks' assets are attached.
-    An answer that cites nothing falls back to everything surfaced: it may still have
-    used a figure, and showing too much beats showing nothing.
+    So when the answer's citations point at figures, only those figures are attached.
+    Every other case — no citations at all, or citations that landed only on text —
+    falls back to everything the turn surfaced: the answer may still have rested on a
+    figure, and showing too much beats showing nothing.
     """
     surfaced = asset_ids_for_turn(ctx, rag_trace)
     if not surfaced or not getattr(delivery_config, "attach_only_cited", True):
@@ -106,9 +107,19 @@ def asset_ids_for_answer(
                 if asset_id and asset_id not in ids:
                     ids.append(asset_id)
 
-    # A citation that pointed only at text chunks yields nothing. That is a correct
-    # answer to "which images did this use?", so it is respected rather than widened.
-    return ids if ids else []
+    # Narrowing to the cited chunks is a REFINEMENT, never a veto.
+    #
+    # Citations that land only on text chunks say nothing about the figures — not that
+    # there are none worth showing. A figure enters the context as a text surrogate
+    # (caption, description, transcription), so it reads exactly like a paragraph by
+    # the time the model cites anything, and a model that answered from a caption
+    # routinely cites the prose next to it instead. Returning nothing here is how
+    # "فين صورة اللبس؟" — the question that most wants a picture — got answered with
+    # none, while the figure that produced every word of the answer sat one chunk away.
+    #
+    # So this falls back to what the turn surfaced, which is the rule an uncited answer
+    # already gets and for the same reason: showing too much beats showing nothing.
+    return ids or surfaced
 
 
 def asset_ids_for_turn(ctx, rag_trace: Optional[dict]) -> List[str]:

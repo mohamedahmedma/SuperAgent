@@ -41,6 +41,19 @@ Retrieved Chunks:
    into a closing sentence describing its own sources, which readers see as filler. #}
 
 Answer the question itself. Do not close with a sentence about the material: where in a document it sits, which figure or note it came from, or what it leaves open. The citation markers already carry provenance.
+{% if figures %}
+{# Paid only on turns that retrieved a figure, which is the minority of them.
+
+   The chunk header names an asset_id so that view_figure is callable at all — the
+   model can only pass back an id it has seen. Shown an id and told markdown is
+   supported, a small model asked "where is the picture?" writes the id into the
+   answer, usually dressed as an image link. Neither can render: the id is not a URL,
+   and the real endpoint needs a header no <img> can send. The picture is already on
+   its way to the user as a structured attachment, so the only thing needed here is
+   for the answer not to try to deliver it a second time. #}
+
+The figures above are already shown to the user next to your answer. Cite the chunk they came from with [n]; never write an image, a link, a file path or an asset_id into the answer — an asset_id is an argument for view_figure and nothing else.
+{% endif %}
 {% if constraints %}
 {# Three states, because a carried condition and the material can stand in three
    relations, and the first version of this block assumed only one of them. It told the
