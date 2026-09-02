@@ -64,6 +64,12 @@ def create_app() -> FastAPI:
     # shutdown work to do.
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # Which provider every model call in the request path is about to go to. With
+        # two credential blocks in .env and a single word selecting between them, the
+        # failure worth catching at boot is a deployment that believes it switched.
+        from backend.llm_provider import log_provider_status
+
+        log_provider_status()
         init_db()
         # create_all() creates missing TABLES but never adds columns to existing ones,
         # so a model change ships silently and surfaces as UndefinedColumn partway

@@ -27,10 +27,25 @@ _FALSE_VALUES = ("false", "0", "no", "off")
 
 
 def load_env() -> None:
+    """Load `.env`, then collapse the selected LLM provider block onto the generic names.
+
+    The provider step has to happen here and not at any call site: the modules that read
+    `MODEL` / `BASE_URL` / `ARK_API_KEY` capture them at import, several at module scope,
+    so the only moment the selection can still take effect is between `load_dotenv` and
+    the first of those imports. An unset `LLM_PROVIDER` makes it a no-op — see
+    backend/llm_provider.py for what it resolves and in what order.
+    """
     global _LOADED
     if _LOADED:
         return
     load_dotenv(PROJECT_ROOT / ".env")
+
+    # Imported here rather than at module scope so that `backend.env` keeps importing
+    # nothing from the rest of the backend, which is what lets every other module import
+    # it without thinking about cycles.
+    from backend.llm_provider import apply_provider_env
+
+    apply_provider_env()
     _LOADED = True
 
 
