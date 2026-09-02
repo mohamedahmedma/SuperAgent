@@ -16,8 +16,8 @@ import { ImportFlow } from '../components/ImportFlow.jsx';
 import { t } from '../i18n.js';
 
 const TEMPLATE = {
-  name: 'roster-template.csv',
-  header: t('student_number,full_name_ar,full_name_en')
+  name: 'family-roster-template.csv',
+  header: t('student_number,full_name_ar,full_name_en,class_code,guardian_name_ar,guardian_name_en,guardian_phone,relationship_type,is_primary_contact,can_view_records')
 };
 
 /* -- The register ---------------------------------------------------------------- */
@@ -223,8 +223,8 @@ export function Roster({ params = {} }) {
         <ImportFlow
           kind="roster"
           template={TEMPLATE}
-          label={t('Choose the roster sheet')}
-          hint={`Columns: ${TEMPLATE.header}, optionally class_code and starts_on.`}
+          label={t('Choose one student and guardian roster sheet')}
+          hint={t('One row per student. Include the guardian in the same row; alternate guardian fields remain optional.')}
           invalidate={['classes:']}
           fields={fields}
           onPreview={(file) => {

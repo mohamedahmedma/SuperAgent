@@ -69,7 +69,8 @@ from sis.domain.imports import (
     tally,
 )
 from sis.domain.people import ClassEnrolment, Gender, Student
-from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
+from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
+from sis.domain.value_objects import AcademicYearCode, ClassCode, Phone, StudentNumber
 
 __all__ = ["BATCH_FAILURE_ROW_CODE", "RosterImportService"]
 
@@ -98,6 +99,15 @@ _K_YEAR = "academic_year_code"
 _K_CLASS = "class_code"
 _K_STARTS = "starts_on"
 _K_GENDER = "gender"
+_K_GUARDIAN_PHONE = "guardian_phone"
+_K_GUARDIAN_ALT_PHONE = "guardian_alt_phone"
+_K_GUARDIAN_NAME_AR = "guardian_name_ar"
+_K_GUARDIAN_NAME_EN = "guardian_name_en"
+_K_RELATIONSHIP = "relationship_type"
+_K_RELATIONSHIP_LABEL = "relationship_label"
+_K_PRIMARY = "is_primary_contact"
+_K_CAN_VIEW = "can_view_records"
+_K_RESTRICTION = "restriction_note"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,11 +131,20 @@ class _Assertion:
     #: the value that means "the school has not said", which is the truthful answer for
     #: any row whose sheet had no such column.
     gender: Gender = Gender.UNSPECIFIED
+    guardian_phone: Phone | None = None
+    guardian_alt_phone: Phone | None = None
+    guardian_name_ar: str = ""
+    guardian_name_en: str = ""
+    relationship: RelationshipType = RelationshipType.OTHER
+    relationship_label: str = ""
+    is_primary_contact: bool = False
+    can_view_records: bool = True
+    restriction_note: str = ""
 
     @property
     def payload(self) -> dict[str, object]:
         """The row as the registrar sees it, and as commit reads it back."""
-        return {
+        payload = {
             _K_NUMBER: str(self.number),
             _K_NAME_AR: self.name_ar,
             _K_NAME_EN: self.name_en,
@@ -137,6 +156,21 @@ class _Assertion:
             # that previews correctly and is silently dropped on the way to being stored.
             _K_GENDER: str(self.gender),
         }
+        if self.guardian_phone is not None:
+            payload.update({
+                _K_GUARDIAN_PHONE: str(self.guardian_phone),
+                _K_GUARDIAN_ALT_PHONE: (
+                    "" if self.guardian_alt_phone is None else str(self.guardian_alt_phone)
+                ),
+                _K_GUARDIAN_NAME_AR: self.guardian_name_ar,
+                _K_GUARDIAN_NAME_EN: self.guardian_name_en,
+                _K_RELATIONSHIP: self.relationship.value,
+                _K_RELATIONSHIP_LABEL: self.relationship_label,
+                _K_PRIMARY: self.is_primary_contact,
+                _K_CAN_VIEW: self.can_view_records,
+                _K_RESTRICTION: self.restriction_note,
+            })
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +186,8 @@ class _Snapshot:
     sections: Mapping[ClassSectionKey, object]
     students: Mapping[str, Student]
     enrolments: Mapping[str, Sequence[ClassEnrolment]]
+    guardians: Mapping[str, Guardian]
+    links: Mapping[str, Sequence[StudentGuardian]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +211,8 @@ class _Plan:
     close_open_on: date | None = None
     #: Set when the previewed verdict and the re-derived one disagree on identity.
     superseded: bool = False
+    guardian: Guardian | None = None
+    guardian_link: StudentGuardian | None = None
 
 
 def _norm_name(raw: str) -> str:
@@ -397,6 +435,15 @@ class RosterImportService:
                     class_code=class_code,
                     starts_on=row.starts_on or default_start,
                     gender=row.gender,
+                    guardian_phone=(None if row.guardian is None else row.guardian.phone),
+                    guardian_alt_phone=(None if row.guardian is None else row.guardian.alt_phone),
+                    guardian_name_ar=("" if row.guardian is None else row.guardian.full_name_ar),
+                    guardian_name_en=("" if row.guardian is None else row.guardian.full_name_en),
+                    relationship=(RelationshipType.OTHER if row.guardian is None else row.guardian.relationship_type),
+                    relationship_label=("" if row.guardian is None else row.guardian.relationship_label),
+                    is_primary_contact=(False if row.guardian is None else row.guardian.is_primary_contact),
+                    can_view_records=(True if row.guardian is None else row.guardian.can_view_records),
+                    restriction_note=("" if row.guardian is None else row.guardian.restriction_note),
                 )
             )
         return assertions, unresolved
@@ -472,6 +519,8 @@ class RosterImportService:
                 carried.append(row)
                 continue
             try:
+                guardian_phone = row.payload.get(_K_GUARDIAN_PHONE)
+                guardian_alt_phone = row.payload.get(_K_GUARDIAN_ALT_PHONE)
                 assertions.append(
                     _Assertion(
                         line=row.line_number,
@@ -485,6 +534,21 @@ class RosterImportService:
                         # before this column existed is still a valid batch, and must
                         # commit rather than be reported as no longer rebuilding.
                         gender=Gender(str(row.payload.get(_K_GENDER, Gender.UNSPECIFIED))),
+                        guardian_phone=(
+                            None if guardian_phone in (None, "") else Phone(str(guardian_phone))
+                        ),
+                        guardian_alt_phone=(
+                            None if guardian_alt_phone in (None, "") else Phone(str(guardian_alt_phone))
+                        ),
+                        guardian_name_ar=str(row.payload.get(_K_GUARDIAN_NAME_AR, "")),
+                        guardian_name_en=str(row.payload.get(_K_GUARDIAN_NAME_EN, "")),
+                        relationship=RelationshipType(
+                            str(row.payload.get(_K_RELATIONSHIP, RelationshipType.OTHER.value))
+                        ),
+                        relationship_label=str(row.payload.get(_K_RELATIONSHIP_LABEL, "")),
+                        is_primary_contact=bool(row.payload.get(_K_PRIMARY, False)),
+                        can_view_records=bool(row.payload.get(_K_CAN_VIEW, True)),
+                        restriction_note=str(row.payload.get(_K_RESTRICTION, "")),
                     )
                 )
             except (SisError, KeyError, TypeError, ValueError) as exc:
@@ -542,10 +606,18 @@ class RosterImportService:
         """
         keys = {(str(a.year_code), str(a.class_code)) for a in assertions}
         numbers = [a.number for a in assertions]
+        phones = [
+            phone
+            for assertion in assertions
+            for phone in (assertion.guardian_phone, assertion.guardian_alt_phone)
+            if phone is not None
+        ]
         return _Snapshot(
             sections=uow.class_sections.get_many(keys),
             students=uow.students.get_many(numbers),
             enrolments=uow.enrolments.list_for_students(numbers),
+            guardians={} if not phones else uow.guardians.get_many(phones),
+            links={} if not phones else uow.student_guardians.list_for_students(numbers),
         )
 
     def _evaluate(
@@ -614,7 +686,7 @@ class RosterImportService:
             str(open_now.academic_year_code),
             str(open_now.class_code),
         ) == key:
-            return _Plan(
+            return self._with_guardian(_Plan(
                 line=stated.line,
                 payload=payload,
                 code=RowCode.OK,
@@ -623,7 +695,7 @@ class RosterImportService:
                 ),
                 student=student if student != existing else None,
                 superseded=existing is not None,
-            )
+            ), stated, snapshot)
 
         # The same placement already recorded and since closed — a second commit of the
         # same file. Writing it again would be harmless (the repository is keyed on the
@@ -633,13 +705,13 @@ class RosterImportService:
             == (key[0], key[1], stated.starts_on)
             for p in placements
         ):
-            return _Plan(
+            return self._with_guardian(_Plan(
                 line=stated.line,
                 payload=payload,
                 code=RowCode.OK,
                 outcome=StoredOutcome.UNCHANGED,
                 superseded=existing is not None,
-            )
+            ), stated, snapshot)
 
         close_on: date | None = None
         remaining = placements
@@ -685,7 +757,7 @@ class RosterImportService:
                 field=_K_STARTS,
             )
 
-        return _Plan(
+        return self._with_guardian(_Plan(
             line=stated.line,
             payload=payload,
             code=RowCode.OK,
@@ -694,6 +766,98 @@ class RosterImportService:
             enrolment=candidate,
             close_open_on=close_on,
             superseded=existing is not None,
+        ), stated, snapshot)
+
+    def _with_guardian(
+        self, plan: _Plan, stated: _Assertion, snapshot: _Snapshot
+    ) -> _Plan:
+        """Attach the adult asserted on this same row to an otherwise valid roster plan."""
+        if stated.guardian_phone is None:
+            return plan
+
+        owner = snapshot.guardians.get(str(stated.guardian_phone))
+        if owner is not None:
+            name_pairs = (
+                (stated.guardian_name_ar, owner.full_name_ar),
+                (stated.guardian_name_en, owner.full_name_en),
+            )
+            if any(a and b and _norm_name(a) != _norm_name(b) for a, b in name_pairs):
+                return replace(
+                    plan,
+                    code=RowCode.DUPLICATE_EXISTING,
+                    outcome=StoredOutcome.REJECTED,
+                    message=(
+                        f"guardian phone {stated.guardian_phone} is already on file for "
+                        f"{owner.full_name_en or owner.full_name_ar}"
+                    ),
+                    field=_K_GUARDIAN_PHONE,
+                    student=None,
+                    enrolment=None,
+                    close_open_on=None,
+                )
+
+        if stated.guardian_alt_phone is not None:
+            alt_owner = snapshot.guardians.get(str(stated.guardian_alt_phone))
+            if alt_owner is not None and (owner is None or alt_owner.identity != owner.identity):
+                return replace(
+                    plan,
+                    code=RowCode.DUPLICATE_EXISTING,
+                    outcome=StoredOutcome.REJECTED,
+                    message=f"guardian alternate phone {stated.guardian_alt_phone} belongs to another adult",
+                    field=_K_GUARDIAN_ALT_PHONE,
+                    student=None,
+                    enrolment=None,
+                    close_open_on=None,
+                )
+
+        if owner is None:
+            guardian = Guardian(
+                phones=tuple(
+                    phone for phone in (stated.guardian_phone, stated.guardian_alt_phone)
+                    if phone is not None
+                ),
+                full_name_ar=stated.guardian_name_ar,
+                full_name_en=stated.guardian_name_en,
+            )
+        else:
+            phones = list(owner.phones)
+            known = {str(phone) for phone in phones}
+            if stated.guardian_alt_phone is not None and str(stated.guardian_alt_phone) not in known:
+                phones.append(stated.guardian_alt_phone)
+            guardian = Guardian(
+                phones=tuple(phones),
+                full_name_ar=owner.full_name_ar or stated.guardian_name_ar,
+                full_name_en=owner.full_name_en or stated.guardian_name_en,
+                preferred_language=owner.preferred_language,
+                is_active=owner.is_active,
+            )
+
+        existing_link = None
+        if owner is not None:
+            existing_link = next(
+                (link for link in snapshot.links.get(str(stated.number), ())
+                 if owner.reachable_on(link.guardian_phone)),
+                None,
+            )
+        link = StudentGuardian(
+            student_number=stated.number,
+            guardian_phone=guardian.primary_phone,
+            relationship_type=stated.relationship,
+            relationship_label=stated.relationship_label,
+            is_primary_contact=stated.is_primary_contact,
+            can_view_records=stated.can_view_records,
+            restriction_note=stated.restriction_note,
+        )
+        guardian_changed = guardian != owner
+        link_changed = existing_link is None or link.differs_from(existing_link)
+        combined_outcome = plan.outcome
+        if combined_outcome is StoredOutcome.UNCHANGED and (guardian_changed or link_changed):
+            combined_outcome = StoredOutcome.UPDATED
+        return replace(
+            plan,
+            outcome=combined_outcome,
+            guardian=guardian if guardian_changed else None,
+            guardian_link=link if link_changed else None,
         )
 
     def _merged_student(self, stated: _Assertion, existing: Student | None) -> Student:
@@ -734,6 +898,10 @@ class RosterImportService:
         if students:
             uow.students.upsert_many(students)
 
+        guardians = [p.guardian for p in plans if p.guardian is not None]
+        if guardians:
+            uow.guardians.upsert_many(guardians)
+
         # Closing is per-student because a transfer needs the child's own open row; there
         # are as many calls as there are transfers, not as there are rows.
         for plan in plans:
@@ -746,3 +914,7 @@ class RosterImportService:
         enrolments = [p.enrolment for p in plans if p.enrolment is not None]
         if enrolments:
             uow.enrolments.upsert_many(enrolments)
+
+        guardian_links = [p.guardian_link for p in plans if p.guardian_link is not None]
+        if guardian_links:
+            uow.student_guardians.upsert_many(guardian_links)

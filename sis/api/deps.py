@@ -96,7 +96,7 @@ from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from sis.infrastructure.parsers import (
     SpreadsheetGradeParser,
     SpreadsheetGuardianParser,
-    SpreadsheetRosterParser,
+    SpreadsheetFamilyRosterParser,
 )
 from sis.tenancy import get_registry
 
@@ -688,7 +688,9 @@ def get_roster_import_service(uow_factory: UowFactoryDep) -> RosterImportService
     settings = get_settings()
     return RosterImportService(
         uow_factory,
-        SpreadsheetRosterParser(),
+        SpreadsheetFamilyRosterParser(
+            default_country_code=settings.default_country_code
+        ),
         preview_ttl=timedelta(minutes=settings.import_preview_ttl_minutes),
         max_upload_bytes=settings.max_upload_bytes,
     )

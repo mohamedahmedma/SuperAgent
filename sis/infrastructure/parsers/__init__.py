@@ -14,7 +14,11 @@ from sis.infrastructure.parsers.guardians import (
     GUARDIAN_COLUMNS,
     SpreadsheetGuardianParser,
 )
-from sis.infrastructure.parsers.roster import ROSTER_COLUMNS, SpreadsheetRosterParser
+from sis.infrastructure.parsers.roster import (
+    ROSTER_COLUMNS,
+    SpreadsheetFamilyRosterParser,
+    SpreadsheetRosterParser,
+)
 from sis.infrastructure.parsers.columns import (
     ACADEMIC_YEAR_CODE,
     CAN_VIEW_RECORDS,
@@ -73,6 +77,7 @@ __all__ = [
     "SpreadsheetGradeParser",
     "SpreadsheetGuardianParser",
     "SpreadsheetRosterParser",
+    "SpreadsheetFamilyRosterParser",
     "ColumnMap",
     "ColumnSpec",
     "ENDS_ON",
