@@ -175,6 +175,12 @@ export const AR = {
     'اختر ملف الدرجات',
   'Choose the roster sheet':
     'اختر ملف كشف القيد',
+  'Choose one student and guardian roster sheet':
+    'اختر ملفًا واحدًا للطلاب وأولياء الأمور',
+  'One row per student. Include the guardian in the same row; alternate guardian fields remain optional.':
+    'صف واحد لكل طالب، ويتضمن ولي الأمر في الصف نفسه، وتظل بيانات الاتصال البديلة اختيارية.',
+  'student_number,full_name_ar,full_name_en,class_code,guardian_name_ar,guardian_name_en,guardian_phone,relationship_type,is_primary_contact,can_view_records':
+    'student_number,full_name_ar,full_name_en,class_code,guardian_name_ar,guardian_name_en,guardian_phone,relationship_type,is_primary_contact,can_view_records',
   'Choose the term first. A marks file with no term named is a file the service cannot place.':
     'اختر الفصل الدراسي أولًا. فملف درجات بلا فصل مُسمّى ملف لا تستطيع الخدمة تحديد موضعه.',
   'Chosen in the header, for every screen.':

@@ -11,6 +11,7 @@ from datetime import date
 
 from sis.domain.people import Gender
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
+from sis.application.dto.guardians import ParsedGuardianRow
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +44,10 @@ class ParsedRosterRow:
     #: than to "today", so importing a roster in November does not record every child as
     #: having joined in November.
     starts_on: date | None = None
+    #: Optional family data carried on the same spreadsheet line.  Older roster files
+    #: remain valid; the web template includes it so a normal upload creates the child,
+    #: guardian and their link as one atomic record.
+    guardian: ParsedGuardianRow | None = None
 
     @property
     def has_name(self) -> bool:
