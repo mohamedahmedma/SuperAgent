@@ -33,6 +33,13 @@ Leaving `LLM_PROVIDER` unset is a supported state and a total no-op: nothing is 
 nothing is written, and the generic variables reach the modules exactly as they always
 have. That is what a deployment predating this file gets.
 
+Vision is the one setting group with a rule of its own, because it is the one that is
+routinely NOT on the same provider as the text models. Naming `<PREFIX>_VISION_MODEL` moves
+vision onto the block, and the block's key and endpoint follow it automatically; naming no
+vision model in the block leaves the generic `VISION_*` exactly where they are, so a
+deployment that has deliberately pinned vision elsewhere keeps it across a switch. See
+`_let_vision_follow_the_block`.
+
 The resolved values are written back into `os.environ` by `apply_provider_env()`, called
 from `backend.env.load_env()` before anything imports a module that reads them. Publishing
 through the environment rather than through an accessor is deliberate: the eight reading
@@ -204,7 +211,56 @@ def resolve(provider: ProviderSpec, environ: Optional[Mapping[str, str]] = None)
             values[setting] = default
             sources[setting] = f"{provider.name} default"
 
+    _let_vision_follow_the_block(provider, values, sources, env)
     return Resolution(provider=provider, values=values, sources=sources)
+
+
+#: When a block moves vision onto itself, these are the settings vision borrows from the
+#: block's text credentials. Only the endpoint and the key: the MODEL is the whole point of
+#: the move and has to be named, because a text model id is not a vision model id.
+_VISION_INHERITS: Dict[str, str] = {
+    "VISION_API_KEY": "ARK_API_KEY",
+    "VISION_BASE_URL": "BASE_URL",
+}
+
+
+def _let_vision_follow_the_block(
+    provider: ProviderSpec,
+    values: Dict[str, str],
+    sources: Dict[str, str],
+    env: Mapping[str, str],
+) -> None:
+    """Give vision the block's key and endpoint, but only when the block asked for it.
+
+    Naming `<PREFIX>_VISION_MODEL` is the request. It is the only unambiguous signal that
+    a deployment wants its vision model on the selected provider, and without it nothing
+    here fires — which is what preserves the opposite arrangement, where the generic
+    `VISION_*` deliberately pin vision to a provider the text models have moved off. That
+    pinning is a real configuration, not an oversight (a text model and a vision model on
+    different providers is the normal case), so it cannot be broken by a switch.
+
+    What this removes is the busywork in between. Before it, moving vision meant writing
+    `<PREFIX>_VISION_API_KEY` and `<PREFIX>_VISION_BASE_URL` as well — the same key and the
+    same endpoint the block already carries, copied a second time, where they could later
+    be updated in one place and not the other. Now the model id alone moves vision, and the
+    credentials follow the block by construction.
+
+    An explicit `<PREFIX>_VISION_API_KEY` still wins: a provider that issues a separate key
+    for its vision tier is a real thing, and the loop above has already recorded it.
+    """
+    moved_by_block = sources.get("VISION_MODEL", "").startswith(provider.prefix)
+    if not moved_by_block:
+        return
+
+    for vision_name, text_name in _VISION_INHERITS.items():
+        if sources.get(vision_name, "").startswith(provider.prefix):
+            # The block named it outright; that is more specific than inheriting.
+            continue
+        inherited = values.get(text_name) or _clean(env.get(text_name))
+        if not inherited:
+            continue
+        values[vision_name] = inherited
+        sources[vision_name] = f"{sources.get(text_name, text_name)} (vision follows the block)"
 
 
 def apply_provider_env(
