@@ -150,6 +150,57 @@ class VisionTests(unittest.TestCase):
             apply_provider_env()
             self.assertEqual("tog-vl", os.environ["VISION_MODEL"])
 
+    def test_naming_a_vision_model_moves_the_key_and_endpoint_with_it(self):
+        """The model id is the whole request. Writing the same key and endpoint a second
+        time under a VISION_ name is busywork, and busywork that can later be updated in
+        one place and not the other."""
+        with env(
+            LLM_PROVIDER="together",
+            TOGETHER_API_KEY="tgp", TOGETHER_BASE_URL="https://together",
+            TOGETHER_VISION_MODEL="tog-vl",
+            # The leftovers from when vision lived on the other provider.
+            VISION_MODEL="groq-vl", VISION_API_KEY="gsk", VISION_BASE_URL="https://groq",
+        ):
+            resolution = apply_provider_env()
+            self.assertEqual("tog-vl", os.environ["VISION_MODEL"])
+            self.assertEqual("tgp", os.environ["VISION_API_KEY"])
+            self.assertEqual("https://together", os.environ["VISION_BASE_URL"])
+        self.assertIn("vision follows the block", resolution.sources["VISION_API_KEY"])
+
+    def test_vision_inherits_the_providers_default_endpoint_too(self):
+        """A block that names only a key and a vision model still gets a working endpoint,
+        the same one its text models use."""
+        with env(LLM_PROVIDER="groq", GROQ_API_KEY="gsk", GROQ_VISION_MODEL="gsk-vl"):
+            apply_provider_env()
+            self.assertEqual(
+                "https://api.groq.com/openai/v1", os.environ["VISION_BASE_URL"]
+            )
+
+    def test_an_explicit_vision_key_still_beats_the_inherited_one(self):
+        """A provider that issues a separate credential for its vision tier is a real
+        thing, and naming it outright is more specific than inheriting."""
+        with env(
+            LLM_PROVIDER="together",
+            TOGETHER_API_KEY="tgp-text", TOGETHER_VISION_MODEL="tog-vl",
+            TOGETHER_VISION_API_KEY="tgp-vision",
+        ):
+            apply_provider_env()
+            self.assertEqual("tgp-vision", os.environ["VISION_API_KEY"])
+
+    def test_nothing_moves_when_the_block_names_no_vision_model(self):
+        """The guard on the whole rule. Vision pinned to another provider through the
+        generic names is a deliberate arrangement, and a text-model switch must not
+        quietly drag it along."""
+        with env(
+            LLM_PROVIDER="together",
+            TOGETHER_API_KEY="tgp", TOGETHER_BASE_URL="https://together",
+            VISION_MODEL="groq-vl", VISION_API_KEY="gsk", VISION_BASE_URL="https://groq",
+        ):
+            apply_provider_env()
+            self.assertEqual("groq-vl", os.environ["VISION_MODEL"])
+            self.assertEqual("gsk", os.environ["VISION_API_KEY"])
+            self.assertEqual("https://groq", os.environ["VISION_BASE_URL"])
+
 
 class NoOpTests(unittest.TestCase):
     """An unset selector has to leave a pre-`LLM_PROVIDER` deployment untouched."""
