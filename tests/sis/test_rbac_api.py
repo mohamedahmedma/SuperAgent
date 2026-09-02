@@ -696,6 +696,8 @@ class TestCatalogue:
         """So a console can explain a role without shipping the table itself."""
         rows = {row["code"]: row for row in client.get("/v1/rbac/roles", headers=principal).json()}
         assert "grades.write" in rows["teacher"]["permissions"]
+        assert "grades.read" in rows["principal"]["permissions"]
+        assert "students.write" in rows["principal"]["permissions"]
         assert "attendance.write" in rows["attendance_supervisor"]["permissions"]
         # The owner looks and does not touch — asserted here rather than trusted.
         assert not [p for p in rows["school_owner"]["permissions"] if p.endswith(".write")]

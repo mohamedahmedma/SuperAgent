@@ -115,12 +115,17 @@ export function StudentEditor({ student, onDone }) {
   );
 }
 
-export function StudentEditorFor({ studentNumber, onDone }) {
+export function StudentEditorFor({ studentNumber, academicYear, onDone }) {
   /* The same cache key the record screen uses, so opening the form from a class register and
-     opening her record show one answer rather than two that can disagree. */
+     opening her record show one answer rather than two that can disagree.
+
+     The year rides along because the read is scope-checked against it: a registrar who holds
+     students.read over one year level is narrowed with `academic_year_code=""` when it is
+     missing, no scope matches, and the form the Edit button opens is a 403 rather than her
+     record. */
   const record = useResource(
-    Store.keys.student(studentNumber),
-    () => api.student(studentNumber),
+    `${Store.keys.student(studentNumber)}:${academicYear || ''}`,
+    () => api.student(studentNumber, academicYear),
     !!studentNumber
   );
 

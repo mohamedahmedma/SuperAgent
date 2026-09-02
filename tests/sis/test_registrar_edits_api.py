@@ -125,7 +125,6 @@ def _complete_admission() -> dict[str, object]:
         "relationship_label": "الأب",
         "academic_year_code": YEAR,
         "class_code": "3A",
-        "starts_on": "2025-09-01",
     }
 
 
@@ -147,6 +146,34 @@ def test_complete_admission_creates_student_guardian_and_placement_atomically(
     assert guardians["guardians"][0]["relationship_type"] == "father"
     placements = seeded.get(f"/v1/students/{number}/placements", headers=registrar).json()
     assert placements["count"] == 1
+
+
+def test_admission_accepts_national_guardian_phone_optional_contacts_and_lists_child_in_class(
+    seeded: TestClient, registrar: dict[str, str]
+) -> None:
+    body = _complete_admission()
+    body.pop("contact_phone")
+    body["guardian_phone"] = "01002222222"
+    body["contact_email"] = ""
+
+    response = seeded.post(
+        "/v1/students/admissions", json=body, headers=registrar
+    )
+    assert response.status_code == 201, response.text
+    result = response.json()
+    number = result["student"]["student_number"]
+    assert result["student"]["contact_phone"] == ""
+    assert result["student"]["contact_email"] == ""
+    assert result["guardian_phone"] == "+201002222222"
+
+    roster = seeded.get(
+        "/v1/classes/3A/students",
+        params={"academic_year": YEAR, "on": "2025-09-01"},
+        headers=registrar,
+    )
+    assert roster.status_code == 200, roster.text
+    assert number in {student["student_number"] for student in roster.json()["students"]}
+    assert result["placement"]["starts_on"] == "2025-09-01"
 
 
 def test_complete_admission_refuses_a_blank_required_field_without_partial_writes(

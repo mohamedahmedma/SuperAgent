@@ -27,7 +27,7 @@
  * column is small buttons that wrap — a four-button `btn-group` at 360px is four buttons nobody
  * can hit.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Router } from '../router.js';
 import { Store } from '../store.js';
@@ -252,13 +252,22 @@ function PlaceExisting({ classCode, year, onSaved }) {
 
 /* -- Move a child to another class in the same year -------------------------------- */
 
-function MoveChild({ student, classCode, year, onDone }) {
+function MoveChild({ student, classCode, year, yearLevel, onDone }) {
   const classes = useResource(Store.keys.classes(year), () => api.classes(year), !!year);
   const form = useForm({ to_class_code: '', on_date: today() });
   const [dialog, ask] = useConfirm();
 
+  /* Same grade only: a move is a change of section, not of year — a child put into a class one
+     grade up by a mistyped dropdown is a mistake nobody notices until her marks arrive against
+     the wrong subjects. The level filter is skipped only while the classes are still loading,
+     because filtering against an undefined level would empty the list and read as "no class to
+     move her to". */
   const options = (classes.value || [])
-    .filter((section) => section.code !== classCode)
+    .filter(
+      (section) =>
+        section.code !== classCode &&
+        (!yearLevel || section.year_level_code === yearLevel)
+    )
     .map((section) => ({ value: section.code, label: `${section.code} — ${labelOf(section)}` }));
 
   return (
@@ -308,7 +317,7 @@ function MoveChild({ student, classCode, year, onDone }) {
               value={form.values.to_class_code}
               options={options}
               placeholder={classes.loading ? t('Loading…') : t('Choose a class')}
-              onInput={form.set('to_class_code')}
+              onChange={form.set('to_class_code')}
             />
           </Field>
           <Field className="col-12 col-sm-6" label={t('From')} required>
@@ -316,6 +325,11 @@ function MoveChild({ student, classCode, year, onDone }) {
           </Field>
         </div>
         <ErrorNote error={classes.error} onRetry={classes.reload} />
+        {!classes.loading && !options.length ? (
+          <Alert tone="warn" title={t('No other class in this grade')}>
+            {t('She can only be moved to another section of the same grade, and this grade has no other. Add one first.')}
+          </Alert>
+        ) : null}
         <div className="d-grid gap-2 d-sm-flex">
           <Button type="submit" variant="primary" disabled={!form.values.to_class_code}>
             Move out of {classCode}
@@ -410,12 +424,21 @@ function RenameClass({ section, year, onDone }) {
 
 /* -- The register ---------------------------------------------------------------- */
 
-function Register({ classCode, year }) {
+function Register({ classCode, year, yearLevel }) {
   const state = useStore();
   const [panel, setPanel] = useState(null); /* 'add' | 'place' | null */
   const [editing, setEditing] = useState('');
   const [moving, setMoving] = useState('');
   const [dialog, ask] = useConfirm();
+  /* Edit and Move open a panel under the table. On a register of thirty that panel is below the
+     fold, so the click reads as a button that did nothing — the reason to scroll to it is that
+     the effect is otherwise invisible, not decoration. */
+  const panel_ref = useRef(null);
+  useEffect(() => {
+    if ((editing || moving) && panel_ref.current) {
+      panel_ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [editing, moving]);
 
   const roster = useQuery(
     () => api.classRoster(classCode, year),
@@ -579,7 +602,7 @@ function Register({ classCode, year }) {
               key: 'actions',
               header: '',
               cell: (row) => (
-                <div className="d-flex flex-wrap gap-1 justify-content-end">
+                <div className="sis-row-actions d-flex flex-wrap gap-1 justify-content-end">
                   <Button
                     size="sm"
                     onClick={() => {
@@ -616,6 +639,8 @@ function Register({ classCode, year }) {
 
       {/* The edit and move forms open under the table rather than inside the row: a form in a
           table cell on a phone is a form in a 90px column. */}
+      <div ref={panel_ref} />
+
       {editing ? (
         <Card className="sis-rise" title={t('Edit {0}', [editing])}>
           {/* The form loads her whole record rather than editing the three columns this table
@@ -623,6 +648,7 @@ function Register({ classCode, year }) {
               had a phone number is a diff that lies. */}
           <StudentEditorFor
             studentNumber={editing}
+            academicYear={year}
             onDone={() => {
               setEditing('');
               roster.reload();
@@ -637,6 +663,7 @@ function Register({ classCode, year }) {
             student={students.find((row) => row.student_number === moving) || {}}
             classCode={classCode}
             year={year}
+            yearLevel={yearLevel}
             onDone={() => {
               setMoving('');
               roster.reload();
@@ -860,7 +887,13 @@ export function Klass({ params = {} }) {
       </ul>
 
       <div className="sis-fade" key={tab}>
-        {tab === 'register' ? <Register classCode={classCode} year={year} /> : null}
+        {tab === 'register' ? (
+          <Register
+            classCode={classCode}
+            year={year}
+            yearLevel={section && section.year_level_code}
+          />
+        ) : null}
         {tab === 'attendance' ? (
           <AttendancePanel
             classCode={classCode}

@@ -720,6 +720,22 @@
   z-index: 1;
 }
 
+/*
+ * The same lift, applied to every control a row can hold whether or not its view remembered
+ * the wrapper class. The stretched anchor is `inset: 0` over the whole row, so a button that
+ * is not raised above it is a button whose clicks the row link swallows — which is exactly how
+ * Edit, Move and Remove on the class register all turned into "open her record" instead. One
+ * rule here is cheaper than the same class repeated in every table that ever grows an action.
+ */
+.sis-row-open td a:not(.sis-row-target),
+.sis-row-open td button,
+.sis-row-open td select,
+.sis-row-open td input,
+.sis-row-open td label {
+  position: relative;
+  z-index: 1;
+}
+
 /* ===================================================================================
  * The settings miniature
  *

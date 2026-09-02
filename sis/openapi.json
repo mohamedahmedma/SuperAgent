@@ -282,6 +282,85 @@
         }
       }
     },
+    "/v1/rbac/year-level-scopes": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List Year Level Scopes",
+        "description": "Grades available when a manager bounds an attendance account.",
+        "operationId": "list_year_level_scopes_v1_rbac_year_level_scopes_get",
+        "parameters": [
+          {
+            "name": "school",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "School"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/YearLevelScopeOut"
+                  },
+                  "title": "Response List Year Level Scopes V1 Rbac Year Level Scopes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/rbac/roles": {
       "get": {
         "tags": [
@@ -4628,6 +4707,128 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "teachers"
+        ],
+        "summary": "Create a teacher with a system-generated staff reference",
+        "operationId": "create_teacher_v1_schools__school_code__teachers_post",
+        "parameters": [
+          {
+            "name": "school_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "School Code"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeacherIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeacherOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/schools/{school_code}/teachers/{staff_number}": {
@@ -5258,6 +5459,121 @@
           },
           "403": {
             "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/admissions": {
+      "post": {
+        "tags": [
+          "students"
+        ],
+        "summary": "Admit one child with a complete family record",
+        "operationId": "admit_student_v1_students_admissions_post",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudentAdmissionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentAdmissionOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6903,6 +7219,387 @@
           },
           "404": {
             "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/teaching/assignments": {
+      "get": {
+        "tags": [
+          "teaching"
+        ],
+        "summary": "The classes and subjects this teacher is assigned",
+        "description": "What a teacher may record, answered from their own assignments rather than from something they named — the same shape as the Stage 12 and Stage 13 listings, and for the same reason: a teacher holds classrooms and nothing above them, so every listing that narrows a grade refuses them and they cannot discover their own timetable.\n\nEach row is one room and one subject, carrying its grade and track, so a teacher working several classes across several grades and both sections gets all of it in one call and a client groups it without a second.",
+        "operationId": "list_my_teaching_v1_teaching_assignments_get",
+        "parameters": [
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeachingAssignmentsOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/classes/{class_code}/grades": {
+      "get": {
+        "tags": [
+          "teaching"
+        ],
+        "summary": "The mark sheet of one class, for one subject and term",
+        "description": "Every child who sat in the class **for that term**, with her figure for this subject or null where nobody has marked her. Built from the enrolments rather than from the marks, so a sheet four children into a class of thirty shows thirty rows and twenty-six blanks instead of four children who all did well.\n\nThe class is the one she sat in for the term, not her current one, so a child who transferred in March still appears on the Term 1 sheet of the room she earned those marks in.\n\n`may_record` reports whether this caller may write it. A teacher may read the sheet of a colleague's subject in their own room and gets `false` — reading a class's marks is part of teaching it; stating a figure for somebody else's subject is not.",
+        "operationId": "read_mark_sheet_v1_classes__class_code__grades_get",
+        "parameters": [
+          {
+            "name": "class_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Class Code"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2026-T1"
+              ],
+              "title": "Term"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "MATH"
+              ],
+              "title": "Subject"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkSheetOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "teaching"
+        ],
+        "summary": "Record marks for one class, subject and term",
+        "description": "The teacher's own write path. Idempotent by `(child, subject, term)` — which is what the table is unique on — so saving the same sheet twice corrects it rather than filing a second set of figures beside the first.\n\n**A teacher may only record their own subject.** The scope check says whether this room is theirs at all; the assignment check says whether this subject in it is. Both run, in that order, and a teacher of Arabic in 4/1 recording its Mathematics is refused by the second with 403 — the room is genuinely theirs, and the subject is not.\n\nA child who was not in this class for this term is refused by number rather than skipped: a silently dropped mark is one the teacher believes they entered.\n\nOmitting `percentage` records no figure; it does not record a zero. Erasing a mark is `clear: true`.",
+        "operationId": "record_marks_v1_classes__class_code__grades_put",
+        "parameters": [
+          {
+            "name": "class_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Class Code"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "2025-2026"
+              ],
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordMarksIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkSheetOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10226,6 +10923,16 @@
             "type": "array",
             "title": "Classes"
           },
+          "available_classes": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Available Classes"
+          },
           "eligible_teachers": {
             "items": {
               "$ref": "#/components/schemas/EligibleTeacherOut"
@@ -11019,6 +11726,141 @@
         ],
         "title": "LoginOut"
       },
+      "MarkSheetLineOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "default": ""
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En",
+            "default": ""
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage",
+            "description": "The stated figure, or **null** when nobody has marked her. Null is not zero: zero is a mark a child earned and null is the absence of one."
+          },
+          "points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points"
+          },
+          "max_points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Points"
+          },
+          "is_graded": {
+            "type": "boolean",
+            "title": "Is Graded"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "is_graded"
+        ],
+        "title": "MarkSheetLineOut"
+      },
+      "MarkSheetOut": {
+        "properties": {
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code"
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code"
+          },
+          "subject_name_en": {
+            "type": "string",
+            "title": "Subject Name En",
+            "default": ""
+          },
+          "subject_name_ar": {
+            "type": "string",
+            "title": "Subject Name Ar",
+            "default": ""
+          },
+          "term_code": {
+            "type": "string",
+            "title": "Term Code"
+          },
+          "term_is_closed": {
+            "type": "boolean",
+            "title": "Term Is Closed"
+          },
+          "may_record": {
+            "type": "boolean",
+            "title": "May Record",
+            "description": "Whether this caller may write this sheet — scope *and* teaching assignment. A teacher opening a colleague's subject in their own room reads it and gets `false`, which is what the screen renders read-only."
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "graded": {
+            "type": "integer",
+            "title": "Graded"
+          },
+          "ungraded": {
+            "type": "integer",
+            "title": "Ungraded",
+            "description": "Children with no figure on file. Reported separately and never folded into a total, so an unfinished sheet cannot read as a finished one."
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/MarkSheetLineOut"
+            },
+            "type": "array",
+            "title": "Students"
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_year_code",
+          "class_code",
+          "subject_code",
+          "term_code",
+          "term_is_closed",
+          "may_record",
+          "size",
+          "graded",
+          "ungraded",
+          "students"
+        ],
+        "title": "MarkSheetOut"
+      },
       "PermissionOut": {
         "properties": {
           "code": {
@@ -11305,6 +12147,39 @@
           "restart_required"
         ],
         "title": "ProvisionSchoolOut"
+      },
+      "RecordMarksIn": {
+        "properties": {
+          "term_code": {
+            "type": "string",
+            "title": "Term Code",
+            "examples": [
+              "2026-T1"
+            ]
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code",
+            "examples": [
+              "MATH"
+            ]
+          },
+          "marks": {
+            "items": {
+              "$ref": "#/components/schemas/StatedMarkIn"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Marks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "term_code",
+          "subject_code",
+          "marks"
+        ],
+        "title": "RecordMarksIn"
       },
       "RegisterClassOut": {
         "properties": {
@@ -12008,6 +12883,67 @@
         ],
         "title": "StaffAttendanceState"
       },
+      "StatedMarkIn": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number",
+            "examples": [
+              "10432"
+            ]
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage",
+            "description": "The mark out of 100. Omit it with `clear: true` to erase what is on file; omitting it without `clear` records no figure rather than a zero."
+          },
+          "points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points",
+            "description": "The raw figure, when the teacher marked out of something else."
+          },
+          "max_points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Points",
+            "description": "What `points` was out of. Required whenever points is sent."
+          },
+          "clear": {
+            "type": "boolean",
+            "title": "Clear",
+            "description": "Erase the mark on file, returning this child to not-yet-marked. A separate flag rather than a null percentage, so a screen sending every visible row cannot wipe the marks it merely failed to load.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number"
+        ],
+        "title": "StatedMarkIn",
+        "description": "One figure being stated for one child."
+      },
       "StructureYearsOut": {
         "properties": {
           "academic_years": {
@@ -12044,6 +12980,116 @@
         ],
         "title": "StructureYearsOut",
         "description": "Both ladders at once — see the module note on why this is one route."
+      },
+      "StudentAdmissionIn": {
+        "properties": {
+          "full_name_ar": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Full Name Ar"
+          },
+          "full_name_en": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Full Name En"
+          },
+          "gender": {
+            "$ref": "#/components/schemas/Gender"
+          },
+          "date_of_birth": {
+            "type": "string",
+            "format": "date",
+            "title": "Date Of Birth"
+          },
+          "contact_phone": {
+            "type": "string",
+            "title": "Contact Phone",
+            "description": "Optional child contact number; guardian contact is stored separately.",
+            "default": ""
+          },
+          "contact_email": {
+            "type": "string",
+            "title": "Contact Email",
+            "description": "Optional. An empty string means no email address is on file.",
+            "default": ""
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Address"
+          },
+          "guardian_full_name_ar": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Guardian Full Name Ar"
+          },
+          "guardian_full_name_en": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Guardian Full Name En"
+          },
+          "guardian_phone": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Guardian Phone"
+          },
+          "relationship_type": {
+            "$ref": "#/components/schemas/RelationshipType"
+          },
+          "relationship_label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Relationship Label"
+          },
+          "academic_year_code": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Academic Year Code"
+          },
+          "class_code": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Class Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "full_name_ar",
+          "full_name_en",
+          "gender",
+          "date_of_birth",
+          "address",
+          "guardian_full_name_ar",
+          "guardian_full_name_en",
+          "guardian_phone",
+          "relationship_type",
+          "relationship_label",
+          "academic_year_code",
+          "class_code"
+        ],
+        "title": "StudentAdmissionIn",
+        "description": "Every fact required to admit one child; no partial records are accepted."
+      },
+      "StudentAdmissionOut": {
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StudentOut"
+          },
+          "placement": {
+            "$ref": "#/components/schemas/PlacementOut"
+          },
+          "guardian_phone": {
+            "type": "string",
+            "title": "Guardian Phone"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student",
+          "placement",
+          "guardian_phone"
+        ],
+        "title": "StudentAdmissionOut"
       },
       "StudentAttendanceOut": {
         "properties": {
@@ -13032,6 +14078,98 @@
           "assignments"
         ],
         "title": "TeacherOut"
+      },
+      "TeachingAssignmentOut": {
+        "properties": {
+          "class_code": {
+            "type": "string",
+            "title": "Class Code"
+          },
+          "class_name_en": {
+            "type": "string",
+            "title": "Class Name En",
+            "default": ""
+          },
+          "class_name_ar": {
+            "type": "string",
+            "title": "Class Name Ar",
+            "default": ""
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code"
+          },
+          "subject_name_en": {
+            "type": "string",
+            "title": "Subject Name En",
+            "default": ""
+          },
+          "subject_name_ar": {
+            "type": "string",
+            "title": "Subject Name Ar",
+            "default": ""
+          },
+          "year_level_code": {
+            "type": "string",
+            "title": "Year Level Code"
+          },
+          "year_level_name_en": {
+            "type": "string",
+            "title": "Year Level Name En",
+            "default": ""
+          },
+          "year_level_name_ar": {
+            "type": "string",
+            "title": "Year Level Name Ar",
+            "default": ""
+          },
+          "track_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Track Code"
+          },
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "class_code",
+          "subject_code",
+          "year_level_code",
+          "academic_year_code"
+        ],
+        "title": "TeachingAssignmentOut",
+        "description": "One room, one subject, and the rung it sits on."
+      },
+      "TeachingAssignmentsOut": {
+        "properties": {
+          "is_teaching_staff": {
+            "type": "boolean",
+            "title": "Is Teaching Staff",
+            "description": "Whether a teacher record is linked to this account. `false` with an empty list is a registrar, who is bounded by scope alone; `true` with an empty list is a teacher nobody has given a class yet, who may record nothing."
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/TeachingAssignmentOut"
+            },
+            "type": "array",
+            "title": "Assignments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_teaching_staff",
+          "assignments"
+        ],
+        "title": "TeachingAssignmentsOut"
       },
       "TermIn": {
         "properties": {
@@ -14038,6 +15176,34 @@
           "display_order"
         ],
         "title": "YearLevelOut"
+      },
+      "YearLevelScopeOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En"
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "name_en",
+          "name_ar"
+        ],
+        "title": "YearLevelScopeOut"
       },
       "YearTrackOut": {
         "properties": {
