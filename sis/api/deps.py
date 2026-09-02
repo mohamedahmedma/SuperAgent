@@ -69,6 +69,7 @@ from sis.domain.rbac import ANYWHERE, AccessProfile, Permission, ScopeType, Targ
 from sis.config import get_settings
 from sis.domain.auth import PREFIX_LENGTH, ApiKey, Scope
 from sis.domain.errors import ImportBatchNotFound, UnknownReference, ValidationError
+from sis.domain.guardians import Guardian, StudentGuardian
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import ClassEnrolment, Student
 from sis.domain.structure import (
@@ -1259,6 +1260,30 @@ class StudentDesk:
             created = uow.students.upsert_many([student])
             uow.commit()
         return bool(created.get(str(student.student_number), False))
+
+    def create_family(
+        self,
+        student: Student,
+        guardian: Guardian,
+        link: StudentGuardian,
+        enrolment: ClassEnrolment,
+    ) -> None:
+        """Create one complete admission in a single transaction.
+
+        This is intentionally create-only.  A manager must not turn the admission form
+        into an accidental overwrite of an existing child's identity or family links.
+        """
+        with self._uow_factory() as uow:
+            if uow.students.get(student.student_number) is not None:
+                raise ValidationError(
+                    f"student {student.student_number} already exists",
+                    field="student_number",
+                )
+            uow.students.upsert_many([student])
+            uow.guardians.upsert_many([guardian])
+            uow.student_guardians.upsert_many([link])
+            uow.enrolments.upsert_many([enrolment])
+            uow.commit()
 
     def set_student_active(
         self, student_number: StudentNumber, *, is_active: bool

@@ -64,6 +64,9 @@ class Permission(StrEnum):
     STRUCTURE_WRITE = "structure.write"
 
     STUDENTS_READ = "students.read"
+    # Create a complete family record (child, guardian and first placement) without
+    # granting the broader correction/transfer powers carried by `students.write`.
+    STUDENTS_CREATE = "students.create"
     STUDENTS_WRITE = "students.write"
 
     TEACHERS_READ = "teachers.read"
@@ -282,6 +285,7 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.SCHOOLS_READ,
             Permission.STRUCTURE_READ,
             Permission.STUDENTS_READ,
+            Permission.STUDENTS_CREATE,
             Permission.TEACHERS_READ,
             Permission.TEACHERS_ASSIGN_SUBJECTS,
             Permission.TIMETABLE_READ,

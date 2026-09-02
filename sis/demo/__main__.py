@@ -88,6 +88,29 @@ def cmd_portfolio(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_arabic_showcase(args: argparse.Namespace) -> int:
+    """Add the large Arabic sales school without touching existing schools."""
+    seeder.guard_environment(allow_remote=args.allow_remote)
+    from sis.demo.arabic_showcase import load
+
+    with seeder.open_session(args.school) as session:
+        counts = load(session)
+        session.commit()
+    print("Arabic showcase school written:")
+    for name, value in counts.items():
+        print(f"  {name.replace('_', ' '):<22} {value}")
+    print("Credentials were written to اداره.txt")
+    return 0
+
+
+def cmd_validate_arabic_showcase(args: argparse.Namespace) -> int:
+    from sis.demo.arabic_showcase import validate
+    with seeder.open_session(args.school) as session:
+        for line in validate(session):
+            print(line)
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     seeder.guard_environment(allow_remote=args.allow_remote)
     with seeder.open_session(args.school) as session:
@@ -212,6 +235,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "portfolio", help="write the three populated sales-demo schools into an empty database"
     ).set_defaults(handler=cmd_portfolio)
+
+    sub.add_parser(
+        "arabic-showcase", help="add the large Arabic client-presentation school"
+    ).set_defaults(handler=cmd_arabic_showcase)
+    sub.add_parser(
+        "validate-arabic-showcase", help="verify presentation-critical Arabic showcase facts"
+    ).set_defaults(handler=cmd_validate_arabic_showcase)
 
     sub.add_parser(
         "sync", help="refresh mutable labels without deleting existing demo data"

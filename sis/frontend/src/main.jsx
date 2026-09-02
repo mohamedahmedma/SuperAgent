@@ -30,7 +30,7 @@ import { Level } from './views/Level.jsx';
 import { Year } from './views/Year.jsx';
 import { Klass } from './views/Klass.jsx';
 import { Student } from './views/Student.jsx';
-import { Roster } from './views/Roster.jsx';
+import { Roster, StudentSetup } from './views/Roster.jsx';
 import { Guardians } from './views/Guardians.jsx';
 import { Marks } from './views/Marks.jsx';
 import { Batches } from './views/Batches.jsx';
@@ -56,6 +56,7 @@ const ROUTES = [
   { name: 'class', view: Klass, title: 'Class' },
   { name: 'student', view: Student, title: 'Student' },
   { name: 'roster', view: Roster, title: 'Roster' },
+  { name: 'studentSetup', view: StudentSetup, title: 'Student setup' },
   { name: 'guardians', view: Guardians, title: 'Guardians' },
   { name: 'marks', view: Marks, title: 'Marks' },
   { name: 'batches', view: Batches, title: 'Batches' },

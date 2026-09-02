@@ -639,6 +639,9 @@ var api = {
   saveStudent: function (body) {
     return post('/students', body);
   },
+  admitStudent: function (body) {
+    return post('/students/admissions', body);
+  },
   updateStudent: function (studentNumber, body) {
     return request('/students/' + encodeURIComponent(studentNumber), {
       method: 'PATCH',
@@ -784,6 +787,9 @@ var api = {
   saveTeacher: function (schoolCode, staffNumber, body) {
     return request('/schools/' + encodeURIComponent(schoolCode) + '/teachers/' +
       encodeURIComponent(staffNumber), { method: 'PUT', body: body });
+  },
+  createTeacher: function (schoolCode, body) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/teachers', body);
   },
   teacherAttendance: function (schoolCode, fromDate, toDate) {
     return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers/attendance', {

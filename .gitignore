@@ -83,3 +83,5 @@ htmlcov/
 # pytest run logs; a stray test*.txt at the root is collected as a doctest file
 # and a UTF-16 one fails collection before a single test runs.
 test_output.txt
+# Local demo credentials (never commit)
+/اداره.txt
