@@ -1,11 +1,4 @@
-/*
- * Roster — enrol children into classes, and read the register back.
- *
- * `default_starts_on` is left empty on purpose and says why. Absent means "the first day of the
- * academic year", decided by the service; prefilling it with today would record a November
- * import as every child in the school having joined in November, and a placement is a dated
- * membership that stays true forever.
- */
+/* Roster — enrol children into classes, and read the register back. */
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Router } from '../router.js';
@@ -22,9 +15,9 @@ const TEMPLATE = {
 
 const emptyAdmission = () => ({
   full_name_ar: '', full_name_en: '', gender: '',
-  date_of_birth: '', contact_phone: '', contact_email: '', address: '',
+  date_of_birth: '', contact_email: '', address: '',
   guardian_full_name_ar: '', guardian_full_name_en: '', guardian_phone: '',
-  relationship_type: '', relationship_label: '', grade_code: '', class_code: '', starts_on: ''
+  relationship_type: '', relationship_label: '', grade_code: '', class_code: ''
 });
 
 function NewAdmission({ year, classes, onCreated }) {
@@ -33,7 +26,8 @@ function NewAdmission({ year, classes, onCreated }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const set = (key) => (value) => setForm((old) => ({ ...old, [key]: value }));
-  const required = Object.values(form).every((value) => String(value).trim());
+  const requiredFields = Object.keys(form).filter((key) => key !== 'contact_email');
+  const required = requiredFields.every((key) => String(form[key]).trim());
   const grades = [...new Map(classes.map((row) => [row.year_level_code, {
     code: row.year_level_code,
     name_en: row.year_level_name_en,
@@ -45,6 +39,8 @@ function NewAdmission({ year, classes, onCreated }) {
     setSaving(true); setError(null);
     try {
       const result = await api.admitStudent({ ...form, academic_year_code: year });
+      Store.invalidate('roster:');
+      Store.invalidate('student:');
       Store.toast(t('Student admitted successfully.'), 'success');
       setForm(emptyAdmission());
       onCreated(result);
@@ -55,7 +51,6 @@ function NewAdmission({ year, classes, onCreated }) {
   return (
     <Card
       title={t('Admit a new student')}
-      subtitle={t('All student, guardian, grade and class fields are required.')}
     >
       <h3 className="h6 mb-3">{t('Student information')}</h3>
       <div className="row g-3">
@@ -74,11 +69,8 @@ function NewAdmission({ year, classes, onCreated }) {
         <Field className="col-12 col-md-3" label={t('Date of birth')} required>
           <Input type="date" value={form.date_of_birth} onInput={set('date_of_birth')} />
         </Field>
-        <Field className="col-12 col-md-3" label={t('Student phone')} required>
-          <Input inputMode="tel" value={form.contact_phone} onInput={set('contact_phone')} />
-        </Field>
-        <Field className="col-12 col-md-3" label={t('Student email')} required>
-          <Input type="email" value={form.contact_email} onInput={set('contact_email')} />
+        <Field className="col-12 col-md-6" label={t('Student email')}>
+          <Input type="email" placeholder={t('Optional')} value={form.contact_email} onInput={set('contact_email')} />
         </Field>
         <Field className="col-12" label={t('Address')} required>
           <Input value={form.address} onInput={set('address')} />
@@ -127,9 +119,6 @@ function NewAdmission({ year, classes, onCreated }) {
               value: row.code,
               label: pickName(row, state.lang) || row.code
             }))]} />
-        </Field>
-        <Field className="col-12 col-md-4" label={t('Placement starts')} required>
-          <Input type="date" value={form.starts_on} onInput={set('starts_on')} />
         </Field>
       </div>
       {error ? <div className="mt-3"><ErrorNote error={error} /></div> : null}
@@ -310,7 +299,7 @@ function Register({ year, classCode }) {
               key: 'links',
               header: '',
               cell: (row) => (
-                <div className="d-flex gap-1">
+                <div className="sis-row-actions d-flex gap-1">
                   <a
                     className="btn btn-sm btn-quiet"
                     href={Router.href('guardians', { student: row.student_number })}
@@ -340,7 +329,6 @@ export function Roster({ params = {} }) {
   const year = state.year;
   const [classCode, setClassCode] = useState('');
   const [gradeCode, setGradeCode] = useState('');
-  const [startsOn, setStartsOn] = useState('');
 
   const classes = useResource(Store.keys.classes(year), () => api.classes(year), !!year);
   const sections = classes.value || [];
@@ -399,13 +387,6 @@ export function Roster({ params = {} }) {
           onChange={setClassCode}
         />
       </Field>
-      <Field
-        className="col-12 col-sm-6 col-lg-4"
-        label={t('Placements start')}
-        hint={t('Optional. Empty means the first day of the academic year.')}
-      >
-        <Input type="date" value={startsOn} onInput={setStartsOn} />
-      </Field>
     </div>
   );
 
@@ -428,10 +409,7 @@ export function Roster({ params = {} }) {
             const form = new FormData();
             form.append('file', file);
             form.append('academic_year_code', year);
-            /* Appended only when set. An empty string is a value the parser has to reject, and
-               the registrar would read the 422 as the file being wrong. */
             if (classCode) form.append('class_code', classCode);
-            if (startsOn) form.append('default_starts_on', startsOn);
             return api.previewRoster(form);
           }}
           onCommit={(batchId) => api.commitRoster(batchId)}

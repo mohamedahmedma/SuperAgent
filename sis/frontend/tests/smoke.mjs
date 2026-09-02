@@ -157,6 +157,17 @@ function newWindow(script, language = 'en', session = '') {
         permission, scope_type: 'global', scope_id: null, scope_code: null
       }));
     }
+    if (session === 'smoke-supervisor' && method === 'GET' && url.includes('/v1/auth/me')) {
+      payload = JSON.parse(JSON.stringify(payload));
+      payload.profile.roles = [
+        { role_code: 'year_supervisor', scope_type: 'year_level', scope_id: 3 }
+      ];
+      payload.profile.permissions = ['structure.read', 'students.read'];
+      payload.profile.grants = [
+        { permission: 'structure.read', scope_type: 'year_level', scope_id: 3, scope_code: 'Y3' },
+        { permission: 'students.read', scope_type: 'year_level', scope_id: 3, scope_code: 'Y3' }
+      ];
+    }
     const body = JSON.stringify(payload);
     return Promise.resolve({
       ok: true,
@@ -267,6 +278,54 @@ async function main() {
       console.log(`  ok   ${screen.hash}`);
     }
   }
+
+  /* The finder must do more than render. Submit a real value and pin the request's
+     academic-year scope; a screen-only smoke check missed the regression where every
+     scoped account received 403 from an otherwise healthy search endpoint. */
+  window.location.hash = '#/student';
+  await settle(window, 100);
+  const searchInput = window.document.querySelector('.sis-field-search input');
+  assert.ok(searchInput, 'the student finder has no search input');
+  const valueSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    'value'
+  ).set;
+  valueSetter.call(searchInput, 'Layla');
+  searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+  searchInput.closest('form').dispatchEvent(
+    new window.Event('submit', { bubbles: true, cancelable: true })
+  );
+  await settle(window, 120);
+  assert.ok(
+    requests.some((line) =>
+      line.includes(`/v1/students?q=Layla&academic_year=${encodeURIComponent(YEAR)}`)
+    ),
+    `student search did not carry its year scope. Saw: ${requests.filter((line) => line.includes('/v1/students'))}`
+  );
+  assert.ok(
+    (window.document.body.textContent || '').includes('Layla Hassan'),
+    'submitting the student finder did not render its result'
+  );
+
+  const supervisor = newWindow(script, 'en', 'smoke-supervisor');
+  await settle(supervisor.window, 180);
+  supervisor.window.location.hash = '#/student';
+  await settle(supervisor.window, 100);
+  const supervisorInput = supervisor.window.document.querySelector('.sis-field-search input');
+  assert.ok(supervisorInput, 'a grade supervisor was sent to the teacher class picker');
+  valueSetter.call(supervisorInput, 'Layla');
+  supervisorInput.dispatchEvent(new supervisor.window.Event('input', { bubbles: true }));
+  supervisorInput.closest('form').dispatchEvent(
+    new supervisor.window.Event('submit', { bubbles: true, cancelable: true })
+  );
+  await settle(supervisor.window, 120);
+  assert.ok(
+    supervisor.requests.some((line) =>
+      line.includes(`academic_year=${encodeURIComponent(YEAR)}&year_level=Y3`)
+    ),
+    `grade-supervisor search did not carry its grade scope. Saw: ${supervisor.requests}`
+  );
+  errors.push(...supervisor.errors);
 
   /* The invariants worth checking once, on the whole walk, rather than per screen. */
   const marks = (() => {

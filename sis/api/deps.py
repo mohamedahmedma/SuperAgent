@@ -1345,13 +1345,44 @@ class StudentDesk:
         exactly what `resolve_section_for_term` cannot answer, and it would make her Term
         marks ambiguous rather than wrong, which is harder to notice.
         """
-        opened = ClassEnrolment(
-            student_number=student_number,
-            academic_year_code=academic_year_code,
-            class_code=to_class,
-            starts_on=on_date,
-        )
         with self._uow_factory() as uow:
+            target = uow.class_sections.get(academic_year_code, to_class)
+            if target is None:
+                raise UnknownReference(
+                    f"no class {to_class} in academic year {academic_year_code}",
+                    field="to_class_code",
+                )
+            current = uow.enrolments.open_enrolment(student_number)
+            if current is not None:
+                if current.academic_year_code != academic_year_code:
+                    raise ValidationError(
+                        "the open placement belongs to a different academic year",
+                        field="academic_year_code",
+                    )
+                if current.class_code == to_class:
+                    raise ValidationError(
+                        "choose a different class",
+                        field="to_class_code",
+                    )
+                source = uow.class_sections.get(
+                    current.academic_year_code, current.class_code
+                )
+                if source is None:
+                    raise UnknownReference(
+                        f"no class {current.class_code} in academic year {academic_year_code}",
+                        field="class_code",
+                    )
+                if source.year_level_code != target.year_level_code:
+                    raise ValidationError(
+                        "a student may only transfer between classes in the same grade",
+                        field="to_class_code",
+                    )
+            opened = ClassEnrolment(
+                student_number=student_number,
+                academic_year_code=academic_year_code,
+                class_code=to_class,
+                starts_on=on_date,
+            )
             closed = uow.enrolments.close_open_enrolment(
                 student_number, ends_on=on_date - timedelta(days=1)
             )

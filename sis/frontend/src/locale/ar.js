@@ -847,6 +847,10 @@ export const AR = {
     'اختر فصلًا دراسيًا',
   'Choose a class':
     'اختر صفًا',
+  'No other class in this grade':
+    'لا يوجد فصل آخر في هذا الصف الدراسي',
+  'She can only be moved to another section of the same grade, and this grade has no other. Add one first.':
+    'لا يمكن نقلها إلا إلى فصل آخر في الصف الدراسي نفسه، وهذا الصف ليس به فصل آخر. أضف فصلًا أولًا.',
   'Nothing changed':
     'لم يتغير شيء',
   'Guardian removed':

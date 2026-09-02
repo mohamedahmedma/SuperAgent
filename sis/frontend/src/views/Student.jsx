@@ -75,20 +75,42 @@ function Finder({ initial }) {
   const [typed, setTyped] = useState(initial || '');
   const [asked, setAsked] = useState('');
   const [teacherClass, setTeacherClass] = useState('');
-  const isTeacher = Store.roles().indexOf('teacher') >= 0;
-  const teaching = useQuery(() => api.teachingAssignments(state.year), [state.year], isTeacher && !!state.year);
+  const studentGrants = ((state.profile && state.profile.grants) || [])
+    .filter((grant) => grant.permission === 'students.read');
+  const searchableLevels = [...new Set(studentGrants
+    .filter((grant) => grant.scope_type === 'year_level')
+    .map((grant) => grant.scope_code)
+    .filter(Boolean))];
+  const [searchLevel, setSearchLevel] = useState(searchableLevels[0] || '');
+  /* A teacher who only holds class-scoped student access must choose from their own
+     registers. Do not key this branch off the role name: roles are additive, so a
+     principal who is also a teacher still has school-wide search and must not be
+     accidentally reduced to their teaching timetable. */
+  const usesClassPicker = studentGrants.length > 0 && studentGrants.every(
+    (grant) => grant.scope_type === 'class_section'
+  );
+  useEffect(() => {
+    if (searchableLevels.length && !searchableLevels.includes(searchLevel)) {
+      setSearchLevel(searchableLevels[0]);
+    }
+  }, [searchableLevels.join('|'), searchLevel]);
+  const teaching = useQuery(() => api.teachingAssignments(state.year), [state.year], usesClassPicker && !!state.year);
   const teacherClasses = [...new Map((((teaching.value || {}).assignments) || [])
     .map((row) => [row.class_code, row])).values()];
   useEffect(() => {
     if (!teacherClass && teacherClasses.length) setTeacherClass(teacherClasses[0].class_code);
   }, [teacherClasses.length]);
   const roster = useQuery(() => api.classRoster(teacherClass, state.year),
-    [teacherClass, state.year], isTeacher && !!teacherClass && !!state.year);
+    [teacherClass, state.year], usesClassPicker && !!teacherClass && !!state.year);
 
-  const found = useQuery(() => api.searchStudents(asked), [asked], !!asked);
+  const found = useQuery(
+    () => api.searchStudents(asked, false, state.year, searchLevel || null),
+    [asked, state.year, searchLevel],
+    !!asked && !!state.year && (!searchableLevels.length || !!searchLevel)
+  );
   const students = (found.value && found.value.students) || [];
 
-  if (isTeacher) return (
+  if (usesClassPicker) return (
     <Card title={t('Find a child in your classes')}>
       <div className="row g-3">
         <Field className="col-12 col-md-5" label={t('Class')}>
@@ -117,7 +139,7 @@ function Finder({ initial }) {
           }}
         >
           <Field
-            className="col-12 col-sm"
+            className={searchableLevels.length > 1 ? 'col-12 col-md-5' : 'col-12 col-sm'}
             label={t('Student number or name')}
             hint={t('A partial name matches in either script.')}
           >
@@ -126,6 +148,15 @@ function Finder({ initial }) {
                 types. */}
             <SearchField value={typed} onInput={setTyped} />
           </Field>
+          {searchableLevels.length > 1 ? (
+            <Field className="col-12 col-md-4" label={t('Grade')}>
+              <Select
+                value={searchLevel}
+                options={searchableLevels.map((code) => ({ value: code, label: code }))}
+                onChange={setSearchLevel}
+              />
+            </Field>
+          ) : null}
           <div className="col-12 col-sm-auto d-grid">
             <Button type="submit" variant="primary" icon="search">
               {t('Search')}

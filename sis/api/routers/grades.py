@@ -223,9 +223,11 @@ def read_student_term_grades(
     # only the academic lines assigned to them in the child's class for this term.
     # Non-teaching roles return ``None`` and retain their ordinary scope-based view.
     if caller.profile is not None and report.class_section is not None:
-        allowed = teaching.subject_codes_in_class(
+        allowed = teaching.subject_codes_for_section(
             caller.profile.user_id,
-            class_section_id=report.class_section.id,
+            academic_year_code=str(report.class_section.academic_year_code),
+            year_level_code=str(report.class_section.year_level_code),
+            class_code=str(report.class_section.code),
         )
         if allowed is not None:
             report = replace(

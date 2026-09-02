@@ -46,8 +46,15 @@ def test_principal_is_general_read_only_and_never_a_system_admin(
     assert profile["is_system_admin"] is False
     assert "roles.assign" in profile["permissions"]
     assert "teacher_attendance.read" in profile["permissions"]
+    # A principal admits and corrects children in their own school: the console's Edit button
+    # is theirs, and refusing it would leave the head of the school unable to fix a misspelt
+    # name. Reading marks is the same story. What stays out of reach is everything that
+    # rewrites the school itself or the system it runs on.
+    assert "students.create" in profile["permissions"]
+    assert "students.write" in profile["permissions"]
+    assert "grades.read" in profile["permissions"]
     forbidden = {
-        "schools.write", "structure.write", "students.write", "grades.write",
+        "schools.write", "structure.write", "grades.write",
         "guardians.write", "imports.run", "system.manage", "system.status.write",
     }
     assert forbidden.isdisjoint(profile["permissions"])

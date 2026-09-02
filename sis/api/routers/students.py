@@ -42,7 +42,9 @@ from sis.domain.errors import UnknownReference
 from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
 from sis.domain.people import ClassEnrolment, Gender, Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
+from sis.domain.value_objects import Phone
 from sis.infrastructure.db import models as m
+from sis.config import get_settings
 
 router = APIRouter(prefix="/v1", tags=["students"])
 
@@ -316,8 +318,14 @@ class StudentAdmissionIn(BaseModel):
     full_name_en: str = Field(min_length=1)
     gender: Gender
     date_of_birth: date
-    contact_phone: str = Field(min_length=1)
-    contact_email: str = Field(min_length=1)
+    contact_phone: str = Field(
+        default="",
+        description="Optional child contact number; guardian contact is stored separately.",
+    )
+    contact_email: str = Field(
+        default="",
+        description="Optional. An empty string means no email address is on file.",
+    )
     address: str = Field(min_length=1)
     guardian_full_name_ar: str = Field(min_length=1)
     guardian_full_name_en: str = Field(min_length=1)
@@ -326,11 +334,9 @@ class StudentAdmissionIn(BaseModel):
     relationship_label: str = Field(min_length=1)
     academic_year_code: str = Field(min_length=1)
     class_code: str = Field(min_length=1)
-    starts_on: date
 
     @field_validator(
-        "full_name_ar", "full_name_en", "contact_phone",
-        "contact_email", "address", "guardian_full_name_ar",
+        "full_name_ar", "full_name_en", "address", "guardian_full_name_ar",
         "guardian_full_name_en", "guardian_phone", "relationship_label",
         "academic_year_code", "class_code",
     )
@@ -410,7 +416,10 @@ def search_students(
     responses=error_responses(401, 403, 404, 409, 422),
 )
 def admit_student(
-    body: StudentAdmissionIn, desk: Desk, caller: AdmissionsManager
+    body: StudentAdmissionIn,
+    desk: Desk,
+    caller: AdmissionsManager,
+    uow_factory: UowFactoryDep,
 ) -> StudentAdmissionOut:
     caller.narrow(
         Permission.STUDENTS_CREATE,
@@ -419,6 +428,23 @@ def admit_student(
         ),
     )
     with domain_errors():
+        # A new admission starts on the first day of the selected academic year. The
+        # form no longer asks the registrar to repeat a date the year already owns.
+        with uow_factory() as uow:
+            academic_year = uow.academic_years.get(
+                AcademicYearCode(body.academic_year_code)
+            )
+        if academic_year is None:
+            raise UnknownReference(
+                f"no academic year {body.academic_year_code}",
+                field="academic_year_code",
+            )
+        # The form accepts the way a registrar actually writes an Egyptian guardian
+        # number (01024066401) and stores one canonical value (+201024066401).
+        country = get_settings().default_country_code
+        guardian_phone = Phone.parse(
+            body.guardian_phone, default_country_code=country
+        )
         # A student number is an internal, immutable reference.  It is minted here so a
         # manager never has to guess the next number or coordinate with another desk.
         student_number = f"S-{uuid4().hex[:12].upper()}"
@@ -433,7 +459,7 @@ def admit_student(
             address=body.address,
         )
         guardian = Guardian(
-            phones=(body.guardian_phone,),
+            phones=(guardian_phone,),
             full_name_ar=body.guardian_full_name_ar,
             full_name_en=body.guardian_full_name_en,
         )
@@ -449,7 +475,7 @@ def admit_student(
             student_number=student.student_number,
             academic_year_code=body.academic_year_code,
             class_code=body.class_code,
-            starts_on=body.starts_on,
+            starts_on=academic_year.starts_on,
         )
         desk.create_family(student, guardian, link, placement)
     return StudentAdmissionOut(

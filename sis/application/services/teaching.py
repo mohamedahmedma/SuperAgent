@@ -247,6 +247,52 @@ class TeachingService:
                 ).all()
             )
 
+    def subject_codes_for_section(
+        self,
+        user_id: int | None,
+        *,
+        academic_year_code: str,
+        year_level_code: str,
+        class_code: str,
+    ) -> set[str] | None:
+        """Subject codes visible in a domain class section, which has no database id."""
+        if user_id is None:
+            return None
+        with self._uow_factory() as uow:
+            session = uow._session
+            teacher_id = session.scalar(
+                select(m.Teacher.id).where(m.Teacher.user_id == int(user_id))
+            )
+            if teacher_id is None:
+                return None
+            return set(
+                session.scalars(
+                    select(m.Subject.code)
+                    .join(
+                        m.TeacherClassSection,
+                        m.TeacherClassSection.subject_id == m.Subject.id,
+                    )
+                    .join(
+                        m.ClassSection,
+                        m.TeacherClassSection.class_section_id == m.ClassSection.id,
+                    )
+                    .join(
+                        m.AcademicYear,
+                        m.ClassSection.academic_year_id == m.AcademicYear.id,
+                    )
+                    .join(
+                        m.YearLevel,
+                        m.ClassSection.year_level_id == m.YearLevel.id,
+                    )
+                    .where(
+                        m.TeacherClassSection.teacher_id == teacher_id,
+                        m.AcademicYear.code == academic_year_code,
+                        m.YearLevel.code == year_level_code,
+                        m.ClassSection.code == class_code,
+                    )
+                ).all()
+            )
+
     # -- Internals ----------------------------------------------------------------
 
     @staticmethod
