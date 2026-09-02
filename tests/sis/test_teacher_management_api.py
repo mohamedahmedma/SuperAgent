@@ -11,6 +11,22 @@ def _save(client: TestClient, headers: dict[str, str], body: dict, staff: str = 
     return client.put(f"/v1/schools/{SCHOOL}/teachers/{staff}", json=body, headers=headers)
 
 
+def test_new_teacher_receives_a_system_generated_staff_reference(
+    client: TestClient, registrar: dict[str, str], school: None
+) -> None:
+    response = client.post(
+        f"/v1/schools/{SCHOOL}/teachers",
+        headers=registrar,
+        json={"full_name_en": "Generated Teacher", "full_name_ar": "معلم جديد"},
+    )
+    assert response.status_code == 201, response.text
+    staff_number = response.json()["staff_number"]
+    assert staff_number.startswith("T-")
+    assert client.get(
+        f"/v1/schools/{SCHOOL}/teachers/{staff_number}", headers=registrar
+    ).status_code == 200
+
+
 def test_teacher_may_hold_multiple_grades_tracks_and_classes(
     client: TestClient, registrar: dict[str, str], school: None
 ) -> None:

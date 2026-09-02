@@ -1,5 +1,6 @@
 """Teacher identity, optional account, and valid teaching assignments."""
 from datetime import UTC, date, datetime
+from uuid import uuid4
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -559,6 +560,40 @@ def save_teacher(school_code: str, staff_number: str, body: TeacherIn,
     caller.narrow(
         Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
     )
+    with domain_errors():
+        row = service.save(
+            school_code=SchoolCode(school_code), staff_number=staff_number,
+            full_name_en=body.full_name_en, full_name_ar=body.full_name_ar,
+            email=body.email, phone=body.phone, is_active=body.is_active,
+            username=body.username, password=body.password,
+            assignments=[(a.academic_year_code, a.subject_code, a.year_level_code, a.class_codes)
+                         for a in body.assignments], assigned_by=str(caller),
+        )
+    with uow_factory() as uow:
+        teacher = uow._session.scalar(select(m.Teacher).join(m.School).where(
+            m.School.code == school_code, m.Teacher.staff_number == staff_number
+        ))
+        if teacher is not None:
+            _sync_teacher_role_grants(uow._session, teacher, actor=caller.username)
+            uow.commit()
+    return TeacherOut.of(row)
+
+
+@router.post(
+    "/schools/{school_code}/teachers",
+    response_model=TeacherOut,
+    status_code=201,
+    summary="Create a teacher with a system-generated staff reference",
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+def create_teacher(
+    school_code: str, body: TeacherIn, service: Teachers,
+    caller: Managers, uow_factory: UowFactoryDep,
+) -> TeacherOut:
+    caller.narrow(
+        Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
+    )
+    staff_number = f"T-{uuid4().hex[:12].upper()}"
     with domain_errors():
         row = service.save(
             school_code=SchoolCode(school_code), staff_number=staff_number,

@@ -22,6 +22,39 @@
  * register. The English "rung" is this system's own coinage for a year-level; it is صف دراسي.
  */
 export const AR = {
+  'Admit a new student': 'إضافة طالب جديد',
+  'All student, guardian, grade and class fields are required.':
+    'يجب استكمال جميع بيانات الطالب وولي الأمر والصف والفصل.',
+  'Student information': 'بيانات الطالب',
+  'Guardian information': 'بيانات ولي الأمر',
+  'Guardian Arabic name': 'اسم ولي الأمر بالعربية',
+  'Guardian English name': 'اسم ولي الأمر بالإنجليزية',
+  'Guardian phone': 'هاتف ولي الأمر',
+  'Student phone': 'هاتف الطالب',
+  'Student email': 'البريد الإلكتروني للطالب',
+  'Gender': 'النوع',
+  'Male': 'ذكر',
+  'Female': 'أنثى',
+  'Date of birth': 'تاريخ الميلاد',
+  'Address': 'العنوان',
+  'Relationship': 'صلة القرابة',
+  'Relationship description': 'وصف صلة القرابة',
+  'Father': 'الأب',
+  'Mother': 'الأم',
+  'Guardian': 'ولي أمر',
+  'Sibling': 'أخ أو أخت',
+  'Grandparent': 'جد أو جدة',
+  'Other': 'أخرى',
+  'Placement': 'القيد الدراسي',
+  'Placement starts': 'تاريخ بداية القيد',
+  'Grade and class': 'الصف والفصل',
+  'Create student and guardian': 'إنشاء الطالب وولي الأمر',
+  'Student admitted successfully.': 'تم تسجيل الطالب بنجاح.',
+  'Student setup': 'إعداد الطالب',
+  'Create one complete student record with a guardian and first class placement.':
+    'أنشئ ملفًا كاملًا للطالب مع ولي الأمر وأول قيد في الفصل.',
+  'The student was added to class {0}.': 'تمت إضافة الطالب إلى الفصل {0}.',
+  'Teacher created with reference {0}.': 'تم إنشاء المعلّم بالرقم المرجعي {0}.',
   /* -- Signing in, and what a person's roles reach ---------------------------------
    *
    * صلاحية is the word an Egyptian school uses for a permission, and دور for a role. The
@@ -1089,6 +1122,8 @@ export const AR = {
   'Teacher configuration saved.': 'تم حفظ إعداد المعلّم.',
   'Assessment name': 'اسم التقييم',
   'Choose grade': 'اختر الصف',
+  'Choose a grade first.': 'اختر الصف أولًا.',
+  'Only classes in the selected grade are shown.': 'تظهر فصول الصف المحدد فقط.',
   'Choose stage': 'اختر المرحلة',
   'Choose subject': 'اختر المادة',
   'Create teacher': 'إنشاء معلّم',

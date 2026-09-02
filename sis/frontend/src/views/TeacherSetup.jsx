@@ -6,7 +6,7 @@ import { Button, Card, Empty, ErrorNote, Field, Input, NoYearNotice, PageHead, S
 import { t } from '../i18n.js';
 
 const blank = () => ({
-  staff_number: '', full_name_en: '', full_name_ar: '', email: '', phone: '',
+  full_name_en: '', full_name_ar: '', email: '', phone: '',
   username: '', password: '', is_active: true, assignments: []
 });
 
@@ -40,9 +40,6 @@ export function TeacherSetup() {
     .map((row) => (levelByCode[row.year_level_code] || {}).stage).filter(Boolean))];
   const filteredGrades = eligible.filter((row) => row.subject_code === chosenSubject &&
     (levelByCode[row.year_level_code] || {}).stage === chosenStage);
-  const duplicateStaffNumber = teachers.some((row) =>
-    row.staff_number.toLowerCase() === form.staff_number.trim().toLowerCase()
-  );
 
   useEffect(() => { setForm(blank()); setPair(''); }, [state.school, state.year]);
 
@@ -63,7 +60,7 @@ export function TeacherSetup() {
   const save = async () => {
     setSaving(true); setError(null);
     try {
-      await api.saveTeacher(state.school, form.staff_number.trim(), {
+      const created = await api.createTeacher(state.school, {
         full_name_en: form.full_name_en,
         full_name_ar: form.full_name_ar,
         email: form.email,
@@ -80,7 +77,8 @@ export function TeacherSetup() {
           class_codes: item.class_codes || []
         }))
       });
-      Store.toast(t('Teacher configuration saved.'), 'success');
+      Store.toast(t('Teacher created with reference {0}.', [created.staff_number]), 'success');
+      setForm(blank());
       data.reload();
     } catch (reason) { setError(reason); }
     finally { setSaving(false); }
@@ -96,15 +94,10 @@ export function TeacherSetup() {
     <div className="vstack gap-3">
       <Card title={t('New teacher account')}>
         <div className="row g-3 mt-1">
-          <Field className="col-12 col-md-4" label={t('Staff number')} required
-            hint={duplicateStaffNumber ? t('This staff number already belongs to another teacher.') : null}>
-            <Input value={form.staff_number}
-              onInput={(value) => setForm((old) => ({ ...old, staff_number: value }))} />
-          </Field>
-          <Field className="col-12 col-md-4" label={t('English name')}>
+          <Field className="col-12 col-md-6" label={t('English name')}>
             <Input value={form.full_name_en} onInput={(value) => setForm((old) => ({ ...old, full_name_en: value }))} />
           </Field>
-          <Field className="col-12 col-md-4" label={t('Arabic name')}>
+          <Field className="col-12 col-md-6" label={t('Arabic name')}>
             <Input value={form.full_name_ar} onInput={(value) => setForm((old) => ({ ...old, full_name_ar: value }))} />
           </Field>
           <Field className="col-12 col-md-6" label={t('Username')}>
@@ -148,7 +141,7 @@ export function TeacherSetup() {
       </Card>
       {error ? <ErrorNote error={error} /> : null}
       <div><Button variant="primary" pending={saving}
-        disabled={duplicateStaffNumber || !form.staff_number.trim() || (!form.full_name_en.trim() && !form.full_name_ar.trim())}
+        disabled={!form.full_name_en.trim() || !form.full_name_ar.trim()}
         onClick={save}>{t('Save teacher configuration')}</Button></div>
     </div>
   </>;

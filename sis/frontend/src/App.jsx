@@ -1,5 +1,5 @@
 /*
- * The shell: header, school strip, nav, view outlet, footer.
+ * The shell: header, school strip, nav, and view outlet.
  *
  * Built for a phone first, because that is where most of this console is read. The chrome is
  * three shallow rows rather than one wide one, and each row solves a different problem at
@@ -52,6 +52,7 @@ const ROUTE_PERMISSION = {
   class: 'structure.read',
   student: 'students.read',
   roster: 'students.write',
+  studentSetup: 'students.create',
   guardians: 'guardians.read',
   marks: 'grades.read',
   batches: 'imports.run',
@@ -69,6 +70,7 @@ const ROUTE_PERMISSION = {
 const NAV = [
   { name: 'school', label: 'School', icon: 'dashboard', roles: ['system_admin', 'school_owner', 'principal'] },
   { name: 'student', label: 'Find a child', icon: 'search' },
+  { name: 'studentSetup', label: 'Student setup', icon: 'people' },
   { name: 'roster', label: 'Roster', icon: 'upload' },
   { name: 'guardians', label: 'Guardians', icon: 'people' },
   { name: 'marks', label: 'Marks', icon: 'marks' },
@@ -562,7 +564,6 @@ export function App() {
           )}
         </div>
       </main>
-      <Footer />
       <Toasts />
       {/* Rendered last so its backdrop lies over the whole shell — including the header the
           button that opened it sits in. */}

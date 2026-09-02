@@ -16,10 +16,11 @@ That refusal is `QueryService`'s, not this router's — it is a rule, and rules 
 here.
 """
 from datetime import UTC, date, datetime
+from uuid import uuid4
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Query, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from sis.api.deps import (
@@ -38,6 +39,7 @@ from sis.api.routers import domain_errors, error_responses
 from sis.application.services import QueryService
 from sis.application.services.queries import ClassRosterEntry
 from sis.domain.errors import UnknownReference
+from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
 from sis.domain.people import ClassEnrolment, Gender, Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
 from sis.infrastructure.db import models as m
@@ -48,6 +50,9 @@ router = APIRouter(prefix="/v1", tags=["students"])
 # would refuse the registrar reading her own register.
 Reader = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_READ))]
 Registrar = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_WRITE))]
+AdmissionsManager = Annotated[
+    Principal, Depends(require_permission(Permission.STUDENTS_CREATE))
+]
 Queries = Annotated[QueryService, Depends(get_query_service)]
 Desk = Annotated[StudentDesk, Depends(get_student_desk)]
 
@@ -304,6 +309,45 @@ class PlacementHistoryOut(BaseModel):
     placements: list[PlacementOut]
 
 
+class StudentAdmissionIn(BaseModel):
+    """Every fact required to admit one child; no partial records are accepted."""
+
+    full_name_ar: str = Field(min_length=1)
+    full_name_en: str = Field(min_length=1)
+    gender: Gender
+    date_of_birth: date
+    contact_phone: str = Field(min_length=1)
+    contact_email: str = Field(min_length=1)
+    address: str = Field(min_length=1)
+    guardian_full_name_ar: str = Field(min_length=1)
+    guardian_full_name_en: str = Field(min_length=1)
+    guardian_phone: str = Field(min_length=1)
+    relationship_type: RelationshipType
+    relationship_label: str = Field(min_length=1)
+    academic_year_code: str = Field(min_length=1)
+    class_code: str = Field(min_length=1)
+    starts_on: date
+
+    @field_validator(
+        "full_name_ar", "full_name_en", "contact_phone",
+        "contact_email", "address", "guardian_full_name_ar",
+        "guardian_full_name_en", "guardian_phone", "relationship_label",
+        "academic_year_code", "class_code",
+    )
+    @classmethod
+    def no_blank_fields(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("this field is required")
+        return cleaned
+
+
+class StudentAdmissionOut(BaseModel):
+    student: StudentOut
+    placement: PlacementOut
+    guardian_phone: str
+
+
 @router.get(
     "/students",
     response_model=StudentSearchOut,
@@ -355,6 +399,63 @@ def search_students(
         found = [student for student in found if str(student.student_number) in allowed]
     return StudentSearchOut(
         query=q, count=len(found), students=[StudentOut.of(s) for s in found]
+    )
+
+
+@router.post(
+    "/students/admissions",
+    response_model=StudentAdmissionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Admit one child with a complete family record",
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+def admit_student(
+    body: StudentAdmissionIn, desk: Desk, caller: AdmissionsManager
+) -> StudentAdmissionOut:
+    caller.narrow(
+        Permission.STUDENTS_CREATE,
+        lambda scopes: scopes.for_class(
+            academic_year_code=body.academic_year_code, class_code=body.class_code
+        ),
+    )
+    with domain_errors():
+        # A student number is an internal, immutable reference.  It is minted here so a
+        # manager never has to guess the next number or coordinate with another desk.
+        student_number = f"S-{uuid4().hex[:12].upper()}"
+        student = Student(
+            student_number=student_number,
+            full_name_ar=body.full_name_ar,
+            full_name_en=body.full_name_en,
+            gender=body.gender,
+            date_of_birth=body.date_of_birth,
+            contact_phone=body.contact_phone,
+            contact_email=body.contact_email,
+            address=body.address,
+        )
+        guardian = Guardian(
+            phones=(body.guardian_phone,),
+            full_name_ar=body.guardian_full_name_ar,
+            full_name_en=body.guardian_full_name_en,
+        )
+        link = StudentGuardian(
+            student_number=student.student_number,
+            guardian_phone=guardian.primary_phone,
+            relationship_type=body.relationship_type,
+            relationship_label=body.relationship_label,
+            is_primary_contact=True,
+            can_view_records=True,
+        )
+        placement = ClassEnrolment(
+            student_number=student.student_number,
+            academic_year_code=body.academic_year_code,
+            class_code=body.class_code,
+            starts_on=body.starts_on,
+        )
+        desk.create_family(student, guardian, link, placement)
+    return StudentAdmissionOut(
+        student=StudentOut.of(student),
+        placement=PlacementOut.of(placement),
+        guardian_phone=str(guardian.primary_phone),
     )
 
 

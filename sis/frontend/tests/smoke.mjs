@@ -142,7 +142,7 @@ function newWindow(script, language = 'en', session = '') {
     if (session === 'smoke-admin' && method === 'GET' && url.includes('/v1/auth/me')) {
       payload = JSON.parse(JSON.stringify(payload));
       const permissions = [
-        'structure.read', 'students.read', 'students.write', 'guardians.read',
+        'structure.read', 'students.read', 'students.create', 'students.write', 'guardians.read',
         'grades.read', 'grades.write', 'imports.run', 'roles.assign', 'users.read',
         'teachers.read', 'teachers.assign_subjects', 'teachers.assign_classes',
         'attendance.read', 'attendance.write', 'timetable.read', 'timetable.write'
@@ -207,6 +207,7 @@ const SCREENS = [
   { hash: '#/student?number=10432', expect: ['Layla Hassan', 'Insights', '10432'] },
   { hash: '#/student', expect: ['Find a child'] },
   { hash: '#/roster', expect: ['roster'] },
+  { hash: '#/studentSetup', expect: ['Student setup', 'Create student and guardian'] },
   { hash: '#/guardians', expect: ['Guardians'] },
   { hash: '#/marks', expect: ['Marks'] },
   { hash: '#/batches', expect: ['Batches'] },
