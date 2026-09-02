@@ -90,7 +90,8 @@ def cmd_portfolio(args: argparse.Namespace) -> int:
 
 def cmd_arabic_showcase(args: argparse.Namespace) -> int:
     """Add the large Arabic sales school without touching existing schools."""
-    seeder.guard_environment(allow_remote=args.allow_remote)
+    if not args.confirm_production_showcase:
+        seeder.guard_environment(allow_remote=args.allow_remote)
     from sis.demo.arabic_showcase import load
 
     with seeder.open_session(args.school) as session:
@@ -236,9 +237,15 @@ def main(argv: list[str] | None = None) -> int:
         "portfolio", help="write the three populated sales-demo schools into an empty database"
     ).set_defaults(handler=cmd_portfolio)
 
-    sub.add_parser(
+    arabic_showcase = sub.add_parser(
         "arabic-showcase", help="add the large Arabic client-presentation school"
-    ).set_defaults(handler=cmd_arabic_showcase)
+    )
+    arabic_showcase.add_argument(
+        "--confirm-production-showcase",
+        action="store_true",
+        help="explicitly approve adding this fictional presentation school to production",
+    )
+    arabic_showcase.set_defaults(handler=cmd_arabic_showcase)
     sub.add_parser(
         "validate-arabic-showcase", help="verify presentation-critical Arabic showcase facts"
     ).set_defaults(handler=cmd_validate_arabic_showcase)
