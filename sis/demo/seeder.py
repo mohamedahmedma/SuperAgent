@@ -35,7 +35,7 @@ import os
 import random
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -156,6 +156,8 @@ class Counts:
     teacher_class_sections: int = 0
     attendance: int = 0
     grades: int = 0
+    timetable_periods: int = 0
+    timetable_entries: int = 0
 
     def as_lines(self) -> list[str]:
         return [
@@ -474,6 +476,7 @@ def load(session: Session, counts: Counts | None = None) -> Counts:
     _load_students(session, built, counts, now)
     _load_accounts(session, built, counts, now)
     _load_teaching(session, built, counts, now)
+    _load_timetable(session, built, counts, now)
     _load_registers(session, built, counts, now)
     _load_marks(session, built, counts, now)
     _ensure_system_status(session, now)
@@ -1022,6 +1025,53 @@ def _load_teaching(session: Session, built: _Built, counts: Counts, now: datetim
                 )
             )
             counts.teacher_class_sections += 1
+
+
+def _load_timetable(session: Session, built: _Built, counts: Counts, now: datetime) -> None:
+    """A populated week for every demo room, ready for the timetable screen.
+
+    Seven visible rows include a real break at period four. Lessons rotate through only
+    the subjects assigned to that room's rung, so every seeded entry obeys the same
+    curriculum rule as a lesson placed through the API.
+    """
+    bells = (
+        (1, "Period 1", "الحصة الأولى", time(8, 0), time(8, 45), True),
+        (2, "Period 2", "الحصة الثانية", time(8, 50), time(9, 35), True),
+        (3, "Period 3", "الحصة الثالثة", time(9, 40), time(10, 25), True),
+        (4, "Break", "الفسحة", time(10, 25), time(10, 50), False),
+        (5, "Period 4", "الحصة الرابعة", time(10, 50), time(11, 35), True),
+        (6, "Period 5", "الحصة الخامسة", time(11, 40), time(12, 25), True),
+        (7, "Period 6", "الحصة السادسة", time(12, 30), time(13, 15), True),
+    )
+    for number, name_en, name_ar, starts, ends, teaching in bells:
+        session.add(m.TimetablePeriod(
+            school_id=built.school_id, period_number=number, name_en=name_en,
+            name_ar=name_ar, starts_at=starts, ends_at=ends, is_teaching=teaching,
+            created_at=now, updated_at=now,
+        ))
+        counts.timetable_periods += 1
+
+    rung_by_room = {
+        bp.room_ref(rung.code, label_en): rung
+        for rung in bp.RUNGS
+        for _, label_en, _ in rung.rooms
+    }
+    days = ("sunday", "monday", "tuesday", "wednesday", "thursday")
+    teaching_periods = (1, 2, 3, 5, 6, 7)
+    term_id = built.terms[bp.TERMS[0].code]
+    for room_key, room_id in built.rooms.items():
+        rung = rung_by_room[room_key]
+        subjects = _SUBJECTS_BY_DEPTH[_depth_for(rung.grade_number, rung.stage.value)]
+        for day_index, day in enumerate(days):
+            for period_index, period_number in enumerate(teaching_periods):
+                subject_code = subjects[(day_index + period_index) % len(subjects)]
+                session.add(m.TimetableEntry(
+                    class_section_id=room_id, academic_year_id=built.year_id,
+                    term_id=term_id, day_of_week=day, period_number=period_number,
+                    subject_id=built.subjects[subject_code], teacher_id=None,
+                    created_at=now, updated_at=now,
+                ))
+                counts.timetable_entries += 1
 
 
 def _load_registers(session: Session, built: _Built, counts: Counts, now: datetime) -> None:
