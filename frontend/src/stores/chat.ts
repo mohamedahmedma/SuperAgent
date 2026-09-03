@@ -537,6 +537,18 @@ export const useChatStore = defineStore('chat', {
                     continue;
                   }
                   botMsg.text += data.content;
+                } else if (data.type === 'content_replace') {
+                  // The answer was streamed and then failed verification against the
+                  // evidence it claimed. Assignment, not append: the reader has already
+                  // seen the figure, and adding a correction below it would leave the
+                  // unverified number on screen next to the retraction.
+                  const botMsg = requestMessages[botMsgIdx];
+                  if (!botMsg) continue;
+                  botMsg.isThinking = false;
+                  if (botMsg.isHitlRequest) {
+                    continue;
+                  }
+                  botMsg.text = data.content;
                 } else if (data.type === 'assets') {
                   // Its own event, ahead of the trace, so images can render without
                   // depending on the trace payload's shape.

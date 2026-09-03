@@ -23,6 +23,7 @@ from backend.rag.rerank_assessor import CrossEncoderAssessor
 from backend.assets.vision import call_with_rate_limit_retry
 from backend.profiles import get_profile
 from backend.schemas.chat import HitlResumeState, normalize_rag_sub_trace
+from backend.text_normalization import normalize_query
 from backend.rag.utils import (
     RETRIEVAL_TOP_K,
     retrieve_documents,
@@ -229,7 +230,11 @@ class RAGState(TypedDict):
     # uploaded in both Arabic and English, retrieval answers from the half that matches
     # the question rather than letting both compete. Empty searches everything, which is
     # also what an unpaired corpus does — see rag/utils.language_filter_clause.
-    language: Optional[str]
+    # The year group the school's records put this turn's child in. Beside the question,
+    # never appended to it: a year group is absent from every passage the corpus wrote
+    # once for everybody, so stapling it to the query dilutes recall exactly as carried
+    # conditions did. It reaches the grader and the answer prompt instead.
+    child_year: Optional[str]
 
 
 def _format_docs(docs: List[dict]) -> str:
@@ -384,7 +389,28 @@ def _initial_state(
         "carried_constraints": list(getattr(ctx, "carried_constraints", None) or []),
         "is_followup": bool(getattr(ctx, "is_followup", False)),
         "language": str(getattr(ctx, "language", "") or ""),
+        "child_year": str(getattr(ctx, "child_year", "") or ""),
     }
+
+
+def grading_conditions(state) -> List[str]:
+    """Every condition the grader should judge the material against.
+
+    The child's year joins the conditions the user set rather than getting a channel of
+    its own, because the question being asked of the grader is the same for both: does
+    this material give different answers depending on them? A fee table does; a document
+    list written once for everybody does not, and that verdict is what stops a general
+    rule being withheld from a parent whose child is in Year 1.
+
+    Its wording says where it came from. The grader is not told the user set it, because
+    the user did not — the roster did, and a condition that misreports its own source is
+    the fabricated-provenance pattern `backend/rag/evidence.py` exists to prevent.
+    """
+    conditions = list(state.get("carried_constraints") or [])
+    year = str(state.get("child_year") or "").strip()
+    if year:
+        conditions.append(_RAG.child_year_condition.format(year=year))
+    return conditions
 
 
 def _search_query(state: RAGState) -> str:
@@ -610,7 +636,7 @@ def _assess_evidence(state: RAGState) -> EvidenceReport:
             docs=docs,
             retrieval_meta=state.get("rag_trace") or {},
             config=_RAG,
-            constraints=list(state.get("carried_constraints") or []),
+            constraints=grading_conditions(state),
         )
     )
 
@@ -1454,7 +1480,36 @@ def resume_rag_from_hitl(
 
 
 def run_rag_graph(question: str, ctx: ChatRequestContext) -> dict:
+    """Run the graph for `question`, or hand back this turn's answer for it.
+
+    The memo is the graph's own half of the duplicate-call fix. Middleware collapses the
+    copies the model emits in one message (`backend/chat/runtime.py`), which is where
+    almost all of them come from — but it can only see one message at a time, and the
+    model also re-asks the identical question on a LATER step of the same turn, after
+    the first result is already in its context. That one arrives here.
+
+    Re-running would not just be slow. Every pass pays an embedding, a hybrid recall, a
+    rerank and an LLM grading call, and because grading is a model call it is not
+    deterministic: the same query graded twice can come back `partial` once and
+    `no_knowledge` the next, so the turn's behaviour would depend on which copy landed
+    last. Answering the second ask from the first result makes a repeated question
+    boring rather than expensive, which is what it should be.
+
+    Scoped to the turn — see `ChatRequestContext.remember_retrieval`. Sub-questions do
+    not come through here (they are dispatched to `rag_sub_agent` by `Send`), so a
+    decomposed question still searches each of its parts properly.
+    """
+    key = normalize_query(question or "")
+    cached = ctx.remembered_retrieval(key) if ctx is not None else None
+    if cached is not None:
+        logger.info("retrieval memo hit; not re-running the graph for an identical query")
+        # Shallow copy so a caller stamping a key onto its result — `hitl_resume_state`
+        # below does exactly that — cannot write into what the next caller reads.
+        return dict(cached)
+
     result = rag_graph.invoke(_initial_state(question, ctx))
     if _is_hitl_result(result):
         result["hitl_resume_state"] = _build_hitl_resume_state(result)
+    if ctx is not None:
+        ctx.remember_retrieval(key, result)
     return result

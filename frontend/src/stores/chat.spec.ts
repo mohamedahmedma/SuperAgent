@@ -390,6 +390,58 @@ describe('chat store streaming sessions', () => {
       hitlResumeText: 'Danjin',
     });
   });
+
+  // An answer can be streamed and then fail verification against the evidence it
+  // claimed — a fee figure that is in none of the retrieved chunks. The server sends
+  // `content_replace`, and the whole point is that it REPLACES: a correction appended
+  // underneath would leave the unverified number on screen next to the retraction,
+  // which is worse than either alone.
+  it('replaces a streamed answer when the server retracts an unverified figure', async () => {
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+
+    const { chatStore } = setupStores();
+    chatStore.userInput = 'مصاريف ابني كام';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+
+    stream.pushEvent({ type: 'content', content: 'مصاريف ابنك 45 ألف جنيه' });
+    await flushPromises();
+    expect(chatStore.messagesBySession.session_current[1]).toMatchObject({
+      text: 'مصاريف ابنك 45 ألف جنيه',
+    });
+
+    stream.pushEvent({
+      type: 'content_replace',
+      content: 'معلش، مقدرتش أتأكد من الأرقام دي من مستندات المدرسة.',
+    });
+    stream.close();
+    await sendPromise;
+
+    const bubble = chatStore.messagesBySession.session_current[1];
+    expect(bubble.text).toBe('معلش، مقدرتش أتأكد من الأرقام دي من مستندات المدرسة.');
+    expect(bubble.text).not.toContain('45');
+    expect(bubble.isThinking).toBe(false);
+  });
+
+  it('leaves a clean answer alone when no retraction arrives', async () => {
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+
+    const { chatStore } = setupStores();
+    chatStore.userInput = 'مصاريف ابني كام';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+
+    stream.pushEvent({ type: 'content', content: 'رسوم الصف الأول ' });
+    stream.pushEvent({ type: 'content', content: '30,000 جنيه. [1]' });
+    stream.close();
+    await sendPromise;
+
+    expect(chatStore.messagesBySession.session_current[1].text).toBe(
+      'رسوم الصف الأول 30,000 جنيه. [1]',
+    );
+  });
 });
 
 describe('chat store conversation paging', () => {

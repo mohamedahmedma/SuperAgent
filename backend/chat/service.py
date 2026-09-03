@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -25,6 +26,7 @@ from backend.chat.assets_bridge import (
 )
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.child_context import load_child_state, save_child_state
+from backend.chat.finalize import Finalizer, finalize_text, message_text
 from backend.chat.orchestrator import plan_turn, resolve_turn_question
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import ResolvedQuestion, conversation_text
@@ -33,6 +35,9 @@ from backend.chat.storage import storage
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
 from backend.schemas.chat import PendingHitlState, normalize_rag_trace
+from backend.tools import GROUNDED_TOOLS
+
+logger = logging.getLogger(__name__)
 
 _PROFILE = get_profile()
 _COPY = _PROFILE.user_copy
@@ -229,18 +234,15 @@ def _pending_resume_state(pending_hitl: dict | None) -> dict | None:
 
 
 def _extract_ai_content(msg) -> str:
-    content = getattr(msg, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        text = ""
-        for block in content:
-            if isinstance(block, str):
-                text += block
-            elif isinstance(block, dict) and block.get("type") == "text":
-                text += block.get("text", "")
-        return text
-    return str(content or "")
+    """The text of a model message, as a user may see it.
+
+    Reading the content and cleaning it are one step on purpose. This function is the
+    only way a direct `model.invoke`/`model.astream` result becomes a string in this
+    module, so putting the transcript strip anywhere else would leave the paths that
+    bypass the agent — the HITL resume answer, the persistent note — able to put a raw
+    Harmony envelope in front of a user. See `backend/chat/finalize.py`.
+    """
+    return finalize_text(message_text(msg))
 
 
 def _format_retrieved_chunks(docs: list[dict]) -> str:
@@ -382,6 +384,102 @@ def _no_knowledge_response() -> str:
 
 def _retrieval_error_response() -> str:
     return _COPY.retrieval_error
+
+
+def _turn_is_asking_a_question(ctx) -> bool:
+    """Whether retrieval has decided this turn ends in a question, not an answer.
+
+    Read from the live trace rather than passed in, because the decision is made by the
+    knowledge tool part-way through the turn — after the stream has already started.
+    Named because two places have to consult it and a copy of the lookup in each is how
+    they come apart: the second one did, and a clarification prompt was shown twice.
+    """
+    stored = ctx.peek_rag_trace()
+    return _is_hitl_trace(
+        normalize_rag_trace(stored.get("rag_trace") if stored else None)
+    )
+
+
+def _evidence_texts(rag_trace: dict | None) -> list:
+    """The text of every chunk this turn retrieved, as the grounding check reads it."""
+    chunks = (rag_trace or {}).get("retrieved_chunks") or []
+    return [
+        str(chunk.get("text") or "")
+        for chunk in chunks
+        if isinstance(chunk, dict) and chunk.get("text")
+    ]
+
+
+def _grounding_expected(turn_plan) -> bool:
+    """Whether this turn is one whose figures have to come from somewhere.
+
+    A turn that bound a grounded tool is answerable from evidence, so a figure in its
+    answer is a claim about that evidence. A social reply or an out-of-domain refusal
+    bound nothing to cite, never claimed to, and must not be checked as though it had —
+    that is how a check earns the right to be enforced rather than merely observed.
+    """
+    exposed = getattr(turn_plan, "exposed_tools", None)
+    bound = _PROFILE.agent.tools if exposed is None else exposed
+    return bool(set(bound) & GROUNDED_TOOLS)
+
+
+def _nothing_usable_reply(finalizer: Finalizer, turn_plan) -> str:
+    """Copy for a turn whose model output contained no answer at all.
+
+    Measured on the live provider: on one turn in three the model emitted a transcript —
+    reasoning plus a fabricated tool call — and never opened a final channel. The
+    finalizer correctly withholds all of it, and the turn then had nothing to say, so
+    the parent got an empty bubble. Suppressing a non-answer is right; showing nothing
+    in its place is not.
+
+    `retrieval_error` is the honest copy for it. The knowledge base was fine — the
+    model's reply was unusable — and what that copy tells a parent is exactly what this
+    situation warrants: a brief technical problem, try again in a moment. Inventing a
+    cheerier message would be claiming to know something about a turn that produced no
+    information at all.
+
+    Returns "" when the turn legitimately had nothing to say — a social reply that was
+    short-circuited, or a plan that answered without the model — so this never
+    manufactures an error out of a quiet success.
+    """
+    if turn_plan is not None and getattr(turn_plan, "short_circuit", False):
+        return ""
+    # Only when the finalizer actually withheld something. A model that returned an
+    # empty string on its own is a different fault and not one this copy describes.
+    trace = finalizer.as_trace()
+    withheld = (
+        trace.get("finalize_dropped_tool_call_messages")
+        or trace.get("finalize_harmony_messages")
+        or trace.get("finalize_dropped_chars")
+    )
+    if not withheld:
+        return ""
+    logger.warning(
+        "the model produced no answer channel this turn; serving the retry copy"
+    )
+    return _COPY.retrieval_error
+
+
+def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan) -> str:
+    """Verify the assembled answer; return replacement copy when it must not stand.
+
+    Returns "" when the answer is fine, when the check is off, or when this turn is not
+    one the check applies to. The verdict is recorded on the finalizer either way, so
+    `observe` mode produces the same trace as `enforce` and a deployment can measure the
+    check against its own corpus before letting it act.
+    """
+    mode = _PROFILE.agent.answer_grounding_mode
+    if mode == "off" or not (finalizer.answer or "").strip():
+        return ""
+    if not _grounding_expected(turn_plan):
+        return ""
+    report = finalizer.verify(
+        _evidence_texts(rag_trace),
+        floor=_PROFILE.agent.answer_grounding_number_floor,
+    )
+    if report.ok or mode != "enforce":
+        return ""
+    return _COPY.unverified_answer
 
 
 def _resume_rag_from_hitl_sync(
@@ -680,16 +778,28 @@ def chat_with_agent(
                 response_content = ""
                 if isinstance(result, dict):
                     if "output" in result:
-                        response_content = result["output"]
+                        response_content = str(result["output"])
                     elif "messages" in result and result["messages"]:
-                        msg = result["messages"][-1]
-                        response_content = getattr(msg, "content", str(msg))
+                        response_content = message_text(result["messages"][-1])
                     else:
                         response_content = str(result)
                 elif hasattr(result, "content"):
-                    response_content = result.content
+                    response_content = message_text(result)
                 else:
                     response_content = str(result)
+                # Same rules as the streamed path. The agent loop has ended, so the last
+                # message answered rather than called a tool — but it may still be
+                # wearing its transcript. See `backend/chat/finalize.py`.
+                raw_response = response_content
+                response_content = finalize_text(response_content)
+                if raw_response.strip() and not response_content.strip():
+                    # Everything the model said was transcript and none of it was an
+                    # answer. The streamed path reaches this through the finalizer's
+                    # counters; here the comparison IS the signal.
+                    logger.warning(
+                        "the model produced no answer channel this turn; serving the retry copy"
+                    )
+                    response_content = _COPY.retrieval_error
 
                 stored_trace = ctx.take_rag_trace()
                 rag_trace = normalize_rag_trace(stored_trace.get("rag_trace") if stored_trace else None)
@@ -706,6 +816,18 @@ def chat_with_agent(
                         next_pending_hitl["prompt"],
                         next_pending_hitl["options"],
                     )
+                else:
+                    # Same check the streamed path runs, and it has to be here too: this
+                    # path serves the same answers to the same parents, and a rule that
+                    # holds on one of two entry points is not a rule.
+                    sync_finalizer = Finalizer()
+                    sync_finalizer.replace_answer(response_content)
+                    replacement = _enforce_grounding(sync_finalizer, rag_trace, turn_plan)
+                    if replacement:
+                        response_content = replacement
+                    sync_finalizer.log_summary()
+                    if rag_trace:
+                        rag_trace.update(sync_finalizer.as_trace())
 
         # Assets this turn surfaced, rendered for whatever the caller can display.
         capabilities = effective_capabilities(client_capabilities, _PROFILE.assets.delivery)
@@ -966,6 +1088,11 @@ async def chat_with_agent_stream(
 
         full_response = ""
         agent_error = None
+        # Every chunk the model produces crosses this, and nothing reaches the browser
+        # that it did not return. Held out here rather than inside the worker because
+        # the grounding check below needs it once the stream has finished — see
+        # `backend/chat/finalize.py`.
+        finalizer = Finalizer()
 
         async def _agent_worker():
             nonlocal full_response, agent_error
@@ -976,31 +1103,35 @@ async def chat_with_agent_stream(
                     config={"recursion_limit": _PROFILE.agent.recursion_limit},
                 ):
                     if isinstance(msg, ToolMessage):
+                        finalizer.note_tool_result(msg)
                         continue
                     if not isinstance(msg, AIMessageChunk):
                         continue
-                    if getattr(msg, "tool_call_chunks", None):
-                        continue
 
-                    content = ""
-                    if isinstance(msg.content, str):
-                        content = msg.content
-                    elif isinstance(msg.content, list):
-                        for block in msg.content:
-                            if isinstance(block, str):
-                                content += block
-                            elif isinstance(block, dict) and block.get("type") == "text":
-                                content += block.get("text", "")
-
-                    if content:
-                        stored_trace = ctx.peek_rag_trace()
-                        rag_trace = normalize_rag_trace(
-                            stored_trace.get("rag_trace") if stored_trace else None
-                        )
-                        if _is_hitl_trace(rag_trace):
-                            continue
+                    # Not `continue`-d on a tool-call chunk any more: the model's prose
+                    # arrives in DIFFERENT chunks of the same message, so skipping only
+                    # the chunks carrying a tool-call delta forwarded all of it. The
+                    # finalizer suppresses by message, which is the unit the rule is
+                    # actually about.
+                    content = finalizer.consider(msg)
+                    if content and not _turn_is_asking_a_question(ctx):
                         full_response += content
                         await output_queue.put({"type": "content", "content": content})
+
+                # The last message is only known to be over once the stream ends, so
+                # whatever it was still holding is released here.
+                #
+                # Through the SAME gate as the chunks above, and that is not belt and
+                # braces: the finalizer holds the opening of a message until it can rule
+                # out a transcript header, so a reply SHORTER than that hold never takes
+                # the streaming path at all and arrives entirely as this tail. A
+                # clarification prompt is exactly that short, and it reaches the user as
+                # a `hitl_request` event — putting it on the wire as content too showed
+                # it twice.
+                tail = finalizer.finish()
+                if tail and not _turn_is_asking_a_question(ctx):
+                    full_response += tail
+                    await output_queue.put({"type": "content", "content": tail})
             except Exception as e:
                 agent_error = str(e)
                 await output_queue.put({"type": "error", "content": str(e)})
@@ -1050,6 +1181,18 @@ async def chat_with_agent_stream(
                 next_pending_hitl["prompt"],
                 next_pending_hitl["options"],
             )
+        else:
+            # The answer is settled and the evidence is in hand, so this is the first
+            # moment the two can be compared. A failure replaces what was streamed
+            # rather than appending to it: the reader has already seen the figure, and
+            # a correction underneath it would leave both on screen.
+            replacement = _enforce_grounding(finalizer, rag_trace, turn_plan)
+            if not replacement and not full_response.strip():
+                replacement = _nothing_usable_reply(finalizer, turn_plan)
+            if replacement:
+                full_response = finalizer.replace_answer(replacement)
+                yield f"data: {json.dumps({'type': 'content_replace', 'content': replacement})}\n\n"
+            finalizer.log_summary()
 
         asset_references = build_asset_references(
             asset_ids_for_answer(full_response, ctx, rag_trace, _PROFILE.assets.delivery),
@@ -1063,6 +1206,12 @@ async def chat_with_agent_stream(
             ]
             yield f"data: {json.dumps({'type': 'assets', 'assets': payload})}\n\n"
         rag_trace = attach_assets_to_trace(rag_trace, asset_references)
+        if rag_trace:
+            # What the finalize stage withheld, and what it made of the answer. Recorded
+            # on every turn it ran, not only the failing ones: "nothing was dropped" and
+            # "the stage never ran" are different facts, and a provider switch is
+            # exactly when telling them apart matters.
+            rag_trace.update(finalizer.as_trace())
 
         if rag_trace:
             yield f"data: {json.dumps({'type': 'trace', 'rag_trace': rag_trace})}\n\n"

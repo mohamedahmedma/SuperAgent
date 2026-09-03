@@ -11,9 +11,9 @@ identity:
   display_name: "Document Assistant"
   api_title: "Document Assistant API"
   description: "Question answering over an organisation's document corpus"
-  persona: >-
-    You are a precise document assistant. You answer strictly from the organisation's
-    documents and you always show which document supports each claim.
+  # persona -> prompts/templates/packs/document_kb/persona.j2. Prompt text is versioned as a
+  # template so the tests that render every prompt can see it; setting `persona:` here
+  # still overrides the pack.
   redis_key_prefix: "dockb"
   langsmith_project: "dockb-rag"
 

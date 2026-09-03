@@ -23,18 +23,9 @@ identity:
   display_name: "مساعد المدرسة"
   api_title: "School Assistant API"
   description: "Answers parents about school information and their own child's records"
-  # Injected verbatim as {persona}. Two rules earn their place here rather than in a
-  # tool result, because they hold on every turn regardless of what any tool returned:
-  # answer in the parent's language, and never invent a figure about a child.
-  persona: >-
-    You are the school's assistant, helping parents and guardians. You reply in the
-    language the parent wrote in — Arabic when they write Arabic — and you keep
-    answers short, warm and practical. When a parent asks about their own child's
-    grades, attendance or report card, you look the answer up rather than recalling
-    it. You never state, estimate or guess a mark, an average or an attendance figure:
-    if the records cannot be reached, you say so plainly and suggest trying again
-    shortly. For anything you cannot do — changing a record, arranging a meeting — you
-    point the parent to the school office.
+  # persona lives in prompts/templates/packs/school/persona.j2 — see the `agent` section
+  # below for why prompt text left this file. Setting `persona:` here still overrides
+  # the pack, for a deployment that would rather keep its voice in one YAML.
   redis_key_prefix: "school"
   langsmith_project: "school-assistant"
 
@@ -51,47 +42,30 @@ agent:
     - view_figure
     - get_student_records
 
-  # Register and dialect, set here rather than in `identity.persona` because persona is
-  # ALSO rendered into the classifier prompts (request_envelope, resolve_question,
-  # scope_check, section_summary, corpus_digest). Style examples there would be billed
-  # on every classifier call and shown to a node explicitly told it never talks to the
-  # user. `system_prompt` reaches the agent and nothing else.
+  # PROMPT TEXT LIVES IN prompts/templates/packs/school/, not here.
   #
-  # THE COST OF SETTING THIS: schema.render_system_prompt returns this string verbatim
-  # and composes nothing, so agent/system.j2 — including agent/_grounding.j2 — is
-  # bypassed. The three grounding rules below are copied from that fragment and must
-  # stay in step with it: asset attribution parses [n] out of the answer, so dropping
-  # the citation line silently breaks figure delivery, not just provenance.
+  # A profile answers "what is this deployment"; a prompt answers "how does the system
+  # talk". Only the first is something a domain owner should have to write, and mixing
+  # them cost real money once: a worked example carrying a real grade and a real fee was
+  # reproduced verbatim by the model — as its answer, and as its search query — on
+  # accounts with no child on file. Prose that the model reads is now versioned as
+  # templates, where the tests that render every prompt can see it.
   #
-  # Written in Arabic on purpose. An English instruction to "reply in Egyptian Arabic"
-  # barely moves a 20B English-centric model's output distribution; the same instruction
-  # in Arabic anchors it. The worked examples are there for the same reason — register
-  # is imitative, and a small model cannot instantiate "friendly semi-formal" from the
-  # adjectives alone. حضرتك is the marker doing most of the work: respectful without
-  # being stiff, which is exactly the target.
+  #   identity.persona     -> packs/school/persona.j2
+  #   system_prompt        -> packs/school/system.j2
+  #   arabic_style_prompt  -> packs/school/arabic_style.j2
   #
-  # BUDGETED AT 500 TOKENS, rendered, and that ceiling is enforced by
-  # test_prompt_budget.py rather than left to whoever edits this next. It is paid on
-  # every single turn, and Arabic costs roughly three tokens a word on this tokenizer,
-  # so prose here is several times more expensive than it looks — the first draft came
-  # to 588. What survived the trim is what a small model actually acts on: the register
-  # written in Arabic, the use/avoid word lists, ONE three-way contrast (small models
-  # overshoot in one direction, and the contrast is what stops it), and TWO worked
-  # examples. Descriptions of the tone were cut first; they were the part the model
-  # could not use.
-  system_prompt: |
-    {persona}
-
-    {language_directive}
-
-    Search once, then answer from what comes back.
-
-    Grounding rules:
-    - Base every factual claim on the retrieved chunks.
-    - Cite the chunk behind each claim inline by its index: [1], or [2][3].
-    - Say plainly when the retrieved context does not answer the question.
-
-    Keep answers to a few short paragraphs or a bulleted list. Markdown is supported.
+  # Each is loaded at profile load by registry._apply_prompt_packs. Setting any of them
+  # here still wins, so a deployment can pin a prompt in YAML without moving the file.
+  #
+  # Register belongs in `system_prompt`/`arabic_style_prompt` rather than in
+  # `identity.persona` because persona is ALSO rendered into five classifier prompts
+  # (request_envelope, resolve_question, scope_check, section_summary, corpus_digest).
+  # Style examples there would be billed on every classifier call and shown to a node
+  # explicitly told it never talks to the user.
+  #
+  # BUDGETED AT 500 TOKENS rendered, enforced by test_prompt_budget.py. It is paid on
+  # every single turn, and Arabic costs roughly three tokens a word on this tokenizer.
 
   # A school serves parents who write Arabic or English and nobody else, so both can be
   # named outright. The global map names only Arabic, on the grounds that `en` is what
@@ -103,26 +77,8 @@ agent:
     ar: Arabic
     en: English
 
-  # Appended only when the turn is being answered in ARABIC. An English turn renders
-  # none of it — 203 tokens instead of 459 — and never carries a register it cannot
-  # use. See AgentConfig.arabic_style_prompt.
-  arabic_style_prompt: |
-    الرد يبقى مصري مهذّب:
-    استخدم: حضرتك، عايز/عايزة، إيه، إمتى، كام، دلوقتي، ممكن، تمام.
-    بلاش فصحى رسمية (يُرجى، نُحيطكم علماً، ماذا، متى، كم) وبلاش عامية زيادة (يا باشا، خالص كده).
-
-      رسمي زيادة: «يُرجى مراجعة إدارة المدرسة»
-      عامي زيادة: «يا باشا كلم المدرسة»
-      المطلوب:    «كلّم حضرتك مكتب المدرسة وهما هيساعدوك»
-
-      «المصاريف كام للصف الرابع؟»
-      «مصاريف الصف الرابع 45 ألف جنيه على تلات دفعات. لو حضرتك عايزة المواعيد أقولك. [1]»
-
-      «ممكن أقابل المس بتاعته؟»
-      «المقابلات بتتنظم عن طريق مكتب المدرسة — كلّم حضرتك المكتب وهما هيحددوا ميعاد. [2]»
-
-    الأرقام والتواريخ والمبالغ زي ما هي في المصدر بالظبط — العامية في الأسلوب مش في المعلومة.
-    خلي كل الرد بنفس الأسلوب ده، مش أول جملة بس.
+  # arabic_style_prompt -> packs/school/arabic_style.j2. Appended only when the turn is
+  # answered in ARABIC: an English turn renders none of it — 203 tokens instead of 459.
 
   # Replaces base's list rather than adding to it, so this is the whole set.
   #
@@ -236,6 +192,12 @@ agent:
   # ChatRequestContext.acquire_records_tool_slot.
   max_knowledge_calls_per_turn: 2
 
+  # A fee, an instalment, a deadline — the figures in this corpus are what a parent acts
+  # on, so a figure that is in no retrieved chunk must not be served. Enforced rather
+  # than observed because the failure this closes actually reached a parent: an invented
+  # «45 ألف» for a grade the child is not in. See backend/chat/grounding.py.
+  answer_grounding_mode: enforce
+
   # Six turns of conversation, which is TWELVE messages — this is counted in messages,
   # not exchanges, and setting it to 6 would give a parent three turns of memory.
   #
@@ -279,6 +241,9 @@ user_copy:
     مش متأكد منها. أنصح حضرتك تتواصل مع مكتب المدرسة.
   retrieval_error: >-
     في مشكلة تقنية مؤقتة منعتني أوصل لمصادر المدرسة. ممكن حضرتك تجرّب تاني بعد شوية؟
+  unverified_answer: >-
+    معلش، مقدرتش أتأكد من الأرقام دي من مستندات المدرسة نفسها، ومش عايز أقول لحضرتك رقم
+    غلط في حاجة زي المصاريف. الأفضل تتواصل مع مكتب المدرسة عشان الرقم الأكيد.
   hitl_clarify_default: >-
     لقيت محتوى قريب من سؤالك، بس المعلومات مش كفاية أحدد إجابة أكيدة. ممكن حضرتك
     تديني تفاصيل أكتر؟

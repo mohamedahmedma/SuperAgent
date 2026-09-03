@@ -13,9 +13,14 @@ from backend.tools.knowledge import make_search_knowledge_base
 from backend.tools.products import make_search_products
 from backend.tools.records import make_get_student_records
 
+#: The corpus tool, named once. It is the tool whose verdict `retrieval_status` reports,
+#: so the runtime's terminal-retrieval guard has to be able to recognise its results
+#: among a turn's other tool results — see `backend/chat/runtime.py`.
+KNOWLEDGE_TOOL = "search_knowledge_base"
+
 # name -> builder(ctx) -> tool
 TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
-    "search_knowledge_base": make_search_knowledge_base,
+    KNOWLEDGE_TOOL: make_search_knowledge_base,
     "view_figure": make_view_figure,
     "search_products": make_search_products,
     # Reads a student's academic record from the records facade. Registered but not
@@ -33,7 +38,7 @@ TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
 # block at all (backend/prompts/templates/agent/system.j2). A deployment binding only
 # view_figure has nothing to cite, and paying for citation rules on every one of its
 # turns would be pure waste.
-GROUNDED_TOOLS: frozenset = frozenset({"search_knowledge_base", "search_products"})
+GROUNDED_TOOLS: frozenset = frozenset({KNOWLEDGE_TOOL, "search_products"})
 
 
 class UnknownToolError(ValueError):
@@ -57,6 +62,7 @@ def build_tools(names: List[str], ctx: ChatRequestContext) -> list:
 
 
 __all__ = [
+    "KNOWLEDGE_TOOL",
     "TOOL_BUILDERS",
     "GROUNDED_TOOLS",
     "UnknownToolError",

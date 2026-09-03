@@ -130,9 +130,14 @@ def _load_yaml(name: str) -> Dict[str, Any]:
     return data
 
 
-def _resolve_inheritance(name: str) -> Dict[str, Any]:
-    """Walk the `extends` chain to its root, then merge back down so the requested
-    profile wins over everything it inherits."""
+def _inheritance_chain(name: str) -> List[str]:
+    """The profile and everything it extends, most specific first.
+
+    Split out because the prompt packs need the same walk: a profile with no pack of its
+    own should fall back to the pack of whatever it extends, exactly as its YAML values
+    do. Deriving the order twice from the same `extends` links is what keeps the two
+    from disagreeing.
+    """
     chain: List[str] = []
     seen: set[str] = set()
     current: Optional[str] = name
@@ -150,6 +155,13 @@ def _resolve_inheritance(name: str) -> Dict[str, Any]:
         chain.append(current)
         current = _load_yaml(current).get("extends")
 
+    return chain
+
+
+def _resolve_inheritance(name: str) -> Dict[str, Any]:
+    """Walk the `extends` chain to its root, then merge back down so the requested
+    profile wins over everything it inherits."""
+    chain = _inheritance_chain(name)
     merged: Dict[str, Any] = {}
     for profile_name in reversed(chain):
         merged = _deep_merge(merged, _load_yaml(profile_name))
@@ -236,6 +248,74 @@ def _apply_env_overrides(data: Dict[str, Any], profile: DomainProfile) -> Dict[s
     return result
 
 
+#: Prompt text a profile can carry, and the pack template each field is loaded from.
+#: Dotted path -> filename under `backend/prompts/templates/packs/<profile>/`.
+#:
+#: These are the last prompts that still lived in profile YAML. Everything else already
+#: reaches its template through `backend.prompts.resolve`; see that module's docstring
+#: for why a profile answers "what is this deployment" and a prompt answers "how does
+#: the system talk", and why only the first belongs in YAML.
+PROMPT_PACK_FIELDS: Dict[str, str] = {
+    "identity.persona": "persona.j2",
+    "agent.system_prompt": "system.j2",
+    "agent.arabic_style_prompt": "arabic_style.j2",
+}
+
+
+def _read_at(data: Dict[str, Any], dotted: str) -> Any:
+    section: Any = data
+    for part in dotted.split("."):
+        if not isinstance(section, dict) or part not in section:
+            return None
+        section = section[part]
+    return section
+
+
+def _write_at(data: Dict[str, Any], dotted: str, value: Any) -> None:
+    *parents, field = dotted.split(".")
+    bucket = data
+    for part in parents:
+        existing = bucket.get(part)
+        if not isinstance(existing, dict):
+            existing = {}
+            bucket[part] = existing
+        bucket = existing
+    bucket[field] = value
+
+
+def _apply_prompt_packs(data: Dict[str, Any], chain: List[str]) -> Dict[str, Any]:
+    """Fill prompt fields from `packs/<profile>/*.j2`, most specific profile first.
+
+    YAML still wins. A deployment that has already tuned a prompt in its profile keeps
+    that text and never notices the pack exists — the same reversibility
+    `backend.prompts.resolve` promises for every other prompt.
+
+    Rendered through the Jinja environment rather than read as bytes, so a pack is a
+    template like every other prompt in that folder: comments are stripped, and the
+    files are covered by the test that compiles all of them.
+
+    A missing pack is not an error. Most profiles carry only a persona, and a custom
+    profile that ships none at all falls through to the schema defaults exactly as it
+    did before packs existed.
+    """
+    from backend.prompts import TEMPLATE_ROOT, render
+
+    result = copy.deepcopy(data)
+    for dotted, filename in PROMPT_PACK_FIELDS.items():
+        if _read_at(result, dotted):
+            continue  # the profile set it in YAML; that is still the override
+        for profile_name in chain:
+            relative = f"packs/{profile_name}/{filename}"
+            if not (TEMPLATE_ROOT / relative).exists():
+                continue
+            try:
+                _write_at(result, dotted, render(relative))
+            except Exception as exc:  # a broken pack must name itself, not the profile
+                raise ProfileError(f"Prompt pack {relative!r} failed to render: {exc}") from exc
+            break
+    return result
+
+
 def available_profiles() -> List[str]:
     if not DEFINITIONS_DIR.exists():
         return []
@@ -247,6 +327,7 @@ def load_profile(name: Optional[str] = None) -> DomainProfile:
     profile_name = (name or os.getenv(PROFILE_ENV_VAR) or DEFAULT_PROFILE).strip()
 
     composed = _resolve_inheritance(profile_name)
+    composed = _apply_prompt_packs(composed, _inheritance_chain(profile_name))
     try:
         profile = DomainProfile.model_validate(composed)
     except Exception as exc:

@@ -148,6 +148,20 @@ class RagTraceFields(StrictSchema):
     auto_merge_figure_threshold: Optional[int] = None
     auto_merge_replaced_chunks: Optional[int] = None
     auto_merge_steps: Optional[int] = None
+    # What the finalize stage did between the model and the reader, and what it made of
+    # the answer. Carried here because both are facts about how this turn's retrieval
+    # and its answer relate — see backend/chat/finalize.py.
+    finalize_dropped_tool_call_messages: Optional[int] = None
+    finalize_dropped_chars: Optional[int] = None
+    finalize_harmony_messages: Optional[int] = None
+    finalize_tool_results: Optional[int] = None
+    grounding_ok: Optional[bool] = None
+    grounding_evidence_chunks: Optional[int] = None
+    grounding_numbers_checked: Optional[int] = None
+    grounding_ungrounded_numbers: Optional[List[str]] = None
+    grounding_invalid_citations: Optional[List[int]] = None
+    grounding_reason: Optional[str] = None
+
     retrieved_chunks: Optional[List[RetrievedChunk]] = None
     initial_retrieved_chunks: Optional[List[RetrievedChunk]] = None
     rewrite_retrieved_chunks: Optional[List[RetrievedChunk]] = None

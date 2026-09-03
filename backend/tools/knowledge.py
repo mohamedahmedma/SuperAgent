@@ -109,6 +109,10 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
             constraints=[
                 str(item) for item in (getattr(ctx, "carried_constraints", None) or [])
             ],
+            # The condition the parent never had to state, and the one this corpus is
+            # most likely to vary by. Shares `discriminate` with the carried conditions
+            # because it is the same question of the material: does it differ by this?
+            child_year=str(getattr(ctx, "child_year", "") or ""),
             # The grader's verdict on whether the material actually varies by those
             # conditions, from the same call that graded the evidence. It decides
             # whether the conditions narrow the answer or merely describe who is
