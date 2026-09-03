@@ -7,10 +7,12 @@
  *
  * Two decisions the form makes on the registrar's behalf:
  *
- * **Only what changed is sent.** `form.changed()` produces the diff and that diff is the whole
- * request body. Sending every field would overwrite a value another registrar edited between
- * this screen loading and this save — a phone number typed by the front desk, quietly replaced
- * by the stale one the form loaded ten minutes ago.
+ * **Only what changed is sent.** `form.delta()` is the whole request body. Sending every field
+ * would overwrite a value another registrar edited between this screen loading and this save —
+ * a phone number typed by the front desk, quietly replaced by the stale one the form loaded ten
+ * minutes ago. `form.changed()` is the same diff in the shape the dialog draws; the two are not
+ * interchangeable, and sending the dialog's shape as the body is a 422 on a screen that has
+ * already said "saved".
  *
  * **The confirmation shows was → now.** Structural and destructive actions are confirmed; this
  * is neither, but a name correction is the one edit a registrar makes fastest and regrets most,
@@ -36,6 +38,13 @@ const FIELDS = [
   { key: 'address', label: 'Address', wide: true }
 ];
 
+/* The dialog names a field the way the form does. Derived from FIELDS rather than written
+   again, so a renamed label cannot say one thing above the box and another in the diff. */
+const LABELS = {};
+FIELDS.forEach((field) => {
+  LABELS[field.key] = field.label;
+});
+
 export function StudentEditor({ student, onDone }) {
   const initial = {};
   FIELDS.forEach((field) => {
@@ -45,12 +54,7 @@ export function StudentEditor({ student, onDone }) {
   const form = useForm(initial);
   const [dialog, ask] = useConfirm();
 
-  const changed = form.changed();
-  const diff = Object.keys(changed).map((key) => ({
-    label: (FIELDS.find((field) => field.key === key) || {}).label || key.replace(/_/g, ' '),
-    was: student[key],
-    now: changed[key]
-  }));
+  const diff = form.changed(null, LABELS);
 
   return (
     <>
@@ -74,7 +78,7 @@ export function StudentEditor({ student, onDone }) {
               </p>
             ),
             run: () =>
-              api.updateStudent(student.student_number, changed).then(() => {
+              api.updateStudent(student.student_number, form.delta()).then(() => {
                 Store.invalidate('roster:');
                 Store.invalidate('student:');
                 Store.toast('ok', t('{0} updated', [student.student_number]));

@@ -133,11 +133,18 @@ function newWindow(script, language = 'en', session = '') {
 
   const { window } = dom;
   const requests = [];
+  const bodies = [];
 
   window.fetch = (input, init = {}) => {
     const url = String(typeof input === 'string' ? input : input.url);
     const method = (init.method || 'GET').toUpperCase();
     requests.push(`${method} ${url}`);
+    /* The body as well as the line. `PATCH /v1/students/10432` looks identical whether the
+       console sent `{full_name_ar: "…"}` or the confirmation dialog's own array of
+       `{label, was, now}` — and only one of those is a request the service accepts. */
+    if (init.body !== undefined && init.body !== null) {
+      bodies.push({ line: `${method} ${url}`, body: String(init.body) });
+    }
     let payload = answer(method, url);
     if (session === 'smoke-admin' && method === 'GET' && url.includes('/v1/auth/me')) {
       payload = JSON.parse(JSON.stringify(payload));
@@ -182,8 +189,12 @@ function newWindow(script, language = 'en', session = '') {
   };
   /* jsdom has no layout, so scrolling is unimplemented and throws through the virtual console.
      The router scrolls to the top on every route change, which would otherwise report thirteen
-     errors for correct behaviour. */
+     errors for correct behaviour. `scrollIntoView` is worse than unimplemented — it is absent
+     from jsdom's Element entirely, so the register's "scroll to the panel you just opened"
+     effect throws a TypeError and React unmounts the screen. A browser has it; the harness
+     must too, or this file cannot test any control that opens a panel. */
   window.scrollTo = () => {};
+  window.Element.prototype.scrollIntoView = () => {};
 
   /* React reports a render that threw, and several real prop faults, through console.error.
      Collected rather than printed so a screen that renders *something* while logging an error
@@ -198,7 +209,7 @@ function newWindow(script, language = 'en', session = '') {
      any non-empty string does. */
   if (session) window.sessionStorage.setItem('sis.session_token.v2', session);
   window.eval(script);
-  return { dom, window, errors, requests };
+  return { dom, window, errors, requests, bodies };
 }
 
 const settle = (window, ms = 60) =>
@@ -248,7 +259,7 @@ async function main() {
   assert.ok(signedOut.window.document.querySelector('.sis-login-page'), 'signed-out visitors must see the sign-in page');
   assert.ok(!signedOut.window.document.querySelector('.sis-app'), 'the SIS shell must stay hidden before sign-in');
 
-  const { window, errors, requests } = newWindow(script, 'en', 'smoke-admin');
+  const { window, errors, requests, bodies } = newWindow(script, 'en', 'smoke-admin');
   await settle(window, 200);
 
   const mount = window.document.getElementById('app');
@@ -305,6 +316,175 @@ async function main() {
   assert.ok(
     (window.document.body.textContent || '').includes('Layla Hassan'),
     'submitting the student finder did not render its result'
+  );
+
+  /*
+   * The register's own three buttons, driven the way a registrar drives them.
+   *
+   * Rendering the screen is not enough here and never was. Edit, Move and Remove all reported
+   * success and changed nothing: the editor sent the confirmation dialog's diff — a JSON
+   * *array* of `{label, was, now}` — as the PATCH body, which the service answers 422 to, and
+   * rendered the same objects where a value belongs, which React refuses to draw at all. The
+   * screen went blank, the toast said "updated", and the name was unchanged. So this walks the
+   * form: open it, type, confirm, and read what actually went over the wire.
+   */
+  window.location.hash = `#/class?code=3A&year=${YEAR}`;
+  await settle(window, 150);
+
+  const openRows = [...window.document.querySelectorAll('tbody tr')];
+  const editButton = openRows
+    .flatMap((row) => [...row.querySelectorAll('.sis-row-actions button')])
+    .find((button) => button.textContent.trim() === 'Edit');
+  assert.ok(editButton, 'the register has no Edit button');
+  editButton.click();
+  await settle(window, 150);
+
+  const nameInput = [...window.document.querySelectorAll('.card input')].find(
+    (input) => input.value === 'Layla Hassan'
+  );
+  assert.ok(nameInput, 'the Edit panel did not load her record into the form');
+  valueSetter.call(nameInput, 'Layla Hassan Ali');
+  nameInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(window, 60);
+  nameInput.closest('form').dispatchEvent(
+    new window.Event('submit', { bubbles: true, cancelable: true })
+  );
+  await settle(window, 100);
+
+  const modal = window.document.querySelector('.modal .sis-diff');
+  assert.ok(modal, 'submitting the edit did not open its confirmation');
+  const shown = modal.textContent || '';
+  assert.ok(
+    shown.includes('Name (English)') && shown.includes('Layla Hassan Ali'),
+    `the diff must name the field and both values. Read: ${shown.replace(/\s+/g, ' ')}`
+  );
+  assert.ok(
+    !shown.includes('object Object') && !shown.includes('"label"'),
+    `the diff rendered its own descriptor objects instead of the values: ${shown}`
+  );
+
+  const confirmButton = [...window.document.querySelectorAll('.modal-footer button')].find(
+    (button) => button.textContent.includes('Save the change')
+  );
+  assert.ok(confirmButton, 'the confirmation has no confirm button');
+  confirmButton.click();
+  await settle(window, 150);
+
+  const patch = bodies.find((entry) => /PATCH .*\/v1\/students\/10432/.test(entry.line));
+  assert.ok(patch, `no PATCH reached the service. Saw: ${bodies.map((e) => e.line)}`);
+  const sent = JSON.parse(patch.body);
+  assert.ok(
+    sent && !Array.isArray(sent) && typeof sent === 'object',
+    `the PATCH body must be the changed fields, not the dialog's diff. Sent: ${patch.body}`
+  );
+  assert.deepEqual(
+    sent,
+    { full_name_en: 'Layla Hassan Ali' },
+    `only the field that changed may be sent. Sent: ${patch.body}`
+  );
+
+  /*
+   * And the other half of the same complaint: Remove said "removed" and left the child on the
+   * register. She is on it correctly — a placement ends on her LAST day, and today's attendance
+   * is taken against today's register — so the fix is that the row says so rather than drawing
+   * her exactly like a child who is staying. `10434` is closed in the fixture.
+   */
+  const registerText = window.document.body.textContent || '';
+  assert.ok(
+    registerText.includes('off the register after it'),
+    'a child whose placement has closed is drawn exactly like one who is staying'
+  );
+  assert.ok(
+    registerText.includes('on their last day'),
+    'the register header does not separate the leavers from the count'
+  );
+  const removeButtons = [...window.document.querySelectorAll('.sis-row-actions button')].filter(
+    (button) => button.textContent.trim() === 'Remove'
+  );
+  assert.equal(
+    removeButtons.length,
+    2,
+    'Remove was offered on a placement that is already closed, which the service 404s'
+  );
+
+  /*
+   * Move, driven the same way, because "moved" and "still in the old class" was the third
+   * report and the one that could only be checked from the console. The service's half is
+   * proven in `test_registrar_edits_api.py`; what could not be proven anywhere is that the
+   * panel this button opens reaches it at all — with the class the registrar picked, in the
+   * year the screen is on.
+   */
+  const moveButton = [...window.document.querySelectorAll('.sis-row-actions button')].find(
+    (button) => button.textContent.trim() === 'Move'
+  );
+  assert.ok(moveButton, 'the register has no Move button');
+  moveButton.click();
+  await settle(window, 150);
+
+  const movePanel = [...window.document.querySelectorAll('.card')].find((card) =>
+    (card.textContent || '').includes('Move out of 3A')
+  );
+  assert.ok(movePanel, 'clicking Move opened no panel');
+  const picker = movePanel.querySelector('.sis-field-trigger');
+  assert.ok(picker, 'the Move panel has no class picker');
+  picker.click();
+  await settle(window, 60);
+
+  /* Same grade only, so 3A's own row is absent and 3B is the whole list. A picker that
+     offered 3A back would be offering a transfer the service refuses. */
+  const options = [...movePanel.querySelectorAll('[role="option"]')].map((node) =>
+    node.textContent.trim()
+  );
+  assert.ok(
+    options.length === 1 && options[0].startsWith('3B'),
+    `the Move picker must offer the other section of this grade and nothing else. Saw: ${JSON.stringify(options)}`
+  );
+  [...movePanel.querySelectorAll('[role="option"]')][0].click();
+  await settle(window, 80);
+
+  movePanel.querySelector('form').dispatchEvent(
+    new window.Event('submit', { bubbles: true, cancelable: true })
+  );
+  await settle(window, 100);
+  const moveConfirm = [...window.document.querySelectorAll('.modal-footer button')].find(
+    (button) => button.textContent.includes('Move her')
+  );
+  assert.ok(moveConfirm, 'submitting the move did not open its confirmation');
+  moveConfirm.click();
+  await settle(window, 150);
+
+  const transfer = bodies.find((entry) => entry.line.includes('/v1/students/10432/transfer'));
+  assert.ok(transfer, `the move sent no transfer. Saw: ${bodies.map((e) => e.line)}`);
+  const moved = JSON.parse(transfer.body);
+  assert.equal(moved.to_class_code, '3B', `the picked class did not reach the service: ${transfer.body}`);
+  assert.equal(moved.academic_year_code, YEAR, `the move left its year behind: ${transfer.body}`);
+  assert.ok(moved.on_date, `a transfer must carry the day it happens on: ${transfer.body}`);
+
+  /* And Remove, which is the one that reported success and left the child on screen. It still
+     leaves her on screen — for one more day, correctly — so what is asserted here is that the
+     request carries her last day and that the console says which day that is. */
+  const removeButton = [...window.document.querySelectorAll('.sis-row-actions button')].find(
+    (button) => button.textContent.trim() === 'Remove'
+  );
+  assert.ok(removeButton, 'the register has no Remove button');
+  removeButton.click();
+  await settle(window, 100);
+  const removeConfirm = [...window.document.querySelectorAll('.modal-footer button')].find(
+    (button) => button.textContent.includes('Remove from the class')
+  );
+  assert.ok(removeConfirm, 'Remove opened no confirmation');
+  assert.ok(
+    (window.document.querySelector('.modal-body').textContent || '').includes('last day'),
+    'the confirmation does not say that today is her last day rather than her last minute'
+  );
+  removeConfirm.click();
+  await settle(window, 150);
+
+  const ended = bodies.find((entry) => entry.line.includes('/placements/current'));
+  assert.ok(ended, `Remove sent nothing. Saw: ${bodies.map((e) => e.line)}`);
+  assert.ok(
+    /^\d{4}-\d{2}-\d{2}$/.test(JSON.parse(ended.body).ends_on),
+    `a placement is ended on a date, and this one was not: ${ended.body}`
   );
 
   const supervisor = newWindow(script, 'en', 'smoke-supervisor');

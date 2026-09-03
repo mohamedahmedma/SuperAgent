@@ -1152,4 +1152,19 @@ export const AR = {
   'Break': 'فسحة',
   'Sunday': 'الأحد', 'Monday': 'الاثنين', 'Tuesday': 'الثلاثاء',
   'Wednesday': 'الأربعاء', 'Thursday': 'الخميس', 'Friday': 'الجمعة', 'Saturday': 'السبت',
+
+  /* Removing a child from a class. The English says "last day" and so does the Arabic: the
+     whole point of these three sentences is that "تمت الإزالة" on its own is what made a
+     registrar think the button had done nothing, because the child is still on the register
+     she was removed from — correctly, for one more day. */
+  'Today is her last day in {0}, so she stays on today’s register — this morning’s attendance is taken against it — and is off it from tomorrow.':
+    'اليوم هو آخر يوم لها في {0}، لذلك تظل في كشف اليوم — لأن غياب اليوم يُسجَّل عليه — وتخرج منه اعتبارًا من الغد.',
+  'It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class tomorrow.':
+    'هذا لا يحذفها: يبقى ملفها ودرجاتها وحضورها كما هي، ويمكن إلحاقها بفصل آخر غدًا.',
+  'Today is her last day, so she is on the register once more and off it tomorrow.':
+    'اليوم آخر يوم لها، لذلك تظهر في الكشف مرة أخيرة وتخرج منه غدًا.',
+  '{0} on their last day':
+    '{0} في آخر يوم لهم',
+  'Last day {0} — off the register after it':
+    'آخر يوم {0} — تخرج من الكشف بعده',
 };
