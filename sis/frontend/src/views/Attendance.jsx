@@ -86,7 +86,8 @@ export function Attendance() {
           <div className="row g-3">
             <div className="col-12 col-md-4">
               <label className="form-label small text-body-tertiary">{t('Date')}</label>
-              <Input type="date" value={day} onInput={setDay} />
+              <Input type="date" max={today()} value={day}
+                onInput={(value) => setDay(value > today() ? today() : value)} />
             </div>
             <div className="col-12 col-md-4">
               <label className="form-label small text-body-tertiary">{t('Grade')}</label>

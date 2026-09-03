@@ -22,6 +22,39 @@
  * register. The English "rung" is this system's own coinage for a year-level; it is صف دراسي.
  */
 export const AR = {
+  'Admit a new student': 'إضافة طالب جديد',
+  'All student, guardian, grade and class fields are required.':
+    'يجب استكمال جميع بيانات الطالب وولي الأمر والصف والفصل.',
+  'Student information': 'بيانات الطالب',
+  'Guardian information': 'بيانات ولي الأمر',
+  'Guardian Arabic name': 'اسم ولي الأمر بالعربية',
+  'Guardian English name': 'اسم ولي الأمر بالإنجليزية',
+  'Guardian phone': 'هاتف ولي الأمر',
+  'Student phone': 'هاتف الطالب',
+  'Student email': 'البريد الإلكتروني للطالب',
+  'Gender': 'النوع',
+  'Male': 'ذكر',
+  'Female': 'أنثى',
+  'Date of birth': 'تاريخ الميلاد',
+  'Address': 'العنوان',
+  'Relationship': 'صلة القرابة',
+  'Relationship description': 'وصف صلة القرابة',
+  'Father': 'الأب',
+  'Mother': 'الأم',
+  'Guardian': 'ولي أمر',
+  'Sibling': 'أخ أو أخت',
+  'Grandparent': 'جد أو جدة',
+  'Other': 'أخرى',
+  'Placement': 'القيد الدراسي',
+  'Placement starts': 'تاريخ بداية القيد',
+  'Grade and class': 'الصف والفصل',
+  'Create student and guardian': 'إنشاء الطالب وولي الأمر',
+  'Student admitted successfully.': 'تم تسجيل الطالب بنجاح.',
+  'Student setup': 'إعداد الطالب',
+  'Create one complete student record with a guardian and first class placement.':
+    'أنشئ ملفًا كاملًا للطالب مع ولي الأمر وأول قيد في الفصل.',
+  'The student was added to class {0}.': 'تمت إضافة الطالب إلى الفصل {0}.',
+  'Teacher created with reference {0}.': 'تم إنشاء المعلّم بالرقم المرجعي {0}.',
   /* -- Signing in, and what a person's roles reach ---------------------------------
    *
    * صلاحية is the word an Egyptian school uses for a permission, and دور for a role. The
@@ -30,6 +63,8 @@ export const AR = {
    * always whoever assigns roles at their own school. */
   'Sign in': 'تسجيل الدخول',
   'Sign in failed': 'تعذر تسجيل الدخول',
+  'Show password': 'إظهار كلمة المرور',
+  'Hide password': 'إخفاء كلمة المرور',
   'Signing in…': 'جارٍ تسجيل الدخول…',
   'Sign out': 'تسجيل الخروج',
   'Signing in shows you the classes and screens your roles cover.':
@@ -44,8 +79,13 @@ export const AR = {
   'System Administrator': 'مدير النظام',
   'School Owner': 'مالك المدرسة',
   'School Manager': 'مدير المدرسة',
-  'Grade Supervisor': 'موجّه الصف الدراسي',
+  'Grade Supervisor': 'مشرف الصف',
+  'Class Supervisor': 'مشرف الصف',
+  'A class supervisor may also remain an ordinary teacher.': 'يمكن أن يكون مشرف الصف معلّمًا أيضًا.',
   'Attendance Supervisor': 'مشرف الحضور والغياب',
+  'Choose a grade': 'اختر السنة الدراسية',
+  'This account will only see this grade’s classes and students in attendance.':
+    'سيظهر لهذا الحساب فصول وطلاب هذه السنة فقط في الغياب.',
   Teacher: 'معلّم',
   'Subject Coordinator': 'منسّق المادة',
   Username: 'اسم المستخدم',
@@ -168,6 +208,12 @@ export const AR = {
     'اختر ملف الدرجات',
   'Choose the roster sheet':
     'اختر ملف كشف القيد',
+  'Choose one student and guardian roster sheet':
+    'اختر ملفًا واحدًا للطلاب وأولياء الأمور',
+  'One row per student. Include the guardian in the same row; alternate guardian fields remain optional.':
+    'صف واحد لكل طالب، ويتضمن ولي الأمر في الصف نفسه، وتظل بيانات الاتصال البديلة اختيارية.',
+  'student_number,full_name_ar,full_name_en,class_code,guardian_name_ar,guardian_name_en,guardian_phone,relationship_type,is_primary_contact,can_view_records':
+    'student_number,full_name_ar,full_name_en,class_code,guardian_name_ar,guardian_name_en,guardian_phone,relationship_type,is_primary_contact,can_view_records',
   'Choose the term first. A marks file with no term named is a file the service cannot place.':
     'اختر الفصل الدراسي أولًا. فملف درجات بلا فصل مُسمّى ملف لا تستطيع الخدمة تحديد موضعه.',
   'Chosen in the header, for every screen.':
@@ -801,6 +847,10 @@ export const AR = {
     'اختر فصلًا دراسيًا',
   'Choose a class':
     'اختر صفًا',
+  'No other class in this grade':
+    'لا يوجد فصل آخر في هذا الصف الدراسي',
+  'She can only be moved to another section of the same grade, and this grade has no other. Add one first.':
+    'لا يمكن نقلها إلا إلى فصل آخر في الصف الدراسي نفسه، وهذا الصف ليس به فصل آخر. أضف فصلًا أولًا.',
   'Nothing changed':
     'لم يتغير شيء',
   'Guardian removed':
@@ -972,6 +1022,17 @@ export const AR = {
   'No grades on this track yet.':
     'لا توجد صفوف في هذا المسار بعد.',
   'Teacher roles': 'أدوار المعلّمين',
+  'Staff roles': 'أدوار العاملين',
+  'Choose a grade and subject to review its teachers. Supervisors are managed separately and may also be teachers.':
+    'اختر الصف والمادة لعرض معلّميها. وتُدار قائمة المشرفين بشكل مستقل، ويمكن أن يكون المشرف معلّماً أيضاً.',
+  'Teachers': 'المعلّمون',
+  'Teachers come from their subject and class assignments.': 'تُحدد قائمة المعلّمين حسب المواد والفصول المسندة إليهم.',
+  'Teacher subject': 'مادة المعلّم',
+  'All subjects': 'كل المواد',
+  'No teachers match this grade and subject.': 'لا يوجد معلّمون مطابقون لهذا الصف وهذه المادة.',
+  'Supervisors': 'المشرفون',
+  'A supervisor may also remain an ordinary teacher. Roles are additive.': 'يمكن أن يكون المشرف معلّماً عادياً أيضاً؛ فالأدوار تُضاف ولا يستبدل أحدها الآخر.',
+  'Supervisor scope': 'نطاق الإشراف',
   'Roles are additive. Selecting a supervisor role keeps the Teacher role active.':
     'الأدوار تراكمية؛ اختيار دور إشرافي يُبقي دور المعلّم فعالًا.',
   'Active roles': 'الأدوار الفعالة',
@@ -1015,6 +1076,19 @@ export const AR = {
     'سبق رصد الحضور في هذا اليوم. الحفظ مرة أخرى يصحّح الرصد ولا يكرّره.',
   'Finish — rest absent': 'إنهاء — الباقون غائبون',
   'Records every child still blank as absent.': 'يسجّل كل طالب لم يُعلَّم بعد بوصفه غائبًا.',
+  '{0} change(s) not yet saved.': '{0} تغييرات لم تُحفظ بعد.',
+  'Nothing is written until you save. Saving again corrects the day rather than adding a second set of marks.':
+    'لن يُكتب شيء قبل الحفظ. والحفظ مرة أخرى يصحّح اليوم ولا يضيف سجلاً مكرراً.',
+  '{0} present': '{0} حاضر',
+  '{0} absent': '{0} غائب',
+  '{0} late': '{0} متأخر',
+  '{0} excused': '{0} بعذر',
+  '{0} not yet marked': '{0} لم يُرصد بعد',
+  'An unmarked child shows {0}. The counts use the {1} recorded marks, not all {2} children.':
+    'يظهر الطالب غير المرصود بالعلامة {0}. وتعتمد الأعداد على {1} سجلات محفوظة، لا على كل الطلاب وعددهم {2}.',
+  'Either this class is empty, or nobody was placed in it on {0}.':
+    'إما أن الفصل فارغ، أو لم يكن أي طالب مقيداً فيه يوم {0}.',
+  'name not on file': 'الاسم غير مسجل',
   /* Stage 14 — teacher academic access and mark entry. */
   'Only your assigned classes and subjects are shown.': 'تظهر فقط الفصول والمواد المسندة إليك.',
   'Enter class marks': 'إدخال درجات الفصل',
@@ -1024,6 +1098,14 @@ export const AR = {
   'Student': 'الطالب',
   'Save marks': 'حفظ الدرجات',
   'Marks saved.': 'تم حفظ الدرجات.',
+  'Upload this class marks file': 'رفع ملف درجات هذا الفصل',
+  'CSV only. Columns: student_number, percentage. Only the selected class and your assigned subject are accepted.':
+    'ملف CSV فقط بالأعمدة student_number وpercentage. لا تُقبل إلا درجات الفصل المحدد والمادة المسندة إليك.',
+  'The file has no student rows.': 'الملف لا يحتوي على صفوف طلاب.',
+  'Required columns: student_number and percentage.': 'الأعمدة المطلوبة: student_number وpercentage.',
+  'Every percentage must be between 0 and 100.': 'يجب أن تكون كل درجة بين 0 و100.',
+  'Could not read the marks file.': 'تعذرت قراءة ملف الدرجات.',
+  '{0} marks loaded from the file.': 'تم تحميل {0} درجات من الملف.',
   /* Stage 15 — principal teacher eligibility workflow. */
   'Teacher setup': 'إعداد المعلّم',
   'Define the teacher account, subjects, eligible grades, and track scope. Grade supervisors assign classes afterward.':
@@ -1042,4 +1124,47 @@ export const AR = {
   'Track': 'المسار',
   'Save teacher configuration': 'حفظ إعداد المعلّم',
   'Teacher configuration saved.': 'تم حفظ إعداد المعلّم.',
+  'Assessment name': 'اسم التقييم',
+  'Choose grade': 'اختر الصف',
+  'Choose a grade first.': 'اختر الصف أولًا.',
+  'Only classes in the selected grade are shown.': 'تظهر فصول الصف المحدد فقط.',
+  'Choose stage': 'اختر المرحلة',
+  'Choose subject': 'اختر المادة',
+  'Create teacher': 'إنشاء معلّم',
+  'Every mark must be between zero and the maximum mark.': 'يجب أن تكون كل درجة بين صفر والحد الأقصى للدرجات.',
+  'Find a child in your classes': 'ابحث عن طالب في فصولك',
+  'January monthly exam': 'الاختبار الشهري لشهر يناير',
+  'Maximum mark': 'الحد الأقصى للدرجات',
+  'New teacher account': 'حساب معلّم جديد',
+  'This staff number already belongs to another teacher.': 'هذا الرقم الوظيفي مسجّل بالفعل لمعلّم آخر.',
+  'Timetable': 'الجدول',
+  'Choose a class to view its weekly timetable. Supervisors can drag subjects into lessons and swap existing lessons.': 'اختر الفصل لعرض جدوله الأسبوعي. يستطيع المشرف سحب المواد إلى الحصص وتبديل الحصص الموجودة.',
+  'Class and term': 'الفصل والفصل الدراسي',
+  'Term': 'الفصل الدراسي',
+  'Editable timetable': 'جدول قابل للتعديل',
+  'View only': 'عرض فقط',
+  'Teachers only see classes assigned to them. Supervisors see classes in their managed grade.': 'يرى المدرس الفصول المسندة إليه فقط، ويرى المشرف فصول الصف الذي يشرف عليه.',
+  'Drag a subject onto any lesson. Drag one lesson onto another to swap them.': 'اسحب المادة إلى أي حصة، أو اسحب حصة إلى أخرى لتبديلهما.',
+  'Weekly timetable': 'الجدول الأسبوعي',
+  'Period': 'الحصة',
+  'Drop subject here': 'ضع المادة هنا',
+  'Clear lesson': 'حذف الحصة',
+  'Break': 'فسحة',
+  'Sunday': 'الأحد', 'Monday': 'الاثنين', 'Tuesday': 'الثلاثاء',
+  'Wednesday': 'الأربعاء', 'Thursday': 'الخميس', 'Friday': 'الجمعة', 'Saturday': 'السبت',
+
+  /* Removing a child from a class. The English says "last day" and so does the Arabic: the
+     whole point of these three sentences is that "تمت الإزالة" on its own is what made a
+     registrar think the button had done nothing, because the child is still on the register
+     she was removed from — correctly, for one more day. */
+  'Today is her last day in {0}, so she stays on today’s register — this morning’s attendance is taken against it — and is off it from tomorrow.':
+    'اليوم هو آخر يوم لها في {0}، لذلك تظل في كشف اليوم — لأن غياب اليوم يُسجَّل عليه — وتخرج منه اعتبارًا من الغد.',
+  'It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class tomorrow.':
+    'هذا لا يحذفها: يبقى ملفها ودرجاتها وحضورها كما هي، ويمكن إلحاقها بفصل آخر غدًا.',
+  'Today is her last day, so she is on the register once more and off it tomorrow.':
+    'اليوم آخر يوم لها، لذلك تظهر في الكشف مرة أخيرة وتخرج منه غدًا.',
+  '{0} on their last day':
+    '{0} في آخر يوم لهم',
+  'Last day {0} — off the register after it':
+    'آخر يوم {0} — تخرج من الكشف بعده',
 };

@@ -171,6 +171,174 @@ class LanguageRoutingTests(PairStoreTestCase):
         self.assertEqual([], pair_store.superseded_filenames(ARABIC))
 
 
+class FigureAwareRoutingTests(PairStoreTestCase):
+    """The refinement on the four cases above: a twin is redundant only when it is
+    redundant IN FULL.
+
+    The failure this exists for: an Arabic handbook translated from an English one
+    carries the prose and none of the figures. Excluding the English half on an Arabic
+    question then drops every picture the corpus has, and the parent is told about the
+    uniform in words with no image of it and nothing saying why.
+
+    Real AssetStore over SQLite rather than a stub, because the predicate under test is
+    the query — hashes compared as content, and a figure whose bytes were never stored
+    not counting as a picture at all.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from backend.assets.store import AssetStore, set_asset_store
+        from backend.db.models import AssetExtraction, DocumentAsset
+
+        engine = create_engine(
+            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+        )
+        DocumentAsset.__table__.create(engine)
+        AssetExtraction.__table__.create(engine)
+        self.assets = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+        set_asset_store(AssetStore(session_factory=self.assets, cache_enabled=False))
+        self.addCleanup(set_asset_store, None)
+
+    def _figures(self, filename, *hashes, stored=True):
+        """Give `filename` one image per hash. `stored=False` writes a row whose bytes
+        were never saved — a figure on paper that can never reach a screen."""
+        from backend.db.models import DocumentAsset
+
+        session = self.assets()
+        try:
+            for index, sha in enumerate(hashes):
+                session.add(DocumentAsset(
+                    asset_id=f"{filename}::p0::img{index}",
+                    sha256=sha,
+                    filename=filename,
+                    storage_uri=f"file://{sha[:2]}/{sha}.png" if stored else "",
+                ))
+            session.commit()
+        finally:
+            session.close()
+
+    def _pair(self, *, arabic=None, english=None):
+        pair_id = ""
+        for language, filename in ((ARABIC, arabic), (ENGLISH, english)):
+            if filename:
+                pair_id = pair_store.attach(pair_id, language, filename)["pair_id"]
+        return pair_id
+
+    # -- the bug -----------------------------------------------------------------
+
+    def test_a_text_only_translation_does_not_hide_the_pictures(self):
+        """The reported failure, as a test. Arabic prose, English figures: excluding
+        the English half answers the question and shows nothing."""
+        self._pair(arabic="uniform_ar.docx", english="uniform_en.docx")
+        self._figures("uniform_en.docx", "aaa", "bbb")
+
+        self.assertEqual([], pair_store.superseded_filenames(ARABIC))
+
+    def test_the_english_half_is_kept_only_for_the_pair_that_needs_it(self):
+        """One pair whose translation lost the figures, one whose translation never had
+        any. Only the first keeps its twin — this is a refinement, not a switch-off."""
+        self._pair(arabic="uniform_ar.docx", english="uniform_en.docx")
+        self._pair(arabic="fees_ar.docx", english="fees_en.docx")
+        self._figures("uniform_en.docx", "aaa")
+
+        self.assertEqual(["fees_en.docx"], pair_store.superseded_filenames(ARABIC))
+
+    # -- what must NOT change ----------------------------------------------------
+
+    def test_the_same_pictures_in_both_halves_are_still_redundant(self):
+        """The usual case: one .docx translated, the same images embedded in both. The
+        twin loses nothing, so the original rule stands. Compared by CONTENT — counting
+        rows would call these two halves different and quietly stop excluding anything
+        the moment a document had a figure in it."""
+        self._pair(arabic="uniform_ar.docx", english="uniform_en.docx")
+        self._figures("uniform_ar.docx", "aaa", "bbb")
+        self._figures("uniform_en.docx", "aaa", "bbb")
+
+        self.assertEqual(["uniform_en.docx"], pair_store.superseded_filenames(ARABIC))
+
+    def test_a_translation_that_gained_pictures_supersedes_the_original(self):
+        self._pair(arabic="uniform_ar.docx", english="uniform_en.docx")
+        self._figures("uniform_ar.docx", "aaa", "bbb")
+        self._figures("uniform_en.docx", "aaa")
+
+        self.assertEqual(["uniform_en.docx"], pair_store.superseded_filenames(ARABIC))
+
+    def test_neither_side_having_pictures_leaves_the_rule_untouched(self):
+        self._pair(arabic="fees_ar.docx", english="fees_en.docx")
+        self.assertEqual(["fees_en.docx"], pair_store.superseded_filenames(ARABIC))
+        self.assertEqual(["fees_ar.docx"], pair_store.superseded_filenames(ENGLISH))
+
+    def test_a_partial_overlap_keeps_the_twin(self):
+        """Shares one image, holds a second alone. Sharing some is not sharing all."""
+        self._pair(arabic="uniform_ar.docx", english="uniform_en.docx")
+        self._figures("uniform_ar.docx", "aaa")
+        self._figures("uniform_en.docx", "aaa", "bbb")
+
+        self.assertEqual([], pair_store.superseded_filenames(ARABIC))
+
+    def test_the_rule_is_symmetric(self):
+        """An English question against an Arabic-only-illustrated pair keeps the Arabic
+        half, for the same reason and by the same code."""
+        self._pair(arabic="uniform_ar.docx", english="uniform_en.docx")
+        self._figures("uniform_ar.docx", "aaa")
+
+        self.assertEqual([], pair_store.superseded_filenames(ENGLISH))
+        self.assertEqual(["uniform_en.docx"], pair_store.superseded_filenames(ARABIC))
+
+    def test_a_figure_with_no_stored_bytes_is_not_a_picture(self):
+        """Triaged out, or a failed blob write. The presenter can only return metadata
+        for it, so keeping a whole redundant document on its account buys no image."""
+        self._pair(arabic="uniform_ar.docx", english="uniform_en.docx")
+        self._figures("uniform_en.docx", "aaa", stored=False)
+
+        self.assertEqual(["uniform_en.docx"], pair_store.superseded_filenames(ARABIC))
+
+    def test_an_unpaired_document_with_figures_is_still_never_excluded(self):
+        self._pair(english="bus_en.docx")
+        self._figures("bus_en.docx", "ccc")
+        self.assertEqual([], pair_store.superseded_filenames(ARABIC))
+
+
+class FigureAwarenessDegradationTests(PairStoreTestCase):
+    """When the pictures cannot be counted, the plain exclusion applies.
+
+    Both routes here mean "no picture is at stake": assets off by profile, or an asset
+    table that cannot be read — and an unreadable asset table is one `build_asset_
+    references` cannot read either, so no image would reach the answer whichever half
+    survived. Keeping the redundant translation would buy nothing and cost the
+    narrowing that pairing exists for.
+    """
+
+    def _pair(self):
+        pair_id = pair_store.attach("", ARABIC, "uniform_ar.docx")["pair_id"]
+        pair_store.attach(pair_id, ENGLISH, "uniform_en.docx")
+
+    def test_assets_disabled_by_profile_uses_the_plain_rule(self):
+        from backend.profiles.registry import load_profile
+
+        profile = load_profile("base")
+        profile.assets.enabled = False
+        with patch("backend.profiles.get_profile", return_value=profile):
+            self._pair()
+            self.assertEqual(["uniform_en.docx"], pair_store.superseded_filenames(ARABIC))
+
+    def test_an_unreadable_asset_table_uses_the_plain_rule(self):
+        self._pair()
+        with patch(
+            "backend.assets.store.get_asset_store", side_effect=RuntimeError("db down")
+        ):
+            self.assertEqual(["uniform_en.docx"], pair_store.superseded_filenames(ARABIC))
+
+    def test_the_asset_table_is_not_touched_when_nothing_is_paired(self):
+        """A deployment that never pairs must not pay for figure awareness — the
+        property the original rule advertised and this refinement has to preserve."""
+        pair_store.attach("", ENGLISH, "bus_en.docx")
+        with patch(
+            "backend.assets.store.get_asset_store", side_effect=AssertionError("looked up assets")
+        ):
+            self.assertEqual([], pair_store.superseded_filenames(ARABIC))
+
+
 class FilterExpressionTests(PairStoreTestCase):
     """What routing actually hands to Milvus."""
 

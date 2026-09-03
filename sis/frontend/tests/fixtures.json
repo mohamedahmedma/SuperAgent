@@ -142,7 +142,7 @@
     "academic_year_code": "2025-2026",
     "class_code": "3A",
     "as_of": "2026-03-01",
-    "count": 2,
+    "count": 3,
     "students": [
       {
         "student_number": "10432",
@@ -159,6 +159,14 @@
         "starts_on": "2025-09-01",
         "ends_on": null,
         "is_open": true
+      },
+      {
+        "student_number": "10434",
+        "full_name_en": "Nour Adel",
+        "full_name_ar": "نور عادل",
+        "starts_on": "2025-09-01",
+        "ends_on": "2026-03-01",
+        "is_open": false
       }
     ]
   },
@@ -213,6 +221,44 @@
         "address": ""
       }
     ]
+  },
+  "PATCH /v1/students/10432/placements/current": {
+    "student_number": "10432",
+    "academic_year_code": "2025-2026",
+    "class_code": "3A",
+    "starts_on": "2025-09-01",
+    "ends_on": "2026-03-01",
+    "is_open": false
+  },
+  "POST /v1/students/10432/transfer": {
+    "closed": {
+      "student_number": "10432",
+      "academic_year_code": "2025-2026",
+      "class_code": "3A",
+      "starts_on": "2025-09-01",
+      "ends_on": "2026-02-28",
+      "is_open": false
+    },
+    "opened": {
+      "student_number": "10432",
+      "academic_year_code": "2025-2026",
+      "class_code": "3B",
+      "starts_on": "2026-03-01",
+      "ends_on": null,
+      "is_open": true
+    }
+  },
+  "PATCH /v1/students/10432": {
+    "student_number": "10432",
+    "full_name_en": "Layla Hassan Ali",
+    "full_name_ar": "ليلى حسن",
+    "is_active": true,
+    "gender": "female",
+    "date_of_birth": "2016-07-14",
+    "age": 9,
+    "contact_phone": "+201234567890",
+    "contact_email": "",
+    "address": ""
   },
   "GET /v1/students/10432": {
     "student_number": "10432",
@@ -621,5 +667,27 @@
         "is_complete": false
       }
     ]
+  },
+  "GET /v1/teaching/assignments": {
+    "is_teaching_staff": true,
+    "assignments": [{
+      "class_code": "3A", "class_name_en": "Falcons", "class_name_ar": "الصقور",
+      "subject_code": "MATH", "subject_name_en": "Mathematics", "subject_name_ar": "الرياضيات",
+      "year_level_code": "Y3", "year_level_name_en": "Grade 3", "year_level_name_ar": "الصف الثالث",
+      "track_code": "AR", "academic_year_code": "2025-2026"
+    }]
+  },
+  "GET /v1/timetable/week": {
+    "academic_year_code": "2025-2026", "class_code": "3A", "term_code": "2026-T1",
+    "days": ["sunday", "monday", "tuesday", "wednesday", "thursday"],
+    "periods": [{
+      "school_code": "MAIN", "period_number": 1, "name_en": "Period 1", "name_ar": "الحصة الأولى",
+      "starts_at": "08:00:00", "ends_at": "08:45:00", "is_teaching": true, "is_timed": true
+    }],
+    "entries": [{
+      "academic_year_code": "2025-2026", "class_code": "3A", "term_code": "2026-T1",
+      "day_of_week": "sunday", "period_number": 1, "subject_code": "MATH", "teacher_staff_number": null
+    }],
+    "teaching_slots": 5
   }
 }

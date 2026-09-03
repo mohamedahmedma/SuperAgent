@@ -292,10 +292,15 @@ class MarkSheetService:
         resolved = resolve_sections_for_term(
             uow.enrolments, candidates, context.term, context.year
         )
+        # Repositories return the domain ClassSection, whose stable identity is
+        # (academic_year_code, code); it deliberately does not expose the database PK.
+        # Comparing a non-existent `.id` made every real student disappear from the sheet.
         numbers = sorted(
             number
             for number in seen
-            if getattr(resolved.get(number), "id", None) == context.section_id
+            if resolved.get(number) is not None
+            and str(resolved[number].academic_year_code) == str(context.year.code)
+            and str(resolved[number].code) == context.class_code
         )
         students = uow.students.get_many([StudentNumber(n) for n in numbers])
         return numbers, students

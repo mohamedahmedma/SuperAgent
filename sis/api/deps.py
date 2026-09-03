@@ -69,6 +69,7 @@ from sis.domain.rbac import ANYWHERE, AccessProfile, Permission, ScopeType, Targ
 from sis.config import get_settings
 from sis.domain.auth import PREFIX_LENGTH, ApiKey, Scope
 from sis.domain.errors import ImportBatchNotFound, UnknownReference, ValidationError
+from sis.domain.guardians import Guardian, StudentGuardian
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import ClassEnrolment, Student
 from sis.domain.structure import (
@@ -96,7 +97,7 @@ from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from sis.infrastructure.parsers import (
     SpreadsheetGradeParser,
     SpreadsheetGuardianParser,
-    SpreadsheetRosterParser,
+    SpreadsheetFamilyRosterParser,
 )
 from sis.tenancy import get_registry
 
@@ -688,7 +689,9 @@ def get_roster_import_service(uow_factory: UowFactoryDep) -> RosterImportService
     settings = get_settings()
     return RosterImportService(
         uow_factory,
-        SpreadsheetRosterParser(),
+        SpreadsheetFamilyRosterParser(
+            default_country_code=settings.default_country_code
+        ),
         preview_ttl=timedelta(minutes=settings.import_preview_ttl_minutes),
         max_upload_bytes=settings.max_upload_bytes,
     )
@@ -1258,6 +1261,30 @@ class StudentDesk:
             uow.commit()
         return bool(created.get(str(student.student_number), False))
 
+    def create_family(
+        self,
+        student: Student,
+        guardian: Guardian,
+        link: StudentGuardian,
+        enrolment: ClassEnrolment,
+    ) -> None:
+        """Create one complete admission in a single transaction.
+
+        This is intentionally create-only.  A manager must not turn the admission form
+        into an accidental overwrite of an existing child's identity or family links.
+        """
+        with self._uow_factory() as uow:
+            if uow.students.get(student.student_number) is not None:
+                raise ValidationError(
+                    f"student {student.student_number} already exists",
+                    field="student_number",
+                )
+            uow.students.upsert_many([student])
+            uow.guardians.upsert_many([guardian])
+            uow.student_guardians.upsert_many([link])
+            uow.enrolments.upsert_many([enrolment])
+            uow.commit()
+
     def set_student_active(
         self, student_number: StudentNumber, *, is_active: bool
     ) -> Student:
@@ -1318,13 +1345,44 @@ class StudentDesk:
         exactly what `resolve_section_for_term` cannot answer, and it would make her Term
         marks ambiguous rather than wrong, which is harder to notice.
         """
-        opened = ClassEnrolment(
-            student_number=student_number,
-            academic_year_code=academic_year_code,
-            class_code=to_class,
-            starts_on=on_date,
-        )
         with self._uow_factory() as uow:
+            target = uow.class_sections.get(academic_year_code, to_class)
+            if target is None:
+                raise UnknownReference(
+                    f"no class {to_class} in academic year {academic_year_code}",
+                    field="to_class_code",
+                )
+            current = uow.enrolments.open_enrolment(student_number)
+            if current is not None:
+                if current.academic_year_code != academic_year_code:
+                    raise ValidationError(
+                        "the open placement belongs to a different academic year",
+                        field="academic_year_code",
+                    )
+                if current.class_code == to_class:
+                    raise ValidationError(
+                        "choose a different class",
+                        field="to_class_code",
+                    )
+                source = uow.class_sections.get(
+                    current.academic_year_code, current.class_code
+                )
+                if source is None:
+                    raise UnknownReference(
+                        f"no class {current.class_code} in academic year {academic_year_code}",
+                        field="class_code",
+                    )
+                if source.year_level_code != target.year_level_code:
+                    raise ValidationError(
+                        "a student may only transfer between classes in the same grade",
+                        field="to_class_code",
+                    )
+            opened = ClassEnrolment(
+                student_number=student_number,
+                academic_year_code=academic_year_code,
+                class_code=to_class,
+                starts_on=on_date,
+            )
             closed = uow.enrolments.close_open_enrolment(
                 student_number, ends_on=on_date - timedelta(days=1)
             )
@@ -1380,9 +1438,25 @@ def get_structure_catalogue(uow_factory: UowFactoryDep) -> StructureCatalogue:
     return StructureCatalogue(uow_factory)
 
 
-def get_attendance_service(uow_factory: UowFactoryDep) -> AttendanceService:
+def get_today() -> date:
+    """The calendar day the register rules are judged against.
+
+    A dependency of its own rather than a `datetime.now` inside the service, so a test can
+    pin it. It is deliberately NOT folded into `get_attendance_service`: overriding the
+    service would swap out the wiring under test, and the point is to move the clock while
+    everything else stays the code that actually ships.
+    """
+    return datetime.now(UTC).date()
+
+
+TodayDep = Annotated[date, Depends(get_today)]
+
+
+def get_attendance_service(
+    uow_factory: UowFactoryDep, today: TodayDep
+) -> AttendanceService:
     """The daily register. A factory, like every other service here."""
-    return AttendanceService(uow_factory)
+    return AttendanceService(uow_factory, today=lambda: today)
 
 
 def get_student_desk(uow_factory: UowFactoryDep) -> StudentDesk:

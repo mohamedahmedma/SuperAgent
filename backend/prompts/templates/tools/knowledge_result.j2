@@ -41,6 +41,22 @@ Retrieved Chunks:
    into a closing sentence describing its own sources, which readers see as filler. #}
 
 Answer the question itself. Do not close with a sentence about the material: where in a document it sits, which figure or note it came from, or what it leaves open. The citation markers already carry provenance.
+{% if figures %}
+{# Paid only on turns that retrieved a figure, which is the minority of them.
+
+   This is the whole of the image feature at query time. There is no tool to look at a
+   picture and no second model call to choose one: the figure was read into text at
+   ingest, so the chunk already answers the question, and the `[n]` the agent is
+   required to emit anyway is what selects which picture the user is shown.
+
+   That only works if the model knows which chunks are pictures, which is what the
+   [FIGURE] marker in the chunk header is for, and if it knows the marker is a
+   selector rather than a label — which is what this sentence is for. Without it the
+   model cites the prose beside a figure as readily as the figure itself, and the
+   answer arrives describing an image nobody attached. #}
+
+One or more chunks above are marked [FIGURE]: the image itself is shown to the user whenever you cite that chunk. Cite the [FIGURE] chunk you actually described — that, and nothing you write, is what puts the picture on screen. Do not write an image, a link or a file path into the answer; it cannot render.
+{% endif %}
 {% if constraints %}
 {# Three states, because a carried condition and the material can stand in three
    relations, and the first version of this block assumed only one of them. It told the

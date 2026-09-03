@@ -76,9 +76,14 @@ ENV_OVERRIDES: Dict[str, str] = {
     # switch worth flipping without a redeploy: it costs a small call per referential
     # turn, and a deployment hitting a quota wall needs to be able to stop paying it.
     "QUERY_RESOLUTION_ENABLED": "agent.query_resolution_enabled",
-    # Vision — the figure-reading model, reachable from a turn via the view_figure
-    # tool. Its effort belongs with the other vision settings rather than in
-    # ModelConfig, but it is tuned per deployment for the same reason as the rest.
+    # Vision — the model that reads a figure into text AT INGEST. Nothing reads pixels
+    # at query time any more, so this is an ingest cost, but it is still tuned per
+    # deployment for the same reason as the rest.
+    #
+    # NOTE: this cannot express "no reasoning". FigurePipelineConfig folds "none"/"off"
+    # to "", which means SEND NO effort parameter and leaves the provider's default on.
+    # To actually turn a scratchpad off, set assets.figures.vision_extra_params in the
+    # profile — see school.yaml.
     "VISION_REASONING_EFFORT": "assets.figures.vision_reasoning_effort",
     # Chunking
     "CHUNK_STRATEGY": "chunking.strategy",

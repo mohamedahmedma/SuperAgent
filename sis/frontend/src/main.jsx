@@ -30,7 +30,7 @@ import { Level } from './views/Level.jsx';
 import { Year } from './views/Year.jsx';
 import { Klass } from './views/Klass.jsx';
 import { Student } from './views/Student.jsx';
-import { Roster } from './views/Roster.jsx';
+import { Roster, StudentSetup } from './views/Roster.jsx';
 import { Guardians } from './views/Guardians.jsx';
 import { Marks } from './views/Marks.jsx';
 import { Batches } from './views/Batches.jsx';
@@ -38,6 +38,7 @@ import { Roles } from './views/Roles.jsx';
 import { GradeAssignments } from './views/GradeAssignments.jsx';
 import { TeacherSetup } from './views/TeacherSetup.jsx';
 import { Attendance } from './views/Attendance.jsx';
+import { Timetable } from './views/Timetable.jsx';
 
 /*
  * Schools -> School -> Rung -> Class -> Child is a containment hierarchy, and the first five
@@ -55,13 +56,15 @@ const ROUTES = [
   { name: 'class', view: Klass, title: 'Class' },
   { name: 'student', view: Student, title: 'Student' },
   { name: 'roster', view: Roster, title: 'Roster' },
+  { name: 'studentSetup', view: StudentSetup, title: 'Student setup' },
   { name: 'guardians', view: Guardians, title: 'Guardians' },
   { name: 'marks', view: Marks, title: 'Marks' },
   { name: 'batches', view: Batches, title: 'Batches' },
   { name: 'roles', view: Roles, title: 'Teacher roles' },
   { name: 'teacherSetup', view: TeacherSetup, title: 'Teacher setup' },
   { name: 'gradeAssignments', view: GradeAssignments, title: 'Class assignments' },
-  { name: 'attendance', view: Attendance, title: 'Take attendance' }
+  { name: 'attendance', view: Attendance, title: 'Take attendance' },
+  { name: 'timetable', view: Timetable, title: 'Timetable' }
 ];
 
 /* The document title follows the route: browser history and a taskbar full of tabs are both

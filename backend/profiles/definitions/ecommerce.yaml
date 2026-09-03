@@ -24,7 +24,6 @@ agent:
   tools:
     - search_knowledge_base
     - search_products
-    - view_figure
 
 assets:
   # Product images ARE the record here, not evidence inside a document.

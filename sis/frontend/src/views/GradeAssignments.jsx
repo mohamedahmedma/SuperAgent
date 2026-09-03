@@ -22,6 +22,11 @@ export function GradeAssignments() {
     !!state.school && !!state.year && !!grade
   );
   const value = options.value || { subjects: [], classes: [], eligible_teachers: [] };
+  const offeredClasses = subject
+    ? (value.available_classes || []).concat(
+        value.classes.filter((row) => classes.includes(row.code))
+      ).filter((row, index, rows) => rows.findIndex((item) => item.code === row.code) === index)
+    : [];
   /* The grade's whole teaching staff, which is a different question from the eligible
      teachers above: that list is one subject's candidates, this one is who works on the
      grade at all. It is read separately because it does not change when the subject does. */
@@ -71,7 +76,7 @@ export function GradeAssignments() {
           </Card>
           <Card title={t('4. Classes')}>
             <div className="d-flex flex-wrap gap-3">
-              {value.classes.map((row) => <label className="form-check" key={row.code}>
+              {offeredClasses.map((row) => <label className="form-check" key={row.code}>
                 <input className="form-check-input" type="checkbox" checked={classes.includes(row.code)}
                   disabled={!teacher} onChange={(event) => setClasses(event.target.checked
                     ? [...classes, row.code] : classes.filter((code) => code !== row.code))} />

@@ -172,9 +172,12 @@ function setYear(code) {
  * and the page after a reload is the page before it.
  */
 function setAccount(account) {
+  var schoolCode = account && account.school_code;
+  if (schoolCode) writeLocal(SCHOOL_KEY, schoolCode);
   set({
     account: account || null,
-    profile: (account && account.profile) || null
+    profile: (account && account.profile) || null,
+    school: schoolCode || state.school
   });
 }
 
@@ -187,7 +190,7 @@ function can(permission) {
   /* No human session means the legacy integration console remains available — the service
      still admits an unauthenticated caller, and a console that hid everything from one
      would be refusing what the server allows. */
-  if (!state.profile) return true;
+  if (!state.profile) return false;
   var held = state.profile.permissions;
   return Array.isArray(held) && held.indexOf(permission) >= 0;
 }
@@ -237,7 +240,7 @@ function scopeCovers(grant, at) {
  * question that only says which school.
  */
 function canIn(permission, at) {
-  if (!state.profile) return true;
+  if (!state.profile) return false;
   var grants = state.profile.grants;
   /* A payload from a service too old to send scopes. Falling back to the unscoped answer
      keeps the console usable rather than blanking every control; the server is still the

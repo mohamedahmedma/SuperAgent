@@ -48,7 +48,7 @@ class SchoolPromptBudgetTests(unittest.TestCase):
     def setUp(self):
         self.profile = load_profile("school")
         self.prompt = self.profile.render_system_prompt(
-            ["search_knowledge_base", "view_figure", "get_student_records"], language="ar"
+            ["search_knowledge_base", "get_student_records"], language="ar"
         )
 
     def test_the_rendered_prompt_fits_the_budget(self):
@@ -126,7 +126,7 @@ class SchoolPromptBudgetTests(unittest.TestCase):
         thing that changes the prompt."""
         sizes = {
             count(self.profile.render_system_prompt(tools, language="ar"))
-            for tools in (["search_knowledge_base"], ["view_figure"], None)
+            for tools in (["search_knowledge_base"], ["get_student_records"], None)
         }
         self.assertEqual(1, len(sizes), f"the prompt varies by bound tools: {sizes}")
 

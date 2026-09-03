@@ -566,6 +566,22 @@ export function Dropzone({ file, label, hint, accept, onFile }) {
  * the page showing round the edges.
  * ================================================================================== */
 
+/**
+ * One side of one line of a diff, always drawable.
+ *
+ * React refuses to render a plain object as a child and throws, and a throw inside a modal
+ * takes the whole console down — a blank page where a confirmation should be. A caller that
+ * hands this an object has a bug worth fixing at the call site, but the failure it earns
+ * should be an unreadable line in a dialog, not a registrar staring at nothing. `null` and
+ * `''` are the ordinary case rather than the defensive one: they mean "this field was empty",
+ * which is a fact the diff has to be able to state.
+ */
+function sideOfDiff(value) {
+  if (value === '' || value == null) return DASH;
+  if (typeof value === 'object') return JSON.stringify(value);
+  return value;
+}
+
 export function Confirm({
   title,
   tone,
@@ -620,17 +636,13 @@ export function Confirm({
                 <dl className="sis-diff">
                   {changes.map((change) => (
                     <Fragment key={change.label}>
-                      <dt>{change.label}</dt>
+                      <dt>{sideOfDiff(change.label)}</dt>
                       <dd>
-                        <span className="sis-diff-was">
-                          {change.was === '' || change.was == null ? DASH : change.was}
-                        </span>
+                        <span className="sis-diff-was">{sideOfDiff(change.was)}</span>
                         <span className="text-body-tertiary" aria-hidden="true">
                           →
                         </span>
-                        <span className="sis-diff-now">
-                          {change.now === '' || change.now == null ? DASH : change.now}
-                        </span>
+                        <span className="sis-diff-now">{sideOfDiff(change.now)}</span>
                       </dd>
                     </Fragment>
                   ))}

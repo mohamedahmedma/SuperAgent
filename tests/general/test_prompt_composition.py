@@ -45,7 +45,7 @@ class CompositionTests(unittest.TestCase):
         """The whole point of composing: a turn bound only to an ungrounded tool has no
         chunks and no citations, so every word about them would be waste on every one of
         its turns."""
-        prompt = self.profile.render_system_prompt(["view_figure"])
+        prompt = self.profile.render_system_prompt(["get_student_records"])
         self.assertNotIn("[1]", prompt)
         self.assertNotIn("Grounding rules", prompt)
         self.assertLess(len(prompt), len(self.profile.render_system_prompt(["search_knowledge_base"])))
@@ -56,7 +56,7 @@ class CompositionTests(unittest.TestCase):
                 self.assertIn("[1], or [2][3]", self.profile.render_system_prompt([name]))
 
     def test_the_persona_always_opens_the_prompt(self):
-        for tools in (None, ["search_knowledge_base"], ["view_figure"], []):
+        for tools in (None, ["search_knowledge_base"], ["get_student_records"], []):
             with self.subTest(tools=tools):
                 self.assertTrue(
                     self.profile.render_system_prompt(tools).startswith(
@@ -67,7 +67,7 @@ class CompositionTests(unittest.TestCase):
     def test_style_rules_survive_every_turn_shape(self):
         """Language and output shape are not tool-conditional — an ungrounded turn
         still has to answer in the user's language."""
-        for tools in (None, ["search_knowledge_base"], ["view_figure"], []):
+        for tools in (None, ["search_knowledge_base"], ["get_student_records"], []):
             with self.subTest(tools=tools):
                 prompt = self.profile.render_system_prompt(tools)
                 self.assertIn("language the user wrote in", prompt)
@@ -230,7 +230,6 @@ class MigratedTemplateTests(unittest.TestCase):
         ("agent/resume_answer.j2", {}),
         ("assets/figure_extraction.j2", {"context": "C"}),
         ("assets/entity_extraction.j2", {"attributes": "A", "context": "C"}),
-        ("assets/figure_read.j2", {"context": "C", "question": "Q"}),
     ]
 
     def test_each_renders_with_its_documented_context(self):
@@ -333,6 +332,7 @@ class ToolResultEnvelopeTests(unittest.TestCase):
             "partial": False,
             "constraints": [],
             "discriminate": "unknown",
+            "figures": False,
         }
         fields.update(flags)
         return render(self.TEMPLATE, **fields)
@@ -369,6 +369,44 @@ class ToolResultEnvelopeTests(unittest.TestCase):
                 out = self._chunks(constraints=["girls only"], discriminate=verdict)
                 self.assertIn("girls only", out)
 
+    def test_the_figure_rule_is_paid_only_when_a_figure_was_retrieved(self):
+        """Rung 3 of the ladder in backend/prompts/__init__.py: an instruction that is
+        only true when retrieval returned a figure is billed only on those turns."""
+        without = self._chunks(figures=False)
+        with_rule = self._chunks(figures=True)
+        self.assertNotIn("[FIGURE]", without)
+        self.assertIn("[FIGURE]", with_rule)
+        self.assertLess(len(without), len(with_rule))
+
+    def test_the_figure_rule_makes_the_citation_the_selector(self):
+        """This is the whole image feature at query time: no tool to look at a picture
+        and no second call to choose one, just the `[n]` the agent already emits. That
+        only works if the model is told the marker SELECTS rather than labels — without
+        it, it cites the prose beside a figure as readily as the figure itself, and the
+        answer describes an image nobody attached."""
+        out = self._chunks(figures=True)
+        self.assertIn("whenever you cite that chunk", out)
+        self.assertIn("Cite the [FIGURE] chunk you actually described", out)
+
+    def test_the_figure_rule_still_forbids_writing_the_picture(self):
+        """The model has no id to write any more, but it can still invent a URL."""
+        out = self._chunks(figures=True)
+        for forbidden in ("an image", "a link", "a file path"):
+            with self.subTest(forbidden=forbidden):
+                self.assertIn(forbidden, out)
+
+    def test_the_figure_rule_is_not_hard_wrapped(self):
+        out = self._chunks(figures=True)
+        self.assertIn("the image itself is shown to the user whenever you cite", out)
+
+    def test_the_figure_rule_reaches_no_other_outcome(self):
+        """A refusal or a clarification shows the model no chunk headers at all, so it
+        has no asset_id to write and no rule to pay for."""
+        for outcome in ("no_knowledge", "retrieval_error", "empty", "call_limit"):
+            with self.subTest(outcome=outcome):
+                out = render(self.TEMPLATE, outcome=outcome, prompt="p", options=[])
+                self.assertNotIn("already shown to the user", out)
+
     def test_the_rewrite_caveat_is_paid_only_when_a_rewrite_happened(self):
         without = self._chunks(rewritten=False)
         with_caveat = self._chunks(rewritten=True)
@@ -396,16 +434,17 @@ class ToolResultEnvelopeTests(unittest.TestCase):
             render(self.TEMPLATE, outcome="needs_scope_selection", prompt="Which?", options=[]),
         )
 
-    def test_a_figure_bearing_chunk_names_its_asset_id(self):
-        """The model can only pass back an id it has actually seen, so this line is
-        what makes view_figure callable at all."""
+    def test_a_figure_bearing_chunk_is_marked_but_never_identified(self):
+        """WHETHER, not which. The marker is what lets the model choose a picture with
+        its citation; the id would only give it something to write into the answer."""
         from backend.tools.knowledge import _format_chunk
 
         entry = _format_chunk(1, {"filename": "kb.pdf", "page_number": 2,
                                   "text": "t", "asset_ids": ["kb.pdf::p2::img0"]})
-        self.assertIn("view_figure asset_id: kb.pdf::p2::img0", entry)
+        self.assertIn("[FIGURE]", entry)
+        self.assertNotIn("kb.pdf::p2::img0", entry)
         self.assertNotIn(
-            "view_figure",
+            "[FIGURE]",
             _format_chunk(1, {"filename": "kb.pdf", "page_number": 2, "text": "t"}),
         )
 
@@ -428,7 +467,6 @@ class CachingContractTests(unittest.TestCase):
     PAYLOADS = {
         "rag/evidence_grade.j2": {"question": "Q", "context": "C", "constraints": []},
         "rag/rewrite.j2": {"query": "Q"},
-        "assets/figure_read.j2": {"context": "C", "question": "Q"},
         "assets/entity_extraction.j2": {"attributes": "A", "context": "C"},
     }
 
@@ -520,7 +558,7 @@ class GroundingContractTests(unittest.TestCase):
 
     def test_an_ungrounded_turn_carries_no_contract(self):
         """Nothing to cite, so the rules would be noise on every one of its turns."""
-        prompt = load_profile("base").render_system_prompt(["view_figure"])
+        prompt = load_profile("base").render_system_prompt(["get_student_records"])
         self.assertNotIn("Cite the chunk", prompt)
 
 

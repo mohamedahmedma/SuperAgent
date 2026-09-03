@@ -109,6 +109,85 @@ def seeded(client: TestClient) -> TestClient:
 # ---------------------------------------------------------------------------
 
 
+def _complete_admission() -> dict[str, object]:
+    return {
+        "full_name_ar": "سارة محمد علي",
+        "full_name_en": "Sara Mohamed Ali",
+        "gender": "female",
+        "date_of_birth": "2016-04-12",
+        "contact_phone": "+201001111111",
+        "contact_email": "sara@example.test",
+        "address": "12 Nile Street, Cairo",
+        "guardian_full_name_ar": "محمد علي",
+        "guardian_full_name_en": "Mohamed Ali",
+        "guardian_phone": "+201002222222",
+        "relationship_type": "father",
+        "relationship_label": "الأب",
+        "academic_year_code": YEAR,
+        "class_code": "3A",
+    }
+
+
+def test_complete_admission_creates_student_guardian_and_placement_atomically(
+    seeded: TestClient, registrar: dict[str, str]
+) -> None:
+    response = seeded.post(
+        "/v1/students/admissions", json=_complete_admission(), headers=registrar
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["placement"]["class_code"] == "3A"
+    number = response.json()["student"]["student_number"]
+    assert number.startswith("S-")
+
+    student = seeded.get(f"/v1/students/{number}", headers=registrar).json()
+    assert student["full_name_ar"] == "سارة محمد علي"
+    guardians = seeded.get(f"/v1/students/{number}/guardians", headers=registrar).json()
+    assert guardians["count"] == 1
+    assert guardians["guardians"][0]["relationship_type"] == "father"
+    placements = seeded.get(f"/v1/students/{number}/placements", headers=registrar).json()
+    assert placements["count"] == 1
+
+
+def test_admission_accepts_national_guardian_phone_optional_contacts_and_lists_child_in_class(
+    seeded: TestClient, registrar: dict[str, str]
+) -> None:
+    body = _complete_admission()
+    body.pop("contact_phone")
+    body["guardian_phone"] = "01002222222"
+    body["contact_email"] = ""
+
+    response = seeded.post(
+        "/v1/students/admissions", json=body, headers=registrar
+    )
+    assert response.status_code == 201, response.text
+    result = response.json()
+    number = result["student"]["student_number"]
+    assert result["student"]["contact_phone"] == ""
+    assert result["student"]["contact_email"] == ""
+    assert result["guardian_phone"] == "+201002222222"
+
+    roster = seeded.get(
+        "/v1/classes/3A/students",
+        params={"academic_year": YEAR, "on": "2025-09-01"},
+        headers=registrar,
+    )
+    assert roster.status_code == 200, roster.text
+    assert number in {student["student_number"] for student in roster.json()["students"]}
+    assert result["placement"]["starts_on"] == "2025-09-01"
+
+
+def test_complete_admission_refuses_a_blank_required_field_without_partial_writes(
+    seeded: TestClient, registrar: dict[str, str]
+) -> None:
+    body = _complete_admission()
+    body["full_name_en"] = "Unique Blank Candidate"
+    body["address"] = "   "
+    response = seeded.post("/v1/students/admissions", json=body, headers=registrar)
+    assert response.status_code == 422
+    found = seeded.get("/v1/students?q=Unique%20Blank%20Candidate", headers=registrar)
+    assert found.json()["count"] == 0
+
+
 def test_a_child_is_created_then_corrected_through_the_same_route(
     seeded: TestClient, registrar: dict[str, str]
 ) -> None:
@@ -339,14 +418,21 @@ def test_ending_a_placement_uses_her_last_day_not_the_day_after(
     assert ended.json()["ends_on"] == "2026-01-15"
     assert ended.json()["is_open"] is False
 
-    def on(day: str) -> list[str]:
+    def on(day: str) -> list[dict]:
         response = seeded.get(
             f"/v1/classes/3A/students?academic_year={YEAR}&on={day}", headers=registrar
         )
-        return [row["student_number"] for row in response.json()["students"]]
+        return response.json()["students"]
 
-    assert on("2026-01-15") == ["10432"]  # her last day: still there
+    assert [row["student_number"] for row in on("2026-01-15")] == ["10432"]  # last day: there
     assert on("2026-01-16") == []  # the day after: gone
+
+    # And the register says which of the two she is. The console draws this flag — a child
+    # removed this morning is on this morning's register, correctly, and without it she is
+    # drawn exactly like a child who is staying, which reads as a Remove button that did
+    # nothing. `ends_on` is on the row for the same reason.
+    assert on("2026-01-15")[0]["is_open"] is False
+    assert on("2026-01-15")[0]["ends_on"] == "2026-01-15"
 
 
 def test_ending_a_placement_she_does_not_have_is_a_404(

@@ -46,7 +46,9 @@ var DEFAULT_KEY = 'dev-sis-registrar';
  * page with no session has.
  */
 var STORAGE_KEY = 'sis.api_key';
-var SESSION_TOKEN_KEY = 'sis.session_token';
+/* Versioned so browsers carrying a session from the pre-login-shell build are forced
+   through the sign-in page once instead of reopening the old anonymous console. */
+var SESSION_TOKEN_KEY = 'sis.session_token.v2';
 
 var DASH = '—'; // em dash: the one rendering of "no mark was recorded"
 
@@ -461,6 +463,10 @@ function post(path, body, params) {
   return request(path, { method: 'POST', body: body, query: params });
 }
 
+function put(path, body, params) {
+  return request(path, { method: 'PUT', body: body, query: params });
+}
+
 function postForm(path, form) {
   /* Caught here rather than at the service: a plain object serialises to
      "[object FormData]"-shaped nonsense that arrives as an unreadable multipart body,
@@ -633,6 +639,9 @@ var api = {
   saveStudent: function (body) {
     return post('/students', body);
   },
+  admitStudent: function (body) {
+    return post('/students/admissions', body);
+  },
   updateStudent: function (studentNumber, body) {
     return request('/students/' + encodeURIComponent(studentNumber), {
       method: 'PATCH',
@@ -675,6 +684,19 @@ var api = {
   },
   teachingAssignments: function (academicYear) {
     return get('/teaching/assignments', { academic_year: academicYear || null });
+  },
+  timetableWeek: function (academicYear, classCode, termCode) {
+    return get('/timetable/week', {
+      academic_year: academicYear,
+      class_code: classCode,
+      term: termCode
+    });
+  },
+  placeTimetableLessons: function (academicYear, entries) {
+    return put('/timetable', { academic_year_code: academicYear, entries: entries });
+  },
+  clearTimetableSlots: function (academicYear, slots) {
+    return post('/timetable/clear', { academic_year_code: academicYear, slots: slots });
   },
   classMarkSheet: function (classCode, academicYear, termCode, subjectCode) {
     return get('/classes/' + encodeURIComponent(classCode) + '/grades', {
@@ -766,6 +788,9 @@ var api = {
     return request('/schools/' + encodeURIComponent(schoolCode) + '/teachers/' +
       encodeURIComponent(staffNumber), { method: 'PUT', body: body });
   },
+  createTeacher: function (schoolCode, body) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/teachers', body);
+  },
   teacherAttendance: function (schoolCode, fromDate, toDate) {
     return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers/attendance', {
       from: fromDate || null,
@@ -774,6 +799,9 @@ var api = {
   },
   rbacUsers: function () { return get('/rbac/users'); },
   rbacRoles: function () { return get('/rbac/roles'); },
+  rbacYearLevels: function (schoolCode) {
+    return get('/rbac/year-level-scopes', { school: schoolCode });
+  },
   addUserRole: function (userId, role) {
     return post('/rbac/users/' + encodeURIComponent(userId) + '/roles', role);
   },

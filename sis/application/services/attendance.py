@@ -16,12 +16,22 @@ deliberate: a register naming a child who had already transferred is either a st
 or the wrong class, and writing it would file her attendance under a room she had left —
 the same failure invariant 2 exists to prevent for marks.
 
-Ports only. No sqlalchemy, no fastapi, no clock: the day is always an argument, so a test
-of "she is not on Monday's register" does not depend on the day the suite runs.
+Ports only: no sqlalchemy, no fastapi. The day a register is *about* is always an
+argument, so a test of "she is not on Monday's register" does not depend on the day the
+suite runs.
+
+Today is the one exception, and it is injected rather than read. `take_register` enforces
+two rules that only a calendar can answer — no register for a day that has not happened,
+and a past day may only have an absence excused — so the service has to know what day it
+is. It takes that as a callable instead of calling `datetime.now` itself, because a rule
+written against the wall clock is a rule no test can state: a suite that records Tuesday
+and Wednesday has to be able to *be* Tuesday and then Wednesday, and pinning the test data
+to whatever today happens to be turns a green suite into one that goes red overnight with
+no commit in between. The default is the real clock, so production wiring says nothing.
 """
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.domain.attendance import AttendanceMark, AttendanceState, AttendanceTally, tally
@@ -108,8 +118,14 @@ class StudentAttendance:
 class AttendanceService:
     """The daily register: build one, take one, read one child's back."""
 
-    def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(
+        self,
+        uow_factory: Callable[[], UnitOfWork],
+        *,
+        today: Callable[[], date] | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._today = today or (lambda: datetime.now(UTC).date())
 
     # -- Reads -------------------------------------------------------------
 
@@ -267,6 +283,9 @@ class AttendanceService:
         writing it would file her attendance under a room she had left.
         """
         notes = notes or {}
+        today = self._today()
+        if on_date > today:
+            raise ValidationError("attendance cannot be recorded for a future day", field="on_date")
         if not states and not absent_unlisted:
             raise ValidationError(
                 "no attendance was stated; the register has nothing to record",
@@ -290,6 +309,21 @@ class AttendanceService:
                     academic_year_code, class_code, on_date
                 )
             }
+            if on_date < today:
+                existing = uow.attendance.marks_for_class(section_id, on_date)
+                invalid = sorted(
+                    number for number, state in states.items()
+                    if not (
+                        state == AttendanceState.EXCUSED.value
+                        and number in existing
+                        and existing[number].state == AttendanceState.ABSENT
+                    )
+                )
+                if absent_unlisted or invalid:
+                    raise ValidationError(
+                        "past attendance may only change an existing absent mark to excused",
+                        field="states",
+                    )
             strangers = sorted(set(states) - placed)
             if strangers:
                 raise ValidationError(

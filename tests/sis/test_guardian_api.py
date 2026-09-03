@@ -28,6 +28,7 @@ from sis.config import reset_settings_cache
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.session import reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+from tests.sis.conftest import Clock
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[2] / "sis" / "alembic.ini"
 
@@ -70,8 +71,12 @@ def sis_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
 
 
 @pytest.fixture
-def client(sis_database: None) -> Iterator[TestClient]:
-    with TestClient(create_app()) as test_client:
+def client(sis_database: None, clock: Clock) -> Iterator[TestClient]:
+    # Its own app, so the clock has to be pinned on this one rather than on the module
+    # singleton the shared fixture pins.
+    app = create_app()
+    clock.install(app)
+    with TestClient(app) as test_client:
         yield test_client
 
 

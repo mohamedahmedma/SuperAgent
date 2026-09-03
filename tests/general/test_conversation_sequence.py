@@ -332,6 +332,7 @@ class Conversation:
             partial=status == "partial",
             constraints=list(ctx.carried_constraints),
             discriminate=str(trace.get("evidence_constraints_discriminate") or "unknown"),
+            figures=any(d.get("asset_ids") for d in result["docs"]),
         )
 
     def _record(self, user_text, reply, turn: Turn) -> None:

@@ -324,6 +324,34 @@ def list_scopes(profile: SessionProfile) -> list[ScopeOut]:
     ]
 
 
+class YearLevelScopeOut(BaseModel):
+    id: int
+    code: str
+    name_en: str
+    name_ar: str
+
+
+@router.get("/rbac/year-level-scopes", response_model=list[YearLevelScopeOut])
+def list_year_level_scopes(
+    profile: Annotated[
+        AccessProfile, Depends(require_user_permission(Permission.ROLES_ASSIGN))
+    ],
+    uow_factory: UowFactoryDep,
+    school: str,
+) -> list[YearLevelScopeOut]:
+    """Grades available when a manager bounds an attendance account."""
+    with uow_factory() as uow:
+        school_row = uow._session.scalar(select(m.School).where(m.School.code == school))
+        if school_row is None:
+            raise _refuse(404, "unknown_reference", "No such school.")
+        if profile.school_id is not None and profile.school_id != school_row.id:
+            raise _refuse(403, "not_authorized", "That school is outside your authority.")
+        levels = uow._session.scalars(select(m.YearLevel).where(
+            m.YearLevel.school_id == school_row.id
+        ).order_by(m.YearLevel.display_order, m.YearLevel.code)).all()
+        return [YearLevelScopeOut(id=row.id, code=row.code, name_en=row.name_en, name_ar=row.name_ar) for row in levels]
+
+
 @router.get("/rbac/roles", response_model=list[RoleOut])
 def list_role_catalogue(profile: SessionProfile, uow_factory: UowFactoryDep) -> list[RoleOut]:
     """Every role this deployment has, with the permissions each one carries.
@@ -357,6 +385,7 @@ def list_role_catalogue(profile: SessionProfile, uow_factory: UowFactoryDep) -> 
                 aliases=sorted(aliases.get(row.code, ())),
             )
             for row in rows
+            if row.code != RoleCode.SUBJECT_COORDINATOR.value
         ]
     return catalogue
 
@@ -765,7 +794,9 @@ def add_role(
     """
     with uow_factory() as uow:
         session = uow._session
-        _subject_user(session, manager, user_id)
+        subject_user = _subject_user(session, manager, user_id)
+        if body.role_code is RoleCode.SUBJECT_COORDINATOR:
+            raise _refuse(422, "invalid_value", "Subject Coordinator is no longer an assignable role.")
         _authorised_to_grant(session, manager, body.role_code.value)
         _validate_scope(session, manager, body.scope_type, body.scope_id)
 

@@ -28,8 +28,8 @@ from sis.domain.structure import Stage
 # The school every demo row hangs off. `reset` deletes by this code and nothing else, so
 # a database holding both demo and real schools loses only the demo one.
 SCHOOL_CODE: Final[str] = "DEMO"
-SCHOOL_NAME_EN: Final[str] = "Nile International School (Demo)"
-SCHOOL_NAME_AR: Final[str] = "مدرسة النيل الدولية (تجريبية)"
+SCHOOL_NAME_EN: Final[str] = "Nile Modern School"
+SCHOOL_NAME_AR: Final[str] = "مدرسة النيل الحديثة"
 
 YEAR_CODE: Final[str] = "2025-2026"
 YEAR_STARTS: Final[date] = date(2025, 9, 1)
@@ -38,7 +38,7 @@ YEAR_ENDS: Final[date] = date(2026, 6, 30)
 # The password every demo account shares. One value, so the account table is readable at a
 # glance and a tester does not have to look up a different string per role. It is
 # deliberately not a secret, and the seeder says so out loud when it runs.
-DEMO_PASSWORD: Final[str] = "Demo#2026"
+DEMO_PASSWORD: Final[str] = "12345678"
 
 
 @dataclass(frozen=True, slots=True)
@@ -327,7 +327,7 @@ def room_ref(rung_code: str, label_en: str) -> str:
 STAFF: Final[tuple[StaffSpec, ...]] = (
     # -- The estate ---------------------------------------------------------------------
     StaffSpec(
-        username="sysadmin",
+        username="admin",
         full_name_en="System Administrator",
         full_name_ar="مدير النظام",
         email="sysadmin@demo.school",
@@ -346,7 +346,7 @@ STAFF: Final[tuple[StaffSpec, ...]] = (
         purpose="Reads every screen of the demo school. Writes nothing, anywhere.",
     ),
     StaffSpec(
-        username="principal",
+        username="manager",
         full_name_en="Sameh Abdelaziz",
         full_name_ar="سامح عبد العزيز",
         email="principal@demo.school",
@@ -359,7 +359,7 @@ STAFF: Final[tuple[StaffSpec, ...]] = (
     ),
     # -- Supervisors ----------------------------------------------------------------------
     StaffSpec(
-        username="supervisor.p4",
+        username="supervisor",
         full_name_en="Nagwa Serageldin",
         full_name_ar="نجوى سراج الدين",
         email="supervisor.p4@demo.school",
@@ -402,7 +402,7 @@ STAFF: Final[tuple[StaffSpec, ...]] = (
     ),
     # -- Teachers -------------------------------------------------------------------------
     StaffSpec(
-        username="t.arabic",
+        username="teacher",
         full_name_en="Ahmed Selim",
         full_name_ar="أحمد سليم",
         email="ahmed.selim@demo.school",
@@ -507,10 +507,8 @@ STAFF: Final[tuple[StaffSpec, ...]] = (
             RoleGrant(RoleCode.TEACHER, ScopeType.CLASS_SECTION, room_ref("AR-PR3", "Class 1")),
             # Teacher AND attendance supervisor — the second additive case, and a
             # different pair of roles from the one above.
-            RoleGrant(RoleCode.ATTENDANCE_SUPERVISOR, ScopeType.CLASS_SECTION,
-                      room_ref("AR-PR1", "Class 1")),
-            RoleGrant(RoleCode.ATTENDANCE_SUPERVISOR, ScopeType.CLASS_SECTION,
-                      room_ref("AR-PR2", "Class 1")),
+            RoleGrant(RoleCode.ATTENDANCE_SUPERVISOR, ScopeType.CLASS_SECTION, room_ref("AR-PR1", "Class 1")),
+            RoleGrant(RoleCode.ATTENDANCE_SUPERVISOR, ScopeType.CLASS_SECTION, room_ref("AR-PR2", "Class 1")),
         ),
         staff_number="T-005",
         subject="SS",
@@ -535,7 +533,6 @@ STAFF: Final[tuple[StaffSpec, ...]] = (
             RoleGrant(RoleCode.TEACHER, ScopeType.CLASS_SECTION, room_ref("LG-G12", "A")),
             RoleGrant(RoleCode.TEACHER, ScopeType.CLASS_SECTION, room_ref("LG-G13", "A")),
             RoleGrant(RoleCode.TEACHER, ScopeType.CLASS_SECTION, room_ref("AR-S1", "Class 1")),
-            RoleGrant(RoleCode.SUBJECT_COORDINATOR, ScopeType.SCHOOL, SCHOOL_CODE),
         ),
         staff_number="T-006",
         subject="CS",

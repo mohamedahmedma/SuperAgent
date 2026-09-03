@@ -27,7 +27,7 @@
  * column is small buttons that wrap — a four-button `btn-group` at 360px is four buttons nobody
  * can hit.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Router } from '../router.js';
 import { Store } from '../store.js';
@@ -252,13 +252,22 @@ function PlaceExisting({ classCode, year, onSaved }) {
 
 /* -- Move a child to another class in the same year -------------------------------- */
 
-function MoveChild({ student, classCode, year, onDone }) {
+function MoveChild({ student, classCode, year, yearLevel, onDone }) {
   const classes = useResource(Store.keys.classes(year), () => api.classes(year), !!year);
   const form = useForm({ to_class_code: '', on_date: today() });
   const [dialog, ask] = useConfirm();
 
+  /* Same grade only: a move is a change of section, not of year — a child put into a class one
+     grade up by a mistyped dropdown is a mistake nobody notices until her marks arrive against
+     the wrong subjects. The level filter is skipped only while the classes are still loading,
+     because filtering against an undefined level would empty the list and read as "no class to
+     move her to". */
   const options = (classes.value || [])
-    .filter((section) => section.code !== classCode)
+    .filter(
+      (section) =>
+        section.code !== classCode &&
+        (!yearLevel || section.year_level_code === yearLevel)
+    )
     .map((section) => ({ value: section.code, label: `${section.code} — ${labelOf(section)}` }));
 
   return (
@@ -308,7 +317,7 @@ function MoveChild({ student, classCode, year, onDone }) {
               value={form.values.to_class_code}
               options={options}
               placeholder={classes.loading ? t('Loading…') : t('Choose a class')}
-              onInput={form.set('to_class_code')}
+              onChange={form.set('to_class_code')}
             />
           </Field>
           <Field className="col-12 col-sm-6" label={t('From')} required>
@@ -316,6 +325,11 @@ function MoveChild({ student, classCode, year, onDone }) {
           </Field>
         </div>
         <ErrorNote error={classes.error} onRetry={classes.reload} />
+        {!classes.loading && !options.length ? (
+          <Alert tone="warn" title={t('No other class in this grade')}>
+            {t('She can only be moved to another section of the same grade, and this grade has no other. Add one first.')}
+          </Alert>
+        ) : null}
         <div className="d-grid gap-2 d-sm-flex">
           <Button type="submit" variant="primary" disabled={!form.values.to_class_code}>
             Move out of {classCode}
@@ -338,12 +352,10 @@ function RenameClass({ section, year, onDone }) {
   });
   const [dialog, ask] = useConfirm();
 
-  const changed = form.changed();
-  const diff = Object.keys(changed).map((key) => ({
-    label: key.replace(/_/g, ' '),
-    was: section[key],
-    now: changed[key]
-  }));
+  const diff = form.changed(null, {
+    name_en: t('Name (English)'),
+    name_ar: t('Name (Arabic)')
+  });
 
   return (
     <>
@@ -410,12 +422,21 @@ function RenameClass({ section, year, onDone }) {
 
 /* -- The register ---------------------------------------------------------------- */
 
-function Register({ classCode, year }) {
+function Register({ classCode, year, yearLevel }) {
   const state = useStore();
   const [panel, setPanel] = useState(null); /* 'add' | 'place' | null */
   const [editing, setEditing] = useState('');
   const [moving, setMoving] = useState('');
   const [dialog, ask] = useConfirm();
+  /* Edit and Move open a panel under the table. On a register of thirty that panel is below the
+     fold, so the click reads as a button that did nothing — the reason to scroll to it is that
+     the effect is otherwise invisible, not decoration. */
+  const panel_ref = useRef(null);
+  useEffect(() => {
+    if ((editing || moving) && panel_ref.current) {
+      panel_ref.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [editing, moving]);
 
   const roster = useQuery(
     () => api.classRoster(classCode, year),
@@ -423,6 +444,12 @@ function Register({ classCode, year }) {
     !!(classCode && year)
   );
   const students = (roster.value && roster.value.students) || [];
+  /* A placement ends on the child's **last day**, not the day after, so a child removed this
+     morning is still on this morning's register — and must be: today's attendance is taken
+     against it. That is the correct record and it is also, on a screen that draws her exactly
+     like everybody else, indistinguishable from a Remove button that did nothing. So the row
+     says so. `is_open` is what the service already tells us; nothing new is asked for. */
+  const leaving = students.filter((row) => row.is_open === false);
 
   function removeFromClass(student) {
     ask({
@@ -432,9 +459,10 @@ function Register({ classCode, year }) {
       body: (
         <div className="vstack gap-2">
           <p className="mb-0">
-            This ends her membership of {classCode} today. It does not delete her: her record, her
-            marks and her attendance all stay exactly as they are, and she can be placed in
-            another class tomorrow.
+            {t('Today is her last day in {0}, so she stays on today’s register — this morning’s attendance is taken against it — and is off it from tomorrow.', [classCode])}
+          </p>
+          <p className="mb-0">
+            {t('It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class tomorrow.')}
           </p>
           <p className="mb-0 small text-body-tertiary">
             {t('If she is moving to another class, use')} <strong>{t('Move')}</strong> {t('instead — it closes this placement and opens the next one together, so she is never in no class at all.')}
@@ -445,7 +473,11 @@ function Register({ classCode, year }) {
         api.endPlacement(student.student_number, { ends_on: today() }).then(() => {
           Store.invalidate('roster:');
           Store.invalidate('placements:');
-          Store.toast('ok', t('{0} removed from {1}', [student.student_number, classCode]));
+          Store.toast(
+            'ok',
+            t('{0} removed from {1}', [student.student_number, classCode]).join(''),
+            t('Today is her last day, so she is on the register once more and off it tomorrow.')
+          );
           roster.reload();
         })
     });
@@ -459,7 +491,14 @@ function Register({ classCode, year }) {
         title={t('On the register')}
         subtitle={
           roster.value
-            ? `${roster.value.count} child(ren) as of ${dateText(roster.value.as_of)}`
+            ? [
+                `${roster.value.count} child(ren) as of ${dateText(roster.value.as_of)}`,
+                leaving.length
+                  ? t('{0} on their last day', [leaving.length]).join('')
+                  : null
+              ]
+                .filter(Boolean)
+                .join(' · ')
             : null
         }
         actions={
@@ -516,6 +555,7 @@ function Register({ classCode, year }) {
           loading={roster.loading}
           rows={students}
           rowKey={(row) => row.student_number}
+          rowTone={(row) => (row.is_open === false ? 'warn' : null)}
           rowHref={(row) => Router.href('student', { number: row.student_number })}
           rowLabel={(row) => t('Open {0}', [pickName(row, state.lang) || row.student_number]).join('')}
           empty={
@@ -563,6 +603,15 @@ function Register({ classCode, year }) {
                   <div className="sis-code sis-xs text-body-tertiary d-md-none">
                     {row.student_number}
                   </div>
+                  {row.is_open === false ? (
+                    <div className="mt-1">
+                      <Badge tone="warn">
+                        {t('Last day {0} — off the register after it', [
+                          dateText(row.ends_on)
+                        ])}
+                      </Badge>
+                    </div>
+                  ) : null}
                 </>
               )
             },
@@ -578,8 +627,12 @@ function Register({ classCode, year }) {
             {
               key: 'actions',
               header: '',
+              /* Move and Remove both act on an *open* placement, and a child whose placement
+                 closed this morning has none — the service answers 404, which reads as a
+                 broken button rather than as "already done". Edit stays: her record is hers
+                 whichever class she is in. */
               cell: (row) => (
-                <div className="d-flex flex-wrap gap-1 justify-content-end">
+                <div className="sis-row-actions d-flex flex-wrap gap-1 justify-content-end">
                   <Button
                     size="sm"
                     onClick={() => {
@@ -589,18 +642,22 @@ function Register({ classCode, year }) {
                   >
                     {t('Edit')}
                   </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setEditing('');
-                      setMoving(moving === row.student_number ? '' : row.student_number);
-                    }}
-                  >
-                    {t('Move')}
-                  </Button>
-                  <Button size="sm" variant="danger" onClick={() => removeFromClass(row)}>
-                    {t('Remove')}
-                  </Button>
+                  {row.is_open === false ? null : (
+                    <>
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setEditing('');
+                          setMoving(moving === row.student_number ? '' : row.student_number);
+                        }}
+                      >
+                        {t('Move')}
+                      </Button>
+                      <Button size="sm" variant="danger" onClick={() => removeFromClass(row)}>
+                        {t('Remove')}
+                      </Button>
+                    </>
+                  )}
                 </div>
               )
             }
@@ -616,6 +673,8 @@ function Register({ classCode, year }) {
 
       {/* The edit and move forms open under the table rather than inside the row: a form in a
           table cell on a phone is a form in a 90px column. */}
+      <div ref={panel_ref} />
+
       {editing ? (
         <Card className="sis-rise" title={t('Edit {0}', [editing])}>
           {/* The form loads her whole record rather than editing the three columns this table
@@ -623,6 +682,7 @@ function Register({ classCode, year }) {
               had a phone number is a diff that lies. */}
           <StudentEditorFor
             studentNumber={editing}
+            academicYear={year}
             onDone={() => {
               setEditing('');
               roster.reload();
@@ -637,6 +697,7 @@ function Register({ classCode, year }) {
             student={students.find((row) => row.student_number === moving) || {}}
             classCode={classCode}
             year={year}
+            yearLevel={yearLevel}
             onDone={() => {
               setMoving('');
               roster.reload();
@@ -860,7 +921,13 @@ export function Klass({ params = {} }) {
       </ul>
 
       <div className="sis-fade" key={tab}>
-        {tab === 'register' ? <Register classCode={classCode} year={year} /> : null}
+        {tab === 'register' ? (
+          <Register
+            classCode={classCode}
+            year={year}
+            yearLevel={section && section.year_level_code}
+          />
+        ) : null}
         {tab === 'attendance' ? (
           <AttendancePanel
             classCode={classCode}

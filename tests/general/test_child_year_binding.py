@@ -133,6 +133,7 @@ class AnswerPromptTests(unittest.TestCase):
             discriminate=discriminate,
             rewritten=False,
             partial=False,
+            figures=False,
             child_year=YEAR,
         )
 
@@ -162,6 +163,7 @@ class AnswerPromptTests(unittest.TestCase):
             discriminate="unknown",
             rewritten=False,
             partial=False,
+            figures=False,
         )
         self.assertNotIn("THE YEAR TO ANSWER FOR", rendered)
 

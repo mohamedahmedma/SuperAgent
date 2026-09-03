@@ -231,10 +231,6 @@ class AgentConfig(_Section):
 
 
 
-    # view_figure gets its own budget, carved explicitly out of the single-knowledge-
-    # call rule. Sharing that budget would make looking at a figure cost the turn its
-    # only retrieval, which is the opposite of what the tool is for.
-    max_figure_calls_per_turn: int = 3
     context_window_messages: int = 6
     persistent_note_max_chars: int = 500
 
@@ -823,12 +819,15 @@ class AssetDeliveryConfig(_Section):
     attach_to_response: bool = True
     max_assets_per_response: int = 8
 
-    # Attach only the images belonging to chunks the answer actually cited.
+    # Attach the image belonging to the chunk the answer CITED, not every figure
+    # retrieval touched.
     #
-    # Retrieval surfaces every figure near the topic — a uniform question hits all the
-    # uniform images — but the answer usually rests on one. The `[n]` markers the agent
-    # already emits say exactly which, so this costs nothing to honour. An answer that
-    # cites nothing still gets everything surfaced.
+    # Retrieval surfaces every figure near the topic — a question about the PE kit hits
+    # all the uniform images — but the answer rests on one. The chunk header marks which
+    # chunks are figures, so the `[n]` the agent already emits is a deliberate choice of
+    # which picture to show, recovered for free. When the citations cannot select, the
+    # best-ranked figure is shown and only that one. Off attaches everything surfaced,
+    # for a client that would rather filter itself.
     attach_only_cited: bool = True
 
     # Ceiling for base64 inlining, applied on top of whatever a client requests — a
@@ -838,12 +837,6 @@ class AssetDeliveryConfig(_Section):
     # Bytes are content-addressed and therefore immutable, so they can be cached hard.
     cache_max_age_seconds: int = 31_536_000
 
-    # How many times one asset may be re-read at the pixel level within a session.
-    # After the first read its observations live in the conversation, so further
-    # questions are answered from text at no cost.
-    max_pixel_reads_per_asset: int = 2
-    # Observations retained per asset before the oldest are dropped.
-    max_observations_per_asset: int = 6
 
 
 class AssetsConfig(_Section):

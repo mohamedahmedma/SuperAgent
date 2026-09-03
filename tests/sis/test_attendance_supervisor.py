@@ -25,7 +25,7 @@ from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from tests.sis.test_rbac_api import _grant, _make_user, _sign_in, ids  # noqa: F401
 from tests.sis.test_timetable_api import SCHOOL, YEAR, registrar, school  # noqa: F401
 
-DAY = "2025-11-20"
+DAY = "2026-09-01"
 
 
 @pytest.fixture()
@@ -49,7 +49,7 @@ def roll(client: TestClient, registrar: dict[str, str], school: None) -> list[st
         assert client.post(
             f"/v1/students/{number}/placements",
             headers=registrar,
-            json={"academic_year_code": YEAR, "class_code": klass, "starts_on": "2025-09-01"},
+            json={"academic_year_code": YEAR, "class_code": klass, "starts_on": "2026-09-01"},
         ).status_code in (200, 201)
         if klass == "P1A":
             numbers.append(number)
@@ -134,7 +134,7 @@ def test_the_listing_reports_the_day_a_register_has_reached(
     # A different day is a different register, and is still untouched.
     other = client.get(
         "/v1/attendance/classes", headers=supervisor,
-        params={"academic_year": YEAR, "on": "2025-11-21"},
+        params={"academic_year": YEAR, "on": "2026-09-02"},
     ).json()["classes"][0]
     assert (other["marked"], other["is_complete"]) == (0, False)
 
