@@ -164,12 +164,32 @@ export function useAction(fn) {
  * `starts_on` lands under the start-date box instead of in a banner that makes the registrar
  * re-read a form they have already checked twice.
  *
- * `changed` exists for the confirmation dialog: it reports what actually differs from where
- * the form started, which is what turns "are you sure?" — a question nobody can answer — into
- * "Sara Mohamd → Sara Mohamed", which anyone can.
+ * **`changed` and `delta` are two readings of one diff, and they are not interchangeable.**
+ *
+ *   changed()  a list of `{label, was, now}` — what the confirmation dialog shows. This is
+ *              what turns "are you sure?", a question nobody can answer, into
+ *              "Sara Mohamd → Sara Mohamed", which anyone can.
+ *   delta()    a plain object of the changed fields — what a PATCH sends. Only what changed
+ *              goes in it, so saving does not overwrite a phone number another registrar
+ *              typed between this screen loading and this save.
+ *
+ * They are stated separately because a caller that sends `changed()` as a request body sends
+ * a JSON *array* the service answers 422 to, and renders `{label, was, now}` where a value
+ * belongs — which React refuses to draw at all, taking the whole console down with it. Both
+ * are derived from `differing()` below rather than from each other, so a change to what
+ * counts as edited reaches the dialog and the request together.
  */
 export function useForm(initial) {
   const [values, setValues] = useState(initial);
+
+  /* The one comparison. `String(x ?? '')` rather than `!==` because a date input reports an
+     empty box as `''` where the record carries `null`, and those are the same fact. */
+  function differing(against) {
+    const base = against || initial;
+    return Object.keys(values).filter(
+      (key) => String(values[key] ?? '') !== String(base[key] ?? '')
+    );
+  }
 
   return {
     values,
@@ -178,13 +198,18 @@ export function useForm(initial) {
     reset: (to) => setValues(to === undefined ? initial : to),
     changed(against, labels) {
       const base = against || initial;
-      return Object.keys(values)
-        .filter((key) => String(values[key] ?? '') !== String(base[key] ?? ''))
-        .map((key) => ({
-          label: (labels && labels[key]) || key,
-          was: base[key],
-          now: values[key]
-        }));
+      return differing(against).map((key) => ({
+        label: (labels && labels[key]) || key,
+        was: base[key],
+        now: values[key]
+      }));
+    },
+    delta(against) {
+      const body = {};
+      differing(against).forEach((key) => {
+        body[key] = values[key];
+      });
+      return body;
     },
     errorFor(error, name) {
       if (!error || !error.field) return null;

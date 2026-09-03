@@ -142,7 +142,7 @@
     "academic_year_code": "2025-2026",
     "class_code": "3A",
     "as_of": "2026-03-01",
-    "count": 2,
+    "count": 3,
     "students": [
       {
         "student_number": "10432",
@@ -159,6 +159,14 @@
         "starts_on": "2025-09-01",
         "ends_on": null,
         "is_open": true
+      },
+      {
+        "student_number": "10434",
+        "full_name_en": "Nour Adel",
+        "full_name_ar": "نور عادل",
+        "starts_on": "2025-09-01",
+        "ends_on": "2026-03-01",
+        "is_open": false
       }
     ]
   },
@@ -213,6 +221,44 @@
         "address": ""
       }
     ]
+  },
+  "PATCH /v1/students/10432/placements/current": {
+    "student_number": "10432",
+    "academic_year_code": "2025-2026",
+    "class_code": "3A",
+    "starts_on": "2025-09-01",
+    "ends_on": "2026-03-01",
+    "is_open": false
+  },
+  "POST /v1/students/10432/transfer": {
+    "closed": {
+      "student_number": "10432",
+      "academic_year_code": "2025-2026",
+      "class_code": "3A",
+      "starts_on": "2025-09-01",
+      "ends_on": "2026-02-28",
+      "is_open": false
+    },
+    "opened": {
+      "student_number": "10432",
+      "academic_year_code": "2025-2026",
+      "class_code": "3B",
+      "starts_on": "2026-03-01",
+      "ends_on": null,
+      "is_open": true
+    }
+  },
+  "PATCH /v1/students/10432": {
+    "student_number": "10432",
+    "full_name_en": "Layla Hassan Ali",
+    "full_name_ar": "ليلى حسن",
+    "is_active": true,
+    "gender": "female",
+    "date_of_birth": "2016-07-14",
+    "age": 9,
+    "contact_phone": "+201234567890",
+    "contact_email": "",
+    "address": ""
   },
   "GET /v1/students/10432": {
     "student_number": "10432",

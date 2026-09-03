@@ -418,14 +418,21 @@ def test_ending_a_placement_uses_her_last_day_not_the_day_after(
     assert ended.json()["ends_on"] == "2026-01-15"
     assert ended.json()["is_open"] is False
 
-    def on(day: str) -> list[str]:
+    def on(day: str) -> list[dict]:
         response = seeded.get(
             f"/v1/classes/3A/students?academic_year={YEAR}&on={day}", headers=registrar
         )
-        return [row["student_number"] for row in response.json()["students"]]
+        return response.json()["students"]
 
-    assert on("2026-01-15") == ["10432"]  # her last day: still there
+    assert [row["student_number"] for row in on("2026-01-15")] == ["10432"]  # last day: there
     assert on("2026-01-16") == []  # the day after: gone
+
+    # And the register says which of the two she is. The console draws this flag — a child
+    # removed this morning is on this morning's register, correctly, and without it she is
+    # drawn exactly like a child who is staying, which reads as a Remove button that did
+    # nothing. `ends_on` is on the row for the same reason.
+    assert on("2026-01-15")[0]["is_open"] is False
+    assert on("2026-01-15")[0]["ends_on"] == "2026-01-15"
 
 
 def test_ending_a_placement_she_does_not_have_is_a_404(
