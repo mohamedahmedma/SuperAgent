@@ -1167,6 +1167,7 @@ export const AR = {
   'Drop subject here': 'ضع المادة هنا',
   'Clear lesson': 'حذف الحصة',
   'Break': 'فسحة',
+  'All rights reserved.': 'جميع الحقوق محفوظة.',
   'Sunday': 'الأحد', 'Monday': 'الاثنين', 'Tuesday': 'الثلاثاء',
   'Wednesday': 'الأربعاء', 'Thursday': 'الخميس', 'Friday': 'الجمعة', 'Saturday': 'السبت',
 

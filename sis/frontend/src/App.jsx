@@ -410,8 +410,7 @@ function Nav({ active }) {
   const here = NAV_PARENT[active] || active;
   return (
     <nav
-      className="border-bottom px-3 px-sm-4"
-      style={{ background: 'var(--canvas)' }}
+      className="sis-nav border-bottom px-3 px-sm-4"
       aria-label={t('Screens')}
     >
       <ul
@@ -443,56 +442,27 @@ function Nav({ active }) {
 
 /* -- Footer ---------------------------------------------------------------------- */
 
-/**
- * Carries one piece of live information: whether the service is answering. Polled rather than
- * inferred from the last request, because the useful case is the registrar who has had a
- * screen open for an hour and is about to start typing. A failed poll never blanks anything —
- * it colours a dot, and the screens keep whatever they already loaded.
- */
 function Footer() {
-  const state = useStore();
-
-  useEffect(() => {
-    let stopped = false;
-    const ping = () =>
-      api.health().then(
-        () => !stopped && Store.set({ online: true }),
-        () => !stopped && Store.set({ online: false })
-      );
-
-    ping();
-    const timer = setInterval(ping, 60000);
-    /* Poll on return to the tab as well: a laptop closed at lunch and reopened has a stale dot
-       for up to a minute otherwise, which is exactly when it is read. */
-    window.addEventListener('focus', ping);
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-      window.removeEventListener('focus', ping);
-    };
-  }, []);
-
-  const colour =
-    state.online === null ? 'var(--grey-400)' : state.online ? 'var(--ok-ink)' : 'var(--bad-ink)';
-  const word =
-    state.online === null ? 'checking…' : state.online ? 'service online' : 'service unreachable';
+  const year = new Date().getFullYear();
 
   return (
-    <footer className="sis-footer sis-no-print px-3 px-sm-4 py-3 border-top small text-body-tertiary">
-      <span className="d-flex align-items-center gap-2">
-        <span
-          style={{ width: '.5rem', height: '.5rem', borderRadius: '50%', background: colour }}
+    <footer className="sis-footer sis-no-print px-3 px-sm-4 py-4 border-top">
+      <div className="sis-footer-brand">
+        <img
+          src="./brand/aurexis-mark.svg"
+          width="24"
+          height="24"
+          alt=""
           aria-hidden="true"
+          draggable="false"
         />
-        {t(word)}
-      </span>
-      <span className="sis-powered-by">
-        {t('Powered by')}{' '}
-        <a href="https://aurexis.cc/" target="_blank" rel="noreferrer">AUREXIS</a>
-      </span>
-      <a className="sis-footer-docs" href="/docs" target="_blank" rel="noreferrer">
-        {t('API reference')}
-      </a>
+        <span className="sis-footer-name">AUREXIS</span>
+        <span className="sis-footer-divider" aria-hidden="true" />
+        <span className="sis-footer-product">SIS</span>
+      </div>
+      <p className="sis-footer-copy">
+        &copy; {year} Aurexis. {t('All rights reserved.')}
+      </p>
     </footer>
   );
 }
