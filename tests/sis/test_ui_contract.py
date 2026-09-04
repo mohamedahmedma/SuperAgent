@@ -95,6 +95,26 @@ def _strip_comments(text: str) -> str:
     return text
 
 
+def _rule_bodies(css: str, selector: str) -> list[str]:
+    """Every rule block whose selector list names `selector` as a whole comma-separated item.
+
+    Searching for the first `.sis-footer {` answers a different question: which block *mentions*
+    the class first. A grouped `.sis-nav, .sis-footer { background: ... }` sitting above the
+    footer's own rule hides the one carrying the property being asserted, and the check then
+    fails on CSS the browser applies exactly as intended — which is how the footer contract went
+    red on a stylesheet that pins the footer correctly.
+
+    Comparing whole items rather than substrings is the other half: `.sis-footer` must not match
+    `.sis-footer-brand`, and `.btn-primary` must not pick up `.sis-segmented > .btn-primary` —
+    the bare rule is the one that test reads.
+    """
+    bodies: list[str] = []
+    for rule in re.finditer(r"([^{}]*)\{([^{}]*)\}", css):
+        if selector in [item.strip() for item in rule.group(1).split(",")]:
+            bodies.append(rule.group(2))
+    return bodies
+
+
 def _real_routes() -> set[tuple[str, ...]]:
     """Every declared route as a tuple of path segments, with `{param}` normalised to `{}`."""
     routes = set()
@@ -609,16 +629,16 @@ def test_the_footer_is_pinned_to_the_bottom_of_the_window() -> None:
     """
     css = _css("sis.css")
 
-    shell = re.search(r"\.sis-app\s*\{([^}]*)\}", css)
+    shell = _rule_bodies(css, ".sis-app")
     assert shell, ".sis-app rule is missing"
-    assert re.search(r"min-height:\s*100dvh", shell.group(1)), (
+    assert re.search(r"min-height:\s*100dvh", "".join(shell)), (
         "`.sis-app` must fill the viewport with `min-height: 100dvh`. A percentage resolves "
         "against the mount point, which has no height, and the footer floats mid-page."
     )
 
-    footer = re.search(r"\.sis-footer\s*\{([^}]*)\}", css)
+    footer = _rule_bodies(css, ".sis-footer")
     assert footer, ".sis-footer rule is missing"
-    assert re.search(r"margin-top:\s*auto", footer.group(1)), (
+    assert re.search(r"margin-top:\s*auto", "".join(footer)), (
         "`.sis-footer` must claim the leftover space with `margin-top: auto`; a fixed margin "
         "pushes it away from the content instead of down to the window."
     )
@@ -698,9 +718,9 @@ def test_the_accent_is_not_spent_on_ordinary_buttons() -> None:
     """
     css = _css("theme.css")
 
-    primary = re.search(r"\.btn-primary\s*\{([^}]*)\}", css)
+    primary = _rule_bodies(css, ".btn-primary")
     assert primary, ".btn-primary rule is missing from theme.css"
-    body = primary.group(1)
+    body = "".join(primary)
     assert "var(--action)" in body, (
         "the primary button must be drawn through --action, which is the one token the "
         "committing colour is allowed to come from"
