@@ -12,9 +12,14 @@ from backend.tools.knowledge import make_search_knowledge_base
 from backend.tools.products import make_search_products
 from backend.tools.records import make_get_student_records
 
+#: The corpus tool, named once. It is the tool whose verdict `retrieval_status` reports,
+#: so the runtime's terminal-retrieval guard has to be able to recognise its results
+#: among a turn's other tool results — see `backend/chat/runtime.py`.
+KNOWLEDGE_TOOL = "search_knowledge_base"
+
 # name -> builder(ctx) -> tool
 TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
-    "search_knowledge_base": make_search_knowledge_base,
+    KNOWLEDGE_TOOL: make_search_knowledge_base,
     "search_products": make_search_products,
     # Reads a student's academic record from the records facade. Registered but not
     # bound by any profile yet — a deployment opts in by naming it, which keeps every
@@ -35,7 +40,7 @@ TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
 # The citation block is load-bearing for images as well as provenance: which figure a
 # turn attaches is read out of the `[n]` markers (backend/chat/assets_bridge.py), so a
 # grounded tool that drops them silently stops showing pictures.
-GROUNDED_TOOLS: frozenset = frozenset({"search_knowledge_base", "search_products"})
+GROUNDED_TOOLS: frozenset = frozenset({KNOWLEDGE_TOOL, "search_products"})
 
 
 class UnknownToolError(ValueError):
@@ -59,6 +64,7 @@ def build_tools(names: List[str], ctx: ChatRequestContext) -> list:
 
 
 __all__ = [
+    "KNOWLEDGE_TOOL",
     "TOOL_BUILDERS",
     "GROUNDED_TOOLS",
     "UnknownToolError",

@@ -14,10 +14,9 @@ identity:
   display_name: "Shop Assistant"
   api_title: "Shop Assistant API"
   description: "Product discovery and customer support over a product catalogue"
-  persona: >-
-    You are a knowledgeable shopping assistant. You help customers find products and
-    answer questions about policies, shipping, and returns using only the store's own
-    catalogue and help-centre content.
+  # persona -> prompts/templates/packs/ecommerce/persona.j2. Prompt text is versioned as a
+  # template so the tests that render every prompt can see it; setting `persona:` here
+  # still overrides the pack.
   redis_key_prefix: "shop"
   langsmith_project: "shop-rag"
 

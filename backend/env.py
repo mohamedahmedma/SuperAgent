@@ -38,6 +38,21 @@ def load_env() -> None:
     global _LOADED
     if _LOADED:
         return
+    # `.env.local` first, and it WINS, because `load_dotenv` does not override a name
+    # that is already set.
+    #
+    # The split exists because one file could not be both things. `.env` is the
+    # PRODUCTION file: it is uploaded to the server as it stands, so it has to carry the
+    # deployment's addresses and the runtime secrets compose declares required. A
+    # developer then edited that same file to point at localhost, and the two uses fought
+    # — a local run reached the deployed estate, and an upload of the local copy
+    # overwrote production's secrets with values that were never in it.
+    #
+    # So `.env` is now written for the server and left alone, and everything a laptop
+    # needs differently goes in `.env.local`, which is gitignored and never uploaded.
+    # Same precedence Vite already applies to the same two filenames, so the Python
+    # services and the Vue app agree about which file wins.
+    load_dotenv(PROJECT_ROOT / ".env.local")
     load_dotenv(PROJECT_ROOT / ".env")
 
     # Imported here rather than at module scope so that `backend.env` keeps importing

@@ -52,6 +52,10 @@ class ChatRequestContext:
     _records_tool_slots_used: int = 0
     _short_circuit_status: Optional[str] = None
     _surfaced_asset_ids: list = field(default_factory=list)
+    _duplicate_tool_calls: int = 0
+    # Retrieval results already produced this turn, keyed by normalised query. See
+    # `remember_retrieval` for why a request-scoped memo is the right lifetime.
+    _retrieval_memo: dict = field(default_factory=dict)
     _started_at: float = field(default_factory=time.monotonic)
     _last_step_at: Optional[float] = None
 
@@ -67,6 +71,11 @@ class ChatRequestContext:
     # Whether this turn's subject came from the conversation. Routing reads it to
     # decide whether offering the user a choice of subjects could possibly help.
     is_followup: bool = False
+    # The year group the school's records put this turn's child in, when the turn is
+    # about one child and the question did not name a year itself. Travels BESIDE the
+    # question, never inside it — see `backend/rag/pipeline.py:_search_query` for the
+    # measurement that settled that.
+    child_year: str = ""
 
     def __post_init__(self) -> None:
         """Settle the caller, and refuse a context whose identity contradicts itself.
@@ -142,6 +151,7 @@ class ChatRequestContext:
         carried_constraints=(),
         is_followup: bool = False,
         language: str = "",
+        child_year: str = "",
     ) -> None:
         """Hand the planner's findings to the RAG graph.
 
@@ -168,6 +178,7 @@ class ChatRequestContext:
             self.carried_constraints = list(carried_constraints or [])
             self.is_followup = bool(is_followup)
             self.language = (language or "").strip()
+            self.child_year = (child_year or "").strip()
 
     def emit_rag_step(
         self,
@@ -334,6 +345,39 @@ class ChatRequestContext:
     def surfaced_asset_ids(self) -> list:
         with self._lock:
             return list(self._surfaced_asset_ids)
+
+    def note_duplicate_tool_calls(self, count: int) -> None:
+        """Record calls the model asked for more than once. Diagnostic only."""
+        if count <= 0:
+            return
+        with self._lock:
+            self._duplicate_tool_calls += int(count)
+
+    @property
+    def duplicate_tool_calls(self) -> int:
+        return self._duplicate_tool_calls
+
+    def remembered_retrieval(self, key: str):
+        """A retrieval already run for `key` this turn, or None."""
+        if not key:
+            return None
+        with self._lock:
+            return self._retrieval_memo.get(key)
+
+    def remember_retrieval(self, key: str, result) -> None:
+        """Keep a retrieval so an identical query this turn does not run it again.
+
+        Request-scoped rather than cached in Redis, and that is the whole design: two
+        identical searches within ONE turn are the same question asked twice and must
+        give the same answer, while the same question next week must be answered from
+        whatever the corpus says then. A turn is exactly the window where reuse is
+        certainly correct, so it is the window this holds.
+        """
+        if not key:
+            return
+        with self._lock:
+            if self._active:
+                self._retrieval_memo[key] = result
 
     def acquire_knowledge_tool_slot(self) -> bool:
         # Budget comes from the profile: a catalogue deployment may legitimately allow

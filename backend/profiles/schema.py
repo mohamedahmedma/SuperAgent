@@ -193,6 +193,42 @@ class AgentConfig(_Section):
     recursion_limit: int = 8
     max_knowledge_calls_per_turn: int = 1
 
+    # Whether an answer's figures are checked against the evidence the turn retrieved,
+    # and what happens when one is not there. See backend/chat/grounding.py.
+    #
+    #   off      — no check, no trace field
+    #   observe  — check and record the verdict, serve the answer either way
+    #   enforce  — an answer stating a figure that is in no retrieved chunk is replaced
+    #              with `user_copy.unverified_answer`
+    #
+    # `observe` is the default because enforcement's cost is borne by whichever
+    # deployment has a corpus this check reads badly, and that has to be discovered from
+    # its own traces rather than assumed here. A deployment whose numbers are the thing
+    # users act on sets `enforce` — the school profile does.
+    answer_grounding_mode: Literal["off", "observe", "enforce"] = "observe"
+
+    # Figures below this are counts, not claims, and are not checked. See the module
+    # docstring for why chasing them produces false positives and buys no safety.
+    answer_grounding_number_floor: int = 100
+
+    # Words that mean the question scoped itself to a year group. When one appears, the
+    # child's year from the roster is NOT applied as a condition: the parent said which
+    # year they meant, and «مصاريف ابني في الصف الرابع» is a real question a parent with
+    # a Year 1 child asks. Matched literally, folded through `text_matching.name_key`.
+    #
+    # Only needed for the "my child, but a different year" case. A question naming a year
+    # and NOT the child — «مصاريف الصف الرابع كام» — is already classified `about_child:
+    # false`, so nothing is applied to it and no marker is consulted.
+    #
+    # Failing to match degrades to today's behaviour (the year is applied) rather than
+    # to a wrong narrowing, so an incomplete list costs nothing it did not already cost.
+    year_reference_markers: List[str] = Field(
+        default_factory=lambda: [
+            "الصف", "صف", "ابتدائي", "اعدادي", "ثانوي", "روضه", "حضانه",
+            "grade", "year", "primary", "prep", "secondary", "kg", "class",
+        ]
+    )
+
 
 
     context_window_messages: int = 6
@@ -313,6 +349,13 @@ class AgentConfig(_Section):
 
 class RagConfig(_Section):
     """Prompts and routing policy for the retrieval graph."""
+
+    # How a child's year group is phrased when it is handed to the grader and the answer
+    # prompt as a condition. `{year}` is the roster's own string («الصف الأول الابتدائي»),
+    # which is the vocabulary the corpus uses, so it is inserted rather than translated.
+    # Says the school's records are the source, because they are — see
+    # `backend/rag/pipeline.py:grading_conditions`.
+    child_year_condition: str = "the student this question is about is in {year}, according to the school's records"
 
     evidence_grade_prompt: str = ""
     complexity_prompt: str = ""
@@ -607,6 +650,14 @@ class CopyConfig(_Section):
     retrieval_error: str = (
         "A temporary technical issue prevented searching the knowledge base. "
         "Please try again in a moment."
+    )
+    # Served in place of an answer whose figures are not in the retrieved evidence, when
+    # `agent.answer_grounding_mode` is `enforce`. Deliberately says nothing about what
+    # went wrong internally: the user needs to know the number was not verified, not
+    # that a check fired.
+    unverified_answer: str = (
+        "I couldn't verify those figures against the school's own documents, "
+        "so I'd rather not state them. Please check with the school office."
     )
     hitl_clarify_default: str = (
         "I found relevant content, but the evidence isn't enough to determine an answer. "

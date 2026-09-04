@@ -71,6 +71,11 @@ htmlcov/
 .env.local
 .env.*.local
 
+# Deployment runbook. Local only: it carries the commands for uploading .env to a
+# server, and quotes real credentials inline while doing it. Untracked rather than
+# scrubbed so the working copy stays useful to whoever is running the deploy.
+UPLOAD_ENV.txt
+
 # Editor and IDE state.
 .idea/
 .vscode/

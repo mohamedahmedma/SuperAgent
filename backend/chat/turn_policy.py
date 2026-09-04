@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from backend.chat.child_resolution import ResolvedChild
+from backend.text_matching import name_key
 from backend.chat.language import ARABIC, ENGLISH
 from backend.chat.signals import RequestSignals, Scope
 from backend.rag.evidence import Certainty
@@ -112,6 +113,10 @@ class TurnPlan:
             # streamed to the browser, and a turn may settle on a child silently.
             "turn_child_resolved": bool(self.child_hint),
             "turn_child_asked": bool(self.child_options),
+            # Whether the roster's year was applied, never which year it is. This trace
+            # is persisted per message and streamed to the browser, and a year group
+            # plus a name narrows a child to a handful of real people.
+            "turn_child_year_applied": bool(self.child_year),
             "turn_reason": "; ".join(self.reasons) or "n/a",
         }
 
@@ -181,7 +186,12 @@ def resolve_turn(
             "knowledge tool stays available"
         )
 
-    _plan_child(plan, child)
+    _plan_child(
+        plan,
+        child,
+        signals.question,
+        getattr(agent_config, "year_reference_markers", ()),
+    )
     plan.retrieval_sections = list(signals.candidate_sections)
     plan.scope_options = list(signals.scope_options)
     if plan.resolved_question and plan.resolved_question != signals.question:
@@ -201,7 +211,32 @@ def resolve_turn(
     return plan
 
 
-def _plan_child(plan: TurnPlan, child: Optional[ResolvedChild]) -> None:
+def question_names_a_year(question: str, markers) -> bool:
+    """Whether the question scoped itself to a year group.
+
+    Pure and literal: a folded substring test against a configured vocabulary, no model
+    and no inference. It gates one thing — whether the roster's year for this child is
+    applied as a condition — and it is deliberately the permissive side of that gate. A
+    marker it fails to recognise leaves the year applied, which is the behaviour that
+    already exists; a marker it recognises only withholds a narrowing. Neither direction
+    can produce an answer scoped to a year nobody asked about.
+
+    Folded through `name_key` for the same reason the roster matcher is: a parent typing
+    «الصف» with a different alif form means the same word, and a gate defeated by
+    orthography would be no gate at all.
+    """
+    folded = name_key(question or "")
+    if not folded:
+        return False
+    return any(name_key(marker) in folded for marker in (markers or []) if marker)
+
+
+def _plan_child(
+    plan: TurnPlan,
+    child: Optional[ResolvedChild],
+    question: str = "",
+    year_markers=(),
+) -> None:
     """Put the resolved child on the plan — as a name, or as a question, never both.
 
     The mutual exclusion lives here because it is a decision. Expressed in the template
@@ -211,12 +246,21 @@ def _plan_child(plan: TurnPlan, child: Optional[ResolvedChild]) -> None:
 
     A turn that is not about a child sets neither, and `_turn_context_message` then
     renders nothing at all, so most turns pay nothing for this feature.
+
+    The year is withheld — while the NAME is still set — when the question named a year
+    of its own. Those two travel together everywhere else, and separating them here is
+    the point: «مصاريف ابني في الصف الرابع» is still about this child, so the answer
+    should be about them, but the year to answer for is the one the parent said and not
+    the one on file.
     """
     if child is None:
         return
     if child.resolved:
         plan.child_hint = child.label
-        plan.child_year = child.year_level
+        if not question_names_a_year(question, year_markers):
+            plan.child_year = child.year_level
+        elif child.year_level:
+            plan.reasons.append("question names its own year — roster year not applied")
         return
     if child.ask:
         plan.child_options = list(child.option_labels)

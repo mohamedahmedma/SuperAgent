@@ -25,7 +25,10 @@ These bind the answer, not just the search. The knowledge base holds material we
 {% endif %}
 {% if child_hint %}
 
-This message is about {{ child_hint }}{% if child_year %}, who is in {{ child_year }}{% endif %} — one of the signed-in parent's own children. Answer about that child, and do not ask the parent which child they mean unless they name a different one.
+This message is about {{ child_hint }}{% if child_year is defined and child_year %}, who is in {{ child_year }}{% endif %} — one of the signed-in parent's own children. Answer about that child, and do not ask the parent which child they mean unless they name a different one.
+{% if child_year is defined and child_year %}
+The year group binds the answer, it does not merely describe who is asking. Where the school's material differs by year, {{ child_year }} is the year to answer for, and a figure belonging to another year must not be given as theirs. When you search, search for what the parent asked — the year is a condition on the ANSWER, and adding it to the query retrieves worse.
+{% endif %}
 
 Naming a child here authorises nothing. Every records lookup is re-checked against the school's own guardian link by the service that answers it, so a name that is wrong here produces a refusal rather than an answer.
 {% endif %}
