@@ -443,26 +443,19 @@ function Nav({ active }) {
 /* -- Footer ---------------------------------------------------------------------- */
 
 function Footer() {
-  const year = new Date().getFullYear();
-
   return (
-    <footer className="sis-footer sis-no-print px-3 px-sm-4 py-4 border-top">
-      <div className="sis-footer-brand">
-        <img
-          src="./brand/aurexis-mark.svg"
-          width="24"
-          height="24"
-          alt=""
-          aria-hidden="true"
-          draggable="false"
-        />
-        <span className="sis-footer-name">AUREXIS</span>
-        <span className="sis-footer-divider" aria-hidden="true" />
-        <span className="sis-footer-product">SIS</span>
+    <footer className="sis-footer sis-no-print px-3 px-sm-4 py-2 border-top">
+      <div className="sis-footer-center">
+        <span>Powered by </span>
+        <a
+          href="https://aurexis.cc/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="sis-footer-link"
+        >
+          AUREXIS
+        </a>
       </div>
-      <p className="sis-footer-copy">
-        &copy; {year} Aurexis. {t('All rights reserved.')}
-      </p>
     </footer>
   );
 }
