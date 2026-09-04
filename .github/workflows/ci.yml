@@ -1,8 +1,8 @@
 name: CI
 on:
-  # `main` is listed because Deploy is manual-only: nothing else would run CI on a push to
-  # main. If Deploy is ever switched back to firing on push, remove `main` from here —
-  # Deploy calls this workflow as its first job, and leaving both would race two CI runs.
+  # `main` is deliberately absent. Deploy fires on every push to main and calls this
+  # workflow as its first job, so listing main here would race two CI runs over the same
+  # commit. Add it back only if Deploy is ever switched to manual dispatch alone.
   push:
     branches: [develop]
   pull_request:
