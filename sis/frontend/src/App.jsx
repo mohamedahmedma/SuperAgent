@@ -171,7 +171,11 @@ function SignIn() {
             {/* One message for every way a sign-in can fail, because the service answers
                 with one — a form that told a wrong password from an unknown username
                 would be a way to read a school's staff list. */}
-            {error ? <div className="alert alert-danger mt-3 py-2 small">{error}</div> : null}
+            {error ? (
+              <p className="sis-inline-message mt-3 mb-0 small" role="status">
+                {t('We could not sign you in. Please check your details and try again.')}
+              </p>
+            ) : null}
             <div className="d-grid mt-4">
               <button className="btn btn-primary" type="submit" disabled={busy}>
                 {busy ? t('Signing in…') : t('Sign in')}
@@ -349,13 +353,22 @@ function Header({ onOpenSettings, onSignIn }) {
     <>
       {state.inflight > 0 ? <div className="sis-progress" aria-hidden="true" /> : null}
       <header
-        className="d-flex flex-wrap align-items-center gap-2 gap-sm-3 px-3 px-sm-4 py-2 border-bottom"
+        className="sis-header d-flex flex-wrap align-items-center gap-2 gap-sm-3 px-3 px-sm-4 py-2 border-bottom"
         style={{ background: 'var(--canvas)' }}
       >
         <a
-          className="d-flex align-items-center gap-2 text-decoration-none text-body"
+          className="sis-brand text-decoration-none text-body"
           href={Router.href('school')}
         >
+          <img
+            className="sis-company-mark"
+            src="./brand/aurexis-mark.svg"
+            width="30"
+            height="30"
+            alt="Aurexis"
+            draggable="false"
+          />
+          <span className="sis-brand-divider" aria-hidden="true" />
           <span className="sis-brand-mark">SIS</span>
           {/* The product name is the first thing to go on a phone: the badge already says
               which application this is, and the space is worth more than the words. */}
@@ -465,21 +478,19 @@ function Footer() {
     state.online === null ? 'checking…' : state.online ? 'service online' : 'service unreachable';
 
   return (
-    <footer
-      className="sis-footer sis-no-print d-flex flex-column flex-md-row align-items-md-center gap-2 gap-md-3 px-3 px-sm-4 py-3 border-top small text-body-tertiary"
-      style={{ background: 'var(--canvas)' }}
-    >
+    <footer className="sis-footer sis-no-print px-3 px-sm-4 py-3 border-top small text-body-tertiary">
       <span className="d-flex align-items-center gap-2">
         <span
           style={{ width: '.5rem', height: '.5rem', borderRadius: '50%', background: colour }}
           aria-hidden="true"
         />
-        {word}
+        {t(word)}
       </span>
-      <span className="flex-md-grow-1 text-md-end">
-        {t('Marks are stated figures, reported exactly as the school recorded them. A blank is not a zero.')}
+      <span className="sis-powered-by">
+        {t('Powered by')}{' '}
+        <a href="https://aurexis.cc/" target="_blank" rel="noreferrer">AUREXIS</a>
       </span>
-      <a href="/docs" target="_blank" rel="noreferrer">
+      <a className="sis-footer-docs" href="/docs" target="_blank" rel="noreferrer">
         {t('API reference')}
       </a>
     </footer>
@@ -564,6 +575,7 @@ export function App() {
           )}
         </div>
       </main>
+      <Footer />
       <Toasts />
       {/* Rendered last so its backdrop lies over the whole shell — including the header the
           button that opened it sits in. */}

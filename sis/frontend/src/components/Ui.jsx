@@ -326,28 +326,24 @@ export function Skeleton({ rows = 3 }) {
  * them is fixed by trying again.
  * ================================================================================== */
 
-const ADVICE = {
-  network: 'The service did not answer. Check that it is running, then try again.',
-  unauthorized: 'The service did not accept this session.',
-  forbidden: 'This session may not perform that action.',
-  too_large: 'Split the spreadsheet into smaller files and upload them one at a time.',
-  gone: 'Previews expire. Upload the file again to get a fresh one.',
-  http: 'The request did not reach the service intact. Try again.'
+const FRIENDLY_ERROR = {
+  network: 'This information is temporarily unavailable. Please try again in a moment.',
+  unauthorized: 'Your session needs to be refreshed before this information can be shown.',
+  forbidden: 'This information is not available for your account.',
+  too_large: 'This file is larger than the supported size. Try uploading it in smaller parts.',
+  gone: 'This information is no longer available. Please refresh it and try again.',
+  http: 'This information is not available yet. Please try again shortly.'
 };
 
 export function ErrorNote({ error, title, onRetry }) {
   if (!error) return null;
-  const advice = ADVICE[error.kind];
+  const message = FRIENDLY_ERROR[error.kind] || 'This information is not available yet.';
   return (
-    <div className="p-3">
-      <Alert tone="bad" title={title || t('That did not work')}>
-        <div>{error.message}</div>
-        {advice ? <div className="small mt-1">{advice}</div> : null}
-        {error.field ? (
-          <div className="small mt-1">
-            {t('Field at fault:')} <span className="sis-code">{error.field}</span>
-          </div>
-        ) : null}
+    <div className="sis-error-note p-3" role="status">
+      <Icon name="info" size={18} />
+      <div className="flex-grow-1" style={{ minWidth: 0 }}>
+        <div className="fw-semibold">{title || t('Information unavailable')}</div>
+        <div className="small text-body-secondary mt-1">{t(message)}</div>
         {onRetry ? (
           <div className="mt-2">
             <Button size="sm" icon="refresh" onClick={onRetry}>
@@ -355,7 +351,7 @@ export function ErrorNote({ error, title, onRetry }) {
             </Button>
           </div>
         ) : null}
-      </Alert>
+      </div>
     </div>
   );
 }
@@ -733,12 +729,18 @@ export function Toasts() {
       aria-live="polite"
     >
       {state.toasts.map((item) => (
-        <div key={item.id} className="toast show" role="status">
+        <div key={item.id} className={cx('toast show', item.tone === 'bad' && 'sis-toast-muted')} role="status">
           <div className="toast-body d-flex gap-2 align-items-start">
-            <Icon name={item.tone === 'bad' ? 'alert' : 'check'} size={18} />
+            <Icon name={item.tone === 'bad' ? 'info' : 'check'} size={18} />
             <div className="flex-grow-1" style={{ minWidth: 0 }}>
-              <div className="fw-semibold">{item.title}</div>
-              {item.detail ? (
+              <div className="fw-semibold">
+                {item.tone === 'bad' ? t('Information unavailable') : item.title}
+              </div>
+              {item.tone === 'bad' ? (
+                <div className="small text-body-secondary">
+                  {t('This information is temporarily unavailable. Please try again in a moment.')}
+                </div>
+              ) : item.detail ? (
                 <div className="small text-body-secondary">{item.detail}</div>
               ) : null}
             </div>
@@ -763,13 +765,13 @@ export function Breadcrumbs({ trail = [] }) {
   if (!crumbs.length) return null;
   return (
     <nav aria-label={t('Where you are')}>
-      <ol className="breadcrumb small mb-2">
+      <ol className="breadcrumb sis-breadcrumb small mb-2">
         {crumbs.map((crumb, index) => {
           const last = index === crumbs.length - 1;
           return (
             <li
               key={crumb.label}
-              className={cx('breadcrumb-item', last && 'active')}
+              className={cx('breadcrumb-item sis-breadcrumb-item', last && 'active')}
               aria-current={last ? 'page' : undefined}
             >
               {last || !crumb.to ? (

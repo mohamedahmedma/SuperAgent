@@ -93,6 +93,23 @@ export const AR = {
   /* -- The shell ----------------------------------------------------------------- */
   'Student Information Service': 'نظام معلومات الطلاب',
   'Registrar console': 'وحدة تحكم شؤون الطلاب',
+  'Powered by': 'بدعم من',
+  'Information unavailable': 'المعلومات غير متاحة حاليًا',
+  'This information is temporarily unavailable. Please try again in a moment.':
+    'هذه المعلومات غير متاحة مؤقتًا. يُرجى المحاولة بعد قليل.',
+  'Your session needs to be refreshed before this information can be shown.':
+    'يلزم تحديث جلستك قبل عرض هذه المعلومات.',
+  'This information is not available for your account.':
+    'هذه المعلومات غير متاحة لحسابك.',
+  'This file is larger than the supported size. Try uploading it in smaller parts.':
+    'حجم الملف أكبر من الحد المدعوم. جرّب رفعه على أجزاء أصغر.',
+  'This information is no longer available. Please refresh it and try again.':
+    'لم تعد هذه المعلومات متاحة. يُرجى تحديثها والمحاولة مرة أخرى.',
+  'This information is not available yet. Please try again shortly.':
+    'هذه المعلومات غير متاحة بعد. يُرجى المحاولة بعد قليل.',
+  'This information is not available yet.': 'هذه المعلومات لم تُضف بعد.',
+  'We could not sign you in. Please check your details and try again.':
+    'تعذّر تسجيل الدخول. يُرجى مراجعة البيانات والمحاولة مرة أخرى.',
   School: 'المدرسة',
   'Find a child': 'البحث عن طالب',
   Roster: 'كشف القيد',

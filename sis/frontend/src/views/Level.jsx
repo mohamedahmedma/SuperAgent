@@ -285,15 +285,17 @@ export function Level({ params = {} }) {
         lede={t('Classes on this rung in {0}. A rung belongs to the school and outlives every year; a class belongs to the year.', [year])}
         actions={
           <>
-            <div className="btn-group" role="group" aria-label={t('How to show the classes')}>
+            <div className="sis-segmented" role="group" aria-label={t('How to show the classes')}>
               <button
-                className={cx('btn btn-sm', view === 'table' ? 'btn-primary' : 'btn-outline-secondary')}
+                className={cx('btn', view === 'table' ? 'btn-primary' : 'btn-outline-secondary')}
+                aria-pressed={view === 'table'}
                 onClick={() => toggle('table')}
               >
                 {t('Table')}
               </button>
               <button
-                className={cx('btn btn-sm', view === 'tabs' ? 'btn-primary' : 'btn-outline-secondary')}
+                className={cx('btn', view === 'tabs' ? 'btn-primary' : 'btn-outline-secondary')}
+                aria-pressed={view === 'tabs'}
                 onClick={() => toggle('tabs')}
               >
                 {t('Tabs')}
