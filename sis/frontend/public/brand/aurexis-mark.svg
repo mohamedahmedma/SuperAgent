@@ -1,0 +1,27 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='-3 -3 405 392' fill='none'>
+  <defs>
+    <linearGradient id='main' x1='269' y1='0' x2='0' y2='385' gradientUnits='userSpaceOnUse'>
+      <stop stop-color='#2DB2FD'/>
+      <stop offset='.34' stop-color='#327AFA'/>
+      <stop offset='.68' stop-color='#4B4CF4'/>
+      <stop offset='1' stop-color='#7A6FF9'/>
+    </linearGradient>
+    <linearGradient id='fold' x1='245' y1='189' x2='320' y2='373' gradientUnits='userSpaceOnUse'>
+      <stop stop-color='#426BF7'/>
+      <stop offset='.5' stop-color='#514EF4'/>
+      <stop offset='1' stop-color='#613BF2'/>
+    </linearGradient>
+    <linearGradient id='data' x1='370' y1='326' x2='370' y2='386' gradientUnits='userSpaceOnUse'>
+      <stop stop-color='#4965F5'/>
+      <stop offset='1' stop-color='#5148F3'/>
+    </linearGradient>
+    <linearGradient id='edge' x1='269' y1='0' x2='0' y2='385' gradientUnits='userSpaceOnUse'>
+      <stop stop-color='#8BE8FF'/>
+      <stop offset='.5' stop-color='#829BFF'/>
+      <stop offset='1' stop-color='#A88CFF'/>
+    </linearGradient>
+  </defs>
+  <path d='M0 385V285L269 0V110L16 370L0 385Z' fill='url(#main)' stroke='url(#edge)' stroke-width='1.5'/>
+  <path d='M193 243L245 189L357 305H320V373L193 243Z' fill='url(#fold)' stroke='url(#edge)' stroke-width='1.5'/>
+  <path d='M341 326H399V386H341Z' fill='url(#data)' stroke='url(#edge)' stroke-width='1.5'/>
+</svg>
