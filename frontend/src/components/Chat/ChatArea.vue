@@ -4,31 +4,6 @@
       <header class="chat-header">
         <div class="header-info">
           <h1>{{ sessionTitle }}</h1>
-          <span class="header-status-line">
-            <span class="status-dot"></span>
-            <span>{{ generationStatus }}</span>
-            <span>·</span>
-            <span>Context synced</span>
-          </span>
-        </div>
-        <div class="chat-header-actions">
-          <label
-            v-if="authStore.isAdmin"
-            class="advanced-mode-toggle"
-            title="Show retrieval details and live evidence"
-          >
-            <span class="advanced-mode-label">Advanced</span>
-            <input v-model="advancedMode" type="checkbox" role="switch" aria-label="Advanced mode" />
-            <span class="advanced-mode-track" aria-hidden="true">
-              <span class="advanced-mode-thumb"></span>
-            </span>
-          </label>
-          <button type="button" title="History" aria-label="Open conversation history" @click="openHistory">
-            <i class="fa-solid fa-clock-rotate-left"></i>
-          </button>
-          <button type="button" title="Clear current chat" aria-label="Clear current chat" @click="chatStore.handleClearChat">
-            <i class="fa-regular fa-trash-can"></i>
-          </button>
         </div>
       </header>
 
@@ -39,6 +14,7 @@
           <i class="fa-solid fa-spinner fa-spin"></i>
           <span>Loading earlier messages…</span>
         </div>
+
         <div
           v-else-if="chatStore.messages.length && !chatStore.canLoadOlderMessages && hasPaged"
           class="older-messages-status older-messages-start"
@@ -72,13 +48,11 @@ import ChatInput from './ChatInput.vue';
 import KnowledgeContextPanel from './KnowledgeContextPanel.vue';
 import { useChatStore } from '@/stores/chat';
 import { useSessionStore } from '@/stores/sessions';
-import { useAuthStore } from '@/stores/auth';
 
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();
-const authStore = useAuthStore();
-const advancedMode = ref(false);
-const showAdvanced = computed(() => authStore.isAdmin && advancedMode.value);
+const showAdvanced = computed(() => false);
+
 const chatContainerRef = ref<HTMLDivElement | null>(null);
 const messageItemRefs = ref<any[]>([]);
 
@@ -91,27 +65,12 @@ const sessionTitle = computed(() => {
   return text.length > 28 ? text.slice(0, 28) + '…' : text;
 });
 
-const generationStatus = computed(() => {
-  if (chatStore.isViewingStreamingSession) return 'Agent is generating a response';
-  if (chatStore.currentPendingHitl) return 'Waiting for your input';
-  return 'Agent is online';
-});
-
 onBeforeUpdate(() => {
   messageItemRefs.value = [];
 });
 
-// True once a session has been loaded from the server, so the "beginning of this
-// conversation" marker does not appear above a brand new chat.
 const hasPaged = computed(() => !!chatStore.pagingBySession[chatStore.sessionId]);
-
-// Set while older messages are being spliced in above the viewport. The auto-scroll
-// watcher below honours it: without that, growing the list upwards would be read as new
-// content and throw the reader back down to the newest message.
 const isPrepending = ref(false);
-
-// Far enough from the top that the next batch is usually in place before the user
-// reaches it, close enough that it is not fetched speculatively.
 const LOAD_OLDER_THRESHOLD_PX = 120;
 
 const scrollToBottom = () => {
@@ -127,12 +86,9 @@ const onScroll = async () => {
   if (!chatStore.canLoadOlderMessages) return;
 
   const sessionId = chatStore.sessionId;
-  // Anchor on the distance from the BOTTOM, which the prepend does not change. Restoring
-  // scrollTop directly would put the reader wherever the newly inserted messages pushed
-  // the one they were looking at.
   const previousBottomOffset = container.scrollHeight - container.scrollTop;
-
   isPrepending.value = true;
+
   try {
     await chatStore.loadOlderMessages(sessionId);
     await nextTick();
@@ -163,17 +119,6 @@ const scrollToChunk = async (msgIndex: number, chunkIndex: number) => {
   }
 };
 
-const openHistory = async () => {
-  chatStore.activeNav = 'history';
-  sessionStore.showHistorySidebar = true;
-  try {
-    await sessionStore.fetchSessions();
-    chatStore.mergeCachedSessionsIntoHistory();
-  } catch (error: any) {
-    alert(error.message);
-  }
-};
-
 watch(
   () => chatStore.messages,
   () => {
@@ -201,8 +146,5 @@ onMounted(scrollToBottom);
   font-size: 0.78rem;
   color: var(--text-muted, #8a8a8a);
 }
-
-.older-messages-start {
-  opacity: 0.7;
-}
+.older-messages-start { opacity: 0.7; }
 </style>

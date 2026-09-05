@@ -1,59 +1,99 @@
 <template>
-  <div class="wa-login" dir="rtl" lang="ar">
-    <!-- 1 · nothing started ------------------------------------------------>
+  <div class="wa-login" :dir="language === 'ar' ? 'rtl' : 'ltr'" :lang="language">
     <template v-if="wa.status === 'idle'">
       <p class="wa-lead">
-        سجّل الدخول برقم هاتفك المسجّل لدى المدرسة. لا حاجة لكلمة مرور.
-        <span class="wa-lead-en">Sign in with the number the school has on file. No password needed.</span>
+        {{
+          language === 'ar'
+            ? 'سجّل الدخول برقم هاتفك المسجّل لدى المدرسة. لا حاجة لكلمة مرور.'
+            : 'Sign in with the number the school has on file. No password needed.'
+        }}
       </p>
+
       <button class="wa-primary" type="button" :disabled="wa.busy" @click="start">
         <i :class="wa.busy ? 'fa-solid fa-spinner fa-spin' : 'fa-brands fa-whatsapp'"></i>
-        <span>{{ wa.busy ? 'جارٍ التحضير…' : 'المتابعة عبر واتساب' }}</span>
+        <span>
+          {{
+            wa.busy
+              ? language === 'ar'
+                ? 'جارٍ التحضير…'
+                : 'Preparing…'
+              : language === 'ar'
+                ? 'المتابعة عبر واتساب'
+                : 'Continue with WhatsApp'
+          }}
+        </span>
       </button>
     </template>
 
-    <!-- 2 · waiting for the parent to send --------------------------------->
     <template v-else-if="wa.status === 'waiting'">
       <ol class="wa-steps">
-        <li>اضغط الزر بالأسفل — سيفتح واتساب برسالة جاهزة.</li>
-        <!-- Said explicitly. WhatsApp never sends a pre-filled message on the user's
-             behalf, and a screen that implies otherwise produces a queue of parents who
-             tapped and then waited for something that was never going to happen. -->
-        <li><strong>اضغط زر الإرسال داخل واتساب</strong> — لن تُرسل الرسالة تلقائيًا.</li>
-        <li>سنرد عليك برمز من ٦ أرقام، اكتبه هنا.</li>
+        <li>
+          {{
+            language === 'ar'
+              ? 'اضغط الزر بالأسفل — سيفتح واتساب برسالة جاهزة.'
+              : 'Tap the button below — WhatsApp will open with a prepared message.'
+          }}
+        </li>
+        <li>
+          <strong>
+            {{
+              language === 'ar'
+                ? 'اضغط زر الإرسال داخل واتساب'
+                : 'Tap Send inside WhatsApp'
+            }}
+          </strong>
+          {{
+            language === 'ar'
+              ? ' — لن تُرسل الرسالة تلقائيًا.'
+              : ' — the message is not sent automatically.'
+          }}
+        </li>
+        <li>
+          {{
+            language === 'ar'
+              ? 'سنرد عليك برمز من ٦ أرقام، اكتبه هنا.'
+              : 'We will reply with a 6-digit code. Enter it here.'
+          }}
+        </li>
       </ol>
 
       <a class="wa-primary" :href="wa.link" target="_blank" rel="noopener noreferrer">
         <i class="fa-brands fa-whatsapp"></i>
-        <span>افتح واتساب وأرسل الرسالة</span>
+        <span>{{ language === 'ar' ? 'افتح واتساب وأرسل الرسالة' : 'Open WhatsApp and send the message' }}</span>
       </a>
 
-      <p class="wa-waiting"><i class="fa-solid fa-spinner fa-spin"></i> في انتظار رسالتك…</p>
+      <p class="wa-waiting">
+        <i class="fa-solid fa-spinner fa-spin"></i>
+        {{ language === 'ar' ? 'في انتظار رسالتك…' : 'Waiting for your message…' }}
+      </p>
 
-      <!-- The manual fallback, and it is not decoration: in-app browsers (Instagram,
-           Facebook, some Android WebViews) routinely swallow the wa.me handoff and strand
-           the parent on a WhatsApp Web login page. Without the number and the text visible
-           as copyable plain text, that parent has no way through at all. -->
       <details class="wa-fallback">
-        <summary>لم يفتح واتساب؟</summary>
-        <p>أرسل هذه الرسالة يدويًا إلى الرقم:</p>
+        <summary>{{ language === 'ar' ? 'لم يفتح واتساب؟' : 'WhatsApp did not open?' }}</summary>
+        <p>{{ language === 'ar' ? 'أرسل هذه الرسالة يدويًا إلى الرقم:' : 'Send this message manually to:' }}</p>
         <p class="wa-copyable">{{ wa.businessNumber }}</p>
         <p class="wa-copyable">{{ wa.message }}</p>
       </details>
 
-      <button class="wa-secondary" type="button" @click="cancel">إلغاء</button>
+      <button class="wa-secondary" type="button" @click="cancel">
+        {{ language === 'ar' ? 'إلغاء' : 'Cancel' }}
+      </button>
     </template>
 
-    <!-- 3 · the code has been sent ------------------------------------------>
     <template v-else-if="wa.status === 'code_sent'">
       <p class="wa-lead">
-        <template v-if="wa.displayName">أهلًا {{ wa.displayName }} —</template>
-        أرسلنا رمزًا من ٦ أرقام إلى واتساب.
+        <template v-if="wa.displayName">
+          {{ language === 'ar' ? `أهلًا ${wa.displayName} —` : `Welcome ${wa.displayName} —` }}
+        </template>
+        {{
+          language === 'ar'
+            ? ' أرسلنا رمزًا من ٦ أرقام إلى واتساب.'
+            : ' We sent a 6-digit code to WhatsApp.'
+        }}
       </p>
 
       <form class="wa-code-form" @submit.prevent="submit">
         <label class="form-field">
-          <span>رمز التحقق</span>
+          <span>{{ language === 'ar' ? 'رمز التحقق' : 'Verification code' }}</span>
           <span class="field-input">
             <i class="fa-solid fa-key"></i>
             <input
@@ -65,6 +105,8 @@
               maxlength="6"
               placeholder="••••••"
               dir="ltr"
+              @focus="onOtpFocus"
+              @blur="onOtpBlur"
             />
           </span>
         </label>
@@ -72,20 +114,31 @@
         <p v-if="wa.error" class="wa-error" role="alert">{{ errorText }}</p>
 
         <button class="wa-primary" type="submit" :disabled="wa.busy || wa.code.trim().length < 6">
-          <i :class="wa.busy ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-arrow-left'"></i>
-          <span>{{ wa.busy ? 'جارٍ التحقق…' : 'تأكيد' }}</span>
+          <i :class="wa.busy ? 'fa-solid fa-spinner fa-spin' : language === 'ar' ? 'fa-solid fa-arrow-left' : 'fa-solid fa-arrow-right'"></i>
+          <span>
+            {{
+              wa.busy
+                ? language === 'ar'
+                  ? 'جارٍ التحقق…'
+                  : 'Verifying…'
+                : language === 'ar'
+                  ? 'تأكيد'
+                  : 'Verify'
+            }}
+          </span>
         </button>
       </form>
 
-      <button class="wa-secondary" type="button" @click="cancel">البدء من جديد</button>
+      <button class="wa-secondary" type="button" @click="cancel">
+        {{ language === 'ar' ? 'البدء من جديد' : 'Start over' }}
+      </button>
     </template>
 
-    <!-- 4 · dead ------------------------------------------------------------>
     <template v-else>
       <p class="wa-error" role="alert">{{ errorText }}</p>
       <button class="wa-primary" type="button" @click="start">
         <i class="fa-solid fa-rotate-right"></i>
-        <span>المحاولة مرة أخرى</span>
+        <span>{{ language === 'ar' ? 'المحاولة مرة أخرى' : 'Try again' }}</span>
       </button>
     </template>
   </div>
@@ -95,19 +148,34 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 
+const props = defineProps<{
+  language: 'ar' | 'en';
+}>();
+
 const authStore = useAuthStore();
 const wa = computed(() => authStore.whatsapp);
 const codeInput = ref<HTMLInputElement | null>(null);
 
-/**
- * What to actually say, chosen by identity's own refusal code.
- *
- * Keyed on the code rather than the message because the message is prose written for a
- * developer reading a log — it says which rule was broken, not what the parent should do
- * next. Anything unrecognised falls back to the server's wording rather than to a generic
- * apology, so a refusal added later is still readable instead of silently blank.
- */
-const MESSAGES: Record<string, string> = {
+
+// aurexis-otp-privacy-v10-4-2
+// OTP is treated as a private secret.
+// While the OTP field is active, the robot deliberately looks away.
+const notifyRobotOtpPrivacy = (mode: 'idle' | 'away') => {
+  window.dispatchEvent(
+    new CustomEvent('aurexis-password-privacy', {
+      detail: { mode },
+    })
+  );
+};
+
+const onOtpFocus = () => {
+  notifyRobotOtpPrivacy('away');
+};
+
+const onOtpBlur = () => {
+  notifyRobotOtpPrivacy('idle');
+};
+const MESSAGES_AR: Record<string, string> = {
   bad_code: 'الرمز غير صحيح. تحقّق من الرسالة وحاول مرة أخرى.',
   too_many_attempts: 'محاولات كثيرة غير صحيحة. ابدأ من جديد للحصول على رمز جديد.',
   expired: 'انتهت صلاحية الطلب. ابدأ من جديد.',
@@ -115,32 +183,49 @@ const MESSAGES: Record<string, string> = {
   not_ready: 'لم نستلم رسالتك بعد. أرسل الرسالة من واتساب أولًا.',
   not_found: 'انتهت هذه الجلسة. ابدأ من جديد.',
   rejected: 'هذا الرقم غير مسجّل لدى المدرسة. تواصل مع إدارة المدرسة لإضافته.',
-  // The server, not the parent. Nothing they type will help, so the message points them
-  // at the only thing that can — the school — instead of showing them a sentence about
-  // an environment variable they have never heard of.
   not_configured: 'الدخول عبر واتساب غير متاح حاليًا. برجاء التواصل مع إدارة المدرسة.',
 };
 
-const errorText = computed(() => MESSAGES[wa.value.errorCode] || wa.value.error);
+const MESSAGES_EN: Record<string, string> = {
+  bad_code: 'That code is incorrect. Check the WhatsApp message and try again.',
+  too_many_attempts: 'Too many incorrect attempts. Start again to request a new code.',
+  expired: 'This request has expired. Please start again.',
+  already_used: 'This code has already been used. Please start again.',
+  not_ready: 'We have not received your message yet. Send the WhatsApp message first.',
+  not_found: 'This sign-in session has ended. Please start again.',
+  rejected: 'This number is not registered with the school. Contact the school administration.',
+  not_configured: 'WhatsApp sign-in is currently unavailable. Please contact the school administration.',
+};
+
+const errorText = computed(() => {
+  const messages = props.language === 'ar' ? MESSAGES_AR : MESSAGES_EN;
+  return messages[wa.value.errorCode] || wa.value.error;
+});
 
 const start = () => authStore.startWhatsAppLogin();
-const cancel = () => authStore.resetWhatsApp();
+const cancel = () => {
+  notifyRobotOtpPrivacy('idle');
+  authStore.resetWhatsApp();
+};
 const submit = () => authStore.submitWhatsAppCode();
 
-// Put the cursor in the code box the moment there is a code to type, so a parent coming
-// back from WhatsApp can type straight away rather than hunting for the field.
 watch(
   () => wa.value.status,
   async (status) => {
     if (status === 'code_sent') {
       await nextTick();
       codeInput.value?.focus();
+      notifyRobotOtpPrivacy('away');
+    } else {
+      notifyRobotOtpPrivacy('idle');
     }
   }
 );
 
-// A poller that outlives its panel keeps hitting identity every two seconds forever.
-onBeforeUnmount(() => authStore.resetWhatsApp());
+onBeforeUnmount(() => {
+  notifyRobotOtpPrivacy('idle');
+  authStore.resetWhatsApp();
+});
 </script>
 
 <style scoped>
@@ -148,21 +233,12 @@ onBeforeUnmount(() => authStore.resetWhatsApp());
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
-  text-align: right;
+  text-align: start;
 }
 
 .wa-lead {
   margin: 0;
   line-height: 1.7;
-}
-
-.wa-lead-en {
-  display: block;
-  margin-top: 0.25rem;
-  font-size: 0.85em;
-  opacity: 0.65;
-  direction: ltr;
-  text-align: left;
 }
 
 .wa-steps {
@@ -188,7 +264,7 @@ onBeforeUnmount(() => authStore.resetWhatsApp());
 }
 
 .wa-primary {
-  background: #25d366; /* WhatsApp green: parents recognise the button before the words. */
+  background: #25d366;
   color: #06251a;
 }
 
@@ -220,8 +296,6 @@ onBeforeUnmount(() => authStore.resetWhatsApp());
   cursor: pointer;
 }
 
-/* Selectable on purpose: this is the escape hatch when the link fails, and a parent has
-   to be able to copy both of these by hand. */
 .wa-copyable {
   direction: ltr;
   text-align: left;
@@ -241,8 +315,6 @@ onBeforeUnmount(() => authStore.resetWhatsApp());
 }
 
 .wa-code-form input {
-  /* Wide tracking and a monospace face so six digits are read as six digits — a parent is
-     copying them off a second screen. */
   letter-spacing: 0.5em;
   text-align: center;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -253,5 +325,74 @@ onBeforeUnmount(() => authStore.resetWhatsApp());
   margin: 0;
   color: #d64545;
   line-height: 1.6;
+}
+
+/* aurexis-whatsapp-exact-00a03c-v10-5-2 */
+.wa-button,
+button[class*="whatsapp"],
+button[class*="WhatsApp"],
+.ax-whatsapp-button,
+button:has(.fa-whatsapp),
+button:has([class*="whatsapp"]) {
+  background:#00A03C!important;
+  background-image:none!important;
+  border-color:#00A03C!important;
+  color:#FFFFFF!important;
+  opacity:1!important;
+  font-size:1.06rem!important;
+  font-weight:700!important;
+  letter-spacing:.035em!important;
+  gap:.72rem!important;
+  column-gap:.72rem!important;
+  box-shadow:0 10px 24px rgba(0,160,60,.20)!important;
+}
+
+.wa-button .fa-whatsapp,
+.wa-button [class*="whatsapp"],
+button[class*="whatsapp"] .fa-whatsapp,
+button[class*="WhatsApp"] .fa-whatsapp,
+.ax-whatsapp-button .fa-whatsapp,
+button:has(.fa-whatsapp) .fa-whatsapp,
+button:has([class*="whatsapp"]) [class*="whatsapp"] {
+  font-size:1.34em!important;
+  line-height:1!important;
+  color:#FFFFFF!important;
+  flex:0 0 auto!important;
+}
+
+.wa-button:hover,
+button[class*="whatsapp"]:hover,
+button[class*="WhatsApp"]:hover,
+.ax-whatsapp-button:hover,
+button:has(.fa-whatsapp):hover,
+button:has([class*="whatsapp"]):hover {
+  background:#008F36!important;
+  background-image:none!important;
+  border-color:#008F36!important;
+  color:#FFFFFF!important;
+  box-shadow:0 12px 28px rgba(0,160,60,.25)!important;
+}
+
+.wa-button:active,
+button[class*="whatsapp"]:active,
+button[class*="WhatsApp"]:active,
+.ax-whatsapp-button:active,
+button:has(.fa-whatsapp):active,
+button:has([class*="whatsapp"]):active {
+  background:#007F30!important;
+  background-image:none!important;
+  border-color:#007F30!important;
+  color:#FFFFFF!important;
+  transform:translateY(1px)!important;
+}
+
+.wa-button:focus-visible,
+button[class*="whatsapp"]:focus-visible,
+button[class*="WhatsApp"]:focus-visible,
+.ax-whatsapp-button:focus-visible,
+button:has(.fa-whatsapp):focus-visible,
+button:has([class*="whatsapp"]):focus-visible {
+  outline:3px solid rgba(0,160,60,.24)!important;
+  outline-offset:2px!important;
 }
 </style>
