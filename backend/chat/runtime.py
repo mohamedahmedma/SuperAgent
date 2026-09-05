@@ -1,14 +1,22 @@
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import after_model, before_model
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    AgentState,
+    after_model,
+    before_model,
+)
+from langchain_core.messages import AIMessage
+from typing_extensions import NotRequired
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import ToolMessage
 
 from backend.chat.request_context import ChatRequestContext
 from backend.llm import sampling
+from backend.provider_compat import fold_tool_results_into_text
 from backend.profiles import get_profile
 from backend.tools import KNOWLEDGE_TOOL, build_tools
 
@@ -19,14 +27,16 @@ BASE_URL = os.getenv("BASE_URL")
 
 logger = logging.getLogger(__name__)
 
-model = init_chat_model(
+# The agent's model is the one that replays tool results, and this endpoint stops
+# parsing its own transcript format the moment it sees one. See backend/provider_compat.py.
+model = fold_tool_results_into_text(init_chat_model(
     model=MODEL,
     model_provider="openai",
     api_key=API_KEY,
     base_url=BASE_URL,
     stream_usage=True,
     **sampling("answer"),
-)
+))
 
 fast_model = init_chat_model(
     model=FAST_MODEL,
@@ -95,6 +105,139 @@ def dedupe_tool_calls(calls) -> list:
         seen.add(fingerprint)
         kept.append(call)
     return kept
+
+
+class ToolBudgetState(AgentState):
+    """The agent's own record of what it has already called this turn.
+
+    In graph state rather than on the request context because it is a fact about the
+    conversation: it is checkpointed with the messages it describes, it survives a
+    resume, and `wrap_model_call` can read it at the moment it decides what to offer.
+    The context's own counters stay where they are — they guard the tools themselves,
+    which is a different job from deciding what the model is allowed to ask for.
+    """
+
+    tool_calls_made: NotRequired[dict]
+
+
+def _tool_name(tool) -> str:
+    """The name of a bound tool, whichever shape the request carries it in."""
+    name = getattr(tool, "name", None)
+    if name:
+        return str(name)
+    if isinstance(tool, dict):
+        return str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+    return ""
+
+
+def budget_for(name: str) -> int:
+    """How many times `name` may be called in one turn.
+
+    Retrieval falls back to `max_knowledge_calls_per_turn` rather than carrying its own
+    number, because two settings for one budget is two settings that can disagree — and
+    when they disagree the lower one refuses, which is the failure this exists to stop.
+    """
+    agent = get_profile().agent
+    budgets = agent.tool_call_budgets or {}
+    if name in budgets:
+        return int(budgets[name])
+    if name == KNOWLEDGE_TOOL:
+        return int(agent.max_knowledge_calls_per_turn)
+    return int(agent.default_tool_call_budget)
+
+
+class _ToolBudget(AgentMiddleware[ToolBudgetState, Any, Any]):
+    """Stop offering a tool once this turn has used it up.
+
+    The tools already refuse a call past their ceiling, and the refusal is what does the
+    damage: it arrives as a tool result, the model reads it as a failure, and it tries
+    again in different words. Measured on one question whose search returned nothing,
+    that produced 29 consecutive `search_knowledge_base` requests, and an earlier
+    arrangement produced 85 before the recursion limit ended the turn. Requests, not
+    executions: the duplicate-collapsing middleware above and the retrieval memo absorb
+    many of them, so the true cost is lower than those numbers and the wasted model
+    round-trips are not.
+
+    Withholding is quieter than refusing. A tool that is not in the request is not a
+    failure the model has to reason about; it is simply not an option, so the turn ends
+    in an answer instead of another attempt. Nothing is said to the model about limits,
+    which is deliberate: `TOOL_CALL_LIMIT_REACHED` is exactly the kind of sentence it
+    narrates around, and parents have seen it do so.
+
+    Counting happens in `after_model`, against the message the model just produced, so a
+    call that the duplicate-collapsing middleware removes is never counted — the two are
+    ordered together in `create_agent_for_request` for that reason.
+    """
+
+    # Declared BOTH ways on purpose. The class attribute is what `create_agent` reads to
+    # widen the compiled state schema, and the generic parameter is what types the
+    # `state` handed to the hooks. Setting only the attribute compiles a graph whose
+    # state has no `tool_calls_made` key, so every update to it is silently discarded and
+    # the budget reads zero forever — which looks exactly like a middleware that is not
+    # running at all.
+    state_schema = ToolBudgetState  # type: ignore[assignment]
+
+    # BOTH the sync and the async hook, and the decision lives in a plain method that
+    # neither one duplicates.
+    #
+    # This is not defensive symmetry, it is the production path. Every streamed turn goes
+    # through `astream`, which composes the ASYNC hooks: `awrap_model_call` on the base
+    # class raises `NotImplementedError` outright, and `aafter_model` is a silent no-op.
+    # A middleware that implemented only the sync side therefore took the whole streamed
+    # chat down on its first model call, and — had it survived that — would have counted
+    # no tool calls at all, so the budget below would have read zero forever. The sync
+    # path (`invoke`) is the one the unit tests exercise and very nearly the only place
+    # it worked.
+    def _count(self, state) -> dict | None:
+        messages = state.get("messages") or []
+        last = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+        if last is None or not getattr(last, "tool_calls", None):
+            return None
+        made = dict(state.get("tool_calls_made") or {})
+        for call in last.tool_calls:
+            name = call.get("name")
+            if name:
+                made[name] = made.get(name, 0) + 1
+        return {"tool_calls_made": made}
+
+    def _affordable(self, request):
+        """The request with any tool this turn has used up removed from it."""
+        made = (getattr(request, "state", None) or {}).get("tool_calls_made") or {}
+        if not made or not request.tools:
+            return request
+        affordable = [
+            tool for tool in request.tools
+            if made.get(_tool_name(tool), 0) < budget_for(_tool_name(tool))
+        ]
+        if len(affordable) == len(request.tools):
+            return request
+        withheld = sorted({_tool_name(t) for t in request.tools}
+                          - {_tool_name(t) for t in affordable})
+        logger.info("tool budget spent, not offering: %s", ", ".join(withheld))
+        overrides = {"tools": affordable}
+        if not affordable:
+            # A request that forces a tool call and offers none is rejected by the
+            # provider before the model ever sees it.
+            overrides["tool_choice"] = None
+        return request.override(**overrides)
+
+    def after_model(self, state, runtime):
+        return self._count(state)
+
+    async def aafter_model(self, state, runtime):
+        return self._count(state)
+
+    def wrap_model_call(self, request, handler):
+        return handler(self._affordable(request))
+
+    async def awrap_model_call(self, request, handler):
+        return await handler(self._affordable(request))
+
+
+def _spend_tool_budgets(ctx: ChatRequestContext) -> _ToolBudget:
+    """One budget middleware for this turn. `ctx` is unused today and kept for symmetry
+    with the other middleware factories, which all take it."""
+    return _ToolBudget()
 
 
 def _collapse_duplicate_tool_calls(ctx: ChatRequestContext):
@@ -213,7 +356,11 @@ def create_agent_for_request(
         middleware=[
             # Ordered: duplicates are dropped as the model produces them, so the guard
             # below counts the tools that actually ran rather than the copies.
+            # Ordered: duplicates are dropped as the model produces them, so the
+            # budget below counts the calls that will actually run rather than the
+            # copies, and the terminal guard still sees a single result.
             _collapse_duplicate_tool_calls(ctx),
+            _spend_tool_budgets(ctx),
             _end_turn_on_terminal_retrieval(ctx),
         ],
     )
