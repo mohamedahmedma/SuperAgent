@@ -1,19 +1,17 @@
 <template>
-  <div class="app-page">
-    <div class="aurora-orb aurora-orb-one" aria-hidden="true"></div>
-    <div class="aurora-orb aurora-orb-two" aria-hidden="true"></div>
+  <AuthPanel
+    v-if="!authStore.isAuthenticated"
+    :theme="theme"
+    @toggle-theme="toggleTheme"
+  />
 
+  <div v-else class="app-page">
     <div class="app-wrapper">
       <Sidebar :theme="theme" @toggle-theme="toggleTheme" />
-
       <main class="main-content">
-        <AuthPanel v-if="!authStore.isAuthenticated" />
-
-        <template v-else>
-          <DocumentSettings v-if="chatStore.activeNav === 'settings'" />
-          <HistorySidebar />
-          <ChatArea v-show="chatStore.activeNav !== 'settings'" />
-        </template>
+        <DocumentSettings v-if="chatStore.activeNav === 'settings'" />
+        <HistorySidebar />
+        <ChatArea v-show="chatStore.activeNav !== 'settings'" />
       </main>
     </div>
   </div>
@@ -26,7 +24,6 @@ import AuthPanel from '@/components/AuthPanel.vue';
 import HistorySidebar from '@/components/HistorySidebar.vue';
 import ChatArea from '@/components/Chat/ChatArea.vue';
 import DocumentSettings from '@/components/Documents/DocumentSettings.vue';
-
 import { useAuthStore } from '@/stores/auth';
 import { useChatStore } from '@/stores/chat';
 import { useSessionStore } from '@/stores/sessions';
@@ -36,7 +33,6 @@ const chatStore = useChatStore();
 const sessionStore = useSessionStore();
 
 type Theme = 'dark' | 'light';
-
 const storedTheme = localStorage.getItem('superagent-theme');
 const theme = ref<Theme>(storedTheme === 'light' ? 'light' : 'dark');
 
@@ -47,7 +43,17 @@ const applyTheme = (nextTheme: Theme) => {
 };
 
 const toggleTheme = () => {
-  theme.value = theme.value === 'dark' ? 'light' : 'dark';
+  const nextTheme: Theme = theme.value === 'dark' ? 'light' : 'dark';
+  const startViewTransition = (document as any).startViewTransition?.bind(document);
+  if (!startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    theme.value = nextTheme;
+    return;
+  }
+  document.documentElement.classList.add('aurexis-theme-transition');
+  const transition = startViewTransition(() => { theme.value = nextTheme; });
+  transition.finished.finally(() => {
+    document.documentElement.classList.remove('aurexis-theme-transition');
+  });
 };
 
 watch(theme, applyTheme, { immediate: true });
@@ -68,17 +74,11 @@ const handleUnauthorized = () => {
 
 onMounted(async () => {
   window.addEventListener('unauthorized', handleUnauthorized);
-  
   if (authStore.token) {
-    try {
-      await authStore.fetchMe();
-    } catch (_) {
-      authStore.handleLogout();
-    }
+    try { await authStore.fetchMe(); }
+    catch (_) { authStore.handleLogout(); }
   }
 });
 
-onUnmounted(() => {
-  window.removeEventListener('unauthorized', handleUnauthorized);
-});
+onUnmounted(() => window.removeEventListener('unauthorized', handleUnauthorized));
 </script>

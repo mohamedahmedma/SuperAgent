@@ -3,13 +3,11 @@
     v-if="!msg.isHitlRequest && !msg.isHitlAnswer"
     :class="['message', msg.isUser ? 'user-message' : 'bot-message']"
   >
-    <div v-if="!msg.isUser" class="message-avatar" aria-hidden="true">
-      <i class="fa-solid fa-robot"></i>
-    </div>
+    <div v-if="!msg.isUser" class="message-avatar" aria-hidden="true"><BrandLogo size="sm" /></div>
 
     <div class="message-column">
       <div v-if="!msg.isUser" class="message-author">
-        <span>Agent Assistant</span>
+        <span>Aurexis School Assistant</span>
         <small v-if="showAdvanced && msg.ragTrace?.retrieved_chunks?.length">
           Cited {{ msg.ragTrace.retrieved_chunks.length }} sources
         </small>
@@ -54,6 +52,7 @@
 </template>
 
 <script setup lang="ts">
+import BrandLogo from '@/components/BrandLogo.vue';
 import { ref } from 'vue';
 import MessageAssets from './MessageAssets.vue';
 import MessageContent from './MessageContent.vue';

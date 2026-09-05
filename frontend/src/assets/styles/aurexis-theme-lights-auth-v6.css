@@ -1,0 +1,401 @@
+/* =====================================================================
+   AUREXIS THEME / LIGHTS / AUTH V6
+   Refines V5:
+   - darker Deep Navy dark mode
+   - polished light mode using soft blue-gray, not white
+   - subtle sea-tone LED lights in several positions
+   - same visual language applied to public sign-in page
+   ===================================================================== */
+
+:root{
+  --ax-outer:#e9eef4;
+
+  /* DARK */
+  --ax-dark-main:#182638;
+  --ax-dark-main-2:#1d2c40;
+  --ax-dark-main-3:#223248;
+  --ax-dark-sidebar:#04111f;
+  --ax-dark-sidebar-2:#06172b;
+  --ax-dark-panel:#0a2135;
+  --ax-dark-panel-2:#0c2941;
+  --ax-dark-line:rgba(69,137,184,.18);
+  --ax-dark-line-strong:rgba(66,161,214,.30);
+  --ax-dark-text:#f7f9fb;
+  --ax-dark-soft:#d8e1e9;
+  --ax-dark-muted:#7f9ab5;
+  --ax-dark-muted-2:#6886a3;
+
+  /* LIGHT — intentionally blue-gray, never pure white */
+  --ax-light-outer:#dfe8f0;
+  --ax-light-main:#d6e1eb;
+  --ax-light-main-2:#cbd9e5;
+  --ax-light-sidebar:#c0d0dd;
+  --ax-light-panel:#c9d8e5;
+  --ax-light-line:rgba(56,112,151,.20);
+  --ax-light-line-strong:rgba(45,128,174,.30);
+  --ax-light-text:#172538;
+  --ax-light-soft:#31485e;
+  --ax-light-muted:#607b94;
+  --ax-light-muted-2:#7890a7;
+
+  /* SEA / LED PALETTE */
+  --ax-sea-1:#19d0da;
+  --ax-sea-2:#1ba9d6;
+  --ax-sea-3:#2184d8;
+  --ax-sea-4:#3867d6;
+  --ax-sea-5:#4a4fc9;
+}
+
+/* ------------------------- GLOBAL DARK SHELL ------------------------- */
+body{
+  background:#eef2f5!important;
+}
+.app-page{
+  background:#eef2f5!important;
+}
+.app-wrapper{
+  background:
+    radial-gradient(680px 380px at 90% 1%, rgba(25,208,218,.050), transparent 68%),
+    radial-gradient(620px 390px at 4% 100%, rgba(33,132,216,.042), transparent 69%),
+    radial-gradient(520px 310px at 65% 104%, rgba(74,79,201,.028), transparent 70%),
+    linear-gradient(180deg,var(--ax-dark-main-2) 0%,var(--ax-dark-main) 100%)!important;
+  border-color:rgba(55,104,142,.52)!important;
+  box-shadow:
+    0 2px 5px rgba(0,7,16,.16),
+    0 16px 36px rgba(0,7,16,.24),
+    0 40px 90px rgba(0,7,16,.18),
+    inset 0 1px 0 rgba(255,255,255,.035)!important;
+}
+.sidebar{
+  background:
+    linear-gradient(155deg,rgba(255,255,255,.012),transparent 36%),
+    linear-gradient(180deg,var(--ax-dark-sidebar-2),var(--ax-dark-sidebar))!important;
+  border-right-color:rgba(63,117,153,.14)!important;
+}
+.main-content,
+.chat-area,
+.chat-workspace,
+.chat-container{
+  background:transparent!important;
+}
+
+/* ------------------------- SEA LED LIGHTS ------------------------- */
+/* These are soft localized LEDs, not big blobs. */
+.app-wrapper::before{
+  content:""!important;
+  display:block!important;
+  position:absolute!important;
+  inset:0!important;
+  pointer-events:none!important;
+  z-index:0!important;
+  border-radius:inherit!important;
+  background:
+    radial-gradient(130px 62px at 18% 7%, rgba(25,208,218,.11), transparent 68%),
+    radial-gradient(110px 52px at 36% 18%, rgba(27,169,214,.08), transparent 69%),
+    radial-gradient(145px 70px at 73% 10%, rgba(33,132,216,.09), transparent 70%),
+    radial-gradient(110px 48px at 91% 27%, rgba(56,103,214,.075), transparent 70%),
+    radial-gradient(130px 58px at 15% 72%, rgba(25,208,218,.060), transparent 70%),
+    radial-gradient(145px 64px at 48% 86%, rgba(27,169,214,.060), transparent 70%),
+    radial-gradient(125px 54px at 82% 78%, rgba(74,79,201,.055), transparent 70%)!important;
+  filter:blur(1px);
+}
+.app-wrapper::after{
+  content:""!important;
+  display:block!important;
+  position:absolute!important;
+  inset:0!important;
+  pointer-events:none!important;
+  z-index:0!important;
+  border-radius:inherit!important;
+  background:
+    radial-gradient(circle at 18% 7%,rgba(112,245,249,.15) 0 1px,transparent 2px),
+    radial-gradient(circle at 36% 18%,rgba(79,208,244,.12) 0 1px,transparent 2px),
+    radial-gradient(circle at 73% 10%,rgba(80,168,244,.13) 0 1px,transparent 2px),
+    radial-gradient(circle at 91% 27%,rgba(99,130,240,.11) 0 1px,transparent 2px),
+    radial-gradient(circle at 15% 72%,rgba(97,235,238,.09) 0 1px,transparent 2px),
+    radial-gradient(circle at 48% 86%,rgba(73,196,236,.09) 0 1px,transparent 2px),
+    radial-gradient(circle at 82% 78%,rgba(114,105,229,.085) 0 1px,transparent 2px),
+    inset 0 0 0 1px rgba(255,255,255,.018)!important;
+}
+.app-wrapper>*{
+  position:relative!important;
+  z-index:1!important;
+}
+
+/* Make internal surfaces a bit darker than V5 */
+.workspace-switcher{
+  background:rgba(7,30,49,.72)!important;
+  border-color:rgba(47,121,166,.28)!important;
+}
+.nav-btn.active{
+  background:#0a354f!important;
+  border-color:rgba(34,143,192,.12)!important;
+}
+.input-area{
+  background:rgba(5,28,46,.62)!important;
+  border-color:rgba(40,145,196,.36)!important;
+}
+.send-btn{
+  background:#20bddc!important;
+  color:#052131!important;
+  box-shadow:0 6px 16px rgba(32,189,220,.13)!important;
+}
+.welcome-capabilities span{
+  background:rgba(7,37,58,.40)!important;
+}
+
+/* ------------------------- LIGHT MODE ------------------------- */
+html[data-theme="light"] body{
+  background:var(--ax-light-outer)!important;
+}
+html[data-theme="light"] .app-page{
+  background:var(--ax-light-outer)!important;
+}
+html[data-theme="light"] .app-wrapper{
+  background:
+    radial-gradient(680px 360px at 91% 3%, rgba(25,169,201,.080), transparent 67%),
+    radial-gradient(620px 380px at 7% 100%, rgba(33,132,216,.060), transparent 70%),
+    radial-gradient(520px 300px at 67% 104%, rgba(74,79,201,.040), transparent 72%),
+    linear-gradient(180deg,var(--ax-light-main) 0%,var(--ax-light-main-2) 100%)!important;
+  border-color:rgba(72,121,156,.36)!important;
+  box-shadow:
+    0 2px 6px rgba(34,55,75,.08),
+    0 18px 42px rgba(34,55,75,.15),
+    0 42px 94px rgba(34,55,75,.10),
+    inset 0 1px 0 rgba(255,255,255,.52)!important;
+}
+html[data-theme="light"] .sidebar{
+  background:
+    linear-gradient(155deg,rgba(255,255,255,.24),transparent 36%),
+    linear-gradient(180deg,#c6d5e1,var(--ax-light-sidebar))!important;
+  border-right-color:rgba(57,103,137,.16)!important;
+}
+html[data-theme="light"] .app-wrapper::before{
+  background:
+    radial-gradient(125px 58px at 18% 7%, rgba(25,208,218,.10), transparent 68%),
+    radial-gradient(105px 50px at 36% 18%, rgba(27,169,214,.075), transparent 69%),
+    radial-gradient(135px 62px at 73% 10%, rgba(33,132,216,.080), transparent 70%),
+    radial-gradient(110px 50px at 91% 27%, rgba(56,103,214,.060), transparent 70%),
+    radial-gradient(125px 56px at 15% 72%, rgba(25,208,218,.050), transparent 70%),
+    radial-gradient(130px 58px at 48% 86%, rgba(27,169,214,.050), transparent 70%),
+    radial-gradient(120px 52px at 82% 78%, rgba(74,79,201,.040), transparent 70%)!important;
+}
+html[data-theme="light"] .app-wrapper::after{
+  background:
+    radial-gradient(circle at 18% 7%,rgba(24,145,165,.15) 0 1px,transparent 2px),
+    radial-gradient(circle at 36% 18%,rgba(36,143,178,.12) 0 1px,transparent 2px),
+    radial-gradient(circle at 73% 10%,rgba(49,119,190,.12) 0 1px,transparent 2px),
+    radial-gradient(circle at 91% 27%,rgba(65,91,184,.10) 0 1px,transparent 2px),
+    inset 0 0 0 1px rgba(255,255,255,.22)!important;
+}
+html[data-theme="light"] .brand-copy h1,
+html[data-theme="light"] .header-info h1,
+html[data-theme="light"] .welcome-screen h2{
+  color:var(--ax-light-text)!important;
+}
+html[data-theme="light"] .brand-copy span,
+html[data-theme="light"] .welcome-screen>p,
+html[data-theme="light"] .recent-empty,
+html[data-theme="light"] .workspace-copy small,
+html[data-theme="light"] .theme-control-label,
+html[data-theme="light"] .user-copy small{
+  color:var(--ax-light-muted)!important;
+}
+html[data-theme="light"] .workspace-copy strong,
+html[data-theme="light"] .user-copy strong{
+  color:#203448!important;
+}
+html[data-theme="light"] .workspace-switcher{
+  background:rgba(186,207,222,.72)!important;
+  border-color:rgba(63,118,153,.24)!important;
+}
+html[data-theme="light"] .workspace-orb{
+  background:#76a9bf!important;
+}
+html[data-theme="light"] .nav-btn{
+  color:#58718a!important;
+}
+html[data-theme="light"] .nav-btn.active{
+  color:#17334a!important;
+  background:#b5cfdd!important;
+  border-color:rgba(36,114,153,.16)!important;
+}
+html[data-theme="light"] .nav-btn:hover{
+  background:#bfd4e0!important;
+  color:#213e56!important;
+}
+html[data-theme="light"] .input-area{
+  background:rgba(190,209,223,.72)!important;
+  border-color:rgba(52,121,160,.28)!important;
+  box-shadow:
+    0 8px 22px rgba(44,67,87,.08),
+    inset 0 1px 0 rgba(255,255,255,.36)!important;
+}
+html[data-theme="light"] .chat-input-textarea{
+  color:#1c3348!important;
+}
+html[data-theme="light"] .chat-input-textarea::placeholder{
+  color:#69839b!important;
+}
+html[data-theme="light"] .attach-btn,
+html[data-theme="light"] .voice-btn{
+  color:#6d879c!important;
+}
+html[data-theme="light"] .welcome-capabilities span{
+  color:#5c7790!important;
+  background:rgba(180,202,217,.50)!important;
+}
+html[data-theme="light"] .user-avatar{
+  color:#18364b!important;
+  background:#a7c7d7!important;
+}
+html[data-theme="light"] .user-actions button{
+  color:#58758e!important;
+}
+
+/* ------------------------- PUBLIC / AUTH PAGE ------------------------- */
+.public-page,
+.public-shell,
+.auth-page,
+.auth-shell{
+  position:relative!important;
+  overflow:hidden!important;
+  background:
+    radial-gradient(520px 300px at 12% 6%, rgba(25,208,218,.055), transparent 68%),
+    radial-gradient(580px 340px at 88% 12%, rgba(33,132,216,.050), transparent 70%),
+    radial-gradient(480px 280px at 72% 88%, rgba(74,79,201,.034), transparent 72%),
+    linear-gradient(180deg,#182638 0%,#142131 100%)!important;
+}
+
+/* little sea LEDs on sign-in page */
+.public-page::before,
+.auth-page::before{
+  content:""!important;
+  display:block!important;
+  position:absolute!important;
+  inset:0!important;
+  pointer-events:none!important;
+  background:
+    radial-gradient(110px 52px at 13% 15%, rgba(25,208,218,.10), transparent 69%),
+    radial-gradient(120px 54px at 82% 18%, rgba(27,169,214,.08), transparent 70%),
+    radial-gradient(115px 50px at 70% 77%, rgba(33,132,216,.065), transparent 70%),
+    radial-gradient(100px 46px at 24% 82%, rgba(74,79,201,.050), transparent 70%)!important;
+}
+.public-page>*,
+.auth-page>*{
+  position:relative!important;
+  z-index:1!important;
+}
+
+/* auth cards/panels */
+.auth-panel,
+.public-auth-card,
+.login-card,
+.auth-card{
+  border:1px solid rgba(60,136,181,.24)!important;
+  background:
+    linear-gradient(180deg,rgba(9,31,49,.86),rgba(6,24,40,.88))!important;
+  box-shadow:
+    0 18px 42px rgba(0,8,17,.24),
+    0 38px 90px rgba(0,8,17,.14),
+    inset 0 1px 0 rgba(255,255,255,.025)!important;
+  backdrop-filter:blur(12px)!important;
+}
+.auth-panel h1,
+.auth-panel h2,
+.public-auth-card h1,
+.public-auth-card h2,
+.login-card h1,
+.login-card h2{
+  color:#f6f8fa!important;
+}
+.auth-panel p,
+.public-auth-card p,
+.login-card p{
+  color:#819db8!important;
+}
+.auth-panel input,
+.public-auth-card input,
+.login-card input{
+  color:#e9f1f8!important;
+  background:rgba(9,31,50,.64)!important;
+  border-color:rgba(54,130,175,.24)!important;
+}
+.auth-panel input::placeholder,
+.public-auth-card input::placeholder,
+.login-card input::placeholder{
+  color:#65829e!important;
+}
+.auth-submit,
+.login-button,
+.auth-primary{
+  color:#061f2e!important;
+  background:linear-gradient(180deg,#2cc9e5,#1ca9cf)!important;
+  border:0!important;
+  box-shadow:0 8px 22px rgba(28,169,207,.18)!important;
+}
+
+/* auth light mode */
+html[data-theme="light"] .public-page,
+html[data-theme="light"] .public-shell,
+html[data-theme="light"] .auth-page,
+html[data-theme="light"] .auth-shell{
+  background:
+    radial-gradient(520px 300px at 12% 6%, rgba(25,169,201,.070), transparent 68%),
+    radial-gradient(580px 340px at 88% 12%, rgba(33,132,216,.055), transparent 70%),
+    linear-gradient(180deg,#d6e1eb 0%,#cbd9e5 100%)!important;
+}
+html[data-theme="light"] .auth-panel,
+html[data-theme="light"] .public-auth-card,
+html[data-theme="light"] .login-card,
+html[data-theme="light"] .auth-card{
+  border-color:rgba(59,116,152,.22)!important;
+  background:rgba(202,218,229,.84)!important;
+  box-shadow:
+    0 16px 38px rgba(38,61,80,.10),
+    0 36px 80px rgba(38,61,80,.08),
+    inset 0 1px 0 rgba(255,255,255,.42)!important;
+}
+html[data-theme="light"] .auth-panel h1,
+html[data-theme="light"] .auth-panel h2,
+html[data-theme="light"] .public-auth-card h1,
+html[data-theme="light"] .public-auth-card h2,
+html[data-theme="light"] .login-card h1,
+html[data-theme="light"] .login-card h2{
+  color:#172b3e!important;
+}
+html[data-theme="light"] .auth-panel p,
+html[data-theme="light"] .public-auth-card p,
+html[data-theme="light"] .login-card p{
+  color:#5e7992!important;
+}
+html[data-theme="light"] .auth-panel input,
+html[data-theme="light"] .public-auth-card input,
+html[data-theme="light"] .login-card input{
+  color:#183148!important;
+  background:rgba(187,207,220,.72)!important;
+  border-color:rgba(53,112,147,.22)!important;
+}
+html[data-theme="light"] .auth-panel input::placeholder,
+html[data-theme="light"] .public-auth-card input::placeholder,
+html[data-theme="light"] .login-card input::placeholder{
+  color:#6d879e!important;
+}
+
+/* Public top controls harmonize with the same theme */
+.public-top-controls{
+  border-color:rgba(63,135,176,.18)!important;
+}
+html[data-theme="light"] .public-top-controls{
+  border-color:rgba(53,112,147,.18)!important;
+}
+
+/* preserve reduced motion */
+@media (prefers-reduced-motion: reduce){
+  .app-wrapper::before,
+  .app-wrapper::after,
+  .public-page::before,
+  .auth-page::before{
+    filter:none!important;
+  }
+}
