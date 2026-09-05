@@ -203,10 +203,47 @@ agent:
     get_student_records: 3
   default_tool_call_budget: 1
 
+  # Bind the one tool the question needs, when the planner already knows which. This
+  # deployment is where the failure was measured: with both tools on the wire, «درجات
+  # ليلى أحمد كام؟» was answered by searching the fee corpus and telling a parent no
+  # information about their daughter existed, while the records tool sat unused beside
+  # it. Three of three runs on that question, and two more questions like it.
+  #
+  # Safe here specifically because this profile has both halves the switch depends on: a
+  # child roster from the records facade, and a classifier that separates a question
+  # about a child's own record from a school matter asked about that child. Without the
+  # second, «مصاريف ابني» would be sent to the records tool, which is why it is a
+  # classifier field and not a keyword rule.
+  narrow_tools_to_the_turn: true
+
   # A fee, an instalment, a deadline — the figures in this corpus are what a parent acts
   # on, so a figure that is in no retrieved chunk must not be served. Enforced rather
   # than observed because the failure this closes actually reached a parent: an invented
   # «45 ألف» for a grade the child is not in. See backend/chat/grounding.py.
+  # An answer that tells a parent no record exists, on a turn where the records tool
+  # returned one. Measured here: the tool came back with 87.5% and 91.0% for a named
+  # child and the reply was "I couldn't find any records." The numeric check above cannot
+  # see it — a denial states no figure, and a mark is under the 100 floor in any case.
+  #
+  # `observe` and not `enforce`, for now and on purpose. The half of this check that
+  # reads the tool is fact; the half that reads the ANSWER is the list below, and a
+  # phrase list is the part that can be wrong about a correct reply. Observing puts every
+  # disagreement in the trace and the log, which is the evidence this deployment needs
+  # before it lets the check rewrite an answer a parent would otherwise have read.
+  records_denial_mode: observe
+  # Folded before matching, so a different alif or teh marbuta does not slip past.
+  records_denial_phrases:
+    - "ما لقيتش"
+    - "مالقيتش"
+    - "لم أجد"
+    - "لا توجد"
+    - "مفيش"
+    - "مش موجود"
+    - "couldn't find"
+    - "could not find"
+    - "no records"
+    - "not find any"
+
   answer_grounding_mode: enforce
 
   # Six turns of conversation, which is TWELVE messages — this is counted in messages,
@@ -237,6 +274,13 @@ models:
 # Register matches agent.system_prompt above — these sit next to model-written replies
 # in the same conversation, and base's MSA boilerplate reads as a different assistant.
 user_copy:
+  # Asked with no model call when this parent's own roster holds more than one child
+  # matching what they said — "my son" with two sons on file. The names follow as
+  # selectable options, so the question deliberately does not list them itself: a parent
+  # taps one rather than re-typing a name the school already knows how to spell.
+  which_child:
+    en: Which child do you mean?
+    ar: حضرتك تقصد أنهي واحد فيهم؟
   out_of_domain:
     en: >-
       That's outside what I can help with here — I answer questions about the school.

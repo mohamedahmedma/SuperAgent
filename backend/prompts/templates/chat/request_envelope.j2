@@ -8,9 +8,16 @@
    guess.
 
    THREE DECISIONS IN ONE CALL. Scope, disclosed profile fields, and whether the
-   message is about the caller's own child. Asking separately would triple the cost of
-   the one call every turn already pays, and the three share all of their context: the
-   same message, the same history, the same description of the deployment.
+   message is about the caller's own child — and, when it is, what answering it would
+   have to read. Asking separately would triple the cost of the one call every turn
+   already pays, and the three share all of their context: the same message, the same
+   history, the same description of the deployment.
+
+   That last part rides along with the child decision rather than becoming a fourth
+   call for the same reason: it is a refinement of an answer the model has already
+   worked out, and it is only ever asked when `about_child` is true. It decides which
+   TOOLS the answering agent is given, so its safe value is `both` — see
+   CHILD_QUESTION_KINDS in backend/chat/signals.py for why every failure lands there.
 
    ORDER IS FOR CACHING, the same rule agent/system.j2 states and for the same reason.
    Everything fixed per deployment comes first — the role, the coverage description,
@@ -121,6 +128,30 @@ Examples:
 The last one is the distinction that matters: the trip is a school matter, and the child is only who relayed the question.
 
 **Here too the mistakes are unequal, and they point the other way than in decision 1.** A false `about_child` costs one cheap lookup nobody sees. A missed one means the answer is written without knowing which child it is about — producing either a wrong answer, or a question the parent has already answered. When in doubt, say true.
+
+## And then — what would answering it need to READ?
+
+Only when `about_child` is true. Set `child_question_kind` to one of:
+
+  `records`       — the child's OWN record, held by the school's records system and about nobody else: their marks, grades, results in a subject, attendance, absences, report card, their own timetable.
+  `school_matter` — the school's own published material, looked up FOR this child: fee schedules, term dates, uniform rules, policies, what their year group studies. General material; this child's year decides which part of it applies.
+  `both`          — the message asks for each of them, or you are not sure which it is.
+
+This is a different question from decision 3, and the difference is the whole point of asking it. "What are the fees for my son?" is `about_child` **true** — the answer has to know his year group — and its kind is `school_matter`, because a fee schedule is published material and no part of the answer is read from his record. Getting this wrong sends the question to the wrong place entirely.
+
+Examples:
+
+  "درجات ليلى كام؟"                       -> records        (her own marks)
+  "تفاصيل درجة ليلى في الرياضيات"          -> records        (one subject, from her record)
+  "كم يوم غاب ابني؟"                       -> records        (his own attendance)
+  "عايز اعرف مصاريف ابني"                  -> school_matter  (the fee schedule; his year picks the row)
+  "امتى امتحانات ابني؟"                    -> school_matter  (the published exam dates for his year)
+  "ما هو زي المدرسة لبنتي؟"                 -> school_matter  (the uniform rule for her year)
+  "درجات ليلى كام والمصاريف كام؟"           -> both           (it asks for each)
+  "ابني عامل ايه، وهل هيعدي للسنة الجاية؟"   -> both           (his marks, and the promotion rule)
+  "طيب وجدوله؟"                            -> records        (his own timetable)
+
+**When the two are close, answer `both`.** `both` looks in every place and costs one extra lookup nobody sees. A wrong single answer looks in one place, finds nothing there, and tells the parent no information exists — which is the failure this field was added to stop.
 {% endif %}
 {% if history %}
 

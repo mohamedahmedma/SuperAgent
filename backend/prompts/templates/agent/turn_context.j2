@@ -25,16 +25,25 @@ These bind the answer, not just the search. The knowledge base holds material we
 {% endif %}
 {% if child_hint %}
 
-This message is about {{ child_hint }}{% if child_year is defined and child_year %}, who is in {{ child_year }}{% endif %} — one of the signed-in parent's own children. Answer about that child, and do not ask the parent which child they mean unless they name a different one.
+This message is about {{ child_hint }}{% if child_year is defined and child_year %}, who is in {{ child_year }}{% endif %} — one of the signed-in parent's own children. Answer about that child.
+
+Which child it is has already been settled against the school's own list of this parent's children, so there is nothing here for you to choose or confirm: do not ask the parent which child they mean, and do not offer alternatives. A message that referred to a different child would not have reached you naming this one.
 {% if child_year is defined and child_year %}
 The year group binds the answer, it does not merely describe who is asking. Where the school's material differs by year, {{ child_year }} is the year to answer for, and a figure belonging to another year must not be given as theirs. When you search, search for what the parent asked — the year is a condition on the ANSWER, and adding it to the query retrieves worse.
 {% endif %}
 
 Naming a child here authorises nothing. Every records lookup is re-checked against the school's own guardian link by the service that answers it, so a name that is wrong here produces a refusal rather than an answer.
 {% endif %}
-{% if child_options %}
+{# There is deliberately no `child_options` block here any more.
 
-The parent has more than one child on file and this message does not say which one they mean. Before answering, ask them — by name, offering exactly these and no others: {{ child_options | join(" / ") }}.
+   It used to hand the model the candidate names and four rules — ask by name, offer
+   exactly these, do not look anything up, do not guess, do not show figures — every one
+   of which held only as often as the model obeyed it, on a question that needs no
+   judgement at all. Whether two of a parent's children match "my son" is a filter over
+   the school's own roster followed by a length check.
 
-Ask only that. Do not look anything up, do not guess, and do not show any figures until they have answered.
-{% endif %}
+   So the planner asks it directly instead (`_plan_child_choice` in
+   backend/chat/turn_policy.py). The turn ends before the agent is built, the names come
+   back as selectable options, and the answer is matched to a student id rather than
+   re-typed. A turn that reaches this template has therefore already had its child
+   settled, or is not about one. #}

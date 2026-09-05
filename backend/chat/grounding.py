@@ -265,17 +265,26 @@ def verify(
     *,
     floor: int = DEFAULT_FLOOR,
     check_citations: bool = True,
+    extra_evidence: Iterable[str] = (),
 ) -> GroundingReport:
     """Check an answer against the evidence the turn retrieved.
 
     `evidence` is the text of the retrieved chunks. An empty answer, or one stating no
     figure and citing nothing, passes trivially — most turns do, and the check has to be
     free on those.
+
+    `extra_evidence` is material the turn genuinely read that is NOT a numbered chunk —
+    today, what `get_student_records` returned. Its figures ground the answer exactly as
+    a chunk's would, and it is deliberately kept out of `evidence_count`, which is the
+    denominator the citation check counts against: a child's marks carry no `[n]` and
+    admitting them there would make `[3]` valid on a turn that retrieved two chunks.
+    Numbers and provenance are two different questions, and this argument is the reason
+    the parameter exists rather than the caller simply concatenating the two lists.
     """
     answer = answer or ""
     evidence_texts = [text for text in evidence if text]
-    evidence_blob = "\n".join(evidence_texts)
     evidence_count = len(evidence_texts)
+    evidence_blob = "\n".join(evidence_texts + [text for text in extra_evidence if text])
 
     grounded_all = numeric_claims(evidence_blob, floor=0)
     grounded = sorted(grounded_all)[:_DERIVATION_LIMIT]

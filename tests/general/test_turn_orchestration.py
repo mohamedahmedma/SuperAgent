@@ -553,3 +553,60 @@ class ShortCircuitedStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, calls["model"], "the composing call was supposed to be skipped")
         self.assertEqual("retrieval_error", ctx.short)
 
+
+
+class TheContextReceivesThePlan(unittest.TestCase):
+    """`_hand_to_graph` is the only route from the plan to the tools.
+
+    It is wrapped in a blanket `except`, deliberately — a hint must never break a turn —
+    which is exactly what makes it worth testing directly: a field that never arrives
+    fails silently and looks like a feature that was never switched on.
+    """
+
+    def _handed(self, **plan_kwargs):
+        from backend.chat.caller_identity import CallerIdentity
+        from backend.chat.orchestrator import _hand_to_graph
+        from backend.chat.request_context import ChatRequestContext
+
+        ctx = ChatRequestContext(
+            user_id="u-1",
+            session_id="s-1",
+            caller=CallerIdentity(user_id="u-1", guardian_id="G-1", guardian_token="t"),
+        )
+        _hand_to_graph(ctx, TurnPlan(**plan_kwargs))
+        return ctx
+
+    def test_the_resolved_child_reaches_the_tools(self):
+        ctx = self._handed(child_hint="ليلى أحمد", child_id="S-1")
+        self.assertEqual(ctx.planned_child_id, "S-1")
+        self.assertEqual(ctx.planned_child_label, "ليلى أحمد")
+
+    def test_the_required_tool_reaches_the_middleware(self):
+        ctx = self._handed(forced_tool="get_student_records")
+        self.assertEqual(ctx.forced_tool, "get_student_records")
+
+    def test_a_plan_that_settled_nothing_leaves_nothing_behind(self):
+        ctx = self._handed()
+        self.assertEqual(ctx.planned_child_id, "")
+        self.assertEqual(ctx.forced_tool, "")
+
+    def test_an_older_context_still_gets_the_hints_it_understands(self):
+        """The version ladder. A context predating these arguments must keep working and
+        simply carry fewer hints — the promise `note_turn_plan` makes in as many words.
+        Anything added to the hints must go to the FRONT of the drop list, or the retry
+        re-sends the argument that raised and the ladder hands over nothing at all."""
+        from backend.chat.orchestrator import _hand_to_graph
+
+        class _OldContext:
+            def note_turn_plan(self, retrieval_sections, scope_options, *,
+                               carried_constraints=(), is_followup=False, language=""):
+                self.sections = list(retrieval_sections)
+                self.language = language
+
+        ctx = _OldContext()
+        _hand_to_graph(ctx, TurnPlan(
+            retrieval_sections=["fees"], language="ar",
+            child_hint="ليلى", child_id="S-1", forced_tool="get_student_records",
+        ))
+        self.assertEqual(ctx.sections, ["fees"])
+        self.assertEqual(ctx.language, "ar")

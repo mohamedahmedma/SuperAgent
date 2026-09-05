@@ -255,3 +255,69 @@ class PromptShapeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhatAnsweringWouldNeedToRead(unittest.TestCase):
+    """The field that separates «درجات ليلى» from «مصاريف ابني».
+
+    Both are `about_child`. Only the first is answered from the child's own record, and
+    reading `about_child` as "records" sent the second to a tool holding no fee schedule.
+    It decides which TOOLS the agent is given, so every uncertain path lands on `both`.
+    """
+
+    def test_a_records_question_is_reported_as_records(self):
+        signals = _run({
+            "scope": "in_domain", "about_child": True,
+            "child_reference": "named", "child_name": "ليلى",
+            "child_question_kind": "records",
+        }, question="درجات ليلى كام؟")
+        self.assertEqual(signals.child_question_kind, "records")
+
+    def test_a_school_matter_asked_about_a_child_is_reported_as_such(self):
+        signals = _run({
+            "scope": "in_domain", "about_child": True,
+            "child_reference": "son", "child_question_kind": "school_matter",
+        })
+        self.assertEqual(signals.child_question_kind, "school_matter")
+
+    def test_a_kind_outside_the_closed_set_degrades_to_both(self):
+        for kind in ("everything", "eldest", "", None, 7):
+            with self.subTest(kind=kind):
+                signals = _run({
+                    "scope": "in_domain", "about_child": True,
+                    "child_reference": "son", "child_question_kind": kind,
+                })
+                self.assertEqual(signals.child_question_kind, "both")
+
+    def test_case_and_padding_are_tolerated(self):
+        """The same tolerance `child_reference` above it already grants, and for the same
+        reason: a provider that upper-cased an enum value said what it meant."""
+        for kind in ("RECORDS", " records ", "Records"):
+            with self.subTest(kind=kind):
+                signals = _run({
+                    "scope": "in_domain", "about_child": True,
+                    "child_reference": "son", "child_question_kind": kind,
+                })
+                self.assertEqual(signals.child_question_kind, "records")
+
+    def test_a_classifier_that_omits_the_field_leaves_it_at_both(self):
+        """Which is what a provider dropping an optional field produces, and what every
+        deployment on the previous schema produces."""
+        signals = _run({
+            "scope": "in_domain", "about_child": True, "child_reference": "son",
+        })
+        self.assertEqual(signals.child_question_kind, "both")
+
+    def test_a_turn_that_is_not_about_a_child_is_left_at_both(self):
+        signals = _run({
+            "scope": "in_domain", "about_child": False,
+            "child_question_kind": "records",
+        })
+        self.assertEqual(signals.child_question_kind, "both")
+
+    def test_the_trace_carries_it(self):
+        signals = _run({
+            "scope": "in_domain", "about_child": True,
+            "child_reference": "son", "child_question_kind": "school_matter",
+        })
+        self.assertEqual(signals.as_trace()["request_child_question_kind"], "school_matter")

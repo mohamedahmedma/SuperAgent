@@ -33,7 +33,8 @@ from backend.chat.storage import storage
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
 from backend.schemas.chat import PendingHitlState, normalize_rag_trace
-from backend.tools import GROUNDED_TOOLS
+from backend.text_matching import name_key
+from backend.tools import CHECKED_TOOLS, GROUNDED_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,72 @@ def _build_pending_hitl(
     ).model_dump()
 
 
+def _child_choice_pending(turn_plan, original_question: str) -> dict | None:
+    """The clarification for "which of your children?", when the planner asked one.
+
+    Built here rather than by `_build_pending_hitl` because that one reads a `rag_trace`,
+    and this question never went near retrieval — it comes from a roster and a length
+    check. Everything the client needs to render selectable names is on the plan already.
+
+    `resume_state` is None, and that is the whole difference between this route and the
+    other two: there is no half-finished search to pick up. The answer pins a child to
+    the session, and the original question is planned again from the start — which is
+    also why `original_question` has to be carried, since the next message will be a
+    name and nothing else.
+    """
+    options = [str(name) for name in (getattr(turn_plan, "child_options", None) or []) if name]
+    question = (getattr(turn_plan, "static_reply", "") or "").strip()
+    if not options or not question:
+        return None
+    return PendingHitlState(
+        id=uuid4().hex,
+        original_question=original_question or question,
+        prompt=question,
+        options=options,
+        route="child_select",
+        retrieval_status="needs_child_choice",
+        answers=[],
+        resume_state=None,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    ).model_dump()
+
+
+def _pin_the_child_the_parent_named(ctx, chosen: str) -> bool:
+    """Settle the pending "which child?" against the roster, with no model involved.
+
+    The reply is matched by the same resolver every other route uses, so a parent who
+    typed the name rather than tapping the option is read the same way, and a reply
+    matching nobody pins nothing — the next plan then asks again rather than answering
+    about a child nobody chose.
+
+    Pinning is what makes the answer stick: `resolve_child` consults the pin only among
+    the candidates a stated sex already allows, so "my son" asked again later still
+    means a son, and the pin only breaks the tie it was created to break.
+    """
+    if not chosen or ctx is None:
+        return False
+    try:
+        from backend.chat.child_resolution import resolve_child
+        from backend.chat.child_roster import OK, load_roster
+
+        outcome, roster = load_roster(ctx)
+        if outcome != OK or not roster:
+            return False
+        found = resolve_child(reference="named", child_name=chosen, roster=roster)
+        if not found.resolved:
+            return False
+        picked = next((c for c in roster if c.student_id == found.student_id), None)
+        ctx.remember_child(
+            found.student_id,
+            label=found.label,
+            gender=getattr(picked, "gender", "") or "",
+        )
+        return True
+    except Exception:  # pragma: no cover - a pin must never break a turn
+        logger.warning("could not settle the child the parent chose", exc_info=True)
+        return False
+
+
 def _build_hitl_event(pending_hitl: dict) -> dict:
     return {
         "id": pending_hitl["id"],
@@ -171,6 +238,10 @@ class _TurnEntry:
     effective_user_text: str = ""
     hitl_answers: list = field(default_factory=list)
     original_question: str = ""
+    # The child the parent just chose, when this message answers a "which child?"
+    # question. A name as they typed or tapped it — resolved against the roster later,
+    # by code holding a verified identity this dataclass deliberately does not.
+    child_choice: str = ""
 
 
 def _enter_turn(user_text: str, messages: list, metadata: dict) -> _TurnEntry:
@@ -191,6 +262,18 @@ def _enter_turn(user_text: str, messages: list, metadata: dict) -> _TurnEntry:
     entry.pending_hitl = _current_pending_hitl(stored)
     entry.invalid_pending_hitl = stored is not None and entry.pending_hitl is None
     if not isinstance(entry.pending_hitl, dict):
+        return entry
+
+    if entry.pending_hitl.get("route") == "child_select":
+        # No resolver call and no model. The pending question was "which of your
+        # children", the reply is a name, and matching it belongs to the roster — so this
+        # turn simply becomes the ORIGINAL question again, planned from the start now
+        # that the pin can settle it. Deliberately not a `hitl_resume`: there is no
+        # search to continue, and folding the name into the old query as the other routes
+        # do would retrieve for "علي" rather than for what the parent actually asked.
+        entry.child_choice = user_text
+        entry.original_question = entry.pending_hitl.get("original_question") or user_text
+        entry.effective_user_text = entry.original_question
         return entry
 
     entry.resolution = resolve_turn_question(
@@ -340,6 +423,7 @@ async def _stream_static_reply(
     metadata: dict,
     persistent_note: str,
     is_first_message: bool,
+    pending_hitl: dict | None = None,
 ):
     """Emit a planned reply that no model composed, and persist the turn.
 
@@ -347,13 +431,23 @@ async def _stream_static_reply(
     `content`, `trace`, `[DONE]` — because a client must not need to know which path
     produced its answer. The saving is that no agent was built: no system prompt, no
     tool schemas, no search.
+
+    `pending_hitl` is set when the planned reply is a QUESTION rather than an answer —
+    today, "which of your children?". It rides the same `hitl_request` event the
+    retrieval clarifications use, so a client that already renders selectable options
+    renders these without knowing a planner produced them, and it is persisted so the
+    next message is read as the answer rather than as a new question.
     """
     if is_first_message:
         title = generate_session_title(user_text)
         yield f"data: {json.dumps({'type': 'session_title', 'title': title, 'session_id': session_id})}\n\n"
 
     reply = turn_plan.static_reply or ""
+    if pending_hitl:
+        reply = _format_hitl_message(reply, pending_hitl["options"])
     yield f"data: {json.dumps({'type': 'content', 'content': reply})}\n\n"
+    if pending_hitl:
+        yield f"data: {json.dumps({'type': 'hitl_request', 'hitl': _build_hitl_event(pending_hitl)})}\n\n"
 
     rag_trace = normalize_rag_trace({**turn_plan.as_trace(), **turn_signals.as_trace()})
     yield f"data: {json.dumps({'type': 'trace', 'rag_trace': rag_trace})}\n\n"
@@ -362,7 +456,7 @@ async def _stream_static_reply(
     # A turn the corpus never saw contributes nothing worth summarising, so the
     # persistent note is deliberately left alone — updating it would spend a model
     # call on the one path whose whole point is not making one.
-    save_meta[PENDING_HITL_KEY] = None
+    save_meta[PENDING_HITL_KEY] = pending_hitl or None
     if is_first_message:
         save_meta.setdefault("title", generate_session_title(user_text))
 
@@ -406,13 +500,61 @@ def _evidence_texts(rag_trace: dict | None) -> list:
     ]
 
 
+def _tool_messages_in(result) -> list:
+    """Every tool result in a finished agent run, for the path that has no stream.
+
+    The streamed path sees each `ToolMessage` go past and hands it to the finalizer
+    there. The synchronous path gets one dictionary at the end instead, so the same
+    messages have to be read back out of it — same objects, same order, arrived
+    differently. Tolerant of every shape `invoke` can return, because a grounding check
+    that raised on an unexpected result would take the answer down with it.
+    """
+    if not isinstance(result, dict):
+        return []
+    return [m for m in (result.get("messages") or []) if isinstance(m, ToolMessage)]
+
+
 def _grounding_expected(turn_plan) -> bool:
     """Whether this turn is one whose figures have to come from somewhere.
 
-    A turn that bound a grounded tool is answerable from evidence, so a figure in its
+    A turn that bound a checked tool is answerable from evidence, so a figure in its
     answer is a claim about that evidence. A social reply or an out-of-domain refusal
-    bound nothing to cite, never claimed to, and must not be checked as though it had —
+    bound nothing to read, never claimed to, and must not be checked as though it had —
     that is how a check earns the right to be enforced rather than merely observed.
+
+    `CHECKED_TOOLS` and not `GROUNDED_TOOLS`. The citation set answers "must this answer
+    cite?", which is a question about the PROMPT; this is asking "may this answer state a
+    number?", which is a question about the ANSWER, and `get_student_records` is on the
+    wrong side of the first and the right side of the second. Reading the citation set
+    here meant a turn that fetched a child's marks was checked against nothing — and once
+    the planner began narrowing a records turn to `["get_student_records"]`, the
+    narrowing itself became what switched the check off. See backend/tools/__init__.py.
+    """
+    exposed = getattr(turn_plan, "exposed_tools", None)
+    bound = _PROFILE.agent.tools if exposed is None else exposed
+    return bool(set(bound) & CHECKED_TOOLS)
+
+
+def _citations_expected(turn_plan) -> bool:
+    """Whether a `[n]` marker in this answer has to point at a real retrieved chunk.
+
+    Deliberately `GROUNDED_TOOLS`, not `CHECKED_TOOLS` — a citation is a claim about
+    the PROMPT'S OWN CONTRACT, and that contract is only ever shown to the model when
+    a grounded tool is bound (`agent/system.j2`'s `grounded` flag, computed from the
+    same set). `get_student_records` never receives that contract, so it stating `[1]`
+    is not a fabricated pointer to be caught — it is unrequested habit, most often
+    picked up from the Arabic style pack's worked examples
+    (backend/prompts/templates/packs/school/arabic_style.j2), which use `[1]`/`[2]`
+    purely to demonstrate keeping figures exact and are shown on every Arabic turn
+    regardless of which tools are bound.
+
+    Measured live: a records-only turn answered "٨٨٪ (A)... [1]" — correct, and
+    grounded via `extra_evidence` — and the citation check on its own, seeing zero RAG
+    chunks retrieved, flagged it as "cited evidence on a turn that retrieved none" and
+    replaced a correct grades answer with the could-not-verify copy. That is what this
+    function exists to stop: the NUMBER in that answer must still be checked (that is
+    `_grounding_expected`'s job, unchanged), but the stray `[1]` must not be judged by
+    a contract the prompt never gave this turn.
     """
     exposed = getattr(turn_plan, "exposed_tools", None)
     bound = _PROFILE.agent.tools if exposed is None else exposed
@@ -472,10 +614,69 @@ def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan) 
     report = finalizer.verify(
         _evidence_texts(rag_trace),
         floor=_PROFILE.agent.answer_grounding_number_floor,
+        check_citations=_citations_expected(turn_plan),
     )
     if report.ok or mode != "enforce":
         return ""
     return _COPY.unverified_answer
+
+
+#: Outcomes where `get_student_records` actually returned a child's record. Anything
+#: else — no_records, unavailable, not_authorized, which_student — is a turn that
+#: legitimately has nothing to report, and an answer saying so is the CORRECT answer.
+RECORDS_RETRIEVED = frozenset({"grades", "subject", "attendance"})
+
+
+def _denies_the_records(ctx, answer: str) -> bool:
+    """Whether the answer tells the parent nothing was found, on a turn that found it.
+
+    The failure, verbatim from the deployment: `get_student_records` returned 87.5% and
+    91.0% for a named child, and the assistant replied that it could not find any
+    records. Nothing in the system contradicted it — the graph knew the tool had been
+    called and not what it returned, and the numeric check cannot see a claim that
+    states no number.
+
+    Both halves are required and they come from opposite ends. What the tool returned is
+    fact, reported by the tool itself (`note_tool_outcome`). What the answer claims is a
+    phrase list, which is a guess — so the phrases are the deployment's own copy, and the
+    mode this drives starts at `observe` for exactly that reason.
+    """
+    phrases = list(getattr(_PROFILE.agent, "records_denial_phrases", None) or [])
+    if not phrases:
+        return False
+    outcomes = getattr(ctx, "tool_outcomes", None) or []
+    if not any(outcome in RECORDS_RETRIEVED for name, outcome in outcomes):
+        return False
+    folded = name_key(answer or "")
+    if not folded:
+        return False
+    # Folded first, then tested for emptiness — not `if phrase`, which was the bug.
+    # A phrase of "   " is truthy and folds to "", and "" is a substring of every answer,
+    # so one stray blank line in a deployment's `records_denial_phrases` made EVERY
+    # records answer read as a denial. Under `records_denial_mode: enforce` that would
+    # have replaced every correct answer about a child's marks with the could-not-verify
+    # copy — a config typo turning into a total outage of the feature it guards.
+    needles = [key for key in (name_key(phrase) for phrase in phrases) if key]
+    return any(needle in folded for needle in needles)
+
+
+def _enforce_records_agreement(finalizer: Finalizer, ctx, turn_plan) -> str:
+    """Replacement copy for an answer that denies a record the turn actually read.
+
+    A sibling of `_enforce_grounding` rather than part of it: that check verifies figures
+    against evidence and reports a `GroundingReport`, and folding a second, differently
+    evidenced verdict into the same report would make one trace field mean two things.
+    Same shape, same contract — "" when there is nothing to do.
+    """
+    mode = getattr(_PROFILE.agent, "records_denial_mode", "off")
+    if mode == "off" or turn_plan is None or getattr(turn_plan, "short_circuit", False):
+        return ""
+    if not _denies_the_records(ctx, finalizer.answer or ""):
+        return ""
+    logger.warning(
+        "the answer denies a record this turn retrieved; mode=%s", mode
+    )
+    return _COPY.unverified_answer if mode == "enforce" else ""
 
 
 def _resume_rag_from_hitl_sync(
@@ -547,10 +748,15 @@ def _turn_context_message(turn_plan) -> SystemMessage | None:
     constraints = [str(item) for item in (getattr(turn_plan, "carried_constraints", None) or [])]
     child_hint = (getattr(turn_plan, "child_hint", "") or "").strip()
     child_year = (getattr(turn_plan, "child_year", "") or "").strip()
-    child_options = [str(item) for item in (getattr(turn_plan, "child_options", None) or [])]
+    # `child_options` is deliberately absent. A turn that could not settle which child is
+    # meant no longer reaches the agent at all — the planner ends it with the question
+    # and the candidates as selectable options — so there is nothing to render and no
+    # reason to pay for a render. See the note where that block used to be in
+    # agent/turn_context.j2.
+    #
     # This condition is the feature's single point of failure: a plan carrying a child
     # and nothing else renders nothing at all unless the child is named here too.
-    if not resolved and not constraints and not child_hint and not child_options:
+    if not resolved and not constraints and not child_hint:
         return None
     rendered = resolve_prompt(
         "",
@@ -559,7 +765,6 @@ def _turn_context_message(turn_plan) -> SystemMessage | None:
         constraints=constraints,
         child_hint=child_hint,
         child_year=child_year,
-        child_options=child_options,
     )
     return SystemMessage(content=rendered) if rendered else None
 
@@ -720,6 +925,11 @@ def chat_with_agent(
         child=child_state,
     )
     ctx.reset_knowledge_tool_budget()
+    # Settled before anything plans this turn, so the pin is in place by the time the
+    # planner resolves a child. `child_state` is threaded by reference, so the choice is
+    # already in what this turn will persist.
+    if entry.child_choice:
+        _pin_the_child_the_parent_named(ctx, entry.child_choice)
 
     try:
         messages.append(HumanMessage(content=user_text))
@@ -753,12 +963,19 @@ def chat_with_agent(
                 effective_user_text, messages[:-1], ctx, resolution=entry.resolution
             )
             if turn_plan.short_circuit:
-                # A confirmed out-of-domain question, or a social turn a profile
-                # answers statically. The agent is never built, so this costs neither
-                # the system prompt nor a single tool schema.
-                response_content = turn_plan.static_reply
+                # A confirmed out-of-domain question, a social turn a profile answers
+                # statically, or a parent with two children who both match what they
+                # said. The agent is never built, so this costs neither the system
+                # prompt nor a single tool schema.
+                next_pending_hitl = _child_choice_pending(
+                    turn_plan, original_question or user_text
+                )
+                response_content = (
+                    _format_hitl_message(turn_plan.static_reply, next_pending_hitl["options"])
+                    if next_pending_hitl
+                    else turn_plan.static_reply
+                )
                 rag_trace = normalize_rag_trace(turn_plan.as_trace())
-                next_pending_hitl = None
             else:
                 request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools, turn_plan.language)
                 context_messages = _build_context_messages(
@@ -815,8 +1032,17 @@ def chat_with_agent(
                     # path serves the same answers to the same parents, and a rule that
                     # holds on one of two entry points is not a rule.
                     sync_finalizer = Finalizer()
+                    # Including what the tools returned. The streamed path collects these
+                    # as they arrive; here the whole conversation is in hand at once, so
+                    # they are replayed off it. Without this the check on THIS path had no
+                    # record of a child's marks and passed every answer about them.
+                    for tool_message in _tool_messages_in(result):
+                        sync_finalizer.note_tool_result(tool_message)
                     sync_finalizer.replace_answer(response_content)
-                    replacement = _enforce_grounding(sync_finalizer, rag_trace, turn_plan)
+                    replacement = (
+                        _enforce_grounding(sync_finalizer, rag_trace, turn_plan)
+                        or _enforce_records_agreement(sync_finalizer, ctx, turn_plan)
+                    )
                     if replacement:
                         response_content = replacement
                     sync_finalizer.log_summary()
@@ -931,6 +1157,11 @@ async def chat_with_agent_stream(
         child=child_state,
     )
     ctx.reset_knowledge_tool_budget()
+    # Settled before anything plans this turn, so the pin is in place by the time the
+    # planner resolves a child. `child_state` is threaded by reference, so the choice is
+    # already in what this turn will persist.
+    if entry.child_choice:
+        _pin_the_child_the_parent_named(ctx, entry.child_choice)
 
     try:
         messages.append(HumanMessage(content=user_text))
@@ -1062,6 +1293,7 @@ async def chat_with_agent_stream(
             async for chunk in _stream_static_reply(
                 turn_plan, turn_signals, user_text, user_id, session_id,
                 messages, metadata, persistent_note, is_first_message,
+                _child_choice_pending(turn_plan, entry.original_question or user_text),
             ):
                 yield chunk
             return
@@ -1177,6 +1409,8 @@ async def chat_with_agent_stream(
             # rather than appending to it: the reader has already seen the figure, and
             # a correction underneath it would leave both on screen.
             replacement = _enforce_grounding(finalizer, rag_trace, turn_plan)
+            if not replacement:
+                replacement = _enforce_records_agreement(finalizer, ctx, turn_plan)
             if not replacement and not full_response.strip():
                 replacement = _nothing_usable_reply(finalizer, turn_plan)
             if replacement:

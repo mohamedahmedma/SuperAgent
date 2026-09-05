@@ -105,6 +105,7 @@ class Finalizer:
         "_dropped_chars",
         "_harmony_messages",
         "_tool_results",
+        "_tool_texts",
         "_grounding",
     )
 
@@ -117,6 +118,7 @@ class Finalizer:
         self._dropped_chars = 0
         self._harmony_messages = 0
         self._tool_results = 0
+        self._tool_texts: list = []
         self._grounding: Optional[GroundingReport] = None
 
     # -- streaming ---------------------------------------------------------------
@@ -191,14 +193,29 @@ class Finalizer:
     # -- the whole-response path -------------------------------------------------
 
     def note_tool_result(self, msg: Any = None) -> None:
-        """Record that a tool actually returned something this turn.
+        """Record that a tool actually returned something this turn, and what it said.
 
-        Not used by the rules above. It is recorded because the next check to land here
-        needs it: an answer that cites `[1]` on a turn where no tool ran is citing
-        evidence that does not exist, which is what put an invented fee in front of a
-        parent.
+        The count is what tells an answer citing `[1]` on a turn where no tool ran from
+        one that has something to point at — the case that put an invented fee in front
+        of a parent.
+
+        The TEXT is kept for the check that came after it. A tool result is the only
+        record of what this turn actually read, and for `get_student_records` it is the
+        only one there will ever be: it writes nothing into the RAG trace, so a turn that
+        fetched «الرياضيات ٨٧.٥٪» and then said something else about it could be compared
+        against nothing. Held in memory for the length of one turn and never persisted —
+        see `as_trace`, which counts these and quotes none of them, because the string
+        contains a real child's name and their marks.
         """
         self._tool_results += 1
+        text = message_text(msg) if msg is not None else ""
+        if text:
+            self._tool_texts.append(text)
+
+    @property
+    def tool_result_texts(self) -> list:
+        """What each tool returned this turn, in the order they returned it."""
+        return list(self._tool_texts)
 
     @property
     def answer(self) -> str:
@@ -227,9 +244,18 @@ class Finalizer:
         checked is a claim and a claim is not complete until its sentence is. What the
         caller does with a failing verdict is the profile's decision, not this object's
         — see `agent.answer_grounding_mode`.
+
+        What the tools returned is added by this object rather than asked of the caller.
+        Both entry points into the check would otherwise have to remember to pass it, and
+        the one that forgot would silently stop checking a whole class of answer — which
+        is the exact shape of the bug this parameter exists to close.
         """
         report = grounding.verify(
-            self._answer, evidence, floor=floor, check_citations=check_citations
+            self._answer,
+            evidence,
+            floor=floor,
+            check_citations=check_citations,
+            extra_evidence=self._tool_texts,
         )
         self._grounding = report
         return report

@@ -29,6 +29,7 @@ class _Agent:
 class _Copy:
     social = None
     out_of_domain = None
+    which_child = "Which child do you mean?"
 
 
 def _plan(child=None, **signal_kwargs):
@@ -89,12 +90,16 @@ class ThePromptRendersIt(unittest.TestCase):
         message = _turn_context_message(_plan(resolve_child(reference="context", roster=[ALI])))
         self.assertIn("authorises nothing", message.content)
 
-    def test_an_open_question_offers_exactly_the_candidates(self):
-        message = _turn_context_message(_plan(resolve_child(reference="son", roster=[ALI, AHMED])))
+    def test_an_open_question_never_reaches_the_prompt_at_all(self):
+        """It used to be four rules handed to the model — ask by name, offer exactly
+        these, do not look anything up, do not guess. Whether two of a parent's children
+        match "my son" is a filter over the school's roster and a length check, so the
+        planner asks it directly and the turn ends before an agent is built."""
+        plan = _plan(resolve_child(reference="son", roster=[ALI, AHMED]))
 
-        self.assertIn("علي حسن", message.content)
-        self.assertIn("أحمد حسن", message.content)
-        self.assertIn("ask", message.content.lower())
+        self.assertTrue(plan.short_circuit)
+        self.assertEqual(plan.child_options, ["علي حسن", "أحمد حسن"])
+        self.assertIsNone(_turn_context_message(plan))
 
     def test_a_child_with_no_year_on_file_renders_without_one(self):
         """The state every child is in until SIS carries a year group."""
