@@ -42,6 +42,27 @@ TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
 # grounded tool that drops them silently stops showing pictures.
 GROUNDED_TOOLS: frozenset = frozenset({KNOWLEDGE_TOOL, "search_products"})
 
+# Tools whose results make the answer's FIGURES checkable. A superset of the citation
+# set above, and the two are separate because they answer different questions:
+#
+#   GROUNDED_TOOLS — "must this answer cite its sources?"  Decides prompt text.
+#   CHECKED_TOOLS  — "may this answer state a number?"     Decides whether the assembled
+#                    answer is verified against what the turn actually retrieved.
+#
+# They were one set, and that conflation was a hole. `get_student_records` is correctly
+# outside the citation set — it returns one child's marks, there is no chunk to number
+# and no picture to attach — but its results are the most figure-dense thing this
+# assistant ever says, and «الرياضيات ٨٧.٥٪» is exactly the class of claim a parent acts
+# on. Under one set, a turn that read a child's record was checked against nothing at
+# all.
+#
+# The hole widened the moment the planner started narrowing tools. `_grounding_expected`
+# in backend/chat/service.py asks whether any BOUND tool is in this set, so a records
+# turn narrowed to `["get_student_records"]` switched the check off entirely — the
+# narrowing would have removed the last checked tool from a turn precisely because that
+# turn was about records. Splitting the sets is what makes the narrowing safe to ship.
+CHECKED_TOOLS: frozenset = GROUNDED_TOOLS | frozenset({"get_student_records"})
+
 
 class UnknownToolError(ValueError):
     """A profile named a tool that is not registered."""
@@ -67,6 +88,7 @@ __all__ = [
     "KNOWLEDGE_TOOL",
     "TOOL_BUILDERS",
     "GROUNDED_TOOLS",
+    "CHECKED_TOOLS",
     "UnknownToolError",
     "build_tools",
     "make_search_knowledge_base",

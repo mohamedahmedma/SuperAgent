@@ -318,3 +318,101 @@ def test_all_server_errors_collapse_to_unavailable(monkeypatch, status):
     monkeypatch.setattr(requests, "get", _route({"/students": _Response(status)}))
     result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
     assert "RECORDS_UNAVAILABLE" in result
+
+
+# --- which child the tool reads -------------------------------------------------
+#
+# The model's transcription of a name it read once is the least reliable link in a chain
+# whose other end is the school's own roster. The planner resolved this turn's child
+# against that roster before the agent ran; these pin that its answer is the one used.
+
+
+def _grades_for(percentage: float = 91.0):
+    return _Response(
+        200,
+        {
+            "term": {"term_id": "2026-T1", "name_ar": "الفصل الأول"},
+            "courses": [
+                {
+                    "course_id": "9001",
+                    "subject_name_ar": "الرياضيات",
+                    "subject_name_en": "Mathematics",
+                    "computed_percentage": percentage,
+                    "letter_grade": "A",
+                    "excused_count": 0,
+                    "missing_count": 0,
+                    "is_complete": True,
+                }
+            ],
+        },
+    )
+
+
+def test_the_planners_child_is_read_and_not_the_name_the_model_typed(monkeypatch):
+    """Two children, and a name that matches the WRONG one.
+
+    Under the old rule the argument won and the tool answered about عمر. The planner had
+    already settled on ليلى from the roster, which is the answer that has actually been
+    checked against a list of real children.
+    """
+    read = {}
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        if url.endswith("/students"):
+            return TWO_CHILDREN
+        read["url"] = url
+        return _grades_for()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    ctx = _ctx()
+    ctx.note_turn_plan([], [], child_id="S-1", child_label="ليلى")
+    result = make_get_student_records(ctx).invoke(
+        {"record_type": "grades", "student_name": "عمر"}
+    )
+
+    assert "/students/S-1/grades" in read["url"]
+    assert "STUDENT_GRADES" in result
+
+
+def test_a_planner_child_no_longer_on_the_roster_falls_back_to_resolving(monkeypatch):
+    """A child withdrawn mid-conversation, or two reads either side of a change.
+
+    Answering about nobody would be worse than asking, so the ordinary resolver runs.
+    """
+    monkeypatch.setattr(requests, "get", _route({"/students": TWO_CHILDREN}))
+    ctx = _ctx()
+    ctx.note_turn_plan([], [], child_id="S-99", child_label="مين ده")
+    result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+
+    assert "NEEDS_STUDENT_CHOICE" in result
+
+
+def test_half_a_planned_child_is_no_planned_child(monkeypatch):
+    """An id with no label names a child nothing can call by name, and a label with no
+    id names one nothing can read. Either half alone is not a state to handle."""
+    ctx = _ctx()
+    ctx.note_turn_plan([], [], child_id="S-1")
+    assert ctx.planned_child_id == ""
+
+
+# --- what the turn knows about what happened -------------------------------------
+
+
+def test_the_tool_reports_which_outcome_it_produced(monkeypatch):
+    """A call count says the tool ran. Only the outcome says it found anything, and only
+    that can contradict an answer claiming it did not."""
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/grades": _grades_for(87.5)})
+    )
+    ctx = _ctx()
+    make_get_student_records(ctx).invoke({"record_type": "grades"})
+
+    assert ctx.tool_outcomes == [("get_student_records", "grades")]
+
+
+def test_a_failure_reports_its_own_outcome_too(monkeypatch):
+    monkeypatch.setattr(requests, "get", _route({"/students": _Response(503)}))
+    ctx = _ctx()
+    make_get_student_records(ctx).invoke({"record_type": "grades"})
+
+    assert ctx.tool_outcomes == [("get_student_records", "unavailable")]

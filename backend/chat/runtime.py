@@ -177,8 +177,8 @@ class _ToolBudget(AgentMiddleware[ToolBudgetState, Any, Any]):
     # running at all.
     state_schema = ToolBudgetState  # type: ignore[assignment]
 
-    # BOTH the sync and the async hook, and the decision lives in a plain method that
-    # neither one duplicates.
+    # BOTH the sync and the async hook, on every one of these middlewares, and the
+    # decision lives in a plain method that neither of them duplicates.
     #
     # This is not defensive symmetry, it is the production path. Every streamed turn goes
     # through `astream`, which composes the ASYNC hooks: `awrap_model_call` on the base
@@ -238,6 +238,92 @@ def _spend_tool_budgets(ctx: ChatRequestContext) -> _ToolBudget:
     """One budget middleware for this turn. `ctx` is unused today and kept for symmetry
     with the other middleware factories, which all take it."""
     return _ToolBudget()
+
+
+def _first_model_call(request) -> bool:
+    """Whether nothing has run yet this turn.
+
+    A `ToolMessage` exists only inside the agent loop — the conversation loaded from
+    storage holds the text of past turns, never their tool traffic — so its absence is
+    exactly "no tool has returned yet in THIS turn". `tool_calls_made` is consulted as
+    well where the budget middleware put it there, which catches the one case the
+    messages cannot: a tool that was requested and produced no result message.
+    """
+    state = getattr(request, "state", None) or {}
+    if state.get("tool_calls_made"):
+        return False
+    return not any(isinstance(m, ToolMessage) for m in (state.get("messages") or []))
+
+
+class _ForcePlannedTool(AgentMiddleware):
+    """Call the tool the planner chose, rather than offering it and hoping.
+
+    Narrowing the tool list removes the wrong choice; it does not remove the choice of
+    making none. Measured on the same three questions: handed only `get_student_records`,
+    `openai/gpt-oss-20b` still answered «درجات ليلى أحمد كام؟» from memory on some runs —
+    a fluent paragraph about a child whose record it had not read. `tool_choice` closes
+    that, because the provider will not return a message without the call.
+
+    ## Only the first call, and that is not a compromise
+
+    Measured against this endpoint: gpt-oss ignores `tool_choice` once a tool result is in
+    the history. Forcing every pass would therefore buy nothing on later passes and cost a
+    turn that cannot end — a model told it must call a tool, on a request whose tool it
+    has already spent, has no legal move. The first call is where the tool selection is
+    actually decided, so constraining it is the whole of the win.
+
+    ## Composed INSIDE the budget
+
+    `create_agent_for_request` lists the budget first, and `wrap_model_call` composes
+    first-in-list as the OUTERMOST layer, so the request reaching this middleware has
+    already had spent tools removed from it. That ordering is what makes the guard below
+    — force only a tool still on the request — sufficient to prevent the one shape the
+    provider rejects outright: a request that requires a tool call and offers no tools.
+    """
+
+    def __init__(self, tool_name: str) -> None:
+        super().__init__()
+        self._tool = (tool_name or "").strip()
+
+    def _required(self, request):
+        """The request with this turn's tool required, when requiring it is safe."""
+        if not self._tool:
+            return request
+        # Somebody with a better claim already decided — structured output binds `any`,
+        # and the budget clears it to None when it has withheld everything. Neither is a
+        # decision to overrule.
+        if getattr(request, "tool_choice", None) is not None:
+            return request
+        if not _first_model_call(request):
+            return request
+        if self._tool not in {_tool_name(tool) for tool in (request.tools or [])}:
+            return request
+        logger.info("planner requires %s on this turn's first call", self._tool)
+        # The bare name. `ChatOpenAI.bind_tools` turns a name it recognises among the
+        # bound tools into the provider's `{"type": "function", ...}` shape itself, and
+        # raises on one it does not — which the guard above has already made impossible.
+        return request.override(tool_choice=self._tool)
+
+    # Sync and async both, for the reason spelled out on `_ToolBudget`: the streamed path
+    # composes the async hooks, and the base class's `awrap_model_call` raises. A forcing
+    # middleware that existed only on the sync side would have forced nothing on the one
+    # path every parent actually uses.
+    def wrap_model_call(self, request, handler):
+        return handler(self._required(request))
+
+    async def awrap_model_call(self, request, handler):
+        return await handler(self._required(request))
+
+
+def _force_the_planned_tool(ctx: ChatRequestContext) -> _ForcePlannedTool:
+    """Require this turn's chosen tool, if the planner chose one.
+
+    Read off the context rather than passed down through `create_agent_for_request`,
+    which already takes a tool LIST and would then be taking two overlapping answers to
+    the same question. The planner writes it in `_hand_to_graph` before the agent is
+    built, alongside the retrieval hints it has always written there.
+    """
+    return _ForcePlannedTool(getattr(ctx, "forced_tool", "") or "")
 
 
 def _collapse_duplicate_tool_calls(ctx: ChatRequestContext):
@@ -354,13 +440,21 @@ def create_agent_for_request(
         # turn did not bind, or stay silent about one it did.
         system_prompt=profile.render_system_prompt(allowed, language),
         middleware=[
-            # Ordered: duplicates are dropped as the model produces them, so the guard
-            # below counts the tools that actually ran rather than the copies.
-            # Ordered: duplicates are dropped as the model produces them, so the
-            # budget below counts the calls that will actually run rather than the
-            # copies, and the terminal guard still sees a single result.
+            # ORDER IS LOAD-BEARING, and `wrap_model_call` composes first-in-list as the
+            # outermost layer:
+            #
+            #   duplicates are dropped as the model produces them, so the budget counts
+            #   the calls that will actually run rather than the copies, and the terminal
+            #   guard still sees a single result;
+            #
+            #   the budget sits OUTSIDE the forcing, so a request that has had its spent
+            #   tools withheld reaches the forcing already narrowed — which is what lets
+            #   that middleware settle for "force only a tool still on the request" and
+            #   never produce the one shape the provider rejects outright, a required
+            #   call with nothing to call.
             _collapse_duplicate_tool_calls(ctx),
             _spend_tool_budgets(ctx),
+            _force_the_planned_tool(ctx),
             _end_turn_on_terminal_retrieval(ctx),
         ],
     )

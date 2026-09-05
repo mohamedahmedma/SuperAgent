@@ -219,6 +219,44 @@ class AgentConfig(_Section):
     tool_call_budgets: Dict[str, int] = Field(default_factory=dict)
     default_tool_call_budget: int = 1
 
+    # Whether the turn planner may bind ONE tool when it already knows which one the
+    # question needs, instead of binding every tool and letting the model choose.
+    #
+    # Off by default, and it has to be: narrowing is only sound where a deployment has
+    # a child roster and a classifier that separates "my daughter's marks" from "the
+    # fees for my daughter". A profile without those never resolves a child, so nothing
+    # would fire anyway — but leaving the switch off means that is a decision rather
+    # than an accident.
+    #
+    # It is on in `school.yaml`, where the failure was measured: handed both tools,
+    # `openai/gpt-oss-20b` answered «درجات ليلى أحمد كام؟» by searching a fee corpus and
+    # reported that no information about the child existed. See `_plan_tools` in
+    # backend/chat/turn_policy.py for why this is not the unbinding that module's
+    # docstring forbids.
+    narrow_tools_to_the_turn: bool = False
+
+    # What to do about an answer that tells a parent no record exists on a turn where
+    # the records tool returned one.
+    #
+    # This is a different fault from the one `answer_grounding_mode` catches, and it
+    # needs its own check because the numeric one cannot see it. Grounding asks whether a
+    # figure came from somewhere; a denial states no figure at all. And the marks are
+    # under `answer_grounding_number_floor` in any case — 87.5 and 91.0 are below the
+    # 100 that separates a fee from a formatting difference — so even a records answer
+    # full of figures is mostly beneath the numeric check. Measured: the tool returned
+    # both of those marks and the reply was "I couldn't find any records."
+    #
+    # `off` by default and `observe` where it is switched on, because the detector is a
+    # phrase list and a phrase list is the one part of this that CAN be wrong about a
+    # correct answer. Observing writes the disagreement into the trace and the log, which
+    # is what tells a deployment whether its own phrases are safe to enforce.
+    records_denial_mode: Literal["off", "observe", "enforce"] = "off"
+    # Wordings that assert no record was found, in every language the deployment answers
+    # in. Matched on a folded substring, so orthography does not defeat them. Deliberately
+    # empty here: these are copy, they belong to a deployment, and a default list written
+    # in this file would be one nobody had checked against their own assistant's voice.
+    records_denial_phrases: List[str] = Field(default_factory=list)
+
     #: Graph nodes crossed per pass of the agent loop — before_model, the model,
     #: two after_model middleware, and the tool node. Used only by the check below.
     _STEPS_PER_LOOP: ClassVar[int] = 5
@@ -710,6 +748,18 @@ class CopyConfig(_Section):
         default_factory=lambda: LocalizedText(
             en="Happy to help — what would you like to know?",
             ar="سعيد بمساعدتك، ما الذي تودّ معرفته؟",
+        )
+    )
+
+    # Asked when the parent's own roster holds more than one child matching what they
+    # said. Localized because the planner emits it with no model call at all — see
+    # `LocalizedText`. The names are appended by the caller as selectable options rather
+    # than written into this string, so a deployment rewrites the question without
+    # having to know how a list of children is rendered.
+    which_child: LocalizedText = Field(
+        default_factory=lambda: LocalizedText(
+            en="Which child do you mean?",
+            ar="أي طفل تقصد؟",
         )
     )
 

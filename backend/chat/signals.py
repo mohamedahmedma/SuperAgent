@@ -88,6 +88,15 @@ class RequestSignals:
     # is "named". Never resolved here — matching it to a real child is done against
     # the school's own roster, by something that has one.
     child_name: str = ""
+    # What answering would have to READ: the child's own record, the school's material,
+    # or both. See CHILD_QUESTION_KINDS.
+    #
+    # Defaults to `both`, and that default is the whole safety argument for the tool
+    # narrowing it drives: a classifier that did not run, abstained, returned a value
+    # outside the closed set, or hit its rate limit leaves this at `both`, which binds
+    # every tool and is exactly the behaviour that existed before this field. Narrowing
+    # is an optimisation, so it may only ever happen on a positive answer.
+    child_question_kind: str = "both"
 
     # A closed-set social utterance and nothing else: "thanks", "شكرا".
     is_social: bool = False
@@ -128,6 +137,7 @@ class RequestSignals:
             "request_is_social": self.is_social,
             "request_about_child": self.about_child,
             "request_child_reference": self.child_reference,
+            "request_child_question_kind": self.child_question_kind,
             "request_personal_data": list(self.personal_data),
             "request_candidate_sections": list(self.candidate_sections),
             "request_scope_options": list(self.scope_options),
@@ -322,6 +332,17 @@ def _last_user_text(history: Sequence[Any]) -> str:
 #: downstream — a free-text reference would be a string nobody could branch on.
 CHILD_REFERENCES = ("none", "son", "daughter", "child", "plural", "named", "context")
 
+#: What answering a child question actually needs to READ. Closed for the same reason,
+#: and `both` is first because it is the value everything degrades to.
+#:
+#: `about_child` cannot stand in for this, and the prompt says why in as many words: "the
+#: question is about a general school matter but asked FOR that child specifically ('what
+#: are the fees for my son?' — the fee schedule is general, the year group is his)". That
+#: is `about_child` true and a KNOWLEDGE question, and «مصاريف ابني» is one of the
+#: commonest messages this deployment gets. A tool binding that read `about_child` as
+#: "records" would answer it from the wrong place every time.
+CHILD_QUESTION_KINDS = ("both", "records", "school_matter")
+
 
 class EnvelopeDetector:
     """The classification node: one small model call, three decisions.
@@ -456,8 +477,18 @@ class EnvelopeDetector:
         signals.child_name = name
         if signals.child_reference == "named" and not name:
             signals.child_reference = "context"
+
+        # Distrusted exactly like the reference above it, and degrading to the same
+        # place: anything outside the closed set becomes `both`, which binds every tool.
+        # A wrong value here does not select a child — it selects a TOOL — so the cost of
+        # being wrong is an answer looked up in the wrong place, and the cost of
+        # abstaining is one tool schema nobody used.
+        kind = str(result.get("child_question_kind") or "").strip().lower()
+        signals.child_question_kind = kind if kind in CHILD_QUESTION_KINDS else "both"
+
         signals.reasons.append(
-            f"classifier: about the caller's child ({signals.child_reference})"
+            f"classifier: about the caller's child ({signals.child_reference}, "
+            f"needs {signals.child_question_kind})"
         )
 
 
@@ -539,6 +570,14 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
         child_name: str = Field(
             default="",
             description="A name the message actually contained; empty otherwise",
+        )
+        child_question_kind: _Literal["both", "records", "school_matter"] = Field(
+            default="both",
+            description=(
+                "What answering needs to read: 'records' for the child's own marks, "
+                "attendance or report; 'school_matter' for the school's own material "
+                "asked about this child; 'both' when it needs each, or when unsure"
+            ),
         )
 
     prompt = render(

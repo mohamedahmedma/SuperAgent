@@ -104,9 +104,40 @@ def _match_student(
     A name the model supplied still wins over the pin, so "and how is Omar?" moves the
     conversation on even when the previous question was about his sister — that is
     route 1 of the shared resolver, reached by passing `reference="named"`.
+
+    ## The planner's answer wins over both
+
+    When the turn planner already resolved a child, that is who this reads, and the
+    `student_name` argument is not consulted at all. Both ends of that trade are
+    measured:
+
+    What is given up is nothing. The planner reaches its answer through the SAME
+    resolver, on the same roster, from a classifier that reports a name the message
+    actually contains — so "and how is Omar?" arrives here as a resolved Omar, by route
+    1, exactly as it did before. The one case the argument used to cover on its own is
+    the case the planner now covers first.
+
+    What is bought is the failure this closes. `student_name` is the model's
+    transcription of a name it read once, and «ليلى أحمد» came back mis-spelled often
+    enough to matter: the roster matcher then found nobody, the tool asked which child,
+    and a parent who had named their daughter in plain words was asked to name her
+    again. The planner's answer is a roster row — it cannot be mis-spelled, because it
+    was never re-typed.
+
+    This never widens what may be read. The id came from a roster fetched under this
+    turn's guardian token, and the facade re-checks that token on the read itself.
     """
     if not students:
         return None
+    planned = getattr(ctx, "planned_child_id", "")
+    if planned:
+        resolved = next((s for s in students if s.student_id == planned), None)
+        if resolved is not None:
+            return resolved
+        # On the roster the planner read and not on this one. A child withdrawn
+        # mid-conversation, or two reads either side of a change. Fall through and
+        # resolve from what is actually here rather than answering about nobody.
+        logger.info("the planner's child is not on the roster this call read")
     pin = getattr(ctx, "child", None)
     found = resolve_child(
         reference="named" if student_name else "context",
@@ -133,21 +164,35 @@ def make_get_student_records(ctx: ChatRequestContext):
 
         record_type: "grades" for all subjects, "subject" for one subject's
             assignment-by-assignment breakdown, or "attendance".
-        student_name: the child's name, in Arabic or English. Leave empty if the
-            parent has only one child or has not said which.
+        student_name: leave this empty. Which child the question is about has already
+            been worked out from the school's own list of this parent's children, and
+            that answer is used. Fill it in only if you are starting a subject the
+            conversation has not mentioned at all.
         subject: required when record_type is "subject" — the subject name as the
             parent said it.
 
         You never supply the parent's identity; it is taken from their signed-in
-        session. If the tool asks you to clarify which child, put that question to the
-        parent rather than choosing one.
+        session. Which child is settled the same way. If the tool asks you to clarify
+        which child, put that question to the parent rather than choosing one.
         """
+        def _result(outcome: str, **context) -> str:
+            """Render one outcome, and tell the turn which one it was.
+
+            Every return from this tool goes through here, so the string the model reads
+            and the string the turn records are produced from the same variable and
+            cannot come to disagree. The recorded half is what lets something downstream
+            know that a record WAS retrieved — see `ChatRequestContext.note_tool_outcome`
+            for why a call count on its own could not.
+            """
+            ctx.note_tool_outcome("get_student_records", outcome)
+            return render_prompt("tools/records_result.j2", outcome=outcome, **context)
+
         if not ctx.acquire_records_tool_slot():
-            return render_prompt("tools/records_result.j2", outcome="call_limit")
+            return _result("call_limit")
 
         # No verified guardian on this session. Staff, a test, or a signed-out user.
         if not ctx.guardian_token or not ctx.guardian_id:
-            return render_prompt("tools/records_result.j2", outcome="not_a_parent")
+            return _result("not_a_parent")
 
         def _refused(outcome: str) -> str:
             """A refusal is evidence the cached roster is stale; an outage is not.
@@ -159,7 +204,7 @@ def make_get_student_records(ctx: ChatRequestContext):
             if outcome == "not_authorized":
                 forget(ctx)
                 ctx.forget_child()
-            return render_prompt("tools/records_result.j2", outcome=outcome)
+            return _result(outcome)
 
         base = f"/v1/guardians/{ctx.guardian_id}"
 
@@ -172,17 +217,13 @@ def make_get_student_records(ctx: ChatRequestContext):
         if roster_outcome in ("unavailable", "not_authorized"):
             return _refused(roster_outcome)
         if not students:
-            return render_prompt("tools/records_result.j2", outcome="no_students")
+            return _result("no_students")
 
         student = _match_student(students, student_name, ctx=ctx)
         if student is None:
             # Either several children and no name, or a name matching more than one.
             # Both are questions for the parent, never a coin flip.
-            return render_prompt(
-                "tools/records_result.j2",
-                outcome="which_student",
-                options=[s.label for s in students],
-            )
+            return _result("which_student", options=[s.label for s in students])
 
         student_id = student.student_id
         # Pinned for the rest of the conversation, so a parent who answered "Layla" once
@@ -222,9 +263,8 @@ def make_get_student_records(ctx: ChatRequestContext):
                 None,
             )
             if course is None:
-                return render_prompt(
-                    "tools/records_result.j2",
-                    outcome="which_subject",
+                return _result(
+                    "which_subject",
                     student=student,
                     options=[
                         c.get("subject_name_ar") or c.get("subject_name_en")
@@ -243,11 +283,7 @@ def make_get_student_records(ctx: ChatRequestContext):
         if outcome != "ok":
             return _refused(outcome)
 
-        return render_prompt(
-            "tools/records_result.j2",
-            outcome=template_outcome,
-            **_render_context(student.label, data),
-        )
+        return _result(template_outcome, **_render_context(student.label, data))
 
     return get_student_records
 

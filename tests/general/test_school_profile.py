@@ -148,3 +148,63 @@ class BindingGrantsNothingTests(ProfileTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeterministicToolSelectionTests(ProfileTestCase):
+    """The switches that make the planner pick the tool, on the deployment that measured
+    the need for it. `test_planner_tool_selection.py` covers the policy; these cover the
+    opt-in, because a feature nobody switched on is a feature that does not run.
+    """
+
+    def test_it_lets_the_planner_bind_one_tool(self):
+        self.assertTrue(load_profile("school").agent.narrow_tools_to_the_turn)
+
+    def test_no_other_shipped_profile_does(self):
+        """Narrowing is only sound where a deployment has a child roster and a classifier
+        that separates a child's record from a school matter asked about that child."""
+        for name in available_profiles():
+            if name == "school":
+                continue
+            with self.subTest(profile=name):
+                self.assertFalse(load_profile(name).agent.narrow_tools_to_the_turn)
+
+    def test_it_watches_for_an_answer_that_denies_the_record_it_read(self):
+        agent = load_profile("school").agent
+        self.assertEqual("observe", agent.records_denial_mode)
+        self.assertTrue(agent.records_denial_phrases)
+
+    def test_it_does_not_yet_rewrite_an_answer_on_that_verdict(self):
+        """`observe` on purpose: the half of the check that reads the ANSWER is a phrase
+        list, and enforcing on a phrase list before measuring it against this corpus is
+        how a correct reply gets replaced by an error message."""
+        self.assertNotEqual("enforce", load_profile("school").agent.records_denial_mode)
+
+    def test_the_phrases_cover_both_languages_it_answers_in(self):
+        phrases = load_profile("school").agent.records_denial_phrases
+        self.assertTrue(any(any("\u0600" <= ch <= "\u06ff" for ch in p) for p in phrases))
+        self.assertTrue(any(p.isascii() for p in phrases))
+
+    def test_the_budgets_still_fit_inside_the_step_limit(self):
+        """`narrow_tools_to_the_turn` changes which tools are BOUND, and the validator
+        that keeps `recursion_limit` able to spend `tool_call_budgets` reads the full
+        list. Narrowing can only shorten it, so the check stays satisfied — pinned here
+        because the two settings are otherwise unrelated and drift silently."""
+        agent = load_profile("school").agent
+        rounds = sum(agent.budget_for_tool(name) for name in agent.tools) + 1
+        self.assertGreaterEqual(agent.recursion_limit, rounds * 5)
+
+    def test_it_asks_which_child_in_the_parents_own_language(self):
+        """Emitted with no model call, so it cannot answer an Arabic question in English
+        the way a model would — see `LocalizedText`."""
+        copy = load_profile("school").user_copy.which_child
+        self.assertTrue(copy.ar)
+        self.assertTrue(copy.en)
+
+    def test_the_question_does_not_list_the_children_itself(self):
+        """The names travel as selectable options. Writing them into the sentence would
+        make a deployment's wording depend on how a list of children is rendered, and
+        would ask a parent to re-type a name the school already knows how to spell."""
+        copy = load_profile("school").user_copy.which_child
+        for text in (copy.ar, copy.en):
+            self.assertNotIn("/", text)
+            self.assertNotIn("{", text)

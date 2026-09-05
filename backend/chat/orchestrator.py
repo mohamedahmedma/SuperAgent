@@ -153,6 +153,9 @@ def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
         "is_followup": plan.is_followup,
         "language": plan.language,
         "child_year": plan.child_year,
+        "child_id": plan.child_id,
+        "child_label": plan.child_hint,
+        "forced_tool": plan.forced_tool,
     }
     try:
         ctx.note_turn_plan(plan.retrieval_sections, plan.scope_options, **hints)
@@ -171,7 +174,15 @@ def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
         logger.debug("could not hand the turn plan to the graph", exc_info=True)
         return
 
-    for dropped in ("child_year", "language", "is_followup", "carried_constraints"):
+    # Newest first, so an older context loses the hint it has never heard of rather than
+    # the four it understands. Anything added to `hints` above belongs at the FRONT of
+    # this tuple on the same commit — a key missing from it is a key that is never
+    # dropped, so the retry re-sends the argument that caused the TypeError and the
+    # ladder walks all the way down handing over nothing at all.
+    for dropped in (
+        "forced_tool", "child_label", "child_id", "child_year", "language",
+        "is_followup", "carried_constraints",
+    ):
         hints.pop(dropped, None)
         try:
             ctx.note_turn_plan(plan.retrieval_sections, plan.scope_options, **hints)
