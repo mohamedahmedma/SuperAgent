@@ -15,9 +15,9 @@ Design rules that the rest of the codebase relies on:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Sequence
+from typing import Any, ClassVar, Dict, List, Literal, Optional, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.assets.attributes import AttributeSpec
 
@@ -190,8 +190,78 @@ class AgentConfig(_Section):
 
     tools: List[str] = Field(default_factory=lambda: ["search_knowledge_base"])
 
-    recursion_limit: int = 8
+    # 32 and not the 8 this shipped with: every tool call costs a whole pass of the agent
+    # loop, and the budgets below are allowed to buy several. The default has to be able
+    # to spend the default budgets or a bare `AgentConfig` fails its own validator.
+    recursion_limit: int = 32
     max_knowledge_calls_per_turn: int = 1
+
+    # How many times each tool may be called in one turn, enforced in the GRAPH rather
+    # than inside the tool.
+    #
+    # The tools already refuse a call past their own ceiling, and that refusal is the
+    # problem: it comes back as a tool result the model reads as a failure, so it tries
+    # again — reworded, and refused again. Measured against `openai/gpt-oss-20b`, one
+    # question whose search returned nothing produced 29 consecutive
+    # `search_knowledge_base` requests, and an earlier variant produced 85 before the
+    # recursion limit ended the turn. Those are requests rather than executions —
+    # duplicate collapsing and the retrieval memo absorb many — but each one still costs
+    # a model round-trip and a step of the recursion budget.
+    #
+    # A budget spent in the graph does not refuse anything. It stops OFFERING the tool,
+    # so the model cannot ask for it a second time and answers from what it already has.
+    # The per-tool ceilings stay where they are as a backstop for anything that reaches a
+    # tool by another route, and must be >= the numbers here or the refusal path returns.
+    #
+    # Unlisted tools get `default_tool_call_budget`. `search_knowledge_base` falls back to
+    # `max_knowledge_calls_per_turn` so retrieval keeps one number rather than two that
+    # can disagree.
+    tool_call_budgets: Dict[str, int] = Field(default_factory=dict)
+    default_tool_call_budget: int = 1
+
+    #: Graph nodes crossed per pass of the agent loop — before_model, the model,
+    #: two after_model middleware, and the tool node. Used only by the check below.
+    _STEPS_PER_LOOP: ClassVar[int] = 5
+
+    #: The tool whose budget is `max_knowledge_calls_per_turn` rather than its own entry.
+    #: Spelled out rather than imported: `backend.tools` reaches back into the request
+    #: context, and a profile schema that cannot be loaded without the tool layer is a
+    #: circular import waiting for the first person who validates a profile in isolation.
+    _KNOWLEDGE_TOOL: ClassVar[str] = "search_knowledge_base"
+
+    def budget_for_tool(self, name: str) -> int:
+        """How many times `name` may be called in one turn. See `tool_call_budgets`."""
+        if name in (self.tool_call_budgets or {}):
+            return int(self.tool_call_budgets[name])
+        if name == self._KNOWLEDGE_TOOL:
+            return int(self.max_knowledge_calls_per_turn)
+        return int(self.default_tool_call_budget)
+
+    @model_validator(mode="after")
+    def _the_budgets_must_fit_inside_the_step_limit(self):
+        """A budget the graph cannot afford to spend is worse than no budget at all.
+
+        The two numbers are independent and they interact: every tool call costs a whole
+        pass of the agent loop, so budgets totalling more passes than `recursion_limit`
+        allows produce a turn that dies at the limit HOLDING A FINISHED ANSWER it never
+        emits. That is exactly what happened — `get_student_records: 4` alongside two
+        knowledge calls needs about thirty steps, the limit was sixteen, and one question
+        failed three times out of three with an empty reply while every other question
+        passed. Nothing in either setting hints at the other, which is why this is checked
+        here rather than left as a comment for somebody to notice.
+
+        The `+ 1` is the pass that produces the answer once every tool is spent.
+        """
+        rounds = sum(self.budget_for_tool(name) for name in self.tools) + 1
+        needed = rounds * self._STEPS_PER_LOOP
+        if self.recursion_limit < needed:
+            raise ValueError(
+                f"recursion_limit={self.recursion_limit} cannot spend the configured tool "
+                f"budgets: {rounds} agent passes x {self._STEPS_PER_LOOP} graph steps "
+                f"needs at least {needed}. Raise recursion_limit or lower "
+                f"tool_call_budgets."
+            )
+        return self
 
     # Whether an answer's figures are checked against the evidence the turn retrieved,
     # and what happens when one is not there. See backend/chat/grounding.py.

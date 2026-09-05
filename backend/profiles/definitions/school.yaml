@@ -191,6 +191,18 @@ agent:
   # ChatRequestContext.acquire_records_tool_slot.
   max_knowledge_calls_per_turn: 2
 
+  # What each tool may be called in one turn, enforced by withholding the tool from the
+  # request rather than refusing the call once it arrives. `search_knowledge_base` is
+  # deliberately not listed here: it takes the number above, so retrieval keeps one
+  # budget rather than two that can drift apart. `get_student_records` keeps the higher
+  # ceiling it already had, because a parent asking about two children is a legitimate
+  # three-call sequence — list the children, then read each one. Three and not the four
+  # the tool itself allows: every call costs a pass of the agent loop, and the fourth
+  # pushed the turn past the step limit on a question that otherwise answered fine.
+  tool_call_budgets:
+    get_student_records: 3
+  default_tool_call_budget: 1
+
   # A fee, an instalment, a deadline — the figures in this corpus are what a parent acts
   # on, so a figure that is in no retrieved chunk must not be served. Enforced rather
   # than observed because the failure this closes actually reached a parent: an invented

@@ -73,7 +73,19 @@ agent:
   # the step that writes the answer. There is no figure tool to pay for any more:
   # images are read into text at ingest and attached by citation, so a turn that shows
   # a picture costs exactly the same as one that does not.
-  recursion_limit: 8
+  # Graph steps, not model calls. Every middleware is a NODE, so one loop of
+  # before_model -> model -> after_model x2 -> tools costs about five of these. The
+  # shipped 8 could not complete two rounds of retrieval once the tool-budget middleware
+  # was added: the turn died at the limit holding a finished answer it never emitted.
+  # Raised here rather than per profile because the middleware is bound for every one.
+  #
+  # It is a backstop again rather than the thing doing the work — `tool_call_budgets`
+  # bounds the loop directly now, by withholding a tool once its budget is spent. The two
+  # are not independent: every tool call costs a whole pass of the loop, so this has to be
+  # large enough to SPEND the budgets, or a turn dies at the limit holding a finished
+  # answer. `AgentConfig` refuses to load a profile where it is not, so this number and
+  # `tool_call_budgets` can no longer drift apart silently.
+  recursion_limit: 32
   max_knowledge_calls_per_turn: 1
   # 14 messages = 7 user/assistant turns. Counted in MESSAGES, not turns, because that
   # is what the slice operates on — halving it silently drops the assistant side of
