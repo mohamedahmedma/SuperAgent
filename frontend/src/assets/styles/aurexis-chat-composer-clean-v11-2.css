@@ -1,0 +1,77 @@
+/*
+  AUREXIS Chat Composer Clean v11.2
+  - Removes the attachment/paperclip control completely from the UI.
+  - Removes placeholder/helper text from the composer.
+  - Keeps microphone + send button untouched.
+  - Mobile and desktop.
+*/
+
+/* Hide any attachment / paperclip control defensively, regardless of old markup. */
+.chat-input .attach-button,
+.input-container .attach-button,
+.composer .attach-button,
+.chat-input button:has(.fa-paperclip),
+.input-container button:has(.fa-paperclip),
+.composer button:has(.fa-paperclip),
+.chat-input button:has(.fa-paperclip-vertical),
+.input-container button:has(.fa-paperclip-vertical),
+.composer button:has(.fa-paperclip-vertical),
+.chat-input button:has([class*="paperclip"]),
+.input-container button:has([class*="paperclip"]),
+.composer button:has([class*="paperclip"]),
+.chat-input [aria-label*="attach" i],
+.input-container [aria-label*="attach" i],
+.composer [aria-label*="attach" i],
+.chat-input [title*="attach" i],
+.input-container [title*="attach" i],
+.composer [title*="attach" i] {
+  display: none !important;
+}
+
+/* Hide all composer helper/footer text. */
+.input-footer,
+.composer-footer,
+.keyboard-hints,
+.chat-input-hint,
+.input-hint {
+  display: none !important;
+}
+
+/* No placeholder text, even if browser/source keeps one. */
+.chat-input textarea::placeholder,
+.input-container textarea::placeholder,
+.composer textarea::placeholder {
+  color: transparent !important;
+  opacity: 0 !important;
+}
+
+/* Reflow after attachment removal. Keep mic + textarea + send. */
+.chat-input,
+.input-container,
+.composer {
+  grid-template-columns: 36px minmax(0, 1fr) 44px !important;
+}
+
+/* Keep the remaining controls vertically centered and clean. */
+.chat-input,
+.input-container,
+.composer {
+  align-items: center !important;
+}
+
+.chat-input textarea,
+.input-container textarea,
+.composer textarea {
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+/* Slight mobile refinement */
+@media (max-width: 900px) {
+  .chat-input,
+  .input-container,
+  .composer {
+    grid-template-columns: 36px minmax(0,1fr) 42px !important;
+    gap: 4px !important;
+  }
+}

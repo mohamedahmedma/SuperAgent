@@ -1,0 +1,474 @@
+/*
+  AUREXIS Mobile Chat Experience v10.8
+  Mobile only. Desktop > 900px remains unchanged.
+*/
+
+.mobile-menu-button,
+.mobile-sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  html,
+  body,
+  #app {
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  .app-page {
+    width: 100% !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    background: #182b3e !important;
+  }
+
+  .app-wrapper {
+    position: relative !important;
+    display: block !important;
+    width: 100% !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    overflow: hidden !important;
+    box-shadow: none !important;
+    background: #182b3e !important;
+  }
+
+  /* Mobile top bar */
+  .mobile-menu-button {
+    position: fixed !important;
+    top: max(10px, env(safe-area-inset-top)) !important;
+    left: 12px !important;
+    z-index: 95 !important;
+    display: grid !important;
+    width: 42px !important;
+    height: 42px !important;
+    place-items: center !important;
+    padding: 0 !important;
+    border: 1px solid rgba(142, 177, 202, .16) !important;
+    border-radius: 12px !important;
+    color: #eef7ff !important;
+    background: rgba(8, 25, 42, .82) !important;
+    box-shadow: 0 8px 22px rgba(0,0,0,.16) !important;
+    backdrop-filter: blur(18px) !important;
+    -webkit-backdrop-filter: blur(18px) !important;
+    cursor: pointer !important;
+    touch-action: manipulation !important;
+  }
+
+  .mobile-menu-button i {
+    font-size: 17px !important;
+  }
+
+  .mobile-menu-button:active {
+    transform: scale(.96) !important;
+  }
+
+  /* Off-canvas options drawer */
+  .mobile-sidebar-shell {
+    position: fixed !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    z-index: 100 !important;
+    width: min(86vw, 330px) !important;
+    max-width: 330px !important;
+    transform: translateX(-104%) !important;
+    transition: transform .26s cubic-bezier(.2,.75,.2,1) !important;
+    pointer-events: none !important;
+  }
+
+  .mobile-sidebar-shell.is-open {
+    transform: translateX(0) !important;
+    pointer-events: auto !important;
+  }
+
+  .mobile-sidebar-shell .sidebar {
+    position: relative !important;
+    inset: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    padding:
+      max(16px, env(safe-area-inset-top))
+      14px
+      max(16px, env(safe-area-inset-bottom)) !important;
+    border-radius: 0 20px 20px 0 !important;
+    border: 0 !important;
+    border-right: 1px solid rgba(120, 169, 202, .12) !important;
+    background: rgba(5, 20, 35, .98) !important;
+    box-shadow: 18px 0 44px rgba(0,0,0,.32) !important;
+    overflow-y: auto !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .brand-copy,
+  .mobile-sidebar-shell .sidebar .brand-text,
+  .mobile-sidebar-shell .sidebar .logo-copy,
+  .mobile-sidebar-shell .sidebar nav button span,
+  .mobile-sidebar-shell .sidebar nav a span,
+  .mobile-sidebar-shell .sidebar .nav-item span:not(.badge),
+  .mobile-sidebar-shell .sidebar .user-info,
+  .mobile-sidebar-shell .sidebar .user-meta,
+  .mobile-sidebar-shell .sidebar .user-name,
+  .mobile-sidebar-shell .sidebar .user-role {
+    display: initial !important;
+  }
+
+  .mobile-sidebar-shell .sidebar nav,
+  .mobile-sidebar-shell .sidebar .sidebar-nav,
+  .mobile-sidebar-shell .sidebar .nav-list {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 7px !important;
+    width: 100% !important;
+    overflow: visible !important;
+  }
+
+  .mobile-sidebar-shell .sidebar nav button,
+  .mobile-sidebar-shell .sidebar nav a,
+  .mobile-sidebar-shell .sidebar .sidebar-nav button,
+  .mobile-sidebar-shell .sidebar .sidebar-nav a,
+  .mobile-sidebar-shell .sidebar .nav-item {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 46px !important;
+    height: auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 11px !important;
+    padding: 10px 12px !important;
+    border-radius: 12px !important;
+  }
+
+  .mobile-sidebar-backdrop {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 99 !important;
+    display: block !important;
+    border: 0 !important;
+    padding: 0 !important;
+    background: rgba(0, 8, 18, .56) !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+  }
+
+  /* Single clean chat surface */
+  .main-content {
+    position: relative !important;
+    width: 100% !important;
+    height: 100dvh !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: #182b3e !important;
+  }
+
+  .chat-area,
+  .chat-page,
+  .chat-layout {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    background: transparent !important;
+  }
+
+  /* ChatGPT-like compact header */
+  .chat-header {
+    position: relative !important;
+    z-index: 20 !important;
+    min-height: 62px !important;
+    height: auto !important;
+    flex: 0 0 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding:
+      max(12px, env(safe-area-inset-top))
+      58px
+      10px !important;
+    border: 0 !important;
+    border-bottom: 1px solid rgba(135, 174, 201, .10) !important;
+    background: rgba(18, 40, 59, .94) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+  }
+
+  .chat-header .header-info,
+  .chat-header .chat-title-wrap {
+    min-width: 0 !important;
+    text-align: center !important;
+  }
+
+  .chat-header h1,
+  .chat-header h2,
+  .chat-header .chat-title {
+    max-width: 220px !important;
+    margin: 0 auto !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .chat-header .status-line,
+  .chat-header .subtitle,
+  .chat-header .header-description,
+  .chat-header .header-actions,
+  .chat-header .chat-actions {
+    display: none !important;
+  }
+
+  /* Main scroll area */
+  .chat-container,
+  .messages-container,
+  .messages-list,
+  .chat-messages {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 16px 14px 118px !important;
+    scroll-padding-bottom: 118px !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* Simpler mobile welcome screen */
+  .welcome-screen {
+    width: 100% !important;
+    max-width: 560px !important;
+    min-height: 100% !important;
+    margin: 0 auto !important;
+    padding: 34px 20px 130px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+  }
+
+  .welcome-screen img,
+  .welcome-screen svg,
+  .welcome-logo,
+  .welcome-screen .brand-logo {
+    width: 62px !important;
+    max-width: 62px !important;
+    height: auto !important;
+    margin: 0 0 18px !important;
+  }
+
+  .welcome-screen .eyebrow,
+  .welcome-screen .ready-label {
+    margin-bottom: 8px !important;
+    font-size: 9px !important;
+    letter-spacing: .12em !important;
+  }
+
+  .welcome-screen h1,
+  .welcome-screen h2 {
+    max-width: 330px !important;
+    margin: 0 0 12px !important;
+    font-size: clamp(28px, 8vw, 35px) !important;
+    line-height: 1.06 !important;
+    letter-spacing: -.04em !important;
+    text-wrap: balance !important;
+  }
+
+  .welcome-screen p {
+    max-width: 330px !important;
+    margin: 0 auto !important;
+    color: rgba(203, 224, 240, .72) !important;
+    font-size: 13px !important;
+    line-height: 1.65 !important;
+  }
+
+  /* Less visual clutter on phones */
+  .welcome-screen .feature-chips,
+  .welcome-screen .welcome-features,
+  .welcome-screen .chips {
+    display: none !important;
+  }
+
+  /* Messages */
+  .message,
+  .message-item,
+  .chat-message {
+    width: auto !important;
+    max-width: 92% !important;
+  }
+
+  .message-content,
+  .message-bubble,
+  .chat-message-content {
+    font-size: 14px !important;
+    line-height: 1.65 !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  /* Floating composer inspired by modern mobile chat apps */
+  .input-area,
+  .chat-input-wrapper,
+  .composer-wrap {
+    position: absolute !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    z-index: 40 !important;
+    width: 100% !important;
+    padding:
+      12px
+      10px
+      max(12px, env(safe-area-inset-bottom)) !important;
+    box-sizing: border-box !important;
+    background:
+      linear-gradient(
+        180deg,
+        rgba(24,43,62,0) 0%,
+        rgba(24,43,62,.92) 28%,
+        #182b3e 62%
+      ) !important;
+  }
+
+  .chat-input,
+  .input-container,
+  .composer {
+    width: 100% !important;
+    min-width: 0 !important;
+    display: grid !important;
+    grid-template-columns: 38px 38px minmax(0,1fr) 44px !important;
+    align-items: end !important;
+    gap: 4px !important;
+    padding: 7px !important;
+    border: 1px solid rgba(133, 181, 214, .18) !important;
+    border-radius: 22px !important;
+    background: rgba(8, 27, 45, .94) !important;
+    box-shadow:
+      0 10px 30px rgba(0,0,0,.20),
+      inset 0 1px 0 rgba(255,255,255,.025) !important;
+    backdrop-filter: blur(18px) !important;
+    -webkit-backdrop-filter: blur(18px) !important;
+    box-sizing: border-box !important;
+  }
+
+  .chat-input textarea,
+  .input-container textarea,
+  .composer textarea {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 40px !important;
+    max-height: 120px !important;
+    padding: 10px 7px !important;
+    border: 0 !important;
+    outline: 0 !important;
+    background: transparent !important;
+    font-size: 16px !important;
+    line-height: 1.35 !important;
+    resize: none !important;
+  }
+
+  .chat-input button,
+  .input-container button,
+  .composer button {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+    display: grid !important;
+    place-items: center !important;
+    padding: 0 !important;
+    border-radius: 999px !important;
+  }
+
+  .chat-input .send-button,
+  .input-container .send-button,
+  .composer .send-button {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .input-footer,
+  .composer-footer,
+  .keyboard-hints {
+    display: none !important;
+  }
+
+  /* Settings/document views should still scroll cleanly */
+  .document-settings,
+  .settings-page {
+    height: 100% !important;
+    overflow-y: auto !important;
+    padding:
+      calc(max(12px, env(safe-area-inset-top)) + 52px)
+      14px
+      max(20px, env(safe-area-inset-bottom)) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .mobile-menu-button {
+    left: 10px !important;
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 11px !important;
+  }
+
+  .chat-header {
+    min-height: 58px !important;
+    padding-left: 54px !important;
+    padding-right: 54px !important;
+  }
+
+  .welcome-screen {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  .welcome-screen h1,
+  .welcome-screen h2 {
+    font-size: clamp(27px, 8.4vw, 33px) !important;
+  }
+
+  .welcome-screen p {
+    font-size: 12.5px !important;
+  }
+
+  .chat-container,
+  .messages-container,
+  .messages-list,
+  .chat-messages {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .input-area,
+  .chat-input-wrapper,
+  .composer-wrap {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+}

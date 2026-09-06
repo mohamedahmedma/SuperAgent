@@ -1,0 +1,62 @@
+/*
+  AUREXIS Welcome + Composer Precision v11.11
+  - Restores the full welcome description.
+  - Adds a short placeholder: "Say something to Aurexis..."
+  - Replaces green/extension-style focus with AUREXIS cyan/navy focus.
+  - Keeps current layout and responsive behavior.
+*/
+
+.chat-input-textarea {
+  caret-color: #22c6e8 !important;
+}
+
+.chat-input-textarea:focus,
+.chat-input-textarea:focus-visible {
+  outline: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.input-area:focus-within {
+  border-color: rgba(34, 198, 232, .58) !important;
+  box-shadow:
+    0 0 0 2px rgba(34, 198, 232, .08),
+    inset 0 1px 0 rgba(255,255,255,.018) !important;
+}
+
+.chat-input-textarea::placeholder {
+  color: rgba(151, 190, 216, .56) !important;
+  opacity: 1 !important;
+}
+
+/* Light theme */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .input-area:focus-within,
+.app-page[data-theme="light"] .input-area:focus-within,
+.app-page.light .input-area:focus-within,
+.app-page.light-theme .input-area:focus-within {
+  border-color: rgba(13, 159, 197, .48) !important;
+  box-shadow:
+    0 0 0 2px rgba(13, 159, 197, .07),
+    inset 0 1px 0 rgba(255,255,255,.88) !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .chat-input-textarea::placeholder,
+.app-page[data-theme="light"] .chat-input-textarea::placeholder,
+.app-page.light .chat-input-textarea::placeholder,
+.app-page.light-theme .chat-input-textarea::placeholder {
+  color: rgba(55, 96, 122, .52) !important;
+}

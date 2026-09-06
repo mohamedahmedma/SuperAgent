@@ -1,0 +1,218 @@
+/*
+  AUREXIS Menu Icon Precision v11.5.1
+  Fixes:
+  1) duplicate desktop/mobile sidebar toggle on phone
+  2) exact mobile placement
+  3) cleaner circular two-line icon
+  4) removes mobile left-edge / container shadow
+*/
+
+/* Never allow both controls to render at the same breakpoint. */
+@media (max-width: 900px) {
+  .desktop-sidebar-toggle {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
+  .mobile-menu-button {
+    display: grid !important;
+  }
+}
+
+@media (min-width: 901px) {
+  .mobile-menu-button {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
+  .desktop-sidebar-toggle {
+    display: grid !important;
+  }
+}
+
+/* Shared exact icon shape */
+.mobile-menu-button .ax-sidebar-glyph,
+.desktop-sidebar-toggle .ax-sidebar-glyph {
+  position: relative !important;
+  display: block !important;
+
+  width: 18px !important;
+  height: 14px !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  border: 0 !important;
+  border-radius: 0 !important;
+
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.mobile-menu-button .ax-sidebar-glyph::before,
+.desktop-sidebar-toggle .ax-sidebar-glyph::before {
+  content: "" !important;
+
+  position: absolute !important;
+  top: 3px !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+
+  width: 14px !important;
+  height: 2px !important;
+
+  transform: translateX(-50%) !important;
+
+  border: 0 !important;
+  border-radius: 999px !important;
+
+  background: currentColor !important;
+  opacity: .96 !important;
+}
+
+.mobile-menu-button .ax-sidebar-glyph::after,
+.desktop-sidebar-toggle .ax-sidebar-glyph::after {
+  content: "" !important;
+
+  position: absolute !important;
+  top: auto !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: 3px !important;
+
+  width: 10px !important;
+  height: 2px !important;
+
+  transform: translateX(-50%) !important;
+
+  border: 0 !important;
+  border-radius: 999px !important;
+
+  background: currentColor !important;
+  opacity: .90 !important;
+}
+
+/* Mobile: precise position and no floating shadow. */
+@media (max-width: 900px) {
+  html,
+  body,
+  #app {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: hidden !important;
+    background: #182b3e !important;
+  }
+
+  .app-page,
+  .app-wrapper,
+  .main-content,
+  .chat-area,
+  .chat-page,
+  .chat-layout {
+    margin: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .app-page,
+  .app-wrapper {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    min-height: 100dvh !important;
+  }
+
+  .mobile-menu-button {
+    position: fixed !important;
+
+    top: max(10px, env(safe-area-inset-top)) !important;
+    left: 10px !important;
+    right: auto !important;
+    bottom: auto !important;
+
+    z-index: 120 !important;
+
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    place-items: center !important;
+
+    border: 1px solid rgba(126, 178, 211, .18) !important;
+    border-radius: 999px !important;
+
+    color: #f2f8fc !important;
+    background: #091f33 !important;
+
+    box-shadow: none !important;
+    filter: none !important;
+
+    transform: none !important;
+  }
+
+  .mobile-menu-button:hover,
+  .mobile-menu-button:focus-visible {
+    color: #ffffff !important;
+    background: #0c2942 !important;
+    border-color: rgba(58, 194, 228, .28) !important;
+
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .mobile-menu-button:active {
+    transform: scale(.96) !important;
+  }
+
+  /* Remove any old left-edge visual shadow from wrappers/drawers while closed. */
+  .mobile-sidebar-shell:not(.is-open),
+  .mobile-sidebar-shell:not(.is-open) .sidebar {
+    box-shadow: none !important;
+    filter: none !important;
+  }
+}
+
+/* Desktop remains compact, but uses the exact same icon. */
+@media (min-width: 901px) {
+  .desktop-sidebar-toggle {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+
+    border-radius: 999px !important;
+
+    color: #eef7ff !important;
+    background: #091f33 !important;
+    border: 1px solid rgba(126, 178, 211, .16) !important;
+
+    box-shadow: none !important;
+    filter: none !important;
+  }
+}
+
+/* Light theme */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .mobile-menu-button,
+.app-page[data-theme="light"] .mobile-menu-button,
+.app-page.light .mobile-menu-button,
+.app-page.light-theme .mobile-menu-button {
+  color: #17364b !important;
+  background: #f7fbfe !important;
+  border-color: rgba(31, 88, 124, .15) !important;
+  box-shadow: none !important;
+}

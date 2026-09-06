@@ -1,0 +1,187 @@
+/*
+  AUREXIS exact sidebar toggle + composer cleanup v10.9.3
+  - Same icon geometry on desktop and mobile.
+  - Correct desktop placement.
+  - Desktop collapse works reliably.
+  - Attachment/paperclip removed from composer UI.
+*/
+
+/* shared exact icon */
+.ax-sidebar-glyph {
+  position: relative !important;
+  display: block !important;
+  width: 18px !important;
+  height: 15px !important;
+  border: 1.45px solid currentColor !important;
+  border-radius: 4px !important;
+  box-sizing: border-box !important;
+}
+
+.ax-sidebar-glyph::before {
+  content: "" !important;
+  position: absolute !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  right: 5px !important;
+  width: 1.45px !important;
+  background: currentColor !important;
+  border-radius: 2px !important;
+}
+
+.ax-sidebar-glyph::after {
+  content: "" !important;
+  position: absolute !important;
+  top: 3px !important;
+  right: 1.7px !important;
+  width: 1.6px !important;
+  height: 7px !important;
+  border-radius: 2px !important;
+  background: currentColor !important;
+  opacity: .92 !important;
+}
+
+/* remove old conflicting extra detail */
+.mobile-menu-button .ax-sidebar-glyph::after,
+.desktop-sidebar-toggle .ax-sidebar-glyph::after {
+  content: "" !important;
+}
+
+/* Desktop */
+@media (min-width: 901px) {
+  .app-page {
+    position: relative !important;
+  }
+
+  .desktop-sidebar-toggle {
+    position: absolute !important;
+    top: 14px !important;
+    left: 220px !important;
+    z-index: 110 !important;
+    display: grid !important;
+    width: 34px !important;
+    height: 34px !important;
+    place-items: center !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 1px solid rgba(142, 183, 211, .14) !important;
+    border-radius: 9px !important;
+    color: rgba(235, 244, 251, .88) !important;
+    background: #071a2c !important;
+    box-shadow: none !important;
+    cursor: pointer !important;
+    transition:
+      left .22s ease,
+      background .18s ease,
+      border-color .18s ease,
+      transform .15s ease !important;
+  }
+
+  .desktop-sidebar-toggle:hover,
+  .desktop-sidebar-toggle:focus-visible {
+    background: #0a2238 !important;
+    border-color: rgba(155, 198, 226, .26) !important;
+    outline: none !important;
+  }
+
+  .desktop-sidebar-toggle:active {
+    transform: scale(.96) !important;
+  }
+
+  /* wrapper becomes transparent to desktop grid */
+  .mobile-sidebar-shell {
+    display: contents !important;
+  }
+
+  /* collapsed state */
+  .app-page.desktop-sidebar-collapsed .app-wrapper {
+    grid-template-columns: 0 minmax(0, 1fr) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .mobile-sidebar-shell,
+  .app-page.desktop-sidebar-collapsed .sidebar {
+    width: 0 !important;
+    min-width: 0 !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    border: 0 !important;
+    opacity: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+    transform: translateX(-14px) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle {
+    left: 14px !important;
+  }
+
+  .sidebar {
+    transition:
+      opacity .18s ease,
+      transform .22s ease,
+      padding .22s ease !important;
+  }
+}
+
+/* Mobile */
+@media (max-width: 900px) {
+  .desktop-sidebar-toggle {
+    display: none !important;
+  }
+
+  .mobile-menu-button {
+    top: max(10px, env(safe-area-inset-top)) !important;
+    left: 10px !important;
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 10px !important;
+    color: rgba(235, 244, 251, .9) !important;
+    background: #071a2c !important;
+  }
+
+  /* attachment is gone, mobile composer now voice/text/send */
+  .chat-input,
+  .input-container,
+  .composer {
+    grid-template-columns: 36px minmax(0,1fr) 42px !important;
+  }
+}
+
+/* paperclip must never render anywhere in composer */
+.chat-input .attach-button,
+.input-container .attach-button,
+.composer .attach-button,
+.chat-input button:has(.fa-paperclip),
+.input-container button:has(.fa-paperclip),
+.composer button:has(.fa-paperclip),
+.chat-input button:has([class*="paperclip"]),
+.input-container button:has([class*="paperclip"]),
+.composer button:has([class*="paperclip"]) {
+  display: none !important;
+}
+
+
+/* aurexis-chatinput-safe-hide-v10-9-3-2 */
+/* Keep Vue markup structurally intact; hide attachment control only via CSS. */
+.chat-input .attach-button,
+.input-container .attach-button,
+.composer .attach-button,
+.chat-input button:has(.fa-paperclip),
+.input-container button:has(.fa-paperclip),
+.composer button:has(.fa-paperclip),
+.chat-input button:has([class*="paperclip"]),
+.input-container button:has([class*="paperclip"]),
+.composer button:has([class*="paperclip"]) {
+  display: none !important;
+}
+
+/* Reflow composer after removing attachment visually. */
+@media (max-width: 900px) {
+  .chat-input,
+  .input-container,
+  .composer {
+    grid-template-columns: 36px minmax(0,1fr) 42px !important;
+  }
+}

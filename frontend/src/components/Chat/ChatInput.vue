@@ -48,11 +48,10 @@
         <i class="fa-solid fa-microphone"></i>
       </button>
 
-      <textarea
+      <textarea data-gramm="false" data-gramm_editor="false" spellcheck="false"
         ref="textareaRef"
         v-model="chatStore.userInput"
-        class="chat-input-textarea"
-        :placeholder="chatStore.inputPlaceholder"
+        class="chat-input-textarea" placeholder="Say something to Aurexis..."
         :disabled="chatStore.isInputLocked"
         rows="1"
         @keydown="handleKeyDown"

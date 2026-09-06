@@ -5,10 +5,43 @@
     @toggle-theme="toggleTheme"
   />
 
-  <div v-else class="app-page">
+  <div v-else class="app-page" :class="{ 'desktop-sidebar-collapsed': desktopSidebarCollapsed }">
     <div class="app-wrapper">
-      <Sidebar :theme="theme" @toggle-theme="toggleTheme" />
-      <main class="main-content">
+      <div
+        class="mobile-sidebar-shell"
+        :class="{ 'is-open': mobileSidebarOpen }"
+      >
+        <Sidebar :theme="theme" @toggle-theme="toggleTheme" />
+      </div>
+
+      <button
+        v-if="mobileSidebarOpen"
+        class="mobile-sidebar-backdrop"
+        type="button"
+        aria-label="Close navigation"
+        @click="closeMobileSidebar"
+      ></button>
+      <button
+        class="mobile-menu-button"
+        type="button"
+        aria-label="Open navigation"
+        :aria-expanded="mobileSidebarOpen"
+        @click="openMobileSidebar"
+      >
+        <span class="ax-sidebar-glyph" aria-hidden="true"></span>
+      </button>
+
+<button
+        class="desktop-sidebar-toggle"
+        type="button"
+        :aria-expanded="!desktopSidebarCollapsed"
+        :aria-label="desktopSidebarCollapsed ? 'Open sidebar' : 'Close sidebar'"
+        @click="toggleDesktopSidebar"
+      >
+        <span class="ax-sidebar-glyph" aria-hidden="true"></span>
+      </button>
+
+<main class="main-content">
         <DocumentSettings v-if="chatStore.activeNav === 'settings'" />
         <HistorySidebar />
         <ChatArea v-show="chatStore.activeNav !== 'settings'" />
@@ -81,4 +114,78 @@ onMounted(async () => {
 });
 
 onUnmounted(() => window.removeEventListener('unauthorized', handleUnauthorized));
+
+const mobileSidebarOpen = ref(false);
+
+const openMobileSidebar = () => {
+  mobileSidebarOpen.value = true;
+};
+
+const closeMobileSidebar = () => {
+  mobileSidebarOpen.value = false;
+};
+
+const desktopSidebarCollapsed = ref(
+  localStorage.getItem('aurexis-desktop-sidebar-collapsed') === '1'
+);
+
+const toggleDesktopSidebar = () => {
+  desktopSidebarCollapsed.value = !desktopSidebarCollapsed.value;
+  localStorage.setItem(
+    'aurexis-desktop-sidebar-collapsed',
+    desktopSidebarCollapsed.value ? '1' : '0'
+  );
+};
+
+// AUREXIS_HISTORY_MOBILE_DRAWER_SYNC_V11
+watch(
+  () => sessionStore.showHistorySidebar,
+  (isOpen) => {
+    if (isOpen) {
+      mobileSidebarOpen.value = false;
+    }
+  }
+);
+
+// AUREXIS_KNOWLEDGE_MOBILE_DRAWER_SYNC_V11_1
+watch(
+  () => chatStore.activeNav,
+  (activeNav) => {
+    if (activeNav === 'settings') {
+      mobileSidebarOpen.value = false;
+    }
+  }
+);
+
+// AUREXIS_LOGO_TOGGLE_V11_10
+const handleAurexisDesktopLogoToggle = (event: MouseEvent) => {
+  if (window.innerWidth < 900) return;
+
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+
+  const header = target.closest('.sidebar .sidebar-header');
+  if (!header) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  toggleDesktopSidebar();
+};
+
+onMounted(() => {
+  document.addEventListener(
+    'click',
+    handleAurexisDesktopLogoToggle,
+    true
+  );
+});
+
+onUnmounted(() => {
+  document.removeEventListener(
+    'click',
+    handleAurexisDesktopLogoToggle,
+    true
+  );
+});
 </script>

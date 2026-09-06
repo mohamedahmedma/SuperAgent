@@ -1,0 +1,369 @@
+/*
+  AUREXIS Desktop + Tablet Final Sync v11.6
+  Scope: tablet/laptop/desktop only (>= 700px)
+
+  Requested ONLY:
+  1) History page uses the new AUREXIS theme.
+  2) Knowledge Base uses the new AUREXIS theme.
+  3) Remove Clear Chat trash icon from sidebar/account area.
+  4) Remove Attachment/Paperclip from chat composer.
+
+  Phone-specific layout/styles are intentionally not changed.
+*/
+
+@media (min-width: 700px) {
+
+  /* =========================================================
+     1) HISTORY — AUREXIS DEEP NAVY THEME
+     ========================================================= */
+  .history-backdrop {
+    background: rgba(2, 10, 20, .58) !important;
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+  }
+
+  .history-sidebar {
+    color: #edf7ff !important;
+    background:
+      linear-gradient(180deg, #071a2c 0%, #081d31 48%, #071a2c 100%) !important;
+
+    border-color: rgba(105, 168, 207, .16) !important;
+    box-shadow: -24px 0 60px rgba(0,0,0,.30) !important;
+  }
+
+  .history-header {
+    background: rgba(7, 26, 44, .96) !important;
+    border-bottom-color: rgba(106, 163, 199, .13) !important;
+  }
+
+  .history-header h2 {
+    color: #f7fbff !important;
+  }
+
+  .history-header .panel-eyebrow {
+    color: #22c6e8 !important;
+  }
+
+  .history-header .close-btn,
+  .history-summary button {
+    color: #9acbe7 !important;
+    background: #0a2238 !important;
+    border-color: rgba(118, 168, 202, .14) !important;
+    box-shadow: none !important;
+  }
+
+  .history-summary {
+    color: rgba(183, 210, 229, .72) !important;
+    background: rgba(8, 29, 49, .86) !important;
+    border-bottom-color: rgba(106, 163, 199, .11) !important;
+  }
+
+  .history-list {
+    background: transparent !important;
+  }
+
+  .history-item {
+    color: #edf7ff !important;
+    background: rgba(9, 32, 52, .84) !important;
+    border-color: rgba(109, 165, 202, .12) !important;
+    box-shadow: none !important;
+  }
+
+  .history-item:hover {
+    background: rgba(11, 40, 64, .92) !important;
+    border-color: rgba(45, 179, 220, .24) !important;
+  }
+
+  .history-item.active {
+    background:
+      linear-gradient(90deg, rgba(10, 76, 108, .48), rgba(9, 34, 55, .94)) !important;
+    border-color: rgba(32, 196, 230, .38) !important;
+  }
+
+  .session-title,
+  .empty-history h3 {
+    color: #f1f8fd !important;
+  }
+
+  .session-meta,
+  .empty-history p {
+    color: rgba(148, 186, 211, .65) !important;
+  }
+
+  .session-status,
+  .history-item.active .session-state-dot {
+    color: #22c6e8 !important;
+    background: #22c6e8 !important;
+  }
+
+  /* History — light theme */
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) .history-sidebar,
+  .app-page[data-theme="light"] .history-sidebar,
+  .app-page.light .history-sidebar,
+  .app-page.light-theme .history-sidebar {
+    color: #10283a !important;
+    background: linear-gradient(180deg, #f7fbfe, #eef7fc) !important;
+    border-color: rgba(30, 89, 127, .10) !important;
+    box-shadow: -18px 0 45px rgba(17, 54, 78, .12) !important;
+  }
+
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) .history-header,
+  .app-page[data-theme="light"] .history-header,
+  .app-page.light .history-header,
+  .app-page.light-theme .history-header,
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) .history-summary,
+  .app-page[data-theme="light"] .history-summary,
+  .app-page.light .history-summary,
+  .app-page.light-theme .history-summary {
+    background: rgba(247, 251, 254, .97) !important;
+    border-color: rgba(30, 89, 127, .10) !important;
+  }
+
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) .history-item,
+  .app-page[data-theme="light"] .history-item,
+  .app-page.light .history-item,
+  .app-page.light-theme .history-item {
+    color: #10283a !important;
+    background: rgba(255,255,255,.84) !important;
+    border-color: rgba(32, 96, 136, .10) !important;
+  }
+
+  /* =========================================================
+     2) KNOWLEDGE BASE — AUREXIS DEEP NAVY THEME
+     ========================================================= */
+  .settings-panel {
+    color: #edf7ff !important;
+    background:
+      linear-gradient(180deg, #182b3e 0%, #14283b 58%, #122537 100%) !important;
+  }
+
+  .settings-header {
+    border-bottom-color: rgba(106, 163, 199, .13) !important;
+  }
+
+  .settings-header .panel-eyebrow {
+    color: #22c6e8 !important;
+  }
+
+  .settings-header h1,
+  .settings-stats article > strong,
+  .documents-section-head h2,
+  .upload-section h2 {
+    color: #f8fbff !important;
+  }
+
+  .settings-header p,
+  .documents-section-head p,
+  .upload-section-head p,
+  .settings-stats article > small {
+    color: rgba(174, 205, 225, .66) !important;
+  }
+
+  .settings-refresh-btn {
+    color: #9ed0ec !important;
+    background: #0a2238 !important;
+    border-color: rgba(111, 171, 210, .16) !important;
+    box-shadow: none !important;
+  }
+
+  .settings-stats article,
+  .documents-section,
+  .upload-section {
+    background: rgba(7, 27, 46, .78) !important;
+    border-color: rgba(106, 163, 199, .12) !important;
+    box-shadow: none !important;
+  }
+
+  .documents-section-head {
+    background: rgba(8, 31, 51, .74) !important;
+    border-bottom-color: rgba(106, 163, 199, .11) !important;
+  }
+
+  .document-search input,
+  .pair-title-field input {
+    color: #edf7ff !important;
+    background: #081d31 !important;
+    border-color: rgba(109, 166, 203, .15) !important;
+    box-shadow: none !important;
+  }
+
+  .document-search input:focus,
+  .pair-title-field input:focus {
+    border-color: rgba(34, 198, 232, .42) !important;
+    box-shadow: 0 0 0 3px rgba(34,198,232,.07) !important;
+  }
+
+  .documents-list .pair-item {
+    color: #edf7ff !important;
+    background: rgba(9, 32, 52, .80) !important;
+    border-color: rgba(106, 163, 199, .12) !important;
+    box-shadow: none !important;
+  }
+
+  .documents-list .pair-item:hover {
+    background: rgba(10, 38, 61, .90) !important;
+    border-color: rgba(45, 179, 220, .23) !important;
+  }
+
+  .documents-list .pair-item-slot {
+    background: rgba(6, 25, 42, .75) !important;
+    border-color: rgba(104, 160, 196, .11) !important;
+  }
+
+  .documents-list .pair-item-title,
+  .documents-list .pair-item-file,
+  .pair-slot-name,
+  .selected-file-copy strong {
+    color: #eef8fd !important;
+  }
+
+  .documents-list .pair-item-lang,
+  .pair-slot-lang,
+  .upload-title-icon,
+  .selected-file-icon {
+    color: #22c6e8 !important;
+  }
+
+  .pair-slot {
+    color: rgba(167, 202, 224, .74) !important;
+    background: rgba(7, 27, 46, .66) !important;
+    border-color: rgba(93, 165, 207, .24) !important;
+  }
+
+  .upload-section .btn-primary {
+    color: #03151e !important;
+    background: #22c6e8 !important;
+    border-color: rgba(34, 198, 232, .32) !important;
+    box-shadow: none !important;
+  }
+
+  /* Knowledge — light theme */
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) .settings-panel,
+  .app-page[data-theme="light"] .settings-panel,
+  .app-page.light .settings-panel,
+  .app-page.light-theme .settings-panel {
+    color: #10283a !important;
+    background: linear-gradient(180deg, #f7fbfe, #edf6fb) !important;
+  }
+
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) :is(.settings-stats article,.documents-section,.upload-section,.documents-list .pair-item,.documents-list .pair-item-slot),
+  .app-page[data-theme="light"] :is(.settings-stats article,.documents-section,.upload-section,.documents-list .pair-item,.documents-list .pair-item-slot),
+  .app-page.light :is(.settings-stats article,.documents-section,.upload-section,.documents-list .pair-item,.documents-list .pair-item-slot),
+  .app-page.light-theme :is(.settings-stats article,.documents-section,.upload-section,.documents-list .pair-item,.documents-list .pair-item-slot) {
+    color: #10283a !important;
+    background: rgba(255,255,255,.84) !important;
+    border-color: rgba(30, 90, 128, .10) !important;
+  }
+
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) :is(.document-search input,.pair-title-field input),
+  .app-page[data-theme="light"] :is(.document-search input,.pair-title-field input),
+  .app-page.light :is(.document-search input,.pair-title-field input),
+  .app-page.light-theme :is(.document-search input,.pair-title-field input) {
+    color: #17364b !important;
+    background: #ffffff !important;
+    border-color: rgba(31, 92, 131, .12) !important;
+  }
+
+  /* =========================================================
+     3) REMOVE CLEAR-CHAT TRASH — TABLET/LAPTOP/DESKTOP ONLY
+     Keep logout untouched.
+     ========================================================= */
+  .sidebar .user-actions > button:has(.fa-trash),
+  .sidebar .user-actions > button:has(.fa-trash-can),
+  .sidebar .account-actions > button:has(.fa-trash),
+  .sidebar .account-actions > button:has(.fa-trash-can),
+  .sidebar button[aria-label*="clear" i],
+  .sidebar button[title*="clear" i],
+  .sidebar button[aria-label*="مسح"],
+  .sidebar button[title*="مسح"] {
+    display: none !important;
+  }
+
+  /* Tighten account actions after trash removal */
+  .sidebar .user-actions,
+  .sidebar .account-actions {
+    gap: 2px !important;
+  }
+
+  /* =========================================================
+     4) REMOVE ATTACHMENT / PAPERCLIP — TABLET/LAPTOP/DESKTOP
+     Keep microphone + textarea + send intact.
+     ========================================================= */
+  .attach-btn,
+  button.attach-btn,
+  .input-area > .attach-btn,
+  .input-area button:has(.fa-paperclip),
+  .input-area button:has(.fa-paperclip-vertical),
+  .chat-input button:has(.fa-paperclip),
+  .input-container button:has(.fa-paperclip),
+  .composer button:has(.fa-paperclip),
+  .input-area [aria-label*="attach" i],
+  .input-area [title*="attach" i] {
+    display: none !important;
+  }
+
+  /* Reflow composer without attachment slot */
+  .input-area {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+  }
+
+  .chat-input-textarea {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+  }
+
+  .send-btn {
+    flex: 0 0 auto !important;
+  }
+}
