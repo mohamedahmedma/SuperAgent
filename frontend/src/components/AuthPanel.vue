@@ -845,4 +845,389 @@ html[data-theme="light"] .ax-password-toggle:focus-visible{
   color:#17415a!important;
   background:rgba(45,121,158,.09)!important;
 }
+
+/* AUREXIS_MOBILE_AUTH_PRO_V10_6_START */
+/*
+  Mobile-first auth repair.
+  Desktop remains untouched. The overrides below only activate on phones/tablets.
+*/
+@media (max-width: 760px) {
+  .ax-auth-root {
+    position: fixed!important;
+    inset: 0!important;
+    display: block!important;
+    overflow-x: hidden!important;
+    overflow-y: auto!important;
+    overscroll-behavior-y: contain!important;
+    -webkit-overflow-scrolling: touch!important;
+    min-height: 100dvh!important;
+    padding:
+      max(10px, env(safe-area-inset-top))
+      0
+      max(18px, env(safe-area-inset-bottom))!important;
+    box-sizing: border-box!important;
+  }
+
+  /* Put language/theme controls in the document flow.
+     This prevents them from colliding with the AUREXIS brand on iPhone. */
+  .ax-auth-controls {
+    position: relative!important;
+    inset: auto!important;
+    top: auto!important;
+    right: auto!important;
+    bottom: auto!important;
+    left: auto!important;
+    z-index: 20!important;
+    display: flex!important;
+    width: calc(100% - 24px)!important;
+    max-width: 560px!important;
+    margin: 2px auto 10px!important;
+    padding: 0!important;
+    align-items: center!important;
+    justify-content: flex-start!important;
+    gap: 8px!important;
+  }
+
+  .ax-control {
+    min-height: 40px!important;
+    padding: 8px 12px!important;
+    border-radius: 12px!important;
+    font-size: 12px!important;
+    line-height: 1!important;
+    white-space: nowrap!important;
+  }
+
+  /* One clean mobile card. No desktop offset/margin-top. */
+  .ax-auth-shell {
+    display: grid!important;
+    grid-template-columns: minmax(0, 1fr)!important;
+    width: calc(100% - 24px)!important;
+    max-width: 560px!important;
+    min-height: 0!important;
+    margin: 0 auto!important;
+    border-radius: 20px!important;
+    overflow: hidden!important;
+    box-sizing: border-box!important;
+  }
+
+  /* Compact hero so login stays reachable without huge scrolling. */
+  .ax-hero {
+    min-width: 0!important;
+    min-height: 0!important;
+    padding: 22px 20px 20px!important;
+    border-inline-end: 0!important;
+    border-bottom: 1px solid rgba(58,137,186,.16)!important;
+    gap: 0!important;
+  }
+
+  .ax-hero::after {
+    width: 250px!important;
+    height: 250px!important;
+    right: -130px!important;
+    bottom: -135px!important;
+    opacity: .55!important;
+  }
+
+  .ax-brand-row {
+    min-width: 0!important;
+    gap: 11px!important;
+  }
+
+  .ax-brand-row .brand-logo,
+  .ax-brand-row svg,
+  .ax-brand-row img {
+    max-width: 48px!important;
+    max-height: 48px!important;
+  }
+
+  .ax-brand-copy {
+    min-width: 0!important;
+    gap: 4px!important;
+  }
+
+  .ax-brand-copy strong {
+    font-size: 14px!important;
+    letter-spacing: .08em!important;
+  }
+
+  .ax-brand-copy span {
+    font-size: 8.5px!important;
+    letter-spacing: .16em!important;
+    white-space: nowrap!important;
+  }
+
+  .ax-hero-copy {
+    max-width: none!important;
+    margin: 24px 0 20px!important;
+  }
+
+  .ax-kicker {
+    margin-bottom: 11px!important;
+    font-size: 11px!important;
+    line-height: 1.3!important;
+  }
+
+  .ax-hero h1 {
+    max-width: 100%!important;
+    margin: 0!important;
+    font-size: clamp(31px, 9vw, 39px)!important;
+    line-height: 1.04!important;
+    letter-spacing: -.045em!important;
+    text-wrap: balance!important;
+  }
+
+  .ax-auth-root[dir="rtl"] .ax-hero h1 {
+    letter-spacing: -.025em!important;
+  }
+
+  .ax-hero p {
+    max-width: none!important;
+    margin: 17px 0 0!important;
+    font-size: 13.5px!important;
+    line-height: 1.85!important;
+  }
+
+  .ax-hero-meta {
+    display: grid!important;
+    grid-template-columns: repeat(3, minmax(0, 1fr))!important;
+    gap: 6px!important;
+    width: 100%!important;
+  }
+
+  .ax-hero-meta span {
+    min-width: 0!important;
+    min-height: 38px!important;
+    padding: 7px 6px!important;
+    justify-content: center!important;
+    gap: 5px!important;
+    font-size: 9.5px!important;
+    text-align: center!important;
+    white-space: nowrap!important;
+  }
+
+  /* Login area gets stronger hierarchy and finger-friendly controls. */
+  .ax-login-panel {
+    min-width: 0!important;
+    padding: 24px 20px 26px!important;
+  }
+
+  .ax-login-heading {
+    min-width: 0!important;
+    gap: 11px!important;
+    margin-bottom: 18px!important;
+  }
+
+  .ax-login-heading .brand-logo,
+  .ax-login-heading svg,
+  .ax-login-heading img {
+    max-width: 44px!important;
+    max-height: 44px!important;
+    flex: 0 0 auto!important;
+  }
+
+  .ax-eyebrow {
+    margin-bottom: 5px!important;
+    font-size: 10px!important;
+    line-height: 1.25!important;
+  }
+
+  .ax-login-panel h2 {
+    font-size: clamp(23px, 7vw, 29px)!important;
+    line-height: 1.15!important;
+    letter-spacing: -.025em!important;
+    text-wrap: balance!important;
+  }
+
+  .ax-tabs {
+    gap: 6px!important;
+    margin-bottom: 18px!important;
+    padding: 4px!important;
+    border-radius: 14px!important;
+  }
+
+  .ax-tabs button {
+    min-height: 48px!important;
+    padding: 8px 10px!important;
+    font-size: 12.5px!important;
+    border-radius: 10px!important;
+  }
+
+  .ax-description,
+  .ax-parent-wrap .wa-lead {
+    margin-bottom: 16px!important;
+    font-size: 13px!important;
+    line-height: 1.75!important;
+  }
+
+  .ax-form {
+    gap: 16px!important;
+  }
+
+  .ax-form label {
+    gap: 8px!important;
+  }
+
+  .ax-form label > span {
+    font-size: 12px!important;
+  }
+
+  .ax-field input {
+    min-height: 54px!important;
+    padding-block: 12px!important;
+    border-radius: 13px!important;
+    font-size: 16px!important; /* prevents iOS Safari input zoom */
+  }
+
+  .ax-field > i {
+    font-size: 17px!important;
+  }
+
+  .ax-password-toggle {
+    width: 38px!important;
+    height: 38px!important;
+    border-radius: 10px!important;
+  }
+
+  .ax-submit,
+  .ax-parent-wrap .wa-primary {
+    min-height: 54px!important;
+    border-radius: 13px!important;
+    font-size: 14px!important;
+  }
+
+  /* Keep WhatsApp CTA balanced on mobile. */
+  .ax-parent-wrap .wa-primary {
+    gap: 10px!important;
+    padding-inline: 16px!important;
+  }
+
+  .ax-parent-wrap .wa-primary .fa-whatsapp,
+  .ax-parent-wrap .wa-primary [class*="whatsapp"] {
+    font-size: 1.35em!important;
+  }
+
+  /* Footer is part of flow, never floating over a submit button. */
+  .ax-auth-footer {
+    position: relative!important;
+    inset: auto!important;
+    width: calc(100% - 24px)!important;
+    max-width: 560px!important;
+    margin: 0 auto!important;
+    padding: 14px 0 4px!important;
+    justify-content: center!important;
+    align-items: center!important;
+    text-align: center!important;
+    flex-direction: row!important;
+    font-size: 9.5px!important;
+  }
+
+  /* 3D object is intentionally disabled on phones:
+     the login UI gets full visual/interaction priority. */
+  .ax-robot-dock {
+    display: none!important;
+  }
+}
+
+/* Extra tuning for narrow iPhones / small Android screens. */
+@media (max-width: 430px) {
+  .ax-auth-controls,
+  .ax-auth-shell,
+  .ax-auth-footer {
+    width: calc(100% - 16px)!important;
+  }
+
+  .ax-auth-controls {
+    margin-bottom: 8px!important;
+  }
+
+  .ax-control {
+    min-height: 38px!important;
+    padding: 8px 10px!important;
+    font-size: 11.5px!important;
+  }
+
+  .ax-hero {
+    padding: 19px 17px 18px!important;
+  }
+
+  .ax-hero-copy {
+    margin: 20px 0 17px!important;
+  }
+
+  .ax-hero h1 {
+    font-size: clamp(29px, 9.7vw, 36px)!important;
+  }
+
+  .ax-hero p {
+    font-size: 13px!important;
+    line-height: 1.78!important;
+  }
+
+  .ax-hero-meta {
+    gap: 5px!important;
+  }
+
+  .ax-hero-meta span {
+    min-height: 36px!important;
+    padding: 6px 4px!important;
+    font-size: 8.8px!important;
+  }
+
+  .ax-login-panel {
+    padding: 22px 17px 24px!important;
+  }
+
+  .ax-login-panel h2 {
+    font-size: 24px!important;
+  }
+}
+
+/* Very narrow devices: chips wrap instead of overflowing horizontally. */
+@media (max-width: 360px) {
+  .ax-hero-meta {
+    grid-template-columns: 1fr!important;
+  }
+
+  .ax-hero-meta span {
+    justify-content: flex-start!important;
+    padding-inline: 10px!important;
+  }
+
+  .ax-tabs button {
+    font-size: 11.5px!important;
+  }
+}
+
+/* Landscape phones: don't waste vertical space on the hero. */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 520px) {
+  .ax-auth-root {
+    padding-top: 8px!important;
+  }
+
+  .ax-auth-shell {
+    max-width: 760px!important;
+  }
+
+  .ax-hero {
+    padding: 16px 18px!important;
+  }
+
+  .ax-hero-copy {
+    margin: 14px 0!important;
+  }
+
+  .ax-hero h1 {
+    font-size: 30px!important;
+  }
+
+  .ax-hero p {
+    margin-top: 10px!important;
+    line-height: 1.55!important;
+  }
+
+  .ax-login-panel {
+    padding: 18px!important;
+  }
+}
+/* AUREXIS_MOBILE_AUTH_PRO_V10_6_END */
 </style>

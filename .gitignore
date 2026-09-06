@@ -90,3 +90,11 @@ UPLOAD_ENV.txt
 test_output.txt
 # Local demo credentials (never commit)
 /اداره.txt
+
+# Local AUREXIS UI backups
+.aurexis-ui-backup/
+_ui_backup_*/
+_ui_deep_navy_backup_*/
+_ui_exact_backup_*/
+_ui_language_backup_*/
+*.bak

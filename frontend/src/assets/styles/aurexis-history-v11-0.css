@@ -1,0 +1,442 @@
+/*
+  AUREXIS History Panel v11.0
+  - Uses the current Deep Navy AUREXIS visual language.
+  - Mobile history becomes a clean full-screen panel.
+  - Mobile navigation drawer is expected to close before history opens.
+*/
+
+/* =========================
+   GLOBAL HISTORY THEME
+   ========================= */
+.history-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 140 !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  background: rgba(2, 10, 20, .58) !important;
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+}
+
+.history-sidebar {
+  width: min(440px, 94vw) !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+
+  border: 0 !important;
+  border-left: 1px solid rgba(105, 168, 207, .16) !important;
+  border-radius: 0 !important;
+
+  background:
+    linear-gradient(180deg, #071a2c 0%, #081d31 48%, #071a2c 100%) !important;
+  color: #edf7ff !important;
+  box-shadow: -24px 0 60px rgba(0,0,0,.30) !important;
+}
+
+.history-header {
+  flex: 0 0 auto !important;
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+
+  padding: 22px 22px 18px !important;
+  border-bottom: 1px solid rgba(106, 163, 199, .13) !important;
+  background: rgba(7, 26, 44, .94) !important;
+}
+
+.history-header > div {
+  min-width: 0 !important;
+}
+
+.history-header .panel-eyebrow {
+  display: block !important;
+  margin-bottom: 7px !important;
+  color: #22c6e8 !important;
+  font-size: 9px !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+  letter-spacing: .13em !important;
+  text-transform: uppercase !important;
+}
+
+.history-header h2 {
+  margin: 0 !important;
+  color: #f7fbff !important;
+  font-size: 22px !important;
+  font-weight: 800 !important;
+  line-height: 1.15 !important;
+  letter-spacing: -.025em !important;
+}
+
+.history-header .close-btn {
+  display: grid !important;
+  width: 38px !important;
+  min-width: 38px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  place-items: center !important;
+  padding: 0 !important;
+
+  border: 1px solid rgba(118, 168, 202, .14) !important;
+  border-radius: 11px !important;
+
+  color: rgba(204, 226, 241, .76) !important;
+  background: #0a2238 !important;
+  box-shadow: none !important;
+}
+
+.history-header .close-btn:hover,
+.history-header .close-btn:focus-visible {
+  color: #ffffff !important;
+  background: #0d2b45 !important;
+  border-color: rgba(127, 191, 230, .25) !important;
+  outline: none !important;
+}
+
+.history-summary {
+  flex: 0 0 auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+
+  min-height: 54px !important;
+  padding: 10px 22px !important;
+
+  border-bottom: 1px solid rgba(106, 163, 199, .11) !important;
+  background: rgba(8, 29, 49, .84) !important;
+
+  color: rgba(183, 210, 229, .72) !important;
+  font-size: 11px !important;
+}
+
+.history-summary strong {
+  color: #ffffff !important;
+  font-weight: 800 !important;
+}
+
+.history-summary button {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+
+  min-height: 34px !important;
+  padding: 7px 11px !important;
+
+  border: 1px solid rgba(111, 171, 210, .14) !important;
+  border-radius: 9px !important;
+
+  color: #94c7e6 !important;
+  background: #0a2238 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+
+.history-summary button:hover,
+.history-summary button:focus-visible {
+  color: #ffffff !important;
+  background: #0c2b46 !important;
+  outline: none !important;
+}
+
+.history-list {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+
+  padding: 14px !important;
+  background: transparent !important;
+
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(62, 137, 181, .36) transparent !important;
+}
+
+.history-item {
+  position: relative !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 34px !important;
+  align-items: stretch !important;
+  gap: 6px !important;
+
+  margin: 0 0 8px !important;
+  padding: 0 !important;
+
+  border: 1px solid rgba(109, 165, 202, .12) !important;
+  border-radius: 13px !important;
+
+  background: rgba(9, 32, 52, .84) !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+
+  transition:
+    border-color .18s ease,
+    background .18s ease,
+    transform .16s ease !important;
+}
+
+.history-item:hover {
+  border-color: rgba(45, 179, 220, .24) !important;
+  background: rgba(11, 40, 64, .92) !important;
+}
+
+.history-item.active {
+  border-color: rgba(32, 196, 230, .38) !important;
+  background: linear-gradient(
+    90deg,
+    rgba(10, 76, 108, .48),
+    rgba(9, 34, 55, .94)
+  ) !important;
+}
+
+.history-item .session-body {
+  min-width: 0 !important;
+  display: grid !important;
+  grid-template-columns: 8px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 10px !important;
+
+  padding: 13px 12px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+  text-align: left !important;
+}
+
+.session-state-dot {
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 999px !important;
+  background: #397a9f !important;
+  box-shadow: 0 0 0 4px rgba(57,122,159,.10) !important;
+}
+
+.history-item.active .session-state-dot {
+  background: #22c6e8 !important;
+  box-shadow: 0 0 0 4px rgba(34,198,232,.12) !important;
+}
+
+.session-info {
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 5px !important;
+}
+
+.session-title {
+  display: block !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+
+  color: #eff8ff !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 1.25 !important;
+}
+
+.session-meta {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 5px 8px !important;
+
+  color: rgba(148, 186, 211, .65) !important;
+  font-size: 9px !important;
+  line-height: 1.3 !important;
+}
+
+.session-status {
+  color: #22c6e8 !important;
+  font-weight: 700 !important;
+}
+
+.history-delete-btn {
+  align-self: center !important;
+  display: grid !important;
+  width: 30px !important;
+  height: 30px !important;
+  place-items: center !important;
+
+  margin-right: 5px !important;
+  padding: 0 !important;
+
+  border: 0 !important;
+  border-radius: 8px !important;
+
+  color: rgba(127, 173, 202, .58) !important;
+  background: transparent !important;
+}
+
+.history-delete-btn:hover,
+.history-delete-btn:focus-visible {
+  color: #ff8d9a !important;
+  background: rgba(215, 76, 96, .10) !important;
+  outline: none !important;
+}
+
+.empty-history {
+  min-height: 320px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 34px 24px !important;
+  text-align: center !important;
+}
+
+.empty-history .empty-icon {
+  display: grid !important;
+  width: 52px !important;
+  height: 52px !important;
+  place-items: center !important;
+  margin-bottom: 15px !important;
+
+  border: 1px solid rgba(65, 176, 217, .16) !important;
+  border-radius: 15px !important;
+
+  color: #31c4e8 !important;
+  background: rgba(18, 79, 109, .18) !important;
+}
+
+.empty-history h3 {
+  margin: 0 0 8px !important;
+  color: #f4f9fd !important;
+  font-size: 17px !important;
+}
+
+.empty-history p {
+  max-width: 290px !important;
+  margin: 0 !important;
+  color: rgba(161, 194, 216, .65) !important;
+  font-size: 11px !important;
+  line-height: 1.6 !important;
+}
+
+/* =========================
+   MOBILE HISTORY EXPERIENCE
+   ========================= */
+@media (max-width: 900px) {
+  .history-backdrop {
+    z-index: 200 !important;
+    display: block !important;
+    background: #071a2c !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .history-sidebar {
+    width: 100% !important;
+    max-width: none !important;
+    height: 100dvh !important;
+
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .history-header {
+    min-height: 68px !important;
+    padding:
+      max(16px, env(safe-area-inset-top))
+      16px
+      13px !important;
+  }
+
+  .history-header .panel-eyebrow {
+    font-size: 8px !important;
+  }
+
+  .history-header h2 {
+    font-size: 19px !important;
+  }
+
+  .history-header .close-btn {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+  }
+
+  .history-summary {
+    min-height: 50px !important;
+    padding: 8px 16px !important;
+  }
+
+  .history-list {
+    padding:
+      12px
+      10px
+      max(16px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .history-item {
+    grid-template-columns: minmax(0,1fr) 38px !important;
+    border-radius: 12px !important;
+  }
+
+  .history-item .session-body {
+    padding: 13px 11px !important;
+  }
+
+  .session-title {
+    font-size: 12.5px !important;
+  }
+
+  .session-meta {
+    font-size: 9px !important;
+  }
+
+  .history-delete-btn {
+    width: 32px !important;
+    height: 32px !important;
+  }
+}
+
+/* Light theme keeps AUREXIS navy character while lifting surfaces. */
+html[data-theme="light"] .history-backdrop {
+  background: rgba(10, 28, 43, .34) !important;
+}
+
+html[data-theme="light"] .history-sidebar {
+  background: linear-gradient(180deg, #f6fbff, #eef7fc) !important;
+  color: #10283a !important;
+}
+
+html[data-theme="light"] .history-header,
+html[data-theme="light"] .history-summary {
+  background: rgba(244, 250, 254, .96) !important;
+  border-color: rgba(30, 89, 127, .10) !important;
+}
+
+html[data-theme="light"] .history-header h2,
+html[data-theme="light"] .session-title,
+html[data-theme="light"] .empty-history h3 {
+  color: #10283a !important;
+}
+
+html[data-theme="light"] .history-item {
+  background: rgba(255,255,255,.82) !important;
+  border-color: rgba(32, 96, 136, .10) !important;
+}
+
+html[data-theme="light"] .history-item.active {
+  background: linear-gradient(90deg, rgba(0,160,190,.10), #ffffff) !important;
+}
+
+html[data-theme="light"] .history-summary,
+html[data-theme="light"] .session-meta,
+html[data-theme="light"] .empty-history p {
+  color: rgba(42, 81, 107, .66) !important;
+}
+
+@media (max-width: 900px) {
+  html[data-theme="light"] .history-backdrop {
+    background: #f5fbff !important;
+  }
+}

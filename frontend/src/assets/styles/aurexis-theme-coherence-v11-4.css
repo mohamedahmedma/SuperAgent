@@ -1,0 +1,453 @@
+/*
+  AUREXIS Theme Coherence v11.4
+  Fixes dark/light mode mismatch across the authenticated mobile UI.
+  Imported LAST so it wins over older mobile/theme patches.
+*/
+
+/* ---------- LIGHT THEME: unified authenticated app ---------- */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .app-page,
+.app-page[data-theme="light"],
+.app-page.light,
+.app-page.light-theme {
+  --ax-light-bg: #edf5fa;
+  --ax-light-surface: #f7fbfe;
+  --ax-light-surface-2: #e8f2f8;
+  --ax-light-line: rgba(31, 88, 124, .12);
+  --ax-light-text: #10283a;
+  --ax-light-muted: #5e7d92;
+  --ax-light-accent: #0d9fc5;
+  background: var(--ax-light-bg) !important;
+  color: var(--ax-light-text) !important;
+}
+
+/* Main authenticated workspace */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .main-content,
+.app-page[data-theme="light"] .main-content,
+.app-page.light .main-content,
+.app-page.light-theme .main-content {
+  background: var(--ax-light-bg, #edf5fa) !important;
+  color: var(--ax-light-text, #10283a) !important;
+}
+
+/* Chat surface */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) :is(.chat-area, .chat-page, .chat-layout),
+.app-page[data-theme="light"] :is(.chat-area, .chat-page, .chat-layout),
+.app-page.light :is(.chat-area, .chat-page, .chat-layout),
+.app-page.light-theme :is(.chat-area, .chat-page, .chat-layout) {
+  background: #edf5fa !important;
+  color: #10283a !important;
+}
+
+/* Mobile/desktop chat header */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .chat-header,
+.app-page[data-theme="light"] .chat-header,
+.app-page.light .chat-header,
+.app-page.light-theme .chat-header {
+  background: rgba(247, 251, 254, .97) !important;
+  border-color: rgba(31, 88, 124, .10) !important;
+  color: #10283a !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .chat-header :is(h1,h2,.chat-title),
+.app-page[data-theme="light"] .chat-header :is(h1,h2,.chat-title),
+.app-page.light .chat-header :is(h1,h2,.chat-title),
+.app-page.light-theme .chat-header :is(h1,h2,.chat-title) {
+  color: #10283a !important;
+}
+
+/* Welcome area */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .welcome-screen,
+.app-page[data-theme="light"] .welcome-screen,
+.app-page.light .welcome-screen,
+.app-page.light-theme .welcome-screen {
+  color: #10283a !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .welcome-screen :is(h1,h2),
+.app-page[data-theme="light"] .welcome-screen :is(h1,h2),
+.app-page.light .welcome-screen :is(h1,h2),
+.app-page.light-theme .welcome-screen :is(h1,h2) {
+  color: #10283a !important;
+  text-shadow: none !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .welcome-screen p,
+.app-page[data-theme="light"] .welcome-screen p,
+.app-page.light .welcome-screen p,
+.app-page.light-theme .welcome-screen p {
+  color: #5e7d92 !important;
+}
+
+/* Sidebar / mobile drawer */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .sidebar,
+.app-page[data-theme="light"] .sidebar,
+.app-page.light .sidebar,
+.app-page.light-theme .sidebar {
+  background: #e7f1f7 !important;
+  color: #17364b !important;
+  border-color: rgba(31, 88, 124, .11) !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .mobile-sidebar-shell .sidebar,
+.app-page[data-theme="light"] .mobile-sidebar-shell .sidebar,
+.app-page.light .mobile-sidebar-shell .sidebar,
+.app-page.light-theme .mobile-sidebar-shell .sidebar {
+  background: #e7f1f7 !important;
+  border-right-color: rgba(31, 88, 124, .10) !important;
+  box-shadow: 18px 0 42px rgba(15, 50, 72, .16) !important;
+}
+
+/* Sidebar typography */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .sidebar :is(.brand-copy,.brand-text,.logo-copy,.nav-item,nav a,nav button,.user-copy,.user-name,.user-email),
+.app-page[data-theme="light"] .sidebar :is(.brand-copy,.brand-text,.logo-copy,.nav-item,nav a,nav button,.user-copy,.user-name,.user-email),
+.app-page.light .sidebar :is(.brand-copy,.brand-text,.logo-copy,.nav-item,nav a,nav button,.user-copy,.user-name,.user-email),
+.app-page.light-theme .sidebar :is(.brand-copy,.brand-text,.logo-copy,.nav-item,nav a,nav button,.user-copy,.user-name,.user-email) {
+  color: #17364b !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .sidebar :is(.user-role,.role,.user-meta,small),
+.app-page[data-theme="light"] .sidebar :is(.user-role,.role,.user-meta,small),
+.app-page.light .sidebar :is(.user-role,.role,.user-meta,small),
+.app-page.light-theme .sidebar :is(.user-role,.role,.user-meta,small) {
+  color: #66869b !important;
+}
+
+/* Sidebar active item */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .sidebar :is(.nav-item.active,nav a.active,nav button.active),
+.app-page[data-theme="light"] .sidebar :is(.nav-item.active,nav a.active,nav button.active),
+.app-page.light .sidebar :is(.nav-item.active,nav a.active,nav button.active),
+.app-page.light-theme .sidebar :is(.nav-item.active,nav a.active,nav button.active) {
+  background: rgba(13, 159, 197, .13) !important;
+  color: #0a5770 !important;
+  border-color: rgba(13, 159, 197, .18) !important;
+}
+
+/* Sidebar bottom: remove the dark rectangle mismatch in light mode */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .mobile-sidebar-shell .sidebar .sidebar-bottom,
+.app-page[data-theme="light"] .mobile-sidebar-shell .sidebar .sidebar-bottom,
+.app-page.light .mobile-sidebar-shell .sidebar .sidebar-bottom,
+.app-page.light-theme .mobile-sidebar-shell .sidebar .sidebar-bottom {
+  background: transparent !important;
+  border-top-color: rgba(31, 88, 124, .13) !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .mobile-sidebar-shell .sidebar .user-panel,
+.app-page[data-theme="light"] .mobile-sidebar-shell .sidebar .user-panel,
+.app-page.light .mobile-sidebar-shell .sidebar .user-panel,
+.app-page.light-theme .mobile-sidebar-shell .sidebar .user-panel {
+  background: transparent !important;
+  border-top-color: rgba(31, 88, 124, .13) !important;
+}
+
+/* Theme row in light mode */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .sidebar .theme-control-label,
+.app-page[data-theme="light"] .sidebar .theme-control-label,
+.app-page.light .sidebar .theme-control-label,
+.app-page.light-theme .sidebar .theme-control-label {
+  color: #274b62 !important;
+}
+
+/* Sidebar/menu buttons */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) :is(.mobile-menu-button,.desktop-sidebar-toggle),
+.app-page[data-theme="light"] :is(.mobile-menu-button,.desktop-sidebar-toggle),
+.app-page.light :is(.mobile-menu-button,.desktop-sidebar-toggle),
+.app-page.light-theme :is(.mobile-menu-button,.desktop-sidebar-toggle) {
+  color: #254b63 !important;
+  background: #f7fbfe !important;
+  border-color: rgba(31, 88, 124, .15) !important;
+  box-shadow: 0 5px 16px rgba(20, 62, 88, .08) !important;
+}
+
+/* Backdrop */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .mobile-sidebar-backdrop,
+.app-page[data-theme="light"] .mobile-sidebar-backdrop,
+.app-page.light .mobile-sidebar-backdrop,
+.app-page.light-theme .mobile-sidebar-backdrop {
+  background: rgba(15, 37, 52, .28) !important;
+}
+
+/* Composer */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .input-area-wrapper,
+.app-page[data-theme="light"] .input-area-wrapper,
+.app-page.light .input-area-wrapper,
+.app-page.light-theme .input-area-wrapper {
+  background: linear-gradient(
+    180deg,
+    rgba(237,245,250,0) 0%,
+    rgba(237,245,250,.94) 35%,
+    #edf5fa 72%
+  ) !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .input-area,
+.app-page[data-theme="light"] .input-area,
+.app-page.light .input-area,
+.app-page.light-theme .input-area {
+  background: #ffffff !important;
+  border-color: rgba(31, 105, 145, .20) !important;
+  box-shadow:
+    0 8px 22px rgba(25, 72, 98, .08),
+    inset 0 1px 0 rgba(255,255,255,.8) !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .chat-input-textarea,
+.app-page[data-theme="light"] .chat-input-textarea,
+.app-page.light .chat-input-textarea,
+.app-page.light-theme .chat-input-textarea {
+  color: #183a50 !important;
+}
+
+/* Send stays branded in both themes */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) .send-btn,
+.app-page[data-theme="light"] .send-btn,
+.app-page.light .send-btn,
+.app-page.light-theme .send-btn {
+  color: #05202a !important;
+  background: #22c6e8 !important;
+}
+
+/* History + Knowledge are already themed separately; unify page transitions */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) :is(.history-sidebar,.settings-panel),
+.app-page[data-theme="light"] :is(.history-sidebar,.settings-panel),
+.app-page.light :is(.history-sidebar,.settings-panel),
+.app-page.light-theme :is(.history-sidebar,.settings-panel) {
+  transition:
+    background-color .22s ease,
+    color .22s ease,
+    border-color .22s ease !important;
+}
+
+/* ---------- DARK THEME: enforce consistency after previous light overrides ---------- */
+:where(
+  html[data-theme="dark"],
+  body[data-theme="dark"],
+  html.dark,
+  body.dark,
+  .theme-dark,
+  .dark-theme
+) .app-page,
+.app-page[data-theme="dark"],
+.app-page.dark,
+.app-page.dark-theme {
+  background: #182b3e !important;
+  color: #eef7ff !important;
+}
+
+:where(
+  html[data-theme="dark"],
+  body[data-theme="dark"],
+  html.dark,
+  body.dark,
+  .theme-dark,
+  .dark-theme
+) :is(.main-content,.chat-area,.chat-page,.chat-layout),
+.app-page[data-theme="dark"] :is(.main-content,.chat-area,.chat-page,.chat-layout),
+.app-page.dark :is(.main-content,.chat-area,.chat-page,.chat-layout),
+.app-page.dark-theme :is(.main-content,.chat-area,.chat-page,.chat-layout) {
+  background: #182b3e !important;
+  color: #eef7ff !important;
+}
+
+:where(
+  html[data-theme="dark"],
+  body[data-theme="dark"],
+  html.dark,
+  body.dark,
+  .theme-dark,
+  .dark-theme
+) .welcome-screen :is(h1,h2),
+.app-page[data-theme="dark"] .welcome-screen :is(h1,h2),
+.app-page.dark .welcome-screen :is(h1,h2),
+.app-page.dark-theme .welcome-screen :is(h1,h2) {
+  color: #ffffff !important;
+}
+
+:where(
+  html[data-theme="dark"],
+  body[data-theme="dark"],
+  html.dark,
+  body.dark,
+  .theme-dark,
+  .dark-theme
+) .welcome-screen p,
+.app-page[data-theme="dark"] .welcome-screen p,
+.app-page.dark .welcome-screen p,
+.app-page.dark-theme .welcome-screen p {
+  color: rgba(192,216,233,.72) !important;
+}
+
+/* Mobile specific: smooth visual switch without white flash */
+@media (max-width: 900px) {
+  .app-page,
+  .main-content,
+  .chat-area,
+  .sidebar,
+  .input-area,
+  .chat-header {
+    transition:
+      background-color .22s ease,
+      color .22s ease,
+      border-color .22s ease !important;
+  }
+}

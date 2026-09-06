@@ -1,0 +1,49 @@
+
+/* AUREXIS mobile sidebar icon v10.9.1 */
+.mobile-menu-button .ax-sidebar-glyph {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 16px;
+  border: 1.7px solid currentColor;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.mobile-menu-button .ax-sidebar-glyph::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 1.7px;
+  background: currentColor;
+  opacity: .95;
+  border-radius: 2px;
+}
+
+.mobile-menu-button .ax-sidebar-glyph::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 1.8px;
+  width: 1.8px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: .9;
+}
+
+@media (max-width: 900px) {
+  .mobile-menu-button {
+    color: rgba(238,247,255,.92)!important;
+  }
+
+  .mobile-menu-button:hover,
+  .mobile-menu-button:focus-visible {
+    color: #ffffff!important;
+    border-color: rgba(146,193,223,.28)!important;
+    background: #0a2136!important;
+    outline: none!important;
+  }
+}

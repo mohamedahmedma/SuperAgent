@@ -1,0 +1,121 @@
+/*
+  AUREXIS Desktop Sidebar Toggle v10.9.2
+  Adds the same sidebar-layout glyph to desktop.
+  Mobile behavior remains unchanged.
+*/
+
+.desktop-sidebar-toggle {
+  display: none;
+}
+
+@media (min-width: 901px) {
+  .app-wrapper {
+    position: relative !important;
+  }
+
+  .desktop-sidebar-toggle {
+    position: fixed !important;
+    top: 14px !important;
+    left: 220px !important;
+    z-index: 90 !important;
+    display: grid !important;
+    width: 36px !important;
+    height: 36px !important;
+    place-items: center !important;
+    padding: 0 !important;
+    border: 1px solid rgba(130, 178, 210, .14) !important;
+    border-radius: 10px !important;
+    color: rgba(230, 242, 251, .86) !important;
+    background: rgba(7, 24, 42, .88) !important;
+    box-shadow: none !important;
+    cursor: pointer !important;
+    transition:
+      left .22s ease,
+      background .18s ease,
+      border-color .18s ease,
+      color .18s ease,
+      transform .15s ease !important;
+  }
+
+  .desktop-sidebar-toggle:hover,
+  .desktop-sidebar-toggle:focus-visible {
+    color: #ffffff !important;
+    background: rgba(10, 33, 54, .96) !important;
+    border-color: rgba(149, 196, 226, .26) !important;
+    outline: none !important;
+  }
+
+  .desktop-sidebar-toggle:active {
+    transform: scale(.96) !important;
+  }
+
+  .desktop-sidebar-toggle .ax-sidebar-glyph {
+    position: relative !important;
+    display: block !important;
+    width: 17px !important;
+    height: 15px !important;
+    border: 1.6px solid currentColor !important;
+    border-radius: 4px !important;
+    box-sizing: border-box !important;
+  }
+
+  .desktop-sidebar-toggle .ax-sidebar-glyph::before {
+    content: "" !important;
+    position: absolute !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 4.8px !important;
+    width: 1.6px !important;
+    background: currentColor !important;
+    border-radius: 2px !important;
+  }
+
+  .desktop-sidebar-toggle .ax-sidebar-glyph::after {
+    content: "" !important;
+    position: absolute !important;
+    top: 3px !important;
+    left: 1.7px !important;
+    width: 1.7px !important;
+    height: 7px !important;
+    border-radius: 2px !important;
+    background: currentColor !important;
+    opacity: .9 !important;
+  }
+
+  /*
+    Default desktop sidebar width is ~212px in the current layout.
+    When collapsed, keep the main content full-width and move the toggle inward.
+  */
+  .app-page.desktop-sidebar-collapsed .app-wrapper {
+    grid-template-columns: 0 minmax(0, 1fr) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar {
+    width: 0 !important;
+    min-width: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    border: 0 !important;
+    opacity: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+    transform: translateX(-12px) !important;
+  }
+
+  .app-page:not(.desktop-sidebar-collapsed) .sidebar {
+    transition:
+      width .22s ease,
+      min-width .22s ease,
+      padding .22s ease,
+      opacity .18s ease,
+      transform .22s ease !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle {
+    left: 14px !important;
+  }
+
+  .main-content {
+    min-width: 0 !important;
+  }
+}

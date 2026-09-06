@@ -1,0 +1,272 @@
+/*
+ AUREXIS Collapsed Rail Refined v11.9
+ IMPORTANT:
+ - Changes ONLY the CLOSED/COLLAPSED desktop rail.
+ - Expanded sidebar is intentionally untouched.
+ - Mobile (<900px) is intentionally untouched.
+*/
+
+@media (min-width: 900px) {
+
+  /* Closed rail geometry */
+  .app-page.desktop-sidebar-collapsed .app-wrapper {
+    grid-template-columns: 72px minmax(0, 1fr) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar {
+    width: 72px !important;
+    min-width: 72px !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    padding: 13px 9px 12px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-right: 1px solid rgba(100,158,194,.10) !important;
+    border-radius: 0 !important;
+    background: linear-gradient(180deg,#06192b 0%,#061626 58%,#051421 100%) !important;
+    box-shadow: none !important;
+  }
+
+  /* Remove items that only make sense in the full sidebar.
+     This is scoped STRICTLY to collapsed mode. */
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .workspace-selector,
+    .school-space,
+    .space-selector,
+    .school-selector,
+    .sidebar-recents,
+    .recent-sessions,
+    .recent-section,
+    .recent-list,
+    .theme-control,
+    .theme-row,
+    .theme-toggle-row,
+    .theme-button,
+    .theme-switch,
+    .theme-toggle,
+    .user-actions
+  ) {
+    display: none !important;
+  }
+
+  /* Brand: mark only */
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .brand,.sidebar-brand,.logo-section
+  ) {
+    width: 48px !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    margin: 0 auto 17px !important;
+    padding: 0 !important;
+    display: grid !important;
+    place-items: center !important;
+    border: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .brand-copy,.brand-text,.logo-copy
+  ) {
+    display: none !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .brand img,.brand svg,.brand-logo,
+    .sidebar-brand img,.sidebar-brand svg,
+    .logo-section img,.logo-section svg
+  ) {
+    width: 35px !important;
+    max-width: 35px !important;
+    height: 35px !important;
+    max-height: 35px !important;
+    object-fit: contain !important;
+  }
+
+  /* Navigation rail */
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav,.sidebar-nav,.nav-list
+  ) {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 7px !important;
+    overflow: visible !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button,nav a,
+    .sidebar-nav button,.sidebar-nav a,
+    .nav-item
+  ) {
+    width: 46px !important;
+    min-width: 46px !important;
+    height: 46px !important;
+    min-height: 46px !important;
+    flex: 0 0 46px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: grid !important;
+    place-items: center !important;
+    border: 1px solid transparent !important;
+    border-radius: 13px !important;
+    color: rgba(143,190,219,.74) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transition: background .15s ease,border-color .15s ease,color .15s ease,transform .15s ease !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button,nav a,
+    .sidebar-nav button,.sidebar-nav a,
+    .nav-item
+  ):hover {
+    color: #f2fbff !important;
+    background: rgba(18,76,108,.28) !important;
+    border-color: rgba(64,160,207,.14) !important;
+    transform: translateY(-1px) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button.active,nav a.active,
+    .sidebar-nav button.active,.sidebar-nav a.active,
+    .nav-item.active
+  ) {
+    color: #eafcff !important;
+    background: linear-gradient(180deg,rgba(11,91,129,.62),rgba(8,66,96,.56)) !important;
+    border-color: rgba(34,198,232,.28) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.025) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button span,nav a span,
+    .sidebar-nav button span,.sidebar-nav a span,
+    .nav-item span:not(.badge)
+  ) {
+    display: none !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav i,nav svg,
+    .sidebar-nav i,.sidebar-nav svg,
+    .nav-item i,.nav-item svg
+  ) {
+    width: 18px !important;
+    height: 18px !important;
+    margin: 0 !important;
+    font-size: 17px !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .badge {
+    display: none !important;
+  }
+
+  /* Remove accidental RECENT SESSIONS text that leaked into the rail. */
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .section-title,.recent-title
+  ) {
+    display: none !important;
+  }
+
+  /* Bottom is deliberately minimal: identity/avatar only. */
+  .app-page.desktop-sidebar-collapsed .sidebar .sidebar-bottom {
+    width: 100% !important;
+    margin: auto 0 0 !important;
+    padding: 12px 0 0 !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    border-top: 1px solid rgba(105,159,191,.10) !important;
+    background: transparent !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .user-panel {
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .user-avatar {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    margin: 0 !important;
+    display: grid !important;
+    place-items: center !important;
+    border: 1px solid rgba(64,173,215,.14) !important;
+    border-radius: 12px !important;
+    color: #fff !important;
+    background: linear-gradient(145deg,#139ac8,#0874a5) !important;
+    box-shadow: none !important;
+    font-size: 11px !important;
+    font-weight: 800 !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .user-copy,.user-info,.user-meta,.user-name,.user-email,.user-role
+  ) {
+    display: none !important;
+  }
+
+  /* Existing toggle stays functional but is aligned as a precise edge control. */
+  .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle {
+    position: absolute !important;
+    z-index: 90 !important;
+    top: 15px !important;
+    left: 50px !important;
+    width: 34px !important;
+    min-width: 34px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: grid !important;
+    place-items: center !important;
+    border: 1px solid rgba(89,151,188,.16) !important;
+    border-radius: 11px !important;
+    color: #dceef8 !important;
+    background: #092138 !important;
+    box-shadow: none !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle:hover {
+    color: #fff !important;
+    background: #0b2a45 !important;
+    border-color: rgba(34,198,232,.24) !important;
+  }
+
+  /* Do not allow any decorative left shadow/strip in collapsed state. */
+  .app-page.desktop-sidebar-collapsed .sidebar::before,
+  .app-page.desktop-sidebar-collapsed .sidebar::after {
+    box-shadow: none !important;
+  }
+}
+
+/* Tablet landscape / compact laptop */
+@media (min-width: 900px) and (max-width: 1100px) {
+  .app-page.desktop-sidebar-collapsed .app-wrapper {
+    grid-template-columns: 68px minmax(0,1fr) !important;
+  }
+  .app-page.desktop-sidebar-collapsed .sidebar {
+    width: 68px !important;
+    min-width: 68px !important;
+    padding-left: 7px !important;
+    padding-right: 7px !important;
+  }
+  .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle {
+    left: 46px !important;
+  }
+}

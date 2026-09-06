@@ -1,0 +1,82 @@
+/*
+  AUREXIS Mobile Sidebar Cleanup v10.9.6
+  هدفه تنظيف الجزء السفلي فقط على الموبايل:
+  - إزالة الخطوط المكررة الناتجة من الإصدارات السابقة.
+  - الإبقاء على خط واحد فوق Dark mode وخط واحد بين Theme/User.
+  - إخفاء زر Clear Chat (علامة السلة) داخل Drawer الموبايل فقط.
+  - عدم تغيير Desktop.
+*/
+
+@media (max-width: 900px) {
+  /* -------------------------------------------------
+     1) Remove legacy pseudo-lines from older patches.
+     These were the reason for the duplicated/short lines.
+     ------------------------------------------------- */
+  .mobile-sidebar-shell .sidebar .sidebar-bottom::before,
+  .mobile-sidebar-shell .sidebar .sidebar-bottom::after,
+  .mobile-sidebar-shell .sidebar .user-panel::before,
+  .mobile-sidebar-shell .sidebar .user-panel::after,
+  .mobile-sidebar-shell .sidebar .sidebar-footer::before,
+  .mobile-sidebar-shell .sidebar .sidebar-footer::after {
+    content: none !important;
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: none !important;
+  }
+
+  /* -------------------------------------------------
+     2) Keep exactly two clean separators:
+        - one above the whole bottom area
+        - one between theme row and account row
+     ------------------------------------------------- */
+  .mobile-sidebar-shell .sidebar .sidebar-bottom {
+    border-top: 1px solid rgba(111, 157, 190, .18) !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .theme-control {
+    border: 0 !important;
+    border-bottom: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .user-panel {
+    border: 0 !important;
+    border-top: 1px solid rgba(111, 157, 190, .18) !important;
+    box-shadow: none !important;
+  }
+
+  /* Remove any inherited decorative lines on nested footer rows. */
+  .mobile-sidebar-shell .sidebar .sidebar-bottom > *,
+  .mobile-sidebar-shell .sidebar .theme-control,
+  .mobile-sidebar-shell .sidebar .user-panel,
+  .mobile-sidebar-shell .sidebar .user-copy,
+  .mobile-sidebar-shell .sidebar .user-actions {
+    outline: 0 !important;
+  }
+
+  /* -------------------------------------------------
+     3) Remove ONLY the trash / clear-chat action from
+        the mobile drawer. Logout remains visible.
+     ------------------------------------------------- */
+  .mobile-sidebar-shell .sidebar .user-actions > button:has(.fa-trash),
+  .mobile-sidebar-shell .sidebar .user-actions > button:has(.fa-trash-can),
+  .mobile-sidebar-shell .sidebar .user-actions > button[aria-label*="clear" i],
+  .mobile-sidebar-shell .sidebar .user-actions > button[title*="clear" i],
+  .mobile-sidebar-shell .sidebar .user-actions > button[aria-label*="مسح"],
+  .mobile-sidebar-shell .sidebar .user-actions > button[title*="مسح"] {
+    display: none !important;
+  }
+
+  /* After removing trash, keep logout aligned tightly to the right. */
+  .mobile-sidebar-shell .sidebar .user-actions {
+    gap: 0 !important;
+    min-width: 30px !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .user-actions > button {
+    margin: 0 !important;
+  }
+}

@@ -1,0 +1,180 @@
+/*
+  AUREXIS Circular Menu Icon v11.5
+  Replaces the old sidebar-layout glyph with a clean circular two-line menu icon.
+  Same visual language on mobile + desktop, with Dark/Light theme variants.
+*/
+
+/* Shared button geometry */
+.mobile-menu-button,
+.desktop-sidebar-toggle {
+  display: grid !important;
+  place-items: center !important;
+
+  border-radius: 999px !important;
+  border: 1px solid rgba(121, 176, 211, .16) !important;
+
+  color: #f3f9fd !important;
+  background: #0a1f33 !important;
+
+  box-shadow:
+    0 8px 22px rgba(0,0,0,.16),
+    inset 0 1px 0 rgba(255,255,255,.025) !important;
+
+  transition:
+    background .18s ease,
+    border-color .18s ease,
+    color .18s ease,
+    transform .14s ease,
+    box-shadow .18s ease !important;
+}
+
+/* The old outlined sidebar glyph becomes a clean two-line symbol */
+.mobile-menu-button .ax-sidebar-glyph,
+.desktop-sidebar-toggle .ax-sidebar-glyph {
+  position: relative !important;
+
+  display: block !important;
+  width: 18px !important;
+  height: 14px !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  border: 0 !important;
+  border-radius: 0 !important;
+
+  color: currentColor !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Upper line */
+.mobile-menu-button .ax-sidebar-glyph::before,
+.desktop-sidebar-toggle .ax-sidebar-glyph::before {
+  content: "" !important;
+
+  position: absolute !important;
+  top: 3px !important;
+  left: 50% !important;
+
+  width: 15px !important;
+  height: 2px !important;
+
+  transform: translateX(-50%) !important;
+
+  border: 0 !important;
+  border-radius: 999px !important;
+
+  background: currentColor !important;
+  opacity: .96 !important;
+}
+
+/* Lower line */
+.mobile-menu-button .ax-sidebar-glyph::after,
+.desktop-sidebar-toggle .ax-sidebar-glyph::after {
+  content: "" !important;
+
+  position: absolute !important;
+  right: auto !important;
+  bottom: 3px !important;
+  left: 50% !important;
+  top: auto !important;
+
+  width: 11px !important;
+  height: 2px !important;
+
+  transform: translateX(-50%) !important;
+
+  border: 0 !important;
+  border-radius: 999px !important;
+
+  background: currentColor !important;
+  opacity: .88 !important;
+}
+
+/* Desktop sizing */
+@media (min-width: 901px) {
+  .desktop-sidebar-toggle {
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+  }
+
+  .desktop-sidebar-toggle:hover,
+  .desktop-sidebar-toggle:focus-visible {
+    color: #ffffff !important;
+    background: #0d2a43 !important;
+    border-color: rgba(65, 196, 229, .28) !important;
+    box-shadow:
+      0 10px 28px rgba(0,0,0,.18),
+      0 0 0 3px rgba(34,198,232,.05) !important;
+    outline: none !important;
+  }
+
+  .desktop-sidebar-toggle:active {
+    transform: scale(.95) !important;
+  }
+}
+
+/* Mobile sizing */
+@media (max-width: 900px) {
+  .mobile-menu-button {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .mobile-menu-button:hover,
+  .mobile-menu-button:focus-visible {
+    color: #ffffff !important;
+    background: #0d2a43 !important;
+    border-color: rgba(65, 196, 229, .28) !important;
+    box-shadow:
+      0 10px 28px rgba(0,0,0,.18),
+      0 0 0 3px rgba(34,198,232,.05) !important;
+    outline: none !important;
+  }
+
+  .mobile-menu-button:active {
+    transform: scale(.95) !important;
+  }
+}
+
+/* Light theme variant */
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) :is(.mobile-menu-button,.desktop-sidebar-toggle),
+.app-page[data-theme="light"] :is(.mobile-menu-button,.desktop-sidebar-toggle),
+.app-page.light :is(.mobile-menu-button,.desktop-sidebar-toggle),
+.app-page.light-theme :is(.mobile-menu-button,.desktop-sidebar-toggle) {
+  color: #17364b !important;
+  background: #f7fbfe !important;
+  border-color: rgba(31, 88, 124, .15) !important;
+
+  box-shadow:
+    0 7px 20px rgba(19, 59, 84, .10),
+    inset 0 1px 0 rgba(255,255,255,.90) !important;
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"],
+  html.light,
+  body.light,
+  .theme-light,
+  .light-theme
+) :is(.mobile-menu-button,.desktop-sidebar-toggle):hover,
+.app-page[data-theme="light"] :is(.mobile-menu-button,.desktop-sidebar-toggle):hover,
+.app-page.light :is(.mobile-menu-button,.desktop-sidebar-toggle):hover,
+.app-page.light-theme :is(.mobile-menu-button,.desktop-sidebar-toggle):hover {
+  color: #0b3b52 !important;
+  background: #ffffff !important;
+  border-color: rgba(13, 159, 197, .26) !important;
+}

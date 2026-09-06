@@ -1,0 +1,501 @@
+/*
+  AUREXIS Desktop Icon Rail v11.7
+  Premium compact rail inspired by modern AI workspaces,
+  customized for AUREXIS.
+  Applies only to tablet/laptop/desktop (>= 900px).
+  Mobile drawer is untouched.
+*/
+
+@media (min-width: 900px) {
+
+  /* =========================================================
+     COLLAPSED STATE = PREMIUM ICON RAIL, NOT ZERO-WIDTH SIDEBAR
+     ========================================================= */
+  .app-page.desktop-sidebar-collapsed .app-wrapper {
+    grid-template-columns: 74px minmax(0, 1fr) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .mobile-sidebar-shell {
+    display: contents !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar {
+    position: relative !important;
+    z-index: 40 !important;
+
+    width: 74px !important;
+    min-width: 74px !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+
+    margin: 0 !important;
+    padding: 14px 10px 12px !important;
+
+    border: 0 !important;
+    border-right: 1px solid rgba(118, 171, 204, .11) !important;
+    border-radius: 0 !important;
+
+    opacity: 1 !important;
+    overflow: hidden !important;
+    pointer-events: auto !important;
+    transform: none !important;
+
+    color: #dcecf7 !important;
+    background:
+      linear-gradient(180deg, #06182a 0%, #061526 56%, #051321 100%) !important;
+
+    box-shadow: none !important;
+  }
+
+  /* ---------------------------------------------------------
+     BRAND: keep only the AUREXIS mark, centered
+     --------------------------------------------------------- */
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .brand,
+    .sidebar-brand,
+    .logo-section
+  ) {
+    width: 48px !important;
+    min-width: 48px !important;
+    height: 48px !important;
+    min-height: 48px !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    margin: 0 auto 13px !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .brand img,
+    .brand svg,
+    .sidebar-brand img,
+    .sidebar-brand svg,
+    .logo-section img,
+    .logo-section svg,
+    .brand-logo
+  ) {
+    width: 34px !important;
+    max-width: 34px !important;
+    height: 34px !important;
+    max-height: 34px !important;
+    object-fit: contain !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .brand-copy,
+    .brand-text,
+    .logo-copy
+  ) {
+    display: none !important;
+  }
+
+  /* ---------------------------------------------------------
+     Hide workspace selector / recents while rail is compact
+     --------------------------------------------------------- */
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .workspace-selector,
+    .school-space,
+    .space-selector,
+    .school-selector,
+    .sidebar-recents,
+    .recent-sessions,
+    .recent-section,
+    .recent-list
+  ) {
+    display: none !important;
+  }
+
+  /* ---------------------------------------------------------
+     NAVIGATION: icon-only vertical rail
+     --------------------------------------------------------- */
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav,
+    .sidebar-nav,
+    .nav-list
+  ) {
+    width: 100% !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 7px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button,
+    nav a,
+    .sidebar-nav button,
+    .sidebar-nav a,
+    .nav-item
+  ) {
+    position: relative !important;
+
+    width: 46px !important;
+    min-width: 46px !important;
+    height: 46px !important;
+    min-height: 46px !important;
+
+    display: grid !important;
+    place-items: center !important;
+    flex: 0 0 46px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: 1px solid transparent !important;
+    border-radius: 13px !important;
+
+    color: rgba(157, 196, 221, .76) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+
+    transition:
+      color .16s ease,
+      background .16s ease,
+      border-color .16s ease,
+      transform .14s ease !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button,
+    nav a,
+    .sidebar-nav button,
+    .sidebar-nav a,
+    .nav-item
+  ):hover {
+    color: #ffffff !important;
+    background: rgba(31, 96, 132, .18) !important;
+    border-color: rgba(89, 166, 209, .12) !important;
+    transform: translateY(-1px) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button.active,
+    nav a.active,
+    .sidebar-nav button.active,
+    .sidebar-nav a.active,
+    .nav-item.active
+  ) {
+    color: #e9fbff !important;
+    background:
+      linear-gradient(180deg, rgba(20, 95, 132, .42), rgba(11, 69, 101, .42)) !important;
+    border-color: rgba(34, 198, 232, .24) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button span,
+    nav a span,
+    .sidebar-nav button span,
+    .sidebar-nav a span,
+    .nav-item span:not(.badge)
+  ) {
+    display: none !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav i,
+    nav svg,
+    .sidebar-nav i,
+    .sidebar-nav svg,
+    .nav-item i,
+    .nav-item svg
+  ) {
+    margin: 0 !important;
+    font-size: 16px !important;
+    width: 18px !important;
+    height: 18px !important;
+    text-align: center !important;
+  }
+
+  /* Hide numeric badges in compact rail to avoid crowding. */
+  .app-page.desktop-sidebar-collapsed .sidebar .badge {
+    display: none !important;
+  }
+
+  /* ---------------------------------------------------------
+     BOTTOM ZONE: theme icon + avatar + logout
+     --------------------------------------------------------- */
+  .app-page.desktop-sidebar-collapsed .sidebar .sidebar-bottom {
+    width: 100% !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 8px !important;
+
+    margin: auto 0 0 !important;
+    padding: 12px 0 0 !important;
+
+    border-top: 1px solid rgba(118, 171, 204, .11) !important;
+    background: transparent !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .theme-control {
+    width: 46px !important;
+    min-width: 46px !important;
+    min-height: 42px !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .theme-control-label {
+    display: none !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .theme-control > :last-child {
+    margin: 0 !important;
+    transform: scale(.94) !important;
+    transform-origin: center !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .user-panel {
+    width: 100% !important;
+    min-height: 0 !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 7px !important;
+
+    margin: 0 !important;
+    padding: 10px 0 0 !important;
+
+    border: 0 !important;
+    border-top: 1px solid rgba(118, 171, 204, .09) !important;
+    background: transparent !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .user-avatar {
+    width: 34px !important;
+    min-width: 34px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border-radius: 11px !important;
+
+    color: #ffffff !important;
+    background:
+      linear-gradient(145deg, #1397c5, #0b6e9c) !important;
+
+    font-size: 11px !important;
+    font-weight: 800 !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar :is(
+    .user-copy,
+    .user-info,
+    .user-meta,
+    .user-name,
+    .user-email,
+    .user-role
+  ) {
+    display: none !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .user-actions {
+    width: 100% !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .user-actions > button {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    border-radius: 10px !important;
+
+    color: rgba(142, 196, 225, .82) !important;
+    background: transparent !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar .user-actions > button:hover {
+    color: #ffffff !important;
+    background: rgba(31, 96, 132, .18) !important;
+  }
+
+  /* Clear-chat trash stays removed in compact rail too. */
+  .app-page.desktop-sidebar-collapsed .sidebar .user-actions > button:has(.fa-trash),
+  .app-page.desktop-sidebar-collapsed .sidebar .user-actions > button:has(.fa-trash-can) {
+    display: none !important;
+  }
+
+  /* ---------------------------------------------------------
+     TOGGLE: becomes a small premium rail-control at top-right
+     --------------------------------------------------------- */
+  .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle {
+    position: absolute !important;
+    top: 16px !important;
+    left: 51px !important;
+    z-index: 80 !important;
+
+    width: 34px !important;
+    min-width: 34px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+
+    border-radius: 11px !important;
+    border: 1px solid rgba(118, 171, 204, .14) !important;
+
+    color: #dcecf7 !important;
+    background: #092036 !important;
+
+    box-shadow: 0 7px 18px rgba(0,0,0,.12) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle:hover {
+    color: #ffffff !important;
+    background: #0c2a45 !important;
+    border-color: rgba(34, 198, 232, .22) !important;
+  }
+
+  /* The icon inside the rail-control remains the AUREXIS two-line glyph. */
+  .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle .ax-sidebar-glyph {
+    width: 16px !important;
+    height: 13px !important;
+  }
+
+  /* =========================================================
+     LIGHT THEME RAIL
+     ========================================================= */
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) .app-page.desktop-sidebar-collapsed .sidebar,
+  .app-page[data-theme="light"].desktop-sidebar-collapsed .sidebar,
+  .app-page.light.desktop-sidebar-collapsed .sidebar,
+  .app-page.light-theme.desktop-sidebar-collapsed .sidebar {
+    color: #18394e !important;
+    background:
+      linear-gradient(180deg, #edf5fa 0%, #e7f1f7 100%) !important;
+    border-right-color: rgba(31, 88, 124, .10) !important;
+  }
+
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button,
+    nav a,
+    .sidebar-nav button,
+    .sidebar-nav a,
+    .nav-item
+  ),
+  .app-page[data-theme="light"].desktop-sidebar-collapsed .sidebar :is(
+    nav button,
+    nav a,
+    .sidebar-nav button,
+    .sidebar-nav a,
+    .nav-item
+  ) {
+    color: #5c8097 !important;
+  }
+
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) .app-page.desktop-sidebar-collapsed .sidebar :is(
+    nav button.active,
+    nav a.active,
+    .sidebar-nav button.active,
+    .sidebar-nav a.active,
+    .nav-item.active
+  ),
+  .app-page[data-theme="light"].desktop-sidebar-collapsed .sidebar :is(
+    nav button.active,
+    nav a.active,
+    .sidebar-nav button.active,
+    .sidebar-nav a.active,
+    .nav-item.active
+  ) {
+    color: #0b5570 !important;
+    background: rgba(13,159,197,.12) !important;
+    border-color: rgba(13,159,197,.18) !important;
+  }
+
+  :where(
+    html[data-theme="light"],
+    body[data-theme="light"],
+    html.light,
+    body.light,
+    .theme-light,
+    .light-theme
+  ) .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle,
+  .app-page[data-theme="light"].desktop-sidebar-collapsed .desktop-sidebar-toggle {
+    color: #244b62 !important;
+    background: #f7fbfe !important;
+    border-color: rgba(31,88,124,.14) !important;
+    box-shadow: 0 5px 14px rgba(21,62,87,.08) !important;
+  }
+}
+
+/* 900–1100px tablets/laptops: keep rail slightly tighter. */
+@media (min-width: 900px) and (max-width: 1100px) {
+  .app-page.desktop-sidebar-collapsed .app-wrapper {
+    grid-template-columns: 68px minmax(0, 1fr) !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .sidebar {
+    width: 68px !important;
+    min-width: 68px !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  .app-page.desktop-sidebar-collapsed .desktop-sidebar-toggle {
+    left: 46px !important;
+  }
+}

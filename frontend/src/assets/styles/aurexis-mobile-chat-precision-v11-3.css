@@ -1,0 +1,275 @@
+/*
+  AUREXIS Mobile Chat Precision v11.3
+  Targets the ACTUAL ChatInput / WelcomeScreen classes.
+  Mobile-first refinement; desktop is left intact except paperclip hiding.
+*/
+
+/* The real attachment button class in ChatInput.vue is .attach-btn */
+.attach-btn,
+button.attach-btn,
+.input-area > .attach-btn,
+.input-area button:has(.fa-paperclip),
+.input-area button:has(.fa-paperclip-vertical) {
+  display: none !important;
+}
+
+/* Remove helper/footer copy everywhere in the composer. */
+.input-footer {
+  display: none !important;
+}
+
+/* Prevent any bound placeholder from becoming visible even if store text exists. */
+.chat-input-textarea::placeholder {
+  color: transparent !important;
+  opacity: 0 !important;
+}
+
+/* =========================
+   MOBILE COMPOSER
+   ========================= */
+@media (max-width: 900px) {
+  .input-area-wrapper {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 70 !important;
+
+    width: 100% !important;
+    margin: 0 !important;
+    padding:
+      10px
+      8px
+      max(10px, env(safe-area-inset-bottom)) !important;
+
+    background:
+      linear-gradient(
+        180deg,
+        rgba(24,43,62,0) 0%,
+        rgba(24,43,62,.90) 28%,
+        #182b3e 72%
+      ) !important;
+
+    box-sizing: border-box !important;
+  }
+
+  .input-area {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 56px !important;
+
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+
+    margin: 0 !important;
+    padding: 6px 7px 6px 9px !important;
+
+    border: 1px solid rgba(54, 153, 207, .34) !important;
+    border-radius: 18px !important;
+
+    background: #08233a !important;
+    box-shadow:
+      0 8px 24px rgba(0,0,0,.16),
+      inset 0 1px 0 rgba(255,255,255,.018) !important;
+
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  /* Any remaining disabled mic stays compact on the left. */
+  .input-area .voice-btn,
+  .input-area .mic-btn,
+  .input-area button:has(.fa-microphone) {
+    order: 1 !important;
+    flex: 0 0 34px !important;
+
+    width: 34px !important;
+    min-width: 34px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+
+    display: grid !important;
+    place-items: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    border-radius: 999px !important;
+
+    color: rgba(113, 159, 189, .42) !important;
+    background: transparent !important;
+  }
+
+  .chat-input-textarea {
+    order: 2 !important;
+    flex: 1 1 auto !important;
+
+    width: auto !important;
+    min-width: 0 !important;
+    min-height: 40px !important;
+    max-height: 112px !important;
+
+    margin: 0 !important;
+    padding: 10px 4px !important;
+
+    border: 0 !important;
+    outline: 0 !important;
+
+    color: #eef8ff !important;
+    background: transparent !important;
+
+    font-size: 16px !important;
+    line-height: 1.28 !important;
+
+    resize: none !important;
+    overflow-y: auto !important;
+    box-sizing: border-box !important;
+  }
+
+  .send-btn {
+    order: 3 !important;
+    flex: 0 0 44px !important;
+
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+
+    display: grid !important;
+    place-items: center !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    border-radius: 12px !important;
+
+    color: #061a26 !important;
+    background: #22c6e8 !important;
+    box-shadow: none !important;
+
+    font-size: 15px !important;
+  }
+
+  .send-btn:hover:not(:disabled),
+  .send-btn:focus-visible {
+    background: #42d0ee !important;
+    outline: none !important;
+  }
+
+  .send-btn:disabled {
+    opacity: .46 !important;
+  }
+
+  /* =========================
+     MOBILE WELCOME CONTENT
+     ========================= */
+  .welcome-screen {
+    width: 100% !important;
+    max-width: 390px !important;
+    min-height: 100% !important;
+
+    margin: 0 auto !important;
+    padding: 18px 24px 116px !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+
+    text-align: center !important;
+    box-sizing: border-box !important;
+  }
+
+  .welcome-screen .welcome-avatar,
+  .welcome-screen .welcome-logo,
+  .welcome-screen .brand-logo,
+  .welcome-screen img,
+  .welcome-screen svg {
+    width: 66px !important;
+    max-width: 66px !important;
+    height: auto !important;
+
+    margin: 0 0 17px !important;
+  }
+
+  .welcome-screen .welcome-eyebrow,
+  .welcome-screen .eyebrow,
+  .welcome-screen .ready-label {
+    margin: 0 0 7px !important;
+
+    color: #22c6e8 !important;
+    font-size: 8.5px !important;
+    font-weight: 800 !important;
+    line-height: 1.2 !important;
+    letter-spacing: .12em !important;
+  }
+
+  .welcome-screen h1,
+  .welcome-screen h2 {
+    max-width: 320px !important;
+    margin: 0 0 10px !important;
+
+    font-size: clamp(28px, 8.2vw, 34px) !important;
+    font-weight: 850 !important;
+    line-height: 1.04 !important;
+    letter-spacing: -.045em !important;
+
+    text-wrap: balance !important;
+  }
+
+  .welcome-screen p {
+    max-width: 285px !important;
+    margin: 0 !important;
+
+    color: rgba(192, 216, 233, .72) !important;
+    font-size: 12px !important;
+    line-height: 1.55 !important;
+
+    text-wrap: balance !important;
+  }
+
+  /* Remove the three capability chips on phones to reduce clutter. */
+  .welcome-capabilities,
+  .welcome-screen .feature-chips,
+  .welcome-screen .welcome-features,
+  .welcome-screen .chips {
+    display: none !important;
+  }
+}
+
+@media (max-width: 390px) {
+  .input-area-wrapper {
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+
+  .input-area {
+    min-height: 54px !important;
+    border-radius: 17px !important;
+  }
+
+  .send-btn {
+    flex-basis: 42px !important;
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+  }
+
+  .welcome-screen {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+
+  .welcome-screen h1,
+  .welcome-screen h2 {
+    font-size: clamp(27px, 8.5vw, 32px) !important;
+  }
+
+  .welcome-screen p {
+    max-width: 270px !important;
+    font-size: 11.5px !important;
+  }
+}

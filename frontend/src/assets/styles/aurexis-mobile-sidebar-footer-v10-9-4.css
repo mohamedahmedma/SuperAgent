@@ -1,0 +1,129 @@
+@media (max-width: 900px) {
+  .mobile-sidebar-shell .sidebar {
+    display:flex!important;
+    flex-direction:column!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom,
+  .mobile-sidebar-shell .sidebar .sidebar-footer,
+  .mobile-sidebar-shell .sidebar .user-panel {
+    margin-top:auto!important;
+    width:100%!important;
+    padding-top:10px!important;
+    padding-bottom:max(4px, env(safe-area-inset-bottom))!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom::before,
+  .mobile-sidebar-shell .sidebar .sidebar-footer::before,
+  .mobile-sidebar-shell .sidebar .user-panel::before {
+    content:""!important;
+    display:block!important;
+    width:100%!important;
+    height:1px!important;
+    margin-bottom:8px!important;
+    background:rgba(123,166,196,.16)!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .theme-row,
+  .mobile-sidebar-shell .sidebar .theme-control,
+  .mobile-sidebar-shell .sidebar .theme-toggle-row {
+    width:100%!important;
+    min-height:42px!important;
+    display:flex!important;
+    align-items:center!important;
+    justify-content:space-between!important;
+    gap:10px!important;
+    padding:6px 2px!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .user-panel,
+  .mobile-sidebar-shell .sidebar .sidebar-user,
+  .mobile-sidebar-shell .sidebar .user-card {
+    width:100%!important;
+    min-height:52px!important;
+    display:flex!important;
+    align-items:center!important;
+    gap:9px!important;
+    padding-top:10px!important;
+    margin-top:2px!important;
+    border-top:1px solid rgba(123,166,196,.16)!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .user-avatar,
+  .mobile-sidebar-shell .sidebar .avatar {
+    width:30px!important;
+    min-width:30px!important;
+    height:30px!important;
+    border-radius:8px!important;
+    display:grid!important;
+    place-items:center!important;
+    flex:0 0 30px!important;
+    font-size:12px!important;
+    font-weight:700!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .user-info,
+  .mobile-sidebar-shell .sidebar .user-meta {
+    display:flex!important;
+    flex-direction:column!important;
+    min-width:0!important;
+    flex:1 1 auto!important;
+    gap:1px!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .user-name,
+  .mobile-sidebar-shell .sidebar .user-email {
+    display:block!important;
+    max-width:150px!important;
+    overflow:hidden!important;
+    text-overflow:ellipsis!important;
+    white-space:nowrap!important;
+    font-size:11px!important;
+    line-height:1.15!important;
+    font-weight:600!important;
+    color:#f5fbff!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .user-role,
+  .mobile-sidebar-shell .sidebar .role {
+    display:block!important;
+    max-width:150px!important;
+    overflow:hidden!important;
+    text-overflow:ellipsis!important;
+    white-space:nowrap!important;
+    font-size:9px!important;
+    line-height:1.2!important;
+    color:rgba(168,197,218,.68)!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .user-actions,
+  .mobile-sidebar-shell .sidebar .account-actions {
+    display:flex!important;
+    align-items:center!important;
+    justify-content:flex-end!important;
+    gap:4px!important;
+    margin-left:auto!important;
+    flex:0 0 auto!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .user-actions button,
+  .mobile-sidebar-shell .sidebar .account-actions button,
+  .mobile-sidebar-shell .sidebar .user-panel > button {
+    width:32px!important;
+    min-width:32px!important;
+    height:32px!important;
+    min-height:32px!important;
+    display:grid!important;
+    place-items:center!important;
+    padding:0!important;
+    border-radius:8px!important;
+  }
+
+  .mobile-sidebar-shell .sidebar .theme-switch,
+  .mobile-sidebar-shell .sidebar .theme-toggle,
+  .mobile-sidebar-shell .sidebar .theme-button {
+    flex:0 0 auto!important;
+    transform:scale(.96)!important;
+    transform-origin:right center!important;
+  }
+}
