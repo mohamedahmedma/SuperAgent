@@ -111,7 +111,7 @@ The caller may be a parent, and some questions are about **their own child** ("h
 
 Set `about_child` to true when the message asks about a particular child's own situation — their marks, attendance, timetable, fees, teacher, class, homework, behaviour, or report — **including** when:
   - the child is referred to only by a pronoun or a possessive pointing back at the conversation. This is the commonest form and the easiest to miss: in Arabic the possessive attaches to the end of the word rather than being written separately, so there is no separate word to notice.
-  - the child is named rather than described.
+  - the child is named rather than described. A personal name ANYWHERE in the message counts, whether it is a full name or a first name on its own, and whether or not the message also uses a possessive.
   - the subject is general school material but the question asks it **for** one child. The material is the school's; which part of it applies is that child's.
 
 Set it to false for anything about the school as an institution — policies, term dates, fees in general, uniform rules, contact details — even when a child appears in the sentence. A child who is merely who relayed or prompted the question is not what the question is about; the test is whether answering requires knowing which child, not whether a child is mentioned.
@@ -122,11 +122,13 @@ Then say **how** the child was referred to, in `child_reference`:
   `daughter` — a female child of the caller's ("ابنتي", "بنتي", "my daughter")
   `child`    — sex not stated ("my child", "طفلي", "ولدي" where it plainly means "my child")
   `plural`   — more than one ("my kids", "اولادي", "both my children")
-  `named`    — referred to by name; put the name in `child_name` exactly as written
+  `named`    — a personal name appears in the message, in full or first name alone; put it in `child_name` exactly as written. This wins over `son`/`daughter`/`context` when a name is present as well.
   `context`  — referred to only by a pronoun or possessive pointing at the conversation
   `none`     — `about_child` is false
 
 Put a name in `child_name` only when the message itself contains one. Copy it from the message; never guess one, and never take one from the conversation, from these instructions, or from anywhere but the message being classified. Something else resolves who is meant, and it has the school's own list of children to check against. A name introduced here selects a real child.
+
+**Copy the characters the message used.** Do not translate a name into another language, and do not transliterate it into another script — an Arabic name stays in Arabic letters even when the rest of your output is English. A name rewritten in different letters is not the name the message contained, so it is discarded and the parent is asked which child they meant, having already said so.
 
 **Here too the mistakes are unequal, and they point the other way than in decision 1.** A false `about_child` costs one cheap lookup nobody sees. A missed one means the answer is written without knowing which child it is about — producing either a wrong answer, or a question the parent has already answered. When in doubt, say true.
 

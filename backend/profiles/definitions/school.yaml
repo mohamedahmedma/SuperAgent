@@ -277,10 +277,13 @@ agent:
       routes, the school day, attendance rules, exam schedules, curriculum, trips,
       medical policy, contact details.
     get_student_grades: >-
-      One child's own marks across every subject this term — how they are doing, their
-      results, their report card.
+      One child's own marks across every subject this term — how they are doing overall,
+      their results, their report card. This is the one to name when the message asks
+      about marks without naming a particular subject.
     get_subject_grades: >-
-      One child's own marks in a single named subject, assignment by assignment.
+      One child's own marks inside a single school subject, assignment by assignment.
+      This is the one to name whenever the message names a subject — maths, science,
+      Arabic, English and so on — however briefly.
     get_student_attendance: >-
       One child's own attendance: the days they were present, absent or late.
 
