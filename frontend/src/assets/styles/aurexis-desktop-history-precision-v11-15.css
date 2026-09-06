@@ -1,0 +1,97 @@
+
+@media (min-width: 901px){
+  .history-backdrop{
+    position:fixed!important; inset:0!important; z-index:1200!important;
+    display:flex!important; justify-content:flex-end!important; align-items:stretch!important;
+    overflow:hidden!important; background:rgba(2,14,27,.48)!important;
+    backdrop-filter:blur(6px)!important; -webkit-backdrop-filter:blur(6px)!important;
+  }
+  .history-sidebar{
+    width:clamp(420px,31vw,520px)!important; min-width:420px!important; max-width:520px!important;
+    height:100vh!important; max-height:100vh!important; min-height:0!important;
+    display:flex!important; flex-direction:column!important; overflow:hidden!important;
+    border-left:1px solid rgba(90,160,205,.18)!important;
+    background:linear-gradient(180deg,rgba(9,35,56,.985),rgba(7,29,49,.992))!important;
+    box-shadow:-22px 0 56px rgba(0,0,0,.24),inset 1px 0 0 rgba(255,255,255,.02)!important;
+  }
+  .history-header{
+    flex:0 0 auto!important; min-height:118px!important; padding:24px 22px 18px!important;
+    display:flex!important; align-items:center!important; justify-content:space-between!important; gap:18px!important;
+    border-bottom:1px solid rgba(91,157,199,.15)!important;
+  }
+  .history-header .panel-eyebrow{margin:0 0 8px!important;color:#20bddc!important;font-size:10px!important;font-weight:800!important;letter-spacing:.16em!important}
+  .history-header h2{margin:0!important;color:#f5fbff!important;font-size:25px!important;font-weight:800!important;line-height:1.08!important}
+  .history-header .close-btn{
+    width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;
+    display:grid!important;place-items:center!important;padding:0!important;
+    border:1px solid rgba(101,165,206,.18)!important;border-radius:12px!important;
+    background:rgba(9,42,67,.72)!important;color:rgba(214,236,249,.78)!important;
+  }
+  .history-summary{
+    flex:0 0 auto!important;min-height:72px!important;padding:13px 22px!important;
+    display:flex!important;align-items:center!important;justify-content:space-between!important;gap:14px!important;
+    border-bottom:1px solid rgba(91,157,199,.13)!important;background:rgba(5,27,46,.30)!important;
+  }
+  .history-summary>span{color:rgba(208,232,247,.78)!important;font-size:13px!important}
+  .history-summary>span strong{color:#f4fbff!important;font-weight:800!important}
+  .history-summary button{
+    min-height:38px!important;padding:8px 13px!important;border:1px solid rgba(92,157,199,.18)!important;
+    border-radius:10px!important;background:rgba(10,43,68,.66)!important;color:rgba(214,237,250,.82)!important;
+    font-size:12px!important;font-weight:700!important;
+  }
+  .history-list{
+    flex:1 1 0!important;min-height:0!important;width:100%!important;
+    display:flex!important;flex-direction:column!important;gap:10px!important;
+    padding:14px 14px 22px!important;margin:0!important;
+    overflow-x:hidden!important;overflow-y:auto!important;scrollbar-gutter:stable!important;overscroll-behavior:contain!important;
+  }
+  .history-list>.history-item{
+    position:relative!important;width:100%!important;min-width:0!important;min-height:78px!important;height:auto!important;
+    display:grid!important;grid-template-columns:minmax(0,1fr) 44px!important;align-items:stretch!important;gap:4px!important;
+    margin:0!important;padding:0!important;border:1px solid rgba(103,164,202,.14)!important;border-radius:14px!important;
+    background:linear-gradient(180deg,rgba(10,40,64,.88),rgba(8,34,56,.88))!important;
+    opacity:1!important;visibility:visible!important;overflow:hidden!important;
+    transition:border-color 150ms ease,transform 150ms ease,box-shadow 150ms ease!important;
+  }
+  .history-list>.history-item:hover{
+    transform:translateY(-1px)!important;border-color:rgba(32,189,220,.28)!important;
+    box-shadow:0 8px 20px rgba(0,0,0,.12)!important;
+  }
+  .history-list>.history-item>.session-body{
+    width:100%!important;min-width:0!important;min-height:76px!important;height:auto!important;
+    display:grid!important;grid-template-columns:8px minmax(0,1fr)!important;align-items:center!important;gap:12px!important;
+    padding:13px 10px 13px 14px!important;margin:0!important;border:0!important;background:transparent!important;
+    opacity:1!important;visibility:visible!important;overflow:hidden!important;text-align:left!important;
+  }
+  .history-list .session-state-dot{
+    display:block!important;width:7px!important;height:7px!important;min-width:7px!important;border-radius:50%!important;opacity:.86!important;
+  }
+  .history-list .session-info{
+    display:flex!important;flex-direction:column!important;justify-content:center!important;gap:6px!important;
+    width:100%!important;min-width:0!important;height:auto!important;opacity:1!important;visibility:visible!important;overflow:hidden!important;
+  }
+  .history-list .session-title{
+    display:block!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;
+    color:#eef8ff!important;font-size:13.5px!important;font-weight:750!important;line-height:1.28!important;
+    white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;opacity:1!important;visibility:visible!important;
+  }
+  .history-list .session-meta{
+    display:flex!important;flex-wrap:wrap!important;align-items:center!important;gap:4px 9px!important;
+    width:100%!important;min-width:0!important;height:auto!important;margin:0!important;
+    color:rgba(150,190,215,.68)!important;font-size:10.5px!important;line-height:1.35!important;
+    opacity:1!important;visibility:visible!important;
+  }
+  .history-list .history-delete-btn{
+    align-self:center!important;justify-self:center!important;width:34px!important;height:34px!important;
+    display:grid!important;place-items:center!important;margin:0!important;padding:0!important;
+    border:1px solid transparent!important;border-radius:9px!important;background:transparent!important;
+    color:rgba(167,198,218,.38)!important;opacity:0!important;visibility:hidden!important;pointer-events:none!important;
+  }
+  .history-list>.history-item:hover .history-delete-btn,
+  .history-list>.history-item:focus-within .history-delete-btn{
+    opacity:.72!important;visibility:visible!important;pointer-events:auto!important;
+  }
+  .history-list .history-delete-btn:hover{
+    opacity:1!important;color:#f4fbff!important;border-color:rgba(221,108,124,.22)!important;background:rgba(146,48,62,.12)!important;
+  }
+}
