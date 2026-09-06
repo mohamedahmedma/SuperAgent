@@ -216,6 +216,49 @@ agent:
   # classifier field and not a keyword rule.
   narrow_tools_to_the_turn: true
 
+  # When the turn needs BOTH tools, dispatch them together instead of letting the model
+  # find them one at a time.
+  #
+  # `narrow_tools_to_the_turn` above already handles the one-tool case; this handles the
+  # case it deliberately leaves alone. «درجات ليلى كام والمصاريف كام؟» is classified
+  # `both`, and until now that meant: bind everything, let the model search, wait, read,
+  # ask for the records, wait, read, answer — four model round-trips with the two lookups
+  # strictly one after the other. Planned, it is one round-trip with both running at once.
+  parallel_tool_calls: true
+
+  # What a planned call looks like for each tool. A tool missing from here is never
+  # pre-dispatched; it stays bound and the model calls it the ordinary way.
+  #
+  # `record_type: grades` is a deliberate default, not a guess dressed up as one. A `both`
+  # question is overwhelmingly "his marks, and something about the school", and the model
+  # keeps two of its three records calls to correct it — «كم يوم غاب ابني والمصاريف كام؟»
+  # gets grades it did not want, sees that, and calls again with `attendance`. That costs
+  # one extra round-trip on the minority shape and saves two on the common one.
+  planned_tool_arguments:
+    search_knowledge_base:
+      query: "$resolved_question"
+    get_student_records:
+      record_type: "grades"
+      # The label the ROSTER matched, never a name the model transcribed. The records
+      # tool re-resolves it against the same roster, so a planned call names the same
+      # child the prompt does.
+      student_name: "$child_label"
+
+  # What each tool is for, for the classifier to choose between — this is what makes
+  # selection work past the two-tool case. Written for a node that judges a message it
+  # must not act on, so it states subject matter rather than telling anyone to call
+  # anything; the tools' own descriptions do that job for the agent, and they are tuned
+  # against a different failure.
+  tool_selection:
+    search_knowledge_base: >-
+      The school's own published material: fees and instalments, term dates and holidays,
+      admissions, uniform, books, transport and bus routes, timetables, attendance rules,
+      exam schedules, curriculum, trips, medical policy, contact details.
+    get_student_records: >-
+      One particular child's own record, held by the school and about nobody else: their
+      marks in a subject, their results this term, their attendance and absences, their
+      report card.
+
   # A fee, an instalment, a deadline — the figures in this corpus are what a parent acts
   # on, so a figure that is in no retrieved chunk must not be served. Enforced rather
   # than observed because the failure this closes actually reached a parent: an invented

@@ -98,6 +98,19 @@ class RequestSignals:
     # is an optimisation, so it may only ever happen on a positive answer.
     child_question_kind: str = "both"
 
+    # The tools this message needs, named by the classifier from the profile's own
+    # catalogue (`agent.tool_selection`). This is `child_question_kind` generalised: that
+    # field knows about exactly two tools and answers in an enum, which stops being
+    # expressible the moment a deployment binds ten.
+    #
+    # Empty is the abstention, and it means the same as it does above — bind everything —
+    # so a deployment that ships no catalogue, a classifier that failed, and a model that
+    # named tools nobody bound all land on today's behaviour. Names outside the profile's
+    # own list are dropped rather than trusted: a plan naming an unbound tool is a
+    # `build_tools` startup error, and a hallucinated tool name must not be able to reach
+    # it.
+    needed_tools: List[str] = field(default_factory=list)
+
     # A closed-set social utterance and nothing else: "thanks", "شكرا".
     is_social: bool = False
     # Profile fields the message appears to disclose. Drives post-turn capture and
@@ -138,6 +151,7 @@ class RequestSignals:
             "request_about_child": self.about_child,
             "request_child_reference": self.child_reference,
             "request_child_question_kind": self.child_question_kind,
+            "request_needed_tools": list(self.needed_tools),
             "request_personal_data": list(self.personal_data),
             "request_candidate_sections": list(self.candidate_sections),
             "request_scope_options": list(self.scope_options),
@@ -391,6 +405,7 @@ class EnvelopeDetector:
             return None
 
         signals.personal_data = [str(item) for item in (result.get("personal_data") or [])]
+        self._read_needed_tools(result, signals, ctx.config)
         # Deliberately NOT text_to_score. With no resolver that falls back to gluing the
         # previous user turn onto this one — the module's own "blunt instrument" — and a
         # name from the turn before is exactly the carried-over guess the check exists to
@@ -428,6 +443,39 @@ class EnvelopeDetector:
             signals.scope = Scope.IN_DOMAIN
             signals.reasons.append("overridden: the message is about the caller's child")
         return signals
+
+    @staticmethod
+    def _read_needed_tools(result: dict, signals: RequestSignals, config) -> None:
+        """Take the classifier's tool selection, keeping only names the profile binds.
+
+        Filtered against `agent.tool_selection` rather than against the bound tool list,
+        and that is not the same set by accident: the catalogue is what the classifier
+        was SHOWN, so a name outside it was never on offer and is a hallucination however
+        plausible it looks. Checking against what the node could legitimately have said
+        is a tighter guard than checking against what the profile happens to bind.
+
+        Order is the catalogue's, not the model's. Two plans naming the same tools must
+        be the same plan, or an identical question produces a different `exposed_tools`
+        on every turn and nothing downstream can be compared or cached.
+
+        Silent on every failure — no catalogue, a non-list, an empty selection, names
+        nobody recognises — because every one of them means the same thing here: this
+        node has nothing to say about tools, so the planner falls back to what it did
+        before. Selection is an optimisation, and an optimisation may never be the reason
+        a capability goes unbound.
+        """
+        catalogue = dict(getattr(config, "tool_selection", None) or {})
+        if not catalogue:
+            return
+        named = result.get("needed_tools")
+        if not isinstance(named, (list, tuple)):
+            return
+        wanted = {str(item).strip() for item in named}
+        signals.needed_tools = [name for name in catalogue if name in wanted]
+        if signals.needed_tools:
+            signals.reasons.append(
+                f"classifier: needs {', '.join(signals.needed_tools)}"
+            )
 
     @staticmethod
     def _read_child(result: dict, signals: RequestSignals, *, classified_text: str = "") -> None:
@@ -538,6 +586,7 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
     profile = get_profile()
     personal_fields = list(getattr(config, "personal_data_fields", None) or [])
     child_context = bool(getattr(config, "child_context_enabled", False))
+    tool_catalogue = dict(getattr(config, "tool_selection", None) or {})
 
     class RequestEnvelope(BaseModel):
         """Every field is declared and every field is required.
@@ -556,6 +605,18 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
         personal_data: _List[str] = Field(
             default_factory=list,
             description="Field names from the supplied list that the message discloses",
+        )
+        # Declared unconditionally, like every other field here, because the schema is
+        # what a strict provider validates against and a schema that changes shape per
+        # deployment is a schema that gets cached wrong. It is only ever POPULATED on a
+        # deployment that ships a catalogue: with none, the prompt asks for nothing, the
+        # model returns the empty list, and `_read_needed_tools` returns immediately.
+        needed_tools: _List[str] = Field(
+            default_factory=list,
+            description=(
+                "Names from the supplied tool list that answering this message needs; "
+                "empty when no list was supplied or none of them apply"
+            ),
         )
         about_child: bool = Field(
             default=False,
@@ -588,6 +649,7 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
         history=_history_text(history, config),
         personal_fields=personal_fields,
         child_context=child_context,
+        tool_catalogue=tool_catalogue,
     )
     model = init_chat_model(
         model=getattr(config, "scope_summary_model", "") or os.getenv("FAST_MODEL"),

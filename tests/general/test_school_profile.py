@@ -191,7 +191,50 @@ class DeterministicToolSelectionTests(ProfileTestCase):
         because the two settings are otherwise unrelated and drift silently."""
         agent = load_profile("school").agent
         rounds = sum(agent.budget_for_tool(name) for name in agent.tools) + 1
-        self.assertGreaterEqual(agent.recursion_limit, rounds * 5)
+        # Read off the class rather than spelled out, so adding a middleware to
+        # `create_agent_for_request` cannot leave this test asserting the old node count
+        # while real turns die at the limit.
+        self.assertGreaterEqual(
+            agent.recursion_limit, rounds * type(agent)._STEPS_PER_LOOP
+        )
+
+    def test_it_lets_the_planner_dispatch_a_set_of_tools(self):
+        """The opt-in for the other half: narrowing handles a one-tool question, this
+        handles the `both` question narrowing deliberately leaves alone."""
+        self.assertTrue(load_profile("school").agent.parallel_tool_calls)
+
+    def test_no_other_shipped_profile_dispatches(self):
+        for name in available_profiles():
+            if name == "school":
+                continue
+            with self.subTest(profile=name):
+                self.assertFalse(load_profile(name).agent.parallel_tool_calls)
+
+    def test_every_tool_it_plans_arguments_for_is_a_tool_it_binds(self):
+        """A planned call for an unbound tool reaches the graph as a call for a tool that
+        does not exist, which the provider rejects for the whole turn."""
+        agent = load_profile("school").agent
+        for name in agent.planned_tool_arguments:
+            with self.subTest(tool=name):
+                self.assertIn(name, agent.tools)
+
+    def test_every_placeholder_it_uses_is_one_the_planner_can_resolve(self):
+        """An unknown `$name` silently drops its argument, so a typo here would degrade a
+        planned records call to a blank one and nothing would say so at startup."""
+        from backend.chat.turn_policy import PLAN_PLACEHOLDERS
+
+        agent = load_profile("school").agent
+        for tool_name, args in agent.planned_tool_arguments.items():
+            for key, value in args.items():
+                if str(value).startswith("$"):
+                    with self.subTest(tool=tool_name, argument=key):
+                        self.assertIn(value, PLAN_PLACEHOLDERS)
+
+    def test_it_describes_every_tool_it_binds_to_the_classifier(self):
+        """A tool missing from the catalogue can never be selected, so it would be
+        unreachable on any turn the classifier does name tools for."""
+        agent = load_profile("school").agent
+        self.assertEqual(sorted(agent.tool_selection), sorted(agent.tools))
 
     def test_it_asks_which_child_in_the_parents_own_language(self):
         """Emitted with no model call, so it cannot answer an Arabic question in English

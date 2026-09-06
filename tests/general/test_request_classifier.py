@@ -210,6 +210,7 @@ class PromptShapeTests(unittest.TestCase):
             history="User: درجات ابني علي\nAssistant: ...",
             personal_fields=profile.agent.personal_data_fields,
             child_context=True,
+            tool_catalogue=profile.agent.tool_selection,
         )
         context.update(overrides)
         return render("chat/request_envelope.j2", **context)

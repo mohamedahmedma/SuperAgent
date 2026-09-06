@@ -7,11 +7,18 @@
    each decision, because a classifier with weaker evidence is one more likely to
    guess.
 
-   THREE DECISIONS IN ONE CALL. Scope, disclosed profile fields, and whether the
-   message is about the caller's own child — and, when it is, what answering it would
-   have to read. Asking separately would triple the cost of the one call every turn
-   already pays, and the three share all of their context: the same message, the same
-   history, the same description of the deployment.
+   FOUR DECISIONS IN ONE CALL. Scope, disclosed profile fields, whether the message is
+   about the caller's own child — and, when it is, what answering it would have to read
+   — and finally which of the deployment's tools it needs. Asking separately would
+   multiply the cost of the one call every turn already pays, and all four share the
+   same context: the same message, the same history, the same description of the
+   deployment.
+
+   The tool section is the general form of the child-question one, and is rendered only
+   for a deployment that ships `agent.tool_selection`. Where both appear the tool list
+   wins, because it names tools directly instead of an enum something else has to map.
+   Its safe value is the EMPTY list, which means "not deciding" and binds everything —
+   see `_read_needed_tools` in backend/chat/signals.py.
 
    That last part rides along with the child decision rather than becoming a fourth
    call for the same reason: it is a refinement of an answer the model has already
@@ -152,6 +159,30 @@ Examples:
   "طيب وجدوله؟"                            -> records        (his own timetable)
 
 **When the two are close, answer `both`.** `both` looks in every place and costs one extra lookup nobody sees. A wrong single answer looks in one place, finds nothing there, and tells the parent no information exists — which is the failure this field was added to stop.
+{% endif %}
+{% if tool_catalogue %}
+
+## And — which of these would answering it need?
+
+This deployment can look things up in several places. Put the name of every one the
+answer would have to read into `needed_tools`, and leave out the rest.
+
+{% for name, purpose in tool_catalogue.items() %}
+  `{{ name }}` — {{ purpose }}
+{% endfor %}
+
+Three rules, and the third is the one that costs money when it is broken:
+
+  * Name a place only when the answer genuinely needs what is IN it. A question with
+    one part needs one; a question with two parts needs two.
+  * Name every place a multi-part question needs, in one answer. They are looked up at
+    the same time, so naming both costs no more than naming one — and naming only half
+    of a two-part question means the other half goes unanswered.
+  * **When you are not sure, name nothing at all.** An empty list is not a failure and
+    it is not "none of them": it means you are not deciding, and everything stays
+    available so the answering agent chooses for itself. That is the same outcome this
+    assistant had before you were asked, so it is always safe. A confident wrong list
+    is not — it takes the right place to look off the table entirely.
 {% endif %}
 {% if history %}
 

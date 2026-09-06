@@ -156,6 +156,7 @@ def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
         "child_id": plan.child_id,
         "child_label": plan.child_hint,
         "forced_tool": plan.forced_tool,
+        "planned_calls": plan.planned_calls,
     }
     try:
         ctx.note_turn_plan(plan.retrieval_sections, plan.scope_options, **hints)
@@ -180,8 +181,8 @@ def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
     # dropped, so the retry re-sends the argument that caused the TypeError and the
     # ladder walks all the way down handing over nothing at all.
     for dropped in (
-        "forced_tool", "child_label", "child_id", "child_year", "language",
-        "is_followup", "carried_constraints",
+        "planned_calls", "forced_tool", "child_label", "child_id", "child_year",
+        "language", "is_followup", "carried_constraints",
     ):
         hints.pop(dropped, None)
         try:
@@ -291,6 +292,15 @@ def _emit(ctx: Optional[ChatRequestContext], signals: RequestSignals, plan: Turn
             )
         if plan.short_circuit:
             ctx.emit_rag_step("🚪", "Answered without searching", "; ".join(plan.reasons)[:90])
+        elif plan.planned_calls:
+            # Ahead of the narrowing step below, because it is the more specific fact:
+            # every planned turn also narrowed, and "looking two things up at once" is
+            # what the person waiting can actually see happening.
+            ctx.emit_rag_step(
+                "⚡",
+                f"Looking up {len(plan.planned_calls)} things at once",
+                ", ".join(str(call.get("name") or "") for call in plan.planned_calls)[:90],
+            )
         elif plan.exposed_tools is not None:
             ctx.emit_rag_step(
                 "🎯", f"Narrowed to {len(plan.exposed_tools)} tool(s)", "; ".join(plan.reasons)[:90]

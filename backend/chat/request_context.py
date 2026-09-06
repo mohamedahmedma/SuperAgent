@@ -53,6 +53,7 @@ class ChatRequestContext:
     _short_circuit_status: Optional[str] = None
     _surfaced_asset_ids: list = field(default_factory=list)
     _duplicate_tool_calls: int = 0
+    _planned_dispatches: int = 0
     # `(tool, outcome)` per call this turn. See `note_tool_outcome`.
     _tool_outcomes: list = field(default_factory=list)
     # Retrieval results already produced this turn, keyed by normalised query. See
@@ -94,6 +95,10 @@ class ChatRequestContext:
     # to exactly one. Read by the middleware that sets `tool_choice` on the turn's first
     # model call; empty on every turn that did not narrow, which is most of them.
     forced_tool: str = ""
+    # Complete tool calls the planner decided on, for the dispatch middleware to run
+    # ahead of the model's first call. `[{"name": str, "args": dict}, ...]`, empty on
+    # every turn the planner did not plan a set — which is most of them.
+    planned_calls: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Settle the caller, and refuse a context whose identity contradicts itself.
@@ -173,6 +178,7 @@ class ChatRequestContext:
         child_id: str = "",
         child_label: str = "",
         forced_tool: str = "",
+        planned_calls=(),
     ) -> None:
         """Hand the planner's findings to the RAG graph.
 
@@ -208,6 +214,14 @@ class ChatRequestContext:
             self.planned_child_id = child_id if child_id and child_label else ""
             self.planned_child_label = child_label if child_id and child_label else ""
             self.forced_tool = (forced_tool or "").strip()
+            # Copied, not aliased, and DEEPLY — the arguments are a nested dict, so a
+            # shallow copy still shares them. The plan outlives this call and the
+            # middleware reads this list on another thread; sharing either level would let
+            # a later edit change what a running turn is about to dispatch.
+            self.planned_calls = [
+                {"name": call.get("name"), "args": dict(call.get("args") or {})}
+                for call in (planned_calls or [])
+            ]
 
     def emit_rag_step(
         self,
@@ -413,6 +427,23 @@ class ChatRequestContext:
     @property
     def duplicate_tool_calls(self) -> int:
         return self._duplicate_tool_calls
+
+    def note_planned_dispatch(self, count: int) -> None:
+        """Record that the planner ran `count` tools together rather than one at a time.
+
+        Diagnostic, and it is the number worth watching: it is how often the plan was
+        good enough to act on, which is the whole claim `parallel_tool_calls` makes. A
+        deployment where it stays at zero has turned the feature on and is paying for the
+        catalogue in every classifier call without getting anything back.
+        """
+        if count <= 0:
+            return
+        with self._lock:
+            self._planned_dispatches += int(count)
+
+    @property
+    def planned_dispatches(self) -> int:
+        return self._planned_dispatches
 
     def remembered_retrieval(self, key: str):
         """A retrieval already run for `key` this turn, or None."""

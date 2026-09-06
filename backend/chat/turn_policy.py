@@ -32,6 +32,7 @@ rung's failures can cost a refusal, and that is the one that read the question.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -40,6 +41,8 @@ from backend.text_matching import name_key
 from backend.chat.language import ARABIC, ENGLISH
 from backend.chat.signals import RequestSignals, Scope
 from backend.rag.evidence import Certainty
+
+logger = logging.getLogger(__name__)
 
 # Only a detector that read the question may end a turn. This floor is the whole
 # safety argument of this module; lowering it hands refusals to a dot product.
@@ -60,6 +63,19 @@ class TurnPlan:
     # call — see `_ForcePlannedTool` in backend/chat/runtime.py. Empty is the normal
     # case and means "offer, do not require".
     forced_tool: str = ""
+    # Tool calls the planner made ITSELF, to be dispatched before the model's first
+    # call rather than waited for. Each is `{"name": str, "args": dict}`.
+    #
+    # This is the difference between deciding what a turn needs and doing it. `forced_tool`
+    # above still leaves the model to compose the call and the graph to run it alone;
+    # these are complete calls, handed to the tool node together, which runs them
+    # concurrently. Empty is the normal case and means the agent loop behaves exactly as
+    # it always has.
+    #
+    # Never set unless `exposed_tools` names every tool in it — see `_plan_parallel_calls`.
+    # A planned call for an unbound tool would reach the graph as a call for a tool that
+    # does not exist.
+    planned_calls: List[Dict[str, Any]] = field(default_factory=list)
     # Sections to search first. A hint; never a filter.
     retrieval_sections: List[str] = field(default_factory=list)
     # The turn's subject in words that stand on their own, when a resolver produced
@@ -113,6 +129,10 @@ class TurnPlan:
             "turn_short_circuit": self.short_circuit,
             "turn_exposed_tools": list(self.exposed_tools) if self.exposed_tools is not None else None,
             "turn_forced_tool": self.forced_tool or None,
+            # The NAMES, never the arguments. This trace is persisted per message and
+            # streamed to the browser, and a planned call's arguments carry the child's
+            # name and the question itself.
+            "turn_planned_calls": [str(call.get("name") or "") for call in self.planned_calls],
             "turn_retrieval_sections": list(self.retrieval_sections),
             "turn_scope_options": list(self.scope_options),
             "turn_resolved_question": self.resolved_question or None,
@@ -166,6 +186,34 @@ KNOWLEDGE_TOOL = "search_knowledge_base"
 _TOOLS_FOR_KIND = {
     "records": (RECORDS_TOOL,),
     "school_matter": (KNOWLEDGE_TOOL,),
+}
+
+#: What `both` means once the planner can dispatch a SET rather than pick one.
+#:
+#: Kept out of `_TOOLS_FOR_KIND` because the two are read for different purposes and
+#: merging them would change what narrowing does. There, `both` must stay absent: binding
+#: every tool is not narrowing, and a `both` entry would make `_plan_tools` set
+#: `exposed_tools` to a list identical to the profile's own on every unnarrowed turn,
+#: which reads in a trace as a decision nobody made. Here it is a real answer — "this
+#: turn needs each of them" — and it is only consulted when `parallel_tool_calls` is on,
+#: which is the switch that makes needing two tools something the planner can act on.
+_TOOLS_FOR_BOTH = (KNOWLEDGE_TOOL, RECORDS_TOOL)
+
+#: What a `$placeholder` in `agent.planned_tool_arguments` may name, and where its value
+#: comes from on the plan.
+#:
+#: A closed set, and it has to be: that setting is data a domain owner edits, so the
+#: alternative is an expression language embedded in YAML — code that no test can see and
+#: no schema can validate. Everything here is something the planner has already worked
+#: out and is willing to stand behind; nothing reaches into the request context, so a
+#: planned call can never carry an identity the model was not supposed to see.
+PLAN_PLACEHOLDERS = {
+    "$question": lambda plan, question: question,
+    "$resolved_question": lambda plan, question: plan.resolved_question or question,
+    "$child_label": lambda plan, question: plan.child_hint,
+    "$child_id": lambda plan, question: plan.child_id,
+    "$child_year": lambda plan, question: plan.child_year,
+    "$language": lambda plan, question: plan.language,
 }
 
 
@@ -345,7 +393,18 @@ def _plan_child_choice(plan: TurnPlan, signals, copy_config) -> TurnPlan:
 
 
 def _plan_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> None:
-    """Bind the tool the turn needs, when something already knows which one that is.
+    """Bind the tools the turn needs, when something already knows which those are.
+
+    Three outcomes, and which one applies is decided by how many tools are needed rather
+    than by a separate switch:
+
+      * **None known** — bind everything. The default, and where every failure lands.
+      * **Exactly one** — bind it and require it. Binding removes the wrong choice;
+        requiring removes the remaining one, which is answering from memory.
+      * **More than one** — bind them and, where the profile has said what their calls
+        look like, WRITE those calls so the graph can run them together. `tool_choice`
+        names one function and cannot express "each of these", so a set can only be
+        required by dispatching it.
 
     ## Why this is not the mistake the module docstring forbids
 
@@ -372,14 +431,7 @@ def _plan_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> None:
     Off unless the profile asks for it, so every deployment that has not measured this
     keeps today's behaviour exactly.
     """
-    if not getattr(agent_config, "narrow_tools_to_the_turn", False):
-        return
-    # An open question about WHICH child is not a settled turn. The agent has to be able
-    # to ask, and if the parent's next message answers with a name the turn may still go
-    # either way — so it keeps everything.
-    if plan.child_options or not plan.child_hint:
-        return
-    wanted = _TOOLS_FOR_KIND.get(signals.child_question_kind)
+    wanted, why = _needed_tools(plan, signals, agent_config)
     if not wanted:
         return
     narrowed = _tools_for(agent_config, keep=wanted)
@@ -387,9 +439,7 @@ def _plan_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> None:
         # The profile does not bind the tool this kind of question needs. Say nothing
         # and change nothing: a plan naming a tool the profile refuses is a startup
         # error in `build_tools`, and an empty list would read as "bind no tools at all".
-        plan.reasons.append(
-            f"{signals.child_question_kind} question, but the profile binds no such tool"
-        )
+        plan.reasons.append(f"{why}, but the profile binds no such tool")
         return
     plan.exposed_tools = narrowed
     if len(narrowed) == 1:
@@ -398,10 +448,133 @@ def _plan_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> None:
         # memory without calling anything, which is the other half of the measured
         # failure and the half narrowing alone does not touch.
         plan.forced_tool = narrowed[0]
-    plan.reasons.append(
-        f"{signals.child_question_kind} question about one child — "
-        f"bound {', '.join(narrowed)} only"
-    )
+    else:
+        # Several tools, and nothing left to choose between them: the turn needs each.
+        # `tool_choice` cannot express that — it names one function — so the only way to
+        # require a SET is to write the calls and dispatch them, which is what this does.
+        _plan_parallel_calls(plan, narrowed, agent_config, signals.question)
+    plan.reasons.append(f"{why} — bound {', '.join(narrowed)} only")
+
+
+def _needed_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> tuple:
+    """Which tools this turn needs, and the phrase explaining why. `()` means everything.
+
+    Two sources, most specific first, and they are not alternatives so much as the same
+    question asked at two levels of generality:
+
+      1. **The classifier's own list.** A deployment shipping `agent.tool_selection` has
+         its tools described to the classifier, which names the ones this message needs.
+         This is the general answer and the only one that scales past two tools.
+      2. **`child_question_kind`.** The two-tool special case, measured on the school
+         deployment, gated exactly as it always was: on `narrow_tools_to_the_turn`, and
+         only once a child has been resolved against the school's own roster.
+
+    Empty from both means bind everything, which is the behaviour that existed before any
+    of this. Every failure lands there — no catalogue, an abstaining classifier, an
+    unresolved child, a kind outside the closed set — because narrowing is an
+    optimisation and an optimisation may never be the reason a capability is out of reach.
+    """
+    # 1. The classifier read the message against this deployment's own tool catalogue.
+    # Trusted without the child gate below, and deliberately: that gate exists because
+    # `child_question_kind` is only meaningful once a real child has been resolved, while
+    # this list is about the MESSAGE and is just as meaningful on a deployment that has
+    # no children at all.
+    if signals.needed_tools:
+        return tuple(signals.needed_tools), f"needs {', '.join(signals.needed_tools)}"
+
+    if not getattr(agent_config, "narrow_tools_to_the_turn", False):
+        return (), ""
+    # An open question about WHICH child is not a settled turn. The agent has to be able
+    # to ask, and if the parent's next message answers with a name the turn may still go
+    # either way — so it keeps everything.
+    if plan.child_options or not plan.child_hint:
+        return (), ""
+
+    kind = signals.child_question_kind
+    # 2a. `both` becomes a real answer only where the planner can dispatch a set. Without
+    # that it is the abstention it has always been, and binding both tools while calling
+    # it a decision would only make the trace lie.
+    if kind == "both":
+        if not getattr(agent_config, "parallel_tool_calls", False):
+            return (), ""
+        return _TOOLS_FOR_BOTH, "a question about one child needing each of them"
+    # 2b. One direction, chosen by a field whose every failure mode is `both`.
+    wanted = _TOOLS_FOR_KIND.get(kind)
+    if not wanted:
+        return (), ""
+    return wanted, f"{kind} question about one child"
+
+
+def _plan_parallel_calls(
+    plan: TurnPlan, tools: List[str], agent_config, question: str
+) -> None:
+    """Write the calls for `tools`, so they can be dispatched together instead of found.
+
+    Nothing here is a guess about what the tools will RETURN — it is only a statement of
+    what to ask them, built from things the planner already settled and the profile
+    already declared. The whole judgement was made upstream, in deciding that this turn
+    needs these tools.
+
+    A tool is dropped from the plan, rather than called blank, when the profile declares
+    no arguments for it or when every argument it declared resolved to nothing. Both mean
+    the same thing: this deployment has not said what a planned call to that tool looks
+    like, so the model should make it the ordinary way. That is what lets a deployment
+    adopt this one tool at a time — an undeclared tool stays bound and behaves exactly as
+    it did before.
+
+    Silent no-op unless the profile asked for it, and a no-op again if fewer than two
+    calls survive: dispatching a single call ahead of the model buys none of the
+    concurrency this exists for, while still spending the planner's credibility on it.
+    """
+    if not getattr(agent_config, "parallel_tool_calls", False):
+        return
+    templates = dict(getattr(agent_config, "planned_tool_arguments", None) or {})
+    if not templates:
+        return
+
+    calls = []
+    for name in tools:
+        declared = templates.get(name)
+        if not declared:
+            continue
+        args = {}
+        for key, value in declared.items():
+            resolved = _resolve_argument(value, plan, question)
+            # An empty argument is dropped rather than sent. A search for "" is a wasted
+            # retrieval, and an empty student name means "the parent did not say which",
+            # which the records tool already handles better from its own default than
+            # from an explicit blank.
+            if resolved:
+                args[key] = resolved
+        if args:
+            calls.append({"name": name, "args": args})
+
+    if len(calls) < 2:
+        return
+    plan.planned_calls = calls
+    plan.reasons.append(f"dispatching {len(calls)} tools together")
+
+
+def _resolve_argument(value: str, plan: TurnPlan, question: str) -> str:
+    """One declared argument, with a `$placeholder` swapped for what the planner knows.
+
+    Whole-value only — `"$resolved_question"` is a placeholder, `"fees for $child_label"`
+    is the literal string it looks like. Substring interpolation would make this a
+    template language, and the argument against that is in `PLAN_PLACEHOLDERS`.
+
+    An unrecognised `$name` resolves to nothing, which drops the argument. That is the
+    right way for a typo in a profile to fail: quietly, into the behaviour that existed
+    before, rather than by sending the literal text `$child_labell` to a tool as a
+    child's name.
+    """
+    text = str(value or "")
+    if not text.startswith("$"):
+        return text
+    reader = PLAN_PLACEHOLDERS.get(text)
+    if reader is None:
+        logger.warning("unknown placeholder %r in planned_tool_arguments", text)
+        return ""
+    return str(reader(plan, question) or "")
 
 
 def _plan_social(signals, plan: TurnPlan, agent_config, copy_config) -> TurnPlan:
