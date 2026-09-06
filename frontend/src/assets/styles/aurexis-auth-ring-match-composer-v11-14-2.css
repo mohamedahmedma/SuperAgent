@@ -1,0 +1,134 @@
+/*
+ AUREXIS Auth Ring Match Composer v11.14.2
+
+ Exact visual target sampled from the provided composer screenshot:
+ outer composer border ≈ rgb(25,129,157) = #19819D
+
+ Applies to BOTH Username and Password on desktop + mobile.
+ Removes legacy green/mint focus ring and replaces it with the same
+ restrained cyan-blue border treatment used by the chat composer.
+*/
+
+:root {
+  --aurexis-composer-border: #19819d;
+  --aurexis-composer-border-soft: rgba(25, 129, 157, .16);
+}
+
+/* Credential inputs themselves */
+.auth-panel input:is(
+  [type="text"],
+  [type="email"],
+  [type="password"],
+  [name="username"],
+  [name="password"]
+) {
+  outline: none !important;
+  accent-color: var(--aurexis-composer-border) !important;
+}
+
+.auth-panel input:is(
+  [type="text"],
+  [type="email"],
+  [type="password"],
+  [name="username"],
+  [name="password"]
+):focus,
+.auth-panel input:is(
+  [type="text"],
+  [type="email"],
+  [type="password"],
+  [name="username"],
+  [name="password"]
+):focus-visible,
+.auth-panel input:is(
+  [type="text"],
+  [type="email"],
+  [type="password"],
+  [name="username"],
+  [name="password"]
+):valid:focus,
+.auth-panel input:is(
+  [type="text"],
+  [type="email"],
+  [type="password"],
+  [name="username"],
+  [name="password"]
+):user-valid:focus {
+  outline: none !important;
+  outline-color: transparent !important;
+  border-color: var(--aurexis-composer-border) !important;
+  box-shadow: none !important;
+  caret-color: #20bddc !important;
+}
+
+/*
+ Target the actual rounded field shell.
+ This selector intentionally targets the immediate parent of credential inputs,
+ so it works even if local class names differ.
+*/
+.auth-panel *:has(> input:is(
+  [type="text"],
+  [type="email"],
+  [type="password"],
+  [name="username"],
+  [name="password"]
+)):focus-within {
+  border-color: var(--aurexis-composer-border) !important;
+  outline: 1px solid var(--aurexis-composer-border) !important;
+  outline-offset: 0 !important;
+  box-shadow: 0 0 0 1px var(--aurexis-composer-border-soft) !important;
+}
+
+/* Known wrappers: extra specificity against old green rules. */
+.auth-panel :is(
+  .input-wrapper,
+  .input-container,
+  .input-field,
+  .field-control,
+  .form-control,
+  .password-wrapper,
+  .password-field,
+  .credential-input,
+  .credential-field
+):has(input):focus-within {
+  border-color: var(--aurexis-composer-border) !important;
+  outline: 1px solid var(--aurexis-composer-border) !important;
+  outline-offset: 0 !important;
+  box-shadow: 0 0 0 1px var(--aurexis-composer-border-soft) !important;
+}
+
+/* Explicitly neutralize common green success/focus variables if inherited locally. */
+.auth-panel *:has(> input[name="username"]):focus-within,
+.auth-panel *:has(> input[name="password"]):focus-within {
+  --success: var(--aurexis-composer-border) !important;
+  --success-color: var(--aurexis-composer-border) !important;
+  --focus-color: var(--aurexis-composer-border) !important;
+  --ring-color: var(--aurexis-composer-border) !important;
+}
+
+/* Identical behavior on phones. */
+@media (max-width: 900px) {
+  .auth-panel *:has(> input:is(
+    [type="text"],
+    [type="email"],
+    [type="password"],
+    [name="username"],
+    [name="password"]
+  )):focus-within,
+  .auth-panel :is(
+    .input-wrapper,
+    .input-container,
+    .input-field,
+    .field-control,
+    .form-control,
+    .password-wrapper,
+    .password-field,
+    .credential-input,
+    .credential-field
+  ):has(input):focus-within {
+    border-color: var(--aurexis-composer-border) !important;
+    outline: 1px solid var(--aurexis-composer-border) !important;
+    outline-offset: 0 !important;
+    box-shadow: 0 0 0 1px var(--aurexis-composer-border-soft) !important;
+  }
+}
