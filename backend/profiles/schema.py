@@ -190,16 +190,18 @@ class AgentConfig(_Section):
 
     tools: List[str] = Field(default_factory=lambda: ["search_knowledge_base"])
 
-    # 48 and not the 8 this shipped with: every tool call costs a whole pass of the agent
+    # 64 and not the 8 this shipped with: every tool call costs a whole pass of the agent
     # loop, and the budgets below are allowed to buy several. The default has to be able
     # to spend the default budgets or a bare `AgentConfig` fails its own validator.
     #
-    # Raised from 32 when the planner's dispatch middleware was added. That is a sixth
-    # graph node in every pass of the loop (see `_STEPS_PER_LOOP`), so a profile sitting
-    # just inside the old ceiling — school needed 30 of 32 — would otherwise have started
-    # dying at the limit HOLDING A FINISHED ANSWER. A ceiling is not a cost: a turn that
-    # ends normally never reaches it, so headroom here is free and running out is not.
-    recursion_limit: int = 48
+    # Raised from 32 by two changes together. The planner's dispatch middleware is a sixth
+    # graph node in every pass (see `_STEPS_PER_LOOP`), and splitting the records tool
+    # into one per record gave the school profile three budgets where it had one — nine
+    # passes at six steps, so 54. A profile sitting inside the old ceiling would otherwise
+    # have started dying at the limit HOLDING A FINISHED ANSWER. A ceiling is not a cost:
+    # a turn that ends normally never reaches it, so headroom here is free and running
+    # out is not.
+    recursion_limit: int = 64
     max_knowledge_calls_per_turn: int = 1
 
     # How many times each tool may be called in one turn, enforced in the GRAPH rather

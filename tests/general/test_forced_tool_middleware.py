@@ -44,7 +44,7 @@ from pydantic import Field
 from backend.chat import runtime
 from backend.profiles import load_profile, registry, set_profile
 
-RECORDS_TOOL = "get_student_records"
+RECORDS_TOOL = "get_student_grades"
 KNOWLEDGE_TOOL = "search_knowledge_base"
 
 
@@ -344,13 +344,13 @@ class TheValueSentIsABareName(unittest.TestCase):
         and the bare name would reach the wire unconverted."""
         from langchain_openai import ChatOpenAI
 
-        @tool
-        def get_student_records(student_name: str) -> str:
-            """The child's record."""
+        @tool(RECORDS_TOOL)
+        def get_student_grades(student_name: str) -> str:
+            """The child's marks."""
             return "{}"
 
         bound = ChatOpenAI(model="gpt-4o-mini", api_key="not-a-real-key").bind_tools(
-            [get_student_records], tool_choice=_chosen(tools=(RECORDS_TOOL,))
+            [get_student_grades], tool_choice=_chosen(tools=(RECORDS_TOOL,))
         )
         self.assertEqual(
             bound.kwargs["tool_choice"],
@@ -382,7 +382,7 @@ class ComposedWithTheBudget(ProfileScopedTest):
         self.assertEqual(seen["tool_choice"], RECORDS_TOOL)
 
     def test_the_budget_withholding_the_planned_tool_never_leaves_it_forced(self):
-        """`get_student_records` has a budget of three in the school profile; spend it
+        """the grades tool has a budget of two in the school profile; spend it
         and the tool is withheld. Whatever the reason the forcing stands down — spent
         budget, or simply not being the first call any more — the outcome that matters
         is that nothing requires a tool the request no longer offers."""
@@ -421,9 +421,9 @@ class ComposedWithTheBudget(ProfileScopedTest):
 # --------------------------------------------------------------------------------------
 
 
-@tool
-def get_student_records(student_name: str) -> str:
-    """Read a child's record."""
+@tool(RECORDS_TOOL)
+def get_student_grades(student_name: str) -> str:
+    """Read a child's marks."""
     return "{}"
 
 
@@ -442,7 +442,7 @@ class _RecordingModel(GenericFakeChatModel):
 
 
 def _agent_with(middleware, model):
-    return create_agent(model=model, tools=[get_student_records], middleware=[middleware])
+    return create_agent(model=model, tools=[get_student_grades], middleware=[middleware])
 
 
 def _one_question():

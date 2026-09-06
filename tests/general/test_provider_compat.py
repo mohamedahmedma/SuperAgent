@@ -40,7 +40,7 @@ def _retrieved_twice():
     """Two rounds, which is what a question about fees AND grades produces."""
     return _retrieved_once() + [
         AIMessage(content="We need grades too.", tool_calls=[
-            {"name": "get_student_records", "args": {"student_name": "فاطمة"}, "id": "c2"}]),
+            {"name": "get_student_grades", "args": {"student_name": "فاطمة"}, "id": "c2"}]),
         ToolMessage(content=GRADES, tool_call_id="c2"),
     ]
 
@@ -112,7 +112,7 @@ class TheFoldRemovesIt(unittest.TestCase):
             HumanMessage(content="مصاريف ودرجات؟"),
             AIMessage(content="", tool_calls=[
                 {"name": "search_knowledge_base", "args": {}, "id": "c1"},
-                {"name": "get_student_records", "args": {}, "id": "c2"}]),
+                {"name": "get_student_grades", "args": {}, "id": "c2"}]),
             ToolMessage(content=FEES, tool_call_id="c1"),
             ToolMessage(content=GRADES, tool_call_id="c2"),
         ]

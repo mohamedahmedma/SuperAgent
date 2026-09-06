@@ -21,7 +21,7 @@ AHMED = ChildOption(student_id="S-2", label="أحمد حسن", gender="male")
 
 
 class _Agent:
-    tools = ["search_knowledge_base", "get_student_records"]
+    tools = ["search_knowledge_base", "get_student_grades"]
     social_phrases = []
     social_reply_mode = "model"
 

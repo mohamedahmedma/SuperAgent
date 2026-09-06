@@ -172,32 +172,33 @@ def localized(copy, language: str) -> str:
     return ""
 
 
-#: The tool that reads one child's own record, and the one that reads the school's
+#: The tools that read one child's own record, and the one that reads the school's
 #: material. Named here rather than imported from `backend.tools`, which reaches back
 #: into the request context: this module is pure by design and a policy layer that
 #: could not be imported without the tool layer would be a circular import waiting for
 #: the first person to unit-test a plan. `AgentConfig` spells `search_knowledge_base`
 #: out for the same reason, and says so.
-RECORDS_TOOL = "get_student_records"
+#:
+#: These must stay in step with `backend.tools.RECORDS_TOOLS`, which is asserted in
+#: tests/general/test_records_tool.py — two spellings of one list is the price of the
+#: import boundary, and the test is what stops them drifting.
+GRADES_TOOL = "get_student_grades"
+SUBJECT_TOOL = "get_subject_grades"
+ATTENDANCE_TOOL = "get_student_attendance"
+RECORDS_TOOLS = (GRADES_TOOL, SUBJECT_TOOL, ATTENDANCE_TOOL)
 KNOWLEDGE_TOOL = "search_knowledge_base"
 
-#: Which tools each kind of child question needs. `both` is absent on purpose — it means
-#: "narrow nothing", which is `exposed_tools = None`, not a list.
+#: Which FAMILY of tools each kind of child question needs. `both` is absent on purpose:
+#: it means "narrow nothing", which is `exposed_tools = None`, not a list.
+#:
+#: A family, not a tool. `records` names all three record tools because the classifier's
+#: enum cannot tell marks from absences — that resolution belongs to `needed_tools`. So
+#: this map NARROWS (bind these, let the model pick among them) and never PLANS, which
+#: is the line `_plan_tools` draws below.
 _TOOLS_FOR_KIND = {
-    "records": (RECORDS_TOOL,),
+    "records": RECORDS_TOOLS,
     "school_matter": (KNOWLEDGE_TOOL,),
 }
-
-#: What `both` means once the planner can dispatch a SET rather than pick one.
-#:
-#: Kept out of `_TOOLS_FOR_KIND` because the two are read for different purposes and
-#: merging them would change what narrowing does. There, `both` must stay absent: binding
-#: every tool is not narrowing, and a `both` entry would make `_plan_tools` set
-#: `exposed_tools` to a list identical to the profile's own on every unnarrowed turn,
-#: which reads in a trace as a decision nobody made. Here it is a real answer — "this
-#: turn needs each of them" — and it is only consulted when `parallel_tool_calls` is on,
-#: which is the switch that makes needing two tools something the planner can act on.
-_TOOLS_FOR_BOTH = (KNOWLEDGE_TOOL, RECORDS_TOOL)
 
 #: What a `$placeholder` in `agent.planned_tool_arguments` may name, and where its value
 #: comes from on the plan.
@@ -431,7 +432,7 @@ def _plan_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> None:
     Off unless the profile asks for it, so every deployment that has not measured this
     keeps today's behaviour exactly.
     """
-    wanted, why = _needed_tools(plan, signals, agent_config)
+    wanted, why, plannable = _needed_tools(plan, signals, agent_config)
     if not wanted:
         return
     narrowed = _tools_for(agent_config, keep=wanted)
@@ -448,8 +449,8 @@ def _plan_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> None:
         # memory without calling anything, which is the other half of the measured
         # failure and the half narrowing alone does not touch.
         plan.forced_tool = narrowed[0]
-    else:
-        # Several tools, and nothing left to choose between them: the turn needs each.
+    elif plannable:
+        # Several tools, and something named each of them: the turn needs them all.
         # `tool_choice` cannot express that — it names one function — so the only way to
         # require a SET is to write the calls and dispatch them, which is what this does.
         _plan_parallel_calls(plan, narrowed, agent_config, signals.question)
@@ -457,22 +458,30 @@ def _plan_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> None:
 
 
 def _needed_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> tuple:
-    """Which tools this turn needs, and the phrase explaining why. `()` means everything.
+    """Which tools this turn needs. Returns `(tools, why, plannable)`; `()` is everything.
 
-    Two sources, most specific first, and they are not alternatives so much as the same
-    question asked at two levels of generality:
+    ## Narrowing and planning are different claims
 
-      1. **The classifier's own list.** A deployment shipping `agent.tool_selection` has
-         its tools described to the classifier, which names the ones this message needs.
-         This is the general answer and the only one that scales past two tools.
-      2. **`child_question_kind`.** The two-tool special case, measured on the school
-         deployment, gated exactly as it always was: on `narrow_tools_to_the_turn`, and
-         only once a child has been resolved against the school's own roster.
+    `plannable` is the whole reason this returns three things. Both sources below say
+    which tools a turn needs, but they do not say it with the same confidence, and the
+    difference decides whether the planner may CALL them or only BIND them:
 
-    Empty from both means bind everything, which is the behaviour that existed before any
-    of this. Every failure lands there — no catalogue, an abstaining classifier, an
-    unresolved child, a kind outside the closed set — because narrowing is an
-    optimisation and an optimisation may never be the reason a capability is out of reach.
+      1. **The classifier's own list** (`needed_tools`, from `agent.tool_selection`).
+         Tool by tool, by name, having read the message against a description of each.
+         That is specific enough to act on, so it is `plannable` — every tool in it is
+         one the turn is asserted to need, and dispatching them together is exactly
+         what the assertion means.
+
+      2. **`child_question_kind`.** A three-valued enum over two FAMILIES. `records`
+         names all three record tools because the enum cannot tell marks from absences
+         — so it is a statement about where to look, not about what to call. Binding
+         those three and letting the model choose is right; dispatching all three would
+         read a child's attendance because they asked about maths.
+
+    Empty means bind everything, and every failure lands there: no catalogue, an
+    abstaining classifier, an unresolved child, a kind outside the closed set. Narrowing
+    is an optimisation, and an optimisation may never be the reason a capability is out
+    of reach.
     """
     # 1. The classifier read the message against this deployment's own tool catalogue.
     # Trusted without the child gate below, and deliberately: that gate exists because
@@ -480,29 +489,24 @@ def _needed_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> tupl
     # this list is about the MESSAGE and is just as meaningful on a deployment that has
     # no children at all.
     if signals.needed_tools:
-        return tuple(signals.needed_tools), f"needs {', '.join(signals.needed_tools)}"
+        named = tuple(signals.needed_tools)
+        return named, f"needs {', '.join(named)}", True
 
     if not getattr(agent_config, "narrow_tools_to_the_turn", False):
-        return (), ""
+        return (), "", False
     # An open question about WHICH child is not a settled turn. The agent has to be able
     # to ask, and if the parent's next message answers with a name the turn may still go
     # either way — so it keeps everything.
     if plan.child_options or not plan.child_hint:
-        return (), ""
+        return (), "", False
 
+    # 2. One family, chosen by a field whose every failure mode is `both` — which is
+    # absent from the map, so it narrows nothing.
     kind = signals.child_question_kind
-    # 2a. `both` becomes a real answer only where the planner can dispatch a set. Without
-    # that it is the abstention it has always been, and binding both tools while calling
-    # it a decision would only make the trace lie.
-    if kind == "both":
-        if not getattr(agent_config, "parallel_tool_calls", False):
-            return (), ""
-        return _TOOLS_FOR_BOTH, "a question about one child needing each of them"
-    # 2b. One direction, chosen by a field whose every failure mode is `both`.
     wanted = _TOOLS_FOR_KIND.get(kind)
     if not wanted:
-        return (), ""
-    return wanted, f"{kind} question about one child"
+        return (), "", False
+    return wanted, f"{kind} question about one child", False
 
 
 def _plan_parallel_calls(

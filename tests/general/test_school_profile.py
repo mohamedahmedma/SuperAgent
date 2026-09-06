@@ -24,7 +24,7 @@ from backend.profiles.registry import (
 )
 from backend.tools import TOOL_BUILDERS, build_tools
 
-RECORDS_TOOL = "get_student_records"
+RECORDS_TOOL = "get_student_grades"
 
 
 class ProfileTestCase(unittest.TestCase):
@@ -130,7 +130,7 @@ class BindingGrantsNothingTests(ProfileTestCase):
 
     def test_a_non_parent_session_is_refused_even_with_the_tool_bound(self):
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        result = self._records_tool(ctx).invoke({"record_type": "grades"})
+        result = self._records_tool(ctx).invoke({})
 
         self.assertIn("NOT_A_PARENT_SESSION", result)
 
@@ -141,7 +141,7 @@ class BindingGrantsNothingTests(ProfileTestCase):
             session_id="s",
             caller=CallerIdentity(user_id="u", guardian_id="G-1", guardian_token=""),
         )
-        result = self._records_tool(ctx).invoke({"record_type": "grades"})
+        result = self._records_tool(ctx).invoke({})
 
         self.assertIn("NOT_A_PARENT_SESSION", result)
 

@@ -235,14 +235,48 @@ class PromptShapeTests(unittest.TestCase):
         here is how an assistant starts refusing valid questions."""
         self.assertIn("term dates", self._render().lower())
 
-    def test_both_languages_are_shown_in_the_examples(self):
+    def test_both_languages_are_shown_in_the_reference_glosses(self):
+        """The `child_reference` enum lists the possessive forms it separates. Those are
+        vocabulary, not examples: a bare possessive is not a message anyone can echo."""
         rendered = self._render()
         self.assertIn("ابني", rendered)
         self.assertIn("my son", rendered)
 
-    def test_the_enclitic_possessive_case_is_taught_explicitly(self):
-        """The form requirement 4 takes in Arabic, and the one no word list can reach."""
-        self.assertIn("طيب وجدوله؟", self._render())
+    def test_the_enclitic_possessive_case_is_taught_as_a_rule(self):
+        """The form decision 3 takes in Arabic, and the one no word list can reach. Stated
+        as a property of the language rather than shown as a specimen message."""
+        rendered = self._render(question="x", history="")
+        self.assertIn("possessive attaches to the end of the word", rendered)
+
+    def test_the_prompt_carries_no_worked_examples(self):
+        """A hard constraint, not a style rule — see this template's own header.
+
+        A specimen message is indistinguishable in kind from the message under THE
+        MESSAGE, and this node has already been measured returning a child's name for a
+        message that contained none. Every decision here is a rule, a boundary or a cost
+        asymmetry; anything shaped like `"a message" -> a verdict` is the shape that
+        leaks, so it fails here rather than in production.
+        """
+        rendered = self._render(question="x", history="")
+        self.assertNotIn("Examples:", rendered)
+        self.assertNotIn("For example", rendered)
+        # The arrow form the removed blocks used, and the one a future edit would reach
+        # for. Checked per line so prose containing an arrow is not a false positive.
+        offenders = [
+            line for line in rendered.splitlines()
+            if "->" in line and '"' in line.split("->")[0]
+        ]
+        self.assertEqual([], offenders)
+
+    def test_the_tool_catalogue_states_subject_matter_and_nothing_else(self):
+        """Each line is read by a node that must not act on the message. A line telling
+        it to CALL something is an instruction aimed at the wrong reader."""
+        rendered = self._render()
+        for line in load_profile("school").agent.tool_selection.values():
+            with self.subTest(line=line[:40]):
+                self.assertNotIn("call ", line.lower())
+                self.assertNotIn("use this", line.lower())
+        self.assertIn("fees and", rendered)
 
     def test_a_persona_containing_jinja_is_data_not_template(self):
         rendered = self._render(persona="We are {{ evil }} school")

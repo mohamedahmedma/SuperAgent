@@ -1,6 +1,6 @@
 # School assistant — answers parents about the school, and about their own child.
 #
-# The only profile that binds `get_student_records`, and deliberately so. Every bound
+# The only profile that binds the student-record tools, and deliberately so. Every bound
 # tool ships its name, description and argument schema to the model on every single
 # call — that is where the cost sits, not in the system prompt, which varies only by
 # whether any bound tool is grounded. Adding student records to `base` would bill every
@@ -33,13 +33,20 @@ agent:
   # Lists replace rather than merge, so this list is the whole set, not an addition
   # to base's.
   #
-  # `get_student_records` covers grades, subject breakdowns and attendance in one tool
-  # rather than three. The model chooses between them with a `record_type` argument, so
-  # the prompt carries one tool description instead of three near-identical ones, and a
-  # parent asking about two children in one turn stays inside a single budget.
+  # ONE TOOL PER RECORD, not one tool with a `record_type` argument. The planner selects
+  # tools by NAME, so a capability reachable only through an argument is one the planner
+  # cannot ask for — it had to guess `grades` and let the model spend a round trip
+  # correcting it. Split, a question about absences AND marks dispatches both at once,
+  # which the merged shape could not express at all.
+  #
+  # The cost is three tool schemas on the wire every turn instead of one. Paid knowingly:
+  # the round trip it removes is worth more than the schemas it adds, and the audited-read
+  # ceiling is shared across the three, so splitting did not triple it.
   tools:
     - search_knowledge_base
-    - get_student_records
+    - get_student_grades
+    - get_subject_grades
+    - get_student_attendance
 
   # PROMPT TEXT LIVES IN prompts/templates/packs/school/, not here.
   #
@@ -194,13 +201,17 @@ agent:
   # What each tool may be called in one turn, enforced by withholding the tool from the
   # request rather than refusing the call once it arrives. `search_knowledge_base` is
   # deliberately not listed here: it takes the number above, so retrieval keeps one
-  # budget rather than two that can drift apart. `get_student_records` keeps the higher
-  # ceiling it already had, because a parent asking about two children is a legitimate
-  # three-call sequence — list the children, then read each one. Three and not the four
-  # the tool itself allows: every call costs a pass of the agent loop, and the fourth
-  # pushed the turn past the step limit on a question that otherwise answered fine.
+  # budget rather than two that can drift apart.
+  #
+  # Two per record tool, because a parent asking about two children is a legitimate
+  # sequence — read one, then the other. These are GRAPH budgets, deciding what stays on
+  # offer; the audited-read ceiling that actually protects the facade is
+  # `RECORDS_MAX_CALLS_PER_TURN`, which all three tools share, so a number raised here
+  # cannot widen how much of a minor's record one turn may read.
   tool_call_budgets:
-    get_student_records: 3
+    get_student_grades: 2
+    get_subject_grades: 2
+    get_student_attendance: 2
   default_tool_call_budget: 1
 
   # Bind the one tool the question needs, when the planner already knows which. This
@@ -216,12 +227,12 @@ agent:
   # classifier field and not a keyword rule.
   narrow_tools_to_the_turn: true
 
-  # When the turn needs BOTH tools, dispatch them together instead of letting the model
-  # find them one at a time.
+  # When the classifier names more than one tool, dispatch them together instead of
+  # letting the model discover them one at a time.
   #
-  # `narrow_tools_to_the_turn` above already handles the one-tool case; this handles the
-  # case it deliberately leaves alone. «درجات ليلى كام والمصاريف كام؟» is classified
-  # `both`, and until now that meant: bind everything, let the model search, wait, read,
+  # `narrow_tools_to_the_turn` above narrows to a FAMILY and stops; this acts on the
+  # tool-by-tool answer `tool_selection` produces. «درجات ليلى كام والمصاريف كام؟» is classified
+  # a two-part question used to mean: bind everything, let the model search, wait, read,
   # ask for the records, wait, read, answer — four model round-trips with the two lookups
   # strictly one after the other. Planned, it is one round-trip with both running at once.
   parallel_tool_calls: true
@@ -229,35 +240,49 @@ agent:
   # What a planned call looks like for each tool. A tool missing from here is never
   # pre-dispatched; it stays bound and the model calls it the ordinary way.
   #
-  # `record_type: grades` is a deliberate default, not a guess dressed up as one. A `both`
-  # question is overwhelmingly "his marks, and something about the school", and the model
-  # keeps two of its three records calls to correct it — «كم يوم غاب ابني والمصاريف كام؟»
-  # gets grades it did not want, sees that, and calls again with `attendance`. That costs
-  # one extra round-trip on the minority shape and saves two on the common one.
+  # There is no `record_type` to fill in any more, and that is the point of the split
+  # above: WHICH record to read is now the tool's name, which the classifier selects,
+  # rather than an argument the planner had to guess and the model had to correct.
+  #
+  # `get_subject_grades` is absent on purpose. Its `subject` argument comes from the
+  # message and nothing in the plan holds it, so a planned call would have to invent one.
+  # An undeclared tool stays bound and the model calls it in the ordinary way, which is
+  # the right outcome for the one record tool whose argument is genuinely the model's to
+  # supply — and the tool answers an unmatched subject with the subjects the child
+  # actually takes, so a wrong guess there costs nothing.
   planned_tool_arguments:
     search_knowledge_base:
       query: "$resolved_question"
-    get_student_records:
-      record_type: "grades"
-      # The label the ROSTER matched, never a name the model transcribed. The records
-      # tool re-resolves it against the same roster, so a planned call names the same
-      # child the prompt does.
+    get_student_grades:
+      # The label the ROSTER matched, never a name the model transcribed. The tool
+      # re-resolves it against the same roster, so a planned call names the same child
+      # the prompt does.
+      student_name: "$child_label"
+    get_student_attendance:
       student_name: "$child_label"
 
-  # What each tool is for, for the classifier to choose between — this is what makes
-  # selection work past the two-tool case. Written for a node that judges a message it
-  # must not act on, so it states subject matter rather than telling anyone to call
-  # anything; the tools' own descriptions do that job for the agent, and they are tuned
-  # against a different failure.
+  # What each tool is for, for the classifier to choose between. This is what makes
+  # selection work past the two-tool case, and it is now also what decides WHICH record
+  # is read — so a new capability is a tool plus a line here, and nothing else.
+  #
+  # Written for a node that judges a message it must not act on, so each line states
+  # SUBJECT MATTER and nothing else: no instruction to call anything, and no worked
+  # example. An example here is a sentence the classifier can mistake for the message it
+  # was given — this deployment has already had model-facing example text reproduced
+  # verbatim as an answer and as a search query.
   tool_selection:
     search_knowledge_base: >-
-      The school's own published material: fees and instalments, term dates and holidays,
-      admissions, uniform, books, transport and bus routes, timetables, attendance rules,
-      exam schedules, curriculum, trips, medical policy, contact details.
-    get_student_records: >-
-      One particular child's own record, held by the school and about nobody else: their
-      marks in a subject, their results this term, their attendance and absences, their
-      report card.
+      The school's own published material, the same for every family: fees and
+      instalments, term dates and holidays, admissions, uniform, books, transport and bus
+      routes, the school day, attendance rules, exam schedules, curriculum, trips,
+      medical policy, contact details.
+    get_student_grades: >-
+      One child's own marks across every subject this term — how they are doing, their
+      results, their report card.
+    get_subject_grades: >-
+      One child's own marks in a single named subject, assignment by assignment.
+    get_student_attendance: >-
+      One child's own attendance: the days they were present, absent or late.
 
   # A fee, an instalment, a deadline — the figures in this corpus are what a parent acts
   # on, so a figure that is in no retrieved chunk must not be served. Enforced rather

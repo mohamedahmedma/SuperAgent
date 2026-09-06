@@ -43,7 +43,7 @@ class _Tool:
         self.name = name
 
 
-def _offered(state, tools=("search_knowledge_base", "get_student_records")):
+def _offered(state, tools=("search_knowledge_base", "get_student_grades")):
     """What `wrap_model_call` lets through, given what the turn has already spent."""
     middleware = runtime._spend_tool_budgets(ctx=None)
     seen = {}
@@ -80,11 +80,14 @@ class TheBudgetComesFromOnePlacePerTool(ProfileScopedTest):
         disagree the lower one refuses, which is the failure this exists to prevent."""
         self.assertEqual(runtime.budget_for("search_knowledge_base"), 2)
 
-    def test_records_keeps_the_higher_ceiling_it_already_had(self):
-        """Two children is a legitimate three-call sequence: list them, then read each.
-        Three and not the four the tool itself allows — the fourth pass pushed a turn
-        past the step limit on a question that otherwise answered fine."""
-        self.assertEqual(runtime.budget_for("get_student_records"), 3)
+    def test_each_record_tool_keeps_its_own_ceiling(self):
+        """Two children is a legitimate two-call sequence per record: read one, then the
+        other. Split from one shared budget of three when the tool was split, so the
+        audited-read ceiling that protects the facade is `RECORDS_MAX_CALLS_PER_TURN`,
+        which all three still share."""
+        for name in ("get_student_grades", "get_subject_grades", "get_student_attendance"):
+            with self.subTest(tool=name):
+                self.assertEqual(runtime.budget_for(name), 2)
 
     def test_anything_unlisted_may_be_called_once(self):
         self.assertEqual(runtime.budget_for("search_products"), 1)
@@ -106,9 +109,9 @@ class TheCountLivesInGraphState(ProfileScopedTest):
             {"tool_calls_made": {"search_knowledge_base": 1}},
             AIMessage(content="", tool_calls=[
                 {"name": "search_knowledge_base", "args": {}, "id": "c2"},
-                {"name": "get_student_records", "args": {}, "id": "c3"}]))
+                {"name": "get_student_grades", "args": {}, "id": "c3"}]))
         self.assertEqual(update["tool_calls_made"],
-                         {"search_knowledge_base": 2, "get_student_records": 1})
+                         {"search_knowledge_base": 2, "get_student_grades": 1})
 
     def test_a_message_with_no_tool_call_changes_nothing(self):
         self.assertIsNone(self._count({}, AIMessage(content="رسوم الصف الأول 30,000 جنيه.")))
@@ -117,7 +120,7 @@ class TheCountLivesInGraphState(ProfileScopedTest):
 class ASpentToolIsNotOffered(ProfileScopedTest):
     def test_everything_is_offered_before_anything_is_spent(self):
         self.assertEqual(_offered({})["tools"],
-                         ["search_knowledge_base", "get_student_records"])
+                         ["search_knowledge_base", "get_student_grades"])
 
     def test_the_tool_survives_up_to_its_budget(self):
         offered = _offered({"tool_calls_made": {"search_knowledge_base": 1}})["tools"]
@@ -126,22 +129,25 @@ class ASpentToolIsNotOffered(ProfileScopedTest):
     def test_the_tool_disappears_once_its_budget_is_spent(self):
         offered = _offered({"tool_calls_made": {"search_knowledge_base": 2}})["tools"]
         self.assertNotIn("search_knowledge_base", offered)
-        self.assertIn("get_student_records", offered)
+        self.assertIn("get_student_grades", offered)
 
     def test_a_spent_tool_does_not_take_the_others_with_it(self):
         """The turn should still be able to do the half it has not done yet."""
         offered = _offered({"tool_calls_made": {"search_knowledge_base": 9}})["tools"]
-        self.assertEqual(offered, ["get_student_records"])
+        self.assertEqual(offered, ["get_student_grades"])
 
     def test_records_survives_where_a_default_budget_tool_would_not(self):
-        state = {"tool_calls_made": {"get_student_records": 2}}
-        self.assertIn("get_student_records", _offered(state)["tools"])
+        """One call spent. A tool on the default budget of one is gone by now; a record
+        tool has two, because reading a second child is a legitimate second call."""
+        state = {"tool_calls_made": {"get_student_grades": 1}}
+        self.assertIn("get_student_grades", _offered(state)["tools"])
+        self.assertEqual(runtime.budget_for("search_products"), 1)
 
     def test_forcing_a_tool_call_is_dropped_when_none_are_left(self):
         """A request that requires a tool call and offers none is rejected by the
         provider before the model ever sees it."""
         seen = _offered({"tool_calls_made":
-                         {"search_knowledge_base": 2, "get_student_records": 4}})
+                         {"search_knowledge_base": 2, "get_student_grades": 4}})
         self.assertEqual(seen["tools"], [])
         self.assertIsNone(seen["tool_choice"])
 
@@ -175,16 +181,16 @@ class TheBudgetsMustFitTheStepLimit(ProfileScopedTest):
         from backend.profiles.schema import AgentConfig
 
         with self.assertRaises(Exception) as raised:
-            AgentConfig(tools=["search_knowledge_base", "get_student_records"],
+            AgentConfig(tools=["search_knowledge_base", "get_student_grades"],
                         recursion_limit=8,
-                        tool_call_budgets={"get_student_records": 4},
+                        tool_call_budgets={"get_student_grades": 4},
                         max_knowledge_calls_per_turn=2)
         self.assertIn("recursion_limit", str(raised.exception))
 
     def test_the_resolver_on_the_config_agrees_with_the_one_in_runtime(self):
         """Two implementations of one rule is one implementation and one bug waiting."""
         agent = load_profile("school").agent
-        for name in ("search_knowledge_base", "get_student_records", "search_products"):
+        for name in ("search_knowledge_base", "get_student_grades", "search_products"):
             with self.subTest(tool=name):
                 self.assertEqual(agent.budget_for_tool(name), runtime.budget_for(name))
 

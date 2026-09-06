@@ -75,11 +75,14 @@ agent:
   # refuses to load a profile whose budgets this cannot spend, so the two can no longer
   # drift apart silently.
   #
-  # 48 rather than the 32 that preceded the planner's dispatch middleware: that sixth
-  # node took the school profile's requirement from 30 steps to 36, past the old ceiling.
-  # Keep this comfortably above what the validator demands. A ceiling costs nothing until
-  # it is hit, and hitting it costs a whole answer.
-  recursion_limit: 48
+  # 64 rather than the 32 that stood before the planner learned to dispatch tools. Two
+  # things pushed it up: the dispatch hook is a sixth node in every pass, and splitting
+  # the records tool into three gave the school profile three budgets where it had one —
+  # nine passes at six steps, so 54. Note the validator's arithmetic assumes each call
+  # costs its own pass, which parallel dispatch makes a deliberate over-estimate: several
+  # planned calls share ONE pass. Keep this comfortably above what it demands anyway. A
+  # ceiling costs nothing until it is hit, and hitting it costs a whole answer.
+  recursion_limit: 64
   max_knowledge_calls_per_turn: 1
   # 14 messages = 7 user/assistant turns. Counted in MESSAGES, not turns, because that
   # is what the slice operates on — halving it silently drops the assistant side of

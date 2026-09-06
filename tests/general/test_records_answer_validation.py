@@ -50,7 +50,7 @@ from backend.chat.grounding import DEFAULT_FLOOR, verify
 CHILD_NAME = "ليلى أحمد"
 RECORDS_TEXT = f"{CHILD_NAME}: الرياضيات 87.5% — العلوم 91.0%"
 
-RECORDS_TOOL = "get_student_records"
+RECORDS_TOOL = "get_student_grades"
 KNOWLEDGE_TOOL = "search_knowledge_base"
 
 

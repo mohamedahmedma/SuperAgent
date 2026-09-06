@@ -1,4 +1,24 @@
-"""The get_student_records tool — a thin relay to the records facade.
+"""The student-record tools — thin relays to the records facade.
+
+ONE TOOL PER CAPABILITY, and per endpoint the facade actually exposes: grades for the
+term, one subject's breakdown, attendance. That is the whole structure of this file.
+
+They were a single `get_student_records(record_type=…)` until the planner learned to
+dispatch a SET of tools rather than pick one, at which point the merged shape stopped
+being able to say what a turn needed. A planner that has decided a turn is about
+attendance cannot express that as a tool NAME while the tool is chosen by an argument —
+it has to guess the argument too, and a guessed `record_type` is a wrong lookup the
+model then pays a round trip to correct. Split, the same decision is `needed_tools`,
+which is already how every other tool is selected, and a question about marks AND
+absences dispatches both at once instead of serialising two calls through one name.
+
+Adding a capability is therefore: a builder here, a line in `TOOL_BUILDERS`, and a line
+in the profile's `tool_selection`. No argument enum, no branch in a dispatcher, nothing
+that has to know about the others. A `get_student_timetable` would slot in beside these
+three the day the facade grows the endpoint for it.
+
+The cost is honest and worth stating: three tool schemas reach the model every turn
+instead of one, and each keeps its own call budget rather than sharing one ceiling.
 
 This file is deliberately the smallest thing that could work. All the judgement lives
 elsewhere: authorisation in the records facade, identity in the identity service,
@@ -150,142 +170,226 @@ def _match_student(
     return next((s for s in students if s.student_id == found.student_id), None)
 
 
-def make_get_student_records(ctx: ChatRequestContext):
-    @tool("get_student_records")
-    def get_student_records(
-        record_type: str = "grades", student_name: str = "", subject: str = ""
-    ) -> str:
-        """Look up the signed-in parent's own child's school records.
+#: The tools this module builds, in the order a profile would naturally list them.
+#: Named here so that policy and profile code can talk about "the record tools" without
+#: importing this module, which reaches the request context and the HTTP layer.
+GRADES_TOOL = "get_student_grades"
+SUBJECT_TOOL = "get_subject_grades"
+ATTENDANCE_TOOL = "get_student_attendance"
 
-        Use this for anything about a specific student's academic record: grades,
-        marks, results, how they are doing in a subject, absences, attendance, or a
-        report card. Do not use it for school policies, fees or general information —
-        those come from the knowledge base.
 
-        record_type: "grades" for all subjects, "subject" for one subject's
-            assignment-by-assignment breakdown, or "attendance".
+def _reporter(ctx: ChatRequestContext, tool_name: str):
+    """Render one outcome, and tell the turn which one it was.
+
+    Every return from every tool below goes through this, so the string the model reads
+    and the string the turn records are produced from the same variable and cannot come
+    to disagree. The recorded half is what lets something downstream know that a record
+    WAS retrieved — see `ChatRequestContext.note_tool_outcome` for why a call count on
+    its own could not.
+
+    The OUTCOME names are shared across the three tools and unchanged by the split:
+    `service.RECORDS_RETRIEVED` reads outcomes rather than tool names, so the check that
+    catches an answer denying the record it just read keeps working without needing to
+    know how many tools can produce one.
+    """
+
+    def _result(outcome: str, **context) -> str:
+        ctx.note_tool_outcome(tool_name, outcome)
+        return render_prompt("tools/records_result.j2", outcome=outcome, **context)
+
+    return _result
+
+
+def _refused(ctx: ChatRequestContext, outcome: str, result) -> str:
+    """A refusal is evidence the cached roster is stale; an outage is not.
+
+    The pin is dropped only here, and deliberately not on `unavailable`: a hint the
+    reader re-checks anyway is not worth discarding over a timeout, and doing so would
+    re-ask the parent for a reason they could never see.
+    """
+    if outcome == "not_authorized":
+        forget(ctx)
+        ctx.forget_child()
+    return result(outcome)
+
+
+def _resolve_student(ctx: ChatRequestContext, student_name: str, result):
+    """Everything that has to be true before any record can be read.
+
+    Returns `(refusal, student)` with exactly one of them set. Shared by all three tools
+    rather than repeated in each, because these are not conveniences — they are the
+    budget, the identity check and the roster match, and three copies of them is three
+    places for one of the checks to go missing.
+
+    The budget slot is taken HERE, so it is shared ACROSS the record tools rather than
+    held per tool. That is deliberate: it exists because every call is an audited read of
+    a minor's records, and splitting one tool into three must not silently triple how
+    many of those a single turn can perform.
+    """
+    if not ctx.acquire_records_tool_slot():
+        return result("call_limit"), None
+
+    # No verified guardian on this session. Staff, a test, or a signed-out user.
+    if not ctx.guardian_token or not ctx.guardian_id:
+        return result("not_a_parent"), None
+
+    # One cached read per conversation, shared with anything else in the turn that needs
+    # to know who this parent's children are.
+    roster_outcome, students = load_roster(ctx)
+    # The roster's outcome names are the template's outcome names, so a refusal or an
+    # outage relays unchanged and keeps its own careful wording.
+    if roster_outcome in ("unavailable", "not_authorized"):
+        return _refused(ctx, roster_outcome, result), None
+    if not students:
+        return result("no_students"), None
+
+    student = _match_student(students, student_name, ctx=ctx)
+    if student is None:
+        # Either several children and no name, or a name matching more than one. Both
+        # are questions for the parent, never a coin flip.
+        return result("which_student", options=[s.label for s in students]), None
+
+    # Pinned for the rest of the conversation, so a parent who answered once is not
+    # asked again. Recorded only after a child has actually been resolved, so a turn
+    # that failed to identify one leaves nothing wrong pinned behind it.
+    #
+    # The label rides along because the pin is durable: a later turn that wants to say
+    # which child it is answering about would otherwise have only an opaque student
+    # number to show a parent.
+    ctx.remember_child(student.student_id, label=student.label, gender=student.gender)
+    return None, student
+
+
+def _student_path(ctx: ChatRequestContext, student_id: str) -> str:
+    return f"/v1/guardians/{ctx.guardian_id}/students/{student_id}"
+
+
+#: Appended to every tool docstring below. Stated once rather than written out three
+#: times, because it is the same guarantee each time and a copy that drifts is a copy
+#: that tells the model something untrue about whose records it is reading.
+_STUDENT_NAME_NOTE = """
         student_name: leave this empty. Which child the question is about has already
-            been worked out from the school's own list of this parent's children, and
-            that answer is used. Fill it in only if you are starting a subject the
-            conversation has not mentioned at all.
-        subject: required when record_type is "subject" — the subject name as the
-            parent said it.
+        been worked out from the school's own list of this parent's children, and that
+        answer is used. Fill it in only if you are starting a subject the conversation
+        has not mentioned at all.
 
         You never supply the parent's identity; it is taken from their signed-in
         session. Which child is settled the same way. If the tool asks you to clarify
         which child, put that question to the parent rather than choosing one.
         """
-        def _result(outcome: str, **context) -> str:
-            """Render one outcome, and tell the turn which one it was.
 
-            Every return from this tool goes through here, so the string the model reads
-            and the string the turn records are produced from the same variable and
-            cannot come to disagree. The recorded half is what lets something downstream
-            know that a record WAS retrieved — see `ChatRequestContext.note_tool_outcome`
-            for why a call count on its own could not.
-            """
-            ctx.note_tool_outcome("get_student_records", outcome)
-            return render_prompt("tools/records_result.j2", outcome=outcome, **context)
 
-        if not ctx.acquire_records_tool_slot():
-            return _result("call_limit")
+def make_get_student_grades(ctx: ChatRequestContext):
+    @tool(GRADES_TOOL)
+    def get_student_grades(student_name: str = "") -> str:
+        """Read one child's marks for the current term, across every subject.
 
-        # No verified guardian on this session. Staff, a test, or a signed-out user.
-        if not ctx.guardian_token or not ctx.guardian_id:
-            return _result("not_a_parent")
+        Use this for how a child is doing overall, their results, or their report card,
+        and for their marks when the question names no single subject. For one subject's
+        assignment-by-assignment detail use get_subject_grades; for absences use
+        get_student_attendance. Do not use any of them for school policies, fees or
+        general information — those come from the knowledge base.
+        """
+        result = _reporter(ctx, GRADES_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
 
-        def _refused(outcome: str) -> str:
-            """A refusal is evidence the cached roster is stale; an outage is not.
-
-            The pin is dropped only here too, and deliberately not on `unavailable`: a
-            hint the reader re-checks anyway is not worth discarding over a timeout, and
-            doing so would re-ask the parent for a reason they could never see.
-            """
-            if outcome == "not_authorized":
-                forget(ctx)
-                ctx.forget_child()
-            return _result(outcome)
-
-        base = f"/v1/guardians/{ctx.guardian_id}"
-
-        # One cached read per conversation, shared with anything else in the turn that
-        # needs to know who this parent's children are. This was a fresh HTTP round trip
-        # on every one of the tool's four permitted calls.
-        roster_outcome, students = load_roster(ctx)
-        # The roster's outcome names are the template's outcome names, so a refusal or
-        # an outage relays unchanged and keeps its own careful wording.
-        if roster_outcome in ("unavailable", "not_authorized"):
-            return _refused(roster_outcome)
-        if not students:
-            return _result("no_students")
-
-        student = _match_student(students, student_name, ctx=ctx)
-        if student is None:
-            # Either several children and no name, or a name matching more than one.
-            # Both are questions for the parent, never a coin flip.
-            return _result("which_student", options=[s.label for s in students])
-
-        student_id = student.student_id
-        # Pinned for the rest of the conversation, so a parent who answered "Layla" once
-        # is not asked again. Recorded only after a child has actually been resolved, so a
-        # turn that failed to identify one leaves nothing wrong pinned behind it.
-        #
-        # The label rides along because the pin is now durable: a later turn that wants to
-        # say which child it is answering about would otherwise have only an opaque
-        # student number to show a parent.
-        ctx.remember_child(student_id, label=student.label, gender=student.gender)
-        kind = (record_type or "grades").strip().lower()
-
-        if kind == "attendance":
-            outcome, data = _get(f"{base}/students/{student_id}/attendance", ctx)
-            template_outcome = "attendance"
-        elif kind == "subject":
-            grades_outcome, grades = _get(f"{base}/students/{student_id}/grades", ctx)
-            if grades_outcome != "ok":
-                return _refused(grades_outcome)
-
-            # Folded, not casefolded: a parent asks about «الرياضيات» however their
-            # keyboard produced it, and the subject table spells it one fixed way. Same
-            # class of failure as the child-name matcher above it, same fix. Folded
-            # rather than stemmed because a subject name is a proper noun — see
-            # backend/text_matching.py.
-            needle = name_key(subject)
-            course = next(
-                (
-                    c
-                    for c in grades.get("courses") or []
-                    if needle
-                    and (
-                        needle in name_key(c.get("subject_name_ar") or "")
-                        or needle in name_key(c.get("subject_name_en") or "")
-                    )
-                ),
-                None,
-            )
-            if course is None:
-                return _result(
-                    "which_subject",
-                    student=student,
-                    options=[
-                        c.get("subject_name_ar") or c.get("subject_name_en")
-                        for c in grades.get("courses") or []
-                    ],
-                )
-
-            outcome, data = _get(
-                f"{base}/students/{student_id}/grades/{course.get('course_id')}", ctx
-            )
-            template_outcome = "subject"
-        else:
-            outcome, data = _get(f"{base}/students/{student_id}/grades", ctx)
-            template_outcome = "grades"
-
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/grades", ctx)
         if outcome != "ok":
-            return _refused(outcome)
+            return _refused(ctx, outcome, result)
+        return result("grades", **_render_context(student.label, data))
 
-        return _result(template_outcome, **_render_context(student.label, data))
+    get_student_grades.description += _STUDENT_NAME_NOTE
+    return get_student_grades
 
-    return get_student_records
+
+def make_get_subject_grades(ctx: ChatRequestContext):
+    @tool(SUBJECT_TOOL)
+    def get_subject_grades(subject: str, student_name: str = "") -> str:
+        """Read one child's assignment-by-assignment breakdown in a single subject.
+
+        Use this when the question names a subject. For every subject at once use
+        get_student_grades instead.
+
+        subject: the subject name as the parent said it, in Arabic or English. This one
+        IS yours to supply — it comes from the message itself, and a name matching no
+        subject is answered with the subjects the child actually takes.
+        """
+        result = _reporter(ctx, SUBJECT_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        path = _student_path(ctx, student.student_id)
+        # The course list first, because the facade addresses one subject by course id
+        # and the parent named it in words.
+        grades_outcome, grades = _get(f"{path}/grades", ctx)
+        if grades_outcome != "ok":
+            return _refused(ctx, grades_outcome, result)
+
+        course = _match_course(grades, subject)
+        if course is None:
+            return result(
+                "which_subject",
+                student=student,
+                options=[
+                    c.get("subject_name_ar") or c.get("subject_name_en")
+                    for c in grades.get("courses") or []
+                ],
+            )
+
+        outcome, data = _get(f"{path}/grades/{course.get('course_id')}", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result("subject", **_render_context(student.label, data))
+
+    get_subject_grades.description += _STUDENT_NAME_NOTE
+    return get_subject_grades
+
+
+def make_get_student_attendance(ctx: ChatRequestContext):
+    @tool(ATTENDANCE_TOOL)
+    def get_student_attendance(student_name: str = "") -> str:
+        """Read one child's attendance: the days they were present, absent or late.
+
+        Use this for absences, lateness and attendance. For marks use
+        get_student_grades.
+        """
+        result = _reporter(ctx, ATTENDANCE_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/attendance", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result("attendance", **_render_context(student.label, data))
+
+    get_student_attendance.description += _STUDENT_NAME_NOTE
+    return get_student_attendance
+
+
+def _match_course(grades: dict, subject: str):
+    """The course a parent meant, matched by name against what the child actually takes.
+
+    Folded, not casefolded: a parent asks about «الرياضيات» however their keyboard
+    produced it, and the subject table spells it one fixed way. Same class of failure as
+    the child-name matcher above, and the same fix. Folded rather than stemmed because a
+    subject name is a proper noun — see backend/text_matching.py.
+    """
+    needle = name_key(subject)
+    if not needle:
+        return None
+    return next(
+        (
+            c
+            for c in grades.get("courses") or []
+            if needle in name_key(c.get("subject_name_ar") or "")
+            or needle in name_key(c.get("subject_name_en") or "")
+        ),
+        None,
+    )
 
 
 def _label(record: dict, *keys: str) -> str:

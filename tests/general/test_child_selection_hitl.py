@@ -79,7 +79,7 @@ class _Agent:
     what `test_school_profile.py` is for.
     """
 
-    tools = ["search_knowledge_base", "get_student_records"]
+    tools = ["search_knowledge_base", "get_student_grades"]
     social_phrases = []
     social_reply_mode = "model"
     narrow_tools_to_the_turn = True
@@ -612,7 +612,7 @@ class TheWholeRoundTrip(_NoRosterCache):
         self.assertEqual(replanned.child_hint, "أحمد احمد")
         self.assertEqual(replanned.child_id, "S-2")
         self.assertFalse(replanned.short_circuit)
-        self.assertEqual(replanned.forced_tool, "get_student_records")
+        self.assertEqual(replanned.forced_tool, "get_student_grades")
 
 
 if __name__ == "__main__":

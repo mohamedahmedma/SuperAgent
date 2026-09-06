@@ -45,7 +45,17 @@ from backend.chat.child_resolution import no_child, resolve_child
 from backend.chat.child_roster import ChildOption
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.signals import EnvelopeDetector, RequestSignals
-from backend.chat.turn_policy import KNOWLEDGE_TOOL, RECORDS_TOOL, resolve_turn
+from backend.chat.turn_policy import (
+    ATTENDANCE_TOOL,
+    GRADES_TOOL,
+    KNOWLEDGE_TOOL,
+    RECORDS_TOOLS,
+    resolve_turn,
+)
+
+#: The record tool most of these tests use. One per record now, so a test that needs
+#: "a records tool" names one rather than pretending there is only one.
+RECORDS_TOOL = GRADES_TOOL
 
 LAYLA = ChildOption(student_id="S-1", label="ليلى أحمد", gender="female", year_level="Year 4")
 OMAR = ChildOption(student_id="S-2", label="عمر أحمد", gender="male")
@@ -60,7 +70,7 @@ OMAR = ChildOption(student_id="S-2", label="عمر أحمد", gender="male")
 class _Agent:
     """A profile that plans and dispatches, in the school profile's shape."""
 
-    tools = [KNOWLEDGE_TOOL, RECORDS_TOOL]
+    tools = [KNOWLEDGE_TOOL, GRADES_TOOL, ATTENDANCE_TOOL]
     social_phrases = []
     social_reply_mode = "model"
     narrow_tools_to_the_turn = True
@@ -69,7 +79,8 @@ class _Agent:
     tool_selection = {}
     planned_tool_arguments = {
         KNOWLEDGE_TOOL: {"query": "$resolved_question"},
-        RECORDS_TOOL: {"record_type": "grades", "student_name": "$child_label"},
+        GRADES_TOOL: {"student_name": "$child_label"},
+        ATTENDANCE_TOOL: {"student_name": "$child_label"},
     }
 
 
@@ -91,8 +102,14 @@ def _settled(roster=(LAYLA,)):
 
 
 def _both(**kwargs):
-    """The turn this feature exists for: one child, and a question needing each tool."""
-    return _plan(_settled(), about_child=True, child_question_kind="both", **kwargs)
+    """The turn this feature exists for: one child, and a classifier naming each tool.
+
+    Named tools, not `child_question_kind="both"`. Only a source that names tools ONE BY
+    ONE may be dispatched — see `_needed_tools`. The enum names a family, which is a
+    statement about where to look rather than about what to call.
+    """
+    kwargs.setdefault("needed_tools", [KNOWLEDGE_TOOL, GRADES_TOOL])
+    return _plan(_settled(), about_child=True, **kwargs)
 
 
 # --------------------------------------------------------------------------------------
@@ -116,7 +133,7 @@ class ThePlanIsASetOfCalls(unittest.TestCase):
         self.assertEqual(by_name[KNOWLEDGE_TOOL], {"query": "درجات ليلى كام والمصاريف كام؟"})
         # The label the ROSTER matched, not a name a model transcribed.
         self.assertEqual(
-            by_name[RECORDS_TOOL], {"record_type": "grades", "student_name": "ليلى أحمد"}
+            by_name[RECORDS_TOOL], {"student_name": "ليلى أحمد"}
         )
 
     def test_nothing_is_forced_when_a_set_is_dispatched(self):
@@ -125,7 +142,7 @@ class ThePlanIsASetOfCalls(unittest.TestCase):
         self.assertEqual(_both().forced_tool, "")
 
     def test_one_tool_is_still_forced_rather_than_dispatched(self):
-        plan = _plan(_settled(), about_child=True, child_question_kind="records")
+        plan = _plan(_settled(), about_child=True, needed_tools=[RECORDS_TOOL])
         self.assertEqual(plan.exposed_tools, [RECORDS_TOOL])
         self.assertEqual(plan.forced_tool, RECORDS_TOOL)
         self.assertEqual(plan.planned_calls, [])
@@ -136,7 +153,7 @@ class ThePlanIsASetOfCalls(unittest.TestCase):
         class _KnowledgeOnly(_Agent):
             tools = [KNOWLEDGE_TOOL]
 
-        plan = _both(agent=_KnowledgeOnly())
+        plan = _both(agent=_KnowledgeOnly())  # the plan names a tool it does not bind
         self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL])
         # One surviving call is not worth a dispatch — see `_plan_parallel_calls`.
         self.assertEqual(plan.planned_calls, [])
@@ -153,11 +170,13 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
     """Dispatching is an optimisation, so it may only ever act on a positive answer."""
 
     def test_the_switch_off_reproduces_todays_behaviour_exactly(self):
+        """The tools are still narrowed to what the turn needs — that is selection, and
+        it predates this feature. What the switch controls is whether they are CALLED."""
         class _Off(_Agent):
             parallel_tool_calls = False
 
         plan = _both(agent=_Off())
-        self.assertIsNone(plan.exposed_tools)
+        self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL, GRADES_TOOL])
         self.assertEqual(plan.planned_calls, [])
 
     def test_a_profile_declaring_no_arguments_plans_nothing(self):
@@ -174,7 +193,7 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
             planned_tool_arguments = {KNOWLEDGE_TOOL: {"query": "$resolved_question"}}
 
         plan = _both(agent=_KnowledgeOnlyArgs())
-        self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL, RECORDS_TOOL])
+        self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL, GRADES_TOOL])
         self.assertEqual(plan.planned_calls, [])
 
     def test_an_unknown_placeholder_drops_its_argument_rather_than_sending_the_text(self):
@@ -182,7 +201,7 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
         class _Typo(_Agent):
             planned_tool_arguments = {
                 KNOWLEDGE_TOOL: {"query": "$resolved_question"},
-                RECORDS_TOOL: {"record_type": "grades", "student_name": "$child_labell"},
+                RECORDS_TOOL: {"student_name": "$child_labell", "record_type": "grades"},
             }
 
         plan = _both(agent=_Typo(), resolved_question="q")
@@ -192,51 +211,62 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
     def test_a_placeholder_resolving_to_nothing_drops_its_argument(self):
         """An empty student name means "the parent did not say which", which the records
         tool handles better from its own default than from an explicit blank."""
-        class _NoChildArgs(_Agent):
-            planned_tool_arguments = {
-                KNOWLEDGE_TOOL: {"query": "$resolved_question"},
-                RECORDS_TOOL: {"student_name": "$child_label"},
-            }
-
         # `needed_tools` reaches the plan without a resolved child, so `$child_label` is
         # empty and the records call has nothing left in it.
-        plan = _plan(no_child("n/a"), agent=_NoChildArgs(),
-                     needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL], resolved_question="q")
+        plan = _plan(no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL],
+                     resolved_question="q")
         self.assertEqual(plan.planned_calls, [])
 
     def test_a_lone_surviving_call_is_not_dispatched(self):
         """One call ahead of the model buys no concurrency and still spends the planner's
         credibility on the guess."""
-        class _OneUsable(_Agent):
-            planned_tool_arguments = {
-                KNOWLEDGE_TOOL: {"query": "$resolved_question"},
-                RECORDS_TOOL: {"student_name": "$child_label"},
-            }
-
-        plan = _plan(no_child("n/a"), agent=_OneUsable(),
-                     needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL], resolved_question="q")
+        plan = _plan(no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL],
+                     resolved_question="q")
         self.assertEqual(plan.planned_calls, [])
 
     def test_an_unsettled_child_is_asked_about_rather_than_dispatched_for(self):
         plan = _plan(resolve_child(reference="child", roster=[LAYLA, OMAR]),
-                     about_child=True, child_question_kind="both")
+                     about_child=True, needed_tools=[KNOWLEDGE_TOOL, GRADES_TOOL])
         self.assertEqual(plan.planned_calls, [])
         self.assertTrue(plan.short_circuit)
+
+    def test_the_question_kind_enum_narrows_but_never_dispatches(self):
+        """The line the architecture turns on. `records` names a FAMILY — it cannot tell
+        marks from absences — so it binds those tools and lets the model choose. Treating
+        it as a plan would read a child's attendance because they asked about maths."""
+        plan = _plan(_settled(), about_child=True, child_question_kind="records")
+        self.assertEqual(plan.exposed_tools, [GRADES_TOOL, ATTENDANCE_TOOL])
+        self.assertEqual(plan.planned_calls, [])
+        self.assertEqual(plan.forced_tool, "")
+
+    def test_both_narrows_nothing_at_all(self):
+        """`both` is absent from the map on purpose: binding everything is not a
+        decision, and recording it as one would only make the trace lie."""
+        plan = _plan(_settled(), about_child=True, child_question_kind="both")
+        self.assertIsNone(plan.exposed_tools)
+        self.assertEqual(plan.planned_calls, [])
 
     def test_a_literal_argument_is_never_read_as_a_placeholder(self):
         class _Literal(_Agent):
             planned_tool_arguments = {
                 KNOWLEDGE_TOOL: {"query": "$resolved_question"},
-                RECORDS_TOOL: {"record_type": "attendance"},
+                RECORDS_TOOL: {"student_name": "everyone"},
             }
 
         plan = _both(agent=_Literal(), resolved_question="q")
         by_name = {call["name"]: call["args"] for call in plan.planned_calls}
-        self.assertEqual(by_name[RECORDS_TOOL], {"record_type": "attendance"})
+        self.assertEqual(by_name[RECORDS_TOOL], {"student_name": "everyone"})
 
 
 class SelectionGeneralisesPastTwoTools(unittest.TestCase):
     """`child_question_kind` is an enum over two tools. Ten needs a list."""
+
+    def test_the_records_family_is_every_record_tool(self):
+        """One name per record now, so the family has to be spelled out somewhere; this
+        pins the policy layer's copy against the registry's."""
+        from backend.tools import RECORDS_TOOLS as REGISTERED
+
+        self.assertEqual(set(RECORDS_TOOLS), set(REGISTERED))
 
     def test_the_classifier_list_chooses_three_of_ten(self):
         class _Ten(_Agent):
@@ -261,7 +291,7 @@ class SelectionGeneralisesPastTwoTools(unittest.TestCase):
                      resolved_question="q")
         self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL, RECORDS_TOOL])
 
-    def test_the_classifier_list_wins_over_the_two_tool_enum(self):
+    def test_the_classifier_list_wins_over_the_question_kind_enum(self):
         plan = _plan(_settled(), about_child=True, child_question_kind="records",
                      needed_tools=[KNOWLEDGE_TOOL], resolved_question="q")
         self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL])
@@ -280,7 +310,7 @@ class TheClassifierReadsItsOwnCatalogue(unittest.TestCase):
     """`EnvelopeDetector._read_needed_tools`: what survives from the model's answer."""
 
     class _Config:
-        tool_selection = {KNOWLEDGE_TOOL: "school material", RECORDS_TOOL: "one child"}
+        tool_selection = {KNOWLEDGE_TOOL: "school material", GRADES_TOOL: "one child"}
 
     def _read(self, named, config=None):
         signals = RequestSignals(question="q")
@@ -304,7 +334,7 @@ class TheClassifierReadsItsOwnCatalogue(unittest.TestCase):
         """Two plans naming the same tools must be the same plan, or an identical
         question produces a different `exposed_tools` on every turn."""
         self.assertEqual(
-            self._read([RECORDS_TOOL, KNOWLEDGE_TOOL]), [KNOWLEDGE_TOOL, RECORDS_TOOL]
+            self._read([GRADES_TOOL, KNOWLEDGE_TOOL]), [KNOWLEDGE_TOOL, GRADES_TOOL]
         )
 
     def test_anything_that_is_not_a_list_is_an_abstention(self):
@@ -334,7 +364,7 @@ class TheDispatchArithmetic(unittest.TestCase):
     def test_every_call_gets_an_id_because_results_are_matched_by_it(self):
         calls = self._calls([
             {"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
-            {"name": RECORDS_TOOL, "args": {"record_type": "grades"}},
+            {"name": RECORDS_TOOL, "args": {"student_name": "ليلى"}},
         ])
         ids = [call["id"] for call in calls]
         self.assertEqual(len(set(ids)), 2)
@@ -342,7 +372,7 @@ class TheDispatchArithmetic(unittest.TestCase):
 
     def test_the_same_plan_produces_the_same_ids_twice(self):
         planned = [{"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
-                   {"name": RECORDS_TOOL, "args": {"record_type": "grades"}}]
+                   {"name": RECORDS_TOOL, "args": {"student_name": "ليلى"}}]
         self.assertEqual(
             [c["id"] for c in self._calls(planned)],
             [c["id"] for c in self._calls(planned)],
@@ -361,7 +391,7 @@ class TheDispatchArithmetic(unittest.TestCase):
         spent = {KNOWLEDGE_TOOL: runtime.budget_for(KNOWLEDGE_TOOL)}
         calls = self._calls(
             [{"name": KNOWLEDGE_TOOL, "args": {"query": "q"}},
-             {"name": RECORDS_TOOL, "args": {"record_type": "grades"}}],
+             {"name": RECORDS_TOOL, "args": {"student_name": "ليلى"}}],
             made=spent,
         )
         self.assertEqual([call["name"] for call in calls], [RECORDS_TOOL])
@@ -416,12 +446,12 @@ class _Meeting:
             return "Retrieved Chunks:\n[1] fees.pdf (Page 3):\n30,000 جنيه."
 
         @tool(RECORDS_TOOL)
-        def get_student_records(record_type: str = "grades", student_name: str = "") -> str:
-            """Read one child's records."""
+        def get_student_grades(student_name: str = "") -> str:
+            """Read one child's marks."""
             self._meet()
             return "الرياضيات 87.5%"
 
-        return [search_knowledge_base, get_student_records]
+        return [search_knowledge_base, get_student_grades]
 
     def _meet(self):
         try:
@@ -465,7 +495,7 @@ def _ctx(planned):
 
 PLANNED = [
     {"name": KNOWLEDGE_TOOL, "args": {"query": "المصاريف"}},
-    {"name": RECORDS_TOOL, "args": {"record_type": "grades", "student_name": "ليلى أحمد"}},
+    {"name": RECORDS_TOOL, "args": {"student_name": "ليلى أحمد"}},
 ]
 
 
@@ -534,20 +564,18 @@ class TheToolsActuallyOverlap(unittest.TestCase):
             return "[1] ok"
 
         @tool(RECORDS_TOOL)
-        def get_student_records(record_type: str = "grades", student_name: str = "") -> str:
+        def get_student_grades(student_name: str = "") -> str:
             """Read."""
             seen["student_name"] = student_name
-            seen["record_type"] = record_type
             return "ok"
 
         ctx = _ctx(PLANNED)
         model, _ = _scripted(AIMessage(content="done"))
-        _agent(ctx, [search_knowledge_base, get_student_records], model).invoke(
+        _agent(ctx, [search_knowledge_base, get_student_grades], model).invoke(
             {"messages": [HumanMessage(content="q")]}
         )
         self.assertEqual(seen["query"], "المصاريف")
         self.assertEqual(seen["student_name"], "ليلى أحمد")
-        self.assertEqual(seen["record_type"], "grades")
 
     def test_a_turn_with_no_plan_runs_the_ordinary_loop(self):
         """The default, and what every failure upstream produces."""
@@ -591,26 +619,26 @@ class ThePlannerIsNotGivenTheLastWord(unittest.TestCase):
             """Search."""
             return "[1] nothing useful"
 
-        @tool(RECORDS_TOOL)
-        def get_student_records(record_type: str = "grades", student_name: str = "") -> str:
+        @tool(ATTENDANCE_TOOL)
+        def get_student_attendance(student_name: str = "") -> str:
             """Read."""
-            queried.append(record_type)
+            queried.append(student_name)
             return "ok"
 
         ctx = _ctx(PLANNED)
         model, _ = _scripted(
-            # The planner guessed grades; the parent asked about absences.
+            # The plan read marks; the parent also wanted absences.
             AIMessage(content="", tool_calls=[{
-                "name": RECORDS_TOOL,
-                "args": {"record_type": "attendance", "student_name": "ليلى أحمد"},
+                "name": ATTENDANCE_TOOL,
+                "args": {"student_name": "ليلى أحمد"},
                 "id": "fix",
             }]),
             AIMessage(content="غابت يومين"),
         )
-        _agent(ctx, [search_knowledge_base, get_student_records], model).invoke(
+        _agent(ctx, [search_knowledge_base, get_student_attendance], model).invoke(
             {"messages": [HumanMessage(content="q")]}
         )
-        self.assertEqual(queried, ["grades", "attendance"])
+        self.assertEqual(queried, ["ليلى أحمد"])
 
     def test_the_chosen_tools_stay_bound_after_the_dispatch(self):
         plan = _both()

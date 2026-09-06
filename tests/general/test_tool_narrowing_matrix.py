@@ -40,7 +40,7 @@ from backend.chat.child_roster import ChildOption
 from backend.chat.signals import RequestSignals, Scope
 from backend.chat.turn_policy import (
     KNOWLEDGE_TOOL,
-    RECORDS_TOOL,
+    GRADES_TOOL as RECORDS_TOOL,
     TurnPlan,
     _tools_for,
     resolve_turn,

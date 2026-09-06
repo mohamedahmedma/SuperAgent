@@ -46,7 +46,7 @@ from backend.chat.turn_policy import resolve_turn
 from backend.profiles.registry import load_profile, set_profile
 
 KNOWLEDGE_TOOL = "search_knowledge_base"
-RECORDS_TOOL = "get_student_records"
+RECORDS_TOOL = "get_student_grades"
 
 GUARDIAN = "G-conv"
 PARENT_TOKEN = "signed.identity.token"
@@ -605,11 +605,23 @@ class AWholeConversationThroughThePlanner(unittest.TestCase):
         self.assertEqual(plan.child_id, "S-1")
 
     def test_two_consecutive_turns_about_one_child_narrow_to_opposite_tools(self):
+        """A records turn keeps every record tool and drops the corpus; a school-matter
+        turn does the reverse.
+
+        `records` narrows to a FAMILY rather than to one tool, because the classifier's
+        enum cannot tell marks from absences — that resolution belongs to `needed_tools`,
+        which names tools one by one. What the enum still buys is the whole of the
+        measured win: the knowledge tool is not on the wire for a question about a child's
+        own record, so it cannot be chosen by mistake.
+        """
+        from backend.tools import RECORDS_TOOLS
+
         self.chat.settle(self.chat.ask("درجات ليلى؟", reference="named", name="ليلى"))
         records = self.chat.ask("طيب وغيابها؟", kind="records")
         school_matter = self.chat.ask("ومصاريف سنتها كام؟", kind="school_matter")
 
-        self.assertEqual(records.exposed_tools, ["get_student_records"])
+        self.assertEqual(records.exposed_tools, list(RECORDS_TOOLS))
+        self.assertNotIn("search_knowledge_base", records.exposed_tools)
         self.assertEqual(school_matter.exposed_tools, ["search_knowledge_base"])
 
     def test_the_forced_tool_is_re_decided_rather_than_carried_over(self):

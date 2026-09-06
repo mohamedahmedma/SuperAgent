@@ -38,14 +38,14 @@ from backend.chat.resolution import unresolved
 from backend.chat.signals import RequestSignals
 from backend.chat.turn_policy import resolve_turn
 from backend.profiles.registry import load_profile, set_profile
-from backend.tools.records import make_get_student_records
+from backend.tools.records import make_get_student_grades
 
 PARENT_TOKEN = "signed.identity.token"
 GUARDIAN = "G-77"
 SESSION = "turn-77"
 
 KNOWLEDGE_TOOL = "search_knowledge_base"
-RECORDS_TOOL = "get_student_records"
+RECORDS_TOOL = "get_student_grades"
 
 LAYLA = ChildOption(student_id="S-1", label="ليلى أحمد", gender="female", year_level="Year 4")
 OMAR = ChildOption(student_id="S-2", label="عمر أحمد", gender="male")
@@ -277,15 +277,15 @@ class ASessionThatIsNotAParent(_SchoolTurn):
 
         ctx = _staff_ctx()
         with patch.object(requests, "get", forbidden):
-            result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+            result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("NOT_A_PARENT_SESSION", result)
-        self.assertEqual([("get_student_records", "not_a_parent")], ctx.tool_outcomes)
+        self.assertEqual([(RECORDS_TOOL, "not_a_parent")], ctx.tool_outcomes)
 
     def test_the_refusal_never_asks_the_user_to_identify_a_student(self):
         """Collecting a name, a student number or a birthdate authorises nothing — it
         only teaches a signed-out user that typing an identifier is how you get in."""
-        result = make_get_student_records(_staff_ctx()).invoke({"record_type": "grades"})
+        result = make_get_student_grades(_staff_ctx()).invoke({})
 
         self.assertIn("NOT_A_PARENT_SESSION", result)
         for invitation in ("Do not ask", "signing in"):
@@ -301,7 +301,7 @@ class ASessionThatIsNotAParent(_SchoolTurn):
         ):
             with self.subTest(session=label):
                 self.assertFalse(ctx.is_parent)
-                result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+                result = make_get_student_grades(ctx).invoke({})
                 self.assertIn("NOT_A_PARENT_SESSION", result)
 
 
@@ -381,10 +381,10 @@ class WhenTheRosterCannotBeRead(_SchoolTurn):
         ctx = _parent_ctx()
         ctx.remember_child("S-1", label="ليلى أحمد")
         with patch.object(requests, "get", _route({"/students": _Response(503)})):
-            result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+            result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("RECORDS_UNAVAILABLE", result)
-        self.assertEqual([("get_student_records", "unavailable")], ctx.tool_outcomes)
+        self.assertEqual([(RECORDS_TOOL, "unavailable")], ctx.tool_outcomes)
         self.assertEqual("S-1", ctx.remembered_child)
 
     def test_a_refusal_drops_the_pin_because_it_is_evidence_the_hint_is_stale(self):
@@ -393,7 +393,7 @@ class WhenTheRosterCannotBeRead(_SchoolTurn):
         ctx = _parent_ctx()
         ctx.remember_child("S-1", label="ليلى أحمد")
         with patch.object(requests, "get", _route({"/students": _Response(403)})):
-            result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+            result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("NOT_AUTHORIZED", result)
         self.assertEqual("", ctx.remembered_child)
@@ -403,9 +403,7 @@ class WhenTheRosterCannotBeRead(_SchoolTurn):
         for status, marker in ((503, "RECORDS_UNAVAILABLE"), (401, "NOT_AUTHORIZED")):
             with self.subTest(status=status):
                 with patch.object(requests, "get", _route({"/students": _Response(status)})):
-                    result = make_get_student_records(_parent_ctx()).invoke(
-                        {"record_type": "grades"}
-                    )
+                    result = make_get_student_grades(_parent_ctx()).invoke({})
 
                 self.assertIn(marker, result)
                 self.assertNotIn("NO_RECORDS", result)
@@ -452,10 +450,10 @@ class AGuardianWithNoChildrenOnFile(_SchoolTurn):
             "get",
             _route({"/students": _Response(200, {"guardian_id": GUARDIAN, "students": []})}),
         ):
-            result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+            result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("NO_STUDENTS_LINKED", result)
-        self.assertEqual([("get_student_records", "no_students")], ctx.tool_outcomes)
+        self.assertEqual([(RECORDS_TOOL, "no_students")], ctx.tool_outcomes)
 
 
 class ThePlannerNeverCostsTheTurn(_SchoolTurn):
@@ -574,7 +572,7 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
         ):
             ctx = _parent_ctx()
             ctx.note_turn_plan([], [], child_id="S-1", child_label="ليلى أحمد")
-            result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+            result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("STUDENT_GRADES", result)
         self.assertTrue(seen)
@@ -587,10 +585,19 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
     def test_no_tool_argument_can_carry_an_identity(self):
         """Structural, not behavioural: there is nothing to inject into. If a future edit
         adds a guardian, a token or a student id as a parameter, the model can name whose
-        records to read and the whole defence is gone."""
-        args = set(make_get_student_records(_parent_ctx()).args.keys())
+        records to read and the whole defence is gone.
 
-        self.assertEqual({"record_type", "student_name", "subject"}, args)
+        Asserted across EVERY record tool, and against a deny-list rather than an exact
+        set — splitting one tool into three multiplied the places this can regress, and a
+        fourth added later has to be caught by the same test rather than by remembering
+        to extend it."""
+        from backend.tools import RECORDS_TOOLS, build_tools
+
+        for bound in build_tools(list(RECORDS_TOOLS), _parent_ctx()):
+            with self.subTest(tool=bound.name):
+                args = set(bound.args.keys())
+                # `subject` names a school subject; nothing here names a person.
+                self.assertTrue(args <= {"student_name", "subject"}, args)
         for forbidden in ("guardian", "token", "student_id", "user"):
             self.assertFalse(
                 [name for name in args if forbidden in name], f"{forbidden} is addressable"
@@ -609,7 +616,7 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
         ):
             ctx = _parent_ctx()
             ctx.note_turn_plan([], [], child_id="S-404", child_label="طفل غير موجود")
-            result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+            result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("STUDENT_GRADES", result)
         read = [url for url, _ in seen if url.endswith("/grades")]
@@ -621,10 +628,10 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
         ctx = _parent_ctx()
         with patch.object(requests, "get", _route({"/students": TWO_CHILDREN})):
             ctx.note_turn_plan([], [], child_id="S-404", child_label="طفل غير موجود")
-            result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+            result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("NEEDS_STUDENT_CHOICE", result)
-        self.assertEqual([("get_student_records", "which_student")], ctx.tool_outcomes)
+        self.assertEqual([(RECORDS_TOOL, "which_student")], ctx.tool_outcomes)
 
     def test_a_context_nobody_planned_reads_under_no_child_at_all(self):
         """The default every non-planned caller is in — a sync call, a resumed turn, a
