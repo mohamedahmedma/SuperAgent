@@ -533,8 +533,9 @@ const onSubmit = async () => {
 }
 [dir="rtl"] .ax-field input{padding:10px 40px 10px 14px}
 .ax-field input:focus{
-  border-color:rgba(37,190,220,.44);
-  box-shadow:0 0 0 3px rgba(37,190,220,.055);
+  border-color:#19819d;
+  outline:none;
+  box-shadow:0 0 0 1px rgba(25,129,157,.14);
 }
 .ax-field input::placeholder{color:#56758f}
 
@@ -1230,4 +1231,36 @@ html[data-theme="light"] .ax-password-toggle:focus-visible{
   }
 }
 /* AUREXIS_MOBILE_AUTH_PRO_V10_6_END */
+
+/* AUREXIS_AUTH_GREEN_RING_FINAL_V11_14_4
+   Exact credential focus treatment.
+   Matches the chat-composer border family and removes the old mint/green ring.
+*/
+html body #app .ax-auth-root .ax-login-panel .ax-form .ax-field input:focus,
+html body #app .ax-auth-root .ax-login-panel .ax-form .ax-field input:focus-visible,
+html body #app .ax-auth-root .ax-login-panel .ax-form .ax-field input:valid:focus,
+html body #app .ax-auth-root .ax-login-panel .ax-form .ax-field input:user-valid:focus{
+  border-color:#19819d!important;
+  outline:0!important;
+  outline-color:transparent!important;
+  box-shadow:0 0 0 1px rgba(25,129,157,.14)!important;
+  caret-color:#20bddc!important;
+}
+
+html body #app .ax-auth-root .ax-login-panel .ax-form .ax-field:focus-within{
+  outline:0!important;
+  box-shadow:none!important;
+}
+
+/* Same exact treatment on phones. */
+@media(max-width:900px){
+  html body #app .ax-auth-root .ax-login-panel .ax-form .ax-field input:focus,
+  html body #app .ax-auth-root .ax-login-panel .ax-form .ax-field input:focus-visible,
+  html body #app .ax-auth-root .ax-login-panel .ax-form .ax-field input:valid:focus,
+  html body #app .ax-auth-root .ax-login-panel .ax-form .ax-field input:user-valid:focus{
+    border-color:#19819d!important;
+    outline:0!important;
+    box-shadow:0 0 0 1px rgba(25,129,157,.14)!important;
+  }
+}
 </style>

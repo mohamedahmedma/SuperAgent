@@ -58,22 +58,35 @@
     <template v-if="authStore.isAuthenticated">
       <div class="sidebar-section-label">Recent sessions</div>
       <div class="sidebar-recents">
-        <button
+        <div
           v-for="session in recentSessions"
           :key="session.session_id"
-          type="button"
-          :class="['recent-session', { active: session.session_id === chatStore.sessionId }]"
-          @click="onLoadSession(session.session_id)"
+          class="recent-session-row"
         >
-          <span class="recent-dot" aria-hidden="true"></span>
-          <span class="recent-copy">
-            <strong>{{ session.title || 'Untitled session' }}</strong>
-            <small>
-              {{ session.isStreaming ? 'Generating' : session.message_count + ' messages' }}
-              · {{ formatRelativeTime(session.updated_at) }}
-            </small>
-          </span>
-        </button>
+          <button
+            type="button"
+            :class="['recent-session', { active: session.session_id === chatStore.sessionId }]"
+            @click="onLoadSession(session.session_id)"
+          >
+            <span class="recent-dot" aria-hidden="true"></span>
+            <span class="recent-copy">
+              <strong>{{ session.title || 'Untitled session' }}</strong>
+              <small>
+                {{ session.isStreaming ? 'Generating' : session.message_count + ' messages' }}
+                Â· {{ formatRelativeTime(session.updated_at) }}
+              </small>
+            </span>
+          </button>
+          <button
+            type="button"
+            class="recent-session-delete"
+            :title="`Delete ${session.title || 'session'}`"
+            aria-label="Delete recent session"
+            @click.stop="onDeleteRecentSession(session.session_id)"
+          >
+            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+          </button>
+        </div>
         <div v-if="!recentSessions.length" class="recent-empty">
           No conversations yet — ask Aurexis a question.
         </div>
@@ -187,6 +200,18 @@ const onSettings = () => {
   sessionStore.showHistorySidebar = false;
 };
 
+
+const onDeleteRecentSession = async (sessionId: string) => {
+  try {
+    const deletingCurrent = sessionId === chatStore.sessionId;
+    await sessionStore.deleteSession(sessionId);
+    if (deletingCurrent) {
+      chatStore.handleNewChat();
+    }
+  } catch (error: any) {
+    alert('Failed to delete session: ' + (error?.message || 'Unknown error'));
+  }
+};
 const onLoadSession = async (sessionId: string) => {
   try {
     await chatStore.loadSession(sessionId);

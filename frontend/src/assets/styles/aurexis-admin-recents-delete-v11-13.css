@@ -1,0 +1,168 @@
+/*
+ AUREXIS v11.13
+ - Restore admin-only Advanced toggle visibility.
+ - Keep Recent sessions available on phones.
+ - Reveal a subtle per-session delete affordance on hover/focus.
+ - Mobile uses a touch-friendly, low-emphasis delete affordance.
+*/
+
+.advanced-mode-toggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 9px !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Recent-session row with a dedicated non-nested delete control. */
+.sidebar-recents .recent-session-row {
+  position: relative !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 34px !important;
+  align-items: center !important;
+  gap: 4px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.sidebar-recents .recent-session-row > .recent-session {
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+.sidebar-recents .recent-session-delete {
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  display: grid !important;
+  place-items: center !important;
+  padding: 0 !important;
+  margin: 0 !important;
+
+  border: 1px solid transparent !important;
+  border-radius: 9px !important;
+  background: transparent !important;
+  color: rgba(157, 190, 214, .56) !important;
+
+  opacity: 0 !important;
+  visibility: hidden !important;
+  transform: translateX(4px) scale(.96) !important;
+  pointer-events: none !important;
+
+  transition:
+    opacity 150ms ease,
+    visibility 150ms ease,
+    transform 150ms ease,
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease !important;
+}
+
+.sidebar-recents .recent-session-row:hover .recent-session-delete,
+.sidebar-recents .recent-session-row:focus-within .recent-session-delete {
+  opacity: .72 !important;
+  visibility: visible !important;
+  transform: translateX(0) scale(1) !important;
+  pointer-events: auto !important;
+}
+
+.sidebar-recents .recent-session-delete:hover,
+.sidebar-recents .recent-session-delete:focus-visible {
+  opacity: 1 !important;
+  color: #f0f8ff !important;
+  border-color: rgba(130, 184, 218, .22) !important;
+  background: rgba(90, 142, 177, .11) !important;
+  outline: none !important;
+}
+
+.sidebar-recents .recent-session-delete:active {
+  transform: scale(.94) !important;
+}
+
+.sidebar-recents .recent-session-delete i {
+  font-size: 12px !important;
+  line-height: 1 !important;
+}
+
+/* Don't let old collapsed-rail rules accidentally expose recents. */
+@media (min-width: 901px) {
+  .app-wrapper.sidebar-collapsed .sidebar .sidebar-section-label,
+  .app-wrapper.sidebar-collapsed .sidebar .sidebar-recents,
+  .app-wrapper.desktop-sidebar-collapsed .sidebar .sidebar-section-label,
+  .app-wrapper.desktop-sidebar-collapsed .sidebar .sidebar-recents,
+  .sidebar.is-collapsed .sidebar-section-label,
+  .sidebar.is-collapsed .sidebar-recents {
+    display: none !important;
+  }
+}
+
+@media (max-width: 900px) {
+  /* Restore recents in the phone drawer/sidebar. */
+  .sidebar .sidebar-section-label {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .sidebar .sidebar-recents {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 7px !important;
+
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    max-height: min(31dvh, 250px) !important;
+
+    padding: 0 10px 7px !important;
+    margin: 0 !important;
+
+    visibility: visible !important;
+    opacity: 1 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior: contain !important;
+  }
+
+  .sidebar-recents .recent-session-row {
+    grid-template-columns: minmax(0, 1fr) 36px !important;
+    gap: 3px !important;
+  }
+
+  .sidebar-recents .recent-session {
+    min-height: 58px !important;
+    border-radius: 12px !important;
+  }
+
+  /* Phones have no reliable hover. Keep the trash discoverable, but subtle. */
+  .sidebar-recents .recent-session-delete {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    min-height: 34px !important;
+
+    opacity: .36 !important;
+    visibility: visible !important;
+    transform: none !important;
+    pointer-events: auto !important;
+  }
+
+  .sidebar-recents .recent-session-row:focus-within .recent-session-delete,
+  .sidebar-recents .recent-session-delete:active {
+    opacity: .9 !important;
+  }
+
+  /* Admin-only element still comes from v-if="authStore.isAdmin".
+     This only prevents prior mobile CSS from hiding it. */
+  .chat-header-actions .advanced-mode-toggle {
+    display: inline-flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+}

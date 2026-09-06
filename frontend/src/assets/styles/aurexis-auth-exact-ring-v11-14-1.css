@@ -1,0 +1,97 @@
+/*
+ AUREXIS Auth Exact Ring Fix v11.14.1
+ Target: the mint/green OUTER focus ring shown around Username/Password.
+ The ring is forced to the same blue-cyan family as the field's inner border.
+ Desktop + mobile.
+*/
+
+:root {
+  --aurexis-auth-field-blue: #1d6687;
+  --aurexis-auth-field-blue-strong: #2587ad;
+  --aurexis-auth-field-glow: rgba(37, 135, 173, .18);
+}
+
+/* Kill browser / legacy green outline on the actual credential inputs. */
+.auth-panel input:is(
+  [type="text"],
+  [type="email"],
+  [type="password"],
+  [name="username"],
+  [name="password"]
+):focus,
+.auth-panel input:is(
+  [type="text"],
+  [type="email"],
+  [type="password"],
+  [name="username"],
+  [name="password"]
+):focus-visible {
+  outline: 0 !important;
+  outline-color: transparent !important;
+  border-color: var(--aurexis-auth-field-blue-strong) !important;
+  box-shadow: none !important;
+  caret-color: var(--aurexis-auth-field-blue-strong) !important;
+}
+
+/*
+ The visible rounded rectangle in AuthPanel is a wrapper around the input.
+ Target the DIRECT input wrapper regardless of its local class name.
+ This is intentionally stronger than v11.14 so old :focus-within / valid
+ rules cannot leave the mint outer ring behind.
+*/
+.auth-panel :is(form, .auth-form, .staff-login, .login-form)
+  *:has(> input:is([type="text"], [type="email"], [type="password"], [name="username"], [name="password"])):focus-within {
+  outline: 1px solid var(--aurexis-auth-field-blue-strong) !important;
+  outline-offset: 1px !important;
+  border-color: var(--aurexis-auth-field-blue-strong) !important;
+  box-shadow:
+    0 0 0 1px rgba(37, 135, 173, .10),
+    0 0 0 3px rgba(37, 135, 173, .07) !important;
+}
+
+/* Also cover the known/common AuthPanel wrapper names. */
+.auth-panel :is(
+  .input-wrapper,
+  .input-container,
+  .input-field,
+  .field-control,
+  .form-control,
+  .password-wrapper,
+  .password-field
+):has(input):focus-within {
+  outline: 1px solid var(--aurexis-auth-field-blue-strong) !important;
+  outline-offset: 1px !important;
+  border-color: var(--aurexis-auth-field-blue-strong) !important;
+  box-shadow:
+    0 0 0 1px rgba(37, 135, 173, .10),
+    0 0 0 3px rgba(37, 135, 173, .07) !important;
+}
+
+/* Neutralize green validation/focus effects without changing validation logic. */
+.auth-panel input:is([name="username"], [name="password"]):is(:valid, :user-valid):focus {
+  outline: 0 !important;
+  border-color: var(--aurexis-auth-field-blue-strong) !important;
+  box-shadow: none !important;
+}
+
+/* Same exact visual treatment on phones. */
+@media (max-width: 900px) {
+  .auth-panel :is(form, .auth-form, .staff-login, .login-form)
+    *:has(> input:is([type="text"], [type="email"], [type="password"], [name="username"], [name="password"])):focus-within,
+  .auth-panel :is(
+    .input-wrapper,
+    .input-container,
+    .input-field,
+    .field-control,
+    .form-control,
+    .password-wrapper,
+    .password-field
+  ):has(input):focus-within {
+    outline: 1px solid var(--aurexis-auth-field-blue-strong) !important;
+    outline-offset: 1px !important;
+    border-color: var(--aurexis-auth-field-blue-strong) !important;
+    box-shadow:
+      0 0 0 1px rgba(37, 135, 173, .10),
+      0 0 0 3px rgba(37, 135, 173, .07) !important;
+  }
+}
