@@ -292,18 +292,93 @@ CASES = [
         expect_ran={A},
         note="the resolver has to carry the child, and the classifier the record type",
     ),
+    # ---------------------------------------------------------------------------------
+    # Held out from the prompt. Every case above shares its shape with a specimen in
+    # `request_envelope.j2`, so on their own they would measure how well the examples
+    # were copied. These are phrased in wordings that appear nowhere in it — a different
+    # verb, a possessive instead of a name, a subject named in English, a question with
+    # its two halves the other way round — and they are what says whether the classifier
+    # generalised or memorised.
+    # ---------------------------------------------------------------------------------
     Case(
-        "out of domain",
-        "ما هو الطقس النهاردة؟",
-        expect_short_circuit=True,
-        note="ends before the agent is built",
+        "held out: report card, English possessive",
+        "Can I see the report card for my daughter?",
+        expect_ran={G},
+        note="no name, no Arabic, and 'report card' rather than marks",
     ),
     Case(
-        "social",
-        "شكرا جزيلا",
-        expect_tools=set(),
-        note="answered with no tools bound",
+        "held out: lateness, contextual",
+        "هي اتأخرت كام مرة الترم ده؟",
+        history=("عايز اعرف عن ليلى أحمد", "تمام، ليلى أحمد في الصف الرابع"),
+        expect_ran={A},
+        note="lateness is attendance, and the child is only a pronoun",
     ),
+    Case(
+        "held out: subject named in English",
+        "How is my son getting on in Science?",
+        expect_ran={S},
+        model_args={S: {"subject": "Science"}},
+        note="a subject named in the other language, with a possessive not a name",
+    ),
+    Case(
+        "held out: bus route",
+        "هل في باص من المعادي؟",
+        expect_ran={K},
+        model_args={K: {"query": "باص المعادي"}},
+        note="transport, a corpus topic no specimen mentions",
+    ),
+    Case(
+        "held out: two-part, halves reversed",
+        "المصاريف كام وابني عامل ايه؟",
+        expect_tools={K, G},
+        expect_parallel=True,
+        note="the school half first, and the child by possessive rather than name",
+    ),
+    # ---------------------------------------------------------------------------------
+    # Breadth. Every corpus topic the profile claims, every record tool reached by more
+    # than one route, both languages, and the two ways a child is identified without
+    # being named: by sex, and by the conversation.
+    # ---------------------------------------------------------------------------------
+    Case("uniform", "يونيفورم المدرسة ايه؟", expect_ran={K},
+         model_args={K: {"query": "الزي المدرسي"}}),
+    Case("payment plans, English", "What payment plans do you offer?", expect_ran={K},
+         model_args={K: {"query": "payment plans"}}),
+    Case("trips", "هل في رحلات الترم ده؟", expect_ran={K},
+         model_args={K: {"query": "رحلات الترم"}}),
+    Case("start of the school day", "المدرسة بتبدأ الساعة كام؟", expect_ran={K},
+         model_args={K: {"query": "مواعيد اليوم الدراسي"}}),
+    Case("exam dates for a child", "ابني عنده امتحانات امتى؟", expect_ran={K},
+         model_args={K: {"query": "مواعيد الامتحانات"},
+                     },
+         note="school_matter although about_child is true"),
+    Case("child identified by sex — son", "درجات ابني كام؟", expect_ran={G},
+         note="one boy on the roster, so 'my son' is unambiguous without a name"),
+    Case("child identified by sex — daughter", "ابنتي غايبة كام يوم؟", expect_ran={A},
+         note="the same route, the other child, the other record"),
+    Case("subject by possessive, Arabic", "كام درجة ابنتي في اللغة العربية؟",
+         expect_ran={S}, model_args={S: {"subject": "اللغة العربية"}}),
+    Case("attendance, English, named", "How many days has Omar been absent?",
+         expect_ran={A}),
+    Case("follow-up on the other child", "طيب ودرجاته؟",
+         history=("كام يوم غاب عمر أحمد؟", "غاب يومين"),
+         expect_ran={G},
+         note="the conversation moved to the brother; the pronoun has to follow"),
+    Case("two-part, results and exam dates",
+         "عايزة اعرف نتيجة بنتي وكمان مواعيد الامتحانات",
+         expect_tools={K, G}, expect_parallel=True,
+         note="both halves by possessive, no name anywhere"),
+    Case("two-part, absence and marks by name",
+         "عايز اعرف غياب ودرجات عمر",
+         expect_tools={A, G}, expect_parallel=True,
+         note="two record tools, name last"),
+    Case("out of domain", "ما هو الطقس النهاردة؟", expect_short_circuit=True,
+         note="ends before the agent is built"),
+    Case("out of domain, sport", "مين كسب الماتش امبارح؟", expect_short_circuit=True),
+    Case("out of domain, a task", "اكتبلي ايميل لمديري", expect_short_circuit=True),
+    Case("social", "شكرا جزيلا", expect_tools=set(),
+         note="answered with no tools bound"),
+    Case("social, dialect", "ازيك يا فندم", expect_tools=set(),
+         note="an Egyptian opener the profile lists, so no model call at all"),
 ]
 
 
