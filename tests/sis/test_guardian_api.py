@@ -771,13 +771,28 @@ SECOND_TERM = "2026-T2"
 
 
 @pytest.fixture
-def week(client: TestClient, registrar: dict[str, str], roll: None) -> None:
+def week(
+    client: TestClient,
+    registrar: dict[str, str],
+    roll: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Two dated terms, a second class, a bell schedule, and one lesson in 3A's Sunday.
 
     Dated terms are the point of the fixture. `resolve_section_for_term` asks about a
     term's last day and falls back to its first, so a term with no dates would resolve
     against the whole year and make the transfer assertion below vacuous.
     """
+    # These rows describe a completed historical year, but the fixture deliberately
+    # creates them through the same structure endpoints a registrar uses.  Keep that
+    # setup on the last day before the year starts; otherwise the production lock on a
+    # started current year makes this suite depend on the wall-clock date and returns
+    # ``409 academic_year_locked`` before any timetable assertion can run.
+    monkeypatch.setattr(
+        "sis.api.routers.structure._school_today",
+        lambda: date(2025, 8, 31),
+    )
+
     with SqlAlchemyUnitOfWork() as uow:
         uow.terms.upsert_many(
             [
