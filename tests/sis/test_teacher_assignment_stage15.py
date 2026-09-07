@@ -102,7 +102,7 @@ def test_grade_scope_cannot_be_reused_against_another_school(
         "code": "OTHER15-2025", "school_code": "OTHER15",
         "name_en": "2025", "name_ar": "2025",
         "starts_on": "2025-09-01", "ends_on": "2026-06-30",
-        "is_current": True,
+        "is_current": False,
     }).status_code == 201
     assert client.post("/v1/structure/levels", headers=registrar, json={
         "code": "AR-P1", "school_code": "OTHER15", "track_code": "AR",

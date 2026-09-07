@@ -16,6 +16,7 @@ That refusal is `QueryService`'s, not this router's — it is a rule, and rules 
 here.
 """
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 from uuid import uuid4
 from typing import Annotated
 
@@ -47,6 +48,7 @@ from sis.infrastructure.db import models as m
 from sis.config import get_settings
 
 router = APIRouter(prefix="/v1", tags=["students"])
+_SCHOOL_TZ = ZoneInfo("Africa/Cairo")
 
 # Both scopes, spelled out: scope comparison is exact equality, so a reader-only check
 # would refuse the registrar reading her own register.
@@ -125,7 +127,7 @@ def read_class_roster(
             academic_year_code=academic_year, class_code=class_code
         ),
     )
-    on_date = on or datetime.now(UTC).date()
+    on_date = on or datetime.now(_SCHOOL_TZ).date()
     with domain_errors():
         entries = queries.class_roster(
             AcademicYearCode(academic_year), ClassCode(class_code), on_date

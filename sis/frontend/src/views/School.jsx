@@ -35,6 +35,7 @@ import {
   useConfirm
 } from '../components/Ui.jsx';
 import { SCHOOL_LEVELS, STAGES, byStage } from '../structure.js';
+import { PrincipalYearSetup } from '../components/PrincipalYearSetup.jsx';
 
 /* The week, Saturday first, as an Egyptian school reads it. The value is what the service
    stores. The labels are built by a call rather than held in a constant because `t` has to run
@@ -113,7 +114,7 @@ function SchoolForm({ onSaved }) {
           />
         </Field>
         <Field className="col-12 col-sm-4" label={t('Name (English)')} required>
-          <Input value={form.values.name_en} required onInput={form.set('name_en')} />
+          <Input className="sis-name-en" value={form.values.name_en} required onInput={form.set('name_en')} />
         </Field>
         <Field className="col-12 col-sm-4" label={t('Name (Arabic)')} required>
           <Input className="sis-name-ar" value={form.values.name_ar} required onInput={form.set('name_ar')} />
@@ -252,7 +253,7 @@ function YearForm({ school, onSaved }) {
           />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-4" label={t('Name (English)')}>
-          <Input value={form.values.name_en} onInput={form.set('name_en')} />
+          <Input className="sis-name-en" value={form.values.name_en} onInput={form.set('name_en')} />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-4" label={t('Name (Arabic)')}>
           <Input className="sis-name-ar" value={form.values.name_ar} onInput={form.set('name_ar')} />
@@ -373,7 +374,7 @@ function LevelForm({ school, schoolConfig, track, count, onSaved }) {
           />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-3" label={t('Name (English)')}>
-          <Input value={form.values.name_en} onInput={form.set('name_en')} />
+          <Input className="sis-name-en" value={form.values.name_en} onInput={form.set('name_en')} />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-3" label={t('Name (Arabic)')}>
           <Input className="sis-name-ar" value={form.values.name_ar} onInput={form.set('name_ar')} />
@@ -516,6 +517,8 @@ export function School({ params = {} }) {
   const [activeTrack, setActiveTrack] = useState('');
   const mayEditStructure = Store.can('structure.write');
   const isAdmin = Store.roles().indexOf('system_admin') >= 0;
+  const heldRoles = Store.roles();
+  const isPrincipal = heldRoles.indexOf('principal') >= 0 && heldRoles.indexOf('system_admin') < 0 && heldRoles.indexOf('school_owner') < 0;
 
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const schoolList = schools.value || [];
@@ -590,17 +593,24 @@ export function School({ params = {} }) {
 
   const grouped = byStage(levelList);
 
+
   return (
     <>
       <PageHead
         title={school ? pickName(school, state.lang) || code : code || 'School'}
         lede={
-          school
-            ? t('Its academic years, and its ladder grouped by division. Open a rung to see its classes.')
-            : t('This school is not on file.')
+          isPrincipal
+            ? undefined
+            : school
+              ? t('Its academic years, and its ladder grouped by division. Open a rung to see its classes.')
+              : t('This school is not on file.')
         }
         actions={
-          mayEditStructure ? <>
+          isPrincipal ? (
+            <Button variant="primary" disabled={!code} onClick={() => setAddingYear(!addingYear)}>
+              {addingYear ? t('Close') : t('Create academic year')}
+            </Button>
+          ) : mayEditStructure ? <>
             {isAdmin ? <Button onClick={() => setAddingSchool(!addingSchool)}>
               {addingSchool ? t('Close') : t('Add school')}
             </Button> : null}
@@ -637,9 +647,26 @@ export function School({ params = {} }) {
         ) : null}
 
         {addingYear && code ? (
-          <Card className="sis-rise" title={t('New academic year in {0}', [code])}>
-            <YearForm school={code} onSaved={() => setAddingYear(false)} />
-          </Card>
+          isPrincipal ? (
+            <div className="sis-rise">
+              <PrincipalYearSetup
+                school={code}
+                schoolConfig={school}
+                tracks={trackList}
+                levels={levels.value || []}
+                years={yearList}
+                onSaved={() => {
+                  years.reload();
+                  levels.reload();
+                  classes.reload();
+                }}
+              />
+            </div>
+          ) : (
+            <Card className="sis-rise" title={t('New academic year in {0}', [code])}>
+              <YearForm school={code} onSaved={() => setAddingYear(false)} />
+            </Card>
+          )
         ) : null}
 
         {addingLevel && code ? (
@@ -743,7 +770,7 @@ export function School({ params = {} }) {
                   note={t('Academic years on file')}
                 />
                 <Tile
-                  label={t('Classes')}
+                  label={t('Class sections')}
                   value={(classes.value || []).length}
                   loading={classes.loading && !classes.ready}
                   note={activeYear ? t('In {0}', [activeYear]) : t('Pick a year')}

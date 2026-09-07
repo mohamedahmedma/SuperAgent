@@ -31,13 +31,20 @@ no commit in between. The default is the real clock, so production wiring says n
 """
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.domain.attendance import AttendanceMark, AttendanceState, AttendanceTally, tally
 from sis.domain.errors import UnknownReference, ValidationError
 from sis.domain.people import Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
+
+
+_SIS_TIMEZONE = ZoneInfo("Africa/Cairo")
+
+def _sis_today() -> date:
+    return datetime.now(_SIS_TIMEZONE).date()
 
 __all__ = [
     "AttendanceService",
@@ -125,7 +132,7 @@ class AttendanceService:
         today: Callable[[], date] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
-        self._today = today or (lambda: datetime.now(UTC).date())
+        self._today = today or _sis_today
 
     # -- Reads -------------------------------------------------------------
 

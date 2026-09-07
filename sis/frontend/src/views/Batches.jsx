@@ -97,13 +97,15 @@ export function Batches({ params = {} }) {
                 label={t('Batch id')}
                 hint={t('Shown after every preview and every commit.')}
               >
-                <SearchField className="sis-code" value={typed} onInput={setTyped} />
-              </Field>
-              <div className="col-12 col-sm-4 col-lg-3 d-grid">
-                <Button type="submit" variant="primary" icon="search" disabled={!typed.trim()}>
+                {/* AUREXIS_INLINE_SEARCH_ACTION */}
+            <div className="d-flex align-items-stretch gap-2">
+              <div className="flex-grow-1"><SearchField className="sis-code" value={typed} onInput={setTyped} /></div>
+              <Button type="submit" variant="primary" icon="search" disabled={!typed.trim()}>
                   {t('Open')}
                 </Button>
-              </div>
+            </div>
+              </Field>
+
             </form>
 
             {history.length ? (

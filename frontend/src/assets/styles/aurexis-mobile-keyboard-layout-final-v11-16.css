@@ -1,0 +1,179 @@
+/*
+ AUREXIS Mobile Keyboard Layout Final v11.16
+
+ هدف النسخة:
+ - عند فتح كيبورد الهاتف لا يتحرك الـcomposer لأعلى الصفحة.
+ - يبقى الـTop bar ظاهر.
+ - تبقى WelcomeScreen في منتصف المساحة المرئية فوق الـcomposer.
+ - الـcomposer يثبت مباشرة فوق الكيبورد.
+ - Desktop / laptop غير متأثرين.
+*/
+
+@media (max-width: 900px) {
+  /*
+   لا نصغّر الـapp كله لارتفاع VisualViewport.
+   هذا كان سبب انهيار الـwelcome في بعض متصفحات الهاتف.
+  */
+  html.aurexis-keyboard-open,
+  html.aurexis-keyboard-open body,
+  html.aurexis-keyboard-open #app {
+    height: 100% !important;
+    min-height: 100% !important;
+    overflow: hidden !important;
+  }
+
+  html.aurexis-keyboard-open .app-wrapper,
+  html.aurexis-keyboard-open .main-content,
+  html.aurexis-keyboard-open .chat-area {
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    max-height: none !important;
+    overflow: hidden !important;
+  }
+
+  /*
+   WelcomeScreen تتحدد داخل الـVisualViewport نفسه:
+   أعلى = أسفل الـmobile header الفعلي.
+   أسفل = قبل الـcomposer بمسافة مريحة.
+  */
+  html.aurexis-keyboard-open .welcome-screen {
+    position: fixed !important;
+    z-index: 20 !important;
+
+    left: 0 !important;
+    right: 0 !important;
+    top: var(--aurexis-visible-content-top, 78px) !important;
+    bottom: auto !important;
+
+    width: 100% !important;
+    max-width: none !important;
+    height: calc(
+      var(--aurexis-vv-bottom, 700px)
+      - var(--aurexis-visible-content-top, 78px)
+      - var(--aurexis-composer-reserved, 102px)
+    ) !important;
+    min-height: 0 !important;
+
+    margin: 0 !important;
+    padding: 14px 24px 10px !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+
+    overflow: hidden !important;
+    transform: none !important;
+    pointer-events: none !important;
+  }
+
+  html.aurexis-keyboard-open .welcome-screen > * {
+    flex: 0 0 auto !important;
+  }
+
+  html.aurexis-keyboard-open .welcome-screen h1,
+  html.aurexis-keyboard-open .welcome-screen h2,
+  html.aurexis-keyboard-open .welcome-screen p {
+    text-align: center !important;
+  }
+
+  /*
+   composer مثبت في آخر الـVisualViewport وليس آخر layout viewport.
+   بالتالي يظل مباشرة فوق الكيبورد.
+  */
+  html.aurexis-keyboard-open .input-area-wrapper {
+    position: fixed !important;
+    z-index: 50 !important;
+
+    left: 0 !important;
+    right: 0 !important;
+    top: calc(
+      var(--aurexis-vv-bottom, 700px)
+      - var(--aurexis-composer-height, 82px)
+    ) !important;
+    bottom: auto !important;
+
+    width: 100% !important;
+    max-width: none !important;
+
+    margin: 0 !important;
+    padding: 7px 0 8px !important;
+
+    transform: none !important;
+    background:
+      linear-gradient(
+        180deg,
+        rgba(24, 43, 62, 0) 0%,
+        rgba(24, 43, 62, .92) 28%,
+        #182b3e 100%
+      ) !important;
+  }
+
+  html.aurexis-keyboard-open .input-area {
+    width: calc(100% - 0px) !important;
+    min-height: 64px !important;
+    height: auto !important;
+
+    margin: 0 !important;
+    padding: 6px 7px 6px 10px !important;
+
+    display: flex !important;
+    align-items: center !important;
+    overflow: hidden !important;
+  }
+
+  html.aurexis-keyboard-open .chat-input-textarea {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+
+    min-height: 44px !important;
+    height: 44px !important;
+    max-height: 96px !important;
+
+    margin: 0 !important;
+    padding: 11px 4px !important;
+
+    font-size: 16px !important;
+    line-height: 22px !important;
+
+    align-self: center !important;
+    transform: none !important;
+  }
+
+  html.aurexis-keyboard-open .chat-input-textarea::placeholder {
+    line-height: 22px !important;
+  }
+
+  html.aurexis-keyboard-open .send-btn,
+  html.aurexis-keyboard-open .voice-btn,
+  html.aurexis-keyboard-open .mic-btn,
+  html.aurexis-keyboard-open .input-area button:has(.fa-microphone) {
+    align-self: center !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    transform: none !important;
+  }
+
+  /*
+   إبقاء الـtop/mobile header فوق welcome + composer.
+   لا نغيّر شكله، فقط ترتيب الطبقات.
+  */
+  html.aurexis-keyboard-open :is(
+    .mobile-topbar,
+    .mobile-top-bar,
+    .mobile-chat-header,
+    .chat-header
+  ) {
+    position: relative !important;
+    z-index: 60 !important;
+  }
+
+  /*
+   منع أي footer/helper داخل composer من إضافة ارتفاع مفاجئ
+   أثناء فتح الكيبورد.
+  */
+  html.aurexis-keyboard-open .input-footer {
+    display: none !important;
+  }
+}

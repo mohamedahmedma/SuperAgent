@@ -1389,16 +1389,29 @@ class StudentDesk:
                         "a student may only transfer between classes in the same grade",
                         field="to_class_code",
                     )
-            opened = ClassEnrolment(
-                student_number=student_number,
-                academic_year_code=academic_year_code,
-                class_code=to_class,
-                starts_on=on_date,
-            )
-            closed = uow.enrolments.close_open_enrolment(
-                student_number, ends_on=on_date - timedelta(days=1)
-            )
-            uow.enrolments.upsert_many([opened])
+            if current is not None and current.starts_on == on_date:
+                opened = uow.enrolments.retarget_open_enrolment(
+                    student_number,
+                    academic_year_code=academic_year_code,
+                    to_class=to_class,
+                )
+                if opened is None:
+                    raise ValidationError(
+                        "the current placement could not be resolved",
+                        field="student_number",
+                    )
+                closed = current
+            else:
+                opened = ClassEnrolment(
+                    student_number=student_number,
+                    academic_year_code=academic_year_code,
+                    class_code=to_class,
+                    starts_on=on_date,
+                )
+                closed = uow.enrolments.close_open_enrolment(
+                    student_number, ends_on=on_date - timedelta(days=1)
+                )
+                uow.enrolments.upsert_many([opened])
             uow.commit()
         return closed, opened
 

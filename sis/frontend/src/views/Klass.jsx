@@ -28,6 +28,7 @@
  * can hit.
  */
 import { useEffect, useRef, useState } from 'react';
+import { ManagerMarksBrowser } from '../components/ManagerMarksBrowser.jsx';
 import { api } from '../api.js';
 import { Router } from '../router.js';
 import { Store } from '../store.js';
@@ -146,7 +147,7 @@ function AddChild({ classCode, year, onSaved }) {
           label={t('Name (English)')}
           error={form.errorFor(save.error, 'full_name_en')}
         >
-          <Input value={form.values.full_name_en} onInput={form.set('full_name_en')} />
+          <Input className="sis-name-en" value={form.values.full_name_en} onInput={form.set('full_name_en')} />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-4" label={t('Name (Arabic)')}>
           <Input
@@ -253,97 +254,174 @@ function PlaceExisting({ classCode, year, onSaved }) {
 /* -- Move a child to another class in the same year -------------------------------- */
 
 function MoveChild({ student, classCode, year, yearLevel, onDone }) {
-  const classes = useResource(Store.keys.classes(year), () => api.classes(year), !!year);
-  const form = useForm({ to_class_code: '', on_date: today() });
-  const [dialog, ask] = useConfirm();
+  const classes = useResource(
+    Store.keys.classes(year),
+    () => api.classes(year, yearLevel || undefined),
+    !!year
+  );
 
-  /* Same grade only: a move is a change of section, not of year — a child put into a class one
-     grade up by a mistyped dropdown is a mistake nobody notices until her marks arrive against
-     the wrong subjects. The level filter is skipped only while the classes are still loading,
-     because filtering against an undefined level would empty the list and read as "no class to
-     move her to". */
+  const form = useForm({
+    to_class_code: '',
+    on_date: today()
+  });
+  const [reviewing, setReviewing] = useState(false);
+
   const options = (classes.value || [])
     .filter(
       (section) =>
         section.code !== classCode &&
         (!yearLevel || section.year_level_code === yearLevel)
     )
-    .map((section) => ({ value: section.code, label: `${section.code} — ${labelOf(section)}` }));
+    .map((section) => ({
+      value: section.code,
+      label: `${section.code} — ${labelOf(section)}`
+    }));
+
+  const transfer = useAction(() =>
+    api.transferStudent(student.student_number, {
+      academic_year_code: year,
+      to_class_code: form.values.to_class_code,
+      on_date: form.values.on_date
+    })
+  );
+
+  const readyToReview =
+    !!form.values.to_class_code &&
+    !!form.values.on_date &&
+    !transfer.pending;
+
+  function resetReview() {
+    setReviewing(false);
+    transfer.reset();
+  }
+
+  function confirmTransfer() {
+    if (!readyToReview) return;
+
+    transfer
+      .run()
+      .then(() => {
+        Store.invalidate('roster:');
+        Store.invalidate('placements:');
+        Store.invalidate('classes:');
+        Store.invalidate('student:');
+        Store.toast(
+          'ok',
+          t('Student transferred'),
+          `${student.student_number}: ${classCode} → ${form.values.to_class_code}`
+        );
+        setReviewing(false);
+        if (onDone) onDone();
+      })
+      .catch(() => {});
+  }
 
   return (
-    <>
-      {dialog}
-      <form
-        className="vstack gap-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          ask({
-            title: `Move ${student.student_number}?`,
-            confirmLabel: 'Move her',
-            changes: [
-              { label: 'class', was: classCode, now: form.values.to_class_code },
-              { label: 'from', was: null, now: form.values.on_date }
-            ],
-            body: (
-              <p className="mb-0">
-                One request: her membership of {classCode} closes and the new one opens on{' '}
-                {form.values.on_date}, so she is never in no class at all. Nothing already
-                recorded against {classCode} changes — a mark stated there stays stated there.
-              </p>
-            ),
-            run: () =>
-              api
-                .transferStudent(student.student_number, {
-                  academic_year_code: year,
-                  to_class_code: form.values.to_class_code,
-                  on_date: form.values.on_date
-                })
-                .then(() => {
-                  Store.invalidate('roster:');
-                  Store.invalidate('placements:');
-                  Store.toast(
-                    'ok',
-                    `${student.student_number} moved`,
-                    `${classCode} → ${form.values.to_class_code}`
-                  );
-                  if (onDone) onDone();
-                })
-          });
-        }}
-      >
-        <div className="row g-3">
-          <Field className="col-12 col-sm-6" label={t('To class')} required>
-            <Select
-              value={form.values.to_class_code}
-              options={options}
-              placeholder={classes.loading ? t('Loading…') : t('Choose a class')}
-              onChange={form.set('to_class_code')}
-            />
-          </Field>
-          <Field className="col-12 col-sm-6" label={t('From')} required>
-            <Input type="date" value={form.values.on_date} onInput={form.set('on_date')} />
-          </Field>
+    <form
+      className="vstack gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!readyToReview) return;
+        setReviewing(true);
+      }}
+    >
+      <div className="row g-3">
+        <Field className="col-12 col-md-6" label={t('To class')} required>
+          <Select
+            value={form.values.to_class_code}
+            strict
+            options={options}
+            placeholder={classes.loading ? t('Loading…') : t('Choose a class')}
+            onChange={(value) => {
+              form.set('to_class_code')(value);
+              resetReview();
+            }}
+          />
+        </Field>
+
+        <Field
+          className="col-12 col-md-6"
+          label={t('Transfer date')}
+          required
+          hint={t('Any transfer date is allowed.')}
+        >
+          <Input
+            type="date"
+            value={form.values.on_date}
+            onInput={(value) => {
+              form.set('on_date')(value);
+              resetReview();
+            }}
+          />
+        </Field>
+      </div>
+
+      <ErrorNote error={classes.error} onRetry={classes.reload} />
+
+      {!classes.loading && !options.length ? (
+        <Alert tone="warn" title={t('No other class in this grade')}>
+          {t('There is no other class in the same grade to transfer this student to.')}
+        </Alert>
+      ) : null}
+
+      {reviewing ? (
+        <div className="border rounded-3 p-3 p-md-4 vstack gap-3">
+          <div>
+            <h3 className="h6 mb-1">{t('Confirm student transfer')}</h3>
+            <p className="small text-body-secondary mb-0">
+              {t('Review the transfer details before applying the change to the student record.')}
+            </p>
+          </div>
+
+          <div className="row g-3">
+            <div className="col-12 col-md-3">
+              <div className="small text-body-tertiary mb-1">{t('Student number')}</div>
+              <div className="fw-semibold sis-code">{student.student_number}</div>
+            </div>
+            <div className="col-12 col-md-3">
+              <div className="small text-body-tertiary mb-1">{t('Current class')}</div>
+              <div className="fw-semibold sis-code">{classCode}</div>
+            </div>
+            <div className="col-12 col-md-3">
+              <div className="small text-body-tertiary mb-1">{t('New class')}</div>
+              <div className="fw-semibold sis-code">{form.values.to_class_code}</div>
+            </div>
+            <div className="col-12 col-md-3">
+              <div className="small text-body-tertiary mb-1">{t('Transfer date')}</div>
+              <div className="fw-semibold sis-num">{form.values.on_date}</div>
+            </div>
+          </div>
+
+          <ErrorNote error={transfer.error} />
+
+          <div className="d-grid gap-2 d-sm-flex justify-content-sm-end">
+            <Button type="button" variant="quiet" disabled={transfer.pending} onClick={() => setReviewing(false)}>
+              {t('Cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              pending={transfer.pending}
+              pendingLabel={t('Moving…')}
+              onClick={confirmTransfer}
+            >
+              {t('Confirm transfer')}
+            </Button>
+          </div>
         </div>
-        <ErrorNote error={classes.error} onRetry={classes.reload} />
-        {!classes.loading && !options.length ? (
-          <Alert tone="warn" title={t('No other class in this grade')}>
-            {t('She can only be moved to another section of the same grade, and this grade has no other. Add one first.')}
-          </Alert>
-        ) : null}
+      ) : (
         <div className="d-grid gap-2 d-sm-flex">
-          <Button type="submit" variant="primary" disabled={!form.values.to_class_code}>
-            Move out of {classCode}
+          <Button type="submit" variant="primary" disabled={!readyToReview}>
+            {t('Review transfer')}
           </Button>
-          <Button variant="quiet" onClick={onDone}>
+          <Button type="button" variant="quiet" disabled={transfer.pending} onClick={onDone}>
             {t('Cancel')}
           </Button>
         </div>
-      </form>
-    </>
+      )}
+    </form>
   );
 }
-
-/* -- Rename, which is a label change and never a code change ---------------------- */
 
 function RenameClass({ section, year, onDone }) {
   const form = useForm({
@@ -394,7 +472,7 @@ function RenameClass({ section, year, onDone }) {
       >
         <div className="row g-3">
           <Field className="col-12 col-sm-6" label={t('Name (English)')}>
-            <Input value={form.values.name_en} onInput={form.set('name_en')} />
+            <Input className="sis-name-en" value={form.values.name_en} onInput={form.set('name_en')} />
           </Field>
           <Field className="col-12 col-sm-6" label={t('Name (Arabic)')}>
             <Input
@@ -946,11 +1024,11 @@ export function Klass({ params = {} }) {
           />
         ) : null}
         {tab === 'marks' ? (
-          <ClassMarks
-            classCode={classCode}
-            year={year}
-            yearLevel={section && section.year_level_code}
-          />
+          Store.can('grades.write') ? (
+            <ClassMarks classCode={classCode} year={year} yearLevel={section && section.year_level_code} />
+          ) : (
+            <ManagerMarksBrowser fixedClassCode={classCode} fixedYearLevel={section && section.year_level_code} />
+          )
         ) : null}
       </div>
     </>

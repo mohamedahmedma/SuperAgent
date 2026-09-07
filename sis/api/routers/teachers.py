@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime
 from uuid import uuid4
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 
@@ -18,7 +18,7 @@ from sis.api.routers import domain_errors, error_responses
 from sis.application.ports.repositories import TeacherRecord
 from sis.application.services.teachers import TeacherManagementService
 from sis.domain.staff import PASSWORD_MIN_LENGTH, StaffAttendanceState
-from sis.domain.rbac import Permission
+from sis.domain.rbac import Permission, RoleCode
 from sis.domain.value_objects import SchoolCode, YearCode
 from sis.infrastructure.db import models as m
 
@@ -97,6 +97,12 @@ class TeacherAssignmentOut(BaseModel):
     year_level_code: str
     track_code: str | None
     class_codes: list[str]
+
+
+class TeacherRemovalOut(BaseModel):
+    staff_number: str
+    account_deleted: bool
+    history_preserved: bool = True
 
 
 class TeacherOut(BaseModel):
@@ -611,3 +617,79 @@ def create_teacher(
             _sync_teacher_role_grants(uow._session, teacher, actor=caller.username)
             uow.commit()
     return TeacherOut.of(row)
+
+@router.delete(
+    "/schools/{school_code}/teachers/{staff_number}",
+    response_model=TeacherRemovalOut,
+    summary="Remove a departed teacher from active school operations",
+    responses=error_responses(401, 403, 404, 409),
+)
+def remove_teacher(
+    school_code: str, staff_number: str, caller: Managers, uow_factory: UowFactoryDep
+) -> TeacherRemovalOut:
+    """Principal-only departure workflow.
+
+    The teaching identity is retained as an inactive historical row so staff attendance and
+    previously recorded academic facts keep resolving. Current teaching assignments are
+    removed, and a linked login account is deleted after its active roles and sessions are
+    cleared. This is intentionally narrower than granting the principal generic user-write.
+    """
+    if caller.profile is None or not caller.profile.has_role(RoleCode.PRINCIPAL.value):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "principal_only", "message": "Only the school manager can remove a teacher."},
+        )
+    caller.narrow(
+        Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
+    )
+    with uow_factory() as uow:
+        session = uow._session
+        teacher = session.scalar(
+            select(m.Teacher).join(m.School).where(
+                m.School.code == school_code, m.Teacher.staff_number == staff_number
+            )
+        )
+        if teacher is None or not teacher.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "unknown_reference", "message": "No active teacher with that reference exists in this school."},
+            )
+
+        user = session.get(m.User, teacher.user_id) if teacher.user_id is not None else None
+        if user is not None:
+            protected = set(session.scalars(
+                select(m.Role.code)
+                .join(m.UserRole, m.UserRole.role_id == m.Role.id)
+                .where(m.UserRole.user_id == user.id)
+            ).all()) & {
+                RoleCode.SYSTEM_ADMIN.value, RoleCode.SCHOOL_OWNER.value, RoleCode.PRINCIPAL.value
+            }
+            if protected:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "protected_account",
+                        "message": "This teacher account also holds a protected management role. Remove that role separately before deleting the teaching account.",
+                    },
+                )
+
+        # Remove every active teaching responsibility. Historical marks are not keyed to these
+        # assignment rows, and teacher attendance remains attached to the inactive teacher row.
+        session.execute(delete(m.TeacherClassSection).where(m.TeacherClassSection.teacher_id == teacher.id))
+        session.execute(delete(m.TeacherYearLevel).where(m.TeacherYearLevel.teacher_id == teacher.id))
+        session.execute(delete(m.TeacherSubject).where(m.TeacherSubject.teacher_id == teacher.id))
+        teacher.is_active = False
+
+        account_deleted = user is not None
+        if user is not None:
+            # Detach first so this remains safe even when a database has FK actions disabled.
+            teacher.user_id = None
+            session.flush()
+            session.execute(delete(m.UserRole).where(m.UserRole.user_id == user.id))
+            session.execute(delete(m.UserSession).where(m.UserSession.user_id == user.id))
+            session.delete(user)
+
+        uow.commit()
+        return TeacherRemovalOut(
+            staff_number=staff_number, account_deleted=account_deleted, history_preserved=True
+        )

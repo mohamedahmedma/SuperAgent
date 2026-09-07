@@ -81,9 +81,15 @@ export function AttendancePanel({ classCode, year, on, scope }) {
   const isFuture = day > today();
   const mayEdit = mayWrite && !isFuture;
 
+  function canChangeState(line, next) {
+    if (!mayEdit) return false;
+    if (!isPast) return true;
+    return next === 'excused' && !!line && line.state === 'absent';
+  }
+
   function mark(number, next) {
     const line = lines.find((item) => item.student_number === number);
-    if (isPast && (next !== 'excused' || !line || line.state !== 'absent')) return;
+    if (!canChangeState(line, next)) return;
     setDraft((current) => {
       const copy = { ...current };
       /* Tapping the state a child already has clears the draft entry rather than re-stating it:
@@ -173,7 +179,7 @@ export function AttendancePanel({ classCode, year, on, scope }) {
              is present but permanently disabled reads as a bug in the page; a sentence
              naming the reason is something a teacher can act on. */
           <span className="small text-body-tertiary">
-            {t('You can read this register but not record it. Ask whoever manages roles at your school for the classes you take.')}
+            {t('Read-only attendance view. Recording controls are hidden for this account.')}
           </span>
         ) : (
         <div className="d-grid gap-2 d-sm-flex align-items-sm-center w-100">
@@ -233,18 +239,24 @@ export function AttendancePanel({ classCode, year, on, scope }) {
           ])}
         </p>
 
-        <div className="d-grid gap-2 d-sm-flex align-items-sm-center">
-          <Button size="sm" disabled={isPast} onClick={() => fillUntouched('present')}>
-            {t('Mark the rest present')}
-          </Button>
-          <span className="small text-body-tertiary">
-            {t('Fills only the children still blank, and leaves every mark already on file alone.')}
-          </span>
-        </div>
+        {mayWrite ? (
+          <div className="d-grid gap-2 d-sm-flex align-items-sm-center">
+            <Button size="sm" disabled={isPast} onClick={() => fillUntouched('present')}>
+              {t('Mark the rest present')}
+            </Button>
+            <span className="small text-body-tertiary">
+              {t('Fills only the children still blank, and leaves every mark already on file alone.')}
+            </span>
+          </div>
+        ) : (
+          <div className="small text-body-tertiary">
+            {t('Read-only attendance view. You can review every recorded status for this class and date.')}
+          </div>
+        )}
       </div>
 
       <ErrorNote error={register.error} onRetry={register.reload} />
-      <ErrorNote error={save.error} />
+      {mayWrite ? <ErrorNote error={save.error} /> : null}
 
       <Table
         loading={register.loading}
@@ -292,6 +304,20 @@ export function AttendancePanel({ classCode, year, on, scope }) {
             cell: (row) => {
               const value = shown(row);
               const dirty = !!draft[row.student_number];
+              if (!mayWrite) {
+                const option = STATES.find((item) => item.key === value);
+                const tone =
+                  value === 'present' ? 'ok' :
+                  value === 'absent' ? 'bad' :
+                  value === 'late' || value === 'excused' ? 'warn' : null;
+                return value ? (
+                  <Badge tone={tone}>{option ? t(option.label) : value}</Badge>
+                ) : (
+                  <span className="sis-ungraded small text-nowrap">
+                    {DASH} {t('not yet marked')}
+                  </span>
+                );
+              }
               return (
                 <div className="vstack gap-1">
                   <div className="btn-group btn-group-sm w-100 sis-attendance-states" role="group">
@@ -310,7 +336,7 @@ export function AttendancePanel({ classCode, year, on, scope }) {
                            the day: the marks already taken are still worth reading, and
                            removing the buttons would make a read-only register look like
                            one nobody has started. */
-                        disabled={!mayEdit || (isPast && (option.key !== 'excused' || row.state !== 'absent'))}
+                        disabled={!canChangeState(row, option.key)}
                         onClick={() => mark(row.student_number, option.key)}
                         title={t(option.label)}
                       >
@@ -336,6 +362,13 @@ export function AttendancePanel({ classCode, year, on, scope }) {
             header: t('Reason'),
             cell: (row) => {
               const value = shown(row);
+              if (!mayWrite) {
+                return shownNote(row) ? (
+                  <span className="small text-body-tertiary">{shownNote(row)}</span>
+                ) : (
+                  <span className="sis-ungraded">{DASH}</span>
+                );
+              }
               /* Only for an excused absence, which is the one state the service requires a reason
                  for: without it, it cannot be told apart from an ordinary absence marked by
                  mistake. */

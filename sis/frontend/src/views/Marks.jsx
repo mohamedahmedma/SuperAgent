@@ -16,6 +16,7 @@
  * stated and putting it in front of a parent.
  */
 import { useEffect, useState } from 'react';
+import { ManagerMarksBrowser } from '../components/ManagerMarksBrowser.jsx';
 import { api, gradeText } from '../api.js';
 import { Router } from '../router.js';
 import { Store } from '../store.js';
@@ -257,6 +258,7 @@ function TeacherMarks() {
   const year = state.year;
   const [term, setTerm] = useState('');
   const [assignmentKey, setAssignmentKey] = useState('');
+  const [assessmentType, setAssessmentType] = useState('');
   const [assessmentName, setAssessmentName] = useState('');
   const [maxPoints, setMaxPoints] = useState('');
   const [draft, setDraft] = useState({});
@@ -304,14 +306,54 @@ function TeacherMarks() {
       await api.recordClassMarks(selected.class_code, year, {
         term_code: term,
         subject_code: selected.subject_code,
+        assessment_type: assessmentType,
+        assessment_name: assessmentName.trim(),
         marks: enteredMarks.map(([number, value]) => ({
           student_number: number,
           points: Number(value),
           max_points: Number(maxPoints),
-          clear: false
+          clear: false,
+          absent: false
         }))
       });
       Store.toast(t('Marks saved.'), 'success');
+      sheet.reload();
+    } catch (error) {
+      setSaveError(error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveAndMarkRestAbsent = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const students = (sheet.value && sheet.value.students) || [];
+      await api.recordClassMarks(selected.class_code, year, {
+        term_code: term,
+        subject_code: selected.subject_code,
+        assessment_type: assessmentType,
+        assessment_name: assessmentName.trim(),
+        marks: students.map((student) => {
+          const value = draft[student.student_number];
+          if (value === undefined || value === '') {
+            return {
+              student_number: student.student_number,
+              clear: false,
+              absent: true
+            };
+          }
+          return {
+            student_number: student.student_number,
+            points: Number(value),
+            max_points: Number(maxPoints),
+            clear: false,
+            absent: false
+          };
+        })
+      });
+      Store.toast(t('Marks saved; blank students were marked absent.'), 'success');
       sheet.reload();
     } catch (error) {
       setSaveError(error);
@@ -324,7 +366,19 @@ function TeacherMarks() {
     <PageHead title={t('Marks')} lede={t('Only your assigned classes and subjects are shown.')} />
     <Card title={t('Enter class marks')} tight>
       <div className="card-body row g-3">
-        <Field className="col-12 col-md-8" label={t('Assessment name')}>
+        <Field className="col-12 col-md-4" label={t('Assessment type')} required>
+          <Select
+            value={assessmentType}
+            strict
+            placeholder={t('— choose assessment type —')}
+            options={[
+              { value: 'exam', label: t('Exam') },
+              { value: 'assignment', label: t('Homework assignment') }
+            ]}
+            onChange={setAssessmentType}
+          />
+        </Field>
+        <Field className="col-12 col-md-4" label={t('Assessment name')} required>
           <Input value={assessmentName} placeholder={t('January monthly exam')} onInput={setAssessmentName} />
         </Field>
         <Field className="col-12 col-md-4" label={t('Maximum mark')} required>
@@ -349,7 +403,9 @@ function TeacherMarks() {
           rowKey={(row) => row.student_number} columns={[
             { key: 'number', header: t('Student number'), className: 'sis-code', cell: (row) => row.student_number },
             { key: 'name', header: t('Student'), cell: (row) => pickName(row, state.lang) },
-            { key: 'mark', header: assessmentName ? `${assessmentName} / ${maxPoints || '—'}` : t('Mark'), cell: (row) => <Input type="number" min="0" max={maxPoints || undefined} step="0.01"
+            { key: 'mark', header: assessmentName
+              ? `${t(assessmentType === 'assignment' ? 'Homework assignment' : 'Exam')} · ${assessmentName} / ${maxPoints || '—'}`
+              : t('Mark'), cell: (row) => <Input type="number" min="0" max={maxPoints || undefined} step="0.01"
               value={draft[row.student_number] === undefined ? '' : draft[row.student_number]}
               disabled={!sheet.value || !sheet.value.may_record || sheet.value.term_is_closed}
               onInput={(value) => setDraft((old) => ({ ...old, [row.student_number]: value }))} /> }
@@ -358,8 +414,14 @@ function TeacherMarks() {
         {invalidMarks ? <span className="small text-danger">
           {t('Every mark must be between zero and the maximum mark.')}
         </span> : null}
-        <Button variant="primary" icon="save" disabled={saving || !enteredMarks.length || invalidMarks || !maxPoints || !assessmentName.trim() || !sheet.value.may_record || sheet.value.term_is_closed}
-          onClick={save}>{saving ? t('Saving…') : t('Save marks')}</Button>
+        <div className="d-flex flex-wrap gap-2 justify-content-end">
+          <Button variant="quiet" icon="save"
+            disabled={saving || !enteredMarks.length || invalidMarks || !maxPoints || !assessmentType || !assessmentName.trim() || !sheet.value.may_record || sheet.value.term_is_closed}
+            onClick={save}>{saving ? t('Saving…') : t('Save marks')}</Button>
+          <Button variant="primary" icon="check"
+            disabled={saving || invalidMarks || !maxPoints || !assessmentType || !assessmentName.trim() || !sheet.value.may_record || sheet.value.term_is_closed || !(sheet.value.students || []).length}
+            onClick={saveAndMarkRestAbsent}>{saving ? t('Saving…') : t('Save and mark blanks absent')}</Button>
+        </div>
       </div> : null}
     </Card>
   </>;
@@ -527,5 +589,9 @@ export function Marks({ params = {} }) {
   useStore();
   if (Store.roles().indexOf('teacher') >= 0) return <TeacherMarks />;
   if (Store.can('grades.write')) return <RegistrarMarks params={params} />;
+  if (Store.can('grades.read')) return <>
+    <PageHead title={t('Marks')} lede={t('Read-only class assessment browser.')} />
+    <ManagerMarksBrowser />
+  </>;
   return <><PageHead title={t('Marks')} /><StudentMarks initial={params.student} initialTerm={params.term} /></>;
 }
