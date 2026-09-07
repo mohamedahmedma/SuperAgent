@@ -1064,12 +1064,6 @@ export function Year({ params = {} }) {
         </Alert>
       ) : null}
 
-      {yearLocked ? (
-        <Alert tone="warn" title={t('Academic year locked')}>
-          {t('This is the current academic year and its first day has arrived. Its structure is now read-only: terms, subjects, grade assignments and classes cannot be added, removed or changed.')}
-        </Alert>
-      ) : null}
-
       <div className="vstack gap-3">
         <Card
           title={t('This year is attached to')}

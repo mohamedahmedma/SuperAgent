@@ -829,6 +829,7 @@ var api = {
     });
   },
   rbacUsers: function () { return get('/rbac/users'); },
+  createSupervisor: function (body) { return post('/rbac/supervisors', body); },
   rbacRoles: function () { return get('/rbac/roles'); },
   rbacYearLevels: function (schoolCode) {
     return get('/rbac/year-level-scopes', { school: schoolCode });
