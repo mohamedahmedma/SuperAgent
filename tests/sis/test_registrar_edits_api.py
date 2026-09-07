@@ -176,6 +176,26 @@ def test_admission_accepts_national_guardian_phone_optional_contacts_and_lists_c
     assert result["placement"]["starts_on"] == "2025-09-01"
 
 
+def test_admission_form_may_omit_the_optional_relationship_label(
+    seeded: TestClient, registrar: dict[str, str]
+) -> None:
+    """The UI selects a relationship type but has no free-text relationship field."""
+    body = _complete_admission()
+    body.pop("relationship_label")
+
+    response = seeded.post(
+        "/v1/students/admissions", json=body, headers=registrar
+    )
+
+    assert response.status_code == 201, response.text
+    number = response.json()["student"]["student_number"]
+    guardians = seeded.get(
+        f"/v1/students/{number}/guardians", headers=registrar
+    ).json()
+    assert guardians["guardians"][0]["relationship_type"] == "father"
+    assert guardians["guardians"][0]["relationship_label"] == ""
+
+
 def test_complete_admission_refuses_a_blank_required_field_without_partial_writes(
     seeded: TestClient, registrar: dict[str, str]
 ) -> None:
