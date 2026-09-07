@@ -278,8 +278,10 @@ agent:
       medical policy, contact details.
     get_student_grades: >-
       One child's own marks across every subject this term — how they are doing overall,
-      their results, their report card. This is the one to name when the message asks
-      about marks without naming a particular subject.
+      their results, their report card, what they scored, whether they are doing well.
+      This is the one to name when the message asks about marks without naming a
+      particular subject, including when it says so in dialect and uses no word meaning
+      "marks" at all.
     get_subject_grades: >-
       One child's own marks inside a single school subject, assignment by assignment.
       This is the one to name whenever the message names a subject — maths, science,

@@ -490,7 +490,31 @@ def _needed_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> tupl
     # no children at all.
     if signals.needed_tools:
         named = tuple(signals.needed_tools)
-        return named, f"needs {', '.join(named)}", True
+        # ## When the classifier's two answers contradict each other
+        #
+        # The same call reports a FAMILY (`child_question_kind`) and a tool LIST
+        # (`needed_tools`). They are independent readings of one message, so they can
+        # disagree — and measured on gpt-oss-20b they do, on about one turn in four for a
+        # question phrased in dialect: «ليلى أحمد جابت كام؟» is `records` every time and
+        # still named `search_knowledge_base` twice in eight runs.
+        #
+        # That is the exact failure this whole mechanism exists to stop: a question about
+        # a named child's marks, sent to a fee corpus, answered with "no information about
+        # your daughter". Taking the tool list on its own would reintroduce it, and taking
+        # the intersection would leave nothing.
+        #
+        # So a contradiction is treated as what it is — the classifier not having settled —
+        # and this falls through to the family below, which is the coarser, measured, and
+        # safer of the two readings. Only a genuine contradiction: `both` names no family,
+        # so a message spanning both sides is not caught by this.
+        family = _TOOLS_FOR_KIND.get(signals.child_question_kind)
+        if family and not set(named) & set(family):
+            logger.info(
+                "classifier disagreed with itself (%s vs %s); using the family",
+                signals.child_question_kind, ", ".join(named),
+            )
+        else:
+            return named, f"needs {', '.join(named)}", True
 
     if not getattr(agent_config, "narrow_tools_to_the_turn", False):
         return (), "", False

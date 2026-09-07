@@ -291,10 +291,41 @@ class SelectionGeneralisesPastTwoTools(unittest.TestCase):
                      resolved_question="q")
         self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL, RECORDS_TOOL])
 
-    def test_the_classifier_list_wins_over_the_question_kind_enum(self):
+    def test_the_classifier_list_refines_the_question_kind_enum(self):
+        """Where the two agree, the finer answer wins: `records` says which family, the
+        list says which member, and the member is what gets dispatched."""
+        plan = _plan(_settled(), about_child=True, child_question_kind="records",
+                     needed_tools=[ATTENDANCE_TOOL], resolved_question="q")
+        self.assertEqual(plan.exposed_tools, [ATTENDANCE_TOOL])
+        self.assertEqual(plan.forced_tool, ATTENDANCE_TOOL)
+
+    def test_a_list_contradicting_the_enum_is_not_a_decision(self):
+        """The two fields come from one call and are independent readings of one message,
+        so they can disagree — measured at about one turn in four on a dialect phrasing,
+        where `records` was right every time and the list named the corpus twice in eight.
+
+        That is the failure the whole mechanism exists to stop: a named child's marks sent
+        to a fee corpus, answered with "no information about your daughter". So a
+        contradiction falls back to the family, which is the coarser, measured and safer
+        of the two readings.
+        """
         plan = _plan(_settled(), about_child=True, child_question_kind="records",
                      needed_tools=[KNOWLEDGE_TOOL], resolved_question="q")
-        self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL])
+        # The family, intersected with what this profile actually binds — `_Agent` ships
+        # no subject tool, and a plan may never name a tool `build_tools` would reject.
+        self.assertEqual(
+            plan.exposed_tools, [t for t in _Agent.tools if t in RECORDS_TOOLS]
+        )
+        self.assertNotIn(KNOWLEDGE_TOOL, plan.exposed_tools)
+        self.assertEqual(plan.planned_calls, [])
+
+    def test_both_spans_the_families_so_nothing_contradicts_it(self):
+        """`both` names no family, so a list spanning each side is not caught by the
+        contradiction rule — which is the case the parallel dispatch exists for."""
+        plan = _plan(_settled(), about_child=True, child_question_kind="both",
+                     needed_tools=[KNOWLEDGE_TOOL, GRADES_TOOL], resolved_question="q")
+        self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL, GRADES_TOOL])
+        self.assertEqual(len(plan.planned_calls), 2)
 
     def test_a_name_the_profile_does_not_bind_is_dropped(self):
         plan = _plan(no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, "invented_tool"],
