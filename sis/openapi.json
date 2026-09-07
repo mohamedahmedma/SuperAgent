@@ -1871,6 +1871,16 @@
               }
             }
           },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "A supplied value is not valid.",
             "content": {
@@ -2344,6 +2354,16 @@
               }
             }
           },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "A supplied value is not valid.",
             "content": {
@@ -2463,6 +2483,16 @@
           },
           "404": {
             "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5093,6 +5123,128 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "teachers"
+        ],
+        "summary": "Remove a departed teacher from active school operations",
+        "description": "Principal-only departure workflow.\n\nThe teaching identity is retained as an inactive historical row so staff attendance and\npreviously recorded academic facts keep resolving. Current teaching assignments are\nremoved, and a linked login account is deleted after its active roles and sessions are\ncleared. This is intentionally narrower than granting the principal generic user-write.",
+        "operationId": "remove_teacher_v1_schools__school_code__teachers__staff_number__delete",
+        "parameters": [
+          {
+            "name": "school_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "School Code"
+            }
+          },
+          {
+            "name": "staff_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Staff Number"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeacherRemovalOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/classes/{class_code}/students": {
@@ -7621,13 +7773,573 @@
         }
       }
     },
+    "/v1/classes/{class_code}/assessments": {
+      "get": {
+        "tags": [
+          "teaching"
+        ],
+        "summary": "List Class Assessments",
+        "operationId": "list_class_assessments_v1_classes__class_code__assessments_get",
+        "parameters": [
+          {
+            "name": "class_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Class Code"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Term"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Subject"
+            }
+          },
+          {
+            "name": "assessment_type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "exam",
+                "assignment"
+              ],
+              "type": "string",
+              "title": "Assessment Type"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/classes/{class_code}/assessments/{assessment_id}": {
+      "get": {
+        "tags": [
+          "teaching"
+        ],
+        "summary": "Read Class Assessment",
+        "operationId": "read_class_assessment_v1_classes__class_code__assessments__assessment_id__get",
+        "parameters": [
+          {
+            "name": "class_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Class Code"
+            }
+          },
+          {
+            "name": "assessment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Assessment Id"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentSheetOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/homework": {
+      "get": {
+        "tags": [
+          "homework"
+        ],
+        "summary": "List Teacher Homework",
+        "operationId": "list_teacher_homework_v1_homework_get",
+        "parameters": [
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Academic Year"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeworkListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "homework"
+        ],
+        "summary": "Upload Homework",
+        "operationId": "upload_homework_v1_homework_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_homework_v1_homework_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeworkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/homework/{homework_id}": {
+      "delete": {
+        "tags": [
+          "homework"
+        ],
+        "summary": "Delete Homework",
+        "operationId": "delete_homework_v1_homework__homework_id__delete",
+        "parameters": [
+          {
+            "name": "homework_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Homework Id"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/homework/student/{student_number}": {
+      "get": {
+        "tags": [
+          "homework"
+        ],
+        "summary": "Homework For Student",
+        "operationId": "homework_for_student_v1_homework_student__student_number__get",
+        "parameters": [
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          },
+          {
+            "name": "on_date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "On Date"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentHomeworkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/homework/{homework_id}/file": {
+      "get": {
+        "tags": [
+          "homework"
+        ],
+        "summary": "Download Homework File",
+        "operationId": "download_homework_file_v1_homework__homework_id__file_get",
+        "parameters": [
+          {
+            "name": "homework_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Homework Id"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/attendance/classes": {
       "get": {
         "tags": [
           "attendance"
         ],
         "summary": "The classes this caller may take the register for",
-        "description": "Step one of taking a register, and the only read here that answers from the caller's own grants rather than from something they named.\n\nEvery other listing narrows a target the caller supplies, which a class-scoped attendance supervisor cannot use: they hold four rooms and no authority over the grade or the year those rooms sit in, so `GET /v1/structure/classes` refuses them however they ask. Without this route the workflow's first step — pick a grade, pick a class — is only possible for somebody who already knows the class code.\n\nThe answer is the union over every grant, so a school-wide registrar sees the school and a supervisor sees their rooms, through one route. Each row carries its grade, so a client groups by grade without a second call, and the day's progress, so a register already taken is visible before it is opened again.",
+        "description": "Step one of taking a register, and the only read here that answers from the caller's own grants rather than from something they named.\n\nEvery other listing narrows a target the caller supplies, which a class-scoped attendance supervisor cannot use: they hold specific rooms and no authority over the grade or year above them. This route therefore starts from the caller's own ATTENDANCE_WRITE grants and returns only rooms whose register they may save.\n\nEach row carries its grade, so a client groups by grade without a second call, and the day's progress, so a register already taken is visible before it is opened again.",
         "operationId": "list_registerable_classes_v1_attendance_classes_get",
         "parameters": [
           {
@@ -10193,6 +10905,113 @@
         "title": "ApiKeyOut",
         "description": "The minted key. `api_key` appears here and is never retrievable again."
       },
+      "AssessmentListOut": {
+        "properties": {
+          "assessments": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentSummaryOut"
+            },
+            "type": "array",
+            "title": "Assessments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assessments"
+        ],
+        "title": "AssessmentListOut"
+      },
+      "AssessmentSheetOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code"
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code"
+          },
+          "term_code": {
+            "type": "string",
+            "title": "Term Code"
+          },
+          "assessment_type": {
+            "type": "string",
+            "title": "Assessment Type"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "max_points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Points"
+          },
+          "students": {
+            "items": {
+              "$ref": "#/components/schemas/MarkSheetLineOut"
+            },
+            "type": "array",
+            "title": "Students"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "class_code",
+          "subject_code",
+          "term_code",
+          "assessment_type",
+          "name",
+          "students"
+        ],
+        "title": "AssessmentSheetOut"
+      },
+      "AssessmentSummaryOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "assessment_type": {
+            "type": "string",
+            "title": "Assessment Type"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "max_points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "assessment_type",
+          "name"
+        ],
+        "title": "AssessmentSummaryOut"
+      },
       "AttendanceEntryIn": {
         "properties": {
           "student_number": {
@@ -10224,6 +11043,51 @@
         ],
         "title": "AttendanceEntryIn",
         "description": "One child's state for the day, and why if it needs one."
+      },
+      "Body_upload_homework_v1_homework_post": {
+        "properties": {
+          "academic_year": {
+            "type": "string",
+            "title": "Academic Year"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code"
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "details": {
+            "type": "string",
+            "title": "Details",
+            "default": ""
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_year",
+          "class_code",
+          "subject_code",
+          "title"
+        ],
+        "title": "Body_upload_homework_v1_homework_post"
       },
       "ClassRegisterOut": {
         "properties": {
@@ -10628,7 +11492,7 @@
           "message"
         ],
         "title": "ErrorDetail",
-        "description": "The body of a refusal: a code to branch on, a sentence to show, a cell to blame.\n\n`code` is the contract and `message` is prose — a client that branches on the wording\nbreaks the first time somebody translates it into Arabic, which this school will do."
+        "description": "The body of a refusal: a code to branch on, a sentence to show, a cell to blame.\n\n`code` is the contract and `message` is prose â€” a client that branches on the wording\nbreaks the first time somebody translates it into Arabic, which this school will do."
       },
       "ErrorOut": {
         "properties": {
@@ -11352,6 +12216,126 @@
         "title": "HealthOut",
         "description": "What a probe reads. Deliberately says nothing about stored data."
       },
+      "HomeworkListOut": {
+        "properties": {
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/HomeworkOut"
+            },
+            "type": "array",
+            "title": "Assignments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assignments"
+        ],
+        "title": "HomeworkListOut"
+      },
+      "HomeworkOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code"
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "details": {
+            "type": "string",
+            "title": "Details"
+          },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename"
+          },
+          "mime_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime Type"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "uploaded_on": {
+            "type": "string",
+            "format": "date",
+            "title": "Uploaded On"
+          },
+          "uploaded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Uploaded At"
+          },
+          "uploaded_by": {
+            "type": "string",
+            "title": "Uploaded By"
+          },
+          "extracted_text": {
+            "type": "string",
+            "title": "Extracted Text",
+            "default": ""
+          },
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "academic_year_code",
+          "class_code",
+          "subject_code",
+          "title",
+          "details",
+          "uploaded_on",
+          "uploaded_at",
+          "uploaded_by"
+        ],
+        "title": "HomeworkOut"
+      },
       "ImportCommitOut": {
         "properties": {
           "batch_id": {
@@ -11779,6 +12763,11 @@
           "is_graded": {
             "type": "boolean",
             "title": "Is Graded"
+          },
+          "is_absent": {
+            "type": "boolean",
+            "title": "Is Absent",
+            "default": false
           }
         },
         "type": "object",
@@ -12164,6 +13153,34 @@
               "MATH"
             ]
           },
+          "assessment_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "exam",
+                  "assignment"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assessment Type"
+          },
+          "assessment_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assessment Name"
+          },
           "marks": {
             "items": {
               "$ref": "#/components/schemas/StatedMarkIn"
@@ -12225,7 +13242,7 @@
           "may_record": {
             "type": "boolean",
             "title": "May Record",
-            "description": "Whether this caller may write this register, as opposed to only read it. Both kinds appear in the list: a supervisor who may read 3B and record 3A should see both and be told which is which."
+            "description": "Always true for this endpoint: only classes the caller may record are returned."
           },
           "size": {
             "type": "integer",
@@ -12935,6 +13952,12 @@
             "title": "Clear",
             "description": "Erase the mark on file, returning this child to not-yet-marked. A separate flag rather than a null percentage, so a screen sending every visible row cannot wipe the marks it merely failed to load.",
             "default": false
+          },
+          "absent": {
+            "type": "boolean",
+            "title": "Absent",
+            "description": "Student was absent from this specific assessment. Distinct from blank and zero.",
+            "default": false
           }
         },
         "type": "object",
@@ -13038,8 +14061,9 @@
           },
           "relationship_label": {
             "type": "string",
-            "minLength": 1,
-            "title": "Relationship Label"
+            "title": "Relationship Label",
+            "description": "Optional free-text detail for relationships such as 'big brother'.",
+            "default": ""
           },
           "academic_year_code": {
             "type": "string",
@@ -13063,7 +14087,6 @@
           "guardian_full_name_en",
           "guardian_phone",
           "relationship_type",
-          "relationship_label",
           "academic_year_code",
           "class_code"
         ],
@@ -13198,6 +14221,41 @@
           "guardians"
         ],
         "title": "StudentGuardiansOut"
+      },
+      "StudentHomeworkOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "on_date": {
+            "type": "string",
+            "format": "date",
+            "title": "On Date"
+          },
+          "class_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Class Codes"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/HomeworkOut"
+            },
+            "type": "array",
+            "title": "Assignments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "on_date",
+          "class_codes",
+          "assignments"
+        ],
+        "title": "StudentHomeworkOut"
       },
       "StudentIn": {
         "properties": {
@@ -14078,6 +15136,29 @@
           "assignments"
         ],
         "title": "TeacherOut"
+      },
+      "TeacherRemovalOut": {
+        "properties": {
+          "staff_number": {
+            "type": "string",
+            "title": "Staff Number"
+          },
+          "account_deleted": {
+            "type": "boolean",
+            "title": "Account Deleted"
+          },
+          "history_preserved": {
+            "type": "boolean",
+            "title": "History Preserved",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "staff_number",
+          "account_deleted"
+        ],
+        "title": "TeacherRemovalOut"
       },
       "TeachingAssignmentOut": {
         "properties": {

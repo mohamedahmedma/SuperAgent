@@ -333,13 +333,16 @@ class StudentAdmissionIn(BaseModel):
     guardian_full_name_en: str = Field(min_length=1)
     guardian_phone: str = Field(min_length=1)
     relationship_type: RelationshipType
-    relationship_label: str = Field(min_length=1)
+    relationship_label: str = Field(
+        default="",
+        description="Optional free-text detail for relationships such as 'big brother'.",
+    )
     academic_year_code: str = Field(min_length=1)
     class_code: str = Field(min_length=1)
 
     @field_validator(
         "full_name_ar", "full_name_en", "address", "guardian_full_name_ar",
-        "guardian_full_name_en", "guardian_phone", "relationship_label",
+        "guardian_full_name_en", "guardian_phone",
         "academic_year_code", "class_code",
     )
     @classmethod

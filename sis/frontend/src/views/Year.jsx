@@ -792,7 +792,7 @@ function YearConnections({ year, lang }) {
           note={t('{0} selected by the school', [body.school.term_count])}
         />
         <Tile label={t('Grades')} value={tracks.reduce((total, track) => total + (track.year_levels || []).length, 0)} />
-        <Tile label={t('Classes')} value={body.class_count} />
+        <Tile label={lang === 'ar' ? 'فصل' : t('Classes')} value={body.class_count} />
         <Tile label={t('Tracks')} value={tracks.filter((track) => track.track_code).length} />
       </div>
 
