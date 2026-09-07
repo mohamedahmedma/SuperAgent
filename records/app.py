@@ -40,11 +40,15 @@ from records.config import load_env, settings
 load_env()
 
 from records.adapters.fake.calendar import FakeSchoolCalendar  # noqa: E402
+from records.adapters.fake.classroom import FakeClassrooms  # noqa: E402
 from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
 from records.adapters.fake.lms import FakeLms  # noqa: E402
+from records.adapters.fake.timetable import FakeTimetables  # noqa: E402
 from records.adapters.sis.calendar import SisSchoolCalendar  # noqa: E402
+from records.adapters.sis.classroom import SisClassroomAdapter  # noqa: E402
 from records.adapters.sis.directory import SisGuardianDirectory  # noqa: E402
 from records.adapters.sis.grades import SisAdapter  # noqa: E402
+from records.adapters.sis.timetable import SisTimetableAdapter  # noqa: E402
 from records.api import errors  # noqa: E402
 from records.api.routers import admin, records  # noqa: E402
 from records.domain.grading import GradingPolicy  # noqa: E402
@@ -105,6 +109,63 @@ def _build_directory(resolved):
     )
 
 
+def _build_timetables(resolved):
+    """Where "what does her week look like" is answered.
+
+    Wired from `SIS_BASE_URL` and **not** from `RECORDS_LMS`, exactly like the calendar and
+    the directory above. A timetable is structural school data rather than a mark: a school
+    running some other gradebook still keeps its own week in its SIS, and tying the two
+    choices together would take the timetable away from it. See `records/ports/timetable.py`.
+
+    Left as the empty in-memory fake when `SIS_BASE_URL` is unset, so a laptop and the test
+    suite work with no second service running. That fake reports "no class on file" rather
+    than an empty week, which is the safe direction: an unconfigured deployment must not
+    look like a school that has cancelled every lesson.
+    """
+    if not resolved.sis_base_url:
+        logger.warning(
+            "SIS_BASE_URL is not set; timetables resolve against an empty fixture and "
+            "every parent will be told the school has no class on file for their child."
+        )
+        return FakeTimetables()
+    return SisTimetableAdapter(
+        base_url=resolved.sis_base_url,
+        api_key=_sis_api_key(resolved),
+        # Handed in rather than read by the adapter — see its constructor. The lookup
+        # budget, not the marks one: this is a smaller question than a gradebook read.
+        timeout_seconds=resolved.lookup_timeout_seconds,
+    )
+
+
+def _build_classrooms(resolved):
+    """Where "which class, which subjects, which teachers" is answered.
+
+    Wired from `SIS_BASE_URL` and **not** from `RECORDS_LMS`, like the calendar, the
+    directory and the timetable above: a class roster, a curriculum board and a staff list
+    are structural school data rather than marks, and a school running some other gradebook
+    still keeps all three in its SIS.
+
+    Left as the empty in-memory fake when `SIS_BASE_URL` is unset, so a laptop and the test
+    suite work with no second service running. That fake reports "no class on file" rather
+    than an empty room, which is the safe direction: an unconfigured deployment must not
+    look like a school that has sacked every teacher.
+    """
+    if not resolved.sis_base_url:
+        logger.warning(
+            "SIS_BASE_URL is not set; classes, subjects and teachers resolve against an "
+            "empty fixture and every parent will be told the school has no class on file "
+            "for their child."
+        )
+        return FakeClassrooms()
+    return SisClassroomAdapter(
+        base_url=resolved.sis_base_url,
+        api_key=_sis_api_key(resolved),
+        # Handed in rather than read by the adapter — see its constructor. The lookup
+        # budget, not the marks one: this is a smaller question than a gradebook read.
+        timeout_seconds=resolved.lookup_timeout_seconds,
+    )
+
+
 def _build_lms(resolved, calendar):
     """Which system of record holds the marks."""
     if not resolved.uses_sis:
@@ -139,13 +200,21 @@ async def lifespan(app: FastAPI):
     app.state.calendar = _build_calendar(resolved)
     app.state.directory = _build_directory(resolved)
     app.state.lms = _build_lms(resolved, app.state.calendar)
+    app.state.timetables = _build_timetables(resolved)
+    app.state.classrooms = _build_classrooms(resolved)
 
     try:
         yield
     finally:
         # Release the pooled clients. Without this, `uvicorn --reload` leaks a connection
         # pool per reload until the process runs out of sockets.
-        for adapter in (app.state.lms, app.state.directory, app.state.calendar):
+        for adapter in (
+            app.state.lms,
+            app.state.directory,
+            app.state.calendar,
+            app.state.timetables,
+            app.state.classrooms,
+        ):
             closer = getattr(adapter, "close", None)
             if callable(closer):
                 closer()

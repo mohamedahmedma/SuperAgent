@@ -3690,6 +3690,150 @@
         }
       }
     },
+    "/v1/guardians/by-id/{public_id}/students/{student_number}/timetable": {
+      "get": {
+        "tags": [
+          "timetable"
+        ],
+        "summary": "A child's week, read by one of her guardians",
+        "description": "The same week as the route above, for a caller that holds a guardian handle and a student number rather than a registrar's authority and a class code.\n\n**The class is resolved here, not by the caller.** A parent has no class code and a parent-facing service has no business holding one — it changes mid-year, and a client that cached one would eventually ask for the week of a room the child has left. This route resolves her placement *for the term asked about* and reads that class's week in one transaction, so the two cannot disagree.\n\nThe guardian-to-child link is re-checked on this request: a caller naming a child who is not hers, or whose access a court order has restricted, gets the same 404 as one naming a child who does not exist. This is the route a parent-facing chat service should use.\n\nA child with no placement covering the term answers 200 with `class_code: null` rather than 404 — she was enrolled for September, or has left, and neither is a missing record. See `StudentWeekOut` on why that is not the same as a class with no lessons.",
+        "operationId": "read_guardian_student_week_v1_guardians_by_id__public_id__students__student_number__timetable_get",
+        "parameters": [
+          {
+            "name": "public_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Public Id"
+            }
+          },
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Term code. Required, for the reason the guardian grades route gives: a bare 'this term' would be answered from a clock, and a timetable is a statement about a named stretch of the year.",
+              "examples": [
+                "2026-T1"
+              ],
+              "title": "Term"
+            },
+            "description": "Term code. Required, for the reason the guardian grades route gives: a bare 'this term' would be answered from a clock, and a timetable is a statement about a named stretch of the year."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentWeekOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/timetable": {
       "get": {
         "tags": [
@@ -5240,6 +5384,150 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/by-id/{public_id}/students/{student_number}/classroom": {
+      "get": {
+        "tags": [
+          "classroom"
+        ],
+        "summary": "A child's class, its subjects and its teachers, read by one of her guardians",
+        "description": "Everything about the room a child sits in that a family may be told, in one request: what the class is called, which subjects that rung studies, and who teaches them.\n\n**One request rather than three, because three can disagree.** The placement that decides the room is resolved once, in one transaction. Asked separately, a placement edited in between would answer with one room's subjects and another room's staff — the same reason `/timetable/week` serves the grid and the lessons together.\n\n**The class is resolved here, not supplied.** A parent has no class code and a parent-facing service has no business holding one: it changes mid-year, and a cached one eventually names a room the child has left.\n\n**`term` pins the room, not the staffing.** She gets the class she sat in for that term — 3A for Term 1 even after a March move to 3B — but `teachers` is who teaches that room *now*, because the assignment table carries no term.\n\nThe guardian-to-child link is re-checked on this request: a caller naming a child who is not hers, or whose access a court order has restricted, gets the same 404 as one naming a child who does not exist.\n\nA child with no placement covering the term answers 200 with `class_code: null` rather than 404 — she was enrolled for September, or has left, and neither is a missing record.",
+        "operationId": "read_guardian_student_classroom_v1_guardians_by_id__public_id__students__student_number__classroom_get",
+        "parameters": [
+          {
+            "name": "public_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Public Id"
+            }
+          },
+          {
+            "name": "student_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Number"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Term code. Required, for the reason the guardian grades route gives: a bare 'this term' would be answered from a clock, and which room a child sat in is a statement about a named stretch of the year.",
+              "examples": [
+                "2026-T1"
+              ],
+              "title": "Term"
+            },
+            "description": "Term code. Required, for the reason the guardian grades route gives: a bare 'this term' would be answered from a clock, and which room a child sat in is a statement about a named stretch of the year."
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentClassroomOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
                 }
               }
             }
@@ -11314,6 +11602,71 @@
         "title": "ClassSectionPatch",
         "description": "Labels only. There is deliberately no `code` and no `year_level_code` here.\n\nMoving a class to another rung or renaming its code would carry every enrolment and\nevery mark with it, under a class the children were never in. Both are new sections\nplus a roster change, and neither is an edit."
       },
+      "ClassSubjectOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "examples": [
+              "MATH"
+            ]
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar"
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name_ar",
+          "name_en"
+        ],
+        "title": "ClassSubjectOut",
+        "description": "One subject on the rung's board."
+      },
+      "ClassTeacherOut": {
+        "properties": {
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "description": "Empty when the school recorded only one spelling; the other is then populated. Never both empty for an active teacher."
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En"
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code",
+            "examples": [
+              "MATH"
+            ]
+          },
+          "subject_name_ar": {
+            "type": "string",
+            "title": "Subject Name Ar"
+          },
+          "subject_name_en": {
+            "type": "string",
+            "title": "Subject Name En"
+          }
+        },
+        "type": "object",
+        "required": [
+          "full_name_ar",
+          "full_name_en",
+          "subject_code",
+          "subject_name_ar",
+          "subject_name_en"
+        ],
+        "title": "ClassTeacherOut",
+        "description": "One teacher in the room, and the subject they teach in it.\n\nOne entry per (teacher, subject): a teacher taking two subjects for the class appears\ntwice, and a subject taught by two teachers has two entries. The table permits both,\nso a client must render a list rather than assume a single name per subject.\n\nCarries a name and a subject and nothing else. No staff number, no email, no phone, no\nusername — a parent needs to know who teaches their child, not how to reach a member of\nstaff directly, and the school's contact routes are the school's to publish."
+      },
       "ClearedOut": {
         "properties": {
           "removed": {
@@ -14166,6 +14519,123 @@
         ],
         "title": "StudentAttendanceOut"
       },
+      "StudentClassroomOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "term_code": {
+            "type": "string",
+            "title": "Term Code"
+          },
+          "academic_year_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Academic Year Code",
+            "description": "`null` when no placement covered the term."
+          },
+          "class_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Code",
+            "description": "The school's internal code for the room — `3A`, `P1-01`. The class she was in **for this term**, not her current one. `null` means no placement covered the term: she had left, or had not yet joined, and neither is a missing record."
+          },
+          "class_name_ar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name Ar",
+            "description": "What the school calls the room — `Primary 1 Class 1`, `3/1`. This is the answer to 'which class is my child in'; the code above is an internal key a family has no reason to see."
+          },
+          "class_name_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name En"
+          },
+          "year_level_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Level Code",
+            "description": "The rung the room sits on."
+          },
+          "year_level_name_ar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Level Name Ar",
+            "description": "The rung's human name — `Year 3`. `null` only when the school's ladder is missing the rung its own class points at, which is broken data rather than a normal state; the rest of the answer is still returned."
+          },
+          "year_level_name_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Level Name En"
+          },
+          "subjects": {
+            "items": {
+              "$ref": "#/components/schemas/ClassSubjectOut"
+            },
+            "type": "array",
+            "title": "Subjects",
+            "description": "The subjects assigned to this rung, in the school's own display order. Retired subjects are excluded — a dropped subject is not one she studies, though it still resolves for marks already stated against it.\n\nEmpty with a class present means nobody has curated this rung's board for the year. That is a fact about the school's admin and must not be reported as the child studying nothing."
+          },
+          "teachers": {
+            "items": {
+              "$ref": "#/components/schemas/ClassTeacherOut"
+            },
+            "type": "array",
+            "title": "Teachers",
+            "description": "Ordered by subject display order, then subject code, then teacher. Inactive teachers are excluded: someone who has left is not the answer to 'who teaches my daughter maths'.\n\n**Who teaches the room now, not who taught it in the term asked about.** The assignment table carries no term, so this cannot be reported historically.\n\nEmpty with a class present means nobody has entered the room's staffing — again about the school, not the child."
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "term_code"
+        ],
+        "title": "StudentClassroomOut",
+        "description": "A child's room for one term: its name, its subjects, and its staff."
+      },
       "StudentDayOut": {
         "properties": {
           "on_date": {
@@ -14321,6 +14791,48 @@
         ],
         "title": "StudentIn",
         "description": "A child's own record: her number and how her name is written."
+      },
+      "StudentLessonOut": {
+        "properties": {
+          "day_of_week": {
+            "type": "string",
+            "title": "Day Of Week"
+          },
+          "period_number": {
+            "type": "integer",
+            "title": "Period Number"
+          },
+          "subject_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Code",
+            "description": "`null` is a stated free period — the class deliberately has this slot off. A slot nobody has planned has no row here at all."
+          },
+          "subject_name_ar": {
+            "type": "string",
+            "title": "Subject Name Ar",
+            "description": "Empty when the subject row could not be loaded, or when the slot is a stated free period. The lesson is still listed: a week that quietly drops a row is one nobody can tell is incomplete.",
+            "default": ""
+          },
+          "subject_name_en": {
+            "type": "string",
+            "title": "Subject Name En",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "day_of_week",
+          "period_number"
+        ],
+        "title": "StudentLessonOut",
+        "description": "One lesson on a child's week, named rather than coded.\n\nLeaner than `TimetableEntryOut` on purpose: the class, term and year are stated once on\nthe envelope, so repeating them on all thirty-five rows would be payload a parent-facing\nclient pays for on every question and reads never.\n\nIt carries the subject's **names** because this is the one timetable route whose reader\nis a person rather than a registrar's screen. `MATH` is the school's own key and means\nnothing to a family; the names are what a parent recognises."
       },
       "StudentOut": {
         "properties": {
@@ -14602,6 +15114,101 @@
         ],
         "title": "StudentTermGradesOut",
         "description": "One child, one term, the marks as stated. No aggregate of any kind."
+      },
+      "StudentWeekOut": {
+        "properties": {
+          "student_number": {
+            "type": "string",
+            "title": "Student Number"
+          },
+          "term_code": {
+            "type": "string",
+            "title": "Term Code"
+          },
+          "academic_year_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Academic Year Code",
+            "description": "`null` when no placement covered the term."
+          },
+          "class_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Code",
+            "description": "The class she sat in **for this term**, not her current one — a child who moved 3A->3B in March still reads 3A for Term 1, because that is the week she actually sat. `null` means no placement covered the term."
+          },
+          "class_name_ar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name Ar"
+          },
+          "class_name_en": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name En"
+          },
+          "days": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Days",
+            "description": "The school's working days, **in the school's own order**. Do not sort this: the week begins on Saturday at some schools and Sunday at others."
+          },
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/TimetablePeriodOut"
+            },
+            "type": "array",
+            "title": "Periods",
+            "description": "The rows of the grid, in period order, breaks included. Read together with the lessons so a client cannot draw a seven-row grid against an eight-period day."
+          },
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/StudentLessonOut"
+            },
+            "type": "array",
+            "title": "Lessons",
+            "description": "Ordered by day — in the school's week order — then by period."
+          },
+          "teaching_slots": {
+            "type": "integer",
+            "title": "Teaching Slots",
+            "description": "How many slots this week could hold a lesson: teaching periods times open days. The denominator for 'how full is this timetable'.",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_number",
+          "term_code"
+        ],
+        "title": "StudentWeekOut",
+        "description": "One child's week: the class she sat in for the term, and what that class does.\n\nTwo `null` states, and they are not the same answer:\n\n* `class_code: null` — no placement covered this term. She had left, or had not yet\n  joined. `lessons` is then empty because there is no room to ask about.\n* `class_code` set with `lessons: []` — she has a class and nobody has laid out its\n  grid yet. That is a fact about the school, not about the child.\n\nA client that renders both as \"no timetable\" tells a parent something false in the\nsecond case, which is why the codes are on the payload rather than inferred from\nemptiness."
       },
       "SubjectAssignmentIn": {
         "properties": {
@@ -15567,7 +16174,7 @@
               }
             ],
             "title": "Teacher Staff Number",
-            "description": "Always `null` in this stage: teacher records exist but nobody manages them yet. The field and its conflict rule are already in place, so assigning a teacher later is a write rather than a migration."
+            "description": "Who is timetabled to take this lesson, when anything has said so — which over HTTP is never. `PUT /timetable` has no input for it and writes `null`, so on any school set up through this API the column is empty; a demo loader does populate it, which is why the field is read back rather than hardcoded here.\n\n**This is not the way to find out who teaches a class.** Staffing lives in the teacher assignments a principal and a year supervisor write — see `/guardians/by-id/.../classroom` and the teacher routes — and a client reading it from here would report every lesson as unstaffed."
           }
         },
         "type": "object",

@@ -39,14 +39,19 @@ agent:
   # correcting it. Split, a question about absences AND marks dispatches both at once,
   # which the merged shape could not express at all.
   #
-  # The cost is three tool schemas on the wire every turn instead of one. Paid knowingly:
+  # The cost is four tool schemas on the wire every turn instead of one. Paid knowingly:
   # the round trip it removes is worth more than the schemas it adds, and the audited-read
-  # ceiling is shared across the three, so splitting did not triple it.
+  # ceiling is shared across all of them, so splitting did not multiply it.
   tools:
     - search_knowledge_base
     - get_student_grades
     - get_subject_grades
     - get_student_attendance
+    - get_student_timetable
+    - get_student_class
+    - get_student_subjects
+    - get_student_teachers
+    - get_subject_teacher
 
   # PROMPT TEXT LIVES IN prompts/templates/packs/school/, not here.
   #
@@ -212,7 +217,18 @@ agent:
     get_student_grades: 2
     get_subject_grades: 2
     get_student_attendance: 2
+    get_student_timetable: 2
+    get_student_class: 2
+    get_student_subjects: 2
+    get_student_teachers: 2
+    get_subject_teacher: 2
   default_tool_call_budget: 1
+
+  # `recursion_limit` is deliberately NOT set here, and adding the timetable tool is what
+  # tested that. Base carries it, sized against this profile's budgets — see the comment
+  # on it there — because this is the profile with the most tools and therefore the one
+  # that decides the number. `test_school_profile.py` asserts the two stay equal, so a
+  # local override here would be a silent fork of a ceiling that is meant to be one value.
 
   # Bind the one tool the question needs, when the planner already knows which. This
   # deployment is where the failure was measured: with both tools on the wire, «درجات
@@ -260,6 +276,24 @@ agent:
       student_name: "$child_label"
     get_student_attendance:
       student_name: "$child_label"
+    # Plannable for the same reason attendance is: the only argument is the child, and
+    # the plan already holds her. Note there is no class here to fill in — the timetable
+    # is resolved from her placement behind the facade, which is what keeps a room code
+    # out of a plan that would still be holding it after she moved class.
+    get_student_timetable:
+      student_name: "$child_label"
+    # The three whose only argument is the child. `get_subject_teacher` is absent for the
+    # same reason `get_subject_grades` is: its `subject` comes from the message, nothing on
+    # the plan holds one, and `PLAN_PLACEHOLDERS` is a closed set with no `$subject` in it —
+    # a planned call would have to invent the argument. Undeclared, it stays bound and the
+    # model calls it the ordinary way, which is right for the one argument that is genuinely
+    # the model's to supply.
+    get_student_class:
+      student_name: "$child_label"
+    get_student_subjects:
+      student_name: "$child_label"
+    get_student_teachers:
+      student_name: "$child_label"
 
   # What each tool is for, for the classifier to choose between. This is what makes
   # selection work past the two-tool case, and it is now also what decides WHICH record
@@ -273,9 +307,11 @@ agent:
   tool_selection:
     search_knowledge_base: >-
       The school's own published material, the same for every family: fees and
-      instalments, term dates and holidays, admissions, uniform, books, transport and bus
-      routes, the school day, attendance rules, exam schedules, curriculum, trips,
-      medical policy, contact details.
+      instalments, term dates and holidays, admissions, uniform, books and equipment to
+      buy, transport and bus routes, the school day, attendance rules, exam schedules,
+      trips, medical policy, contact details. Not which subjects one child's class is
+      assigned, which class the child is in, or who teaches them — those differ per child
+      and have their own tools.
     get_student_grades: >-
       One child's own marks across every subject this term — how they are doing overall,
       their results, their report card, what they scored, whether they are doing well.
@@ -288,6 +324,39 @@ agent:
       Arabic, English and so on — however briefly.
     get_student_attendance: >-
       One child's own attendance: the days they were present, absent or late.
+    get_student_timetable: >-
+      One child's own weekly class schedule — which lessons fall on which day, what the
+      child has on a particular day, when a subject is taught, and what their school day
+      looks like. This is the one to name when the message asks about a schedule or a timetable
+      rather than about marks or absences, including when it says so in dialect. It is not
+      for term dates, holidays or exam schedules, which are the same for every family.
+    get_student_class: >-
+      Which class one child is in, and what that class is called. For a message asking
+      about the child's class, section or which room they are in — not what happens in it.
+    get_student_subjects: >-
+      Which subjects one child studies — the list of subjects their class is taught. For
+      a message asking what the child studies or which subjects they take, without asking
+      about marks in them or when they are taught. This one covers their curriculum too:
+      the subjects THAT child's class is assigned are their own record, not published
+      material.
+      بالعربي: مواد ابني، بياخد أنهي مواد، بتدرس ايه، كام مادة، المنهج بتاعه، بياخد مادة
+      معينة ولا لأ.
+    get_student_teachers: >-
+      All of one child's teachers at once, and which subject each of them takes. This is
+      the one to name only when the message asks about their teachers in general and names
+      NO subject. If any subject is named, however briefly, name get_subject_teacher
+      instead — this tool would answer with every teacher the child has, which is not what
+      was asked.
+      بالعربي: مين مدرسين ابني، اسماء المدرسين بتوع فصله، مين بيدرسله — من غير ما يذكر مادة
+      بعينها.
+    get_subject_teacher: >-
+      Who teaches one child ONE named subject, and nobody else. This is the one to name
+      whenever the message names a subject — maths, science, Arabic, English and so on —
+      however briefly, and whatever else the message also asks for. Naming the subject is
+      what chooses it, including dialect and feminine wordings of both the subject and the
+      teacher.
+      بالعربي: مين مدرس الرياضيات/الحساب/العلوم/العربي لابني، مين مدرسة العلوم بتاعة بنتي،
+      استاذ المادة الفلانية اسمه ايه، بياخد المادة دي مع مين.
 
   # A fee, an instalment, a deadline — the figures in this corpus are what a parent acts
   # on, so a figure that is in no retrieved chunk must not be served. Enforced rather

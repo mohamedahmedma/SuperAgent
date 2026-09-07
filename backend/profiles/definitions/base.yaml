@@ -82,7 +82,20 @@ agent:
   # costs its own pass, which parallel dispatch makes a deliberate over-estimate: several
   # planned calls share ONE pass. Keep this comfortably above what it demands anyway. A
   # ceiling costs nothing until it is hit, and hitting it costs a whole answer.
-  recursion_limit: 64
+  #
+  # 126 now, and the reason is the same one a fourth time: the school profile grew four
+  # more record tools — the class she is in, what she studies, who teaches her, and who
+  # teaches one subject — so its NINE tools are 2 (knowledge) + 8 x 2 = 18 passes, plus one
+  # to write the answer, at six nodes a pass: 114 needed, which the previous 78 could not
+  # spend. Note `tests/general/test_tool_budgets.py` only asserts `>= rounds * 5`, so a
+  # number between 95 and 113 passes that test and still refuses to load — trust the
+  # validator's own arithmetic in `backend/profiles/schema.py`, not that assertion.
+  #
+  # That profile has the most tools of any shipped one and so is what this number is sized
+  # against; it deliberately does not override it, and `test_school_profile.py` asserts the
+  # two stay equal. 126 is 21 passes, keeping the two-pass headroom this comment has always
+  # asked for rather than sitting exactly on the limit.
+  recursion_limit: 126
   max_knowledge_calls_per_turn: 1
   # 14 messages = 7 user/assistant turns. Counted in MESSAGES, not turns, because that
   # is what the slice operates on — halving it silently drops the assistant side of

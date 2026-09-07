@@ -1,7 +1,14 @@
 """The student-record tools — thin relays to the records facade.
 
-ONE TOOL PER CAPABILITY, and per endpoint the facade actually exposes: grades for the
-term, one subject's breakdown, attendance. That is the whole structure of this file.
+ONE TOOL PER CAPABILITY, and per question a parent actually asks: grades for the term, one
+subject's breakdown, attendance, the weekly timetable, which class the child is in, what
+they study, who teaches them, and who teaches them one named subject. That is the whole
+structure of this file.
+
+The last four sit over THREE facade endpoints rather than four, because three of those
+questions are answers about the same room and the facade resolves it once — see
+`records/ports/classroom.py`. The tool layer still gets one name per question, which is
+what the planner selects on.
 
 They were a single `get_student_records(record_type=…)` until the planner learned to
 dispatch a SET of tools rather than pick one, at which point the merged shape stopped
@@ -14,11 +21,21 @@ absences dispatches both at once instead of serialising two calls through one na
 
 Adding a capability is therefore: a builder here, a line in `TOOL_BUILDERS`, and a line
 in the profile's `tool_selection`. No argument enum, no branch in a dispatcher, nothing
-that has to know about the others. A `get_student_timetable` would slot in beside these
-three the day the facade grows the endpoint for it.
+that has to know about the others. `get_student_timetable` is the one that proved it: it
+slotted in beside the other three when the facade grew the endpoint, and nothing in the
+planner, the narrowing or the dispatcher had to learn it existed.
 
-The cost is honest and worth stating: three tool schemas reach the model every turn
-instead of one, and each keeps its own call budget rather than sharing one ceiling.
+The last five are the ones whose subject is not the child. Marks and attendance are facts
+about the child; a week, a class name, a subject board and a staff list all belong to the
+ROOM they are placed in. That resolution stays behind the facade — this file sends a
+student number and no class code, because a placement changes mid-year and a class code
+cached up here would eventually name a room the child has left.
+
+The cost is honest and worth stating: eight tool schemas reach the model every turn
+instead of one, and each keeps its own call budget rather than sharing one ceiling. The
+audited-read ceiling is NOT one of those budgets — `_resolve_student` takes a slot from a
+single per-turn allowance shared by every tool here, so splitting a capability into two
+names never widens how much of a minor's record one turn may read.
 
 This file is deliberately the smallest thing that could work. All the judgement lives
 elsewhere: authorisation in the records facade, identity in the identity service,
@@ -176,6 +193,11 @@ def _match_student(
 GRADES_TOOL = "get_student_grades"
 SUBJECT_TOOL = "get_subject_grades"
 ATTENDANCE_TOOL = "get_student_attendance"
+TIMETABLE_TOOL = "get_student_timetable"
+CLASS_TOOL = "get_student_class"
+SUBJECTS_TOOL = "get_student_subjects"
+TEACHERS_TOOL = "get_student_teachers"
+SUBJECT_TEACHER_TOOL = "get_subject_teacher"
 
 
 def _reporter(ctx: ChatRequestContext, tool_name: str):
@@ -368,6 +390,307 @@ def make_get_student_attendance(ctx: ChatRequestContext):
 
     get_student_attendance.description += _STUDENT_NAME_NOTE
     return get_student_attendance
+
+
+def make_get_student_timetable(ctx: ChatRequestContext):
+    @tool(TIMETABLE_TOOL)
+    def get_student_timetable(student_name: str = "") -> str:
+        """Read one child's weekly class timetable: which lessons fall on which day.
+
+        Use this for their schedule, their timetable, what lessons they have on a given
+        day, when a subject is taught, or what time the school day runs to. For marks use
+        get_student_grades; for absences use get_student_attendance. Do not use it for term
+        dates, holidays or exam schedules — those are school-wide and come from the
+        knowledge base.
+        """
+        result = _reporter(ctx, TIMETABLE_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        # No class code is sent, and there is none to send. A timetable belongs to a room,
+        # the room is the child's placement for the term, and the facade resolves it
+        # through SIS — which is the only thing that knows a placement changed in March.
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/timetable", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result("timetable", **_timetable_context(student.label, data))
+
+    get_student_timetable.description += _STUDENT_NAME_NOTE
+    return get_student_timetable
+
+
+def _timetable_context(student_label: str, data: dict) -> dict:
+    """Flatten a week into the day-by-day shape the template renders.
+
+    Grouped here rather than in Jinja for the reason `_render_context` gives: a filter
+    chain over rows that may be missing a key is one optional field away from raising
+    mid-turn under StrictUndefined. And the grouping itself is a decision — a parent asks
+    "what does she have on Sunday", so the model is handed days rather than a flat list it
+    would have to sort, in the school's own week order rather than any order Python would
+    pick.
+
+    `status` arrives from the facade already saying which of the three answers this is, so
+    nothing here infers "no lessons" from an empty list — that is the conflation the whole
+    contract is shaped to prevent.
+    """
+    lessons = data.get("lessons") or []
+    periods = {
+        int(row.get("period_number") or 0): row for row in data.get("periods") or []
+    }
+
+    def _slot(lesson: dict) -> dict:
+        period = periods.get(int(lesson.get("period_number") or 0)) or {}
+        return {
+            "period_number": lesson.get("period_number"),
+            "subject": _label(lesson, "subject_name_ar", "subject_name_en"),
+            "is_free": not (lesson.get("subject_code") or ""),
+            "starts_at": period.get("starts_at") or "",
+            "ends_at": period.get("ends_at") or "",
+        }
+
+    days = [
+        {
+            "name": day,
+            "slots": [
+                _slot(lesson)
+                for lesson in lessons
+                if str(lesson.get("day_of_week") or "").lower() == str(day).lower()
+            ],
+        }
+        for day in data.get("days") or []
+    ]
+
+    return {
+        "student_label": student_label,
+        "term_label": _label(data.get("term") or {}, "name_ar", "name_en", "term_id"),
+        "status": str(data.get("status") or ""),
+        "class_label": _label(data, "class_name_ar", "class_name_en", "class_code"),
+        "days": days,
+        # The breaks, so the model can say when the day ends and when the break falls
+        # without having to read them out of the lessons, which never contain them.
+        "breaks": [
+            {
+                "name": _label(row, "name_ar", "name_en"),
+                "starts_at": row.get("starts_at") or "",
+                "ends_at": row.get("ends_at") or "",
+            }
+            for row in data.get("periods") or []
+            if not row.get("is_teaching", True)
+        ],
+        "data": data,
+    }
+
+
+# --- the room she sits in: her class, her subjects, her teachers -------------------
+#
+# Three facade endpoints and four tools over them. The extra tool is the subject-teacher
+# one, which stands beside `get_student_teachers` exactly as `get_subject_grades` stands
+# beside `get_student_grades`: a parent who names a subject wants one answer, not a list
+# to read through, and the planner selects by NAME so the narrow case needs its own name.
+#
+# None of them sends a class code, and none of them could: the facade resolves the room
+# from the child's placement for the term. A class code held up here would be one that
+# keeps naming 3A after she has moved to 3B.
+
+
+def make_get_student_class(ctx: ChatRequestContext):
+    @tool(CLASS_TOOL)
+    def get_student_class(student_name: str = "") -> str:
+        """Read which class one child is in — the class name the school uses for it.
+
+        Use this when the question asks which class, section or room a child is in, or
+        what their class is called. For the lessons that class sits use
+        get_student_timetable; for the subjects it studies use get_student_subjects.
+        """
+        result = _reporter(ctx, CLASS_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/class", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result(
+            "class",
+            student_label=student.label,
+            status=str(data.get("status") or ""),
+            # The NAME, and only the name: the code is an internal key and a parent has
+            # never seen it. `_label` falls back to the other script rather than to blank.
+            class_label=_label(data, "class_name_ar", "class_name_en"),
+            year_label=_label(data, "year_level_name_ar", "year_level_name_en"),
+        )
+
+    get_student_class.description += _STUDENT_NAME_NOTE
+    return get_student_class
+
+
+def make_get_student_subjects(ctx: ChatRequestContext):
+    @tool(SUBJECTS_TOOL)
+    def get_student_subjects(student_name: str = "") -> str:
+        """Read the list of subjects one child studies this year.
+
+        Use this for which subjects a child takes, what they study, or their curriculum.
+        For their marks in those subjects use get_student_grades; for when each one is
+        taught use get_student_timetable; for who teaches them use get_student_teachers.
+        """
+        result = _reporter(ctx, SUBJECTS_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/subjects", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result(
+            "subjects",
+            student_label=student.label,
+            status=str(data.get("status") or ""),
+            class_label=_label(data, "class_name_ar", "class_name_en"),
+            subjects=[
+                _label(row, "name_ar", "name_en", "code")
+                for row in data.get("subjects") or []
+            ],
+        )
+
+    get_student_subjects.description += _STUDENT_NAME_NOTE
+    return get_student_subjects
+
+
+def make_get_student_teachers(ctx: ChatRequestContext):
+    @tool(TEACHERS_TOOL)
+    def get_student_teachers(student_name: str = "") -> str:
+        """Read every teacher who teaches one child, and the subject each of them teaches.
+
+        Use this for who a child's teachers are. When the question names a single subject
+        — who teaches them maths — use get_subject_teacher instead. Do not use either for
+        how to contact a teacher or for parent-meeting times; those come from the
+        knowledge base.
+        """
+        result = _reporter(ctx, TEACHERS_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/teachers", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result("teachers", **_teachers_context(student.label, data))
+
+    get_student_teachers.description += _STUDENT_NAME_NOTE
+    return get_student_teachers
+
+
+def make_get_subject_teacher(ctx: ChatRequestContext):
+    @tool(SUBJECT_TEACHER_TOOL)
+    def get_subject_teacher(subject: str, student_name: str = "") -> str:
+        """Read who teaches one child one named subject, and nobody else.
+
+        Use this whenever the question names a subject — who teaches them maths, who their
+        Arabic teacher is. For every teacher at once use get_student_teachers.
+
+        subject: the subject name as the parent said it, in Arabic or English. This one IS
+        yours to supply — it comes from the message itself, and a name matching no subject
+        is answered with the subjects the child actually has a teacher for.
+        """
+        result = _reporter(ctx, SUBJECT_TEACHER_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        # One call, not two. The teacher rows carry their own subject names, so the subject
+        # a parent named is matched against what came back rather than resolved through a
+        # second endpoint first — which is what `get_subject_grades` has to do only because
+        # a subject's detail lives at its own URL.
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/teachers", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+
+        rows = data.get("teachers") or []
+        matched = _match_subject_rows(rows, subject)
+        if not matched:
+            return result(
+                "which_subject",
+                student=student,
+                options=sorted(
+                    {_label(row, "subject_name_ar", "subject_name_en", "subject_code")
+                     for row in rows}
+                ),
+            )
+        # Every teacher of that subject, never the first: two teachers for one subject is a
+        # state the school's records permit, and dropping one hides a real person from the
+        # parent who asked.
+        return result(
+            "subject_teacher",
+            student_label=student.label,
+            status=str(data.get("status") or ""),
+            subject_label=_label(
+                matched[0], "subject_name_ar", "subject_name_en", "subject_code"
+            ),
+            teachers=[_label(row, "full_name_ar", "full_name_en") for row in matched],
+        )
+
+    get_subject_teacher.description += _STUDENT_NAME_NOTE
+    return get_subject_teacher
+
+
+def _match_subject_rows(rows: list, subject: str) -> list:
+    """The teacher rows whose subject is the one the parent named.
+
+    Folded, not casefolded, for the reason `_match_course` gives: a parent writes
+    «الرياضيات» however their keyboard produced it and the subject table spells it one
+    fixed way. Matched against both scripts and the code, so "maths", "Math" and the
+    school's own «الرياضيات» all land.
+    """
+    needle = name_key(subject)
+    if not needle:
+        return []
+    return [
+        row
+        for row in rows
+        if needle in name_key(row.get("subject_name_ar") or "")
+        or needle in name_key(row.get("subject_name_en") or "")
+        or needle in name_key(row.get("subject_code") or "")
+    ]
+
+
+def _teachers_context(student_label: str, data: dict) -> dict:
+    """Flatten the staff list into one entry per subject, teachers grouped under it.
+
+    Grouped here rather than in Jinja for the reason `_render_context` gives, and grouped
+    at all because the payload is one row per (teacher, subject): rendered flat, a subject
+    with two teachers reads as two separate facts, and a teacher taking two subjects reads
+    as two people. Grouping also makes the co-teacher case say what it is — "maths: A and
+    B" rather than two lines a model may summarise into one.
+
+    Order is preserved from the payload, which is the school's own subject order.
+    """
+    groups: list[dict] = []
+    seen: dict[str, dict] = {}
+    for row in data.get("teachers") or []:
+        code = str(row.get("subject_code") or "")
+        label = _label(row, "subject_name_ar", "subject_name_en", "subject_code")
+        key = code or label
+        group = seen.get(key)
+        if group is None:
+            group = {"subject": label, "teachers": []}
+            seen[key] = group
+            groups.append(group)
+        name = _label(row, "full_name_ar", "full_name_en")
+        if name:
+            group["teachers"].append(name)
+
+    return {
+        "student_label": student_label,
+        "status": str(data.get("status") or ""),
+        "class_label": _label(data, "class_name_ar", "class_name_en"),
+        # A subject whose every teacher row has no name on file is dropped rather than
+        # rendered as "maths: " with nothing after it. The school can create a teacher
+        # with neither name spelling filled in, and a blank beside a subject reads to a
+        # parent as a missing answer rather than as missing data — if that empties the
+        # list entirely, the template's "not recorded yet" branch says so honestly.
+        "subject_groups": [group for group in groups if group["teachers"]],
+    }
 
 
 def _match_course(grades: dict, subject: str):

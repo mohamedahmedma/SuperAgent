@@ -180,19 +180,34 @@ def localized(copy, language: str) -> str:
 #: out for the same reason, and says so.
 #:
 #: These must stay in step with `backend.tools.RECORDS_TOOLS`, which is asserted in
-#: tests/general/test_records_tool.py — two spellings of one list is the price of the
-#: import boundary, and the test is what stops them drifting.
+#: tests/general/test_planner_parallel_dispatch.py — two spellings of one list is the
+#: price of the import boundary, and the test is what stops them drifting.
 GRADES_TOOL = "get_student_grades"
 SUBJECT_TOOL = "get_subject_grades"
 ATTENDANCE_TOOL = "get_student_attendance"
-RECORDS_TOOLS = (GRADES_TOOL, SUBJECT_TOOL, ATTENDANCE_TOOL)
+TIMETABLE_TOOL = "get_student_timetable"
+CLASS_TOOL = "get_student_class"
+SUBJECTS_TOOL = "get_student_subjects"
+TEACHERS_TOOL = "get_student_teachers"
+SUBJECT_TEACHER_TOOL = "get_subject_teacher"
+RECORDS_TOOLS = (
+    GRADES_TOOL,
+    SUBJECT_TOOL,
+    ATTENDANCE_TOOL,
+    TIMETABLE_TOOL,
+    CLASS_TOOL,
+    SUBJECTS_TOOL,
+    TEACHERS_TOOL,
+    SUBJECT_TEACHER_TOOL,
+)
 KNOWLEDGE_TOOL = "search_knowledge_base"
 
 #: Which FAMILY of tools each kind of child question needs. `both` is absent on purpose:
 #: it means "narrow nothing", which is `exposed_tools = None`, not a list.
 #:
-#: A family, not a tool. `records` names all three record tools because the classifier's
-#: enum cannot tell marks from absences — that resolution belongs to `needed_tools`. So
+#: A family, not a tool. `records` names every record tool because the classifier's
+#: enum cannot tell marks from absences from a timetable — that resolution belongs to
+#: `needed_tools`. So
 #: this map NARROWS (bind these, let the model pick among them) and never PLANS, which
 #: is the line `_plan_tools` draws below.
 _TOOLS_FOR_KIND = {

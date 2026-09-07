@@ -84,8 +84,14 @@ class TheBudgetComesFromOnePlacePerTool(ProfileScopedTest):
         """Two children is a legitimate two-call sequence per record: read one, then the
         other. Split from one shared budget of three when the tool was split, so the
         audited-read ceiling that protects the facade is `RECORDS_MAX_CALLS_PER_TURN`,
-        which all three still share."""
-        for name in ("get_student_grades", "get_subject_grades", "get_student_attendance"):
+        which all of them still share.
+
+        Enumerated from `RECORDS_TOOLS` rather than listed here, because a list written out
+        is one a fifth record tool would silently drop off — it would keep passing while
+        covering one tool fewer, which is the failure a budget test cannot afford."""
+        from backend.tools import RECORDS_TOOLS
+
+        for name in RECORDS_TOOLS:
             with self.subTest(tool=name):
                 self.assertEqual(runtime.budget_for(name), 2)
 

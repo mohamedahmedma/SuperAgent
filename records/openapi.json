@@ -686,6 +686,638 @@
         }
       }
     },
+    "/v1/guardians/{guardian_id}/students/{student_id}/timetable": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "Get Timetable",
+        "description": "One child's weekly timetable — the class she sits in, and what it does.\n\n**The caller does not name a class, and cannot.** A timetable belongs to a room; a child\nreaches one through the placement she holds for the term, and that placement is the\nsystem of record's to resolve. So this route takes a student, exactly as the grades and\nattendance routes do, and the room is resolved behind it — which is what keeps a chat\nservice from holding a class code that goes stale the next time a child moves.\n\nThree answers, and `status` says which. Two of them have no lessons and they mean\ndifferent things: `no_class` is a fact about the child, `no_timetable` a fact about the\nschool. A caller must not render them alike — see `TimetableStatusOut`.",
+        "operationId": "get_timetable_v1_guardians__guardian_id__students__student_id__timetable_get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Term code; defaults to the current term.",
+              "title": "Term"
+            },
+            "description": "Term code; defaults to the current term."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimetableOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such student record for this guardian.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System of record unreachable. Do not answer from memory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/{guardian_id}/students/{student_id}/class": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "Get Class",
+        "description": "Which class a child is in.\n\nThe answer a parent wants is `class_name_ar` / `class_name_en` — what the school calls\nthe room, \"Primary 1 Class 1\" or \"3/1\". `class_code` is the internal key for the same\nroom and is not what a family should be shown.\n\nThe class is the one she was in **for this term**. `status: no_class` means no placement\ncovered it — she had left, or had not yet joined — which is a real answer and not a\nmissing record.",
+        "operationId": "get_class_v1_guardians__guardian_id__students__student_id__class_get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Term code; defaults to the current term.",
+              "title": "Term"
+            },
+            "description": "Term code; defaults to the current term."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentClassOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such student record for this guardian.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System of record unreachable. Do not answer from memory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/{guardian_id}/students/{student_id}/subjects": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "Get Subjects",
+        "description": "What a child studies — the subjects assigned to her rung, in the school's own order.\n\nHer rung's assignment board rather than the year's whole catalogue, and rather than the\nsubjects she happens to have marks in: a subject nobody has marked yet is still one she\nstudies, and a mark can exist against a subject the board has since dropped.\n\nAn empty list with `status: ok` means the school has not curated the board for this year.\nThat is not the child studying nothing.",
+        "operationId": "get_subjects_v1_guardians__guardian_id__students__student_id__subjects_get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Term code; defaults to the current term.",
+              "title": "Term"
+            },
+            "description": "Term code; defaults to the current term."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentSubjectsOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such student record for this guardian.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System of record unreachable. Do not answer from memory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/guardians/{guardian_id}/students/{student_id}/teachers": {
+      "get": {
+        "tags": [
+          "records"
+        ],
+        "summary": "Get Teachers",
+        "description": "Who teaches a child, and what each of them teaches her.\n\nOne entry per (teacher, subject), so a subject with two teachers has two entries and a\nteacher taking two subjects appears twice. A caller asking \"who teaches her maths\"\nfilters this by subject and must render everyone it finds — taking the first would hide\na co-teacher.\n\n**Who teaches the room now, not who taught it in the term asked about.** The school's\nassignment table carries no term, so this cannot be reported historically. Teachers who\nhave left are excluded: someone who is gone is not the answer to \"who teaches my\ndaughter maths\", and naming them sends a parent to ask for them.\n\nNothing here carries a teacher's email, phone, staff number or username.",
+        "operationId": "get_teachers_v1_guardians__guardian_id__students__student_id__teachers_get",
+        "parameters": [
+          {
+            "name": "guardian_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Guardian Id"
+            }
+          },
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Term code; defaults to the current term.",
+              "title": "Term"
+            },
+            "description": "Term code; defaults to the current term."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentTeachersOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key, or missing/invalid identity token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Identity token does not authorise the guardian named in the path.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such student record for this guardian.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "System of record unreachable. Do not answer from memory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/guardians": {
       "post": {
         "tags": [
@@ -1058,6 +1690,48 @@
         "title": "AttendanceSummaryOut",
         "description": "Attendance for one student over a window.\n\nCounts first, days second. The agent answers \"how many days has she missed\" far\nmore often than \"list them\", and a summary that forces it to count a list is a\nsummary that will eventually be counted wrong."
       },
+      "ClassTeacherOut": {
+        "properties": {
+          "full_name_ar": {
+            "type": "string",
+            "title": "Full Name Ar",
+            "description": "Empty when the school recorded only one spelling; the other is then populated.",
+            "default": ""
+          },
+          "full_name_en": {
+            "type": "string",
+            "title": "Full Name En",
+            "default": ""
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code",
+            "default": ""
+          },
+          "subject_name_ar": {
+            "type": "string",
+            "title": "Subject Name Ar",
+            "default": ""
+          },
+          "subject_name_en": {
+            "type": "string",
+            "title": "Subject Name En",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ClassTeacherOut",
+        "description": "One teacher in the child's class, and the subject they teach her.\n\nCarries a name and a subject and nothing else — no staff number, no email, no phone, no\nusername. A parent needs to know who teaches their child, not how to reach a member of\nstaff directly, and the school's own contact routes are the school's to publish. The\nshape is the privacy boundary rather than a filter a consumer has to apply."
+      },
+      "ClassroomStatusOut": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "no_class"
+        ],
+        "title": "ClassroomStatusOut",
+        "description": "Whether there is a room to talk about at all.\n\nTwo members, and the other two ways these answers can be empty are deliberately NOT\nhere: a room with no subject board and a room with no staffing are properties of those\nlists, because a room can lack either, both or neither and one enum cannot say so.\n\nWhat must never be inferred is this one. An empty `subjects` beside `no_class` means\n\"there is no room to ask about\"; beside `ok` it means \"nobody has curated the board\".\nA consumer that read emptiness alone would tell a parent her child studies nothing."
+      },
       "CourseGrade": {
         "properties": {
           "course_id": {
@@ -1248,6 +1922,66 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "StudentClassOut": {
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StudentRef"
+          },
+          "term": {
+            "$ref": "#/components/schemas/TermOut"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ClassroomStatusOut"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code",
+            "description": "Empty exactly when `status` is `no_class`.",
+            "default": ""
+          },
+          "class_name_ar": {
+            "type": "string",
+            "title": "Class Name Ar",
+            "default": ""
+          },
+          "class_name_en": {
+            "type": "string",
+            "title": "Class Name En",
+            "default": ""
+          },
+          "year_level_code": {
+            "type": "string",
+            "title": "Year Level Code",
+            "description": "The rung the room sits on, e.g. `AR-P4`.",
+            "default": ""
+          },
+          "year_level_name_ar": {
+            "type": "string",
+            "title": "Year Level Name Ar",
+            "description": "The rung's human name — 'Year 3'. Empty when the school's ladder is missing the rung its own class points at, which is broken data rather than a normal state; the class name is still returned.",
+            "default": ""
+          },
+          "year_level_name_en": {
+            "type": "string",
+            "title": "Year Level Name En",
+            "default": ""
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student",
+          "term",
+          "status",
+          "as_of"
+        ],
+        "title": "StudentClassOut",
+        "description": "Which class a child is in — the answer to \"what class is my son in\".\n\n`class_name_ar` / `class_name_en` are what the school itself calls the room: \"Primary 1\nClass 1\", \"3/1\". **That is the answer to give a parent.** `class_code` is the school's\ninternal key for the same room (\"3A\", \"P1-01\") and is carried for correlation, not for\nreading out to a family.\n\nThe class is the one she was in **for this term**, not her current one: a child who\nmoved rooms in March still reads her autumn room for Term 1."
+      },
       "StudentGradesOut": {
         "properties": {
           "student": {
@@ -1348,6 +2082,131 @@
         "title": "StudentRef",
         "description": "A student as a parent would recognise them. No LMS ids leak across the seam."
       },
+      "StudentSubjectsOut": {
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StudentRef"
+          },
+          "term": {
+            "$ref": "#/components/schemas/TermOut"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ClassroomStatusOut"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code",
+            "default": ""
+          },
+          "class_name_ar": {
+            "type": "string",
+            "title": "Class Name Ar",
+            "default": ""
+          },
+          "class_name_en": {
+            "type": "string",
+            "title": "Class Name En",
+            "default": ""
+          },
+          "subjects": {
+            "items": {
+              "$ref": "#/components/schemas/StudySubjectOut"
+            },
+            "type": "array",
+            "title": "Subjects",
+            "description": "In the school's own display order. Do not re-sort: alphabetical ordering differs between the two scripts, so the same board would read in two different orders."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student",
+          "term",
+          "status",
+          "as_of"
+        ],
+        "title": "StudentSubjectsOut",
+        "description": "What a child studies — the subjects assigned to her rung, in the school's order.\n\nThe rung's assignment board, not the year's whole catalogue: a school teaches Physics\nbut only Secondary sits it. Retired subjects are excluded, because a dropped subject is\nnot one she studies — though it still resolves for marks already stated against it.\n\nAn empty list with `status: ok` means nobody has curated this rung's board for the year.\nThat is a fact about the school's admin and must not be reported as the child studying\nnothing."
+      },
+      "StudentTeachersOut": {
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StudentRef"
+          },
+          "term": {
+            "$ref": "#/components/schemas/TermOut"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ClassroomStatusOut"
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code",
+            "default": ""
+          },
+          "class_name_ar": {
+            "type": "string",
+            "title": "Class Name Ar",
+            "default": ""
+          },
+          "class_name_en": {
+            "type": "string",
+            "title": "Class Name En",
+            "default": ""
+          },
+          "teachers": {
+            "items": {
+              "$ref": "#/components/schemas/ClassTeacherOut"
+            },
+            "type": "array",
+            "title": "Teachers",
+            "description": "Ordered by the school's subject display order, then subject, then teacher. Teachers who have left the school are excluded."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student",
+          "term",
+          "status",
+          "as_of"
+        ],
+        "title": "StudentTeachersOut",
+        "description": "Who teaches a child, and what each of them teaches her.\n\n**One entry per (teacher, subject).** A teacher taking two subjects appears twice, and\na subject taught by two teachers has two entries — the system of record permits both, so\na consumer must render a list and never assume one name per subject. Taking the first\nwould hide a co-teacher from the parent who asked.\n\n**Present tense, and this is the one caveat worth reading.** `term` resolves which ROOM\nshe sat in; the school's assignment table carries no term, so `teachers` is who teaches\nthat room *now*. It is not who taught it last November, and must not be described as\nsuch.\n\nAn empty list with `status: ok` means nobody has entered the room's staffing — about\nthe school, not the child."
+      },
+      "StudySubjectOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "The school's own subject code, e.g. `MATH`."
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "default": ""
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "StudySubjectOut",
+        "description": "One subject the child is taught."
+      },
       "SubmissionStatus": {
         "type": "string",
         "enum": [
@@ -1411,6 +2270,167 @@
           "is_closed"
         ],
         "title": "TermOut"
+      },
+      "TimetableLessonOut": {
+        "properties": {
+          "day_of_week": {
+            "type": "string",
+            "title": "Day Of Week",
+            "description": "Lowercase, e.g. 'sunday'."
+          },
+          "period_number": {
+            "type": "integer",
+            "title": "Period Number"
+          },
+          "subject_code": {
+            "type": "string",
+            "title": "Subject Code",
+            "description": "Empty for a stated free period — a slot the class deliberately has off, which is different from a slot nobody has planned (no row at all).",
+            "default": ""
+          },
+          "subject_name_ar": {
+            "type": "string",
+            "title": "Subject Name Ar",
+            "default": ""
+          },
+          "subject_name_en": {
+            "type": "string",
+            "title": "Subject Name En",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "day_of_week",
+          "period_number"
+        ],
+        "title": "TimetableLessonOut",
+        "description": "One lesson, in one slot of one day."
+      },
+      "TimetableOut": {
+        "properties": {
+          "student": {
+            "$ref": "#/components/schemas/StudentRef"
+          },
+          "term": {
+            "$ref": "#/components/schemas/TermOut"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TimetableStatusOut",
+            "description": "Which of the three answers this is. Branch on this, never on whether `lessons` is empty."
+          },
+          "class_code": {
+            "type": "string",
+            "title": "Class Code",
+            "description": "Empty exactly when `status` is `no_class`.",
+            "default": ""
+          },
+          "class_name_ar": {
+            "type": "string",
+            "title": "Class Name Ar",
+            "default": ""
+          },
+          "class_name_en": {
+            "type": "string",
+            "title": "Class Name En",
+            "default": ""
+          },
+          "days": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Days",
+            "description": "The school's working days, **in the school's own order**. Do not sort this: the week begins on Saturday at some schools and Sunday at others, and only the school knows which."
+          },
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/TimetablePeriodOut"
+            },
+            "type": "array",
+            "title": "Periods"
+          },
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/TimetableLessonOut"
+            },
+            "type": "array",
+            "title": "Lessons",
+            "description": "Ordered by day — in the school's week order — then by period."
+          },
+          "teaching_slots": {
+            "type": "integer",
+            "title": "Teaching Slots",
+            "description": "How many slots this week could hold a lesson: teaching periods times open days. The denominator for 'how full is this timetable'.",
+            "default": 0
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student",
+          "term",
+          "status",
+          "as_of"
+        ],
+        "title": "TimetableOut",
+        "description": "One child's week: the class she sat in for the term, and what that class does.\n\nThe grid and the lessons travel together because read apart they can disagree, and the\nsymptom is a client drawing a seven-row day against an eight-period grid.\n\n`class_code` is the class she was in **for this term**, not her current one. A child who\nmoved 3A -> 3B in March still reads 3A for Term 1, because that is the week she actually\nsat."
+      },
+      "TimetablePeriodOut": {
+        "properties": {
+          "period_number": {
+            "type": "integer",
+            "title": "Period Number",
+            "description": "Its position in the day. 1 is the first."
+          },
+          "name_ar": {
+            "type": "string",
+            "title": "Name Ar",
+            "default": ""
+          },
+          "name_en": {
+            "type": "string",
+            "title": "Name En",
+            "default": ""
+          },
+          "starts_at": {
+            "type": "string",
+            "title": "Starts At",
+            "description": "`HH:MM`, or empty when the school has not fixed this boundary — a school settles how many periods it runs long before it agrees when each one rings. Never a placeholder: an invented 08:00 cannot afterwards be told from an agreed one.",
+            "default": ""
+          },
+          "ends_at": {
+            "type": "string",
+            "title": "Ends At",
+            "default": ""
+          },
+          "is_teaching": {
+            "type": "boolean",
+            "title": "Is Teaching",
+            "description": "`false` for break, assembly or prayer — a slot the day contains and no class timetables a lesson into. A client drawing the day must show it; a caller counting lessons must not.",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_number"
+        ],
+        "title": "TimetablePeriodOut",
+        "description": "One slot in the school's day — a row of the grid, breaks included."
+      },
+      "TimetableStatusOut": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "no_class",
+          "no_timetable"
+        ],
+        "title": "TimetableStatusOut",
+        "description": "Why a week is or is not a grid of lessons.\n\nOn the payload rather than left to be inferred from an empty list, for the reason\n`SubmissionStatus` exists: a model handed emptiness narrates a plausible reason for it,\nand the plausible reason here — \"she has no lessons\" — is false in two of the three\ncases."
       },
       "ValidationError": {
         "properties": {

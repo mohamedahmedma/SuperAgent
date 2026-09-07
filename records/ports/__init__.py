@@ -10,7 +10,15 @@ nothing, and cannot be broken by a base gaining a method it does not use. The ty
 still catches an implementation that drifts.
 """
 from records.ports.calendar import SchoolCalendar
+from records.ports.classroom import StudentClassrooms
 from records.ports.directory import GuardianDirectory
 from records.ports.lms import LmsAdapter
+from records.ports.timetable import StudentTimetables
 
-__all__ = ["GuardianDirectory", "LmsAdapter", "SchoolCalendar"]
+__all__ = [
+    "GuardianDirectory",
+    "LmsAdapter",
+    "SchoolCalendar",
+    "StudentClassrooms",
+    "StudentTimetables",
+]

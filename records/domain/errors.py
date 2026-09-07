@@ -72,6 +72,33 @@ class CalendarUnavailable(UpstreamUnavailable):
     """The academic calendar could not be read. Distinct from "no such term", a `None`."""
 
 
+class ClassroomUnavailable(UpstreamUnavailable):
+    """The class, its subject board or its staff could not be read.
+
+    Its own type so an outage here is separable in a log and a test from one in the marks
+    or the timetable, and `lms_unavailable` on the wire regardless — inherited, not chosen.
+    The agent above is written against that one code.
+
+    Never raised for a child with no class this term. That is `ClassroomStatus.NO_CLASS`, a
+    real answer about a real child; an exception there would turn "she starts in September"
+    into "the school's records are down".
+    """
+
+
+class TimetableUnavailable(UpstreamUnavailable):
+    """The weekly plan could not be read.
+
+    Its own type so an outage in the timetable is separable in a log and in a test from one
+    in the marks, and `lms_unavailable` on the wire regardless — inherited, not chosen. The
+    agent above is written against that one code, and a route that has to learn a second
+    failure vocabulary is a route that will handle one of them wrong.
+
+    Never raised for a child with no class this term. That is `TimetableStatus.NO_CLASS`, a
+    real answer about a real child; an exception there would turn "she starts in September"
+    into "the school's records are down".
+    """
+
+
 class GuardianDirectoryUnavailable(UpstreamUnavailable):
     """The guardian links could not be read.
 
@@ -141,6 +168,7 @@ class UnknownTerm(RecordsError):
 
 __all__ = [
     "CalendarUnavailable",
+    "ClassroomUnavailable",
     "GuardianDirectoryUnavailable",
     "GuardianMismatch",
     "LmsUnavailable",
@@ -148,6 +176,7 @@ __all__ = [
     "NotConfigured",
     "RecordsError",
     "StudentNotFound",
+    "TimetableUnavailable",
     "UnknownTerm",
     "UpstreamUnavailable",
 ]
