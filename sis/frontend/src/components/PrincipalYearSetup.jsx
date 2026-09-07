@@ -316,9 +316,6 @@ export function PrincipalYearSetup({ school, schoolConfig, tracks = [], levels =
             <Field className="col-12 col-md-4" label={t('Name (Arabic)')}>
               <Input className="sis-name-ar" value={row.name_ar} onInput={(value) => updateDraft(row.id, { name_ar: value })} />
             </Field>
-            {!row.name_en.trim() && !row.name_ar.trim() ? (
-              <div className="col-12 small text-danger">{t('Enter the academic year name in English, Arabic, or both.')}</div>
-            ) : null}
             <Field className="col-12 col-md-4" label={t('First day')} required>
               <Input type="date" value={row.starts_on} onInput={(value) => updateDraft(row.id, { starts_on: value })} />
             </Field>
@@ -326,9 +323,9 @@ export function PrincipalYearSetup({ school, schoolConfig, tracks = [], levels =
               <Input type="date" value={row.ends_on} onInput={(value) => updateDraft(row.id, { ends_on: value })} />
             </Field>
             <div className="col-12 col-md-4 d-flex align-items-end">
-              <label className="form-check mb-2">
-                <input className="form-check-input" type="radio" name="principal-current-year" checked={!!row.is_current}
-                  onChange={() => setCurrent(row.id)} />
+              <label className={`d-flex align-items-center gap-2 border rounded-3 px-3 py-2 w-100 ${row.is_current ? 'border-primary bg-primary bg-opacity-10' : 'bg-body'}`} style={{ cursor: 'pointer', minHeight: '38px' }}>
+                <input className="form-check-input m-0 flex-shrink-0" type="checkbox" checked={!!row.is_current}
+                  onChange={(event) => event.target.checked ? setCurrent(row.id) : updateDraft(row.id, { is_current: false })} />
                 <span className="form-check-label">{t('Make current academic year')}</span>
               </label>
             </div>
@@ -388,15 +385,10 @@ export function PrincipalYearSetup({ school, schoolConfig, tracks = [], levels =
         <Field label={t('Academic year')}>
           <Select value={configureYear} options={yearOptions} onChange={setConfigureYear} />
         </Field>
-        {configureLocked ? (
-          <Alert tone="warn" title={t('Academic year locked')}>
-            {t('This is the current academic year and its first day has arrived. Subjects, grade assignments and classes are now read-only.')}
-          </Alert>
-        ) : null}
         <SubjectCreator year={configureYear} onSaved={loadSubjects} disabled={configureLocked} />
         {subjectError ? <ErrorNote error={subjectError} onRetry={loadSubjects} /> : null}
         {subjectLoading ? <div className="small text-body-tertiary">{t('Loading…')}</div> : null}
-        {!subjectLoading && configureYear ? <SubjectBoard year={configureYear} school={school} levels={levels} subjects={subjects} lang={state.lang} readOnly={configureLocked} /> : null}
+        {!subjectLoading && configureYear ? <SubjectBoard year={configureYear} school={school} levels={levels} subjects={subjects} lang={state.lang} hideInfo readOnly={configureLocked} /> : null}
       </div> : <Empty title={t('Create an academic year first')}>
         {t('Subject configuration becomes available as soon as an academic year exists.')}
       </Empty>}

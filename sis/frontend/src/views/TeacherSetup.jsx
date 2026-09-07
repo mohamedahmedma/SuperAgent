@@ -7,7 +7,7 @@ import { t } from '../i18n.js';
 
 const blank = () => ({
   full_name_en: '', full_name_ar: '', email: '', phone: '',
-  username: '', password: '', is_active: true, assignments: []
+  username: '', password: '', is_active: true, assignments: [], role_code: 'teacher', year_level_id: ''
 });
 
 export function TeacherSetup() {
@@ -19,11 +19,12 @@ export function TeacherSetup() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const data = useQuery(
-    () => Promise.all([api.teachers(state.school), api.subjectAssignments(state.year)]),
+    () => Promise.all([api.teachers(state.school), api.subjectAssignments(state.year), api.rbacYearLevels(state.school)]),
     [state.school, state.year],
     !!state.school && !!state.year
   );
-  const [teachers = [], board = []] = data.value || [];
+  const [teachers = [], board = [], grades = []] = data.value || [];
+  const isSupervisor = form.role_code !== 'teacher';
   const levels = useQuery(() => api.schoolLevels(state.school), [state.school], !!state.school);
   const eligible = useMemo(() => board.flatMap((grade) => grade.subjects.map((subject) => ({
     key: `${grade.year_level_code}\u0000${subject.code}`,
@@ -60,6 +61,19 @@ export function TeacherSetup() {
   const save = async () => {
     setSaving(true); setError(null);
     try {
+      if (isSupervisor) {
+        await api.createSupervisor({
+          username: form.username.trim(), password: form.password,
+          full_name_en: form.full_name_en, full_name_ar: form.full_name_ar,
+          role_code: form.role_code, year_level_id: Number(form.year_level_id),
+          preferred_language: state.lang,
+        });
+        Store.invalidate('roles:');
+        Store.toast('ok', t('Supervisor account created'));
+        setForm(blank());
+        data.reload();
+        return;
+      }
       const created = await api.createTeacher(state.school, {
         full_name_en: form.full_name_en,
         full_name_ar: form.full_name_ar,
@@ -89,11 +103,18 @@ export function TeacherSetup() {
 
   return <>
     <PageHead title={t('Create teacher')}
-      lede={t('Define the teacher account, subjects, eligible grades, and track scope. Grade supervisors assign classes afterward.')} />
+      lede={t('Create a teacher or supervisor account and choose its role and assigned grades.')} />
     {data.error ? <ErrorNote error={data.error} onRetry={data.reload} /> : null}
     <div className="vstack gap-3">
-      <Card title={t('New teacher account')}>
+      <Card title={t('New staff account')}>
         <div className="row g-3 mt-1">
+          <Field className="col-12" label={t('Account role')} required>
+            <Select value={form.role_code} disabled={saving} options={[
+              { value: 'teacher', label: t('Teacher') },
+              { value: 'year_supervisor', label: t('Class supervisor') },
+              { value: 'attendance_supervisor', label: t('Attendance supervisor') }
+            ]} onChange={(value) => setForm((old) => ({ ...old, role_code: value }))} />
+          </Field>
           <Field className="col-12 col-md-6" label={t('English name')}>
             <Input className="sis-name-en" value={form.full_name_en} onInput={(value) => setForm((old) => ({ ...old, full_name_en: value }))} />
           </Field>
@@ -110,7 +131,14 @@ export function TeacherSetup() {
         </div>
       </Card>
 
-      <Card title={t('Subject, grade, and track eligibility')}>
+      {isSupervisor ? <Card title={t('Supervision grade')}>
+        <Field label={t('Grade')} required>
+          <Select value={form.year_level_id} disabled={saving} options={[
+            { value: '', label: t('Choose grade') },
+            ...grades.map((grade) => ({ value: String(grade.id), label: pickName(grade, state.lang) || grade.code }))
+          ]} onChange={(value) => setForm((old) => ({ ...old, year_level_id: value }))} />
+        </Field>
+      </Card> : <Card title={t('Subject, grade, and track eligibility')}>
         <div className="d-flex flex-column flex-md-row gap-2">
           <Select value={chosenSubject}
             options={[{ value: '', label: t('Choose subject') }, ...subjects.map((item) => ({
@@ -138,11 +166,11 @@ export function TeacherSetup() {
                 item.year_level_code !== row.year_level_code || item.subject_code !== row.subject_code) }))}>
               {t('Remove')}</Button> }
           ]} />
-      </Card>
+      </Card>}
       {error ? <ErrorNote error={error} /> : null}
       <div><Button variant="primary" pending={saving}
-        disabled={!form.full_name_en.trim() || !form.full_name_ar.trim()}
-        onClick={save}>{t('Save teacher configuration')}</Button></div>
+        disabled={saving || !form.full_name_en.trim() || !form.full_name_ar.trim() || (isSupervisor && (!form.year_level_id || !form.username.trim() || !form.password))}
+        onClick={save}>{t(isSupervisor ? 'Create supervisor account' : 'Save teacher configuration')}</Button></div>
     </div>
   </>;
 }

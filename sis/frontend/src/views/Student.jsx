@@ -30,7 +30,6 @@ import { Router } from '../router.js';
 import { Store } from '../store.js';
 import {
   DASH,
-  countText,
   dateText,
   labelOf,
   pickName,
@@ -53,8 +52,7 @@ import {
   SearchField,
   Select,
   Skeleton,
-  Table,
-  Tile
+  Table
 } from '../components/Ui.jsx';
 import { StudentEditor } from '../components/StudentEditor.jsx';
 import { t } from '../i18n.js';
@@ -524,7 +522,7 @@ function Marks({ studentNumber }) {
   );
 }
 
-/* -- Which days she was in the room, and the counts over them ---------------------- */
+/* -- Attendance records for the selected date range ------------------------------ */
 
 function Attendance({ studentNumber }) {
   const [range, setRange] = useState(defaultWindow);
@@ -534,7 +532,6 @@ function Attendance({ studentNumber }) {
     () => api.studentAttendance(studentNumber, range.from, range.to),
     !!studentNumber
   );
-  const counts = (record.value && record.value.counts) || null;
   const days = (record.value && record.value.days) || [];
 
   return (
@@ -564,35 +561,6 @@ function Attendance({ studentNumber }) {
       tight
     >
       <ErrorNote error={!record.value ? record.error : null} onRetry={record.reload} />
-
-      {counts ? (
-        <div className="card-body">
-          <div className="row g-2 row-cols-2 row-cols-sm-3 row-cols-lg-6">
-            <div className="col">
-              <Tile label={t('Recorded days')} value={countText(counts.recorded)} />
-            </div>
-            <div className="col">
-              <Tile label={t('Present')} value={countText(counts.present)} />
-            </div>
-            <div className="col">
-              <Tile label={t('Late')} value={countText(counts.late)} />
-            </div>
-            <div className="col">
-              <Tile label={t('Absent')} value={countText(counts.absent)} />
-            </div>
-            <div className="col">
-              <Tile label={t('Excused')} value={countText(counts.excused)} />
-            </div>
-            <div className="col">
-              <Tile
-                label={t('In the room')}
-                value={countText(counts.in_the_room)}
-                note="Present plus late."
-              />
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <Table
         loading={record.loading}

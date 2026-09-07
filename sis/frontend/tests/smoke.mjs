@@ -290,6 +290,23 @@ async function main() {
     }
   }
 
+  window.location.hash = '#/teacherSetup';
+  await settle(window, 120);
+  const roleSelect = [...window.document.querySelectorAll('[aria-haspopup="listbox"]')].find((button) =>
+    button.textContent.trim() === 'Teacher');
+  assert.ok(roleSelect, 'staff creation must offer supervisor roles');
+  for (const role of ['Class supervisor', 'Attendance supervisor']) {
+    roleSelect.click();
+    await settle(window, 40);
+    const option = [...window.document.querySelectorAll('[role="option"]')].find((item) => item.textContent.trim() === role);
+    assert.ok(option, `missing role ${role}`);
+    option.click();
+    await settle(window, 80);
+    assert.ok(window.document.body.textContent.includes('Supervision grade'));
+    assert.ok(!window.document.body.textContent.includes('Subject, grade, and track eligibility'));
+    assert.ok(window.document.body.textContent.includes('Create supervisor account'));
+  }
+
   /* The finder must do more than render. Submit a real value and pin the request's
      academic-year scope; a screen-only smoke check missed the regression where every
      scoped account received 403 from an otherwise healthy search endpoint. */

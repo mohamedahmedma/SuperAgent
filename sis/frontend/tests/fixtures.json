@@ -1,4 +1,7 @@
 {
+  "GET /v1/rbac/year-level-scopes": [
+    { "id": 1, "code": "P3", "name_en": "Year 3", "name_ar": "الصف الثالث" }
+  ],
   "GET /health": {
     "status": "ok"
   },
