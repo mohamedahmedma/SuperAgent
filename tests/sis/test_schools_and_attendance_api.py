@@ -626,8 +626,8 @@ def test_a_year_naming_a_school_that_does_not_exist_is_refused_by_field(
             "school_code": "NOPE",
             "name_en": "y",
             "name_ar": "y",
-            "starts_on": "2026-09-01",
-            "ends_on": "2027-06-30",
+            "starts_on": "2099-09-01",
+            "ends_on": "2100-06-30",
         },
         headers=registrar,
     )

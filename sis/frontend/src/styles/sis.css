@@ -1474,21 +1474,6 @@
   font-size: 1.16rem;
 }
 
-@media (max-width: 575.98px) {
-  .sis-footer {
-    min-height: 58px;
-    padding-top: 0.40rem;
-    padding-bottom: 0.35rem;
-  }
 
-  .sis-footer-center {
-    font-size: 1.04rem;
-    line-height: 1.30;
-  }
-
-  .sis-footer-link {
-    font-size: 1.08rem;
-  }
-}
 
 /* AUREXIS_FOOTER_CANONICAL_END */

@@ -1344,4 +1344,10 @@ export const AR = {
   'Enter the academic year name in English, Arabic, or both.': 'اكتب اسم العام الدراسي بالإنجليزية أو بالعربية أو باللغتين.',
   'Each academic year needs at least one name: English, Arabic, or both.': 'يجب كتابة اسم واحد على الأقل لكل عام دراسي: بالإنجليزية أو بالعربية أو باللغتين.',
   'A current academic year must be fully configured before its first day.': 'يجب إكمال إعداد العام الدراسي الحالي قبل تاريخ بدايته.',
+
+  'Delete': '???',
+  'Percentage': '?????? ???????',
+  'Settings ? appearance and language': '????????? ? ?????? ??????',
+  'Signing in?': '???? ????? ???????',
+  'Teacher setup': '????? ??????',
 };

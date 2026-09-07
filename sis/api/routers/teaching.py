@@ -191,8 +191,8 @@ class StatedMarkIn(BaseModel):
 class RecordMarksIn(BaseModel):
     term_code: str = Field(examples=["2026-T1"])
     subject_code: str = Field(examples=["MATH"])
-    assessment_type: Literal["exam", "assignment"]
-    assessment_name: str = Field(min_length=1, max_length=160)
+    assessment_type: Literal["exam", "assignment"] | None = None
+    assessment_name: str | None = Field(default=None, min_length=1, max_length=160)
     marks: list[StatedMarkIn] = Field(min_length=1)
 
 
@@ -278,6 +278,13 @@ def read_mark_sheet(
             academic_year_code=academic_year, class_code=class_code
         ),
     )
+    if (
+        caller.profile is not None
+        and caller.profile.has_role("teacher")
+        and not caller.profile.has_role("year_supervisor")
+        and not _may_record(caller, teaching, academic_year, class_code, subject)
+    ):
+        raise _assignment_forbidden(subject, class_code)
     with domain_errors():
         sheet = sheets.sheet(
             AcademicYearCode(academic_year),
@@ -389,7 +396,8 @@ def record_marks(
                 SubjectCode(body.subject_code),
                 TermCode(body.term_code),
             )
-    _save_assessment_snapshot(uow_factory, class_code, academic_year, body, caller.prefix)
+    if body.assessment_type and body.assessment_name:
+        _save_assessment_snapshot(uow_factory, class_code, academic_year, body, caller.prefix)
     return MarkSheetOut.of(sheet, may_record=True)
 
 

@@ -285,7 +285,6 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.SCHOOLS_READ,
             Permission.STRUCTURE_READ,
             Permission.STUDENTS_READ,
-            Permission.ATTENDANCE_READ,
             Permission.STUDENTS_CREATE,
             Permission.STUDENTS_WRITE,
                         Permission.GUARDIANS_READ,

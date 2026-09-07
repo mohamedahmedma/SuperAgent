@@ -186,7 +186,7 @@ function SignIn() {
             ) : null}
             <div className="d-grid mt-4">
               <button className="btn btn-primary" type="submit" disabled={busy}>
-                {busy ? t('Signing inâ€¦') : t('Sign in')}
+                {busy ? t('Signing in…') : t('Sign in')}
               </button>
             </div>
           </form>
@@ -401,7 +401,7 @@ function Header({ onOpenSettings, onSignIn }) {
           <button
             className="btn btn-sm btn-quiet"
             onClick={onOpenSettings}
-            title={t('Settings â€” appearance and language')}
+            title={t('Settings — appearance and language')}
           >
             <Icon name="settings" />
             <span className="visually-hidden">{t('Open settings')}</span>
