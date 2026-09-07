@@ -68,7 +68,7 @@ def _year(client: TestClient, headers: dict[str, str], *, code: str = YEAR, scho
             "name_ar": "٢٠٢٥",
             "starts_on": "2025-09-01",
             "ends_on": "2026-06-30",
-            "is_current": True,
+            "is_current": False,
         },
         headers=headers,
     )

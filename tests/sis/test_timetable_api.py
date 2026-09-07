@@ -27,6 +27,8 @@ one table further on, and the same test proves the Arabic and Languages sections
 apart — they are different rungs with different assignments, so neither can borrow the
 other's subjects.
 """
+from datetime import date, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -77,8 +79,8 @@ def school(client: TestClient, registrar: dict[str, str]) -> None:
             "school_code": SCHOOL,
             "name_en": "2026/2027",
             "name_ar": "٢٠٢٦",
-            "starts_on": "2026-09-01",
-            "ends_on": "2027-06-30",
+            "starts_on": (date.today() + timedelta(days=30)).isoformat(),
+            "ends_on": (date.today() + timedelta(days=330)).isoformat(),
             "is_current": True,
         },
         headers=registrar,

@@ -698,6 +698,22 @@ var api = {
   clearTimetableSlots: function (academicYear, slots) {
     return post('/timetable/clear', { academic_year_code: academicYear, slots: slots });
   },
+  teacherHomework: function (academicYear) {
+    return get('/homework', { academic_year: academicYear });
+  },
+  uploadHomework: function (payload) {
+    var form = new FormData();
+    form.append('academic_year', payload.academicYear);
+    form.append('class_code', payload.classCode);
+    form.append('subject_code', payload.subjectCode);
+    form.append('title', payload.title);
+    form.append('details', payload.details || '');
+    if (payload.file) form.append('attachment', payload.file);
+    return postForm('/homework', form);
+  },
+  deleteHomework: function (id) {
+    return request('/homework/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
   classMarkSheet: function (classCode, academicYear, termCode, subjectCode) {
     return get('/classes/' + encodeURIComponent(classCode) + '/grades', {
       academic_year: academicYear,
@@ -712,6 +728,17 @@ var api = {
       body: body
     });
   },
+  classAssessments: function (classCode, academicYear, termCode, subjectCode, assessmentType) {
+    return get('/classes/' + encodeURIComponent(classCode) + '/assessments', {
+      academic_year: academicYear, term: termCode, subject: subjectCode, assessment_type: assessmentType
+    });
+  },
+  classAssessment: function (classCode, assessmentId, academicYear) {
+    return get('/classes/' + encodeURIComponent(classCode) + '/assessments/' + encodeURIComponent(assessmentId), {
+      academic_year: academicYear
+    });
+  },
+
 
   previewRoster: function (form) {
     return postForm('/imports/roster/preview', form);
@@ -790,6 +817,10 @@ var api = {
   },
   createTeacher: function (schoolCode, body) {
     return post('/schools/' + encodeURIComponent(schoolCode) + '/teachers', body);
+  },
+  removeTeacher: function (schoolCode, staffNumber) {
+    return request('/schools/' + encodeURIComponent(schoolCode) + '/teachers/' +
+      encodeURIComponent(staffNumber), { method: 'DELETE' });
   },
   teacherAttendance: function (schoolCode, fromDate, toDate) {
     return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers/attendance', {

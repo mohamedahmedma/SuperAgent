@@ -17,7 +17,8 @@ caller that wants a percentage divides by a number it can see. This service does
 school calendar, so it cannot tell an unmarked Tuesday from a holiday and will not compute a
 figure that pretends otherwise.
 """
-from datetime import UTC, date, datetime
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Query
@@ -34,7 +35,7 @@ from sis.api.deps import (
     Principal,
     require_permission,
 )
-from sis.domain.rbac import Permission, Target
+from sis.domain.rbac import Permission, RoleCode, ScopeType, Target
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services.attendance import ClassRegister, StudentAttendance
 from sis.domain.attendance import AttendanceState, AttendanceTally
@@ -44,7 +45,14 @@ from sis.infrastructure.db import models as m
 
 router = APIRouter(prefix="/v1", tags=["attendance"])
 
+_SIS_TIMEZONE = ZoneInfo("Africa/Cairo")
+
+def _sis_today() -> date:
+    return datetime.now(_SIS_TIMEZONE).date()
+
+
 Reader = Annotated[Principal, Depends(require_permission(Permission.ATTENDANCE_READ))]
+StudentReader = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_READ))]
 Registrar = Annotated[Principal, Depends(require_permission(Permission.ATTENDANCE_WRITE))]
 
 
@@ -227,9 +235,7 @@ class RegisterClassOut(BaseModel):
     year_level_name_ar: str = ""
     track_code: str | None = None
     may_record: bool = Field(
-        description="Whether this caller may write this register, as opposed to only read "
-        "it. Both kinds appear in the list: a supervisor who may read 3B and record 3A "
-        "should see both and be told which is which."
+        description="Always true for this endpoint: only classes the caller may record are returned."
     )
     size: int = Field(description="Children placed in this class on that day.")
     marked: int = Field(description="How many of them already have a mark.")
@@ -252,12 +258,10 @@ class RegisterClassesOut(BaseModel):
     description="Step one of taking a register, and the only read here that answers from "
     "the caller's own grants rather than from something they named.\n\n"
     "Every other listing narrows a target the caller supplies, which a class-scoped "
-    "attendance supervisor cannot use: they hold four rooms and no authority over the "
-    "grade or the year those rooms sit in, so `GET /v1/structure/classes` refuses them "
-    "however they ask. Without this route the workflow's first step — pick a grade, pick a "
-    "class — is only possible for somebody who already knows the class code.\n\n"
-    "The answer is the union over every grant, so a school-wide registrar sees the school "
-    "and a supervisor sees their rooms, through one route. Each row carries its grade, so "
+    "attendance supervisor cannot use: they hold specific rooms and no authority over the "
+    "grade or year above them. This route therefore starts from the caller's own "
+    "ATTENDANCE_WRITE grants and returns only rooms whose register they may save.\n\n"
+    "Each row carries its grade, so "
     "a client groups by grade without a second call, and the day's progress, so a register "
     "already taken is visible before it is opened again.",
     responses=error_responses(401, 403, 422),
@@ -271,7 +275,7 @@ def list_registerable_classes(
         Query(description="The day to report progress for. Defaults to today."),
     ] = None,
 ) -> RegisterClassesOut:
-    on_date = on or datetime.now(UTC).date()
+    on_date = on or _sis_today()
     with uow_factory() as uow:
         session = uow._session
         year = session.scalar(
@@ -319,8 +323,78 @@ def list_registerable_classes(
                 .group_by(m.ClassEnrolment.class_section_id)
             ).all()
         )
-
         listed: list[RegisterClassOut] = []
+
+        # Classroom staff use concrete assignments, not the union of broad grants.
+        assigned_class_ids: set[int] | None = None
+        teacher_class_ids: set[int] = set()
+        supervisor_class_ids: set[int] = set()
+        supervisor_year_level_ids: set[int] = set()
+
+        if caller.profile is not None:
+            profile = caller.profile
+            is_teacher = profile.has_role(RoleCode.TEACHER.value)
+            is_attendance_supervisor = profile.has_role(
+                RoleCode.ATTENDANCE_SUPERVISOR.value
+            )
+
+            if is_teacher:
+                teacher_id = session.scalar(
+                    select(m.Teacher.id).where(
+                        m.Teacher.user_id == profile.user_id,
+                        m.Teacher.is_active.is_(True),
+                    )
+                )
+                if teacher_id is not None:
+                    teacher_class_ids = set(
+                        session.scalars(
+                            select(m.TeacherClassSection.class_section_id)
+                            .join(
+                                m.ClassSection,
+                                m.TeacherClassSection.class_section_id
+                                == m.ClassSection.id,
+                            )
+                            .where(
+                                m.TeacherClassSection.teacher_id == teacher_id,
+                                m.ClassSection.academic_year_id == year.id,
+                            )
+                            .distinct()
+                        ).all()
+                    )
+
+            if is_attendance_supervisor:
+                supervisor_class_ids.update(
+                    profile.scope_ids(
+                        Permission.ATTENDANCE_WRITE,
+                        ScopeType.CLASS_SECTION,
+                    )
+                )
+                supervisor_class_ids.update(
+                    assignment.scope.id
+                    for assignment in profile.assignments
+                    if (
+                        assignment.role_code
+                        == RoleCode.ATTENDANCE_SUPERVISOR.value
+                        and assignment.scope.type is ScopeType.CLASS_SECTION
+                        and assignment.scope.id is not None
+                    )
+                )
+
+                # A grade-scoped attendance supervisor owns the whole grade:
+                # every class section beneath that YearLevel is part of the
+                # attendance workflow.
+                for assignment in profile.assignments:
+                    if (
+                        assignment.role_code
+                        == RoleCode.ATTENDANCE_SUPERVISOR.value
+                        and assignment.scope.type is ScopeType.YEAR_LEVEL
+                        and assignment.scope.id is not None
+                    ):
+                        supervisor_year_level_ids.add(assignment.scope.id)
+
+            if is_teacher or is_attendance_supervisor:
+                assigned_class_ids = teacher_class_ids | supervisor_class_ids
+
         for section, level, track in rows:
             # The target names everything above the room, so a grant at any rung of the
             # ladder matches — this is the same `Target` every narrowed route builds, and
@@ -331,8 +405,23 @@ def list_registerable_classes(
                 year_level_id=level.id,
                 class_section_id=section.id,
             )
-            if not caller.allows(Permission.ATTENDANCE_READ, where):
+
+            if assigned_class_ids is not None:
+                # Subject teachers remain exactly as V13.2: concrete teaching classes only.
+                # Attendance supervisors may additionally be assigned at YEAR_LEVEL scope;
+                # that means every class under that grade.
+                supervisor_grade_match = (
+                    is_attendance_supervisor
+                    and level.id in supervisor_year_level_ids
+                )
+                if (
+                    section.id not in assigned_class_ids
+                    and not supervisor_grade_match
+                ):
+                    continue
+            elif not caller.allows(Permission.ATTENDANCE_READ, where):
                 continue
+
             size = int(sizes.get(section.id, 0))
             marked = int(marked_by_class.get(section.id, 0))
             listed.append(
@@ -377,7 +466,7 @@ def read_class_register(
         Query(description="The day to answer for. Defaults to today, echoed as `on_date`."),
     ] = None,
 ) -> ClassRegisterOut:
-    on_date = on or datetime.now(UTC).date()
+    on_date = on or _sis_today()
     # Narrowed before the read, not after: a refusal that arrives with the register
     # already assembled has still had the register assembled, and a class-scoped grant
     # exists precisely so that this person cannot see this room.
@@ -422,7 +511,7 @@ def take_register(
         Query(description="The day being recorded. Defaults to today."),
     ] = None,
 ) -> ClassRegisterOut:
-    on_date = on or datetime.now(UTC).date()
+    on_date = on or _sis_today()
     # The check this whole scope model is for: an attendance supervisor is given rooms,
     # and taking the register of a room they were not given is the thing being refused.
     caller.narrow(
@@ -497,7 +586,7 @@ def read_guardian_student_attendance(
 def read_student_attendance(
     student_number: str,
     attendance: AttendanceServiceDep,
-    caller: Reader,
+    caller: StudentReader,
     from_: Annotated[
         date | None, Query(alias="from", description="First day, inclusive.")
     ] = None,

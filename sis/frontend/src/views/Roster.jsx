@@ -17,7 +17,7 @@ const emptyAdmission = () => ({
   full_name_ar: '', full_name_en: '', gender: '',
   date_of_birth: '', contact_email: '', address: '',
   guardian_full_name_ar: '', guardian_full_name_en: '', guardian_phone: '',
-  relationship_type: '', relationship_label: '', grade_code: '', class_code: ''
+  relationship_type: '', grade_code: '', class_code: ''
 });
 
 function NewAdmission({ year, classes, onCreated }) {
@@ -79,25 +79,22 @@ function NewAdmission({ year, classes, onCreated }) {
 
       <h3 className="h6 mt-4 mb-3">{t('Guardian information')}</h3>
       <div className="row g-3">
-        <Field className="col-12 col-md-4" label={t('Guardian Arabic name')} required>
+        <Field className="col-12 col-md-6" label={t('Guardian Arabic name')} required>
           <Input className="sis-name-ar" value={form.guardian_full_name_ar} onInput={set('guardian_full_name_ar')} />
         </Field>
-        <Field className="col-12 col-md-4" label={t('Guardian English name')} required>
+        <Field className="col-12 col-md-6" label={t('Guardian English name')} required>
           <Input className="sis-name-en" value={form.guardian_full_name_en} onInput={set('guardian_full_name_en')} />
         </Field>
-        <Field className="col-12 col-md-4" label={t('Guardian phone')} required>
+        <Field className="col-12 col-md-6" label={t('Guardian phone')} required>
           <Input inputMode="tel" value={form.guardian_phone} onInput={set('guardian_phone')} />
         </Field>
-        <Field className="col-12 col-md-4" label={t('Relationship')} required>
+        <Field className="col-12 col-md-6" label={t('Relationship')} required>
           <Select value={form.relationship_type} onChange={set('relationship_type')} options={[
             { value: '', label: t('Choose…') }, { value: 'father', label: t('Father') },
             { value: 'mother', label: t('Mother') }, { value: 'guardian', label: t('Guardian') },
             { value: 'sibling', label: t('Sibling') }, { value: 'grandparent', label: t('Grandparent') },
             { value: 'other', label: t('Other') }
           ]} />
-        </Field>
-        <Field className="col-12 col-md-8" label={t('Relationship description')} required>
-          <Input value={form.relationship_label} onInput={set('relationship_label')} />
         </Field>
       </div>
 
@@ -139,11 +136,11 @@ export function StudentSetup() {
   const [createdClass, setCreatedClass] = useState('');
 
   if (!state.year) {
-    return <><PageHead title={t('Student setup')} /><NoYearNotice /></>;
+    return <><PageHead title={t('Create student')} /><NoYearNotice /></>;
   }
   return <>
     <PageHead
-      title={t('Student setup')}
+      title={t('Create student')}
       lede={t('Create one complete student record with a guardian and first class placement.')}
     />
     <NewAdmission

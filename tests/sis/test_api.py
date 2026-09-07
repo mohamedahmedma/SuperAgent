@@ -110,7 +110,7 @@ def _seed_academic_year() -> None:
                     name_ar="٢٠٢٥-٢٠٢٦",
                     starts_on=date(2025, 9, 1),
                     ends_on=date(2026, 6, 30),
-                    is_current=True,
+                    is_current=False,
                 )
             ]
         )

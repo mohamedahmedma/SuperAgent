@@ -229,13 +229,13 @@ const SCREENS = [
   { hash: '#/student?number=10432', expect: ['Layla Hassan', 'Insights', '10432'] },
   { hash: '#/student', expect: ['Find a child'] },
   { hash: '#/roster', expect: ['roster'] },
-  { hash: '#/studentSetup', expect: ['Student setup', 'Create student and guardian'] },
+  { hash: '#/studentSetup', expect: ['Create student', 'Create student and guardian'] },
   { hash: '#/guardians', expect: ['Guardians'] },
   { hash: '#/marks', expect: ['Marks'] },
   { hash: '#/batches', expect: ['Batches'] },
   /* A multi-role teacher/principal configuring eligibility before the grade supervisor
      assigns concrete rooms. This covers the Stage 15 manager handoff in the real router. */
-  { hash: '#/teacherSetup', expect: ['Teacher setup', 'Subject, grade, and track eligibility'] },
+  { hash: '#/teacherSetup', expect: ['Create teacher', 'Subject, grade, and track eligibility'] },
   /* The grade supervisor's screen, walked as somebody holding no year-level grant: it
      renders its own empty state rather than throwing, which is the branch every other
      visitor to this route takes. The populated flow needs a profile with a `year_level`
@@ -421,9 +421,10 @@ async function main() {
   moveButton.click();
   await settle(window, 150);
 
-  const movePanel = [...window.document.querySelectorAll('.card')].find((card) =>
-    (card.textContent || '').includes('Move out of 3A')
-  );
+  const movePanel = [...window.document.querySelectorAll('.card')].find((card) => {
+    const text = card.textContent || '';
+    return text.includes('Move') && text.includes('Transfer date');
+  });
   assert.ok(movePanel, 'clicking Move opened no panel');
   const picker = movePanel.querySelector('.sis-field-trigger');
   assert.ok(picker, 'the Move panel has no class picker');
@@ -446,8 +447,8 @@ async function main() {
     new window.Event('submit', { bubbles: true, cancelable: true })
   );
   await settle(window, 100);
-  const moveConfirm = [...window.document.querySelectorAll('.modal-footer button')].find(
-    (button) => button.textContent.includes('Move her')
+  const moveConfirm = [...movePanel.querySelectorAll('button')].find(
+    (button) => button.textContent.trim() === 'Confirm transfer'
   );
   assert.ok(moveConfirm, 'submitting the move did not open its confirmation');
   moveConfirm.click();
@@ -597,8 +598,8 @@ async function main() {
   await settle(scoped.window, 150);
   const other = scoped.window.document.body.textContent || '';
   assert.ok(
-    other.includes('You can read this register but not record it'),
-    `the teacher of 3A was offered the Save control on 3B. Rendered: ${other.slice(0, 400).replace(/\s+/g, ' ')}`
+    other.includes('Read-only attendance view. Recording controls are hidden for this account.'),
+    `the teacher of 3A was offered attendance write controls on 3B. Rendered: ${other.slice(0, 400).replace(/\s+/g, ' ')}`
   );
   errors.push(...scoped.errors);
 

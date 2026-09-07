@@ -139,14 +139,20 @@ function Finder({ initial }) {
           }}
         >
           <Field
-            className={searchableLevels.length > 1 ? 'col-12 col-md-5' : 'col-12 col-sm'}
+            className={searchableLevels.length > 1 ? 'col-12 col-md-8' : 'col-12'}
             label={t('Student number or name')}
             hint={t('A partial name matches in either script.')}
           >
             {/* No placeholder: the field's own label already says what goes in it, and a
                 placeholder repeating it is a second copy that disappears the moment anyone
                 types. */}
-            <SearchField value={typed} onInput={setTyped} />
+            {/* AUREXIS_INLINE_SEARCH_ACTION */}
+            <div className="d-flex align-items-stretch gap-2">
+              <div className="flex-grow-1"><SearchField value={typed} onInput={setTyped} /></div>
+              <Button type="submit" variant="primary" icon="search">
+              {t('Search')}
+            </Button>
+            </div>
           </Field>
           {searchableLevels.length > 1 ? (
             <Field className="col-12 col-md-4" label={t('Grade')}>
@@ -157,11 +163,7 @@ function Finder({ initial }) {
               />
             </Field>
           ) : null}
-          <div className="col-12 col-sm-auto d-grid">
-            <Button type="submit" variant="primary" icon="search">
-              {t('Search')}
-            </Button>
-          </div>
+
         </form>
       </Card>
 
@@ -243,8 +245,6 @@ function Identity({ student }) {
         student.age === null || student.age === undefined ? null : `${student.age} years`,
       note: 'Read from her date of birth, never stored beside it.'
     },
-    { label: 'Phone', value: student.contact_phone, mono: true },
-    { label: 'Email', value: student.contact_email },
     { label: 'Address', value: student.address }
   ];
 
@@ -289,93 +289,6 @@ function Identity({ student }) {
 
 /* -- Where she has been placed ---------------------------------------------------- */
 
-function Placements({ studentNumber }) {
-  const state = useStore();
-  const placements = useResource(
-    Store.keys.placements(studentNumber),
-    () => api.studentPlacements(studentNumber),
-    !!studentNumber
-  );
-
-  /* `.placements`, not the response itself: the route answers
-     `{student_number, count, placements: [...]}`. Reading it as a bare array threw
-     `rows.filter is not a function` and took the whole screen out — found by walking the
-     console against the real service, because the smoke fixture had the shape wrong in the
-     same way the screen did. */
-  const rows = ((placements.value && placements.value.placements) || [])
-    .slice()
-    .sort((a, b) => String(b.starts_on).localeCompare(String(a.starts_on)));
-
-  return (
-    <Card
-      title={t('Placements')}
-      subtitle={t('{0} in the record — newest first', [rows.length])}
-      actions={
-        <Button size="sm" icon="refresh" onClick={placements.reload}>
-          {t('Reload')}
-        </Button>
-      }
-      tight
-    >
-      <ErrorNote error={placements.error} onRetry={placements.reload} />
-      <Table
-        loading={placements.loading}
-        rows={rows}
-        rowKey={(row) => `${row.academic_year_code}:${row.class_code}:${row.starts_on}`}
-        empty={
-          <Empty title={t('She has never been placed in a class')}>
-            {t('Her record exists and no class has claimed her. Place her from a class register.')}
-          </Empty>
-        }
-        columns={[
-          {
-            key: 'class',
-            header: t('Class'),
-            className: 'sis-code',
-            cell: (row) => (
-              <a
-                href={Router.href('class', {
-                  code: row.class_code,
-                  year: row.academic_year_code
-                })}
-              >
-                {row.class_code}
-              </a>
-            )
-          },
-          {
-            key: 'year',
-            header: t('Year'),
-            className: 'sis-code',
-            hide: 'sm',
-            cell: (row) => row.academic_year_code
-          },
-          {
-            key: 'from',
-            header: t('From'),
-            className: 'sis-num',
-            cell: (row) => <span className="font-monospace small">{dateText(row.starts_on)}</span>
-          },
-          {
-            key: 'to',
-            header: t('To'),
-            className: 'sis-num',
-            cell: (row) =>
-              row.is_open ? (
-                <Badge tone="ok">{t('open')}</Badge>
-              ) : (
-                <span className="font-monospace small">{dateText(row.ends_on)}</span>
-              )
-          }
-        ]}
-      />
-      <div className="card-footer small text-body-tertiary">
-        {t('A placement is a dated membership, so a transfer closes one row and opens another. October still says what it said in October — nothing here is rewritten when she moves.')}
-      </div>
-    </Card>
-  );
-}
-
 /* -- Who to call ------------------------------------------------------------------ */
 
 function Guardians({ studentNumber }) {
@@ -398,14 +311,14 @@ function Guardians({ studentNumber }) {
       }
       tight
     >
-      <ErrorNote error={guardians.error} onRetry={guardians.reload} />
+      <ErrorNote error={!guardians.value ? guardians.error : null} onRetry={guardians.reload} />
       <Table
         loading={guardians.loading}
         rows={rows}
         rowKey={(row) => row.phone}
         empty={
-          <Empty title={t('No adult is linked to her')}>
-            {t('Nobody here can be told she was absent. Link a guardian from the Guardians screen.')}
+          <Empty title={t('No guardian data recorded yet')}>
+            {t('No guardian information has been recorded for this student yet.')}
           </Empty>
         }
         columns={[
@@ -526,7 +439,7 @@ function Marks({ studentNumber }) {
       }
       tight
     >
-      <ErrorNote error={report.error} onRetry={report.reload} />
+      <ErrorNote error={!report.value ? report.error : null} onRetry={report.reload} />
 
       {card ? (
         <div className="card-body pb-0">
@@ -549,8 +462,8 @@ function Marks({ studentNumber }) {
         rows={lines}
         rowKey={(row) => row.subject_code}
         empty={
-          <Empty title={t('No subject rows for this term')}>
-            {t('Either the year has no subjects yet, or nothing has been uploaded against this term.')}
+          <Empty title={t('No marks recorded yet')}>
+            {t('No marks have been recorded for this student in this term yet.')}
           </Empty>
         }
         columns={[
@@ -650,7 +563,7 @@ function Attendance({ studentNumber }) {
       }
       tight
     >
-      <ErrorNote error={record.error} onRetry={record.reload} />
+      <ErrorNote error={!record.value ? record.error : null} onRetry={record.reload} />
 
       {counts ? (
         <div className="card-body">
@@ -678,11 +591,6 @@ function Attendance({ studentNumber }) {
               />
             </div>
           </div>
-          <p className="small text-body-tertiary mt-3 mb-0">
-            Counted over the {counts.recorded} day(s) somebody actually marked in this window. A
-            day nobody marked is not in this list and is in none of these counts — it is not an
-            absence.
-          </p>
         </div>
       ) : null}
 
@@ -694,8 +602,8 @@ function Attendance({ studentNumber }) {
           row.state === 'present' ? 'ok' : row.state === 'absent' ? 'bad' : 'warn'
         }
         empty={
-          <Empty title={t('No marks in this window')}>
-            {t('Nobody took a register for her between these two dates. Widen the window, or take one from her class.')}
+          <Empty title={t('No attendance data recorded yet')}>
+            {t('No attendance has been recorded for this student in the selected period yet.')}
           </Empty>
         }
         columns={[
@@ -744,23 +652,16 @@ function Insights({ student, studentNumber }) {
     () => api.studentAttendance(studentNumber, range.from, range.to),
     !!studentNumber
   );
-  const placements = useResource(
-    Store.keys.placements(studentNumber),
-    () => api.studentPlacements(studentNumber),
-    !!studentNumber
-  );
-  const guardians = useResource(
+const guardians = useResource(
     Store.keys.guardians(studentNumber),
     () => api.studentGuardians(studentNumber),
     !!studentNumber
   );
 
-  if (attendance.loading || placements.loading || guardians.loading) return <Skeleton rows={4} />;
+  if (attendance.loading || guardians.loading) return <Skeleton rows={4} />;
 
   const counts = (attendance.value && attendance.value.counts) || null;
-  const rows = (placements.value && placements.value.placements) || [];
-  const open = rows.filter((row) => row.is_open);
-  const contacts = (guardians.value && guardians.value.guardians) || [];
+const contacts = (guardians.value && guardians.value.guardians) || [];
   const readers = contacts.filter((row) => row.can_view_records);
 
   /* Every line below is a count of something recorded, or the plain absence of a record. There
@@ -776,36 +677,29 @@ function Insights({ student, studentNumber }) {
       : null,
     counts
       ? {
-          label: 'Days marked present or late',
-          value: `${counts.in_the_room} of ${counts.recorded} recorded`,
-          note: 'A count over recorded days, not a rate over the term.'
+          label: 'Days present or late',
+          value: `${counts.in_the_room}`,
+          note: `${counts.present} present, ${counts.late} late.`
         }
       : null,
-    counts && counts.away
+    counts
       ? {
-          label: 'Days marked absent or excused',
-          value: `${counts.away} of ${counts.recorded} recorded`,
+          label: 'Days absent or excused',
+          value: `${counts.away}`,
           note: `${counts.absent} absent, ${counts.excused} excused.`
         }
       : null,
     {
-      label: 'Classes in her record',
-      value: `${rows.length}`,
-      note: open.length
-        ? `Currently in ${open.map((row) => row.class_code).join(', ')}.`
-        : t('No open placement — she is on no current register.')
-    },
-    {
-      label: 'Adults on her contact list',
+      label: 'Adults on contact list',
       value: `${contacts.length}`,
-      note: `${readers.length} may read her records.`
+      note: `${readers.length} may read the student record.`
     },
     {
       label: 'Date of birth',
       value: student.date_of_birth ? dateText(student.date_of_birth) : 'not on file',
       note:
         student.age === null || student.age === undefined
-          ? t('No age can be stated without one.')
+          ? null
           : `${student.age} years old today.`
     }
   ].filter(Boolean);
@@ -830,9 +724,6 @@ function Insights({ student, studentNumber }) {
             ))}
           </tbody>
         </table>
-      </div>
-      <div className="card-footer small text-body-tertiary">
-        {t('No attendance rate, no subject average, no ranking and no trend. Each of those is a figure the school never stated, computed over a denominator this screen would have chosen for it.')}
       </div>
     </Card>
   );
@@ -878,7 +769,7 @@ export function Student({ params = {} }) {
     return (
       <>
         <PageHead title={number} />
-        <ErrorNote error={record.error} onRetry={record.reload} />
+        <ErrorNote error={!record.value ? record.error : null} onRetry={record.reload} />
         <Finder initial={number} />
       </>
     );
@@ -889,7 +780,7 @@ export function Student({ params = {} }) {
 
   const name = pickName(student, state.lang);
   const isTeacher = Store.roles().indexOf('teacher') >= 0;
-  const mayEditStudent = Store.can('students.write');
+  const mayReadGrades = Store.can('grades.read');const mayEditStudent = Store.can('students.write');
 
   return (
     <>
@@ -940,13 +831,12 @@ export function Student({ params = {} }) {
           <div className="vstack gap-3">
             <Identity student={student} />
             {!isTeacher ? <Guardians studentNumber={number} /> : null}
-            {!isTeacher ? <Placements studentNumber={number} /> : null}
           </div>
         </div>
         <div className="col-12 col-lg-6">
           <div className="vstack gap-3">
             {!isTeacher ? <Insights student={student} studentNumber={number} /> : null}
-            <Marks studentNumber={number} />
+            {mayReadGrades ? <Marks studentNumber={number} /> : null}
             <Attendance studentNumber={number} />
           </div>
         </div>

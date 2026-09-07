@@ -16,10 +16,11 @@ identity, the names are labels, and re-posting a term with a corrected Arabic na
 it without detaching one grade.
 """
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from typing import Annotated, Literal, Protocol
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -34,7 +35,8 @@ from sis.api.deps import (
     require_permission,
     UowFactoryDep,
 )
-from sis.domain.rbac import Permission
+from sis.domain.rbac import Permission, RoleCode
+from sis.domain.errors import UnknownReference
 from sis.api.routers import domain_errors, error_responses
 from sis.application.dto import GenerateStructureCommand, TermPlan
 from sis.application.services import QueryService, StructureGenerationService
@@ -85,6 +87,69 @@ class StructureCatalogue(Protocol):
 # registrar out of the very dropdowns she generates the structure from.
 Reader = Annotated[Principal, Depends(require_permission(Permission.STRUCTURE_READ))]
 Registrar = Annotated[Principal, Depends(require_permission(Permission.STRUCTURE_WRITE))]
+PrincipalStructureWriter = Annotated[Principal, Depends(require_permission(Permission.STRUCTURE_READ))]
+
+def _allow_principal_structure_write(caller: Principal, locate) -> None:  # noqa: ANN001
+    """Keep the existing writer contract, plus a principal bounded to their own school.
+
+    The principal receives no broad ``structure.write`` grant.  These setup routes accept
+    that role explicitly and re-use its school-scoped ``structure.read`` grant to prove the
+    target belongs to the same school.  Every other caller keeps the original
+    ``structure.write`` requirement.
+    """
+    if caller.profile is not None and caller.profile.has_role(RoleCode.PRINCIPAL.value):
+        caller.narrow(Permission.STRUCTURE_READ, locate)
+        return
+    caller.ensure(Permission.STRUCTURE_WRITE)
+
+
+_SCHOOL_TIMEZONE = ZoneInfo("Africa/Cairo")
+
+
+def _school_today() -> date:
+    return datetime.now(_SCHOOL_TIMEZONE).date()
+
+
+def _year_if_present(catalogue: "StructureCatalogue", code: str) -> AcademicYear | None:
+    try:
+        detail = catalogue.academic_year_detail(AcademicYearCode(code))
+    except UnknownReference:
+        return None
+    return detail["year"]
+
+
+def _ensure_year_structure_mutable(catalogue: "StructureCatalogue", code: str) -> None:
+    """Freeze the current academic year's structure from its first day onward."""
+    year = _year_if_present(catalogue, code)
+    if year is None:
+        return
+    if year.is_current and year.starts_on <= _school_today():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "academic_year_locked",
+                "message": (
+                    "The current academic year has already started. Its structure is locked: "
+                    "terms, subjects, grade assignments and classes cannot be added, removed or changed."
+                ),
+                "academic_year": str(year.code),
+                "starts_on": year.starts_on.isoformat(),
+            },
+        )
+
+
+def _ensure_new_current_year_starts_in_future(body: "AcademicYearIn") -> None:
+    if body.is_current and body.starts_on <= _school_today():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "current_year_must_be_configured_before_start",
+                "message": "A current academic year must be created and fully configured before its first day.",
+                "starts_on": body.starts_on.isoformat(),
+            },
+        )
+
+
 Queries = Annotated[QueryService, Depends(get_query_service)]
 Structure = Annotated[StructureGenerationService, Depends(get_structure_service)]
 Catalogue = Annotated[StructureCatalogue, Depends(get_structure_catalogue)]
@@ -460,9 +525,13 @@ class GradeSubjectAssignmentsOut(BaseModel):
     responses=error_responses(401, 403, 404, 409, 422),
 )
 def generate_structure(
-    body: GenerateStructureIn, structure: Structure, caller: Registrar
+    body: GenerateStructureIn, structure: Structure, catalogue: Catalogue, caller: PrincipalStructureWriter
 ) -> GenerateStructureOut:
+    _allow_principal_structure_write(
+        caller, lambda scopes: scopes.for_year(body.academic_year_code)
+    )
     with domain_errors():
+        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         result = structure.generate(
             body.to_command(), allow_new_convention=body.allow_new_convention
         )
@@ -566,9 +635,13 @@ def list_classes(
     responses=error_responses(401, 403, 409, 422),
 )
 def create_term(
-    body: TermIn, catalogue: Catalogue, caller: Registrar, response: Response
+    body: TermIn, catalogue: Catalogue, caller: PrincipalStructureWriter, response: Response
 ) -> TermOut:
+    _allow_principal_structure_write(
+        caller, lambda scopes: scopes.for_year(body.academic_year_code)
+    )
     with domain_errors():
+        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         term = Term(
             code=body.code,
             academic_year_code=body.academic_year_code,
@@ -603,8 +676,30 @@ def create_term(
     responses=error_responses(401, 403, 409, 422),
 )
 def create_academic_year(
-    body: AcademicYearIn, catalogue: Catalogue, caller: Registrar, response: Response
+    body: AcademicYearIn, catalogue: Catalogue, caller: PrincipalStructureWriter, response: Response
 ) -> AcademicYearOut:
+    _allow_principal_structure_write(
+        caller, lambda scopes: scopes.for_school(body.school_code)
+    )
+    existing = _year_if_present(catalogue, body.code)
+    if existing is not None:
+        _ensure_year_structure_mutable(catalogue, body.code)
+    else:
+        _ensure_new_current_year_starts_in_future(body)
+    if (
+        caller.profile is not None
+        and caller.profile.has_role(RoleCode.PRINCIPAL.value)
+        and not body.name_en.strip()
+        and not body.name_ar.strip()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "academic_year_name_required",
+                "field": "name",
+                "message": "Enter the academic year name in English, Arabic, or both.",
+            },
+        )
     with domain_errors():
         year = AcademicYear(
             code=AcademicYearCode(body.code),
@@ -631,10 +726,11 @@ def create_academic_year(
     "registrar who wants to see the effect without re-saving anything.\n\n"
     "It never deletes a term that holds marks. A surplus term with grades stated against "
     "it is reported in `kept` and left exactly where it is.",
-    responses=error_responses(401, 403, 404, 422),
+    responses=error_responses(401, 403, 404, 409, 422),
 )
 def sync_year_terms(code: str, catalogue: Catalogue, caller: Registrar) -> TermPlanOut:
     with domain_errors():
+        _ensure_year_structure_mutable(catalogue, code)
         return TermPlanOut.of(catalogue.sync_year_terms(AcademicYearCode(code)))
 
 
@@ -665,9 +761,13 @@ def list_terms(
     responses=error_responses(401, 403, 409, 422),
 )
 def create_subject(
-    body: SubjectIn, catalogue: Catalogue, caller: Registrar, response: Response
+    body: SubjectIn, catalogue: Catalogue, caller: PrincipalStructureWriter, response: Response
 ) -> SubjectOut:
+    _allow_principal_structure_write(
+        caller, lambda scopes: scopes.for_year(body.academic_year_code)
+    )
     with domain_errors():
+        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         subject = Subject(
             code=body.code,
             academic_year_code=body.academic_year_code,
@@ -771,12 +871,16 @@ def list_subject_assignments(
     "(`uq_subject_year_levels_assignment`).\n\n"
     "The subject and the rung must belong to the same school, which the year names. A "
     "rung from another branch is a 404 rather than an assignment nobody can see.",
-    responses=error_responses(401, 403, 404, 422),
+    responses=error_responses(401, 403, 404, 409, 422),
 )
 def set_subject_assignment(
-    body: SubjectAssignmentIn, catalogue: Catalogue, caller: Registrar
+    body: SubjectAssignmentIn, catalogue: Catalogue, caller: PrincipalStructureWriter
 ) -> None:
+    _allow_principal_structure_write(
+        caller, lambda scopes: scopes.for_year(body.academic_year_code)
+    )
     with domain_errors():
+        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         catalogue.set_subject_assignment(
             AcademicYearCode(body.academic_year_code),
             SubjectCode(body.subject_code),
@@ -843,6 +947,7 @@ def create_class_section(
     body: ClassSectionIn, catalogue: Catalogue, caller: Registrar, response: Response
 ) -> ClassSectionOut:
     with domain_errors():
+        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         section = ClassSection(
             code=body.code,
             academic_year_code=body.academic_year_code,
@@ -863,7 +968,7 @@ def create_class_section(
     description="Renaming `3A` to `Falcons` changes a label and detaches no student and no "
     "grade — the code is what everything points at, and this route cannot reach it. "
     "`academic_year` is required, because a class code names a different room each year.",
-    responses=error_responses(401, 403, 404, 422),
+    responses=error_responses(401, 403, 404, 409, 422),
 )
 def rename_class_section(
     class_code: str,
@@ -873,6 +978,7 @@ def rename_class_section(
     academic_year: Annotated[str, Query(examples=["2025-2026"])],
 ) -> ClassSectionOut:
     with domain_errors():
+        _ensure_year_structure_mutable(catalogue, academic_year)
         section = catalogue.rename_class_section(
             AcademicYearCode(academic_year),
             ClassCode(class_code),
@@ -1156,8 +1262,12 @@ def configured_grades(school_code: str, track_code: str, catalogue: Catalogue, c
 
 
 @router.post("/structure/configured-classes", response_model=list[ClassSectionOut])
-def create_configured_classes(body: ConfiguredClassesIn, catalogue: Catalogue, caller: Registrar):
+def create_configured_classes(body: ConfiguredClassesIn, catalogue: Catalogue, caller: PrincipalStructureWriter):
+    _allow_principal_structure_write(
+        caller, lambda scopes: scopes.for_year(body.academic_year_code)
+    )
     with domain_errors():
+        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         if body.mode == "same":
             if body.class_count is None:
                 raise ValidationError("class_count is required in same mode", field="class_count")

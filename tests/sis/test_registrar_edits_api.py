@@ -47,7 +47,7 @@ def _seed_two_years_and_two_classes() -> None:
                     name_ar="٢٠٢٥-٢٠٢٦",
                     starts_on=date(2025, 9, 1),
                     ends_on=date(2026, 6, 30),
-                    is_current=True,
+                    is_current=False,
                 ),
                 AcademicYear(
                     code=NEXT_YEAR,

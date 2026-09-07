@@ -1,0 +1,14 @@
+/* AUREXIS SIS precision polish v2 */
+.sis-header {min-height:72px;padding-top:.65rem!important;padding-bottom:.65rem!important}
+.sis-company-mark {width:42px!important;height:42px!important}.sis-brand-mark {width:2.2rem;height:2.2rem;font-size:.92rem}
+.sis-brand .fw-semibold {font-size:1rem}.sis-brand .small {font-size:.78rem}.sis-header .btn, .sis-header select, .sis-header .form-select {min-height:40px;font-size:.9rem}
+.sis-nav {min-height:58px;display:flex;align-items:stretch}.sis-nav>ul {align-items:stretch}
+.sis-nav-link {min-height:58px;padding:.72rem .82rem!important;font-size:.96rem;font-weight:600;border-radius:.55rem .55rem 0 0}
+.sis-nav-link svg {width:21px!important;height:21px!important;flex:0 0 21px}.sis-nav-label {display:inline}
+.sis-nav-link.active {background:color-mix(in srgb,var(--bs-primary) 10%,transparent)}
+@media(max-width:575.98px){
+.sis-header {min-height:68px;padding:.6rem .75rem!important;gap:.55rem!important}.sis-company-mark {width:37px!important;height:37px!important}.sis-brand-mark {width:2rem;height:2rem;font-size:.84rem}.sis-header .btn, .sis-header select, .sis-header .form-select {min-height:42px}
+.sis-nav {min-height:76px;padding-left:.45rem!important;padding-right:.45rem!important}.sis-nav>ul {gap:.35rem;padding:.4rem 0}
+.sis-nav-link {min-width:84px;min-height:66px;padding:.48rem .5rem!important;flex-direction:column;justify-content:center;gap:.3rem!important;border-radius:.65rem;font-size:.76rem;line-height:1.15}
+.sis-nav-link svg {width:25px!important;height:25px!important;flex-basis:25px}.sis-nav-label {display:block!important;max-width:82px;overflow:hidden;text-overflow:ellipsis;text-align:center}}
+@media(min-width:576px) and (max-width:991.98px){.sis-header {min-height:70px}.sis-nav-link {font-size:.91rem;padding-inline:.68rem!important}.sis-nav-link svg {width:20px!important;height:20px!important}}
