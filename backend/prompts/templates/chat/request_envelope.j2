@@ -176,8 +176,10 @@ Where an example shows `X`, a real message carries a real name. Return that name
 
 Only when `about_child` is true. Set `child_question_kind` to one of:
 
-  `records`       — the child's OWN record, held by the school's records system and about nobody else: their marks, grades, results in a subject, attendance, absences, report card, their own timetable.
-  `school_matter` — the school's own published material, looked up FOR this child: fee schedules, term dates, uniform rules, policies, what their year group studies. General material; this child's year decides which part of it applies.
+  `records`       — the child's OWN record, held by the school's records system and about nobody else: their marks, grades, results in a subject, attendance, absences, report card, their own timetable, which class or section they are placed in and what it is called, which subjects that class studies, and the names of the teachers who teach them.
+                    بالعربي، ودي الحالات اللي بتتلخبط: هو في أنهي فصل، اسم فصله ايه، بياخد أنهي مواد، المنهج بتاعه فيه ايه، بيدرس ايه، مين مدرسينه، مين مدرس مادة معينة ليه — كل دي سجل الطالب نفسه.
+  `school_matter` — the school's own published material, looked up FOR this child: fee schedules, term dates, uniform rules, policies, exam schedules. General material; this child's year decides which part of it applies. It is NOT which class this child is in, NOT the subjects their class studies and NOT who their teachers are — another family's child would get a different answer to each of those, which makes them `records`.
+                    بالعربي: المصاريف والأقساط، مواعيد الترم والإجازات، الزي المدرسي، المواد والأدوات المطلوب شراؤها، مواعيد الامتحانات، قواعد المدرسة. لكن "بياخد أنهي مواد" مش من دول — دي مواد فصله هو بالذات.
   `both`          — the message asks for each of them, or you are not sure which it is.
 
 This is a different question from decision 3, and the difference is the whole point of asking it. Both can be true of one message: a question can be about a child — the answer has to know their year group — while every word of the answer comes from published material and none of it from that child's record. Getting this wrong sends the question to the wrong place entirely.
@@ -196,6 +198,12 @@ Examples (similar cases)
   ex  "تفاصيل درجة X في Y"                 -> records        one subject, from their record
   ex  "كم يوم غاب X؟"                      -> records        their own attendance
   ex  "طيب وجدوله؟"                        -> records        their own timetable
+  ex  "X في أنهي فصل؟"                     -> records        which class they are in
+  ex  "X بياخد أنهي مواد؟"                 -> records        the subjects assigned to THEIR class
+  ex  "المنهج بتاع X فيه ايه؟"              -> records        the same question, said as 'curriculum'
+  ex  "المواد والأدوات المطلوبة ايه؟"       -> school_matter  equipment to buy — the same word, a different question
+  ex  "مين مدرسين X؟"                      -> records        the teachers of their class
+  ex  "مين مدرس Y بتاع X؟"                 -> records        the teacher of one subject, for their class
   ex  "عايز اعرف مصاريف ابني"              -> school_matter  the fee schedule; their year picks the row
   ex  "امتى امتحانات ابني؟"                -> school_matter  the published exam dates for their year
   ex  "ما هو زي المدرسة لبنتي؟"             -> school_matter  the uniform rule for their year

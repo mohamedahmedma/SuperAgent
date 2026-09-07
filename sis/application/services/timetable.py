@@ -30,22 +30,25 @@ looks finished.
 **Nothing here touches attendance.** A timetable is a plan and the register is a record.
 Per-lesson attendance would need exactly this table and is deliberately not built on it.
 """
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from sis.application.ports.unit_of_work import UnitOfWork
+from sis.application.services.queries import resolve_section_for_term
 from sis.domain.errors import DomainRuleViolation, UnknownReference, ValidationError
-from sis.domain.structure import School, WorkingDay
+from sis.domain.structure import ClassSection, School, Subject, WorkingDay
 from sis.domain.timetable import TimetableEntry, TimetablePeriod, TimetableSlot
 from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,
     SchoolCode,
+    StudentNumber,
+    SubjectCode,
     TermCode,
     YearCode,
 )
 
-__all__ = ["TimetableConflict", "TimetableService", "WeekPlan"]
+__all__ = ["StudentWeek", "TimetableConflict", "TimetableService", "WeekPlan"]
 
 
 class TimetableConflict(DomainRuleViolation):
@@ -80,6 +83,33 @@ class WeekPlan:
     def teaching_slots(self) -> int:
         """How many slots this week could hold a lesson: teaching periods x open days."""
         return len(self.days) * sum(1 for period in self.periods if period.is_teaching)
+
+
+@dataclass(frozen=True, slots=True)
+class StudentWeek:
+    """One child's week: the class she sat in for a term, and that class's plan.
+
+    A timetable is a statement about a *class*, and a child reaches one only through the
+    room she is placed in. This is that indirection made into a value, so the caller that
+    has a student number — a parent-facing service, which has no business holding a class
+    code — never has to resolve a room itself.
+
+    **`plan is None` means no placement covered the term.** She had left, or had not yet
+    joined. It is deliberately distinguishable from a plan with no entries, which means the
+    school has not laid this class's grid out yet: the first is a fact about the child, the
+    second a fact about the school, and a reader that flattened them would tell a parent
+    her daughter has no lessons when the truth is that nobody has typed them in.
+
+    `subjects` resolves the codes the entries carry into the names a person reads, keyed by
+    code. Carried beside the plan rather than folded into it because `WeekPlan` is what the
+    registrar screens already read and they resolve their own names.
+    """
+
+    student_number: str
+    term_code: str
+    class_section: ClassSection | None
+    plan: WeekPlan | None
+    subjects: Mapping[str, Subject]
 
 
 class TimetableService:
@@ -165,6 +195,101 @@ class TimetableService:
             days=tuple(school.working_days),
             periods=periods,
             entries=self._in_week_order(entries, school),
+        )
+
+    def week_for_student(
+        self, student_number: StudentNumber, term_code: TermCode
+    ) -> StudentWeek:
+        """One child's week, resolved through the class she sat in for that term.
+
+        The read a parent's question ends at, and the reason it is one method rather than
+        two calls by the caller: "which class is she in" and "what is that class doing" are
+        asked here in **one transaction**, so a placement edited between them cannot produce
+        a week belonging to a room the child is no longer in.
+
+        The class is resolved by `resolve_section_for_term` — the same function the grade
+        import and `student_term_grades` use, never a second reading of invariant 2. A child
+        who moved 3A->3B in March therefore gets Term 1's timetable for 3A, which is the
+        week she actually sat, and not the one her current room is sitting now.
+
+        Refuses an unknown student and an unknown term, because a caller that could not tell
+        those from "she has no class this term" would render a typo as an empty timetable and
+        send a parent looking for lessons that were never missing. No placement covering the
+        term is `plan=None` instead — see `StudentWeek`.
+
+        No authorisation happens here. Whether this guardian may be told about this child is
+        `QueryService.require_guardian_may_see`, which is where every parent-facing read in
+        this service makes that decision, and it runs before this is called.
+        """
+        with self._uow_factory() as uow:
+            if uow.students.get(student_number) is None:
+                raise UnknownReference(
+                    f"no student {student_number}", field="student_number"
+                )
+            term = uow.terms.get(term_code)
+            if term is None:
+                raise UnknownReference(f"no term {term_code}", field="term_code")
+            # The term's own year, which is the only year this week can be about. A term
+            # whose year is missing is a broken foreign key, not a state to answer around.
+            year = uow.academic_years.get(
+                AcademicYearCode(str(term.academic_year_code))
+            )
+            if year is None:
+                raise UnknownReference(
+                    f"no academic year {term.academic_year_code}",
+                    field="academic_year_code",
+                )
+            school = uow.schools.get(SchoolCode(str(year.school_code)))
+            if school is None:
+                raise UnknownReference(
+                    f"no school {year.school_code}", field="school_code"
+                )
+
+            section = resolve_section_for_term(
+                uow.enrolments, student_number, term, year
+            )
+            if section is None:
+                return StudentWeek(
+                    student_number=str(student_number),
+                    term_code=str(term_code),
+                    class_section=None,
+                    plan=None,
+                    subjects={},
+                )
+
+            class_code = ClassCode(str(section.code))
+            periods = tuple(uow.timetable.list_periods(SchoolCode(str(school.code))))
+            entries = uow.timetable.list_entries(
+                AcademicYearCode(str(year.code)),
+                class_code=class_code,
+                term_code=term_code,
+            )
+            # Resolved within the term's own year, for the reason `student_term_grades`
+            # states: a subject's identity is `(year, code)`, so a lookup by code alone
+            # would answer with whichever year happened to be current.
+            subjects = uow.subjects.get_many(
+                [
+                    entry.subject_code
+                    for entry in entries
+                    if isinstance(entry.subject_code, SubjectCode)
+                ],
+                AcademicYearCode(str(year.code)),
+            )
+            ordered = self._in_week_order(entries, school)
+
+        return StudentWeek(
+            student_number=str(student_number),
+            term_code=str(term_code),
+            class_section=section,
+            plan=WeekPlan(
+                academic_year_code=str(year.code),
+                class_code=str(class_code),
+                term_code=str(term_code),
+                days=tuple(school.working_days),
+                periods=periods,
+                entries=ordered,
+            ),
+            subjects=dict(subjects),
         )
 
     def entries_for_year(

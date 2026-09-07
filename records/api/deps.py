@@ -40,8 +40,10 @@ from records.application.access import AccessService
 from records.application.reads import RecordsService
 from records.config import Settings, api_key, settings
 from records.ports.calendar import SchoolCalendar
+from records.ports.classroom import StudentClassrooms
 from records.ports.directory import GuardianDirectory
 from records.ports.lms import LmsAdapter
+from records.ports.timetable import StudentTimetables
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +100,14 @@ def get_calendar(request: Request) -> SchoolCalendar:
     return request.app.state.calendar
 
 
+def get_timetables(request: Request) -> StudentTimetables:
+    return request.app.state.timetables
+
+
+def get_classrooms(request: Request) -> StudentClassrooms:
+    return request.app.state.classrooms
+
+
 def get_records_service(request: Request) -> RecordsService:
     """One service over this deployment's adapters.
 
@@ -111,6 +121,12 @@ def get_records_service(request: Request) -> RecordsService:
         calendar=state.calendar,
         lms=state.lms,
         policy=state.policy,
+        # `getattr` rather than an attribute read, so a test app that builds its own state
+        # without this port keeps working: the service refuses the timetable read and
+        # answers every other one, which is what a deployment that never wired one should
+        # do. See `RecordsService.timetable`.
+        timetables=getattr(state, "timetables", None),
+        classrooms=getattr(state, "classrooms", None),
     )
 
 

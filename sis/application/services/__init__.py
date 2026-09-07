@@ -17,6 +17,7 @@ from sis.application.services.attendance import (
     RegisterEntry,
     StudentAttendance,
 )
+from sis.application.services.classroom import ClassroomService, StudentClassroom
 from sis.application.services.grade_import import GradeImportService
 from sis.application.services.guardian_import import GuardianImportService
 from sis.application.services.queries import (
@@ -29,6 +30,7 @@ from sis.application.services.queries import (
 from sis.application.services.roster_import import RosterImportService
 from sis.application.services.structure import StructureGenerationService
 from sis.application.services.timetable import (
+    StudentWeek,
     TimetableConflict,
     TimetableService,
     WeekPlan,
@@ -38,6 +40,7 @@ from sis.application.services.teachers import TeacherManagementService
 __all__ = [
     "AttendanceService",
     "ClassRegister",
+    "ClassroomService",
     "GradeImportService",
     "GuardianImportService",
     "GuardianIdentity",
@@ -50,6 +53,8 @@ __all__ = [
     "WeekPlan",
     "RosterImportService",
     "StudentAttendance",
+    "StudentClassroom",
+    "StudentWeek",
     "StructureGenerationService",
     "resolve_section_for_term",
     "resolve_sections_for_term",

@@ -4,9 +4,9 @@ Environment is set before any `records` module is imported, because issuer and a
 are read at import time.
 
 **There is no database to set up.** The service holds none: every fact it serves is asked
-for at request time, so the fixtures below register fakes for the three things it asks —
-the guardian directory, the school calendar, and the marks adapter — and that is the whole
-of the arrangement. What used to be here, a temporary SQLite file and a schema created per
+for at request time, so the fixtures below register fakes for the four things it asks —
+the guardian directory, the school calendar, the marks adapter and the timetable — and that
+is the whole of the arrangement. What used to be here, a temporary SQLite file and a schema created per
 test, went with the tables.
 
 The identity keypair is generated here rather than imported from the `identity` package on
@@ -50,12 +50,26 @@ from jose import jwt  # noqa: E402
 
 from records.adapters.fake.calendar import FakeSchoolCalendar  # noqa: E402
 from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
+from records.adapters.fake.classroom import FakeClassrooms  # noqa: E402
 from records.adapters.fake.lms import FakeLms  # noqa: E402
+from records.adapters.fake.timetable import FakeTimetables  # noqa: E402
 from records.app import app  # noqa: E402
 from records.config import reset_settings  # noqa: E402
+from records.domain.classroom import (  # noqa: E402
+    ClassTeacher,
+    ClassroomStatus,
+    StudentClassroom,
+    StudySubject,
+)
 from records.domain.marks import SubjectAttendance, SubjectGrade  # noqa: E402
 from records.domain.people import PermittedStudent  # noqa: E402
 from records.domain.terms import SchoolTerm  # noqa: E402
+from records.domain.timetable import (  # noqa: E402
+    StudentTimetable,
+    TimetableLesson,
+    TimetablePeriodSlot,
+    TimetableStatus,
+)
 
 def _isolate_from_the_environment() -> None:
     """Blank the settings that decide who this service talks to.
@@ -160,7 +174,10 @@ def _pin_identity_configuration():
     reset_settings()
 
 
-def install_adapters(test_client, *, calendar=None, directory=None, lms=None):
+def install_adapters(
+    test_client, *, calendar=None, directory=None, lms=None, timetables=None,
+    classrooms=None,
+):
     """Point the running app at these fakes.
 
     The three seams used to be module-level slots a fixture could assign before the app
@@ -176,6 +193,10 @@ def install_adapters(test_client, *, calendar=None, directory=None, lms=None):
         state.directory = directory
     if lms is not None:
         state.lms = lms
+    if timetables is not None:
+        state.timetables = timetables
+    if classrooms is not None:
+        state.classrooms = classrooms
 
 
 @pytest.fixture()
@@ -277,7 +298,111 @@ def fake_lms():
 
 
 @pytest.fixture()
-def client(seeded, fake_lms):
+def fake_timetables():
+    """A week with a break in it, one named lesson, and one stated free period.
+
+    The break and the free period are both here deliberately: they are the two rows a
+    consumer is most likely to mistake for a lesson, and a fixture without them would let
+    that pass. The subject carries both names because a parent reads one of them and the
+    school files under a code.
+    """
+    adapter = FakeTimetables(
+        weeks={
+            ("S-1001", "2026-T1"): StudentTimetable(
+                status=TimetableStatus.OK,
+                class_code="3A",
+                class_name_ar="الثالث أ",
+                class_name_en="Year 3 A",
+                days=("sunday", "monday", "tuesday", "wednesday", "thursday"),
+                periods=(
+                    TimetablePeriodSlot(
+                        period_number=1,
+                        name_ar="حصة ١",
+                        name_en="Period 1",
+                        starts_at="08:00",
+                        ends_at="08:45",
+                    ),
+                    TimetablePeriodSlot(
+                        period_number=2,
+                        name_ar="فسحة",
+                        name_en="Break",
+                        is_teaching=False,
+                    ),
+                ),
+                lessons=(
+                    TimetableLesson(
+                        day_of_week="sunday",
+                        period_number=1,
+                        subject_code="MATH",
+                        subject_name_ar="الرياضيات",
+                        subject_name_en="Mathematics",
+                    ),
+                    TimetableLesson(day_of_week="monday", period_number=1),
+                ),
+                teaching_slots=5,
+            )
+        }
+    )
+    return adapter
+
+
+@pytest.fixture()
+def fake_classrooms():
+    """A room with two subjects and three teachers, one of them a CO-TEACHER.
+
+    The co-teacher is the point: the system of record's table is unique on (teacher, class,
+    subject), so two teachers of one subject is a legal state that only one of its two write
+    paths guards against. A fixture with one teacher per subject would let a facade or a
+    tool that takes the first silently hide a real person.
+
+    The class NAME is deliberately unlike its CODE — `3A` versus `Primary 3 Class 1` — so a
+    test asserting the name cannot pass by accidentally reading the code.
+    """
+    adapter = FakeClassrooms(
+        rooms={
+            ("S-1001", "2026-T1"): StudentClassroom(
+                status=ClassroomStatus.OK,
+                class_code="3A",
+                class_name_ar="الثالث ١",
+                class_name_en="Primary 3 Class 1",
+                year_level_code="AR-P3",
+                year_level_name_ar="الصف الثالث",
+                year_level_name_en="Year 3",
+                subjects=(
+                    StudySubject(code="MATH", name_ar="الرياضيات", name_en="Mathematics"),
+                    StudySubject(code="SCI", name_ar="العلوم", name_en="Science"),
+                ),
+                teachers=(
+                    ClassTeacher(
+                        full_name_ar="أ. سامي",
+                        full_name_en="Mr Sami",
+                        subject_code="MATH",
+                        subject_name_ar="الرياضيات",
+                        subject_name_en="Mathematics",
+                    ),
+                    ClassTeacher(
+                        full_name_ar="أ. هدى",
+                        full_name_en="Ms Huda",
+                        subject_code="SCI",
+                        subject_name_ar="العلوم",
+                        subject_name_en="Science",
+                    ),
+                    ClassTeacher(
+                        full_name_ar="أ. منى",
+                        full_name_en="Ms Mona",
+                        subject_code="SCI",
+                        subject_name_ar="العلوم",
+                        subject_name_en="Science",
+                    ),
+                ),
+            )
+        }
+    )
+    return adapter
+
+
+@pytest.fixture()
+def client(seeded, fake_lms, fake_timetables, fake_classrooms):
     with TestClient(app) as test_client:
         # After the lifespan, which built its own bare fakes from the (blank) environment.
         install_adapters(
@@ -285,5 +410,7 @@ def client(seeded, fake_lms):
             calendar=seeded["calendar"],
             directory=seeded["directory"],
             lms=fake_lms,
+            timetables=fake_timetables,
+            classrooms=fake_classrooms,
         )
         yield test_client

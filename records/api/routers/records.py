@@ -19,12 +19,22 @@ from fastapi import APIRouter, Query, Request
 from records.api.deps import AgentCaller, ParentSubjectDep, RecordsServiceDep
 from records.api.schemas.contract import (
     AttendanceSummaryOut,
+    ClassroomStatusOut,
+    ClassTeacherOut,
     CourseGradeDetailOut,
     ErrorOut,
+    StudentClassOut,
     StudentGradesOut,
     StudentListOut,
     StudentRef,
+    StudentSubjectsOut,
+    StudentTeachersOut,
+    StudySubjectOut,
     TermOut,
+    TimetableLessonOut,
+    TimetableOut,
+    TimetablePeriodOut,
+    TimetableStatusOut,
 )
 from records.application import audit
 from records.domain.people import PermittedStudent
@@ -208,6 +218,235 @@ def get_attendance(
         total_sessions=result.total_sessions,
         attendance_rate=result.attendance_rate,
         recent_days=result.recent_days,
+        as_of=result.as_of,
+    )
+
+
+@router.get(
+    "/guardians/{guardian_id}/students/{student_id}/timetable",
+    response_model=TimetableOut,
+    responses=AGENT_RESPONSES,
+)
+def get_timetable(
+    guardian_id: str,
+    student_id: str,
+    request: Request,
+    subject: ParentSubjectDep,
+    service: RecordsServiceDep,
+    term: str | None = Query(default=None, description="Term code; defaults to the current term."),
+) -> TimetableOut:
+    """One child's weekly timetable — the class she sits in, and what it does.
+
+    **The caller does not name a class, and cannot.** A timetable belongs to a room; a child
+    reaches one through the placement she holds for the term, and that placement is the
+    system of record's to resolve. So this route takes a student, exactly as the grades and
+    attendance routes do, and the room is resolved behind it — which is what keeps a chat
+    service from holding a class code that goes stale the next time a child moves.
+
+    Three answers, and `status` says which. Two of them have no lessons and they mean
+    different things: `no_class` is a fact about the child, `no_timetable` a fact about the
+    school. A caller must not render them alike — see `TimetableStatusOut`.
+    """
+    with audit.reporting_unavailable(request, subject, student_id):
+        result = service.timetable(
+            guardian_id=subject.guardian_id,
+            student_id=student_id,
+            term_code=term,
+            school_code=subject.school_code,
+        )
+    week = result.timetable
+    return TimetableOut(
+        student=_student_ref(result.student),
+        term=_term_out(result.term),
+        status=TimetableStatusOut(week.status.value),
+        class_code=week.class_code,
+        class_name_ar=week.class_name_ar,
+        class_name_en=week.class_name_en,
+        days=list(week.days),
+        periods=[
+            TimetablePeriodOut(
+                period_number=period.period_number,
+                name_ar=period.name_ar,
+                name_en=period.name_en,
+                starts_at=period.starts_at,
+                ends_at=period.ends_at,
+                is_teaching=period.is_teaching,
+            )
+            for period in week.periods
+        ],
+        lessons=[
+            TimetableLessonOut(
+                day_of_week=lesson.day_of_week,
+                period_number=lesson.period_number,
+                subject_code=lesson.subject_code,
+                subject_name_ar=lesson.subject_name_ar,
+                subject_name_en=lesson.subject_name_en,
+            )
+            for lesson in week.lessons
+        ],
+        teaching_slots=week.teaching_slots,
+        as_of=result.as_of,
+    )
+
+
+# ---------------------------------------------------------------------------
+# The room she sits in. Three routes, one read.
+# ---------------------------------------------------------------------------
+#
+# Three URLs because a parent asks three different questions, and one read behind them
+# because all three describe the SAME room — resolved from one time-bounded placement. Asked
+# as three reads, a placement edited in between would answer with one room's subjects beside
+# another room's staff. See records/ports/classroom.py.
+#
+# None of the three takes a class. A parent has no class code and this service holds none;
+# the system of record resolves the room from the child, which is what keeps a cached code
+# from eventually naming a room she has left.
+
+
+@router.get(
+    "/guardians/{guardian_id}/students/{student_id}/class",
+    response_model=StudentClassOut,
+    responses=AGENT_RESPONSES,
+)
+def get_class(
+    guardian_id: str,
+    student_id: str,
+    request: Request,
+    subject: ParentSubjectDep,
+    service: RecordsServiceDep,
+    term: str | None = Query(default=None, description="Term code; defaults to the current term."),
+) -> StudentClassOut:
+    """Which class a child is in.
+
+    The answer a parent wants is `class_name_ar` / `class_name_en` — what the school calls
+    the room, "Primary 1 Class 1" or "3/1". `class_code` is the internal key for the same
+    room and is not what a family should be shown.
+
+    The class is the one she was in **for this term**. `status: no_class` means no placement
+    covered it — she had left, or had not yet joined — which is a real answer and not a
+    missing record.
+    """
+    with audit.reporting_unavailable(request, subject, student_id):
+        result = service.classroom(
+            guardian_id=subject.guardian_id,
+            student_id=student_id,
+            term_code=term,
+            school_code=subject.school_code,
+        )
+    room = result.classroom
+    return StudentClassOut(
+        student=_student_ref(result.student),
+        term=_term_out(result.term),
+        status=ClassroomStatusOut(room.status.value),
+        class_code=room.class_code,
+        class_name_ar=room.class_name_ar,
+        class_name_en=room.class_name_en,
+        year_level_code=room.year_level_code,
+        year_level_name_ar=room.year_level_name_ar,
+        year_level_name_en=room.year_level_name_en,
+        as_of=result.as_of,
+    )
+
+
+@router.get(
+    "/guardians/{guardian_id}/students/{student_id}/subjects",
+    response_model=StudentSubjectsOut,
+    responses=AGENT_RESPONSES,
+)
+def get_subjects(
+    guardian_id: str,
+    student_id: str,
+    request: Request,
+    subject: ParentSubjectDep,
+    service: RecordsServiceDep,
+    term: str | None = Query(default=None, description="Term code; defaults to the current term."),
+) -> StudentSubjectsOut:
+    """What a child studies — the subjects assigned to her rung, in the school's own order.
+
+    Her rung's assignment board rather than the year's whole catalogue, and rather than the
+    subjects she happens to have marks in: a subject nobody has marked yet is still one she
+    studies, and a mark can exist against a subject the board has since dropped.
+
+    An empty list with `status: ok` means the school has not curated the board for this year.
+    That is not the child studying nothing.
+    """
+    with audit.reporting_unavailable(request, subject, student_id):
+        result = service.classroom(
+            guardian_id=subject.guardian_id,
+            student_id=student_id,
+            term_code=term,
+            school_code=subject.school_code,
+        )
+    room = result.classroom
+    return StudentSubjectsOut(
+        student=_student_ref(result.student),
+        term=_term_out(result.term),
+        status=ClassroomStatusOut(room.status.value),
+        class_code=room.class_code,
+        class_name_ar=room.class_name_ar,
+        class_name_en=room.class_name_en,
+        subjects=[
+            StudySubjectOut(
+                code=item.code, name_ar=item.name_ar, name_en=item.name_en
+            )
+            for item in room.subjects
+        ],
+        as_of=result.as_of,
+    )
+
+
+@router.get(
+    "/guardians/{guardian_id}/students/{student_id}/teachers",
+    response_model=StudentTeachersOut,
+    responses=AGENT_RESPONSES,
+)
+def get_teachers(
+    guardian_id: str,
+    student_id: str,
+    request: Request,
+    subject: ParentSubjectDep,
+    service: RecordsServiceDep,
+    term: str | None = Query(default=None, description="Term code; defaults to the current term."),
+) -> StudentTeachersOut:
+    """Who teaches a child, and what each of them teaches her.
+
+    One entry per (teacher, subject), so a subject with two teachers has two entries and a
+    teacher taking two subjects appears twice. A caller asking "who teaches her maths"
+    filters this by subject and must render everyone it finds — taking the first would hide
+    a co-teacher.
+
+    **Who teaches the room now, not who taught it in the term asked about.** The school's
+    assignment table carries no term, so this cannot be reported historically. Teachers who
+    have left are excluded: someone who is gone is not the answer to "who teaches my
+    daughter maths", and naming them sends a parent to ask for them.
+
+    Nothing here carries a teacher's email, phone, staff number or username.
+    """
+    with audit.reporting_unavailable(request, subject, student_id):
+        result = service.classroom(
+            guardian_id=subject.guardian_id,
+            student_id=student_id,
+            term_code=term,
+            school_code=subject.school_code,
+        )
+    room = result.classroom
+    return StudentTeachersOut(
+        student=_student_ref(result.student),
+        term=_term_out(result.term),
+        status=ClassroomStatusOut(room.status.value),
+        class_code=room.class_code,
+        class_name_ar=room.class_name_ar,
+        class_name_en=room.class_name_en,
+        teachers=[
+            ClassTeacherOut(
+                full_name_ar=teacher.full_name_ar,
+                full_name_en=teacher.full_name_en,
+                subject_code=teacher.subject_code,
+                subject_name_ar=teacher.subject_name_ar,
+                subject_name_en=teacher.subject_name_en,
+            )
+            for teacher in room.teachers
+        ],
         as_of=result.as_of,
     )
 

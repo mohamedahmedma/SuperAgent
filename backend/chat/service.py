@@ -624,7 +624,23 @@ def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan) 
 #: Outcomes where `get_student_records` actually returned a child's record. Anything
 #: else — no_records, unavailable, not_authorized, which_student — is a turn that
 #: legitimately has nothing to report, and an answer saying so is the CORRECT answer.
-RECORDS_RETRIEVED = frozenset({"grades", "subject", "attendance"})
+#: Every outcome name that means a record actually came back. It must grow with each new
+#: record tool: an outcome missing from here cannot trip `_denies_the_records` at all, so
+#: a turn that read a child's record and then told the parent nothing was found passes
+#: unnoticed. `timetable` was missing for exactly that reason until the classroom tools
+#: were added and the gap was noticed.
+RECORDS_RETRIEVED = frozenset(
+    {
+        "grades",
+        "subject",
+        "attendance",
+        "timetable",
+        "class",
+        "subjects",
+        "teachers",
+        "subject_teacher",
+    }
+)
 
 
 def _denies_the_records(ctx, answer: str) -> bool:

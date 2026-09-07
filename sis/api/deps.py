@@ -53,6 +53,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sis.application.dto import Page, PageRequest
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.application.services.attendance import AttendanceService
+from sis.application.services.classroom import ClassroomService
 from sis.application.services.grade_import import GradeImportService
 from sis.application.services.guardian_import import GuardianImportService
 from sis.application.services.queries import QueryService
@@ -637,6 +638,17 @@ def get_timetable_service(uow_factory: UowFactoryDep) -> TimetableService:
     from three different places and are worth testing without a database.
     """
     return TimetableService(uow_factory)
+
+
+def get_classroom_service(uow_factory: UowFactoryDep) -> ClassroomService:
+    """A child's room, its subject board and its staff — read as one fact.
+
+    Its own service rather than methods on `QueryService` for the reason the timetable has
+    one: the three reads it composes hang off a single placement resolution, and keeping
+    them together is what stops a parent being told about one room's subjects and another
+    room's teachers.
+    """
+    return ClassroomService(uow_factory)
 
 
 def get_teacher_management_service(
