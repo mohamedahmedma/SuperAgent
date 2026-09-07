@@ -10,7 +10,14 @@ from typing import Callable, Dict, List
 from backend.chat.request_context import ChatRequestContext
 from backend.tools.knowledge import make_search_knowledge_base
 from backend.tools.products import make_search_products
-from backend.tools.records import make_get_student_records
+from backend.tools.records import (
+    ATTENDANCE_TOOL,
+    GRADES_TOOL,
+    SUBJECT_TOOL,
+    make_get_student_attendance,
+    make_get_student_grades,
+    make_get_subject_grades,
+)
 
 #: The corpus tool, named once. It is the tool whose verdict `retrieval_status` reports,
 #: so the runtime's terminal-retrieval guard has to be able to recognise its results
@@ -21,11 +28,20 @@ KNOWLEDGE_TOOL = "search_knowledge_base"
 TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
     KNOWLEDGE_TOOL: make_search_knowledge_base,
     "search_products": make_search_products,
-    # Reads a student's academic record from the records facade. Registered but not
-    # bound by any profile yet — a deployment opts in by naming it, which keeps every
-    # existing profile's behaviour unchanged.
-    "get_student_records": make_get_student_records,
+    # One tool per record the facade exposes, rather than one tool with a `record_type`
+    # argument. The planner selects tools by NAME, so a capability that is an argument
+    # instead of a name is one the planner has to guess at — see backend/tools/records.py.
+    # Registered but bound only by a profile that names them.
+    GRADES_TOOL: make_get_student_grades,
+    SUBJECT_TOOL: make_get_subject_grades,
+    ATTENDANCE_TOOL: make_get_student_attendance,
 }
+
+#: The record tools as one set, for the two places that care about the family rather
+#: than the member: the figure check below, and tool narrowing in
+#: `backend/chat/turn_policy.py`. Kept here beside the registry so adding a fourth
+#: record tool is one edit rather than a hunt for every list that should have grown.
+RECORDS_TOOLS: tuple = (GRADES_TOOL, SUBJECT_TOOL, ATTENDANCE_TOOL)
 
 
 # Tools whose results are numbered evidence the answer is expected to cite. This is a
@@ -49,19 +65,19 @@ GROUNDED_TOOLS: frozenset = frozenset({KNOWLEDGE_TOOL, "search_products"})
 #   CHECKED_TOOLS  — "may this answer state a number?"     Decides whether the assembled
 #                    answer is verified against what the turn actually retrieved.
 #
-# They were one set, and that conflation was a hole. `get_student_records` is correctly
-# outside the citation set — it returns one child's marks, there is no chunk to number
-# and no picture to attach — but its results are the most figure-dense thing this
+# They were one set, and that conflation was a hole. The record tools are correctly
+# outside the citation set — they return one child's marks, there is no chunk to number
+# and no picture to attach — but their results are the most figure-dense thing this
 # assistant ever says, and «الرياضيات ٨٧.٥٪» is exactly the class of claim a parent acts
 # on. Under one set, a turn that read a child's record was checked against nothing at
 # all.
 #
 # The hole widened the moment the planner started narrowing tools. `_grounding_expected`
 # in backend/chat/service.py asks whether any BOUND tool is in this set, so a records
-# turn narrowed to `["get_student_records"]` switched the check off entirely — the
+# turn narrowed to the record tools alone switched the check off entirely — the
 # narrowing would have removed the last checked tool from a turn precisely because that
 # turn was about records. Splitting the sets is what makes the narrowing safe to ship.
-CHECKED_TOOLS: frozenset = GROUNDED_TOOLS | frozenset({"get_student_records"})
+CHECKED_TOOLS: frozenset = GROUNDED_TOOLS | frozenset(RECORDS_TOOLS)
 
 
 class UnknownToolError(ValueError):
@@ -86,6 +102,10 @@ def build_tools(names: List[str], ctx: ChatRequestContext) -> list:
 
 __all__ = [
     "KNOWLEDGE_TOOL",
+    "GRADES_TOOL",
+    "SUBJECT_TOOL",
+    "ATTENDANCE_TOOL",
+    "RECORDS_TOOLS",
     "TOOL_BUILDERS",
     "GROUNDED_TOOLS",
     "CHECKED_TOOLS",
@@ -93,5 +113,7 @@ __all__ = [
     "build_tools",
     "make_search_knowledge_base",
     "make_search_products",
-    "make_get_student_records",
+    "make_get_student_grades",
+    "make_get_subject_grades",
+    "make_get_student_attendance",
 ]

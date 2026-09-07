@@ -445,7 +445,7 @@ class TerminalShortCircuitMiddlewareTests(unittest.TestCase):
     def test_a_second_tool_keeps_the_model_call(self):
         """A turn that also called, say, the records tool still has material to answer
         from, and cutting it there would throw that away."""
-        verdict, ctx = self._decide("no_knowledge", [KNOWLEDGE_TOOL, "get_student_records"])
+        verdict, ctx = self._decide("no_knowledge", [KNOWLEDGE_TOOL, "get_student_grades"])
         self.assertIsNone(verdict)
         self.assertIsNone(ctx.noted)
 
@@ -582,8 +582,8 @@ class TheContextReceivesThePlan(unittest.TestCase):
         self.assertEqual(ctx.planned_child_label, "ليلى أحمد")
 
     def test_the_required_tool_reaches_the_middleware(self):
-        ctx = self._handed(forced_tool="get_student_records")
-        self.assertEqual(ctx.forced_tool, "get_student_records")
+        ctx = self._handed(forced_tool="get_student_grades")
+        self.assertEqual(ctx.forced_tool, "get_student_grades")
 
     def test_a_plan_that_settled_nothing_leaves_nothing_behind(self):
         ctx = self._handed()
@@ -606,7 +606,7 @@ class TheContextReceivesThePlan(unittest.TestCase):
         ctx = _OldContext()
         _hand_to_graph(ctx, TurnPlan(
             retrieval_sections=["fees"], language="ar",
-            child_hint="ليلى", child_id="S-1", forced_tool="get_student_records",
+            child_hint="ليلى", child_id="S-1", forced_tool="get_student_grades",
         ))
         self.assertEqual(ctx.sections, ["fees"])
         self.assertEqual(ctx.language, "ar")

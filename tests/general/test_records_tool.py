@@ -10,7 +10,11 @@ import requests
 
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.request_context import ChatRequestContext
-from backend.tools.records import make_get_student_records
+from backend.tools.records import (
+    make_get_student_attendance,
+    make_get_student_grades,
+    make_get_subject_grades,
+)
 
 PARENT_TOKEN = "signed.identity.token"
 
@@ -80,14 +84,19 @@ def test_the_model_cannot_supply_a_guardian_id():
     The guardian comes from the session. If a future edit adds it as a parameter,
     this test fails and the whole prompt-injection defence is gone.
     """
-    tool = make_get_student_records(_ctx())
-    assert set(tool.args.keys()) == {"record_type", "student_name", "subject"}
+    builders = (make_get_student_grades, make_get_subject_grades, make_get_student_attendance)
+    for build in builders:
+        args = set(build(_ctx()).args.keys())
+        # Every record tool takes the child and nothing else that could name a person;
+        # `subject` names a school subject, not anybody.
+        assert args <= {"student_name", "subject"}, args
+        assert not args & {"guardian_id", "guardian", "student_id", "token"}
 
 
 def test_no_parent_session_refuses_without_asking_for_identifiers(monkeypatch):
     """A signed-out user must not be invited to type a student ID instead."""
-    tool = make_get_student_records(_ctx(guardian_id="", token=""))
-    result = tool.invoke({"record_type": "grades"})
+    tool = make_get_student_grades(_ctx(guardian_id="", token=""))
+    result = tool.invoke({})
 
     assert "NOT_A_PARENT_SESSION" in result
     assert "signing in" in result
@@ -98,7 +107,7 @@ def test_unreachable_facade_forbids_inventing_a_figure(monkeypatch):
         raise requests.ConnectionError("refused")
 
     monkeypatch.setattr(requests, "get", boom)
-    result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    result = make_get_student_grades(_ctx()).invoke({})
 
     assert "RECORDS_UNAVAILABLE" in result
     assert "Do NOT state, estimate or infer" in result
@@ -107,7 +116,7 @@ def test_unreachable_facade_forbids_inventing_a_figure(monkeypatch):
 def test_server_error_is_unavailable_not_no_records(monkeypatch):
     """A 500 must never render as "your child has no grades"."""
     monkeypatch.setattr(requests, "get", _route({"/students": _Response(503)}))
-    result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    result = make_get_student_grades(_ctx()).invoke({})
 
     assert "RECORDS_UNAVAILABLE" in result
     assert "NO_RECORDS" not in result
@@ -115,7 +124,7 @@ def test_server_error_is_unavailable_not_no_records(monkeypatch):
 
 def test_expired_identity_is_not_reported_as_missing_records(monkeypatch):
     monkeypatch.setattr(requests, "get", _route({"/students": _Response(401)}))
-    result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    result = make_get_student_grades(_ctx()).invoke({})
 
     assert "NOT_AUTHORIZED" in result
     assert "sign in again" in result
@@ -125,7 +134,7 @@ def test_no_linked_students_does_not_name_anyone(monkeypatch):
     monkeypatch.setattr(
         requests, "get", _route({"/students": _Response(200, {"guardian_id": "G-1", "students": []})})
     )
-    result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    result = make_get_student_grades(_ctx()).invoke({})
 
     assert "NO_STUDENTS_LINKED" in result
 
@@ -133,7 +142,7 @@ def test_no_linked_students_does_not_name_anyone(monkeypatch):
 def test_two_children_and_no_name_asks_which(monkeypatch):
     """Guessing here means showing one child's grades while naming another."""
     monkeypatch.setattr(requests, "get", _route({"/students": TWO_CHILDREN}))
-    result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    result = make_get_student_grades(_ctx()).invoke({})
 
     assert "NEEDS_STUDENT_CHOICE" in result
     assert "ليلى" in result and "عمر" in result
@@ -167,9 +176,7 @@ def test_a_named_child_is_matched_in_arabic(monkeypatch):
             }
         ),
     )
-    result = make_get_student_records(_ctx()).invoke(
-        {"record_type": "grades", "student_name": "ليلى"}
-    )
+    result = make_get_student_grades(_ctx()).invoke({"student_name": "ليلى"})
 
     assert "STUDENT_GRADES" in result
     assert "90.0%" in result
@@ -203,7 +210,7 @@ def test_grades_forbid_recalculation_and_explain_excused(monkeypatch):
             }
         ),
     )
-    result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    result = make_get_student_grades(_ctx()).invoke({})
 
     assert "Do not recalculate" in result
     assert "not counted against the student and is not a zero" in result
@@ -236,7 +243,7 @@ def test_in_progress_subject_is_flagged_as_not_final(monkeypatch):
             }
         ),
     )
-    result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    result = make_get_student_grades(_ctx()).invoke({})
 
     assert "still in progress" in result
     assert "not a final grade" in result
@@ -253,7 +260,7 @@ def test_empty_term_is_not_reported_as_failing(monkeypatch):
             }
         ),
     )
-    result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    result = make_get_student_grades(_ctx()).invoke({})
 
     assert "nothing is recorded yet" in result
     assert "not that the student is failing" in result
@@ -281,7 +288,7 @@ def test_attendance_separates_excused_from_unexcused(monkeypatch):
             }
         ),
     )
-    result = make_get_student_records(_ctx()).invoke({"record_type": "attendance"})
+    result = make_get_student_attendance(_ctx()).invoke({})
 
     assert "ATTENDANCE" in result
     assert "rather than adding them together" in result
@@ -292,11 +299,11 @@ def test_the_turn_budget_stops_a_loop(monkeypatch):
     monkeypatch.setattr(requests, "get", _route({"/students": ONE_CHILD}))
 
     ctx = _ctx()
-    tool = make_get_student_records(ctx)
+    tool = make_get_student_grades(ctx)
     for _ in range(2):
-        tool.invoke({"record_type": "grades"})
+        tool.invoke({})
 
-    assert "TOOL_CALL_LIMIT_REACHED" in tool.invoke({"record_type": "grades"})
+    assert "TOOL_CALL_LIMIT_REACHED" in tool.invoke({})
 
 
 def test_session_id_is_sent_so_the_facade_can_correlate_its_audit(monkeypatch):
@@ -307,7 +314,7 @@ def test_session_id_is_sent_so_the_facade_can_correlate_its_audit(monkeypatch):
         return ONE_CHILD if url.endswith("/students") else _Response(404)
 
     monkeypatch.setattr(requests, "get", capture)
-    make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    make_get_student_grades(_ctx()).invoke({})
 
     assert seen.get("X-Request-Id") == "turn-1"
     assert seen.get("Authorization") == f"Bearer {PARENT_TOKEN}"
@@ -316,7 +323,7 @@ def test_session_id_is_sent_so_the_facade_can_correlate_its_audit(monkeypatch):
 @pytest.mark.parametrize("status", [500, 502, 504])
 def test_all_server_errors_collapse_to_unavailable(monkeypatch, status):
     monkeypatch.setattr(requests, "get", _route({"/students": _Response(status)}))
-    result = make_get_student_records(_ctx()).invoke({"record_type": "grades"})
+    result = make_get_student_grades(_ctx()).invoke({})
     assert "RECORDS_UNAVAILABLE" in result
 
 
@@ -366,9 +373,7 @@ def test_the_planners_child_is_read_and_not_the_name_the_model_typed(monkeypatch
     monkeypatch.setattr(requests, "get", fake_get)
     ctx = _ctx()
     ctx.note_turn_plan([], [], child_id="S-1", child_label="ليلى")
-    result = make_get_student_records(ctx).invoke(
-        {"record_type": "grades", "student_name": "عمر"}
-    )
+    result = make_get_student_grades(ctx).invoke({"student_name": "عمر"})
 
     assert "/students/S-1/grades" in read["url"]
     assert "STUDENT_GRADES" in result
@@ -382,7 +387,7 @@ def test_a_planner_child_no_longer_on_the_roster_falls_back_to_resolving(monkeyp
     monkeypatch.setattr(requests, "get", _route({"/students": TWO_CHILDREN}))
     ctx = _ctx()
     ctx.note_turn_plan([], [], child_id="S-99", child_label="مين ده")
-    result = make_get_student_records(ctx).invoke({"record_type": "grades"})
+    result = make_get_student_grades(ctx).invoke({})
 
     assert "NEEDS_STUDENT_CHOICE" in result
 
@@ -405,14 +410,14 @@ def test_the_tool_reports_which_outcome_it_produced(monkeypatch):
         requests, "get", _route({"/students": ONE_CHILD, "/grades": _grades_for(87.5)})
     )
     ctx = _ctx()
-    make_get_student_records(ctx).invoke({"record_type": "grades"})
+    make_get_student_grades(ctx).invoke({})
 
-    assert ctx.tool_outcomes == [("get_student_records", "grades")]
+    assert ctx.tool_outcomes == [("get_student_grades", "grades")]
 
 
 def test_a_failure_reports_its_own_outcome_too(monkeypatch):
     monkeypatch.setattr(requests, "get", _route({"/students": _Response(503)}))
     ctx = _ctx()
-    make_get_student_records(ctx).invoke({"record_type": "grades"})
+    make_get_student_grades(ctx).invoke({})
 
-    assert ctx.tool_outcomes == [("get_student_records", "unavailable")]
+    assert ctx.tool_outcomes == [("get_student_grades", "unavailable")]

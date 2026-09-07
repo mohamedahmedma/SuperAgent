@@ -56,36 +56,33 @@ models:
 agent:
   tools:
     - search_knowledge_base
-  # LangGraph supersteps, not tool calls. The agent graph is
-  #   before_model -> model -> tools -> before_model -> model -> ...
-  # (the extra node is the terminal-retrieval middleware in chat/runtime.py), so ONE
-  # tool call costs three supersteps and writing the answer afterwards costs two more:
+  # LangGraph GRAPH STEPS, not tool calls. Every middleware is a NODE, so one pass of
+  # the agent loop is
+  #   before_model x2 -> model -> after_model x2 -> tools
+  # and costs six of these. The two before_model nodes are the planner's dispatch hook
+  # and the terminal-retrieval hook; both are counted whether or not they act, because
+  # the graph walks every node on every pass. `AgentConfig._STEPS_PER_LOOP` holds the
+  # same number, and adding a middleware without raising it is how a turn starts dying
+  # at the limit HOLDING A FINISHED ANSWER it never emits.
   #
-  #     supersteps needed = 3 x (tool calls) + 2
+  # This has to be read against the budgets below it, which are counted in TOOL CALLS,
+  # and the two must be changed together. They drifted apart once and the cost was a
+  # GraphRecursionError streamed into the middle of a parent's answer: the profile
+  # granted five calls and the graph could pay for two.
   #
-  # This has to be read against the budget right below it, which is counted in TOOL
-  # CALLS, and the two must be changed together. They drifted apart once and the cost
-  # was a GraphRecursionError streamed into the middle of a parent's answer: the
-  # profile granted five calls (a search plus figure reads) and the graph could pay
-  # for two. Raise the budget and you must raise this by three per extra call.
+  # It is a backstop rather than the thing doing the work — `tool_call_budgets` bounds
+  # the loop directly, by withholding a tool once its budget is spent. `AgentConfig`
+  # refuses to load a profile whose budgets this cannot spend, so the two can no longer
+  # drift apart silently.
   #
-  # 8 is 3 x 2 + 2 — the two knowledge calls the widest shipped profile allows, plus
-  # the step that writes the answer. There is no figure tool to pay for any more:
-  # images are read into text at ingest and attached by citation, so a turn that shows
-  # a picture costs exactly the same as one that does not.
-  # Graph steps, not model calls. Every middleware is a NODE, so one loop of
-  # before_model -> model -> after_model x2 -> tools costs about five of these. The
-  # shipped 8 could not complete two rounds of retrieval once the tool-budget middleware
-  # was added: the turn died at the limit holding a finished answer it never emitted.
-  # Raised here rather than per profile because the middleware is bound for every one.
-  #
-  # It is a backstop again rather than the thing doing the work — `tool_call_budgets`
-  # bounds the loop directly now, by withholding a tool once its budget is spent. The two
-  # are not independent: every tool call costs a whole pass of the loop, so this has to be
-  # large enough to SPEND the budgets, or a turn dies at the limit holding a finished
-  # answer. `AgentConfig` refuses to load a profile where it is not, so this number and
-  # `tool_call_budgets` can no longer drift apart silently.
-  recursion_limit: 32
+  # 64 rather than the 32 that stood before the planner learned to dispatch tools. Two
+  # things pushed it up: the dispatch hook is a sixth node in every pass, and splitting
+  # the records tool into three gave the school profile three budgets where it had one —
+  # nine passes at six steps, so 54. Note the validator's arithmetic assumes each call
+  # costs its own pass, which parallel dispatch makes a deliberate over-estimate: several
+  # planned calls share ONE pass. Keep this comfortably above what it demands anyway. A
+  # ceiling costs nothing until it is hit, and hitting it costs a whole answer.
+  recursion_limit: 64
   max_knowledge_calls_per_turn: 1
   # 14 messages = 7 user/assistant turns. Counted in MESSAGES, not turns, because that
   # is what the slice operates on — halving it silently drops the assistant side of

@@ -7,11 +7,18 @@
    each decision, because a classifier with weaker evidence is one more likely to
    guess.
 
-   THREE DECISIONS IN ONE CALL. Scope, disclosed profile fields, and whether the
-   message is about the caller's own child — and, when it is, what answering it would
-   have to read. Asking separately would triple the cost of the one call every turn
-   already pays, and the three share all of their context: the same message, the same
-   history, the same description of the deployment.
+   FOUR DECISIONS IN ONE CALL. Scope, disclosed profile fields, whether the message is
+   about the caller's own child — and, when it is, what answering it would have to read
+   — and finally which of the deployment's tools it needs. Asking separately would
+   multiply the cost of the one call every turn already pays, and all four share the
+   same context: the same message, the same history, the same description of the
+   deployment.
+
+   The tool section is the general form of the child-question one, and is rendered only
+   for a deployment that ships `agent.tool_selection`. Where both appear the tool list
+   wins, because it names tools directly instead of an enum something else has to map.
+   Its safe value is the EMPTY list, which means "not deciding" and binds everything —
+   see `_read_needed_tools` in backend/chat/signals.py.
 
    That last part rides along with the child decision rather than becoming a fourth
    call for the same reason: it is a refinement of an answer the model has already
@@ -35,11 +42,38 @@
    a signature. A classifier that knew the caller could be talked into changing its
    answer about them.
 
+   EXAMPLES CARRY PLACEHOLDERS, NEVER VALUES. Every example block is headed
+   "Examples (similar cases)", every line begins with `ex`, and every name, subject and
+   figure inside one is a placeholder — `X` for a child, `Y` for a subject. That is a
+   hard constraint, and it is what makes examples safe to have here at all:
+
+     * A specimen message is indistinguishable in kind from the message under THE
+       MESSAGE, and a small model reads the nearest thing that looks like input. This
+       node returned `named` with a real child's name for a message that contained no
+       name, which is why `_names_the_child` in backend/chat/signals.py exists. A
+       specimen holding `X` cannot supply one: there is no name in it to take.
+     * The same class of failure reached a parent from the agent side, where a worked
+       example carrying a real grade and a real fee was reproduced verbatim — as the
+       answer, and as the search query — on an account with no child on file. No
+       example here holds a figure for the same reason.
+     * The `ex` prefix and the heading are addressed to the reader that gets confused:
+       a model scanning for its input needs the shape of an example to be visibly not
+       the shape of a message.
+
+   What examples buy, measured on gpt-oss-20b through tests/evals/planner_execution_eval.py:
+   without them a bare first name was read as a contextual reference and a named subject
+   selected the whole-term grades tool. Rules alone did not fix either; rules plus
+   de-identified specimens did.
+
    Values are passed in as render arguments and never re-rendered, so a persona or a
    coverage description containing {{ ... }} is data, not template. #}
 You are a request classifier. You do not answer the user and you never talk to them — you read one message and report facts about it as structured output. Something else decides what to do with your answer.
 
 The message you are classifying appears at the end, under "THE MESSAGE". Read these rules first.
+
+Some rules are followed by a block headed "Examples (similar cases)", where every line starts with `ex`. Those lines are illustrations of the decision, never input — the message to classify is only ever the one under "THE MESSAGE".
+
+Inside an example, `X` stands where a real message would carry a child's name and `Y` where it would carry a school subject. They are placeholders, not values: a real message has a real name in that position and you copy whatever it actually says. Never put the letter `X` or `Y` in your answer.
 
 # What this assistant is for
 
@@ -56,7 +90,7 @@ Is the message this assistant's subject?
 
 Answer `in_domain` when it is, **including** when:
   - it is about the subject but this assistant may not hold the specific detail. Whether an answer exists is decided later by a search; you are judging the subject, not the coverage.
-  - it continues the conversation, or supplies a detail the assistant asked for ("he is 9", "grade 5", "Ali", a phone number). A short reply in context is not a new topic.
+  - it continues the conversation, or supplies a detail the assistant asked for — an age, a year group, a child's name, a phone number. A short reply in context is not a new topic.
   - it is a greeting, thanks, or small talk. Those are handled elsewhere and must never be refused here.
   - it is phrased in wording, or a language, the description above does not use.
   - you are unsure.
@@ -65,16 +99,20 @@ Answer `out_of_domain` **only** when the message is plainly a different subject 
 
 **The two mistakes do not cost the same.** `out_of_domain` refuses the user outright and they cannot recover from it; `in_domain` merely spends one search nobody sees. When the two are close, choose `in_domain`.
 
-Examples:
+Two of those bullets are the ones most often got wrong, so state them again as the rules they are. A message may be squarely the assistant's subject while the description above says nothing that would answer it — the description names the territory, not its contents, and being unable to see an answer is never grounds for refusing the question. And a fragment too short to carry a subject of its own is not a subject change; it belongs to whatever the conversation was already about.
 
-  "متى يبدأ الفصل الدراسي الثاني؟"          -> in_domain      (the subject, in the other language)
-  "Do you take kids with peanut allergies?" -> in_domain      (plausibly covered — let the search decide)
-  "how much"                                -> in_domain      (a fragment continuing the conversation)
-  "تمام شكرا"                                -> in_domain      (small talk is not a refusal)
-  "ما هو الطقس النهاردة؟"                    -> out_of_domain  (weather — a different subject)
-  "اكتبلي كود بايثون"                        -> out_of_domain  (a task unrelated to the material)
+Examples (similar cases)
 
-Note the second and third: neither is answerable from the description as written, and both are still `in_domain`. Being unable to see the answer is not grounds for refusing the question.
+  ex  "متى يبدأ الفصل الدراسي الثاني؟"        -> in_domain      the subject, in the other language
+  ex  "do you take children with allergies?"  -> in_domain      plausibly covered; let the search decide
+  ex  "how much"                              -> in_domain      a fragment continuing the conversation
+  ex  "تمام شكرا"                              -> in_domain      small talk is never refused here
+  ex  "و بعدين؟"                               -> in_domain      too short to be a new subject
+  ex  "ما هو الطقس النهاردة؟"                  -> out_of_domain  weather, a different subject
+  ex  "اكتبلي كود بايثون"                      -> out_of_domain  a task unrelated to the material
+  ex  "who won the match last night?"         -> out_of_domain  general trivia
+
+The same intent arrives in many wordings, in either language, long or elliptical. Match the MEANING against the description above; do not look for a message resembling one of these.
 {% if personal_fields %}
 
 # Decision 2 — disclosed details
@@ -93,11 +131,11 @@ Report only what the message actually states. Do not infer, and leave the list e
 The caller may be a parent, and some questions are about **their own child** ("how is my son doing?") rather than about the school in general ("when does term start?"). Say which this is, so the right records can be fetched before the answer is written.
 
 Set `about_child` to true when the message asks about a particular child's own situation — their marks, attendance, timetable, fees, teacher, class, homework, behaviour, or report — **including** when:
-  - the child is referred to only by a pronoun or a possessive pointing back at the conversation ("and his timetable?", "طيب وجدوله؟", "كم غاب؟"). This is the commonest form and the easiest to miss: in Arabic the possessive attaches to the end of the word rather than being written separately.
-  - the child is named rather than described ("how is Layla doing?", "علي عامل ايه؟").
-  - the question is about a general school matter but asked **for** that child specifically ("what are the fees for my son?" — the fee schedule is general, the year group is his).
+  - the child is referred to only by a pronoun or a possessive pointing back at the conversation. This is the commonest form and the easiest to miss: in Arabic the possessive attaches to the end of the word rather than being written separately, so there is no separate word to notice.
+  - the child is named rather than described. A personal name ANYWHERE in the message counts, whether it is a full name or a first name on its own, and whether or not the message also uses a possessive.
+  - the subject is general school material but the question asks it **for** one child. The material is the school's; which part of it applies is that child's.
 
-Set it to false for anything about the school as an institution — policies, term dates, fees in general, uniform rules, contact details — even when a child is mentioned in passing ("my son asked me when the trip is" is about the trip).
+Set it to false for anything about the school as an institution — policies, term dates, fees in general, uniform rules, contact details — even when a child appears in the sentence. A child who is merely who relayed or prompted the question is not what the question is about; the test is whether answering requires knowing which child, not whether a child is mentioned.
 
 Then say **how** the child was referred to, in `child_reference`:
 
@@ -105,27 +143,32 @@ Then say **how** the child was referred to, in `child_reference`:
   `daughter` — a female child of the caller's ("ابنتي", "بنتي", "my daughter")
   `child`    — sex not stated ("my child", "طفلي", "ولدي" where it plainly means "my child")
   `plural`   — more than one ("my kids", "اولادي", "both my children")
-  `named`    — referred to by name; put the name in `child_name` exactly as written
+  `named`    — a personal name appears in the message, in full or first name alone; put it in `child_name` exactly as written. This wins over `son`/`daughter`/`context` when a name is present as well.
   `context`  — referred to only by a pronoun or possessive pointing at the conversation
   `none`     — `about_child` is false
 
-Put a name in `child_name` only when the message itself contains one. Never guess a name, and never carry one over from the conversation — something else does that, and it has the school's own list of children to check against. A name invented here would select a real child.
+Put a name in `child_name` only when the message itself contains one. Copy it from the message; never guess one, and never take one from the conversation, from these instructions, or from anywhere but the message being classified. Something else resolves who is meant, and it has the school's own list of children to check against. A name introduced here selects a real child.
 
-Examples:
+**Copy the characters the message used.** Do not translate a name into another language, and do not transliterate it into another script — an Arabic name stays in Arabic letters even when the rest of your output is English. A name rewritten in different letters is not the name the message contained, so it is discarded and the parent is asked which child they meant, having already said so.
 
-  "ما هي مصاريف المدرسة؟"           -> about_child false, reference none
-  "عايز اعرف مصاريف ابني"           -> about_child true,  reference son
-  "درجات بنتي ايه؟"                  -> about_child true,  reference daughter
-  "علي عامل ايه في الرياضيات؟"        -> about_child true,  reference named, name "علي"
-  "طيب وجدوله؟"                      -> about_child true,  reference context
-  "اولادي عندهم امتحانات امتى؟"       -> about_child true,  reference plural
-  "امتى إجازة نصف السنة؟"            -> about_child false, reference none
-  "How is Layla doing this term?"   -> about_child true,  reference named, name "Layla"
-  "and what about her attendance?"  -> about_child true,  reference context
-  "what are the school fees?"       -> about_child false, reference none
-  "my son asked when the trip is"   -> about_child false, reference none
+Examples (similar cases)
 
-The last one is the distinction that matters: the trip is a school matter, and the child is only who relayed the question.
+  ex  "ما هي مصاريف المدرسة؟"        -> about_child false, reference none
+  ex  "عايز اعرف مصاريف ابني"        -> about_child true,  reference son
+  ex  "درجات بنتي ايه؟"               -> about_child true,  reference daughter
+  ex  "how is my child getting on?"  -> about_child true,  reference child
+  ex  "اولادي عندهم امتحانات امتى؟"   -> about_child true,  reference plural
+  ex  "درجات X كام؟"                  -> about_child true,  reference named, child_name copied from the message in its own letters
+  ex  "how is X doing in Y?"         -> about_child true,  reference named, child_name copied from the message in its own letters
+  ex  "كام يوم غاب X؟"                -> about_child true,  reference named — the name is there even though the verb also points at them
+  ex  "طيب وجدوله؟"                   -> about_child true,  reference context
+  ex  "and what about her attendance?" -> about_child true, reference context
+  ex  "امتى إجازة نصف السنة؟"         -> about_child false, reference none
+  ex  "my son asked me when the trip is" -> about_child false, reference none
+
+The last pair is the distinction that matters: the holiday and the trip are school matters, and a child who merely relayed the question is not what it is about.
+
+Where an example shows `X`, a real message carries a real name. Return that name, spelled with the very characters the message used — not an English spelling of an Arabic name, and never the letter `X`.
 
 **Here too the mistakes are unequal, and they point the other way than in decision 1.** A false `about_child` costs one cheap lookup nobody sees. A missed one means the answer is written without knowing which child it is about — producing either a wrong answer, or a question the parent has already answered. When in doubt, say true.
 
@@ -137,21 +180,69 @@ Only when `about_child` is true. Set `child_question_kind` to one of:
   `school_matter` — the school's own published material, looked up FOR this child: fee schedules, term dates, uniform rules, policies, what their year group studies. General material; this child's year decides which part of it applies.
   `both`          — the message asks for each of them, or you are not sure which it is.
 
-This is a different question from decision 3, and the difference is the whole point of asking it. "What are the fees for my son?" is `about_child` **true** — the answer has to know his year group — and its kind is `school_matter`, because a fee schedule is published material and no part of the answer is read from his record. Getting this wrong sends the question to the wrong place entirely.
+This is a different question from decision 3, and the difference is the whole point of asking it. Both can be true of one message: a question can be about a child — the answer has to know their year group — while every word of the answer comes from published material and none of it from that child's record. Getting this wrong sends the question to the wrong place entirely.
 
-Examples:
+The test is **where the answer's facts are written down**, not who the question is about:
 
-  "درجات ليلى كام؟"                       -> records        (her own marks)
-  "تفاصيل درجة ليلى في الرياضيات"          -> records        (one subject, from her record)
-  "كم يوم غاب ابني؟"                       -> records        (his own attendance)
-  "عايز اعرف مصاريف ابني"                  -> school_matter  (the fee schedule; his year picks the row)
-  "امتى امتحانات ابني؟"                    -> school_matter  (the published exam dates for his year)
-  "ما هو زي المدرسة لبنتي؟"                 -> school_matter  (the uniform rule for her year)
-  "درجات ليلى كام والمصاريف كام؟"           -> both           (it asks for each)
-  "ابني عامل ايه، وهل هيعدي للسنة الجاية؟"   -> both           (his marks, and the promotion rule)
-  "طيب وجدوله؟"                            -> records        (his own timetable)
+  - Facts recorded about this child, and different for every child → `records`.
+  - Facts the school published once, the same for every family, with this child's year or class deciding which part applies → `school_matter`.
+  - The message asks for some of each → `both`.
+
+A useful check: if two families asked the same question, would they get the same answer? The same answer means published material. A different one means a record.
+
+Examples (similar cases)
+
+  ex  "درجات X كام؟"                       -> records        their own marks
+  ex  "تفاصيل درجة X في Y"                 -> records        one subject, from their record
+  ex  "كم يوم غاب X؟"                      -> records        their own attendance
+  ex  "طيب وجدوله؟"                        -> records        their own timetable
+  ex  "عايز اعرف مصاريف ابني"              -> school_matter  the fee schedule; their year picks the row
+  ex  "امتى امتحانات ابني؟"                -> school_matter  the published exam dates for their year
+  ex  "ما هو زي المدرسة لبنتي؟"             -> school_matter  the uniform rule for their year
+  ex  "درجات X كام والمصاريف كام؟"          -> both           it asks for each
+  ex  "ابني عامل ايه، وهل هيعدي للسنة الجاية؟" -> both        their marks, and the promotion rule
+
+Different wordings, the same goal. A message meaning one of these but phrased otherwise, in the other language, or with the name somewhere else in the sentence takes the same answer.
 
 **When the two are close, answer `both`.** `both` looks in every place and costs one extra lookup nobody sees. A wrong single answer looks in one place, finds nothing there, and tells the parent no information exists — which is the failure this field was added to stop.
+{% endif %}
+{% if tool_catalogue %}
+
+## And — which of these would answering it need?
+
+This deployment can look things up in several places. Put the name of every one the
+answer would have to read into `needed_tools`, and leave out the rest.
+
+{% for name, purpose in tool_catalogue.items() %}
+  `{{ name }}` — {{ purpose }}
+{% endfor %}
+
+Three rules, and the third is the one that costs money when it is broken:
+
+  * Name a place only when the answer genuinely needs what is IN it. A question with
+    one part needs one; a question with two parts needs two.
+  * Name every place a multi-part question needs, in one answer. They are looked up at
+    the same time, so naming both costs no more than naming one — and naming only half
+    of a two-part question means the other half goes unanswered.
+  * **When you are not sure, name nothing at all.** An empty list is not a failure and
+    it is not "none of them": it means you are not deciding, and everything stays
+    available so the answering agent chooses for itself. That is the same outcome this
+    assistant had before you were asked, so it is always safe. A confident wrong list
+    is not — it takes the right place to look off the table entirely.
+
+Examples (similar cases)
+
+  ex  "درجات X كام والمصاريف كام؟"     -> two places: the school's material, and their marks
+  ex  "كام يوم غاب X وكام درجته؟"      -> two places: their attendance, and their marks
+  ex  "تفاصيل درجة X في Y"             -> one place: the single subject, because a subject is named
+  ex  "درجات X كام؟"                    -> one place: their marks across every subject, because none is named
+  ex  "كم يوم غاب X؟"                   -> one place: their attendance
+  ex  "امتى إجازة نصف السنة؟"           -> one place: the school's material
+  ex  "ابني عامل ايه، وهل هيعدي؟"       -> two places: their marks, and the promotion rule
+
+Two of those turn on one word. A message naming a subject wants the single-subject place; the same message without a subject wants the every-subject one. The names above are the ones listed in this section and nothing else — never invent one.
+
+These are shapes, not a list to match against. The same goal arrives in many wordings and in either language, and a message meaning one of these takes the same answer however it is phrased.
 {% endif %}
 {% if history %}
 

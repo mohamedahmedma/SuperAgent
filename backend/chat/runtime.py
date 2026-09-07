@@ -240,19 +240,31 @@ def _spend_tool_budgets(ctx: ChatRequestContext) -> _ToolBudget:
     return _ToolBudget()
 
 
-def _first_model_call(request) -> bool:
-    """Whether nothing has run yet this turn.
+def _nothing_has_run_yet(state) -> bool:
+    """Whether no tool has run yet this turn, given the graph state itself.
 
     A `ToolMessage` exists only inside the agent loop — the conversation loaded from
     storage holds the text of past turns, never their tool traffic — so its absence is
     exactly "no tool has returned yet in THIS turn". `tool_calls_made` is consulted as
-    well where the budget middleware put it there, which catches the one case the
-    messages cannot: a tool that was requested and produced no result message.
+    well where the budget middleware put it there, which catches the two cases the
+    messages cannot: a tool that was requested and produced no result message, and the
+    planner's own dispatch, which writes that counter as it seeds.
     """
-    state = getattr(request, "state", None) or {}
+    state = state or {}
     if state.get("tool_calls_made"):
         return False
     return not any(isinstance(m, ToolMessage) for m in (state.get("messages") or []))
+
+
+def _first_model_call(request) -> bool:
+    """`_nothing_has_run_yet` for a caller holding a model request rather than a state.
+
+    Two entry points to one predicate, and one definition: the forcing middleware reads a
+    request and the dispatch middleware reads a state, and they must agree about what
+    "first" means or the planner's seeded results would leave `tool_choice` still set on
+    a call the model has already been given the answers for.
+    """
+    return _nothing_has_run_yet(getattr(request, "state", None) or {})
 
 
 class _ForcePlannedTool(AgentMiddleware):
@@ -324,6 +336,146 @@ def _force_the_planned_tool(ctx: ChatRequestContext) -> _ForcePlannedTool:
     built, alongside the retrieval hints it has always written there.
     """
     return _ForcePlannedTool(getattr(ctx, "forced_tool", "") or "")
+
+
+def planned_tool_calls(planned, already_made: dict) -> list:
+    """The planner's calls, in the shape the graph dispatches, with the unaffordable cut.
+
+    Pure and separate from the middleware so the arithmetic can be tested without a
+    graph. Three things happen here, in this order, and the order matters:
+
+      1. **Shape.** A plan carries `{"name", "args"}`; a tool call needs an `id` as well,
+         because the result message is matched back to its call by that id. Malformed
+         entries are dropped HERE, before anything else touches them:
+         `dedupe_tool_calls` fingerprints a call by sorting its arguments, so an entry
+         whose `args` is not a dict raises there rather than being skipped.
+      2. **Deduplicate.** Through the same function the model's own calls go through, so
+         a profile that names one tool twice is collapsed by the rule that already exists
+         rather than by a second one that could disagree with it.
+      3. **Afford.** A call is dropped once its tool's budget for the turn is spent. The
+         budget is the deployment's statement of how many times a tool may run, and the
+         planner is not exempt from it — a planner that could overspend it would be a
+         second, invisible budget.
+
+    Ids are positional rather than random so the same plan produces the same transcript
+    twice. They only have to be unique within the message they travel in.
+    """
+    well_formed = [
+        {"name": str((call or {}).get("name") or ""), "args": (call or {}).get("args")}
+        for call in (planned or [])
+    ]
+    well_formed = [
+        call for call in well_formed
+        if call["name"] and isinstance(call["args"], dict)
+    ]
+
+    calls = []
+    made = dict(already_made or {})
+    for index, call in enumerate(dedupe_tool_calls(well_formed)):
+        name = call["name"]
+        if made.get(name, 0) >= budget_for(name):
+            logger.info("planned call to %s is past its budget for the turn", name)
+            continue
+        made[name] = made.get(name, 0) + 1
+        calls.append({"name": name, "args": dict(call["args"]), "id": f"plan_{index}_{name}"})
+    return calls
+
+
+def _dispatch_planned_tools(ctx: ChatRequestContext):
+    """Run the tools the planner chose, together, before the model is asked anything.
+
+    ## What this replaces
+
+    Left to itself the agent discovers its tools one at a time: it asks for one, waits
+    for the result, reads it, asks for the next. A question needing three tools costs
+    four model round-trips, and the tools run strictly in sequence because a model emits
+    its calls one message at a time. On a turn where the planner already knows all three
+    are needed, every one of those waits is bought with nothing.
+
+    Seeding the calls collapses that to one model call. The assistant message the model
+    would eventually have written is written by the planner instead, and the graph's own
+    tool node dispatches it — one `Send` per call, so the tools genuinely overlap. The
+    model wakes up with every result already in front of it and writes the answer.
+
+    ## Why the graph runs them and not this function
+
+    This hook has no async half, so LangGraph runs it in a worker thread; calling the
+    tools here would run them one after another in that single thread and deliver none of
+    the concurrency this exists for. Handing the calls back and jumping to `tools` puts
+    them where the fan-out already lives. That is also why the seeded message is a real
+    `AIMessage` rather than anything bespoke: everything downstream — the budget counter,
+    the duplicate collapser, the transcript fold in `provider_compat`, the checkpointer —
+    already knows how to read one.
+
+    ## The planner is not given the last word
+
+    A wrong plan is worth more here than a wrong tool choice is in the ordinary loop, so
+    three things deliberately limit it:
+
+      * **The tools stay bound.** The model can still call anything the planner chose,
+        because `exposed_tools` is the same list.
+      * **Their budgets are only partly spent.** What the planner dispatched is counted
+        (see `planned_tool_calls`), so a tool with budget left can be called again with
+        different arguments — which is how the model corrects a planned query that came
+        back empty.
+      * **Fewer than two surviving calls means no dispatch at all.** One call ahead of
+        the model buys no concurrency, and the ordinary loop already handles one tool
+        well. Falling back costs a round-trip; seeding a lone call would spend the
+        planner's credibility for nothing.
+
+    ## Ordering against the other hook that jumps
+
+    Listed FIRST in `create_agent_for_request`, ahead of `_end_turn_on_terminal_retrieval`,
+    and `before_model` hooks are chained in list order with a jump short-circuiting the
+    rest. The two can never contend for the same pass: this one fires only while nothing
+    has run, and that one only once retrieval has returned a verdict. The ordering is
+    stated anyway, because "they cannot both fire" is a property of today's conditions
+    and list order is what would decide it if that ever stopped being true.
+    """
+
+    @before_model(state_schema=ToolBudgetState, can_jump_to=["tools"])
+    def _run_the_planned_calls_together(state, runtime):
+        planned = list(getattr(ctx, "planned_calls", None) or [])
+        if not planned:
+            return None
+        # Once anything has run, the model is mid-conversation with its own tools and
+        # the plan is spent. This is the same predicate the forcing middleware uses, so
+        # the seeded results also stand `tool_choice` down — the model must be free to
+        # answer from what it has rather than be required to call something again.
+        if not _nothing_has_run_yet(state):
+            return None
+
+        made = dict(state.get("tool_calls_made") or {})
+        calls = planned_tool_calls(planned, made)
+        if len(calls) < 2:
+            return None
+
+        for call in calls:
+            made[call["name"]] = made.get(call["name"], 0) + 1
+        logger.info(
+            "planner dispatching %d tools together: %s",
+            len(calls),
+            ", ".join(call["name"] for call in calls),
+        )
+        try:
+            ctx.note_planned_dispatch(len(calls))
+        except Exception:  # pragma: no cover - accounting must never break a turn
+            logger.debug("could not record the planned dispatch", exc_info=True)
+        return {
+            # Empty content, deliberately. Anything written here is text the model did
+            # not write, sitting in its own voice in its own transcript — and on the
+            # harmony path `provider_compat` replaces this message with its own
+            # description of the calls anyway.
+            "messages": [AIMessage(content="", tool_calls=calls)],
+            # Counted HERE and not in `after_model`, which is where the budget middleware
+            # counts and which this jump skips entirely. Without this the planner's calls
+            # would be free, and the model could then spend every tool's full budget over
+            # again on results it already has.
+            "tool_calls_made": made,
+            "jump_to": "tools",
+        }
+
+    return _run_the_planned_calls_together
 
 
 def _collapse_duplicate_tool_calls(ctx: ChatRequestContext):
@@ -408,6 +560,14 @@ def _end_turn_on_terminal_retrieval(ctx: ChatRequestContext):
         # from its own knowledge. That is how an invented figure reached a parent.
         # Duplicate calls to the SAME tool are one tool having run, and its verdict is
         # already in `status`.
+        #
+        # A PLANNED turn reaches here with both results at once, which changes when this
+        # fires and does so correctly: the guard exists to stop the model answering a
+        # question the corpus could not answer, and on a planned turn the records tool has
+        # already put real material in front of it. Sequentially the search ran first and
+        # ended the turn before the records tool was ever reached, so a parent asking
+        # «درجات ليلى كام والمصاريف كام؟» against a corpus with no fee table was told
+        # nothing at all — including about the marks, which were sitting there unread.
         if _other_tools_ran(state["messages"]):
             return None
         ctx.note_short_circuit(status)
@@ -440,8 +600,15 @@ def create_agent_for_request(
         # turn did not bind, or stay silent about one it did.
         system_prompt=profile.render_system_prompt(allowed, language),
         middleware=[
-            # ORDER IS LOAD-BEARING, and `wrap_model_call` composes first-in-list as the
-            # outermost layer:
+            # ORDER IS LOAD-BEARING. `before_model` hooks are chained FIRST-IN-LIST-FIRST
+            # and a jump short-circuits the rest, while `wrap_model_call` composes
+            # first-in-list as the OUTERMOST layer:
+            #
+            #   the planner's dispatch runs before every other before_model hook, so a
+            #   turn whose tools were decided in advance never reaches the model without
+            #   them — and because it jumps to the tool node, nothing after it on that
+            #   pass runs at all. It is inert from the second pass onward, so the hooks
+            #   below see an ordinary loop;
             #
             #   duplicates are dropped as the model produces them, so the budget counts
             #   the calls that will actually run rather than the copies, and the terminal
@@ -452,6 +619,7 @@ def create_agent_for_request(
             #   that middleware settle for "force only a tool still on the request" and
             #   never produce the one shape the provider rejects outright, a required
             #   call with nothing to call.
+            _dispatch_planned_tools(ctx),
             _collapse_duplicate_tool_calls(ctx),
             _spend_tool_budgets(ctx),
             _force_the_planned_tool(ctx),

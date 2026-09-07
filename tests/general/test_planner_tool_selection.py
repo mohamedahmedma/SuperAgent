@@ -30,7 +30,11 @@ from backend.chat.child_resolution import no_child, resolve_child
 from backend.chat.child_roster import ChildOption
 from backend.chat.grounding import verify
 from backend.chat.signals import RequestSignals
-from backend.chat.turn_policy import KNOWLEDGE_TOOL, RECORDS_TOOL, resolve_turn
+from backend.chat.turn_policy import (
+    KNOWLEDGE_TOOL,
+    GRADES_TOOL as RECORDS_TOOL,
+    resolve_turn,
+)
 
 LAYLA = ChildOption(student_id="S-1", label="ليلى أحمد", gender="female", year_level="Year 4")
 OMAR = ChildOption(student_id="S-2", label="عمر أحمد", gender="male")
@@ -352,12 +356,12 @@ class DenyingWhatTheToolReturned(unittest.TestCase):
 
     def test_a_denial_after_a_successful_lookup_is_caught(self):
         self.assertTrue(self._denies(
-            [("get_student_records", "grades")], "I couldn't find any records for her."
+            [("get_student_grades", "grades")], "I couldn't find any records for her."
         ))
 
     def test_the_arabic_wording_is_caught_through_folding(self):
         self.assertTrue(self._denies(
-            [("get_student_records", "grades")], "ما لقيتش أي معلومات عن درجات ليلى أحمد"
+            [("get_student_grades", "grades")], "ما لقيتش أي معلومات عن درجات ليلى أحمد"
         ))
 
     def test_a_denial_after_a_failed_lookup_is_the_correct_answer(self):
@@ -365,19 +369,19 @@ class DenyingWhatTheToolReturned(unittest.TestCase):
         for outcome in ("no_records", "unavailable", "not_authorized", "which_student"):
             with self.subTest(outcome=outcome):
                 self.assertFalse(self._denies(
-                    [("get_student_records", outcome)], "I couldn't find any records."
+                    [("get_student_grades", outcome)], "I couldn't find any records."
                 ))
 
     def test_an_answer_that_reports_the_marks_is_not_flagged(self):
         self.assertFalse(self._denies(
-            [("get_student_records", "grades")], "ليلى حاصلة على 87.5% في الرياضيات"
+            [("get_student_grades", "grades")], "ليلى حاصلة على 87.5% في الرياضيات"
         ))
 
     def test_a_deployment_with_no_phrases_configured_never_fires(self):
         """The phrase list is the guessing half of this check, so an empty one has to
         mean 'do not guess' rather than 'match everything'."""
         self.assertFalse(self._denies(
-            [("get_student_records", "grades")], "I couldn't find any records.",
+            [("get_student_grades", "grades")], "I couldn't find any records.",
             phrases=(),
         ))
 
