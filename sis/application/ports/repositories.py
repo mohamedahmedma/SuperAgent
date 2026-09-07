@@ -642,6 +642,15 @@ class EnrolmentRepository(Protocol):
         row's class: overwriting it is exactly the history rewrite invariant 2 forbids.
         """
 
+    def retarget_open_enrolment(
+        self,
+        student_id: StudentNumber,
+        *,
+        academic_year_code: AcademicYearCode,
+        to_class: ClassCode,
+    ) -> ClassEnrolment | None:
+        """Retarget the open placement for a repeated same-day transfer."""
+
     def upsert_many(
         self, enrolments: Sequence[ClassEnrolment]
     ) -> Mapping[EnrolmentKey, bool]:

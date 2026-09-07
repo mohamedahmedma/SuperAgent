@@ -133,6 +133,17 @@ export function Field({ label, required, hint, error, className, children }) {
   );
 }
 
+const ARABIC_SCRIPT = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g;
+const LATIN_SCRIPT = /[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]/g;
+
+function languageSafeInput(raw, className) {
+  const text = String(raw ?? '');
+  const classes = String(className || '').split(/\s+/);
+  if (classes.includes('sis-name-en')) return text.replace(ARABIC_SCRIPT, '');
+  if (classes.includes('sis-name-ar')) return text.replace(LATIN_SCRIPT, '');
+  return text;
+}
+
 export function Input({
   type = 'text',
   value,
@@ -154,7 +165,7 @@ export function Input({
       autoComplete="off"
       spellCheck={false}
       inputMode={inputMode}
-      onChange={(event) => onInput && onInput(event.target.value)}
+      onChange={(event) => onInput && onInput(languageSafeInput(event.target.value, className))}
       onKeyDown={onKeyDown}
     />
   );

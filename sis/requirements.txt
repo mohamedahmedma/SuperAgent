@@ -42,3 +42,6 @@ openpyxl>=3.1.0
 # Postgres for anything holding real student records. SQLite is the default only so
 # the service runs with no infrastructure.
 psycopg2-binary>=2.9.10
+
+# Homework PDF text extraction for chatbot-grounded lookup.
+pypdf>=5.0.0

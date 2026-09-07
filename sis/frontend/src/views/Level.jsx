@@ -98,7 +98,7 @@ function ClassForm({ year, level, onSaved }) {
           label={t('Name (English)')}
           error={form.errorFor(save.error, 'name_en')}
         >
-          <Input value={form.values.name_en} onInput={form.set('name_en')} />
+          <Input className="sis-name-en" value={form.values.name_en} onInput={form.set('name_en')} />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-3" label={t('Name (Arabic)')}>
           <Input className="sis-name-ar" value={form.values.name_ar} onInput={form.set('name_ar')} />

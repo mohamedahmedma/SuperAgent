@@ -42,6 +42,34 @@ from sis.infrastructure.db import models
 # data, so every `IN` below is chunked. "One query" in this module means one per chunk.
 _IN_CHUNK = 400
 
+# Extra equivalences used by everyday Arabic name search.  Kept here in addition to the
+# domain table so older databases/builds get the same behaviour without a data migration.
+# Both sides of the comparison are folded through the same sequence.
+_EXTRA_SEARCH_FOLDING = (
+    ("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ٱ", "ا"),
+    ("ة", "ه"), ("ى", "ي"), ("ئ", "ي"), ("ؤ", "و"),
+    ("ـ", ""),
+    ("ً", ""), ("ٌ", ""), ("ٍ", ""), ("َ", ""), ("ُ", ""),
+    ("ِ", ""), ("ّ", ""), ("ْ", ""), ("ٰ", ""),
+)
+
+
+def _search_folding() -> tuple[tuple[str, str], ...]:
+    rows: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for pair in (*SEARCH_FOLDING, *_EXTRA_SEARCH_FOLDING):
+        if pair not in seen:
+            rows.append(pair)
+            seen.add(pair)
+    return tuple(rows)
+
+
+def _fold_search_text(value: str) -> str:
+    folded = fold_for_search(value)
+    for written, matched in _EXTRA_SEARCH_FOLDING:
+        folded = folded.replace(written, matched)
+    return folded
+
 
 def _chunked(values: Sequence[Any]) -> Iterator[Sequence[Any]]:
     """Split an `IN` list into batches SQLite will accept."""
@@ -63,7 +91,7 @@ def _folded(column: Any) -> Any:
     Python half of this comparison cannot disagree about what folds onto what.
     """
     expression = column
-    for written, matched in SEARCH_FOLDING:
+    for written, matched in _search_folding():
         expression = func.replace(expression, written, matched)
     return expression
 
@@ -222,7 +250,7 @@ class SqlAlchemyStudentRepository:
         """
         if not query.strip():
             return []
-        term = _like_term(fold_for_search(query))
+        term = _like_term(_fold_search_text(query))
         stmt = select(models.Student).where(
             or_(
                 _folded(models.Student.student_number).ilike(term, escape="\\"),
@@ -515,6 +543,50 @@ class SqlAlchemyEnrolmentRepository:
             .values(ends_on=ends_on)
         )
         return closed
+
+    def retarget_open_enrolment(
+        self,
+        student_id: StudentNumber,
+        *,
+        academic_year_code: AcademicYearCode,
+        to_class: ClassCode,
+    ) -> ClassEnrolment | None:
+        """Retarget only the current open placement, without committing."""
+        row = self._session.execute(
+            _enrolment_query().where(
+                models.Student.student_number == str(student_id),
+                models.ClassEnrolment.ends_on.is_(None),
+            )
+        ).first()
+        if row is None:
+            return None
+
+        section_ids = self._section_ids(
+            {(str(academic_year_code), str(to_class))}
+        )
+        section_id = section_ids.get(
+            (str(academic_year_code), str(to_class))
+        )
+        if section_id is None:
+            raise UnknownReference(
+                f"no class {to_class} in academic year {academic_year_code}",
+                field="to_class_code",
+            )
+
+        self._session.execute(
+            update(models.ClassEnrolment)
+            .where(models.ClassEnrolment.id == row.enrolment_id)
+            .values(class_section_id=section_id)
+        )
+        self._session.flush()
+
+        return ClassEnrolment(
+            student_number=row.student_number,
+            academic_year_code=academic_year_code,
+            class_code=to_class,
+            starts_on=row.starts_on,
+            ends_on=None,
+        )
 
     def upsert_many(
         self, enrolments: Sequence[ClassEnrolment]

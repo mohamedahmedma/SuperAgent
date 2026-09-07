@@ -46,6 +46,7 @@ router = APIRouter(prefix="/v1", tags=["guardians"])
 # Reads are open to both scopes; writes are the registrar's alone. Scope comparison is
 # exact equality, so a reader-only check would refuse the registrar reading her own list.
 Reader = Annotated[Principal, Depends(require_permission(Permission.GUARDIANS_READ))]
+StudentReader = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_READ))]
 Registrar = Annotated[Principal, Depends(require_permission(Permission.GUARDIANS_WRITE))]
 Queries = Annotated[QueryService, Depends(get_query_service)]
 UnitOfWorkFactory = Annotated[object, Depends(get_unit_of_work_factory)]
@@ -252,7 +253,7 @@ def resolve_guardian(
     responses=error_responses(401, 403, 404, 422),
 )
 def read_student_guardians(
-    student_number: str, queries: Queries, caller: Reader
+    student_number: str, queries: Queries, caller: StudentReader
 ) -> StudentGuardiansOut:
     with domain_errors():
         entries = queries.student_guardians(StudentNumber(student_number))

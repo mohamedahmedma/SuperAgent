@@ -1,6 +1,6 @@
-"""HTTP routers: the only place FastAPI and pydantic appear, and the thinnest layer here.
+﻿"""HTTP routers: the only place FastAPI and pydantic appear, and the thinnest layer here.
 
-A router does three things and nothing else — turn a request into a DTO or a domain
+A router does three things and nothing else â€” turn a request into a DTO or a domain
 value, call one service method, render the answer. It holds no rule and it imports no
 SQLAlchemy. A `select()` written in a handler is a query no unit test of the application
 layer can reach, and the next caller of the same use case has to write it again.
@@ -12,7 +12,7 @@ either is how one service ends up with two error envelopes.
 `sis.api.errors` which status that is. The table is **not** duplicated here. It was, and
 the two copies had already drifted: an expired preview batch was a 410 to the app-level
 handler and a 409 to every route that wrapped its service call, so the same failure
-carried two status codes depending on which mechanism happened to catch it — and a client
+carried two status codes depending on which mechanism happened to catch it â€” and a client
 that learned one of them wrote retry logic that was wrong half the time. One table, in
 `sis/api/errors.py`, keyed on the exception class and walked along the MRO so a subclass
 added next year inherits its parent's status instead of falling through to a 500.
@@ -47,7 +47,7 @@ __all__ = [
 class ErrorDetail(BaseModel):
     """The body of a refusal: a code to branch on, a sentence to show, a cell to blame.
 
-    `code` is the contract and `message` is prose — a client that branches on the wording
+    `code` is the contract and `message` is prose â€” a client that branches on the wording
     breaks the first time somebody translates it into Arabic, which this school will do.
     """
 
@@ -91,8 +91,8 @@ def domain_errors() -> Iterator[None]:
 
     Wrapped at the call site rather than installed as one app-wide exception handler
     because the boundary is the point: everything inside is application code that may
-    fail in a stated way, and anything raised *outside* it — a `KeyError` from a broken
-    handler — has no business being rendered as a tidy 4xx. An app-level handler catching
+    fail in a stated way, and anything raised *outside* it â€” a `KeyError` from a broken
+    handler â€” has no business being rendered as a tidy 4xx. An app-level handler catching
     `SisError` globally is a fine second net and does not conflict with this one.
     """
     try:
@@ -116,7 +116,7 @@ def error_responses(*codes: int) -> dict[int | str, dict[str, object]]:
 def all_routers() -> tuple["APIRouter", ...]:
     """Every router, in the order the OpenAPI page should read.
 
-    Imported lazily — see the module docstring — and returned rather than mounted, so the
+    Imported lazily â€” see the module docstring â€” and returned rather than mounted, so the
     composition root in `sis/app.py` stays the only thing that knows an app exists.
     """
     from sis.api.routers import (
@@ -127,6 +127,7 @@ def all_routers() -> tuple["APIRouter", ...]:
         grades,
         guardians,
         health,
+        homework,
         imports,
         structure,
         students,
@@ -138,7 +139,7 @@ def all_routers() -> tuple["APIRouter", ...]:
 
     # An explicit tuple, not discovery over the package. A new module that nobody adds
     # here is unreachable in production while every test still passes, because the tests
-    # build their client from this same function — so `test_api` asserts the mounted paths
+    # build their client from this same function â€” so `test_api` asserts the mounted paths
     # rather than trusting this list to be complete.
     return (
         health.router,
@@ -154,6 +155,7 @@ def all_routers() -> tuple["APIRouter", ...]:
         # After grades: this is the teacher's own write path onto the same figures those
         # routes read back, and the OpenAPI page should read in that order.
         teaching.router,
+        homework.router,
         attendance.router,
         imports.router,
         admin.router,

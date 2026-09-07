@@ -97,7 +97,7 @@ function TermForm({ year, count, onSaved }) {
           />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-4" label={t('Name (English)')}>
-          <Input value={form.values.name_en} onInput={form.set('name_en')} />
+          <Input className="sis-name-en" value={form.values.name_en} onInput={form.set('name_en')} />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-4" label={t('Name (Arabic)')}>
           <Input className="sis-name-ar" value={form.values.name_ar} onInput={form.set('name_ar')} />
@@ -208,7 +208,7 @@ function SubjectForm({ year, count, onSaved }) {
           />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-3" label={t('Name (English)')}>
-          <Input value={form.values.name_en} onInput={form.set('name_en')} />
+          <Input className="sis-name-en" value={form.values.name_en} onInput={form.set('name_en')} />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-3" label={t('Name (Arabic)')}>
           <Input className="sis-name-ar" value={form.values.name_ar} onInput={form.set('name_ar')} />
@@ -239,7 +239,7 @@ function SubjectForm({ year, count, onSaved }) {
  * it, and the dialog says so — a registrar who fears losing marks will otherwise leave a dead
  * subject in the list forever.
  */
-function RetireSubject({ year, subject }) {
+function RetireSubject({ year, subject, readOnly = false }) {
   const [dialog, ask] = useConfirm();
 
   const save = (active) =>
@@ -267,6 +267,8 @@ function RetireSubject({ year, subject }) {
       <Button
         size="sm"
         variant="quiet"
+        disabled={readOnly}
+        title={readOnly ? t('Academic year locked') : undefined}
         onClick={() =>
           subject.is_active
             ? ask({
@@ -358,7 +360,7 @@ function readPayload(event) {
   return subjectCode ? { subjectCode, fromLevel: fromLevel || '' } : null;
 }
 
-function SubjectBoard({ year, school, levels, subjects, lang }) {
+export function SubjectBoard({ year, school, levels, subjects, lang, hideInfo = false, readOnly = false }) {
   const tracks = useResource(Store.keys.tracks(school), () => api.schoolTracks(school), !!school);
   const board = useResource(
     Store.keys.subjectAssignments(year),
@@ -413,7 +415,7 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
   const place = (subjectCode, levelCode, fromLevel) => {
     setHeld('');
     setOver('');
-    if (!subjectCode || !levelCode || has(levelCode, subjectCode)) return;
+    if (readOnly || !subjectCode || !levelCode || has(levelCode, subjectCode)) return;
     save
       .run(subjectCode, levelCode, true)
       /* A move is two statements and this is the safe order: the subject is on both rungs
@@ -425,6 +427,7 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
   const remove = (subjectCode, levelCode) => {
     setHeld('');
     setOver('');
+    if (readOnly) return;
     save.run(subjectCode, levelCode, false).catch(() => {});
   };
 
@@ -446,9 +449,11 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
 
   return (
     <div className="vstack gap-3">
-      <Alert tone="info">
-        {t('A subject appears only where it is assigned. Physics assigned to Secondary does not appear in Primary, and the two academic tracks are assigned separately.')}
-      </Alert>
+      {!hideInfo ? (
+        <Alert tone="info">
+          {t('A subject appears only where it is assigned. Physics assigned to Secondary does not appear in Primary, and the two academic tracks are assigned separately.')}
+        </Alert>
+      ) : null}
 
       {trackList.length > 1 ? (
         <div className="d-flex flex-wrap gap-2" role="group" aria-label={t('Academic track')}>
@@ -465,11 +470,13 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
       <div
         className={dropClass('sis-board-palette', over === PALETTE)}
         onDragOver={(event) => {
+          if (readOnly) return;
           event.preventDefault();
           setOver(PALETTE);
         }}
         onDragLeave={() => setOver('')}
         onDrop={(event) => {
+          if (readOnly) return;
           event.preventDefault();
           const payload = readPayload(event);
           setOver('');
@@ -477,9 +484,11 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
         }}
       >
         <div className="small text-body-secondary mb-2">
-          {held
-            ? t('Now choose a grade below, or tap the subject again to put it back.')
-            : t('Drag a subject onto a grade, or tap it to pick it up.')}
+          {readOnly
+            ? t('Subject assignments are read-only because this current academic year has already started.')
+            : held
+              ? t('Now choose a grade below, or tap the subject again to put it back.')
+              : t('Drag a subject onto a grade, or tap it to pick it up.')}
         </div>
         <div className="d-flex flex-wrap gap-2" aria-label={t('Available subjects')}>
           {active.length ? (
@@ -488,13 +497,14 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
                 key={subject.code}
                 type="button"
                 className="sis-chip"
-                draggable
+                draggable={!readOnly}
                 aria-pressed={held === subject.code}
                 onDragStart={(event) => {
+                  if (readOnly) return;
                   event.dataTransfer.setData('text/plain', dragPayload(subject.code, ''));
                   setHeld('');
                 }}
-                onClick={() => setHeld(held === subject.code ? '' : subject.code)}
+                onClick={() => { if (!readOnly) setHeld(held === subject.code ? '' : subject.code); }}
               >
                 {nameOf(subject)}
               </button>
@@ -520,11 +530,13 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
                     <div
                       className={dropClass('sis-board-grade h-100', over === level.code)}
                       onDragOver={(event) => {
+                        if (readOnly) return;
                         event.preventDefault();
                         setOver(level.code);
                       }}
                       onDragLeave={() => setOver('')}
                       onDrop={(event) => {
+                        if (readOnly) return;
                         event.preventDefault();
                         const payload = readPayload(event);
                         if (payload) {
@@ -545,30 +557,33 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
                             <span
                               key={subject.code}
                               className="sis-board-chip"
-                              draggable
-                              onDragStart={(event) =>
+                              draggable={!readOnly}
+                              onDragStart={(event) => {
+                                if (readOnly) return;
                                 event.dataTransfer.setData(
                                   'text/plain',
                                   dragPayload(subject.code, level.code)
-                                )
-                              }
+                                );
+                              }}
                             >
                               <span>{nameOf(subject)}</span>
                               {subject.is_active ? null : (
                                 <span className="small">({t('retired')})</span>
                               )}
-                              <button
-                                type="button"
-                                className="sis-board-remove"
-                                aria-label={t('Remove {0} from {1}', [
-                                  nameOf(subject),
-                                  nameOf(level)
-                                ])}
-                                title={t('Remove assignment')}
-                                onClick={() => remove(subject.code, level.code)}
-                              >
-                                &times;
-                              </button>
+                              {!readOnly ? (
+                                <button
+                                  type="button"
+                                  className="sis-board-remove"
+                                  aria-label={t('Remove {0} from {1}', [
+                                    nameOf(subject),
+                                    nameOf(level)
+                                  ])}
+                                  title={t('Remove assignment')}
+                                  onClick={() => remove(subject.code, level.code)}
+                                >
+                                  &times;
+                                </button>
+                              ) : null}
                             </span>
                           ))}
                         </div>
@@ -580,7 +595,7 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
 
                       {/* The tap twin of the drop. Present only while something is held, so
                           the card is not a wall of buttons the rest of the time. */}
-                      {held ? (
+                      {held && !readOnly ? (
                         <div className="d-grid mt-3">
                           <Button
                             size="sm"
@@ -629,7 +644,7 @@ function SubjectBoard({ year, school, levels, subjects, lang }) {
  * no longer knows. Nothing defaults them to the year's dates — that would be three terms
  * all claiming the whole year, which reads as a decision the school made.
  */
-function TermPanel({ year, term, lang }) {
+function TermPanel({ year, term, lang, hideUploadMarks = false, readOnly = false }) {
   const form = useForm({
     starts_on: term.starts_on || '',
     ends_on: term.ends_on || ''
@@ -697,7 +712,7 @@ function TermPanel({ year, term, lang }) {
             hint={t('Optional')}
             error={form.errorFor(save.error, 'starts_on')}
           >
-            <Input type="date" value={form.values.starts_on} onInput={form.set('starts_on')} />
+            <Input type="date" disabled={readOnly} value={form.values.starts_on} onInput={form.set('starts_on')} />
           </Field>
           <Field
             className="col-12 col-sm-6"
@@ -705,7 +720,7 @@ function TermPanel({ year, term, lang }) {
             hint={t('Optional')}
             error={form.errorFor(save.error, 'ends_on')}
           >
-            <Input type="date" value={form.values.ends_on} onInput={form.set('ends_on')} />
+            <Input type="date" disabled={readOnly} value={form.values.ends_on} onInput={form.set('ends_on')} />
           </Field>
         </div>
 
@@ -716,12 +731,16 @@ function TermPanel({ year, term, lang }) {
         )}
 
         <div className="d-grid d-sm-flex gap-2">
-          <Button type="submit" variant="primary" disabled={!dirty} pending={save.pending}>
-            {t('Save dates')}
-          </Button>
-          <a className="btn btn-outline-secondary" href={Router.href('marks', { term: term.code })}>
-            {t('Upload marks')}
-          </a>
+          {!readOnly ? (
+            <Button type="submit" variant="primary" disabled={!dirty} pending={save.pending}>
+              {t('Save dates')}
+            </Button>
+          ) : null}
+          {!hideUploadMarks ? (
+            <a className="btn btn-outline-secondary" href={Router.href('marks', { term: term.code })}>
+              {t('Upload marks')}
+            </a>
+          ) : null}
         </div>
         <ErrorNote error={save.error} />
       </form>
@@ -943,7 +962,7 @@ function Generator({ year }) {
 
 /* -- A card whose form opens and closes ------------------------------------------ */
 
-function Section({ title, subtitle, action, form, children }) {
+function Section({ title, subtitle, action, form, children, locked = false }) {
   const [open, setOpen] = useState(false);
   return (
     <Card
@@ -951,15 +970,29 @@ function Section({ title, subtitle, action, form, children }) {
       subtitle={subtitle}
       tight
       actions={
-        <Button size="sm" variant={open ? 'quiet' : 'primary'} onClick={() => setOpen(!open)}>
-          {open ? 'Close' : action}
-        </Button>
+        locked ? <Badge tone="warn">{t('Locked')}</Badge> : (
+          <Button size="sm" variant={open ? 'quiet' : 'primary'} onClick={() => setOpen(!open)}>
+            {open ? 'Close' : action}
+          </Button>
+        )
       }
     >
-      {open ? <div className="card-body border-bottom sis-rise">{form}</div> : null}
+      {open && !locked ? <div className="card-body border-bottom sis-rise">{form}</div> : null}
       {children}
     </Card>
   );
+}
+
+function cairoTodayIso() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function isStartedCurrentYear(year) {
+  return !!(year && year.is_current && year.starts_on && year.starts_on <= cairoTodayIso());
 }
 
 /* -- Screen ---------------------------------------------------------------------- */
@@ -989,12 +1022,15 @@ export function Year({ params = {} }) {
 
   const yearList = (years.value && years.value.academic_years) || [];
   const year = yearList.find((item) => item.code === code);
-  const nameClass = state.lang === 'ar' ? 'sis-name-ar' : 'sis-name-en';
+  const heldRoles = Store.roles();
+  const isPrincipal = heldRoles.indexOf('principal') >= 0 && heldRoles.indexOf('system_admin') < 0 && heldRoles.indexOf('school_owner') < 0;
+  const yearLocked = isStartedCurrentYear(year);
 
   const termList = (terms.value || []).slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
   const subjectList = (subjects.value || [])
     .slice()
     .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+
 
   return (
     <>
@@ -1028,6 +1064,12 @@ export function Year({ params = {} }) {
         </Alert>
       ) : null}
 
+      {yearLocked ? (
+        <Alert tone="warn" title={t('Academic year locked')}>
+          {t('This is the current academic year and its first day has arrived. Its structure is now read-only: terms, subjects, grade assignments and classes cannot be added, removed or changed.')}
+        </Alert>
+      ) : null}
+
       <div className="vstack gap-3">
         <Card
           title={t('This year is attached to')}
@@ -1045,13 +1087,16 @@ export function Year({ params = {} }) {
           }
           action="Add a term"
           form={<TermForm year={code} count={termList.length} />}
+          locked={yearLocked}
         >
           <div className="card-body">
             {termList.length ? (
               <div className="vstack gap-3">
-                <Alert tone="info">
-                  {t('These sections come from the number of terms the school runs. Dates are optional — a term works without them, and they can be filled in whenever the calendar is settled.')}
-                </Alert>
+                {!isPrincipal ? (
+                  <Alert tone="info">
+                    {t('These sections come from the number of terms the school runs. Dates are optional — a term works without them, and they can be filled in whenever the calendar is settled.')}
+                  </Alert>
+                ) : null}
                 {/* One column per term, so two terms sit side by side on a laptop and
                     three still fit. Each panel is its own card: the requirement is that a
                     registrar can never be unsure which term they are editing. */}
@@ -1063,7 +1108,7 @@ export function Year({ params = {} }) {
                       }
                       key={term.code}
                     >
-                      <TermPanel year={code} term={term} lang={state.lang} />
+                      <TermPanel year={code} term={term} lang={state.lang} hideUploadMarks={isPrincipal} readOnly={yearLocked} />
                     </div>
                   ))}
                 </div>
@@ -1081,12 +1126,15 @@ export function Year({ params = {} }) {
           subtitle={t('{0} in this year', [subjectList.length])}
           action="Add subject"
           form={<SubjectForm year={code} count={subjectList.length} />}
+          locked={yearLocked}
         >
-          <div className="card-body pb-0">
-            <Alert tone="info">
-              {t('A subject belongs to this year. The same code in another year is a different subject, so marks are not comparable across years — copy the catalogue forward each September rather than expecting it to carry over.')}
-            </Alert>
-          </div>
+          {!isPrincipal ? (
+            <div className="card-body pb-0">
+              <Alert tone="info">
+                {t('A subject belongs to this year. The same code in another year is a different subject, so marks are not comparable across years — copy the catalogue forward each September rather than expecting it to carry over.')}
+              </Alert>
+            </div>
+          ) : null}
           <Table
             loading={subjects.loading}
             rows={subjectList}
@@ -1128,7 +1176,7 @@ export function Year({ params = {} }) {
               {
                 key: 'retire',
                 header: '',
-                cell: (row) => <RetireSubject year={code} subject={row} />
+                cell: (row) => <RetireSubject year={code} subject={row} readOnly={yearLocked} />
               }
             ]}
           />
@@ -1144,12 +1192,16 @@ export function Year({ params = {} }) {
             levels={(years.value && years.value.year_levels) || []}
             subjects={subjectList}
             lang={state.lang}
+            hideInfo={isPrincipal}
+            readOnly={yearLocked}
           />
         </Card>
 
-        <Card title={t('Generate the ladder')}>
-          <Generator year={code} />
-        </Card>
+        {!isPrincipal && !yearLocked ? (
+          <Card title={t('Generate the ladder')}>
+            <Generator year={code} />
+          </Card>
+        ) : null}
       </div>
     </>
   );

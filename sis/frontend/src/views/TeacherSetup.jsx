@@ -95,10 +95,10 @@ export function TeacherSetup() {
       <Card title={t('New teacher account')}>
         <div className="row g-3 mt-1">
           <Field className="col-12 col-md-6" label={t('English name')}>
-            <Input value={form.full_name_en} onInput={(value) => setForm((old) => ({ ...old, full_name_en: value }))} />
+            <Input className="sis-name-en" value={form.full_name_en} onInput={(value) => setForm((old) => ({ ...old, full_name_en: value }))} />
           </Field>
           <Field className="col-12 col-md-6" label={t('Arabic name')}>
-            <Input value={form.full_name_ar} onInput={(value) => setForm((old) => ({ ...old, full_name_ar: value }))} />
+            <Input className="sis-name-ar" value={form.full_name_ar} onInput={(value) => setForm((old) => ({ ...old, full_name_ar: value }))} />
           </Field>
           <Field className="col-12 col-md-6" label={t('Username')}>
             <Input value={form.username} onInput={(value) => setForm((old) => ({ ...old, username: value }))} />
