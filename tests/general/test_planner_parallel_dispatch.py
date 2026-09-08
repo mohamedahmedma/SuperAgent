@@ -1,10 +1,15 @@
 """The planner decides the tool SET; the graph runs it concurrently.
 
-`test_planner_tool_selection.py` covers the one-tool case: the plan picks a tool and
-`tool_choice` requires it. This file is about the case that one deliberately leaves
-alone — a question that needs several tools — and it is a different mechanism, because
-`tool_choice` names one function and cannot express "each of these". The only way to
-require a set is to write the calls and dispatch them.
+`test_planner_tool_selection.py` covers which tool `tool_choice` requires. This file is
+about writing the calls instead of asking for them, because `tool_choice` names one
+function and cannot express "each of these": the only way to require a set is to write
+the calls and dispatch them.
+
+That began as a multi-tool mechanism and is no longer only that. Dispatching also
+removes the model round-trip that would have composed the call, which is worth the same
+on a turn needing one tool as on a turn needing three — and the one-tool turn is this
+deployment's common case. So a single named tool is now dispatched AND left forced: the
+dispatch is the fast path, `forced_tool` is what covers the dispatch declining.
 
 What is asserted here, and why each is a way the architecture quietly stops working:
 
@@ -141,11 +146,23 @@ class ThePlanIsASetOfCalls(unittest.TestCase):
         require one of the tools whose answer is already in hand."""
         self.assertEqual(_both().forced_tool, "")
 
-    def test_one_tool_is_still_forced_rather_than_dispatched(self):
+    def test_one_named_tool_is_both_forced_and_dispatched(self):
+        """The single-tool turn is dispatched too, and `forced_tool` stays set beside it.
+
+        Not a contradiction, and not belt-and-braces: they cover different failures of
+        the same turn. The dispatch removes the round-trip that would have produced the
+        call; `forced_tool` is what happens if the dispatch declines — an undeclared
+        tool, or every argument resolving to nothing — and the two cannot both fire,
+        because seeded results make `_nothing_has_run_yet` false and that is the
+        predicate the forcing middleware reads.
+        """
         plan = _plan(_settled(), about_child=True, needed_tools=[RECORDS_TOOL])
         self.assertEqual(plan.exposed_tools, [RECORDS_TOOL])
         self.assertEqual(plan.forced_tool, RECORDS_TOOL)
-        self.assertEqual(plan.planned_calls, [])
+        self.assertEqual(
+            plan.planned_calls,
+            [{"name": RECORDS_TOOL, "args": {"student_name": "ليلى أحمد"}}],
+        )
 
     def test_a_planned_call_never_names_a_tool_the_profile_does_not_bind(self):
         """A plan naming an unbound tool reaches the graph as a call for a tool that does
@@ -153,10 +170,14 @@ class ThePlanIsASetOfCalls(unittest.TestCase):
         class _KnowledgeOnly(_Agent):
             tools = [KNOWLEDGE_TOOL]
 
-        plan = _both(agent=_KnowledgeOnly())  # the plan names a tool it does not bind
+        plan = _both(agent=_KnowledgeOnly(), resolved_question="q")  # names a tool it does not bind
         self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL])
-        # One surviving call is not worth a dispatch — see `_plan_parallel_calls`.
-        self.assertEqual(plan.planned_calls, [])
+        # The unbound tool is gone from the plan; the bound one is still dispatched. This
+        # is the assertion the lone-call rule used to make for free, and it is the one
+        # that actually matters — emptiness proved nothing about WHICH name survived.
+        self.assertEqual(
+            [call["name"] for call in plan.planned_calls], [KNOWLEDGE_TOOL]
+        )
 
     def test_the_trace_reports_the_names_and_never_the_arguments(self):
         """This trace is persisted per message and streamed to the browser, and a planned
@@ -192,9 +213,14 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
         class _KnowledgeOnlyArgs(_Agent):
             planned_tool_arguments = {KNOWLEDGE_TOOL: {"query": "$resolved_question"}}
 
-        plan = _both(agent=_KnowledgeOnlyArgs())
+        plan = _both(agent=_KnowledgeOnlyArgs(), resolved_question="q")
         self.assertEqual(plan.exposed_tools, [KNOWLEDGE_TOOL, GRADES_TOOL])
-        self.assertEqual(plan.planned_calls, [])
+        # The undeclared tool is absent from the plan and still BOUND above, which is the
+        # whole of "left to the model". The declared one is dispatched — adoption one
+        # tool at a time means the declared half works, not that neither half does.
+        self.assertEqual(
+            [call["name"] for call in plan.planned_calls], [KNOWLEDGE_TOOL]
+        )
 
     def test_an_unknown_placeholder_drops_its_argument_rather_than_sending_the_text(self):
         """A typo in a profile must not become a child's name."""
@@ -215,14 +241,19 @@ class EveryFailureFallsBackToTheOrdinaryLoop(unittest.TestCase):
         # empty and the records call has nothing left in it.
         plan = _plan(no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL],
                      resolved_question="q")
-        self.assertEqual(plan.planned_calls, [])
+        # The records call is what must not be made, and it is not made. What survives is
+        # the knowledge call, whose argument resolved to something.
+        self.assertNotIn(RECORDS_TOOL, [call["name"] for call in plan.planned_calls])
 
-    def test_a_lone_surviving_call_is_not_dispatched(self):
-        """One call ahead of the model buys no concurrency and still spends the planner's
-        credibility on the guess."""
+    def test_a_lone_surviving_call_is_dispatched(self):
+        """One call ahead of the model overlaps with nothing, and still removes the model
+        round-trip that would have produced it. On this deployment the single-tool turn is
+        the common case, so excluding it collected the saving only where it was rarest."""
         plan = _plan(no_child("n/a"), needed_tools=[KNOWLEDGE_TOOL, RECORDS_TOOL],
                      resolved_question="q")
-        self.assertEqual(plan.planned_calls, [])
+        self.assertEqual(
+            plan.planned_calls, [{"name": KNOWLEDGE_TOOL, "args": {"query": "q"}}]
+        )
 
     def test_an_unsettled_child_is_asked_about_rather_than_dispatched_for(self):
         plan = _plan(resolve_child(reference="child", roster=[LAYLA, OMAR]),
@@ -632,6 +663,61 @@ class TheToolsActuallyOverlap(unittest.TestCase):
         self.assertEqual(calls["n"], 2)
 
 
+class OneToolCostsOneModelCallInsteadOfTwo(unittest.TestCase):
+    """The single-tool saving, measured in the only unit that matters.
+
+    A barrier cannot prove this one — there is nothing to overlap with. What is being
+    removed is not concurrency but a round-trip: on the forced path the model spends a
+    whole call emitting a tool call the planner could already spell, and only the SECOND
+    call sees the result. Both paths are asserted here so the difference is a number in
+    a test rather than a claim in a comment.
+    """
+
+    @staticmethod
+    def _grades_tool():
+        @tool(RECORDS_TOOL)
+        def get_student_grades(student_name: str = "") -> str:
+            """Read one child's marks."""
+            return "الرياضيات 87.5%"
+
+        return [get_student_grades]
+
+    def test_a_dispatched_single_call_answers_in_one_model_call(self):
+        ctx = _ctx([PLANNED[1]])
+        model, calls = _scripted(AIMessage(content="الرياضيات 87.5%"))
+        out = _agent(ctx, self._grades_tool(), model).invoke(
+            {"messages": [HumanMessage(content="درجات ليلى كام؟")]}
+        )
+
+        self.assertEqual(calls["n"], 1)
+        results = [m for m in out["messages"] if isinstance(m, ToolMessage)]
+        self.assertEqual([message.name for message in results], [RECORDS_TOOL])
+
+    def test_the_same_turn_on_the_forced_path_costs_two(self):
+        """What the dispatch replaces, kept as the baseline. This is still the path a
+        turn takes when the profile declares no arguments for its tool."""
+        ctx = _ctx([])
+        ctx.forced_tool = RECORDS_TOOL
+        model, calls = _scripted(
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": RECORDS_TOOL,
+                        "args": {"student_name": "ليلى أحمد"},
+                        "id": "call_1",
+                    }
+                ],
+            ),
+            AIMessage(content="الرياضيات 87.5%"),
+        )
+        _agent(ctx, self._grades_tool(), model).invoke(
+            {"messages": [HumanMessage(content="درجات ليلى كام؟")]}
+        )
+
+        self.assertEqual(calls["n"], 2)
+
+
 # --------------------------------------------------------------------------------------
 # The four things that bite
 # --------------------------------------------------------------------------------------
@@ -793,8 +879,22 @@ class TheTwoJumpingHooksHaveADefinedPrecedence(unittest.TestCase):
         )
         self.assertIsNone(again)
 
-    def test_a_plan_of_one_call_does_not_jump(self):
+    def test_a_plan_of_one_call_jumps(self):
+        """A lone call is seeded and jumped like any other. The round-trip it removes is
+        the same round-trip; only the concurrency is absent."""
         ctx = _ctx([PLANNED[0]])
+        hook = runtime._dispatch_planned_tools(ctx)
+        seeded = hook.before_model({"messages": [HumanMessage(content="q")]}, None)
+        self.assertEqual(seeded["jump_to"], "tools")
+        self.assertEqual(
+            [call["name"] for call in seeded["messages"][0].tool_calls], [KNOWLEDGE_TOOL]
+        )
+        # Counted, so the model cannot spend the tool's budget again on a result it has.
+        self.assertEqual(seeded["tool_calls_made"], {KNOWLEDGE_TOOL: 1})
+
+    def test_an_empty_plan_still_does_not_jump(self):
+        """`not calls` is the only bail left, so it is the one worth pinning."""
+        ctx = _ctx([])
         hook = runtime._dispatch_planned_tools(ctx)
         self.assertIsNone(hook.before_model({"messages": [HumanMessage(content="q")]}, None))
 

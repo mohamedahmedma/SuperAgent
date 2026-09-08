@@ -464,6 +464,23 @@ def _plan_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> None:
         # memory without calling anything, which is the other half of the measured
         # failure and the half narrowing alone does not touch.
         plan.forced_tool = narrowed[0]
+        if plannable:
+            # And when the classifier NAMED this tool, the call can be written rather
+            # than requested. `forced_tool` above still costs a full model round-trip
+            # to produce a call the planner could already spell: the model is handed
+            # the tool, required to call it, and only on the NEXT pass does it see the
+            # result. Writing it here collapses those two passes into one.
+            #
+            # `forced_tool` is left set on purpose, as the fallback for when planning
+            # declines — an undeclared tool, or every argument resolving to nothing.
+            # The two cannot both fire: seeding results makes `_nothing_has_run_yet`
+            # false, which is the same predicate the forcing middleware reads.
+            #
+            # Only on the `plannable` path. The family fallback below narrows on
+            # `child_question_kind` alone, and that is a claim about which tools to
+            # OFFER, not confidence enough to call one — the distinction `_needed_tools`
+            # returns `plannable` to preserve.
+            _plan_parallel_calls(plan, narrowed, agent_config, signals.question)
     elif plannable:
         # Several tools, and something named each of them: the turn needs them all.
         # `tool_choice` cannot express that — it names one function — so the only way to
@@ -565,9 +582,15 @@ def _plan_parallel_calls(
     adopt this one tool at a time — an undeclared tool stays bound and behaves exactly as
     it did before.
 
-    Silent no-op unless the profile asked for it, and a no-op again if fewer than two
-    calls survive: dispatching a single call ahead of the model buys none of the
-    concurrency this exists for, while still spending the planner's credibility on it.
+    Silent no-op unless the profile asked for it, and a no-op again if NO call survives.
+
+    A single surviving call is dispatched, and that is a change from when this only ran
+    for two or more. The old rule reasoned about concurrency — one call ahead of the
+    model overlaps with nothing — and that reasoning is still correct and no longer the
+    whole of what this buys. Seeding a call also removes the model round-trip that would
+    have produced it, and on this deployment the single-tool turn is the common case, not
+    the edge: «إيه جدولها؟» and «درجاتها كام؟» each need exactly one record. Excluding
+    them meant the saving was collected only on the questions that rarely arrive.
     """
     if not getattr(agent_config, "parallel_tool_calls", False):
         return
@@ -592,10 +615,13 @@ def _plan_parallel_calls(
         if args:
             calls.append({"name": name, "args": args})
 
-    if len(calls) < 2:
+    if not calls:
         return
     plan.planned_calls = calls
-    plan.reasons.append(f"dispatching {len(calls)} tools together")
+    plan.reasons.append(
+        f"dispatching {len(calls)} tools together" if len(calls) > 1
+        else f"dispatching {calls[0]['name']} ahead of the model"
+    )
 
 
 def _resolve_argument(value: str, plan: TurnPlan, question: str) -> str:

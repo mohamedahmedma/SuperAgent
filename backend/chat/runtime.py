@@ -418,10 +418,12 @@ def _dispatch_planned_tools(ctx: ChatRequestContext):
         (see `planned_tool_calls`), so a tool with budget left can be called again with
         different arguments — which is how the model corrects a planned query that came
         back empty.
-      * **Fewer than two surviving calls means no dispatch at all.** One call ahead of
-        the model buys no concurrency, and the ordinary loop already handles one tool
-        well. Falling back costs a round-trip; seeding a lone call would spend the
-        planner's credibility for nothing.
+      * **No surviving call means no dispatch at all.** A lone surviving call IS
+        dispatched, which it did not used to be. The old rule weighed concurrency only —
+        one call overlaps with nothing — but the round-trip it removes is the same
+        round-trip either way, and the single-tool turn is this deployment's common
+        case. What the planner spends its credibility on is the ARGUMENTS, and those are
+        written from what it already settled, however many calls there are.
 
     ## Ordering against the other hook that jumps
 
@@ -447,7 +449,7 @@ def _dispatch_planned_tools(ctx: ChatRequestContext):
 
         made = dict(state.get("tool_calls_made") or {})
         calls = planned_tool_calls(planned, made)
-        if len(calls) < 2:
+        if not calls:
             return None
 
         for call in calls:
