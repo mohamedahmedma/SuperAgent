@@ -5,6 +5,34 @@ import { pickName, useQuery, useStore } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Alert, Badge, Button, Card, Empty, ErrorNote, NoYearNotice, PageHead, Select, Skeleton, useConfirm } from '../components/Ui.jsx';
 
+function SupervisorCard({ title, rows, users, roleCode, gradeId, lang, busy, onAssign, onRemove }) {
+  const [userId, setUserId] = useState('');
+  useEffect(() => setUserId(''), [gradeId]);
+  const candidates = users.filter((user) => user.is_active !== false && !rows.some((row) => row.user.id === user.id));
+  return <Card title={title} className="h-100">
+    <div className="vstack gap-3">
+      {rows.map(({ user, scopes, grants }) => <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 border rounded-3 p-3" key={user.id}>
+        <div>
+          <strong>{pickName(user, lang) || user.username}</strong>
+          <div className="small text-body-tertiary">{user.username}</div>
+          <div className="d-flex flex-wrap gap-1 mt-2">{scopes.map((scope) => <Badge key={scope}>{scope}</Badge>)}</div>
+        </div>
+        <Button size="sm" variant="danger" disabled={busy} onClick={() => onRemove(user, grants)}>{t('Remove supervisor')}</Button>
+      </div>)}
+      {!rows.length ? <Empty title={t('No supervisor assigned')} /> : null}
+      <div className="d-flex flex-wrap gap-2">
+        <Select className="flex-grow-1" value={userId} disabled={busy} options={[
+          { value: '', label: t('Choose an existing account') },
+          ...candidates.map((user) => ({ value: String(user.id), label: `${pickName(user, lang) || user.username} (${user.username})` }))
+        ]} onChange={setUserId} />
+        <Button disabled={busy || !candidates.some((user) => String(user.id) === userId)} onClick={async () => {
+          if (await onAssign(userId, roleCode)) setUserId('');
+        }}>{t('Assign supervisor')}</Button>
+      </div>
+    </div>
+  </Card>;
+}
+
 export function TeachingStaff() {
   const state = useStore();
   const [gradeId, setGradeId] = useState('');
@@ -43,19 +71,20 @@ export function TeachingStaff() {
     users.filter((user) => user.is_active !== false).forEach((user) => {
       (user.roles || []).forEach((role) => {
         if (role.role_code === 'year_supervisor' && role.scope_type === 'year_level' && String(role.scope_id) === gradeId) {
-          year.push({ user, scope: selectedGrade.code });
+          year.push({ user, scope: selectedGrade.code, grant: role });
         }
         if (role.role_code === 'attendance_supervisor') {
           const gradeWide = role.scope_type === 'year_level' && String(role.scope_id) === gradeId;
           const classScoped = role.scope_type === 'class_section' && gradeClassCodes.has(String(role.scope_code || ''));
-          if (gradeWide || classScoped) attendance.push({ user, scope: gradeWide ? selectedGrade.code : role.scope_code });
+          if (gradeWide || classScoped) attendance.push({ user, scope: gradeWide ? selectedGrade.code : role.scope_code, grant: role });
         }
       });
     });
     const unique = (rows) => {
       const map = new Map();
       rows.forEach((row) => {
-        const current = map.get(row.user.id) || { user: row.user, scopes: [] };
+        const current = map.get(row.user.id) || { user: row.user, scopes: [], grants: [] };
+        current.grants.push(row.grant);
         if (row.scope && !current.scopes.includes(row.scope)) current.scopes.push(row.scope);
         map.set(row.user.id, current);
       });
@@ -93,6 +122,32 @@ export function TeachingStaff() {
     } finally { setRemoving(''); }
   };
 
+  const assignSupervisor = async (userId, roleCode) => {
+    setRemoving(`supervisor:${userId}`); setRemoveError(null);
+    try {
+      await api.addUserRole(userId, { role_code: roleCode, scope_type: 'year_level', scope_id: Number(gradeId) });
+      Store.invalidate('roles:');
+      data.reload();
+      return true;
+    } catch (reason) { setRemoveError(reason); return false; }
+    finally { setRemoving(''); }
+  };
+
+  const removeSupervisor = (user, grants) => ask({
+    title: t('Remove supervisor assignment?'), tone: 'bad', confirmLabel: t('Remove supervisor'),
+    body: t('This removes supervision permissions for this grade. The account and its other assignments are preserved.'),
+    run: async () => {
+      setRemoving(`supervisor:${user.id}`); setRemoveError(null);
+      try {
+        for (const grant of grants) {
+          await api.removeUserRole(user.id, { role_code: grant.role_code, scope_type: grant.scope_type, scope_id: grant.scope_id });
+        }
+        Store.invalidate('roles:');
+      } catch (reason) { setRemoveError(reason); throw reason; }
+      finally { data.reload(); setRemoving(''); }
+    }
+  });
+
   if (!state.year) return <><PageHead title={t('Teaching staff')} /><NoYearNotice /></>;
   if (data.loading && !data.ready) return <><PageHead title={t('Teaching staff')} /><Card><Skeleton rows={8} /></Card></>;
   if (data.error) return <><PageHead title={t('Teaching staff')} /><ErrorNote error={data.error} onRetry={data.reload} /></>;
@@ -111,25 +166,14 @@ export function TeachingStaff() {
       {selectedGrade ? <>
         <div className="row g-3">
           <div className="col-12 col-lg-6">
-            <Card title={t('Class supervisor')} className="h-100">
-              {supervisors.year.length ? <div className="vstack gap-2">
-                {supervisors.year.map(({ user }) => <div className="border rounded-3 p-3" key={user.id}>
-                  <strong>{pickName(user, state.lang) || user.username}</strong>
-                  <div className="small text-body-tertiary">{user.username}</div>
-                </div>)}
-              </div> : <Empty title={t('No class supervisor assigned')} />}
-            </Card>
+            <SupervisorCard title={t('Class supervisor')} rows={supervisors.year} users={users}
+              roleCode="year_supervisor" gradeId={gradeId} lang={state.lang} busy={!!removing}
+              onAssign={assignSupervisor} onRemove={removeSupervisor} />
           </div>
           <div className="col-12 col-lg-6">
-            <Card title={t('Attendance supervisor')} className="h-100">
-              {supervisors.attendance.length ? <div className="vstack gap-2">
-                {supervisors.attendance.map(({ user, scopes }) => <div className="border rounded-3 p-3" key={user.id}>
-                  <strong>{pickName(user, state.lang) || user.username}</strong>
-                  <div className="small text-body-tertiary">{user.username}</div>
-                  {scopes.length ? <div className="d-flex flex-wrap gap-1 mt-2">{scopes.map((scope) => <Badge key={scope}>{scope}</Badge>)}</div> : null}
-                </div>)}
-              </div> : <Empty title={t('No attendance supervisor assigned')} />}
-            </Card>
+            <SupervisorCard title={t('Attendance supervisor')} rows={supervisors.attendance} users={users}
+              roleCode="attendance_supervisor" gradeId={gradeId} lang={state.lang} busy={!!removing}
+              onAssign={assignSupervisor} onRemove={removeSupervisor} />
           </div>
         </div>
 

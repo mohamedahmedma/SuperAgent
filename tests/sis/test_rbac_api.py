@@ -330,6 +330,30 @@ class TestScopesBite:
         assert response.status_code == 403, response.text
         assert "attendance.read" in response.json()["detail"]["message"]
 
+    def test_a_teacher_cannot_use_the_timetable_save_endpoint(
+        self, client: TestClient, teacher_of_p1a: dict[str, str]
+    ) -> None:
+        """The UI hides Save, and the server remains the actual permission boundary."""
+        response = client.put(
+            "/v1/timetable/week",
+            headers=teacher_of_p1a,
+            json={
+                "academic_year_code": YEAR,
+                "entries": [
+                    {
+                        "class_code": "P1A",
+                        "term_code": TERM,
+                        "day_of_week": "sunday",
+                        "period_number": 1,
+                        "subject_code": "MATH",
+                    }
+                ],
+                "clear_slots": [],
+            },
+        )
+        assert response.status_code == 403, response.text
+        assert "timetable.write" in response.json()["detail"]["message"]
+
     def test_an_attendance_supervisor_writes_only_the_class_she_was_given(
         self, client: TestClient, ids: dict[str, int]
     ) -> None:

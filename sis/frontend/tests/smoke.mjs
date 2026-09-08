@@ -175,6 +175,17 @@ function newWindow(script, language = 'en', session = '') {
         { permission: 'students.read', scope_type: 'year_level', scope_id: 3, scope_code: 'Y3' }
       ];
     }
+    if (session === 'smoke-viewer' && method === 'GET' && url.includes('/v1/auth/me')) {
+      payload = JSON.parse(JSON.stringify(payload));
+      payload.profile.roles = [
+        { role_code: 'school_owner', scope_type: 'school', scope_id: 1 }
+      ];
+      payload.profile.permissions = ['structure.read', 'timetable.read'];
+      payload.profile.grants = [
+        { permission: 'structure.read', scope_type: 'school', scope_id: 1, scope_code: 'MAIN' },
+        { permission: 'timetable.read', scope_type: 'school', scope_id: 1, scope_code: 'MAIN' }
+      ];
+    }
     const body = JSON.stringify(payload);
     return Promise.resolve({
       ok: true,
@@ -288,6 +299,74 @@ async function main() {
     } else {
       console.log(`  ok   ${screen.hash}`);
     }
+  }
+
+  /* Timetable edits stay in the browser until the authorised user presses Save. The save
+     then sends additions and removals together to the transactional endpoint. */
+  const saveTimetable = [...window.document.querySelectorAll('button')].find(
+    (button) => button.textContent.trim() === 'Save timetable'
+  );
+  assert.ok(saveTimetable, 'an authorised timetable editor has no Save button');
+  assert.ok(saveTimetable.disabled, 'Save timetable must start disabled with no changes');
+  const subjectChip = [...window.document.querySelectorAll('.sis-subject-chip')].find(
+    (button) => button.textContent.includes('Mathematics')
+  );
+  const emptySlot = [...window.document.querySelectorAll('.sis-timetable-slot')].find(
+    (cell) => cell.querySelector('.sis-empty-slot')
+  );
+  assert.ok(subjectChip && emptySlot, 'the timetable fixture has no editable empty slot');
+  const writesBeforeEdit = requests.filter((line) => line.startsWith('PUT /v1/timetable')).length;
+  subjectChip.click();
+  await settle(window, 40);
+  emptySlot.click();
+  await settle(window, 60);
+  assert.equal(
+    requests.filter((line) => line.startsWith('PUT /v1/timetable')).length,
+    writesBeforeEdit,
+    'editing a timetable cell wrote to the service before Save was pressed'
+  );
+  assert.ok(!saveTimetable.disabled, 'editing a timetable cell did not enable Save');
+  saveTimetable.click();
+  await settle(window, 100);
+  const timetableWrite = bodies.find((entry) => entry.line === 'PUT /v1/timetable/week');
+  assert.ok(timetableWrite, `Save timetable sent no database request. Saw: ${bodies.map((e) => e.line)}`);
+  const timetableBody = JSON.parse(timetableWrite.body);
+  assert.equal(timetableBody.academic_year_code, YEAR);
+  assert.equal(timetableBody.entries.length, 1);
+  assert.equal(timetableBody.entries[0].subject_code, 'MATH');
+  assert.deepEqual(timetableBody.clear_slots, []);
+
+  const timetableViewer = newWindow(script, 'en', 'smoke-viewer');
+  await settle(timetableViewer.window, 180);
+  timetableViewer.window.location.hash = '#/timetable';
+  await settle(timetableViewer.window, 140);
+  assert.ok(
+    timetableViewer.window.document.body.textContent.includes('View only'),
+    'a read-only timetable user was not shown the read-only state'
+  );
+  assert.ok(
+    ![...timetableViewer.window.document.querySelectorAll('button')].some(
+      (button) => button.textContent.trim() === 'Save timetable'
+    ),
+    'a read-only timetable user was shown the Save button'
+  );
+  errors.push(...timetableViewer.errors);
+
+  window.location.hash = '#/teacherSetup';
+  await settle(window, 120);
+  const roleSelect = [...window.document.querySelectorAll('[aria-haspopup="listbox"]')].find((button) =>
+    button.textContent.trim() === 'Teacher');
+  assert.ok(roleSelect, 'staff creation must offer supervisor roles');
+  for (const role of ['Class supervisor', 'Attendance supervisor']) {
+    roleSelect.click();
+    await settle(window, 40);
+    const option = [...window.document.querySelectorAll('[role="option"]')].find((item) => item.textContent.trim() === role);
+    assert.ok(option, `missing role ${role}`);
+    option.click();
+    await settle(window, 80);
+    assert.ok(window.document.body.textContent.includes('Supervision grade'));
+    assert.ok(!window.document.body.textContent.includes('Subject, grade, and track eligibility'));
+    assert.ok(window.document.body.textContent.includes('Create supervisor account'));
   }
 
   /* The finder must do more than render. Submit a real value and pin the request's

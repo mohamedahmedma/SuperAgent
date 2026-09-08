@@ -543,6 +543,74 @@ def test_a_free_period_and_an_unplanned_slot_are_different_things(
     assert again.status_code == 200 and again.json()["removed"] == 0
 
 
+def test_save_button_changes_are_persisted_as_one_database_update(
+    client: TestClient, registrar: dict[str, str], school: None
+) -> None:
+    """The UI's Save request inserts and clears slots, and a fresh read sees both."""
+    assert _periods(client, registrar, count=3).status_code == 200
+    assert _place(
+        client,
+        registrar,
+        [_lesson("P1A", "sunday", 1), _lesson("P1A", "monday", 2)],
+    ).status_code == 200
+
+    saved = client.put(
+        "/v1/timetable/week",
+        headers=registrar,
+        json={
+            "academic_year_code": YEAR,
+            "entries": [_lesson("P1A", "tuesday", 3)],
+            "clear_slots": [
+                {
+                    "class_code": "P1A",
+                    "term_code": TERM,
+                    "day_of_week": "monday",
+                    "period_number": 2,
+                }
+            ],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    # A separate request proves this is database state, not the response echoed by the UI.
+    entries = _week(client, registrar, "P1A")["entries"]
+    assert [
+        (row["day_of_week"], row["period_number"], row["subject_code"])
+        for row in entries
+    ] == [("sunday", 1, "MATH"), ("tuesday", 3, "MATH")]
+
+
+def test_save_changes_rolls_back_clears_when_one_new_lesson_is_invalid(
+    client: TestClient, registrar: dict[str, str], school: None
+) -> None:
+    """A failed Save never leaves the database with only half the visible changes."""
+    assert _periods(client, registrar, count=3).status_code == 200
+    assert _place(client, registrar, [_lesson("P1A", "sunday", 1)]).status_code == 200
+
+    refused = client.put(
+        "/v1/timetable/week",
+        headers=registrar,
+        json={
+            "academic_year_code": YEAR,
+            # Physics exists, but is not assigned to the primary rung.
+            "entries": [_lesson("P1A", "monday", 2, "PHYS")],
+            "clear_slots": [
+                {
+                    "class_code": "P1A",
+                    "term_code": TERM,
+                    "day_of_week": "sunday",
+                    "period_number": 1,
+                }
+            ],
+        },
+    )
+    assert refused.status_code == 409, refused.text
+    assert [
+        (row["day_of_week"], row["period_number"], row["subject_code"])
+        for row in _week(client, registrar, "P1A")["entries"]
+    ] == [("sunday", 1, "MATH")]
+
+
 def test_the_week_read_carries_the_grid_and_counts_its_own_slots(
     client: TestClient, registrar: dict[str, str], school: None
 ) -> None:

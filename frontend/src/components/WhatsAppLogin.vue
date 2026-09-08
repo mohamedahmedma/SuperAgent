@@ -97,6 +97,7 @@
           <span class="field-input">
             <i class="fa-solid fa-key"></i>
             <input
+              class="wa-otp-input"
               ref="codeInput"
               v-model="wa.code"
               type="text"
@@ -319,6 +320,34 @@ onBeforeUnmount(() => {
   text-align: center;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 1.15rem;
+}
+
+/* The shared field style reserves room for a leading icon. That makes a six-digit OTP
+   look off-centre, especially with its deliberate character spacing. OTPs are a single,
+   fixed-width value, so keep the key as an overlay and centre the digits in the full bar. */
+.wa-code-form .field-input {
+  min-height: 3.5rem;
+}
+
+.wa-code-form .field-input > i {
+  pointer-events: none;
+}
+
+.wa-code-form .field-input .wa-otp-input {
+  min-height: 3.5rem !important;
+  padding-inline: 1rem !important;
+  direction: ltr !important;
+  letter-spacing: 0.42em !important;
+  text-align: center !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: clamp(1.1rem, 4vw, 1.3rem) !important;
+  font-variant-numeric: tabular-nums;
+  caret-color: #20bddc;
+}
+
+.wa-code-form .field-input .wa-otp-input::placeholder {
+  letter-spacing: 0.28em;
+  opacity: 0.72;
 }
 
 .wa-error {

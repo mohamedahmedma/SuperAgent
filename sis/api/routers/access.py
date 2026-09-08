@@ -458,6 +458,50 @@ class UserCreateIn(BaseModel):
     is_active: bool = True
 
 
+class SupervisorCreateIn(UserCreateIn):
+    role_code: RoleCode
+    year_level_id: int
+
+
+@router.post("/rbac/supervisors", response_model=UserOut, status_code=201)
+def create_supervisor(
+    body: SupervisorCreateIn, manager: RoleManager, uow_factory: UowFactoryDep
+) -> UserOut:
+    """Create the supervisor account and its grade grant in one transaction."""
+    if body.role_code not in {RoleCode.YEAR_SUPERVISOR, RoleCode.ATTENDANCE_SUPERVISOR}:
+        raise _refuse(422, "invalid_value", "Choose a supervisor role.")
+    with uow_factory() as uow:
+        session = uow._session
+        _authorised_to_grant(session, manager, body.role_code.value)
+        _validate_scope(session, manager, ScopeType.YEAR_LEVEL, body.year_level_id)
+        grade = session.get(m.YearLevel, body.year_level_id)
+        if body.school_id is not None and body.school_id != grade.school_id:
+            raise _refuse(403, "not_authorized", "That grade belongs to another school.")
+        username = body.username.strip()
+        if not username:
+            raise _refuse(422, "invalid_value", "A username is required.")
+        if session.scalar(select(m.User.id).where(m.User.username == username)) is not None:
+            raise _refuse(409, "duplicate_code", "That username already exists.")
+        role = session.scalar(select(m.Role).where(m.Role.code == body.role_code.value))
+        if role is None:
+            raise _refuse(404, "unknown_reference", "That role is not configured.")
+        user = m.User(
+            username=username, password_hash=hash_password(body.password),
+            email=body.email.strip(), full_name_en=body.full_name_en.strip(),
+            full_name_ar=body.full_name_ar.strip(), preferred_language=body.preferred_language,
+            school_id=grade.school_id, is_active=body.is_active,
+        )
+        session.add(user)
+        session.flush()
+        session.add(m.UserRole(
+            user_id=user.id, role_id=role.id, scope_type=ScopeType.YEAR_LEVEL.value,
+            scope_id=grade.id, granted_by=manager.username,
+        ))
+        session.flush()
+        uow.commit()
+        return _user_out(session, user)
+
+
 class UserUpdateIn(BaseModel):
     password: str | None = Field(default=None, min_length=PASSWORD_MIN_LENGTH, max_length=1024)
     email: str | None = Field(default=None, max_length=255)
