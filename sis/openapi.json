@@ -501,6 +501,82 @@
         }
       }
     },
+    "/v1/rbac/supervisors": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Create Supervisor",
+        "description": "Create the supervisor account and its grade grant in one transaction.",
+        "operationId": "create_supervisor_v1_rbac_supervisors_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupervisorCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/rbac/users": {
       "post": {
         "tags": [
@@ -3669,6 +3745,124 @@
           },
           "404": {
             "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A supplied value is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "timetable"
+        ],
+        "summary": "Save timetable changes",
+        "description": "Persists all additions, edits and cleared slots from one timetable editing session in a single transaction. Either every visible change reaches the database or none does. The caller must hold `timetable.write` for every class named in either part of the request.",
+        "operationId": "save_week_changes_v1_timetable_week_put",
+        "parameters": [
+          {
+            "name": "X-School-Code",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-School-Code"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimetableChangesIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TimetableEntryOut"
+                  },
+                  "title": "Response Save Week Changes V1 Timetable Week Put"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or unknown API key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The presented key does not carry the scope this route requires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing on file under the code named in the path or query.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with what is already stored.",
             "content": {
               "application/json": {
                 "schema": {
@@ -15335,6 +15529,77 @@
         ],
         "title": "SubjectOut"
       },
+      "SupervisorCreateIn": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 8,
+            "title": "Password"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Email",
+            "default": ""
+          },
+          "full_name_en": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Full Name En",
+            "default": ""
+          },
+          "full_name_ar": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Full Name Ar",
+            "default": ""
+          },
+          "preferred_language": {
+            "type": "string",
+            "pattern": "^(en|ar)$",
+            "title": "Preferred Language",
+            "default": "en"
+          },
+          "school_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "School Id"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "role_code": {
+            "$ref": "#/components/schemas/RoleCode"
+          },
+          "year_level_id": {
+            "type": "integer",
+            "title": "Year Level Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password",
+          "role_code",
+          "year_level_id"
+        ],
+        "title": "SupervisorCreateIn"
+      },
       "SystemStatus": {
         "type": "string",
         "enum": [
@@ -16044,6 +16309,37 @@
         ],
         "title": "TermPlanOut",
         "description": "What creating or re-syncing a year did to its term sections."
+      },
+      "TimetableChangesIn": {
+        "properties": {
+          "academic_year_code": {
+            "type": "string",
+            "title": "Academic Year Code",
+            "examples": [
+              "2025-2026"
+            ]
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/TimetableEntryIn"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "clear_slots": {
+            "items": {
+              "$ref": "#/components/schemas/TimetableSlotIn"
+            },
+            "type": "array",
+            "title": "Clear Slots"
+          }
+        },
+        "type": "object",
+        "required": [
+          "academic_year_code"
+        ],
+        "title": "TimetableChangesIn",
+        "description": "The additions, edits and removals made before the user pressed Save."
       },
       "TimetableEntriesIn": {
         "properties": {
