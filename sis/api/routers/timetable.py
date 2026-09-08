@@ -177,6 +177,14 @@ class TimetableSlotsIn(BaseModel):
     slots: list[TimetableSlotIn]
 
 
+class TimetableChangesIn(BaseModel):
+    """The additions, edits and removals made before the user pressed Save."""
+
+    academic_year_code: str = Field(examples=["2025-2026"])
+    entries: list[TimetableEntryIn] = Field(default_factory=list)
+    clear_slots: list[TimetableSlotIn] = Field(default_factory=list)
+
+
 class TimetableEntryOut(BaseModel):
     academic_year_code: str
     class_code: str
@@ -442,6 +450,60 @@ def place_lessons(
             ],
         )
     return [TimetableEntryOut.of(entry) for entry in placed]
+
+
+@router.put(
+    "/timetable/week",
+    response_model=list[TimetableEntryOut],
+    summary="Save timetable changes",
+    description="Persists all additions, edits and cleared slots from one timetable editing "
+    "session in a single transaction. Either every visible change reaches the database or "
+    "none does. The caller must hold `timetable.write` for every class named in either "
+    "part of the request.",
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+def save_week_changes(
+    body: TimetableChangesIn, timetables: Timetables, caller: Registrar
+) -> list[TimetableEntryOut]:
+    class_codes = {entry.class_code for entry in body.entries} | {
+        slot.class_code for slot in body.clear_slots
+    }
+    caller.narrow_all(
+        Permission.TIMETABLE_WRITE,
+        lambda scopes: [
+            scopes.for_class(
+                academic_year_code=body.academic_year_code, class_code=code
+            )
+            for code in class_codes
+        ],
+    )
+    with domain_errors():
+        stored = timetables.save_changes(
+            AcademicYearCode(body.academic_year_code),
+            [
+                TimetableEntry(
+                    slot=TimetableSlot(
+                        class_code=entry.class_code,
+                        term_code=entry.term_code,
+                        day_of_week=entry.day_of_week,
+                        period_number=entry.period_number,
+                    ),
+                    academic_year_code=body.academic_year_code,
+                    subject_code=entry.subject_code,
+                )
+                for entry in body.entries
+            ],
+            [
+                TimetableSlot(
+                    class_code=slot.class_code,
+                    term_code=slot.term_code,
+                    day_of_week=slot.day_of_week,
+                    period_number=slot.period_number,
+                )
+                for slot in body.clear_slots
+            ],
+        )
+    return [TimetableEntryOut.of(entry) for entry in stored]
 
 
 @router.post(

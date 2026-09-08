@@ -204,74 +204,51 @@ class TimetableService:
         if not entries:
             return ()
         with self._uow_factory() as uow:
-            _, school = self._require_year_and_school(uow, academic_year_code)
-            open_days = set(school.working_days)
-            grid = {
-                period.period_number: period
-                for period in uow.timetable.list_periods(SchoolCode(str(school.code)))
-            }
-            if not grid:
-                raise DomainRuleViolation(
-                    f"school {school.code} has no timetable periods yet; set the school's "
-                    "day before timetabling a lesson into it",
-                    field="period_number",
-                )
+            prepared = self._prepare_entries(uow, academic_year_code, entries)
+            uow.timetable.upsert_entries(prepared)
+            uow.commit()
+        return tuple(prepared)
 
-            seen: set[tuple[str, str, str, int]] = set()
-            prepared: list[TimetableEntry] = []
-            for entry in entries:
-                slot = entry.slot
-                if slot.key in seen:
-                    raise TimetableConflict(
-                        f"two lessons were sent for {slot.class_code} on "
-                        f"{slot.day_of_week} period {slot.period_number}",
-                        field="slot",
-                    )
-                seen.add(slot.key)
+    def save_changes(
+        self,
+        academic_year_code: AcademicYearCode,
+        entries: Sequence[TimetableEntry],
+        cleared_slots: Sequence[TimetableSlot],
+    ) -> Sequence[TimetableEntry]:
+        """Persist one editing session as a single database transaction.
 
-                # Requirement 2: the week is the school's, never a constant.
-                if slot.day_of_week not in open_days:
+        The timetable screen works on a draft. Pressing Save can therefore contain both
+        lessons to insert/update and slots to remove. Keeping those two intentions in one
+        service call matters: two HTTP calls could save the additions and then fail before
+        the removals, leaving a week that the user never approved.
+        """
+        if not entries and not cleared_slots:
+            return ()
+
+        with self._uow_factory() as uow:
+            self._require_year_and_school(uow, academic_year_code)
+            prepared = self._prepare_entries(uow, academic_year_code, entries)
+
+            clear_keys: set[tuple[str, str, str, int]] = set()
+            for slot in cleared_slots:
+                if slot.key in clear_keys:
                     raise ValidationError(
-                        f"school {school.code} does not open on {slot.day_of_week}; its "
-                        "week is " + ", ".join(day.value for day in school.working_days),
-                        field="day_of_week",
+                        "each cleared timetable slot may appear once", field="clear_slots"
                     )
-                period = grid.get(slot.period_number)
-                if period is None:
-                    raise ValidationError(
-                        f"school {school.code} has no period {slot.period_number}",
-                        field="period_number",
-                    )
-                if not period.is_teaching:
-                    raise DomainRuleViolation(
-                        f"period {slot.period_number} is not a teaching period",
-                        field="period_number",
-                    )
-
-                section = self._require_class(uow, academic_year_code, slot.class_code)
+                clear_keys.add(slot.key)
+                self._require_class(uow, academic_year_code, slot.class_code)
                 self._require_term(uow, academic_year_code, slot.term_code)
 
-                # Stage 5's rule, one table further on: a subject appears only where it is
-                # assigned, and the rung's track is what makes the two sections separate.
-                if entry.subject_code is not None:
-                    assigned = uow.subjects.list_for_year(
-                        academic_year_code,
-                        include_inactive=False,
-                        year_level_code=section.year_level_code,
-                    )
-                    if not any(
-                        str(subject.code) == str(entry.subject_code)
-                        for subject in assigned
-                    ):
-                        raise DomainRuleViolation(
-                            f"{entry.subject_code} is not assigned to "
-                            f"{section.year_level_code}, so {slot.class_code} does not "
-                            "teach it",
-                            field="subject_code",
-                        )
+            overlap = clear_keys.intersection(entry.slot.key for entry in prepared)
+            if overlap:
+                raise TimetableConflict(
+                    "a timetable slot cannot be saved and cleared in the same request",
+                    field="slot",
+                )
 
-                prepared.append(replace(entry, academic_year_code=academic_year_code))
-
+            # Repositories only stage work. Both statements become durable at this one
+            # commit, and the unit of work rolls both back if either statement fails.
+            uow.timetable.delete_entries(cleared_slots)
             uow.timetable.upsert_entries(prepared)
             uow.commit()
         return tuple(prepared)
@@ -296,6 +273,81 @@ class TimetableService:
         return removed
 
     # -- Shared checks ------------------------------------------------------
+
+    def _prepare_entries(
+        self,
+        uow: UnitOfWork,
+        academic_year_code: AcademicYearCode,
+        entries: Sequence[TimetableEntry],
+    ) -> list[TimetableEntry]:
+        """Validate a batch and bind every row to ``academic_year_code`` without writing."""
+        if not entries:
+            return []
+
+        _, school = self._require_year_and_school(uow, academic_year_code)
+        open_days = set(school.working_days)
+        grid = {
+            period.period_number: period
+            for period in uow.timetable.list_periods(SchoolCode(str(school.code)))
+        }
+        if not grid:
+            raise DomainRuleViolation(
+                f"school {school.code} has no timetable periods yet; set the school's "
+                "day before timetabling a lesson into it",
+                field="period_number",
+            )
+
+        seen: set[tuple[str, str, str, int]] = set()
+        prepared: list[TimetableEntry] = []
+        for entry in entries:
+            slot = entry.slot
+            if slot.key in seen:
+                raise TimetableConflict(
+                    f"two lessons were sent for {slot.class_code} on "
+                    f"{slot.day_of_week} period {slot.period_number}",
+                    field="slot",
+                )
+            seen.add(slot.key)
+
+            if slot.day_of_week not in open_days:
+                raise ValidationError(
+                    f"school {school.code} does not open on {slot.day_of_week}; its "
+                    "week is " + ", ".join(day.value for day in school.working_days),
+                    field="day_of_week",
+                )
+            period = grid.get(slot.period_number)
+            if period is None:
+                raise ValidationError(
+                    f"school {school.code} has no period {slot.period_number}",
+                    field="period_number",
+                )
+            if not period.is_teaching:
+                raise DomainRuleViolation(
+                    f"period {slot.period_number} is not a teaching period",
+                    field="period_number",
+                )
+
+            section = self._require_class(uow, academic_year_code, slot.class_code)
+            self._require_term(uow, academic_year_code, slot.term_code)
+
+            if entry.subject_code is not None:
+                assigned = uow.subjects.list_for_year(
+                    academic_year_code,
+                    include_inactive=False,
+                    year_level_code=section.year_level_code,
+                )
+                if not any(
+                    str(subject.code) == str(entry.subject_code) for subject in assigned
+                ):
+                    raise DomainRuleViolation(
+                        f"{entry.subject_code} is not assigned to "
+                        f"{section.year_level_code}, so {slot.class_code} does not "
+                        "teach it",
+                        field="subject_code",
+                    )
+
+            prepared.append(replace(entry, academic_year_code=academic_year_code))
+        return prepared
 
     @staticmethod
     def _require_school(uow: UnitOfWork, school_code: SchoolCode) -> School:

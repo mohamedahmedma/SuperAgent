@@ -692,5 +692,6 @@
       "day_of_week": "sunday", "period_number": 1, "subject_code": "MATH", "teacher_staff_number": null
     }],
     "teaching_slots": 5
-  }
+  },
+  "PUT /v1/timetable/week": []
 }

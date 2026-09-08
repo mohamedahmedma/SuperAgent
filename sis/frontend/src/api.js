@@ -695,6 +695,13 @@ var api = {
   placeTimetableLessons: function (academicYear, entries) {
     return put('/timetable', { academic_year_code: academicYear, entries: entries });
   },
+  saveTimetableChanges: function (academicYear, entries, clearSlots) {
+    return put('/timetable/week', {
+      academic_year_code: academicYear,
+      entries: entries,
+      clear_slots: clearSlots
+    });
+  },
   clearTimetableSlots: function (academicYear, slots) {
     return post('/timetable/clear', { academic_year_code: academicYear, slots: slots });
   },

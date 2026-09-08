@@ -12,7 +12,7 @@ const APPEARANCES = [
 
 const LANGUAGES = [
   { value: 'en', label: 'English', note: 'Latin names first' },
-  { value: 'ar', label: 'العربية', note: 'Arabic names first, right to left' }
+  { value: 'ar', label: 'Arabic', note: 'Arabic names first, right to left' }
 ];
 
 function Group({ title, hint, children }) {

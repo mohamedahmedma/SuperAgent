@@ -87,7 +87,8 @@ const NAV = [
   { name: 'homework', label: 'Homework', icon: 'upload', roles: ['teacher'] },
   { name: 'marks', label: 'Marks', icon: 'marks', roles: ['teacher', 'year_supervisor'] },
   { name: 'attendance', label: 'Take attendance', icon: 'calendar', roles: ['teacher', 'attendance_supervisor', 'year_supervisor'] },
-  { name: 'timetable', label: 'Timetable', icon: 'timetable', roles: ['year_supervisor', 'teacher'] }
+  { name: 'timetable', label: 'Timetable', icon: 'timetable',
+    roles: ['system_admin', 'school_owner', 'principal', 'year_supervisor', 'teacher'] }
 ];
 
 /* Which nav item is lit for a route that is not in the nav. The drill-down screens are
