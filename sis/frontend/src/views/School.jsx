@@ -516,10 +516,10 @@ export function School({ params = {} }) {
   const [addingLevel, setAddingLevel] = useState(false);
   const [addingYear, setAddingYear] = useState(false);
   const [activeTrack, setActiveTrack] = useState('');
-  const mayEditStructure = Store.can('structure.write');
   const isAdmin = Store.roles().indexOf('admin') >= 0;
   const heldRoles = Store.roles();
   const isPrincipal = heldRoles.indexOf('school_manager') >= 0 && heldRoles.indexOf('admin') < 0 && heldRoles.indexOf('school_owner') < 0;
+  const mayEditStructure = Store.can('structure.write') || isPrincipal;
 
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const schoolList = schools.value || [];
@@ -609,17 +609,17 @@ export function School({ params = {} }) {
         actions={
           isPrincipal ? (
             <Button variant="primary" disabled={!code} onClick={() => setAddingYear(!addingYear)}>
-              {addingYear ? t('Close') : t('Create academic year')}
+              {addingYear ? t('Close') : t('Set up a new academic year')}
             </Button>
           ) : mayEditStructure ? <>
             {isAdmin ? <Button onClick={() => setAddingSchool(!addingSchool)}>
               {addingSchool ? t('Close') : t('Add school')}
             </Button> : null}
             <Button disabled={!code} onClick={() => setAddingLevel(!addingLevel)}>
-              {addingLevel ? t('Close') : t('Add rung')}
+              {addingLevel ? t('Close') : t('Edit grades')}
             </Button>
             <Button variant="primary" disabled={!code} onClick={() => setAddingYear(!addingYear)}>
-              {addingYear ? t('Close') : t('Add academic year')}
+              {addingYear ? t('Close') : t('Set up a new academic year')}
             </Button>
           </> : null
         }

@@ -157,10 +157,47 @@ function RemoveCell({ studentNumber, guardian, onChanged }) {
   );
 }
 
+function EditGuardianCell({ studentNumber, guardian, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [form, setForm] = useState(() => ({
+    full_name_ar: guardian.full_name_ar || '', full_name_en: guardian.full_name_en || '',
+    relationship_type: guardian.relationship_type || 'guardian',
+    relationship_label: guardian.relationship_label || '', is_primary_contact: !!guardian.is_primary_contact
+  }));
+  if (!open) return <Button size="sm" variant="quiet" onClick={() => setOpen(true)}>{t('Edit')}</Button>;
+  const save = async () => {
+    setSaving(true); setError(null);
+    try {
+      await api.updateGuardianDetails(studentNumber, guardian.phone, form);
+      setOpen(false); Store.toast(t('Guardian details updated.'), 'success'); onChanged();
+    } catch (caught) { setError(caught); } finally { setSaving(false); }
+  };
+  return <div className="vstack gap-2" style={{ minWidth: '17rem' }}>
+    <Field label={t('Arabic name')}><Input className="sis-name-ar" value={form.full_name_ar}
+      onInput={(value) => setForm((old) => ({ ...old, full_name_ar: value }))} /></Field>
+    <Field label={t('English name')}><Input value={form.full_name_en}
+      onInput={(value) => setForm((old) => ({ ...old, full_name_en: value }))} /></Field>
+    <Field label={t('Relationship')}><select className="form-select" value={form.relationship_type}
+      onChange={(event) => setForm((old) => ({ ...old, relationship_type: event.target.value }))}>
+      {['father', 'mother', 'guardian', 'sibling', 'grandparent', 'other'].map((value) => <option key={value} value={value}>{t(value)}</option>)}
+    </select></Field>
+    <Field label={t('Relationship label')}><Input value={form.relationship_label}
+      onInput={(value) => setForm((old) => ({ ...old, relationship_label: value }))} /></Field>
+    <label className="form-check"><input className="form-check-input" type="checkbox" checked={form.is_primary_contact}
+      onChange={(event) => setForm((old) => ({ ...old, is_primary_contact: event.target.checked }))} /> {t('Primary contact')}</label>
+    <ErrorNote error={error} />
+    <div className="d-flex gap-2"><Button size="sm" variant="primary" pending={saving} onClick={save}>{t('Save')}</Button>
+      <Button size="sm" variant="quiet" disabled={saving} onClick={() => setOpen(false)}>{t('Cancel')}</Button></div>
+  </div>;
+}
+
 /* -- Look up one child ----------------------------------------------------------- */
 
 function StudentLookup({ initial }) {
   const state = useStore();
+  const mayEdit = Store.can('guardians.write');
   const [typed, setTyped] = useState(initial || '');
   const [asked, setAsked] = useState(initial || '');
 
@@ -256,7 +293,7 @@ function StudentLookup({ initial }) {
               hide: 'lg',
               cell: (row) => row.relationship_label || row.relationship_type
             },
-            {
+            ...(mayEdit ? [{
               key: 'access',
               header: t('Records access'),
               cell: (row) => (
@@ -271,14 +308,17 @@ function StudentLookup({ initial }) {
                   ) : null}
                 </div>
               )
-            },
-            {
+            }, {
+              key: 'edit',
+              header: '',
+              cell: (row) => <EditGuardianCell studentNumber={asked} guardian={row} onChanged={result.reload} />
+            }, {
               key: 'remove',
               header: '',
               cell: (row) => (
                 <RemoveCell studentNumber={asked} guardian={row} onChanged={result.reload} />
               )
-            }
+            }] : [])
           ]}
         />
       )}
@@ -434,6 +474,7 @@ function PhoneLookup() {
 /* -- Screen ---------------------------------------------------------------------- */
 
 export function Guardians({ params = {} }) {
+  const mayEdit = Store.can('guardians.write');
   return (
     <>
       <PageHead
@@ -442,7 +483,7 @@ export function Guardians({ params = {} }) {
       />
 
       <div className="vstack gap-4">
-        <ImportFlow
+        {mayEdit ? <ImportFlow
           kind="guardians"
           template={TEMPLATE}
           label={t('Choose the guardians sheet')}
@@ -455,7 +496,7 @@ export function Guardians({ params = {} }) {
             return api.previewGuardians(form);
           }}
           onCommit={(batchId) => api.commitGuardians(batchId)}
-        />
+        /> : null}
 
         <StudentLookup initial={params.student} />
         <PhoneLookup />

@@ -172,6 +172,16 @@ class LinkOut(BaseModel):
     can_view_records: bool
 
 
+class GuardianDetailsIn(BaseModel):
+    """The editable contact and relationship facts; the phone remains the identity."""
+
+    full_name_ar: str = Field(default="", max_length=240)
+    full_name_en: str = Field(default="", max_length=240)
+    relationship_type: RelationshipType
+    relationship_label: str = Field(default="", max_length=160)
+    is_primary_contact: bool
+
+
 class ResolveIn(BaseModel):
     """A number to look up. In a body, never a path — see the route's own docstring."""
 
@@ -372,6 +382,59 @@ def set_records_access(
         student_number=str(number),
         phone=str(parsed),
         can_view_records=body.can_view_records,
+    )
+
+
+@router.patch(
+    "/students/{student_number}/guardians/{phone}/details",
+    response_model=GuardianOut,
+    summary="Edit a guardian's contact details and this child's relationship",
+    description="Updates the guardian's displayed name for all of their linked children and "
+    "updates the relationship/primary-contact facts only for this child. Phone number is "
+    "the guardian identity and is intentionally not changed by this route.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def update_guardian_details(
+    student_number: str,
+    phone: str,
+    body: Annotated[GuardianDetailsIn, Body()],
+    caller: Registrar,
+    uow_factory: UnitOfWorkFactory,
+) -> GuardianOut:
+    from dataclasses import replace
+
+    with domain_errors():
+        number = StudentNumber(student_number)
+        parsed = Phone(phone)
+        with uow_factory() as uow:  # type: ignore[operator]
+            link = _require_link(uow, number, parsed)
+            guardian = uow.guardians.get(parsed)
+            if guardian is None:
+                raise UnknownReference(f"no guardian reachable on {parsed}", field="phone")
+            updated_guardian = replace(
+                guardian,
+                full_name_ar=body.full_name_ar,
+                full_name_en=body.full_name_en,
+            )
+            updated_link = replace(
+                link,
+                relationship_type=body.relationship_type,
+                relationship_label=body.relationship_label,
+                is_primary_contact=body.is_primary_contact,
+            )
+            uow.guardians.upsert_many([updated_guardian])
+            uow.student_guardians.upsert_many([updated_link])
+            uow.commit()
+    return GuardianOut(
+        phone=str(parsed),
+        phones=[str(item) for item in updated_guardian.phones],
+        full_name_ar=updated_guardian.full_name_ar,
+        full_name_en=updated_guardian.full_name_en,
+        relationship_type=updated_link.relationship_type,
+        relationship_label=updated_link.relationship_label,
+        is_primary_contact=updated_link.is_primary_contact,
+        can_view_records=updated_link.can_view_records,
+        restriction_note=updated_link.restriction_note,
     )
 
 

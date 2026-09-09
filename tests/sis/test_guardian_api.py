@@ -365,6 +365,29 @@ def test_access_can_be_revoked_without_an_upload(
     assert father["restriction_note"] == "court order 2026/114"
 
 
+def test_guardian_details_and_the_child_specific_relationship_are_editable(
+    client: TestClient, registrar: dict[str, str], roll: None
+) -> None:
+    """A registrar fixes contact data without changing the guardian's phone identity."""
+    _upload(client, registrar)
+    changed = client.patch(
+        "/v1/students/S001/guardians/+201002223333/details",
+        json={
+            "full_name_ar": "Ø£Ø­Ù…Ø¯ Ø§Ù„Ø³ÙŠØ¯",
+            "full_name_en": "Ahmed El Sayed",
+            "relationship_type": "father",
+            "relationship_label": "Father and emergency contact",
+            "is_primary_contact": True,
+        },
+        headers=registrar,
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["phone"] == "+201002223333"
+    assert changed.json()["full_name_en"] == "Ahmed El Sayed"
+    assert changed.json()["relationship_label"] == "Father and emergency contact"
+    assert changed.json()["can_view_records"] is True
+
+
 def test_an_unknown_student_is_a_404_not_an_empty_list(
     client: TestClient, registrar: dict[str, str], roll: None
 ) -> None:

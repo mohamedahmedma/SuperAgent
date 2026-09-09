@@ -112,6 +112,23 @@ def cmd_validate_arabic_showcase(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_final_reset(args: argparse.Namespace) -> int:
+    """Replace only the named final showcase after an explicit confirmation."""
+    from sis.demo import arabic_showcase
+    if args.confirm_school != arabic_showcase.SCHOOL_CODE:
+        print(f"Refused: pass --confirm-school {arabic_showcase.SCHOOL_CODE!r} exactly.", file=sys.stderr)
+        return 2
+    seeder.guard_environment(allow_remote=args.allow_remote)
+    with seeder.open_session(args.school) as session:
+        removed = arabic_showcase.remove(session)
+        counts = arabic_showcase.load(session)
+        session.commit()
+    print(f"Removed {removed} final-showcase row(s) for {arabic_showcase.SCHOOL_CODE} only.")
+    print("Final showcase written:")
+    for name, value in counts.items(): print(f"  {name.replace('_', ' '):<22} {value}")
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     seeder.guard_environment(allow_remote=args.allow_remote)
     with seeder.open_session(args.school) as session:
@@ -246,6 +263,9 @@ def main(argv: list[str] | None = None) -> int:
         help="explicitly approve adding this fictional presentation school to production",
     )
     arabic_showcase.set_defaults(handler=cmd_arabic_showcase)
+    final_reset = sub.add_parser("final-reset", help="replace only the final Arabic showcase school")
+    final_reset.add_argument("--confirm-school", required=True, help="must equal ARABIC-DEMO")
+    final_reset.set_defaults(handler=cmd_final_reset)
     sub.add_parser(
         "validate-arabic-showcase", help="verify presentation-critical Arabic showcase facts"
     ).set_defaults(handler=cmd_validate_arabic_showcase)

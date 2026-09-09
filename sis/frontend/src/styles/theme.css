@@ -466,6 +466,7 @@
 }
 
 .badge {
+  display: none !important;
   font-weight: var(--weight-medium);
 }
 

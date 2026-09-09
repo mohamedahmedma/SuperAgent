@@ -557,6 +557,9 @@ var api = {
   createTerm: function (body) {
     return post('/terms', body);
   },
+  updateTermDates: function (termCode, body) {
+    return request('/terms/' + encodeURIComponent(termCode) + '/dates', { method: 'PATCH', body: body });
+  },
   /* One year with everything it hangs off: its school, its terms, and its ladder grouped
      by track. One request rather than four, which cannot disagree with itself. */
   academicYear: function (code) {
@@ -702,6 +705,14 @@ var api = {
       clear_slots: clearSlots
     });
   },
+  copyTimetableTerm: function (academicYear, classCode, sourceTermCode, targetTermCode) {
+    return post('/timetable/copy-term', {
+      academic_year_code: academicYear,
+      class_code: classCode,
+      source_term_code: sourceTermCode,
+      target_term_code: targetTermCode
+    });
+  },
   clearTimetableSlots: function (academicYear, slots) {
     return post('/timetable/clear', { academic_year_code: academicYear, slots: slots });
   },
@@ -784,6 +795,12 @@ var api = {
         encodeURIComponent(studentNumber) +
         '/guardians/' +
         encodeURIComponent(phone),
+      { method: 'PATCH', body: body }
+    );
+  },
+  updateGuardianDetails: function (studentNumber, phone, body) {
+    return request(
+      '/students/' + encodeURIComponent(studentNumber) + '/guardians/' + encodeURIComponent(phone) + '/details',
       { method: 'PATCH', body: body }
     );
   },
@@ -939,9 +956,9 @@ var api = {
       to: toDate
     });
   },
-  studentAttendanceSummary: function (studentNumber, academicYear) {
+  studentAttendanceSummary: function (studentNumber, academicYear, termCode) {
     return get('/students/' + encodeURIComponent(studentNumber) + '/attendance/summary', {
-      academic_year: academicYear
+      academic_year: academicYear, term: termCode || null
     });
   },
   studentTimeline: function (studentNumber) {

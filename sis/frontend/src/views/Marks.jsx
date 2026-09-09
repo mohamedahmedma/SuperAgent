@@ -263,6 +263,7 @@ function TeacherMarks() {
   const [maxPoints, setMaxPoints] = useState('');
   const [draft, setDraft] = useState({});
   const [saving, setSaving] = useState(false);
+  const [loadingAssessment, setLoadingAssessment] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const terms = useResource(Store.keys.terms(year), () => api.terms(year), !!year);
   const teaching = useQuery(() => api.teachingAssignments(year), [year], !!year);
@@ -279,6 +280,11 @@ function TeacherMarks() {
     () => api.classMarkSheet(selected.class_code, year, term, selected.subject_code),
     [year, term, assignmentKey],
     !!(selected && term)
+  );
+  const uploaded = useQuery(
+    () => api.classAssessments(selected.class_code, year, term, selected.subject_code, assessmentType),
+    [year, term, assignmentKey, assessmentType],
+    !!(selected && term && assessmentType)
   );
 
   useEffect(() => {
@@ -362,6 +368,30 @@ function TeacherMarks() {
     }
   };
 
+  const editUploadedAssessment = async (assessment) => {
+    if (!selected || loadingAssessment) return;
+    setLoadingAssessment(true);
+    setSaveError(null);
+    try {
+      const stored = await api.classAssessment(selected.class_code, assessment.id, year);
+      setTerm(stored.term_code);
+      setAssessmentType(stored.assessment_type);
+      setAssessmentName(stored.name);
+      setMaxPoints(stored.max_points === null || stored.max_points === undefined ? '' : String(stored.max_points));
+      const next = {};
+      (stored.students || []).forEach((student) => {
+        next[student.student_number] = student.is_absent || student.points === null || student.points === undefined
+          ? '' : String(student.points);
+      });
+      setDraft(next);
+      Store.toast(t('Assessment loaded for editing.'), 'success');
+    } catch (error) {
+      setSaveError(error);
+    } finally {
+      setLoadingAssessment(false);
+    }
+  };
+
   return <>
     <PageHead title={t('Marks')} lede={t('Only your assigned classes and subjects are shown.')} />
     <Card title={t('Enter class marks')} tight>
@@ -423,6 +453,21 @@ function TeacherMarks() {
             onClick={saveAndMarkRestAbsent}>{saving ? t('Saving…') : t('Save and mark blanks absent')}</Button>
         </div>
       </div> : null}
+    </Card>
+    <Card title={t('Uploaded grades')} subtitle={t('Choose a saved assessment to review or edit its recorded marks.')} tight>
+      <ErrorNote error={uploaded.error} onRetry={uploaded.reload} />
+      {!assessmentType ? <Empty title={t('Choose an assessment type first')}>
+        {t('Select Exam or Homework assignment above to see saved assessments for this class, subject and term.')}
+      </Empty> : <Table loading={uploaded.loading} rows={(uploaded.value && uploaded.value.assessments) || []}
+        rowKey={(row) => row.id}
+        empty={<Empty title={t('No uploaded grades yet')}>{t('Saved assessments for this selection will appear here.')}</Empty>}
+        columns={[
+          { key: 'name', header: t('Assessment'), cell: (row) => <strong>{row.name}</strong> },
+          { key: 'max', header: t('Maximum mark'), className: 'sis-num', cell: (row) => row.max_points ?? DASH },
+          { key: 'edit', header: '', cell: (row) => <Button size="sm" variant="quiet" pending={loadingAssessment}
+            disabled={loadingAssessment || (sheet.value && sheet.value.term_is_closed)}
+            onClick={() => editUploadedAssessment(row)}>{t('Edit')}</Button> }
+        ]} />}
     </Card>
   </>;
 }
