@@ -38,12 +38,21 @@ def _snapshot(obj, *, old: bool = False) -> dict[str, object]:  # noqa: ANN001
 
 @event.listens_for(Session, "before_flush")
 def record_mutations(session: Session, _flush_context, _instances) -> None:  # noqa: ANN001
+    # SQLAlchemy event registrations are process-wide.  The identity service uses its
+    # own declarative base but the same ``Session`` class, so its account/bootstrap
+    # writes also arrive here when both services are imported by the integration
+    # suite.  Auditing those objects with the SIS model would attempt to insert into
+    # ``audit_log`` in the identity database (where that table intentionally does
+    # not exist).  Only SIS-mapped entities belong in the SIS audit trail.
+    def is_sis_entity(obj: object) -> bool:
+        return isinstance(obj, m.Base)
+
     if session.info.get("audit_flushing"):
         return
     actor_user_id, actor = actor_context.get()
     entries = []
     for obj in tuple(session.new):
-        if type(obj) in _SKIP:
+        if not is_sis_entity(obj) or type(obj) in _SKIP:
             continue
         action = {
             m.Student: "student_created",
@@ -52,7 +61,11 @@ def record_mutations(session: Session, _flush_context, _instances) -> None:  # n
         }.get(type(obj), "create")
         entries.append((action, obj, None, _snapshot(obj)))
     for obj in tuple(session.dirty):
-        if type(obj) in _SKIP or not session.is_modified(obj, include_collections=False):
+        if (
+            not is_sis_entity(obj)
+            or type(obj) in _SKIP
+            or not session.is_modified(obj, include_collections=False)
+        ):
             continue
         before, after = _snapshot(obj, old=True), _snapshot(obj)
         action = "restore" if before.get("is_active") is False and after.get("is_active") is True else (
@@ -62,7 +75,7 @@ def record_mutations(session: Session, _flush_context, _instances) -> None:  # n
             action = "soft_delete"
         entries.append((action, obj, before, after))
     for obj in tuple(session.deleted):
-        if type(obj) not in _SKIP:
+        if is_sis_entity(obj) and type(obj) not in _SKIP:
             entries.append(("delete", obj, _snapshot(obj), None))
     if not entries:
         return

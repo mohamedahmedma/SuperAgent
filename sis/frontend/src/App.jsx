@@ -523,7 +523,10 @@ export function App() {
      one nothing gates â€” the sign-in screen, say â€” and is drawn. */
   const needed = ROUTE_PERMISSION[route.route.name];
   const routeItem = NAV.find((item) => item.name === route.route.name);
-  const roleAllowed = !routeItem?.roles || routeItem.roles.some(
+  // Admin is a universal role. Role-specific navigation is helpful for staff UX, but
+  // must never turn into a frontend-only denial for the account the backend grants all
+  // permissions to.
+  const roleAllowed = Store.roles().indexOf('admin') >= 0 || !routeItem?.roles || routeItem.roles.some(
     (role) => Store.roles().indexOf(role) >= 0
   );
   const experienceAllowed = !routeItem?.principalOnly || principalExperience();

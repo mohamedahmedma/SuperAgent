@@ -156,7 +156,7 @@ function newWindow(script, language = 'en', session = '') {
       ];
       payload.profile.is_system_admin = true;
       payload.profile.roles = [
-        { role_code: 'system_admin', scope_type: 'global', scope_id: null },
+        { role_code: 'admin', scope_type: 'global', scope_id: null },
         { role_code: 'year_supervisor', scope_type: 'global', scope_id: null }
       ];
       payload.profile.permissions = permissions;
@@ -357,7 +357,7 @@ async function main() {
   const roleSelect = [...window.document.querySelectorAll('[aria-haspopup="listbox"]')].find((button) =>
     button.textContent.trim() === 'Teacher');
   assert.ok(roleSelect, 'staff creation must offer supervisor roles');
-  for (const role of ['Class supervisor', 'Attendance supervisor']) {
+  for (const role of ['Floor supervisor', 'Attendance supervisor']) {
     roleSelect.click();
     await settle(window, 40);
     const option = [...window.document.querySelectorAll('[role="option"]')].find((item) => item.textContent.trim() === role);
