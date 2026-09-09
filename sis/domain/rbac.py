@@ -283,8 +283,8 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
         name_en="School Manager / Principal",
         name_ar="مدير المدرسة",
         description_en=(
-            "Reads general information and teacher attendance in one school, and adds "
-            "approved teaching and supervisor roles. Changes no ordinary school data."
+            "Manages student and guardian records, general information, and approved "
+            "teaching and supervisor roles in one school."
         ),
         default_scope=ScopeType.SCHOOL,
         # Everything in the school, and nothing of the estate. The two system permissions
@@ -304,8 +304,9 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.STUDENTS_READ,
             Permission.STUDENTS_CREATE,
             Permission.STUDENTS_WRITE,
-                        Permission.GUARDIANS_READ,
-Permission.GRADES_READ,
+            Permission.GUARDIANS_READ,
+            Permission.GUARDIANS_WRITE,
+            Permission.GRADES_READ,
             Permission.TEACHERS_READ,
             Permission.TEACHERS_ASSIGN_SUBJECTS,
             Permission.TIMETABLE_READ,
