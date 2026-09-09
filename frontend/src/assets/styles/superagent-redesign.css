@@ -1,0 +1,530 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap');
+
+/* Light parent-dashboard presentation. Chat state and service APIs remain unchanged. */
+html[data-theme='light'] {
+  --page-bg: #eef4ff; --shell-bg: #f8fbff; --sidebar-bg: #132b4c;
+  --surface: #fff; --surface-strong: #fff; --surface-hover: #f1f6ff; --surface-soft: #f7faff;
+  --line: #dce7f7; --line-strong: #cbdcf2; --text: #172b4d; --text-soft: #435a78;
+  --muted: #71839b; --muted-strong: #8598b0; --mint: #5269e9; --mint-strong: #5269e9;
+  --mint-ink: #fff; --lilac: #7285ff; --lilac-strong: #5269e9;
+}
+
+html[data-theme='light'], html[data-theme='light'] body { font-family: 'Cairo', 'Outfit', sans-serif; }
+html[data-theme='light'] .app-page { padding: 8px; background: linear-gradient(135deg, #eaf2ff, #f8fbff 50%, #edf4ff); }
+html[data-theme='light'] .app-wrapper { grid-template-columns: 260px minmax(0, 1fr); border-color: #d7e4f5; border-radius: 22px; background: #f8fbff; box-shadow: 0 18px 48px rgba(39, 74, 126, .13); }
+
+/* Navigation rail mirrored from the reference: dense navy, soft active state, white type. */
+html[data-theme='light'] .sidebar { padding: 22px 14px 15px; border-right: 0; background: linear-gradient(180deg, #172e50, #102744); }
+html[data-theme='light'] .brand-copy h1, html[data-theme='light'] .brand-copy span, html[data-theme='light'] .workspace-copy strong, html[data-theme='light'] .sidebar { color: #fff; }
+html[data-theme='light'] .brand-copy span, html[data-theme='light'] .workspace-copy small, html[data-theme='light'] .sidebar-section-label, html[data-theme='light'] .recent-copy small { color: #a8c0dd; }
+html[data-theme='light'] .logo-icon { color: #fff; background: transparent; box-shadow: none; }
+html[data-theme='light'] .workspace-switcher { border-color: rgba(130, 190, 232, .18); background: rgba(54, 104, 150, .26); box-shadow: none; }
+html[data-theme='light'] .workspace-orb { background: #12618e; }
+html[data-theme='light'] .nav-btn { color: #d5e4f5; border-radius: 12px; }
+html[data-theme='light'] .nav-btn:hover { color: #fff; background: rgba(92, 151, 198, .2); transform: none; }
+html[data-theme='light'] .nav-btn.active { color: #fff; background: linear-gradient(135deg, #235b89, #2b79a8); box-shadow: none; }
+html[data-theme='light'] .recent-session { color: #edf6ff; }
+html[data-theme='light'] .recent-session:hover, html[data-theme='light'] .recent-session.active { background: rgba(95, 150, 195, .17); }
+html[data-theme='light'] .recent-session.active .recent-dot { background: #88bfff; box-shadow: none; }
+html[data-theme='light'] .theme-control, html[data-theme='light'] .user-panel { border-color: rgba(177, 206, 235, .17); }
+html[data-theme='light'] .theme-control-label, html[data-theme='light'] .user-copy small, html[data-theme='light'] .user-actions button { color: #b8d0ea; }
+html[data-theme='light'] .user-avatar { color: #fff; background: linear-gradient(135deg, #6474f4, #8295ff); }
+
+html[data-theme='light'] .chat-header { min-height: 64px; border-bottom-color: #e5edf8; background: rgba(255,255,255,.84); }
+html[data-theme='light'] .chat-header h1 { color: #1c3152; font-family: 'Outfit', sans-serif; font-size: 16px; font-weight: 700; text-align: center; }
+html[data-theme='light'] .chat-container { padding: 0; background: #f6f9fe; }
+
+.parent-dashboard { display: grid; grid-template-columns: minmax(0, 1fr) 290px; min-height: 100%; }
+.superagent-welcome { width: 100%; max-width: none; min-height: 100%; margin: 0; padding: clamp(32px, 7vh, 70px) clamp(24px, 5vw, 88px) 130px; background: radial-gradient(circle at 50% 23%, rgba(98, 128, 255, .13), transparent 31%), #f7faff; text-align: center; }
+.superagent-welcome .welcome-avatar { width: 76px; height: 76px; margin-bottom: 16px; border: 0; border-radius: 24px; background: transparent; box-shadow: none; animation: gentle-float 5s ease-in-out infinite; }
+.superagent-welcome .welcome-eyebrow { color: #5970dc; font-size: 10px; letter-spacing: .14em; }
+.superagent-welcome h2 { max-width: 540px; margin: 12px auto 0; color: #172e53; font-family: 'Cairo', sans-serif; font-size: clamp(28px, 3.5vw, 43px); font-weight: 800; letter-spacing: -.045em; line-height: 1.2; text-wrap: balance; }
+.superagent-welcome > p { max-width: 570px; margin-top: 12px; color: #617491; font-size: 13px; line-height: 1.8; }
+.superagent-welcome .welcome-capabilities { margin-top: 17px; }
+.superagent-welcome .welcome-capabilities span { border: 1px solid #e1eaf7; color: #667a97; background: #fff; box-shadow: 0 3px 10px rgba(45, 76, 120, .04); }
+.superagent-welcome .welcome-capabilities i { color: #5b70ed; }
+
+.suggested-questions { width: min(700px, 100%); margin: 30px auto 0; padding: 18px; border: 1px solid #dce7f8; border-radius: 20px; background: rgba(255,255,255,.9); box-shadow: 0 16px 36px rgba(43, 78, 125, .09); backdrop-filter: blur(12px); text-align: left; animation: fade-in .45s ease both; }
+.suggested-questions-heading { margin-bottom: 14px; }
+.suggested-questions-icon { color: #5a6fea; background: #eef1ff; }
+.suggested-questions h3 { color: #20385b; font-family: 'Cairo', sans-serif; }
+.suggested-questions-heading p { color: #8395ae; }
+.question-grid { gap: 10px; }
+.question-card { min-height: 58px; border-color: #e0e9f6; color: #344d6e; background: #fff; box-shadow: 0 4px 12px rgba(51,84,125,.035); font-size: 12px; }
+.question-card > i:first-child { color: #6176ed; }
+.question-arrow { color: #a1b1c9; }
+.question-card:hover { border-color: #b9c8ff; background: #f7f8ff; box-shadow: 0 10px 18px rgba(77, 99, 206, .11); transform: translateY(-2px); }
+
+/* Right utility rail, matching the reference without inventing a new data source. */
+.parent-services { padding: 14px; border-left: 1px solid #e0e9f5; background: #f3f7fd; }
+.parent-services-hero { overflow: hidden; padding: 12px 16px 15px; border: 1px solid #dce7f6; border-radius: 17px; color: #1f3659; background: linear-gradient(145deg, #eef3ff, #fff); text-align: center; }
+.robot-frame { width: 100%; height: 112px; margin: -4px auto 0; }
+.robot-frame .aurexis-robot { width: 100%; height: 100%; }
+.parent-services-hero h2 { margin-top: 5px; font-size: 13px; font-weight: 800; }
+.parent-services-hero p { margin-top: 4px; color: #6f829e; font-size: 10px; line-height: 1.55; }
+.parent-services-list { margin-top: 13px; padding: 13px 14px 5px; border: 1px solid #e0e9f6; border-radius: 17px; background: #fff; }
+.parent-services-list h3 { margin-bottom: 7px; color: #233b5d; font-size: 13px; font-weight: 800; }
+.quick-service { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; width: 100%; min-height: 47px; align-items: center; gap: 8px; border-bottom: 1px solid #edf2f9; color: #314a6e; background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; text-align: left; transition: color .2s ease, background .2s ease, transform .2s ease; }
+.quick-service:last-child { border-bottom: 0; }
+.quick-service:hover { color: #4f63df; transform: translateX(2px); }
+.quick-service-icon { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; color: #5a70e8; background: #eff2ff; font-size: 12px; }
+.quick-service > i { color: #7f90ad; font-size: 9px; }
+.parent-tip { display: flex; align-items: flex-start; gap: 8px; margin-top: 13px; padding: 12px; border: 1px solid #dfe9fb; border-radius: 14px; color: #607796; background: #edf4ff; font-size: 10px; line-height: 1.5; }
+.parent-tip i { color: #e1a617; font-size: 16px; }
+.parent-tip strong { display: block; color: #365171; }
+
+html[data-theme='light'] .input-area-wrapper { padding: 17px clamp(18px, 4vw, 60px) 20px; border-top-color: #e2eaf6; background: rgba(250,252,255,.96); }
+html[data-theme='light'] .input-area { min-height: 58px; border-color: #d5e2f4; border-radius: 19px; background: #fff; box-shadow: 0 8px 20px rgba(43,76,115,.07); }
+html[data-theme='light'] .input-area:focus-within { border-color: #7184f1 !important; box-shadow: 0 0 0 3px rgba(93,112,234,.12) !important; }
+html[data-theme='light'] .chat-input-textarea { color: #213a5a; }
+html[data-theme='light'] .send-btn { color: #fff; background: linear-gradient(135deg, #6475ed, #5264d9); box-shadow: 0 7px 14px rgba(74,93,211,.24); }
+
+@media (max-width: 1080px) { .parent-dashboard { grid-template-columns: minmax(0, 1fr) 250px; } .parent-services { padding: 10px; } }
+@media (max-width: 900px) {
+  html[data-theme='light'] .app-page { padding: 0; }
+  html[data-theme='light'] .app-wrapper { border: 0; border-radius: 0; }
+  .parent-dashboard { display: block; }
+  .parent-services { display: none; }
+  .superagent-welcome { min-height: auto; padding: 34px 20px 128px; }
+  .suggested-questions { margin-top: 24px; }
+  .question-grid { grid-template-columns: 1fr; }
+  .question-card { min-height: 56px; font-size: 13px; }
+}
+
+/* Center the welcome content independently from the utility cards. */
+.parent-dashboard { position: relative !important; display: block !important; min-height: 100% !important; }
+.parent-dashboard .superagent-welcome { display: flex !important; min-height: 100% !important; align-items: center; flex-direction: column; justify-content: center; padding: 48px 24px 132px !important; }
+.parent-dashboard .parent-services { position: absolute !important; top: 24px; right: 24px; width: 248px; padding: 0 !important; border: 0 !important; background: transparent !important; }
+.parent-services-hero, .parent-services-list, .parent-tip { border: 0 !important; box-shadow: 0 14px 32px rgba(4, 20, 39, .18); }
+.parent-services-hero { padding: 16px 18px 18px !important; background: linear-gradient(145deg, rgba(24, 69, 103, .92), rgba(14, 47, 76, .94)) !important; }
+.parent-services-list { padding: 12px !important; background: rgba(18, 54, 83, .92) !important; }
+.quick-service { margin-top: 7px; padding: 0 9px; border: 0 !important; border-radius: 11px; background: rgba(5, 31, 53, .52) !important; }
+.quick-service:hover { background: rgba(36, 92, 132, .8) !important; transform: translateX(2px); }
+.parent-tip { background: rgba(26, 74, 109, .88) !important; }
+
+/* Keep the existing blue/purple palette; the question cards have no green accent. */
+.superagent-welcome .suggested-questions { border: 0 !important; border-radius: 18px !important; background: rgba(20, 59, 92, .86) !important; box-shadow: 0 18px 42px rgba(4, 19, 37, .24) !important; }
+.superagent-welcome .suggested-questions-heading { border-color: rgba(124, 174, 211, .2) !important; }
+.superagent-welcome .question-card { border: 0 !important; background: rgba(5, 31, 53, .7) !important; box-shadow: 0 5px 14px rgba(2, 16, 29, .16) !important; }
+.superagent-welcome .question-card::before { background: linear-gradient(#19c5ec, #666cff) !important; }
+.superagent-welcome .question-card:hover, .superagent-welcome .question-card:focus-visible { background: rgba(21, 71, 108, .92) !important; box-shadow: 0 10px 22px rgba(0, 13, 29, .28) !important; }
+.superagent-welcome .question-card > i:first-child { color: #6e7cff !important; }
+
+html[data-theme='light'] .parent-dashboard .superagent-welcome { background: radial-gradient(circle at 50% 25%, rgba(98, 128, 255, .13), transparent 31%), #f7faff !important; }
+html[data-theme='light'] .parent-services-hero { background: linear-gradient(145deg, #e8f1ff, #fff) !important; }
+html[data-theme='light'] .parent-services-list { background: #fff !important; }
+html[data-theme='light'] .quick-service { background: #f2f6fe !important; }
+html[data-theme='light'] .parent-tip { background: #edf4ff !important; }
+html[data-theme='light'] .superagent-welcome .suggested-questions { background: #fff !important; }
+html[data-theme='light'] .superagent-welcome .question-card { background: #f5f8ff !important; }
+html[data-theme='light'] .superagent-welcome .question-card:hover, html[data-theme='light'] .superagent-welcome .question-card:focus-visible { background: #edf2ff !important; }
+
+html[lang='ar'] .quick-service, html[lang='ar'] .suggested-questions { text-align: right !important; }
+html[lang='ar'] .quick-service > i { transform: rotate(180deg); }
+@media (max-width: 1200px) { .parent-dashboard .parent-services { display: none !important; } }
+
+/* Welcome question cells and conversation header: shared tonal hierarchy in both themes. */
+.suggested-questions-heading { padding: 2px 2px 14px; border-bottom: 1px solid var(--line); }
+.suggested-questions-heading > div { width: 100%; }
+.question-card { position: relative; overflow: hidden; min-height: 68px; border-radius: 14px; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
+.question-card::before { position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--mint-strong); content: ''; opacity: 0; transition: opacity .18s ease; }
+.question-card:hover::before, .question-card:focus-visible::before { opacity: 1; }
+.question-card:active { transform: translateY(0); }
+.chat-header { border-bottom: 1px solid var(--line) !important; background: color-mix(in srgb, var(--shell-bg) 94%, transparent) !important; box-shadow: 0 1px 0 color-mix(in srgb, var(--surface-strong) 55%, transparent); }
+
+html[data-theme='light'] .chat-header { background: #f7faff !important; }
+html[data-theme='light'] .superagent-welcome .suggested-questions { border-color: #d8e3f1 !important; box-shadow: 0 14px 30px rgba(31, 64, 108, .08) !important; }
+html[data-theme='light'] .superagent-welcome .question-card { border-color: #dce6f2 !important; background: #fbfdff !important; box-shadow: 0 2px 7px rgba(31, 64, 108, .035) !important; }
+html[data-theme='light'] .superagent-welcome .question-card:hover, html[data-theme='light'] .superagent-welcome .question-card:focus-visible { border-color: #8598e8 !important; background: #f4f7ff !important; box-shadow: 0 8px 18px rgba(61, 86, 173, .12) !important; }
+
+html[data-theme='dark'] .chat-header { background: #10263d !important; }
+html[data-theme='dark'] .superagent-welcome .suggested-questions { border-color: rgba(132, 185, 216, .3) !important; background: #122f49 !important; box-shadow: 0 14px 30px rgba(0, 10, 22, .3) !important; }
+html[data-theme='dark'] .superagent-welcome .question-card { border-color: rgba(133, 188, 219, .24) !important; background: #0e2941 !important; box-shadow: inset 0 1px rgba(255, 255, 255, .025) !important; }
+html[data-theme='dark'] .superagent-welcome .question-card:hover, html[data-theme='dark'] .superagent-welcome .question-card:focus-visible { border-color: #55c5e4 !important; background: #123a59 !important; box-shadow: 0 8px 18px rgba(0, 10, 22, .28) !important; }
+
+html[dir='rtl'] .question-card::before { right: 0; left: auto; }
+
+/* Dark mode mirrors the same dashboard hierarchy with ink-blue surfaces, not an
+   inverted light canvas. */
+html[data-theme='dark'] .parent-dashboard { display: grid !important; grid-template-columns: minmax(0, 1fr) 290px !important; width: 100% !important; min-height: 100% !important; flex: 1 0 auto !important; }
+html[data-theme='dark'] .chat-container { padding: 0 !important; background: #0e2136 !important; }
+html[data-theme='dark'] .parent-dashboard .superagent-welcome { width: 100% !important; max-width: none !important; min-height: 100% !important; margin: 0 !important; padding: clamp(32px, 7vh, 70px) clamp(24px, 5vw, 88px) 130px !important; background: radial-gradient(circle at 50% 20%, rgba(70, 108, 204, .23), transparent 34%), #10263d !important; }
+html[data-theme='dark'] .superagent-welcome .welcome-eyebrow { color: #4ed7f5 !important; background: transparent !important; }
+html[data-theme='dark'] .superagent-welcome h2 { color: #f5f9ff !important; background: transparent !important; }
+html[data-theme='dark'] .superagent-welcome > p { color: #abc4d8 !important; }
+html[data-theme='dark'] .superagent-welcome .welcome-capabilities span { border-color: rgba(107, 171, 208, .2) !important; color: #b7d2e3 !important; background: rgba(7, 29, 49, .5) !important; }
+html[data-theme='dark'] .superagent-welcome .suggested-questions { width: min(700px, 100%) !important; margin: 30px auto 0 !important; padding: 18px !important; border-color: rgba(97, 165, 206, .26) !important; color: #edf7ff !important; background: #122f49 !important; box-shadow: 0 18px 40px rgba(0,0,0,.26) !important; }
+html[data-theme='dark'] .superagent-welcome .suggested-questions h3 { color: #f2f8ff !important; }
+html[data-theme='dark'] .superagent-welcome .suggested-questions-heading p { color: #9fc1d8 !important; }
+html[data-theme='dark'] .superagent-welcome .question-grid { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; }
+html[data-theme='dark'] .superagent-welcome .question-card { display: grid !important; grid-template-columns: 22px minmax(0, 1fr) 15px !important; min-height: 64px !important; align-items: center !important; gap: 9px !important; padding: 11px 12px !important; border: 1px solid rgba(106, 172, 209, .19) !important; border-radius: 13px !important; color: #d9ecf8 !important; background: rgba(5, 28, 48, .64) !important; box-shadow: none !important; font-size: 12px !important; }
+html[data-theme='dark'] .superagent-welcome .question-card:hover { border-color: rgba(54, 205, 234, .48) !important; background: rgba(17, 69, 99, .8) !important; }
+html[data-theme='dark'] .parent-services { border-left-color: rgba(113, 171, 208, .16) !important; background: #10263d !important; }
+html[data-theme='dark'] .parent-services-hero, html[data-theme='dark'] .parent-services-list { border-color: rgba(109, 174, 211, .2) !important; color: #eff8ff !important; background: #122f49 !important; }
+html[data-theme='dark'] .parent-services-hero h2, html[data-theme='dark'] .parent-services-list h3 { color: #f1f8ff !important; }
+html[data-theme='dark'] .parent-services-hero p, html[data-theme='dark'] .parent-tip { color: #aac5d9 !important; }
+html[data-theme='dark'] .quick-service { border-bottom-color: rgba(116, 171, 206, .13) !important; color: #d9ebf7 !important; }
+html[data-theme='dark'] .quick-service-icon { color: #53d1ec !important; background: rgba(50, 141, 190, .2) !important; }
+html[data-theme='dark'] .parent-tip { border-color: rgba(94, 166, 204, .18) !important; background: rgba(24, 66, 96, .55) !important; }
+
+.language-control { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0 8px 10px; }
+.language-control button { min-height: 34px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: var(--surface); cursor: pointer; font-size: 10px; font-weight: 700; transition: color .2s ease, background .2s ease, border-color .2s ease; }
+.language-control button.active { border-color: transparent; color: #fff; background: linear-gradient(135deg, #6475ed, #5264d9); }
+html[data-theme='light'] .language-control button { border-color: rgba(177, 206, 235, .2); color: #b8d0ea; background: rgba(255,255,255,.06); }
+html[data-theme='light'] .language-control button.active { color: #fff; background: rgba(82, 116, 166, .72); }
+html[dir='rtl'] .quick-service { text-align: right; }
+html[dir='rtl'] .quick-service > i { transform: rotate(180deg); }
+html[dir='rtl'] .question-card, html[dir='rtl'] .suggested-questions { text-align: right; }
+@media (max-width: 900px) { html[data-theme='dark'] .parent-dashboard { display: block !important; } html[data-theme='dark'] .parent-services { display: none !important; } html[data-theme='dark'] .parent-dashboard .superagent-welcome { padding: 34px 20px 128px !important; } html[data-theme='dark'] .superagent-welcome .question-grid { grid-template-columns: 1fr !important; } }
+@media (max-width: 480px) {
+  .superagent-welcome { padding-top: 24px; }
+  .superagent-welcome .welcome-avatar { width: 64px; height: 64px; }
+  .superagent-welcome h2 { font-size: 29px; }
+  .superagent-welcome > p { font-size: 12px; }
+  .superagent-welcome .welcome-capabilities { display: flex !important; }
+  .suggested-questions { padding: 14px; border-radius: 17px; }
+  .question-card { grid-template-columns: 26px minmax(0, 1fr) 18px; padding: 10px 11px; }
+}
+@media (prefers-reduced-motion: reduce) { .superagent-welcome .welcome-avatar, .suggested-questions { animation: none; } .question-card, .quick-service { transition: none; } .question-card:hover, .quick-service:hover { transform: none; } }
+
+/* Legacy precision sheets load broad !important rules. Keep their scope intact and
+   explicitly restore the dashboard geometry and contrast only inside this new view. */
+html[data-theme='light'] .chat-container { padding: 0 !important; background: #f6f9fe !important; }
+html[data-theme='light'] .parent-dashboard { display: grid !important; grid-template-columns: minmax(0, 1fr) 290px !important; width: 100% !important; min-height: 100% !important; flex: 1 0 auto !important; }
+html[data-theme='light'] .parent-dashboard .superagent-welcome { display: block !important; width: 100% !important; max-width: none !important; min-height: 100% !important; margin: 0 !important; padding: clamp(32px, 7vh, 70px) clamp(24px, 5vw, 88px) 130px !important; background: radial-gradient(circle at 50% 23%, rgba(98, 128, 255, .13), transparent 31%), #f7faff !important; }
+html[data-theme='light'] .superagent-welcome .welcome-avatar { display: grid !important; width: 76px !important; height: 76px !important; margin: 0 auto 16px !important; background: transparent !important; }
+html[data-theme='light'] .superagent-welcome .welcome-eyebrow { display: inline-flex !important; margin: 0 !important; padding: 0 !important; color: #5970dc !important; background: transparent !important; }
+html[data-theme='light'] .superagent-welcome h2 { max-width: 540px !important; margin: 12px auto 0 !important; color: #172e53 !important; background: transparent !important; font-size: clamp(28px, 3.5vw, 43px) !important; line-height: 1.2 !important; }
+html[data-theme='light'] .superagent-welcome > p { display: block !important; max-width: 570px !important; margin: 12px auto 0 !important; color: #617491 !important; font-size: 13px !important; }
+html[data-theme='light'] .superagent-welcome .welcome-capabilities { display: flex !important; margin-top: 17px !important; }
+
+html[data-theme='light'] .superagent-welcome .suggested-questions { display: block !important; width: min(700px, 100%) !important; margin: 30px auto 0 !important; padding: 18px !important; border: 1px solid #dce7f8 !important; border-radius: 20px !important; color: #20385b !important; background: #fff !important; box-shadow: 0 16px 36px rgba(43, 78, 125, .09) !important; text-align: left !important; }
+html[data-theme='light'] .superagent-welcome .suggested-questions-heading { display: flex !important; align-items: center !important; gap: 11px !important; margin: 0 0 14px !important; }
+html[data-theme='light'] .superagent-welcome .suggested-questions h3 { margin: 0 !important; color: #20385b !important; font-size: 16px !important; line-height: 1.3 !important; }
+html[data-theme='light'] .superagent-welcome .suggested-questions-heading p { margin: 2px 0 0 !important; color: #8395ae !important; font-size: 12px !important; }
+html[data-theme='light'] .superagent-welcome .question-grid { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px !important; }
+html[data-theme='light'] .superagent-welcome .question-card { display: grid !important; grid-template-columns: 22px minmax(0, 1fr) 15px !important; min-height: 64px !important; align-items: center !important; gap: 9px !important; padding: 11px 12px !important; border: 1px solid #e0e9f6 !important; border-radius: 13px !important; color: #344d6e !important; background: #fff !important; box-shadow: 0 4px 12px rgba(51,84,125,.035) !important; font-size: 12px !important; font-weight: 600 !important; line-height: 1.35 !important; text-align: left !important; }
+html[data-theme='light'] .superagent-welcome .question-card:hover { border-color: #b9c8ff !important; background: #f7f8ff !important; }
+
+@media (max-width: 900px) {
+  html[data-theme='light'] .parent-dashboard { display: block !important; }
+  html[data-theme='light'] .parent-dashboard .parent-services { display: none !important; }
+  html[data-theme='light'] .parent-dashboard .superagent-welcome { padding: 34px 20px 128px !important; }
+  html[data-theme='light'] .superagent-welcome .question-grid { grid-template-columns: 1fr !important; }
+  html[data-theme='light'] .superagent-welcome .question-card { min-height: 56px !important; font-size: 13px !important; }
+}
+
+/* Final dashboard overrides: this sheet loads after older precision styles. */
+html[data-theme='dark'] .parent-dashboard,
+html[data-theme='light'] .parent-dashboard { position: relative !important; display: block !important; min-height: 100% !important; }
+html[data-theme='dark'] .parent-dashboard .superagent-welcome,
+html[data-theme='light'] .parent-dashboard .superagent-welcome { display: flex !important; width: 100% !important; min-height: 100% !important; align-items: center; flex-direction: column; justify-content: center; padding: 48px 24px 132px !important; }
+html[data-theme='dark'] .parent-dashboard .parent-services,
+html[data-theme='light'] .parent-dashboard .parent-services { position: absolute !important; top: 24px; right: 24px; display: block !important; width: 248px; padding: 0 !important; border: 0 !important; background: transparent !important; }
+html[data-theme='dark'] .parent-services-hero,
+html[data-theme='dark'] .parent-services-list,
+html[data-theme='dark'] .parent-tip,
+html[data-theme='light'] .parent-services-hero,
+html[data-theme='light'] .parent-services-list,
+html[data-theme='light'] .parent-tip { border: 0 !important; }
+html[data-theme='dark'] .superagent-welcome .suggested-questions,
+html[data-theme='light'] .superagent-welcome .suggested-questions { border: 0 !important; }
+html[data-theme='dark'] .superagent-welcome .question-card,
+html[data-theme='light'] .superagent-welcome .question-card { border: 0 !important; }
+html[data-theme='dark'] .superagent-welcome .question-card::before,
+html[data-theme='light'] .superagent-welcome .question-card::before { background: linear-gradient(#19c5ec, #666cff) !important; }
+html[data-theme='dark'] .superagent-welcome .question-card > i:first-child,
+html[data-theme='light'] .superagent-welcome .question-card > i:first-child { color: #6e7cff !important; }
+@media (max-width: 1200px) {
+  html[data-theme='dark'] .parent-dashboard .parent-services,
+  html[data-theme='light'] .parent-dashboard .parent-services { display: none !important; }
+}
+
+/* Seamless conversation chrome: header, workspace, and composer share one surface. */
+html[data-theme='dark'] .chat-header,
+html[data-theme='dark'] .input-area-wrapper { border: 0 !important; box-shadow: none !important; background: #10263d !important; }
+html[data-theme='dark'] .input-area { border: 0 !important; box-shadow: none !important; }
+html[data-theme='light'] .chat-header,
+html[data-theme='light'] .input-area-wrapper { border: 0 !important; box-shadow: none !important; background: #f7faff !important; }
+html[data-theme='light'] .input-area { border: 0 !important; box-shadow: none !important; }
+html[data-theme='dark'] .superagent-welcome .suggested-questions,
+html[data-theme='light'] .superagent-welcome .suggested-questions { transform: translateY(14px); }
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme='dark'] .superagent-welcome .suggested-questions,
+  html[data-theme='light'] .superagent-welcome .suggested-questions { transform: translateY(14px); }
+}
+
+/* Move the complete welcome group down without altering its internal rhythm. */
+html[data-theme='dark'] .parent-dashboard .superagent-welcome > .welcome-avatar,
+html[data-theme='dark'] .parent-dashboard .superagent-welcome > .welcome-eyebrow,
+html[data-theme='dark'] .parent-dashboard .superagent-welcome > h2,
+html[data-theme='dark'] .parent-dashboard .superagent-welcome > p,
+html[data-theme='dark'] .parent-dashboard .superagent-welcome > .welcome-capabilities,
+html[data-theme='light'] .parent-dashboard .superagent-welcome > .welcome-avatar,
+html[data-theme='light'] .parent-dashboard .superagent-welcome > .welcome-eyebrow,
+html[data-theme='light'] .parent-dashboard .superagent-welcome > h2,
+html[data-theme='light'] .parent-dashboard .superagent-welcome > p,
+html[data-theme='light'] .parent-dashboard .superagent-welcome > .welcome-capabilities { transform: translateY(26px); }
+html[data-theme='dark'] .parent-dashboard .superagent-welcome > .suggested-questions,
+html[data-theme='light'] .parent-dashboard .superagent-welcome > .suggested-questions { transform: translateY(40px); }
+
+/* Arabic keeps the same visual title scale; only the input copy follows RTL. */
+html[lang='ar'] .superagent-welcome h2 { font-size: clamp(25px, 2.65vw, 36px) !important; letter-spacing: 0 !important; }
+html[lang='ar'] .chat-input-textarea { direction: rtl; text-align: right; }
+
+/* The language selector is available only while the full sidebar is open. */
+.app-page.desktop-sidebar-collapsed .sidebar .language-control { display: none !important; }
+
+html[data-theme='light'] .language-control button:not(.active) {
+  border-color: rgba(43, 82, 124, .2) !important;
+  color: #58718d !important;
+  background: rgba(255, 255, 255, .36) !important;
+}
+
+html[data-theme='light'] .recent-copy strong { color: #1b4d72 !important; }
+
+/* Keep the recent-history rhythm identical in dark mode for English and Arabic. */
+html[data-theme='dark'] .sidebar {
+  font-family: 'Cairo', 'Outfit', sans-serif !important;
+}
+
+html[data-theme='dark'] .sidebar-recents {
+  gap: 5px !important;
+}
+
+html[data-theme='dark'] .sidebar .recent-session {
+  box-sizing: border-box;
+  min-height: 50px;
+  padding: 9px 10px !important;
+  align-items: start;
+}
+
+html[data-theme='dark'] .sidebar .recent-copy strong {
+  display: block;
+  height: 18px;
+  overflow: hidden;
+  font-size: 12px !important;
+  line-height: 18px !important;
+  white-space: nowrap;
+}
+
+html[data-theme='dark'] .sidebar .recent-copy small {
+  display: block;
+  height: 14px;
+  margin-top: 3px !important;
+  overflow: hidden;
+  font-size: 9px !important;
+  line-height: 14px !important;
+  white-space: nowrap;
+}
+
+/* Touch browsers can retain :hover after a tap. Do not leave a question cell
+   looking selected on phone-sized screens; keyboard focus still remains visible. */
+@media (max-width: 900px), (hover: none) {
+  html[data-theme='dark'] .superagent-welcome .question-card:hover {
+    border-color: rgba(106, 172, 209, .19) !important;
+    background: rgba(5, 28, 48, .64) !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  html[data-theme='light'] .superagent-welcome .question-card:hover {
+    border-color: #e0e9f6 !important;
+    background: #fff !important;
+    box-shadow: 0 4px 12px rgba(51, 84, 125, .035) !important;
+    transform: none !important;
+  }
+
+  .superagent-welcome .question-card:hover::before {
+    opacity: 0 !important;
+  }
+}
+
+/* The empty-state dashboard is a single, balanced phone screen rather than a
+   scrollable page. Conversation history remains independently scrollable. */
+@media (max-width: 720px) {
+  .chat-container:has(.parent-dashboard) {
+    overflow: hidden !important;
+    padding: 0 !important;
+  }
+
+  html[data-theme='dark'] .parent-dashboard,
+  html[data-theme='light'] .parent-dashboard {
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+
+  html[data-theme='dark'] .parent-dashboard .superagent-welcome,
+  html[data-theme='light'] .parent-dashboard .superagent-welcome {
+    height: 100% !important;
+    min-height: 0 !important;
+    justify-content: center !important;
+    padding: 10px 18px 12px !important;
+    overflow: hidden !important;
+  }
+
+  html[data-theme='dark'] .parent-dashboard .superagent-welcome > .welcome-avatar,
+  html[data-theme='dark'] .parent-dashboard .superagent-welcome > .welcome-eyebrow,
+  html[data-theme='dark'] .parent-dashboard .superagent-welcome > h2,
+  html[data-theme='dark'] .parent-dashboard .superagent-welcome > p,
+  html[data-theme='dark'] .parent-dashboard .superagent-welcome > .suggested-questions,
+  html[data-theme='light'] .parent-dashboard .superagent-welcome > .welcome-avatar,
+  html[data-theme='light'] .parent-dashboard .superagent-welcome > .welcome-eyebrow,
+  html[data-theme='light'] .parent-dashboard .superagent-welcome > h2,
+  html[data-theme='light'] .parent-dashboard .superagent-welcome > p,
+  html[data-theme='light'] .parent-dashboard .superagent-welcome > .suggested-questions {
+    transform: none !important;
+  }
+
+  .superagent-welcome .welcome-avatar {
+    width: 50px !important;
+    height: 50px !important;
+    margin-bottom: 6px !important;
+  }
+
+  .superagent-welcome .welcome-eyebrow { font-size: 8px !important; }
+  .superagent-welcome h2 { margin-top: 6px !important; font-size: 26px !important; line-height: 1.12 !important; }
+  .superagent-welcome > p { margin-top: 7px !important; font-size: 11px !important; line-height: 1.45 !important; }
+
+  .superagent-welcome .suggested-questions {
+    width: 100% !important;
+    margin-top: 16px !important;
+    padding: 12px !important;
+    border-radius: 17px !important;
+  }
+
+  .superagent-welcome .suggested-questions-heading {
+    margin-bottom: 9px !important;
+    padding-bottom: 9px !important;
+  }
+
+  .superagent-welcome .suggested-questions h3 { font-size: 15px !important; }
+  .superagent-welcome .suggested-questions-heading p { font-size: 11px !important; }
+  .superagent-welcome .question-grid { gap: 7px !important; }
+  .superagent-welcome .question-card {
+    min-height: 48px !important;
+    padding: 8px 10px !important;
+    font-size: 11px !important;
+  }
+
+  .welcome-description-desktop { display: none; }
+  .welcome-description-mobile { display: inline !important; }
+}
+
+.welcome-description-mobile { display: none; }
+
+/* Conversation canvas tokens: one continuous surface around active chats. */
+html[data-theme='dark'] {
+  --chat-canvas: #0e2136;
+  --welcome-glow: radial-gradient(circle at 50% 20%, rgba(70, 108, 204, .23), transparent 34%);
+  --chat-message-gutter: clamp(36px, 2.3vw, 48px);
+}
+
+html[data-theme='light'] {
+  --chat-canvas: #f6f9fe;
+  --welcome-glow: radial-gradient(circle at 50% 23%, rgba(98, 128, 255, .13), transparent 31%);
+  --chat-message-gutter: clamp(36px, 2.3vw, 48px);
+}
+
+.chat-area,
+.chat-header,
+.chat-container,
+.input-area-wrapper {
+  background: var(--chat-canvas) !important;
+}
+
+.chat-header,
+.input-area-wrapper {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+@media (min-width: 721px) {
+  .chat-container.has-messages {
+    padding-inline: var(--chat-message-gutter) !important;
+  }
+}
+
+/* Explicit active-chat selectors avoid legacy sheet specificity and keep all
+   three horizontal bands on the same themed surface. */
+html[data-theme='dark'] .chat-workspace .chat-header,
+html[data-theme='dark'] .chat-workspace .chat-container,
+html[data-theme='dark'] .chat-workspace .input-area-wrapper,
+html[data-theme='light'] .chat-workspace .chat-header,
+html[data-theme='light'] .chat-workspace .chat-container,
+html[data-theme='light'] .chat-workspace .input-area-wrapper {
+  background-color: var(--chat-canvas) !important;
+  background-image: none !important;
+}
+
+@media (min-width: 721px) {
+  html[data-theme='dark'] .chat-workspace .chat-container.has-messages,
+  html[data-theme='light'] .chat-workspace .chat-container.has-messages {
+    padding-right: var(--chat-message-gutter) !important;
+    padding-left: var(--chat-message-gutter) !important;
+  }
+}
+
+/* Optional quick-services popover: tucked away until the user asks for it. */
+.services-launcher {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  right: 28px;
+  display: grid;
+  width: auto;
+  min-width: 48px;
+  height: 48px;
+  place-items: center;
+  grid-auto-flow: column;
+  gap: 8px;
+  padding: 0 14px;
+  border-radius: 15px;
+  color: var(--text);
+  background: var(--lilac-strong);
+  box-shadow: var(--card-shadow);
+  cursor: pointer;
+  transition: transform 180ms ease, background-color 180ms ease;
+}
+
+.chat-header { position: relative; }
+
+.services-launcher:hover { background: var(--lilac); transform: translateY(-2px); }
+.services-launcher:active { transform: translateY(0); }
+.services-launcher i { font-size: 16px; }
+.services-launcher span { font-size: 11px; font-weight: 750; white-space: nowrap; }
+
+html[data-theme='dark'] .parent-dashboard .parent-services,
+html[data-theme='light'] .parent-dashboard .parent-services {
+  z-index: 3;
+  top: 14px !important;
+  right: 28px !important;
+}
+
+.services-pop-enter-active,
+.services-pop-leave-active {
+  transition: opacity 180ms ease, transform 220ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.services-pop-enter-from,
+.services-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-10px) scale(.96);
+}
+
+@media (max-width: 1200px) {
+  .services-launcher { display: none; }
+}
+
+/* Preserve a continuous canvas around both the welcome and active chat states. */
+html[data-theme='dark'] .chat-workspace .chat-header,
+html[data-theme='dark'] .chat-workspace .input-area-wrapper,
+html[data-theme='light'] .chat-workspace .chat-header,
+html[data-theme='light'] .chat-workspace .input-area-wrapper {
+  background: var(--chat-canvas) !important;
+}
+
+html[data-theme='dark'] .parent-dashboard .superagent-welcome,
+html[data-theme='light'] .parent-dashboard .superagent-welcome {
+  background: var(--welcome-glow), var(--chat-canvas) !important;
+}

@@ -94,6 +94,11 @@
     </template>
 
     <div class="sidebar-bottom">
+      <div class="language-control" aria-label="Language">
+        <button type="button" :class="{ active: language === 'en' }" :aria-pressed="language === 'en'" @click="$emit('set-language', 'en')">EN</button>
+        <button type="button" :class="{ active: language === 'ar' }" :aria-pressed="language === 'ar'" @click="$emit('set-language', 'ar')">العربية</button>
+      </div>
+
       <div class="theme-control">
         <span class="theme-control-label">
           <i :class="theme === 'light' ? 'fa-regular fa-sun' : 'fa-regular fa-moon'"></i>
@@ -135,8 +140,8 @@ import { useAuthStore } from '@/stores/auth';
 import { useChatStore } from '@/stores/chat';
 import { useSessionStore } from '@/stores/sessions';
 
-defineProps<{ theme: 'dark' | 'light' }>();
-defineEmits<{ (e: 'toggle-theme'): void }>();
+defineProps<{ theme: 'dark' | 'light'; language: 'en' | 'ar' }>();
+defineEmits<{ (e: 'toggle-theme'): void; (e: 'set-language', language: 'en' | 'ar'): void }>();
 
 const authStore = useAuthStore();
 const chatStore = useChatStore();

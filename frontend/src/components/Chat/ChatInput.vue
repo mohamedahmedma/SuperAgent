@@ -51,7 +51,7 @@
       <textarea data-gramm="false" data-gramm_editor="false" spellcheck="false"
         ref="textareaRef"
         v-model="chatStore.userInput"
-        class="chat-input-textarea" placeholder="Say something to Aurexis..."
+        class="chat-input-textarea" :placeholder="language === 'ar' ? 'اكتب رسالتك إلى أوركسيس...' : 'Say something to Aurexis...'"
         :disabled="chatStore.isInputLocked"
         rows="1"
         @keydown="handleKeyDown"
@@ -90,6 +90,7 @@
 import { nextTick, ref } from 'vue';
 import { useChatStore } from '@/stores/chat';
 
+defineProps<{ language: 'en' | 'ar' }>();
 const chatStore = useChatStore();
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const isComposing = ref(false);

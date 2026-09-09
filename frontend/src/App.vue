@@ -11,7 +11,7 @@
         class="mobile-sidebar-shell"
         :class="{ 'is-open': mobileSidebarOpen }"
       >
-        <Sidebar :theme="theme" @toggle-theme="toggleTheme" />
+        <Sidebar :theme="theme" :language="language" @toggle-theme="toggleTheme" @set-language="setLanguage" />
       </div>
 
       <button
@@ -44,7 +44,7 @@
 <main class="main-content">
         <DocumentSettings v-if="chatStore.activeNav === 'settings'" />
         <HistorySidebar />
-        <ChatArea v-show="chatStore.activeNav !== 'settings'" />
+        <ChatArea v-show="chatStore.activeNav !== 'settings'" :language="language" />
       </main>
     </div>
   </div>
@@ -66,14 +66,26 @@ const chatStore = useChatStore();
 const sessionStore = useSessionStore();
 
 type Theme = 'dark' | 'light';
-const storedTheme = localStorage.getItem('superagent-theme');
-const theme = ref<Theme>(storedTheme === 'light' ? 'light' : 'dark');
+const themeStorageKey = 'superagent-theme-v2';
+const storedTheme = localStorage.getItem(themeStorageKey);
+const theme = ref<Theme>(storedTheme === 'dark' ? 'dark' : 'light');
+type Language = 'en' | 'ar';
+const language = ref<Language>(localStorage.getItem('superagent-language') === 'ar' ? 'ar' : 'en');
 
 const applyTheme = (nextTheme: Theme) => {
   document.documentElement.dataset.theme = nextTheme;
   document.documentElement.style.colorScheme = nextTheme;
-  localStorage.setItem('superagent-theme', nextTheme);
+  localStorage.setItem(themeStorageKey, nextTheme);
 };
+
+const applyLanguage = (nextLanguage: Language) => {
+  document.documentElement.lang = nextLanguage;
+  // Language changes the copy only; the application geometry must stay stable.
+  document.documentElement.dir = 'ltr';
+  localStorage.setItem('superagent-language', nextLanguage);
+};
+
+const setLanguage = (nextLanguage: Language) => { language.value = nextLanguage; };
 
 const toggleTheme = () => {
   const nextTheme: Theme = theme.value === 'dark' ? 'light' : 'dark';
@@ -90,6 +102,7 @@ const toggleTheme = () => {
 };
 
 watch(theme, applyTheme, { immediate: true });
+watch(language, applyLanguage, { immediate: true });
 
 watch(
   () => authStore.currentUser?.username || null,
