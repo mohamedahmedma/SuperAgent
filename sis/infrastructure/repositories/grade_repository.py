@@ -239,15 +239,15 @@ class SqlAlchemyGradeRepository:
         subject_years = dict(self._session.execute(
             select(models.Subject.id, models.Subject.academic_year_id)
             .where(models.Subject.id.in_(subjects.values()))
-        ))
+        ).all())
         term_years = dict(self._session.execute(
             select(models.Term.id, models.Term.academic_year_id)
             .where(models.Term.id.in_(terms.values()))
-        ))
+        ).all())
         allowed_pairs = set(self._session.execute(
             select(models.SubjectYearLevel.subject_id, models.SubjectYearLevel.year_level_id)
             .where(models.SubjectYearLevel.subject_id.in_(subjects.values()))
-        ))
+        ).all())
         for grade in grades:
             section = sections.get(grade.class_section_id)
             subject_id = subjects[str(grade.subject_code)]
@@ -260,7 +260,10 @@ class SqlAlchemyGradeRepository:
                     "grade subject, term, and class must belong to the same academic year",
                     field="academic_year_code",
                 )
-            if (subject_id, level_id) not in allowed_pairs:
+            # Legacy imports may predate subject-to-grade configuration entirely. Once a
+            # subject has any configured grades, that configuration is authoritative.
+            subject_pairs = {pair for pair in allowed_pairs if pair[0] == subject_id}
+            if subject_pairs and (subject_id, level_id) not in subject_pairs:
                 raise UnknownReference(
                     "subject is not configured for the class grade level",
                     field="subject_code",

@@ -19,20 +19,25 @@ def upgrade() -> None:
         "UPDATE educational_systems SET department_key = "
         "CASE WHEN kind = 'arabic' THEN 'arabic' ELSE 'languages' END"
     )
-    op.alter_column("educational_systems", "department_key", server_default=None)
-    op.create_unique_constraint(
-        "uq_educational_systems_school_department",
-        "educational_systems",
-        ["school_id", "department_key"],
-    )
-    op.create_check_constraint(
-        "ck_educational_systems_department_key",
-        "educational_systems",
-        "department_key IN ('arabic', 'languages')",
-    )
+    # SQLite cannot drop a column default without rebuilding the table. The temporary
+    # default is harmless there: application writes always provide the key explicitly.
+    if op.get_bind().dialect.name != "sqlite":
+        op.alter_column("educational_systems", "department_key", server_default=None)
+    if op.get_bind().dialect.name != "sqlite":
+        op.create_unique_constraint(
+            "uq_educational_systems_school_department",
+            "educational_systems",
+            ["school_id", "department_key"],
+        )
+        op.create_check_constraint(
+            "ck_educational_systems_department_key",
+            "educational_systems",
+            "department_key IN ('arabic', 'languages')",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_educational_systems_department_key", "educational_systems", type_="check")
-    op.drop_constraint("uq_educational_systems_school_department", "educational_systems", type_="unique")
+    if op.get_bind().dialect.name != "sqlite":
+        op.drop_constraint("ck_educational_systems_department_key", "educational_systems", type_="check")
+        op.drop_constraint("uq_educational_systems_school_department", "educational_systems", type_="unique")
     op.drop_column("educational_systems", "department_key")

@@ -130,6 +130,7 @@ def all_routers() -> tuple["APIRouter", ...]:
         homework,
         imports,
         structure,
+        student_documents,
         students,
         system,
         timetable,
@@ -150,6 +151,7 @@ def all_routers() -> tuple["APIRouter", ...]:
         timetable.router,
         teachers.router,
         students.router,
+        student_documents.router,
         guardians.router,
         grades.router,
         # After grades: this is the teacher's own write path onto the same figures those

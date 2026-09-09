@@ -635,6 +635,44 @@ function Timeline({ studentNumber }) {
   </Card>;
 }
 
+function Documents({ studentNumber }) {
+  const canWrite = Store.can('documents.write');
+  const docs = useResource(`student-documents:${studentNumber}`, () => api.studentDocuments(studentNumber), !!studentNumber);
+  const [file, setFile] = useState(null);
+  const [documentType, setDocumentType] = useState('identity');
+  const [expiryDate, setExpiryDate] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const upload = async (event) => {
+    event.preventDefault();
+    if (!file || !documentType.trim() || saving) return;
+    setSaving(true); setError(null);
+    try { await api.uploadStudentDocument(studentNumber, documentType.trim(), file, expiryDate); setFile(null); setExpiryDate(''); await docs.reload(); }
+    catch (reason) { setError(reason); } finally { setSaving(false); }
+  };
+  const remove = async (id) => {
+    try { await api.deleteStudentDocument(studentNumber, id); await docs.reload(); }
+    catch (reason) { setError(reason); }
+  };
+  return <Card title={t('Documents')} subtitle={t('Files recorded against this student.')} tight>
+    <ErrorNote error={error || docs.error} onRetry={docs.reload} />
+    {canWrite ? <form className="row g-2 p-3 border-bottom" onSubmit={upload}>
+      <Field className="col-12 col-md-3" label={t('Document type')}><Input value={documentType} onInput={setDocumentType} /></Field>
+      <Field className="col-12 col-md-4" label={t('File')}><input className="form-control" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(event) => setFile(event.target.files?.[0] || null)} /></Field>
+      <Field className="col-8 col-md-3" label={t('Expiry date')}><Input type="date" value={expiryDate} onInput={setExpiryDate} /></Field>
+      <div className="col-4 col-md-2 d-grid align-items-end"><Button type="submit" variant="primary" pending={saving} disabled={!file}>{t('Upload')}</Button></div>
+    </form> : null}
+    <Table loading={docs.loading} rows={docs.value || []} rowKey={(row) => row.id}
+      empty={<Empty title={t('No documents recorded yet')} />}
+      columns={[
+        { key: 'name', header: t('Document'), cell: (row) => <><a href={api.studentDocumentFileUrl(studentNumber, row.id)}>{row.original_filename}</a><div className="small text-body-secondary">{row.document_type} · {Math.ceil(row.size_bytes / 1024)} KB</div></> },
+        { key: 'status', header: t('Status'), hide: 'sm', cell: (row) => <Badge>{row.status}</Badge> },
+        { key: 'uploaded', header: t('Uploaded'), hide: 'md', cell: (row) => dateText(row.uploaded_at) },
+        { key: 'actions', header: '', cell: (row) => canWrite ? <Button size="sm" variant="danger" onClick={() => remove(row.id)}>{t('Delete')}</Button> : null }
+      ]} />
+  </Card>;
+}
+
 /* -- Insights: counts and facts, and nothing derived ------------------------------ */
 
 function Insights({ student, studentNumber }) {
@@ -833,6 +871,7 @@ export function Student({ params = {} }) {
             {!isTeacher ? <Insights student={student} studentNumber={number} /> : null}
             {mayReadGrades ? <Marks studentNumber={number} /> : null}
             <Attendance studentNumber={number} academicYear={state.year} />
+            <Documents studentNumber={number} />
             <Timeline studentNumber={number} />
           </div>
         </div>

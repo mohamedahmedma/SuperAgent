@@ -947,6 +947,22 @@ var api = {
   studentTimeline: function (studentNumber) {
     return get('/students/' + encodeURIComponent(studentNumber) + '/timeline');
   },
+  studentDocuments: function (studentNumber) {
+    return get('/students/' + encodeURIComponent(studentNumber) + '/documents');
+  },
+  uploadStudentDocument: function (studentNumber, documentType, file, expiryDate) {
+    var form = new FormData();
+    form.append('document_type', documentType);
+    form.append('file', file);
+    if (expiryDate) form.append('expiry_date', expiryDate);
+    return request('/students/' + encodeURIComponent(studentNumber) + '/documents', { method: 'POST', form: form });
+  },
+  deleteStudentDocument: function (studentNumber, documentId) {
+    return request('/students/' + encodeURIComponent(studentNumber) + '/documents/' + encodeURIComponent(documentId), { method: 'DELETE' });
+  },
+  studentDocumentFileUrl: function (studentNumber, documentId) {
+    return BASE + '/students/' + encodeURIComponent(studentNumber) + '/documents/' + encodeURIComponent(documentId) + '/file';
+  },
 
   /*
    * Liveness, and the only entry here that is not under /v1. `/health` is the process

@@ -527,13 +527,17 @@ def require_permission(permission: Permission) -> Callable[..., Principal]:
 
     def dependency(
         authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        raw_key: Annotated[str | None, Header(alias=API_KEY_HEADER)] = None,
         school_code: SchoolCodeDep = None,
     ) -> Principal:
         if not (authorization or "").strip().lower().startswith("bearer "):
             allowed = (
                 (Scope.REGISTRAR, Scope.READER) if _is_read(permission) else (Scope.REGISTRAR,)
             )
-            return Principal(caller=_require_scopes(*allowed)(), school_code=school_code)
+            return Principal(
+                caller=_require_scopes(*allowed)(raw_key=raw_key, school_code=school_code),
+                school_code=school_code,
+            )
 
         profile = get_access_profile(authorization, school_code)
         # The wide check: held anywhere, at any scope. `allows` with no target would ask
