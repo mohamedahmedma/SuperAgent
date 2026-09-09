@@ -251,6 +251,39 @@ class AgentAssemblyTests(ProfileTestCase):
     def test_a_toolless_profile_builds_an_agent_with_no_tools(self):
         kwargs = self._built_kwargs(temp_profile("name: bare\nagent:\n  tools: []\n"))
         self.assertEqual([], kwargs["tools"])
+        # ONLY the middleware that declares an edge to `tools` is withheld. Asserting
+        # emptiness here would pin the opposite contract, and would then defend a future
+        # non-tool middleware — a redactor, a language guard — being silently dropped
+        # from every social turn.
+        names = [getattr(m, "name", type(m).__name__) for m in kwargs["middleware"]]
+        self.assertNotIn("_run_the_planned_calls_together", names)
+        self.assertIn("_ForcePlannedTool", names)
+
+    def test_a_toolless_agent_really_compiles_without_a_tools_node(self):
+        """Regression: a middleware edge to `tools` made every social turn fail while
+        constructing the graph, because LangChain omits that node for an empty list.
+
+        The load-bearing assertion is that the call below RETURNS — the production error
+        was `At '_run_the_planned_calls_together.before_model' node, 'jump_edge' branch
+        found unknown target 'tools'`, raised during construction. `assertNotIn` merely
+        records what the graph is; with no tools there is no such node either way.
+        """
+        import backend.chat.runtime as runtime
+        from backend.chat.request_context import ChatRequestContext
+
+        ctx = ChatRequestContext.for_sync(user_id="u", session_id="social")
+        with temp_profile("name: bare\nagent:\n  tools: []\n"):
+            agent = runtime.create_agent_for_request(ctx)
+        self.assertNotIn("tools", agent.nodes)
+
+    def test_a_tool_bearing_turn_still_gets_the_planner_dispatch(self):
+        """The other half of the gate. Withholding it whenever tools exist would cost
+        every planned turn the round-trip the dispatch exists to remove."""
+        kwargs = self._built_kwargs(
+            temp_profile("name: kb\nagent:\n  tools: [search_knowledge_base]\n")
+        )
+        names = [getattr(m, "name", type(m).__name__) for m in kwargs["middleware"]]
+        self.assertEqual("_run_the_planned_calls_together", names[0])
 
 
 class CacheNamespaceTests(ProfileTestCase):

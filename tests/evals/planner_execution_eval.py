@@ -477,9 +477,13 @@ CASES = [
          note="ends before the agent is built"),
     Case("out of domain, sport", "مين كسب الماتش امبارح؟", expect_short_circuit=True),
     Case("out of domain, a task", "اكتبلي ايميل لمديري", expect_short_circuit=True),
-    Case("social", "شكرا جزيلا", expect_tools=set(),
-         note="answered with no tools bound"),
-    Case("social, dialect", "ازيك يا فندم", expect_tools=set(),
+    # `expect_short_circuit`, because the school profile answers a pleasantry from its
+    # own copy: `social_reply_mode: static` sets `static_reply`, and a plan carrying one
+    # ends the turn before the agent is built. Without this the runner reports "turn
+    # ended before the agent, unexpectedly" on both.
+    Case("social", "شكرا جزيلا", expect_tools=set(), expect_short_circuit=True,
+         note="answered from profile copy, with no model call at all"),
+    Case("social, dialect", "ازيك يا فندم", expect_tools=set(), expect_short_circuit=True,
          note="an Egyptian opener the profile lists, so no model call at all"),
 
     # =================================================================================

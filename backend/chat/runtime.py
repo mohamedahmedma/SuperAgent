@@ -27,6 +27,15 @@ BASE_URL = os.getenv("BASE_URL")
 
 logger = logging.getLogger(__name__)
 
+# Together's OpenAI-compatible endpoint can occasionally return an ordinary assistant
+# message even when a named tool was required. LangChain then raises this provider error
+# instead of handing the message back. Keep the match deliberately specific: retrying an
+# arbitrary model failure would double traffic and hide the real outage.
+_UNHONOURED_TOOL_CHOICE_PARTS = (
+    "tool choice is required",
+    "did not call a tool",
+)
+
 # The agent's model is the one that replays tool results, and this endpoint stops
 # parsing its own transcript format the moment it sees one. See backend/provider_compat.py.
 model = fold_tool_results_into_text(init_chat_model(
@@ -316,15 +325,53 @@ class _ForcePlannedTool(AgentMiddleware):
         # raises on one it does not — which the guard above has already made impossible.
         return request.override(tool_choice=self._tool)
 
+    @staticmethod
+    def _provider_ignored_requirement(exc: BaseException) -> bool:
+        text = str(exc).casefold()
+        return all(part in text for part in _UNHONOURED_TOOL_CHOICE_PARTS)
+
     # Sync and async both, for the reason spelled out on `_ToolBudget`: the streamed path
     # composes the async hooks, and the base class's `awrap_model_call` raises. A forcing
     # middleware that existed only on the sync side would have forced nothing on the one
     # path every parent actually uses.
     def wrap_model_call(self, request, handler):
-        return handler(self._required(request))
+        required = self._required(request)
+        try:
+            return handler(required)
+        except Exception as exc:
+            if required is request or not self._provider_ignored_requirement(exc):
+                raise
+            # Keep the selected tool bound but relax only the requirement. The model gets
+            # one chance to recover instead of exposing provider plumbing to the parent.
+            # Numeric claims are still checked against actual tool evidence downstream.
+            # `exc_info`, because the matched text is the provider's own unversioned
+            # error body, not anything the pinned stack emits. If the endpoint rewords
+            # it, `_provider_ignored_requirement` stops matching and this fallback goes
+            # quiet — and the logged exception is the only way to notice and re-pin it.
+            logger.warning(
+                "provider did not honour required tool %s; retrying with tool choice open",
+                self._tool,
+                exc_info=True,
+            )
+            return handler(request)
 
     async def awrap_model_call(self, request, handler):
-        return await handler(self._required(request))
+        required = self._required(request)
+        try:
+            return await handler(required)
+        except Exception as exc:
+            if required is request or not self._provider_ignored_requirement(exc):
+                raise
+            # `exc_info`, because the matched text is the provider's own unversioned
+            # error body, not anything the pinned stack emits. If the endpoint rewords
+            # it, `_provider_ignored_requirement` stops matching and this fallback goes
+            # quiet — and the logged exception is the only way to notice and re-pin it.
+            logger.warning(
+                "provider did not honour required tool %s; retrying with tool choice open",
+                self._tool,
+                exc_info=True,
+            )
+            return await handler(request)
 
 
 def _force_the_planned_tool(ctx: ChatRequestContext) -> _ForcePlannedTool:
@@ -418,10 +465,12 @@ def _dispatch_planned_tools(ctx: ChatRequestContext):
         (see `planned_tool_calls`), so a tool with budget left can be called again with
         different arguments — which is how the model corrects a planned query that came
         back empty.
-      * **Fewer than two surviving calls means no dispatch at all.** One call ahead of
-        the model buys no concurrency, and the ordinary loop already handles one tool
-        well. Falling back costs a round-trip; seeding a lone call would spend the
-        planner's credibility for nothing.
+      * **No surviving call means no dispatch at all.** A lone surviving call IS
+        dispatched, which it did not used to be. The old rule weighed concurrency only —
+        one call overlaps with nothing — but the round-trip it removes is the same
+        round-trip either way, and the single-tool turn is this deployment's common
+        case. What the planner spends its credibility on is the ARGUMENTS, and those are
+        written from what it already settled, however many calls there are.
 
     ## Ordering against the other hook that jumps
 
@@ -447,7 +496,7 @@ def _dispatch_planned_tools(ctx: ChatRequestContext):
 
         made = dict(state.get("tool_calls_made") or {})
         calls = planned_tool_calls(planned, made)
-        if len(calls) < 2:
+        if not calls:
             return None
 
         for call in calls:
@@ -593,36 +642,52 @@ def create_agent_for_request(
     """
     profile = get_profile()
     allowed = profile.agent.tools if tool_names is None else tool_names
+    bound_tools = build_tools(allowed, ctx)
+
+    # `create_agent` omits its `tools` graph node when the bound list is empty, and a
+    # middleware declaring `can_jump_to=["tools"]` against that graph fails validation
+    # before the model is ever called — the exact failure a social turn used to expose,
+    # because `_plan_social` narrows `exposed_tools` to nothing.
+    #
+    # Exactly one of these declares that edge, so exactly one is conditional. The others
+    # are left registered on every turn: they are inert without tools, and dropping them
+    # wholesale would silently disable anything later added to this list that is NOT
+    # about tool traffic — on precisely the turns that reach a parent with the least
+    # machinery in front of them.
+    middleware = [
+        # ORDER IS LOAD-BEARING. `before_model` hooks are chained FIRST-IN-LIST-FIRST
+        # and a jump short-circuits the rest, while `wrap_model_call` composes
+        # first-in-list as the OUTERMOST layer:
+        #
+        #   the planner's dispatch runs before every other before_model hook, so a
+        #   turn whose tools were decided in advance never reaches the model without
+        #   them — and because it jumps to the tool node, nothing after it on that
+        #   pass runs at all. It is inert from the second pass onward, so the hooks
+        #   below see an ordinary loop;
+        #
+        #   duplicates are dropped as the model produces them, so the budget counts
+        #   the calls that will actually run rather than the copies, and the terminal
+        #   guard still sees a single result;
+        #
+        #   the budget sits OUTSIDE the forcing, so a request that has had its spent
+        #   tools withheld reaches the forcing already narrowed — which is what lets
+        #   that middleware settle for "force only a tool still on the request" and
+        #   never produce the one shape the provider rejects outright, a required
+        #   call with nothing to call.
+        _collapse_duplicate_tool_calls(ctx),
+        _spend_tool_budgets(ctx),
+        _force_the_planned_tool(ctx),
+        _end_turn_on_terminal_retrieval(ctx),
+    ]
+    # First in the list, so it stays the outermost `wrap_model_call` and the first
+    # `before_model` hook — the ordering the block above describes.
+    if bound_tools:
+        middleware.insert(0, _dispatch_planned_tools(ctx))
     return create_agent(
         model=model,
-        tools=build_tools(allowed, ctx),
+        tools=bound_tools,
         # Same list drives both, so the prompt can never describe a capability this
         # turn did not bind, or stay silent about one it did.
         system_prompt=profile.render_system_prompt(allowed, language),
-        middleware=[
-            # ORDER IS LOAD-BEARING. `before_model` hooks are chained FIRST-IN-LIST-FIRST
-            # and a jump short-circuits the rest, while `wrap_model_call` composes
-            # first-in-list as the OUTERMOST layer:
-            #
-            #   the planner's dispatch runs before every other before_model hook, so a
-            #   turn whose tools were decided in advance never reaches the model without
-            #   them — and because it jumps to the tool node, nothing after it on that
-            #   pass runs at all. It is inert from the second pass onward, so the hooks
-            #   below see an ordinary loop;
-            #
-            #   duplicates are dropped as the model produces them, so the budget counts
-            #   the calls that will actually run rather than the copies, and the terminal
-            #   guard still sees a single result;
-            #
-            #   the budget sits OUTSIDE the forcing, so a request that has had its spent
-            #   tools withheld reaches the forcing already narrowed — which is what lets
-            #   that middleware settle for "force only a tool still on the request" and
-            #   never produce the one shape the provider rejects outright, a required
-            #   call with nothing to call.
-            _dispatch_planned_tools(ctx),
-            _collapse_duplicate_tool_calls(ctx),
-            _spend_tool_budgets(ctx),
-            _force_the_planned_tool(ctx),
-            _end_turn_on_terminal_retrieval(ctx),
-        ],
+        middleware=middleware,
     )

@@ -122,6 +122,32 @@ class SocialDetectorTests(unittest.TestCase):
         self.assertIsNotNone(self._detect("Thanks!!!"))
         self.assertIsNotNone(self._detect("THANK YOU."))
 
+    def test_a_listed_sentence_is_social(self):
+        """A whole sentence is matchable, because that is what a parent actually types.
+
+        «Thanks for your help» reached the agent in production and came back to the
+        parent as a provider error. The fix is the phrase list — one entry, still an
+        exact match — not fuzzy matching, which would have to accept a sentence plus an
+        error budget and would then admit "thanks and what are the fees" too.
+        """
+        config = agent_config(social_phrases=["thanks", "thanks for your help"])
+        signals = self.detector.detect(
+            ctx("Thanks for your help!", config=config),
+            RequestSignals(question="Thanks for your help!"),
+        )
+        self.assertIsNotNone(signals)
+        self.assertTrue(signals.is_social)
+
+    def test_a_listed_sentence_does_not_make_a_longer_one_social(self):
+        config = agent_config(social_phrases=["thanks", "thanks for your help"])
+        for text in ("thanks for your help, what are the fees", "thanks but what class"):
+            self.assertIsNone(
+                self.detector.detect(
+                    ctx(text, config=config), RequestSignals(question=text)
+                ),
+                text,
+            )
+
     def test_a_social_turn_is_not_out_of_domain(self):
         """Routing a greeting to a refusal is the wrong reply to "thank you"."""
         signals = self._detect("thanks")

@@ -463,9 +463,11 @@ class TerminalShortCircuitMiddlewareTests(unittest.TestCase):
         import backend.chat.runtime as runtime
 
         captured = {}
-        with patch.object(runtime, "build_tools", lambda names, ctx: []), \
+        # A real bound tool is what makes these tool-traffic guards relevant. Returning
+        # [] here used to construct the invalid graph this regression now prevents.
+        with patch.object(runtime, "build_tools", lambda names, ctx: [object()]), \
              patch.object(runtime, "create_agent", lambda **kw: captured.update(kw)):
-            runtime.create_agent_for_request(self.Ctx("no_knowledge"), [])
+            runtime.create_agent_for_request(self.Ctx("no_knowledge"), [KNOWLEDGE_TOOL])
 
         bound = " ".join(
             f"{type(item).__name__} {getattr(item, 'name', '')}"

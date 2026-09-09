@@ -695,6 +695,44 @@ def _enforce_records_agreement(finalizer: Finalizer, ctx, turn_plan) -> str:
     return _COPY.unverified_answer if mode == "enforce" else ""
 
 
+def _enforce_forced_tool_ran(finalizer: Finalizer, ctx, turn_plan) -> str:
+    """Replacement copy for an answer whose required tool never actually ran.
+
+    `_ForcePlannedTool` asks the provider to require a tool; it cannot make it. When the
+    endpoint returns an ordinary assistant message instead, that middleware relaxes the
+    requirement and gives the model one more pass — and an unforced model may answer the
+    question from memory, which is the single outcome forcing exists to prevent.
+
+    So the requirement is checked here, where the turn's actual tool traffic is known,
+    rather than trusted at the point it was requested. Two failures are closed at once,
+    and it is the same replacement that closes both:
+
+      * **The invented record.** `_enforce_grounding` only sees figures at or above
+        `answer_grounding_number_floor`, and marks sit under it — 84.0 and 87.5 are
+        below 100 — while a claim about a class, a subject or a teacher carries no
+        number at all. Neither is checkable against evidence that was never fetched.
+      * **The doubled answer.** The retry happens after the first attempt's prose has
+        already streamed to the browser, so the reader would otherwise see the rejected
+        answer followed by the second one. A replacement is an assignment on the client,
+        not an append, so it clears both.
+
+    Same shape and same contract as its two siblings above — "" when there is nothing to
+    do — and it asks only the question those cannot: was a tool this turn REQUIRED to
+    call among the tools it called?
+    """
+    forced = (getattr(ctx, "forced_tool", "") or "").strip()
+    if not forced or turn_plan is None or getattr(turn_plan, "short_circuit", False):
+        return ""
+    # The planner's own dispatch satisfies the requirement as surely as a model call
+    # does: a seeded result is the tool having run. `tool_outcomes` records both.
+    if any(name == forced for name, _ in (getattr(ctx, "tool_outcomes", None) or [])):
+        return ""
+    logger.warning(
+        "the turn required %s and no such tool ran; replacing the answer", forced
+    )
+    return _COPY.unverified_answer
+
+
 def _resume_rag_from_hitl_sync(
     pending_hitl: dict,
     user_answer: str,
@@ -1058,6 +1096,7 @@ def chat_with_agent(
                     replacement = (
                         _enforce_grounding(sync_finalizer, rag_trace, turn_plan)
                         or _enforce_records_agreement(sync_finalizer, ctx, turn_plan)
+                        or _enforce_forced_tool_ran(sync_finalizer, ctx, turn_plan)
                     )
                     if replacement:
                         response_content = replacement
@@ -1427,6 +1466,8 @@ async def chat_with_agent_stream(
             replacement = _enforce_grounding(finalizer, rag_trace, turn_plan)
             if not replacement:
                 replacement = _enforce_records_agreement(finalizer, ctx, turn_plan)
+            if not replacement:
+                replacement = _enforce_forced_tool_ran(finalizer, ctx, turn_plan)
             if not replacement and not full_response.strip():
                 replacement = _nothing_usable_reply(finalizer, turn_plan)
             if replacement:

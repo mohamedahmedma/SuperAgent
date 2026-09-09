@@ -312,6 +312,64 @@ class TheRequestIsNeverMutated(unittest.TestCase):
         self.assertIs(handed["request"], request)
 
 
+class ProviderToolChoiceFallback(unittest.TestCase):
+    """A provider violation is retried once without exposing its protocol error.
+
+    `ERROR` is not invented. It is the message a parent was actually shown in
+    production — «Thansks for your help» reached the agent, was handed a required tool
+    it had no reason to call, and came back as this text — so the matcher is pinned to
+    an observed body rather than a guess. It comes from the endpoint, not from any
+    pinned dependency, so it can be reworded without a lockfile change: the retry logs
+    `exc_info` for that reason, and `_enforce_forced_tool_ran` in `service.py` is what
+    keeps the turn safe whether or not this match still fires.
+    """
+
+    ERROR = RuntimeError("Tool choice is required, but model did not call a tool")
+
+    def test_the_sync_path_retries_with_the_tool_still_bound_but_not_required(self):
+        middleware = runtime._ForcePlannedTool(RECORDS_TOOL)
+        attempts = []
+
+        def handler(request):
+            attempts.append(
+                (request.tool_choice, [runtime._tool_name(t) for t in request.tools])
+            )
+            if len(attempts) == 1:
+                raise self.ERROR
+            return "recovered"
+
+        result = middleware.wrap_model_call(_request(), handler)
+        self.assertEqual(result, "recovered")
+        self.assertEqual([choice for choice, _ in attempts], [RECORDS_TOOL, None])
+        self.assertEqual(attempts[0][1], attempts[1][1])
+
+    def test_the_async_path_has_the_same_single_retry(self):
+        middleware = runtime._ForcePlannedTool(RECORDS_TOOL)
+        attempts = []
+
+        async def handler(request):
+            attempts.append(request.tool_choice)
+            if len(attempts) == 1:
+                raise self.ERROR
+            return "recovered"
+
+        result = asyncio.run(middleware.awrap_model_call(_request(), handler))
+        self.assertEqual(result, "recovered")
+        self.assertEqual(attempts, [RECORDS_TOOL, None])
+
+    def test_an_unrelated_provider_error_is_not_retried(self):
+        middleware = runtime._ForcePlannedTool(RECORDS_TOOL)
+        attempts = []
+
+        def handler(request):
+            attempts.append(request.tool_choice)
+            raise RuntimeError("upstream unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "upstream unavailable"):
+            middleware.wrap_model_call(_request(), handler)
+        self.assertEqual(attempts, [RECORDS_TOOL])
+
+
 # --------------------------------------------------------------------------------------
 # The value that reaches the provider
 # --------------------------------------------------------------------------------------
@@ -542,3 +600,45 @@ class TheStreamedPath(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheRequirementIsCheckedAfterTheTurn(unittest.TestCase):
+    """`tool_choice` is a request to the provider, so the turn verifies it was honoured.
+
+    The middleware's retry relaxes the requirement to recover a turn that would
+    otherwise 500. An unforced model may then answer from memory, which is the one
+    outcome forcing exists to prevent — and neither existing check catches it: grounding
+    only sees figures at or above `answer_grounding_number_floor` (marks sit under it),
+    and `_denies_the_records` needs a tool result to disagree with.
+    """
+
+    class _Ctx:
+        def __init__(self, forced, outcomes):
+            self.forced_tool = forced
+            self.tool_outcomes = outcomes
+
+    class _Plan:
+        short_circuit = False
+
+    class _Finalizer:
+        answer = "ليلى حصلت على ٩٥٪ في الرياضيات"
+
+    def _verdict(self, forced, outcomes):
+        from backend.chat import service
+
+        return service._enforce_forced_tool_ran(
+            self._Finalizer(), self._Ctx(forced, outcomes), self._Plan()
+        )
+
+    def test_an_answer_with_no_tool_run_is_replaced(self):
+        self.assertTrue(self._verdict(RECORDS_TOOL, []))
+
+    def test_a_turn_whose_forced_tool_ran_is_left_alone(self):
+        self.assertEqual("", self._verdict(RECORDS_TOOL, [(RECORDS_TOOL, "grades")]))
+
+    def test_a_different_tool_running_does_not_satisfy_the_requirement(self):
+        """The planner required THIS tool. Another one answering is not that tool."""
+        self.assertTrue(self._verdict(RECORDS_TOOL, [("search_knowledge_base", "ok")]))
+
+    def test_a_turn_that_forced_nothing_is_never_replaced(self):
+        self.assertEqual("", self._verdict("", []))

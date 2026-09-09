@@ -471,6 +471,14 @@ export const useChatStore = defineStore('chat', {
       this.mergeCachedSessionsIntoHistory();
 
       this.abortController = new AbortController();
+      // This request's own handle on the shared streaming state. Releasing the composer
+      // at `[DONE]` means a NEXT message can start while this connection is still open
+      // draining the server's post-answer work, so the teardown below must be able to
+      // tell "I am still the live request" from "something newer replaced me". Without
+      // it, this stream's `finally` would clear the newer request's `isLoading` and
+      // re-enable the send button mid-answer.
+      const requestAbortController = this.abortController;
+      const isStillTheLiveRequest = () => this.abortController === requestAbortController;
       let receivedHitlRequest = false;
       let streamHadError = false;
 
@@ -524,7 +532,21 @@ export const useChatStore = defineStore('chat', {
 
             if (eventStr.startsWith('data: ')) {
               const dataStr = eventStr.slice(6);
-              if (dataStr === '[DONE]') continue;
+              if (dataStr === '[DONE]') {
+                // The answer is complete. Release the composer HERE rather than in the
+                // `finally` below, which waits for the connection to CLOSE — and the
+                // server keeps it open past this point to summarise the conversation
+                // into its persistent note. That summary is a further model call, so
+                // waiting for the close kept the send button disabled for seconds after
+                // the last word had already been rendered. Reading continues to the
+                // close so a late `trace` or `assets` event is not dropped; the `finally`
+                // sets both of these again, which is idempotent.
+                if (isStillTheLiveRequest()) {
+                  this.isLoading = false;
+                  this.streamingSessionId = null;
+                }
+                continue;
+              }
               try {
                 const data = JSON.parse(dataStr);
                 if (data.type === 'content') {
@@ -628,9 +650,14 @@ export const useChatStore = defineStore('chat', {
         if (streamHadError && pendingHitlAtSend && !receivedHitlRequest) {
           this.pendingHitlBySession[requestSessionId] = pendingHitlAtSend;
         }
-        this.isLoading = false;
-        this.streamingSessionId = null;
-        this.abortController = null;
+        // Guarded: see `requestAbortController`. A stream that has already released the
+        // composer at `[DONE]` may reach here long after a newer message took over, and
+        // this state belongs to whichever request is live now.
+        if (isStillTheLiveRequest()) {
+          this.isLoading = false;
+          this.streamingSessionId = null;
+          this.abortController = null;
+        }
         this.mergeCachedSessionsIntoHistory();
       }
     },
