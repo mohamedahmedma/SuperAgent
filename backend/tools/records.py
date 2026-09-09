@@ -191,13 +191,11 @@ def _match_student(
 #: Named here so that policy and profile code can talk about "the record tools" without
 #: importing this module, which reaches the request context and the HTTP layer.
 GRADES_TOOL = "get_student_grades"
-SUBJECT_TOOL = "get_subject_grades"
 ATTENDANCE_TOOL = "get_student_attendance"
 TIMETABLE_TOOL = "get_student_timetable"
 CLASS_TOOL = "get_student_class"
 SUBJECTS_TOOL = "get_student_subjects"
 TEACHERS_TOOL = "get_student_teachers"
-SUBJECT_TEACHER_TOOL = "get_subject_teacher"
 
 
 def _reporter(ctx: ChatRequestContext, tool_name: str):
@@ -303,71 +301,55 @@ _STUDENT_NAME_NOTE = """
 
 def make_get_student_grades(ctx: ChatRequestContext):
     @tool(GRADES_TOOL)
-    def get_student_grades(student_name: str = "") -> str:
-        """Read one child's marks for the current term, across every subject.
+    def get_student_grades(student_name: str = "", subject: str = "") -> str:
+        """Read one child's marks for the current term, across every subject or one.
 
-        Use this for how a child is doing overall, their results, or their report card,
-        and for their marks when the question names no single subject. For one subject's
-        assignment-by-assignment detail use get_subject_grades; for absences use
-        get_student_attendance. Do not use any of them for school policies, fees or
-        general information — those come from the knowledge base.
+        Use this for how a child is doing overall, their results or their report card,
+        and equally for their mark in one named subject — what she got in Arabic. For
+        absences use get_student_attendance. Do not use either for school policies, fees
+        or general information; those come from the knowledge base.
+
+        subject: OPTIONAL, and the only argument that is yours to supply — it comes from
+        the message itself. Leave it empty whenever the question names no subject; naming
+        one adds that subject's assignment-by-assignment detail, and a name matching none
+        is answered with the subjects the child actually takes, so a wrong guess costs
+        nothing.
         """
         result = _reporter(ctx, GRADES_TOOL)
         refusal, student = _resolve_student(ctx, student_name, result)
         if refusal:
             return refusal
 
-        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/grades", ctx)
+        path = _student_path(ctx, student.student_id)
+        # The term's rollup first, whichever question was asked. Without a subject it IS
+        # the answer; with one it is how a subject named in words becomes the course id
+        # the facade addresses a breakdown by.
+        outcome, data = _get(f"{path}/grades", ctx)
         if outcome != "ok":
             return _refused(ctx, outcome, result)
-        return result("grades", **_render_context(student.label, data))
 
-    get_student_grades.description += _STUDENT_NAME_NOTE
-    return get_student_grades
+        wanted = (subject or "").strip()
+        if not wanted:
+            return result("grades", **_render_context(student.label, data))
 
-
-def make_get_subject_grades(ctx: ChatRequestContext):
-    @tool(SUBJECT_TOOL)
-    def get_subject_grades(subject: str, student_name: str = "") -> str:
-        """Read one child's assignment-by-assignment breakdown in a single subject.
-
-        Use this when the question names a subject. For every subject at once use
-        get_student_grades instead.
-
-        subject: the subject name as the parent said it, in Arabic or English. This one
-        IS yours to supply — it comes from the message itself, and a name matching no
-        subject is answered with the subjects the child actually takes.
-        """
-        result = _reporter(ctx, SUBJECT_TOOL)
-        refusal, student = _resolve_student(ctx, student_name, result)
-        if refusal:
-            return refusal
-
-        path = _student_path(ctx, student.student_id)
-        # The course list first, because the facade addresses one subject by course id
-        # and the parent named it in words.
-        grades_outcome, grades = _get(f"{path}/grades", ctx)
-        if grades_outcome != "ok":
-            return _refused(ctx, grades_outcome, result)
-
-        course = _match_course(grades, subject)
+        course = _match_course(data, wanted)
         if course is None:
             return result(
                 "which_subject",
                 student=student,
                 options=[
                     c.get("subject_name_ar") or c.get("subject_name_en")
-                    for c in grades.get("courses") or []
+                    for c in data.get("courses") or []
                 ],
             )
 
-        outcome, data = _get(f"{path}/grades/{course.get('course_id')}", ctx)
-        if outcome != "ok":
-            return _refused(ctx, outcome, result)
-        return result("subject", **_render_context(student.label, data))
+        detail_outcome, detail = _get(f"{path}/grades/{course.get('course_id')}", ctx)
+        if detail_outcome != "ok":
+            return _refused(ctx, detail_outcome, result)
+        return result("subject", **_render_context(student.label, detail))
 
-    get_subject_grades.description += _STUDENT_NAME_NOTE
-    return get_subject_grades
+    get_student_grades.description += _STUDENT_NAME_NOTE
+    return get_student_grades
 
 
 def make_get_student_attendance(ctx: ChatRequestContext):
@@ -484,10 +466,11 @@ def _timetable_context(student_label: str, data: dict) -> dict:
 
 # --- the room she sits in: her class, her subjects, her teachers -------------------
 #
-# Three facade endpoints and four tools over them. The extra tool is the subject-teacher
-# one, which stands beside `get_student_teachers` exactly as `get_subject_grades` stands
-# beside `get_student_grades`: a parent who names a subject wants one answer, not a list
-# to read through, and the planner selects by NAME so the narrow case needs its own name.
+# Three facade endpoints and three tools over them, one each. A parent who names a
+# subject wants one answer rather than a list to read through, and that used to be its
+# own tool — but a filter is not a different record: the classifier had to tell two
+# near-identical descriptions apart every turn, and a tool whose argument comes from the
+# message can never be pre-dispatched. It is an optional `subject` on the parent tool now.
 #
 # None of them sends a class code, and none of them could: the facade resolves the room
 # from the child's placement for the term. A class code held up here would be one that
@@ -559,55 +542,38 @@ def make_get_student_subjects(ctx: ChatRequestContext):
 
 def make_get_student_teachers(ctx: ChatRequestContext):
     @tool(TEACHERS_TOOL)
-    def get_student_teachers(student_name: str = "") -> str:
-        """Read every teacher who teaches one child, and the subject each of them teaches.
+    def get_student_teachers(student_name: str = "", subject: str = "") -> str:
+        """Read who teaches one child, for every subject or for one named subject.
 
-        Use this for who a child's teachers are. When the question names a single subject
-        — who teaches them maths — use get_subject_teacher instead. Do not use either for
+        Use this for who a child's teachers are, and equally for who teaches them one
+        subject — who their maths teacher is, who gives them Arabic. Do not use it for
         how to contact a teacher or for parent-meeting times; those come from the
         knowledge base.
+
+        subject: OPTIONAL, and the only argument that is yours to supply — it comes from
+        the message itself. Leave it empty whenever the question names no subject; a name
+        matching none is answered with the subjects the child actually has a teacher for,
+        so a wrong guess costs nothing.
         """
         result = _reporter(ctx, TEACHERS_TOOL)
         refusal, student = _resolve_student(ctx, student_name, result)
         if refusal:
             return refusal
 
+        # One call either way. The teacher rows carry their own subject names, so a named
+        # subject is matched against what came back rather than resolved through a second
+        # endpoint first — which is what the grades tool has to do only because a
+        # subject's detail lives at its own URL.
         outcome, data = _get(f"{_student_path(ctx, student.student_id)}/teachers", ctx)
         if outcome != "ok":
             return _refused(ctx, outcome, result)
-        return result("teachers", **_teachers_context(student.label, data))
 
-    get_student_teachers.description += _STUDENT_NAME_NOTE
-    return get_student_teachers
-
-
-def make_get_subject_teacher(ctx: ChatRequestContext):
-    @tool(SUBJECT_TEACHER_TOOL)
-    def get_subject_teacher(subject: str, student_name: str = "") -> str:
-        """Read who teaches one child one named subject, and nobody else.
-
-        Use this whenever the question names a subject — who teaches them maths, who their
-        Arabic teacher is. For every teacher at once use get_student_teachers.
-
-        subject: the subject name as the parent said it, in Arabic or English. This one IS
-        yours to supply — it comes from the message itself, and a name matching no subject
-        is answered with the subjects the child actually has a teacher for.
-        """
-        result = _reporter(ctx, SUBJECT_TEACHER_TOOL)
-        refusal, student = _resolve_student(ctx, student_name, result)
-        if refusal:
-            return refusal
-
-        # One call, not two. The teacher rows carry their own subject names, so the subject
-        # a parent named is matched against what came back rather than resolved through a
-        # second endpoint first — which is what `get_subject_grades` has to do only because
-        # a subject's detail lives at its own URL.
-        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/teachers", ctx)
-        if outcome != "ok":
-            return _refused(ctx, outcome, result)
+        wanted = (subject or "").strip()
+        if not wanted:
+            return result("teachers", **_teachers_context(student.label, data))
 
         rows = data.get("teachers") or []
-        matched = _match_subject_rows(rows, subject)
+        matched = _match_subject_rows(rows, wanted)
         if not matched:
             return result(
                 "which_subject",
@@ -630,8 +596,8 @@ def make_get_subject_teacher(ctx: ChatRequestContext):
             teachers=[_label(row, "full_name_ar", "full_name_en") for row in matched],
         )
 
-    get_subject_teacher.description += _STUDENT_NAME_NOTE
-    return get_subject_teacher
+    get_student_teachers.description += _STUDENT_NAME_NOTE
+    return get_student_teachers
 
 
 def _match_subject_rows(rows: list, subject: str) -> list:

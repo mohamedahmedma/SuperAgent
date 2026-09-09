@@ -183,22 +183,18 @@ def localized(copy, language: str) -> str:
 #: tests/general/test_planner_parallel_dispatch.py — two spellings of one list is the
 #: price of the import boundary, and the test is what stops them drifting.
 GRADES_TOOL = "get_student_grades"
-SUBJECT_TOOL = "get_subject_grades"
 ATTENDANCE_TOOL = "get_student_attendance"
 TIMETABLE_TOOL = "get_student_timetable"
 CLASS_TOOL = "get_student_class"
 SUBJECTS_TOOL = "get_student_subjects"
 TEACHERS_TOOL = "get_student_teachers"
-SUBJECT_TEACHER_TOOL = "get_subject_teacher"
 RECORDS_TOOLS = (
     GRADES_TOOL,
-    SUBJECT_TOOL,
     ATTENDANCE_TOOL,
     TIMETABLE_TOOL,
     CLASS_TOOL,
     SUBJECTS_TOOL,
     TEACHERS_TOOL,
-    SUBJECT_TEACHER_TOOL,
 )
 KNOWLEDGE_TOOL = "search_knowledge_base"
 
