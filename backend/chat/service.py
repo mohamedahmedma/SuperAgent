@@ -25,6 +25,7 @@ from backend.chat.assets_bridge import (
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.child_context import load_child_state, save_child_state
 from backend.chat.finalize import Finalizer, finalize_text, message_text
+from backend.chat.grounding import strip_citations
 from backend.chat.orchestrator import plan_turn, resolve_turn_question
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import ResolvedQuestion, conversation_text
@@ -618,6 +619,37 @@ def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan) 
     )
     if report.ok or mode != "enforce":
         return ""
+
+    # Failed on the citation marker ALONE, on a turn that answered from a tool.
+    #
+    # `grounding.verify` is right to call this `cited_without_evidence`: tool text is not
+    # a citable chunk, and it must never make `[1]` valid — the tests in
+    # test_planner_tool_selection.py pin exactly that, and the rule stays. What is policy,
+    # and therefore lives here beside `answer_grounding_mode`, is what to DO about it.
+    #
+    # A records turn retrieves no chunks by design. Its evidence is what the tool
+    # returned, its figures were checked against that text above and passed, and the
+    # `[n]` is the model reaching for a habit the prompt teaches it on knowledge turns.
+    # Withdrawing a verified answer over a dangling marker is the harm, not the marker:
+    # it turned a correct timetable into "I could not verify these figures".
+    #
+    # So the marker is removed and the answer stands — and only when nothing else failed.
+    # An ungrounded figure or an out-of-range citation still costs the whole answer, on a
+    # records turn exactly as on any other.
+    #
+    # Generic by construction: the condition is "a tool returned evidence", so every tool
+    # bound today and every one added later is covered without knowing this rule exists.
+    if (
+        report.cited_without_evidence
+        and report.tool_evidence
+        and not report.ungrounded
+        and not report.invalid_citations
+    ):
+        cleaned = " ".join(strip_citations(finalizer.answer).split())
+        if cleaned:
+            logger.info("stripped a citation marker from a tool-evidenced answer")
+            return cleaned
+
     return _COPY.unverified_answer
 
 

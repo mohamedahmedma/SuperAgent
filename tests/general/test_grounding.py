@@ -12,6 +12,7 @@ middleware in `test_turn_orchestration.py`.
 import unittest
 
 from backend.chat.grounding import citation_indices, numeric_claims, verify
+from backend.chat.service import _COPY
 
 FABRICATED = "مصاريف الصف الرابع 45 ألف جنيه على تلات دفعات. [1]"
 EVIDENCE_GRADE_1 = ["رسوم الصف الأول الابتدائي للعام 2026: 30,000 جنيه على ثلاث دفعات."]
@@ -83,6 +84,92 @@ class DerivationTests(unittest.TestCase):
     def test_a_sum_of_two_grounded_figures_is_grounded(self):
         evidence = ["الرسوم 30,000 والأنشطة 5,000"]
         self.assertTrue(verify("الإجمالي 35,000 [1]", evidence).ok)
+
+
+
+class ACitationOnAToolAnsweredTurn(unittest.TestCase):
+    """A `[n]` means two different things, and the remedy differs — but the RULE does not.
+
+    `verify` keeps calling this `cited_without_evidence`: tool text is not a citable
+    chunk and must never make `[1]` valid. What it also reports now is whether a tool ran
+    at all, so the caller can tell "invented a source" from "cited on a turn whose
+    evidence carries no `[n]`". Acting on that is policy, and it lives in
+    `service._enforce_grounding` beside `answer_grounding_mode`.
+    """
+
+    TOOL = "TIMETABLE for ليلى — 4A, Term 2 (ARABIC-2025-2026):\n- Sunday: 1) Arabic"
+
+    def test_the_citation_rule_itself_is_unchanged_by_tool_evidence(self):
+        report = verify("Sunday is 1) Arabic. [1]", [], extra_evidence=[self.TOOL])
+        self.assertFalse(report.ok)
+        self.assertTrue(report.cited_without_evidence)
+        self.assertEqual(report.evidence_count, 0)
+
+    def test_the_report_says_whether_a_tool_supplied_the_evidence(self):
+        self.assertTrue(verify("x [1]", [], extra_evidence=[self.TOOL]).tool_evidence)
+        self.assertFalse(verify("x [1]", [], extra_evidence=[]).tool_evidence)
+        self.assertFalse(verify("x [1]", [], extra_evidence=[None, ""]).tool_evidence)
+
+    def test_tool_evidence_does_not_excuse_an_invented_figure(self):
+        report = verify("The fee is 45,000. [1]", [], extra_evidence=[self.TOOL])
+        self.assertFalse(report.ok)
+        self.assertIn(45000.0, report.ungrounded)
+
+    def test_the_fact_reaches_the_trace(self):
+        trace = verify("x [1]", [], extra_evidence=[self.TOOL]).as_trace()
+        self.assertTrue(trace["grounding_tool_evidence"])
+
+
+class TheCallerStripsRatherThanRefuses(unittest.TestCase):
+    """`service._enforce_grounding` is where the marker is forgiven, and only there.
+
+    The failure it answers to: a correct timetable, grounded in the tool's own text, was
+    replaced with "I could not verify these figures" because the model had appended `[1]`.
+    """
+
+    TOOL = "TIMETABLE for ليلى — 4A (ARABIC-2025-2026):\n- Sunday: 1) Arabic 07:45-08:30"
+
+    class _Finalizer:
+        def __init__(self, answer, report):
+            self.answer = answer
+            self._report = report
+
+        def verify(self, evidence, *, floor, check_citations):
+            return self._report
+
+    def _verdict(self, answer, evidence=(), extra=()):
+        from unittest import mock
+
+        from backend.chat import service
+
+        report = verify(answer, list(evidence), floor=100,
+                        check_citations=True, extra_evidence=list(extra))
+        plan = type("P", (), {"exposed_tools": ["get_student_timetable"],
+                              "short_circuit": False})()
+        # `enforce` explicitly: the base profile this module loads observes rather than
+        # enforces, and observing never replaces anything — which would make every
+        # assertion below pass on an empty string and prove nothing. The school profile
+        # is the one that enforces, and it is the deployment this bug was found on.
+        with mock.patch.object(service._PROFILE.agent, "answer_grounding_mode", "enforce"):
+            return service._enforce_grounding(
+                self._Finalizer(answer, report), None, plan
+            )
+
+    def test_a_marker_on_a_tool_answer_is_stripped_and_the_answer_kept(self):
+        out = self._verdict("الأحد: 1) اللغة العربية 07:45-08:30. [1]", extra=[self.TOOL])
+        self.assertEqual("الأحد: 1) اللغة العربية 07:45-08:30.", out)
+
+    def test_a_marker_with_no_tool_behind_it_is_still_refused(self):
+        """The protection this must not weaken: nothing was read, so nothing was cited."""
+        out = self._verdict("الرسوم 45000 جنيه. [1]", extra=[])
+        self.assertEqual(_COPY.unverified_answer, out)
+
+    def test_an_invented_figure_is_refused_even_with_tool_evidence(self):
+        out = self._verdict("الرسوم 45000 جنيه. [1]", extra=[self.TOOL])
+        self.assertEqual(_COPY.unverified_answer, out)
+
+    def test_a_clean_tool_answer_is_left_exactly_alone(self):
+        self.assertEqual("", self._verdict("الأحد: 1) اللغة العربية.", extra=[self.TOOL]))
 
 
 if __name__ == "__main__":
