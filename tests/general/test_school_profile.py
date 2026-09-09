@@ -52,6 +52,35 @@ class SchoolProfileTests(ProfileTestCase):
     def test_social_replies_do_not_depend_on_a_model_call(self):
         self.assertEqual("static", load_profile("school").agent.social_reply_mode)
 
+    def test_every_tool_it_binds_can_be_pre_dispatched(self):
+        """The point of folding the subject variants into their parents.
+
+        `get_subject_grades` and `get_subject_teacher` could never appear here: their
+        `subject` came from the message, nothing on the plan holds one, and
+        `PLAN_PLACEHOLDERS` is closed. So «هي جابت كام في العربي» and «مين مدرس
+        الرياضيات» — two of the commonest questions asked — were the only records
+        questions still paying a model round-trip to compose their own call, and the
+        only ones reaching the provider under `tool_choice`.
+
+        An unplannable tool is a legitimate choice; this profile just no longer has one,
+        and that is worth failing on if a future tool quietly reintroduces it.
+        """
+        agent = load_profile("school").agent
+        self.assertEqual(set(agent.tools), set(agent.planned_tool_arguments))
+
+    def test_a_subject_is_answered_by_the_same_tool_as_the_whole_record(self):
+        """The classifier is asked to tell records apart, never to tell a filter apart.
+
+        A subject-bearing question and a subject-free one differ by an argument, so they
+        must not be two entries here — near-identical descriptions are what the
+        classifier confuses, and it was measured picking between them wrongly.
+        """
+        selection = load_profile("school").agent.tool_selection
+        self.assertNotIn("get_subject_grades", selection)
+        self.assertNotIn("get_subject_teacher", selection)
+        for name in ("get_student_grades", "get_student_teachers"):
+            self.assertIn(name, selection)
+
     def test_the_thank_you_sentences_that_reached_the_agent_are_listed(self):
         """Regression, from a production transcript. «Thanks for your help» was not on
         the list, so it was planned as a question, given a required tool it had no

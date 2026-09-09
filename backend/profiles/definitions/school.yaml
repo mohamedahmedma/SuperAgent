@@ -39,19 +39,29 @@ agent:
   # correcting it. Split, a question about absences AND marks dispatches both at once,
   # which the merged shape could not express at all.
   #
-  # The cost is four tool schemas on the wire every turn instead of one. Paid knowingly:
-  # the round trip it removes is worth more than the schemas it adds, and the audited-read
-  # ceiling is shared across all of them, so splitting did not multiply it.
+  # But one tool per RECORD, not per QUESTION ABOUT a record. `get_subject_grades` and
+  # `get_subject_teacher` used to stand beside their parents as separate tools, and that
+  # was the split applied one level too far: they read the same record from the same
+  # endpoint and differed only by a filter. It cost twice — the classifier had to tell
+  # near-identical descriptions apart on every turn, and a tool whose argument comes from
+  # the message can never be pre-dispatched. Folded in as an optional `subject`, both
+  # questions reach the same name and every record tool is plannable. See
+  # `planned_tool_arguments` below.
+  #
+  # The line: merge along "same record, optional filter"; never along "different record,
+  # type argument", which is the `record_type` mistake this comment opens with.
+  #
+  # The cost is a tool schema per record on the wire every turn instead of one. Paid
+  # knowingly: the round trip it removes is worth more than the schemas it adds, and the
+  # audited-read ceiling is shared across all of them, so splitting did not multiply it.
   tools:
     - search_knowledge_base
     - get_student_grades
-    - get_subject_grades
     - get_student_attendance
     - get_student_timetable
     - get_student_class
     - get_student_subjects
     - get_student_teachers
-    - get_subject_teacher
 
   # PROMPT TEXT LIVES IN prompts/templates/packs/school/, not here.
   #
@@ -239,13 +249,11 @@ agent:
   # cannot widen how much of a minor's record one turn may read.
   tool_call_budgets:
     get_student_grades: 2
-    get_subject_grades: 2
     get_student_attendance: 2
     get_student_timetable: 2
     get_student_class: 2
     get_student_subjects: 2
     get_student_teachers: 2
-    get_subject_teacher: 2
   default_tool_call_budget: 1
 
   # `recursion_limit` is deliberately NOT set here, and adding the timetable tool is what
@@ -284,12 +292,20 @@ agent:
   # above: WHICH record to read is now the tool's name, which the classifier selects,
   # rather than an argument the planner had to guess and the model had to correct.
   #
-  # `get_subject_grades` is absent on purpose. Its `subject` argument comes from the
-  # message and nothing in the plan holds it, so a planned call would have to invent one.
-  # An undeclared tool stays bound and the model calls it in the ordinary way, which is
-  # the right outcome for the one record tool whose argument is genuinely the model's to
-  # supply — and the tool answers an unmatched subject with the subjects the child
-  # actually takes, so a wrong guess there costs nothing.
+  # `subject` is NOT planned, and every record tool is still plannable — which is the
+  # whole reason the subject variants were folded into their parents. As separate tools
+  # they were unplannable by construction: `subject` comes from the message, nothing in
+  # the plan holds one, and `PLAN_PLACEHOLDERS` is a closed set. So the two commonest
+  # record questions a parent asks — «هي جابت كام في العربي», «مين مدرس الرياضيات» — were
+  # exactly the two that paid a full model round-trip to compose the call, and the two
+  # that reached the provider under `tool_choice`, which is where the endpoint's
+  # unhonoured-requirement error was actually met.
+  #
+  # Folded in, the planned call is `student_name` alone. The subject is dropped from the
+  # PLAN, not from the tool: a planned call returns the whole term or every teacher, and
+  # the model reads the one row it was asked about out of grounded evidence instead of
+  # guessing a string that has to match the school's own naming. The tool still accepts
+  # `subject` when the model calls it the ordinary way.
   planned_tool_arguments:
     search_knowledge_base:
       query: "$resolved_question"
@@ -337,15 +353,11 @@ agent:
       assigned, which class the child is in, or who teaches them — those differ per child
       and have their own tools.
     get_student_grades: >-
-      One child's own marks across every subject this term — how they are doing overall,
-      their results, their report card, what they scored, whether they are doing well.
-      This is the one to name when the message asks about marks without naming a
-      particular subject, including when it says so in dialect and uses no word meaning
-      "marks" at all.
-    get_subject_grades: >-
-      One child's own marks inside a single school subject, assignment by assignment.
-      This is the one to name whenever the message names a subject — maths, science,
-      Arabic, English and so on — however briefly.
+      One child's own marks — across every subject this term, or inside one named subject
+      assignment by assignment. How they are doing overall, their results, their report
+      card, what they scored, whether they are doing well, and equally what they got in
+      maths or Arabic. Name this one whether or not a subject is mentioned; the subject,
+      when there is one, is an argument to it and not a different tool.
     get_student_attendance: >-
       One child's own attendance: the days they were present, absent or late.
     get_student_timetable: >-
@@ -366,21 +378,11 @@ agent:
       بالعربي: مواد ابني، بياخد أنهي مواد، بتدرس ايه، كام مادة، المنهج بتاعه، بياخد مادة
       معينة ولا لأ.
     get_student_teachers: >-
-      All of one child's teachers at once, and which subject each of them takes. This is
-      the one to name only when the message asks about their teachers in general and names
-      NO subject. If any subject is named, however briefly, name get_subject_teacher
-      instead — this tool would answer with every teacher the child has, which is not what
-      was asked.
-      بالعربي: مين مدرسين ابني، اسماء المدرسين بتوع فصله، مين بيدرسله — من غير ما يذكر مادة
-      بعينها.
-    get_subject_teacher: >-
-      Who teaches one child ONE named subject, and nobody else. This is the one to name
-      whenever the message names a subject — maths, science, Arabic, English and so on —
-      however briefly, and whatever else the message also asks for. Naming the subject is
-      what chooses it, including dialect and feminine wordings of both the subject and the
-      teacher.
-      بالعربي: مين مدرس الرياضيات/الحساب/العلوم/العربي لابني، مين مدرسة العلوم بتاعة بنتي،
-      استاذ المادة الفلانية اسمه ايه، بياخد المادة دي مع مين.
+      Who teaches one child — all of their teachers with the subject each takes, or the
+      teacher of one named subject. Name this one whether or not a subject is mentioned;
+      the subject, when there is one, is an argument to it and not a different tool.
+      بالعربي: مين مدرسين ابني، اسماء المدرسين بتوع فصله، مين بيدرسله، وكمان مين مدرس
+      الرياضيات/الحساب/العلوم/العربي، مين مدرسة العلوم بتاعة بنتي، بياخد المادة دي مع مين.
 
   # A fee, an instalment, a deadline — the figures in this corpus are what a parent acts
   # on, so a figure that is in no retrieved chunk must not be served. Enforced rather

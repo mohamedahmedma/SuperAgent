@@ -324,13 +324,20 @@ class Case:
 
 K = "search_knowledge_base"
 G = "get_student_grades"
-S = "get_subject_grades"
+# `S` and `TSUB` no longer name tools of their own: the subject variants were folded
+# into their parents as an optional `subject` argument, because a filter is not a
+# different record and near-identical descriptions were what the classifier confused.
+# The aliases are kept so every case below still reads as "the subject question", and
+# what they now assert is the pair that still matters — the right RECORD tool ran, and
+# `model_args` says whether the model extracted the subject. The all-vs-one DISTINCTION
+# is deliberately no longer under test, because nothing is asked to make it any more.
+S = "get_student_grades"
 A = "get_student_attendance"
 T = "get_student_timetable"
 C = "get_student_class"
 SUBJ = "get_student_subjects"
 TCH = "get_student_teachers"
-TSUB = "get_subject_teacher"
+TSUB = "get_student_teachers"
 
 CASES = [
     Case(
@@ -546,7 +553,7 @@ CASES = [
               "alone and made the tool unreachable no matter what it was named"),
     Case("EP subject teacher — named subject", "مين مدرس الرياضيات لبنتي؟",
          expect_ran={TSUB}, technique="EP", model_args={TSUB: {"subject": "الرياضيات"}},
-         note="the all-vs-one split, mirroring get_student_grades / get_subject_grades"),
+         note="all-vs-one: same tool now, and the subject rides as an argument"),
 
     # --- Boundary value analysis ------------------------------------------------------
     # The edges of each input dimension: how short a message can be and still carry an
@@ -721,7 +728,7 @@ CASES = [
     Case("CONF subject named, and the question is who teaches it",
          "ابني بياخد رياضيات مع مين؟",
          expect_ran={TSUB}, technique="NEG", model_args={TSUB: {"subject": "الرياضيات"}},
-         note="names a subject, which is get_subject_grades' trigger, but asks WHO — the "
+         note="names a subject, which pulls toward marks, but asks WHO — the "
               "one place the subject-grades and subject-teacher descriptions collide"),
     Case("CONF the mark and the teacher of one subject",
          "ابني جاب كام في العلوم ومين المدرس بتاعها؟",
@@ -939,7 +946,7 @@ CASES = [
     Case("TEACHERS singular phrasing, plural intent", "مين مدرس فصل عمر؟",
          expect_ran_includes={TCH}, technique="NEG",
          note="singular 'مدرس' with no subject named means the class's staff, not one "
-              "subject's — the boundary with get_subject_teacher"),
+              "subject's — the all-vs-one boundary inside one tool"),
 
     # --- Who teaches her ONE subject ----------------------------------------------------
     Case("SUBJTEACH maths", "مين مدرس الرياضيات لابني؟", expect_ran={TSUB},
@@ -1143,7 +1150,7 @@ CASES = [
     Case("day subject marks — why so low", "ليه درجة ابني في الرياضيات قليلة؟",
          observe_only=True, model_args={S: {"subject": "الرياضيات"}},
          note="MEASURED, not gated. A subject IS named, which normally selects "
-              "get_subject_grades, but the 'why is it low' framing pulls the classifier to "
+              "a subject question, but the 'why is it low' framing pulls the classifier to "
               "the whole-term overview instead — and that is defensible: explaining a mark "
               "is easier with the other subjects beside it, and the overview contains the "
               "named subject anyway. Both answers serve the parent, so neither is pinned"),

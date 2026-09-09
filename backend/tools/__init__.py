@@ -15,8 +15,6 @@ from backend.tools.records import (
     CLASS_TOOL,
     GRADES_TOOL,
     SUBJECTS_TOOL,
-    SUBJECT_TEACHER_TOOL,
-    SUBJECT_TOOL,
     TEACHERS_TOOL,
     TIMETABLE_TOOL,
     make_get_student_attendance,
@@ -25,8 +23,6 @@ from backend.tools.records import (
     make_get_student_subjects,
     make_get_student_teachers,
     make_get_student_timetable,
-    make_get_subject_grades,
-    make_get_subject_teacher,
 )
 
 #: The corpus tool, named once. It is the tool whose verdict `retrieval_status` reports,
@@ -43,15 +39,13 @@ TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
     # instead of a name is one the planner has to guess at — see backend/tools/records.py.
     # Registered but bound only by a profile that names them.
     GRADES_TOOL: make_get_student_grades,
-    SUBJECT_TOOL: make_get_subject_grades,
     ATTENDANCE_TOOL: make_get_student_attendance,
     TIMETABLE_TOOL: make_get_student_timetable,
-    # The room she sits in. Three facade endpoints, four names — the subject-teacher tool
-    # narrows the teachers one the way get_subject_grades narrows get_student_grades.
+    # The room she sits in. Three facade endpoints, three names: narrowing to one subject
+    # is an argument on the teachers tool, not a tool of its own.
     CLASS_TOOL: make_get_student_class,
     SUBJECTS_TOOL: make_get_student_subjects,
     TEACHERS_TOOL: make_get_student_teachers,
-    SUBJECT_TEACHER_TOOL: make_get_subject_teacher,
 }
 
 #: The record tools as one set, for the two places that care about the family rather
@@ -60,13 +54,11 @@ TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
 #: record tool is one edit rather than a hunt for every list that should have grown.
 RECORDS_TOOLS: tuple = (
     GRADES_TOOL,
-    SUBJECT_TOOL,
     ATTENDANCE_TOOL,
     TIMETABLE_TOOL,
     CLASS_TOOL,
     SUBJECTS_TOOL,
     TEACHERS_TOOL,
-    SUBJECT_TEACHER_TOOL,
 )
 
 
@@ -129,13 +121,11 @@ def build_tools(names: List[str], ctx: ChatRequestContext) -> list:
 __all__ = [
     "KNOWLEDGE_TOOL",
     "GRADES_TOOL",
-    "SUBJECT_TOOL",
     "ATTENDANCE_TOOL",
     "TIMETABLE_TOOL",
     "CLASS_TOOL",
     "SUBJECTS_TOOL",
     "TEACHERS_TOOL",
-    "SUBJECT_TEACHER_TOOL",
     "RECORDS_TOOLS",
     "TOOL_BUILDERS",
     "GROUNDED_TOOLS",
@@ -145,11 +135,9 @@ __all__ = [
     "make_search_knowledge_base",
     "make_search_products",
     "make_get_student_grades",
-    "make_get_subject_grades",
     "make_get_student_attendance",
     "make_get_student_timetable",
     "make_get_student_class",
     "make_get_student_subjects",
     "make_get_student_teachers",
-    "make_get_subject_teacher",
 ]

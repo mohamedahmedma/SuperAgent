@@ -17,8 +17,6 @@ from backend.tools.records import (
     make_get_student_subjects,
     make_get_student_teachers,
     make_get_student_timetable,
-    make_get_subject_grades,
-    make_get_subject_teacher,
 )
 
 PARENT_TOKEN = "signed.identity.token"
@@ -89,7 +87,7 @@ def test_the_model_cannot_supply_a_guardian_id():
     The guardian comes from the session. If a future edit adds it as a parameter,
     this test fails and the whole prompt-injection defence is gone.
     """
-    builders = (make_get_student_grades, make_get_subject_grades, make_get_student_attendance)
+    builders = (make_get_student_grades, make_get_student_teachers, make_get_student_attendance)
     for build in builders:
         args = set(build(_ctx()).args.keys())
         # Every record tool takes the child and nothing else that could name a person;
@@ -690,7 +688,7 @@ def test_no_teacher_contact_details_are_ever_offered(monkeypatch):
     """
     monkeypatch.setattr(requests, "get", _rooms())
     listed = make_get_student_teachers(_ctx()).invoke({})
-    one = make_get_subject_teacher(_ctx()).invoke({"subject": "العلوم"})
+    one = make_get_student_teachers(_ctx()).invoke({"subject": "العلوم"})
 
     for result in (listed, one):
         assert "school office" in result
@@ -703,7 +701,7 @@ def test_a_named_subject_returns_only_that_subject_s_teachers(monkeypatch):
     And every teacher of it — science has two, and both are named.
     """
     monkeypatch.setattr(requests, "get", _rooms())
-    result = make_get_subject_teacher(_ctx()).invoke({"subject": "العلوم"})
+    result = make_get_student_teachers(_ctx()).invoke({"subject": "العلوم"})
 
     assert "SUBJECT_TEACHER" in result
     assert "أ. هدى" in result and "أ. منى" in result
@@ -715,7 +713,7 @@ def test_a_named_subject_returns_only_that_subject_s_teachers(monkeypatch):
 def test_a_subject_named_in_english_matches_the_arabic_board(monkeypatch):
     """A parent writes in either language and the board spells it one fixed way."""
     monkeypatch.setattr(requests, "get", _rooms())
-    result = make_get_subject_teacher(_ctx()).invoke({"subject": "Science"})
+    result = make_get_student_teachers(_ctx()).invoke({"subject": "Science"})
 
     assert "SUBJECT_TEACHER" in result
     assert "أ. هدى" in result
@@ -724,7 +722,7 @@ def test_a_subject_named_in_english_matches_the_arabic_board(monkeypatch):
 def test_a_subject_nobody_teaches_her_asks_rather_than_guessing(monkeypatch):
     """Answered with the subjects she actually has a teacher for, never a nearest guess."""
     monkeypatch.setattr(requests, "get", _rooms())
-    result = make_get_subject_teacher(_ctx()).invoke({"subject": "الموسيقى"})
+    result = make_get_student_teachers(_ctx()).invoke({"subject": "الموسيقى"})
 
     assert "NEEDS_SUBJECT_CHOICE" in result
     assert "الرياضيات" in result and "العلوم" in result
@@ -765,9 +763,9 @@ def test_the_classroom_tools_never_name_a_class_in_the_request(monkeypatch):
         (make_get_student_subjects, {}, "get_student_subjects", "subjects"),
         (make_get_student_teachers, {}, "get_student_teachers", "teachers"),
         (
-            make_get_subject_teacher,
+            make_get_student_teachers,
             {"subject": "العلوم"},
-            "get_subject_teacher",
+            "get_student_teachers",
             "subject_teacher",
         ),
     ],
@@ -798,7 +796,7 @@ def test_each_classroom_tool_reports_its_own_outcome(
         (make_get_student_class, {}),
         (make_get_student_subjects, {}),
         (make_get_student_teachers, {}),
-        (make_get_subject_teacher, {"subject": "العلوم"}),
+        (make_get_student_teachers, {"subject": "العلوم"}),
     ],
 )
 def test_an_unreachable_facade_forbids_inventing_a_room(monkeypatch, builder, args):
