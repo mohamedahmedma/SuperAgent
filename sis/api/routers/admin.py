@@ -219,9 +219,18 @@ def read_audit_log(
     uow_factory: UowFactoryDep,
     entity_type: Annotated[str | None, Query()] = None,
     action: Annotated[str | None, Query()] = None,
+    offset: Annotated[
+        int, Query(ge=0, description="Number of newest-first audit rows to skip.")
+    ] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[AuditLogOut]:
-    """Admin-only, newest-first audit history. There is intentionally no write route."""
+    """Admin-only, newest-first audit history. There is intentionally no write route.
+
+    ``offset`` and ``limit`` deliberately paginate the immutable list at the database rather
+    than loading every historical change into the browser.  The ordering includes ``id`` as a
+    tie-breaker, so two writes in the same timestamp retain a stable order while an operator
+    moves between pages.
+    """
     with uow_factory() as uow:
         from sqlalchemy import select
         statement = select(m.AuditLog)
@@ -230,6 +239,6 @@ def read_audit_log(
         if action:
             statement = statement.where(m.AuditLog.action == action)
         rows = uow._session.scalars(
-            statement.order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc()).limit(limit)
+            statement.order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc()).offset(offset).limit(limit)
         ).all()
     return [AuditLogOut.model_validate(row, from_attributes=True) for row in rows]
