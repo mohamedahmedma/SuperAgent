@@ -182,7 +182,8 @@ class TeacherRepository(Protocol):
     """Teaching staff, their optional login, and their teaching scope."""
 
     def list_for_school(
-        self, school_code: SchoolCode, *, year_level_code: YearCode | None = None
+        self, school_code: SchoolCode, *, year_level_code: YearCode | None = None,
+        include_inactive: bool = False,
     ) -> Sequence[TeacherRecord]:
         """The school's teachers, or only those teaching on one grade.
 

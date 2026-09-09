@@ -29,6 +29,7 @@ from sqlalchemy import delete, select, update
 from sis.api.errors import error_detail
 from sis.api.deps import SessionProfile, UowFactoryDep, require_user_permission
 from sis.application.services.access import (
+    ROLE_POLICY_KEY_PREFIX,
     SCOPE_TABLES,
     AuthenticationFailed,
     ensure_catalogue,
@@ -100,6 +101,13 @@ class GrantOut(BaseModel):
     )
 
 
+class EffectiveOverrideOut(BaseModel):
+    """A sparse exception, sent so the UI can mirror effective access accurately."""
+
+    permission: str
+    effect: str
+
+
 class ProfileOut(BaseModel):
     user_id: int
     username: str
@@ -116,6 +124,10 @@ class ProfileOut(BaseModel):
     grants: list[GrantOut] = Field(
         default_factory=list,
         description="The same permissions, each with the scope it is held at.",
+    )
+    overrides: list[EffectiveOverrideOut] = Field(
+        default_factory=list,
+        description="Explicit per-user permission exceptions, evaluated before role grants.",
     )
 
     @classmethod
@@ -159,6 +171,10 @@ class ProfileOut(BaseModel):
                     scope_code=code_for(grant.scope),
                 )
                 for grant in profile.grants
+            ],
+            overrides=[
+                EffectiveOverrideOut(permission=permission.value, effect=effect.value)
+                for permission, effect in profile.overrides
             ],
         )
 
@@ -304,6 +320,44 @@ class PermissionOut(BaseModel):
     group: str = Field(description="The noun half of the code — how a listing is grouped.")
 
 
+class PermissionMatrixRow(BaseModel):
+    resource: str
+    mode: str = Field(pattern="^(no_access|read_only|read_write)$")
+
+
+class RolePermissionMatrixIn(BaseModel):
+    resources: list[PermissionMatrixRow]
+
+
+class RolePermissionMatrixOut(BaseModel):
+    role_code: str
+    protected: bool = False
+    resources: list[PermissionMatrixRow]
+
+
+PermissionManager = Annotated[AccessProfile, Depends(require_user_permission(Permission.SYSTEM_MANAGE))]
+_CONFIGURABLE_ROLE_CODES = {
+    RoleCode.SCHOOL_OWNER.value,
+    RoleCode.SCHOOL_MANAGER.value,
+    RoleCode.FLOOR_SUPERVISOR.value,
+    RoleCode.ATTENDANCE_SUPERVISOR.value,
+    RoleCode.TEACHER.value,
+}
+
+
+def _permission_matrix(codes: set[str]) -> list[PermissionMatrixRow]:
+    grouped: dict[str, set[str]] = {}
+    for permission in Permission:
+        resource, _, action = permission.value.partition(".")
+        grouped.setdefault(resource, set()).add(action)
+    rows = []
+    for resource in sorted(grouped):
+        selected = {code.rpartition(".")[2] for code in codes if code.partition(".")[0] == resource}
+        mode = "no_access" if not selected else "read_write" if selected - {"read"} else "read_only"
+        rows.append(PermissionMatrixRow(resource=resource, mode=mode))
+    return rows
+
+
 @router.get("/rbac/scopes", response_model=list[ScopeOut])
 def list_scopes(profile: SessionProfile) -> list[ScopeOut]:
     """The scope ladder, widest first.
@@ -385,7 +439,7 @@ def list_role_catalogue(profile: SessionProfile, uow_factory: UowFactoryDep) -> 
                 aliases=sorted(aliases.get(row.code, ())),
             )
             for row in rows
-            if row.code != RoleCode.SUBJECT_COORDINATOR.value
+            if row.code != "subject_coordinator"
         ]
     return catalogue
 
@@ -406,6 +460,76 @@ def list_permission_catalogue(profile: SessionProfile) -> list[PermissionOut]:
         )
         for permission in Permission
     ]
+
+
+@router.get("/rbac/roles/{role_code}/permission-matrix", response_model=RolePermissionMatrixOut)
+def get_role_permission_matrix(
+    role_code: RoleCode, manager: PermissionManager, uow_factory: UowFactoryDep
+) -> RolePermissionMatrixOut:
+    if not manager.is_system_admin:
+        raise _refuse(403, "not_authorized", "Only Admin may manage role permissions.")
+    if role_code.value not in _CONFIGURABLE_ROLE_CODES:
+        raise _refuse(403, "protected_role", "Admin permissions are permanent and cannot be edited.")
+    with uow_factory() as uow:
+        ensure_catalogue(uow._session)
+        role = uow._session.scalar(select(m.Role).where(m.Role.code == role_code.value))
+        if role is None:
+            raise _refuse(404, "unknown_reference", "That role is not configured.")
+        codes = set(uow._session.scalars(
+            select(m.PermissionRow.code).join(m.RolePermission).where(m.RolePermission.role_id == role.id)
+        ))
+        uow.commit()
+    return RolePermissionMatrixOut(role_code=role_code.value, resources=_permission_matrix(codes))
+
+
+@router.put("/rbac/roles/{role_code}/permission-matrix", response_model=RolePermissionMatrixOut)
+def set_role_permission_matrix(
+    role_code: RoleCode, body: RolePermissionMatrixIn, manager: PermissionManager,
+    uow_factory: UowFactoryDep,
+) -> RolePermissionMatrixOut:
+    if not manager.is_system_admin:
+        raise _refuse(403, "not_authorized", "Only Admin may manage role permissions.")
+    if role_code.value not in _CONFIGURABLE_ROLE_CODES:
+        raise _refuse(403, "protected_role", "Admin permissions are permanent and cannot be edited.")
+    requested = {row.resource: row.mode for row in body.resources}
+    if len(requested) != len(body.resources):
+        raise _refuse(422, "duplicate_resource", "Each resource may be configured once.")
+    all_permissions = list(Permission)
+    resources = {permission.value.partition(".")[0] for permission in all_permissions}
+    unknown = sorted(set(requested) - resources)
+    if unknown:
+        raise _refuse(422, "unknown_resource", "Unknown permission resource: " + ", ".join(unknown))
+    if role_code is RoleCode.SCHOOL_OWNER and any(mode == "read_write" for mode in requested.values()):
+        raise _refuse(422, "owner_read_only", "School Owner is permanently read-only.")
+
+    wanted_codes: set[str] = set()
+    for permission in all_permissions:
+        resource, _, action = permission.value.partition(".")
+        mode = requested.get(resource, "no_access")
+        if mode == "read_write" or (mode == "read_only" and action == "read"):
+            wanted_codes.add(permission.value)
+    with uow_factory() as uow:
+        session = uow._session
+        ensure_catalogue(session)
+        role = session.scalar(select(m.Role).where(m.Role.code == role_code.value))
+        if role is None:
+            raise _refuse(404, "unknown_reference", "That role is not configured.")
+        ids = set(session.scalars(select(m.PermissionRow.id).where(m.PermissionRow.code.in_(wanted_codes))))
+        session.execute(delete(m.RolePermission).where(m.RolePermission.role_id == role.id))
+        session.add_all(m.RolePermission(role_id=role.id, permission_id=permission_id) for permission_id in ids)
+        policy_key = f"{ROLE_POLICY_KEY_PREFIX}{role_code.value}"
+        policy = session.scalars(
+            select(m.SystemSetting).where(m.SystemSetting.key == policy_key)
+        ).one_or_none()
+        if policy is None:
+            policy = m.SystemSetting(key=policy_key)
+            session.add(policy)
+        policy.value = "custom"
+        policy.note = "Role permission matrix configured by an Admin."
+        policy.updated_by = manager.username
+        session.flush()
+        uow.commit()
+    return RolePermissionMatrixOut(role_code=role_code.value, resources=_permission_matrix(wanted_codes))
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +569,135 @@ class UserOut(BaseModel):
     school_id: int | None
     is_active: bool
     roles: list[RoleGrantOut]
+
+
+class UserPermissionOverrideIn(BaseModel):
+    permission: Permission
+    effect: str = Field(pattern="^(allow|deny)$")
+
+
+class UserPermissionOverrideRow(BaseModel):
+    permission: str
+    inherited: bool
+    override: str | None = None
+    effective: bool
+
+
+class UserPermissionOverridesIn(BaseModel):
+    overrides: list[UserPermissionOverrideIn]
+
+
+class UserPermissionOverridesOut(BaseModel):
+    user_id: int
+    roles: list[str]
+    permissions: list[UserPermissionOverrideRow]
+
+
+def _user_override_matrix(session, user_id: int) -> UserPermissionOverridesOut:
+    """Describe one user's inherited, exceptional, and effective access separately."""
+    user = session.get(m.User, user_id)
+    if user is None:
+        raise _refuse(404, "unknown_reference", "No such user.")
+    role_codes = list(session.scalars(
+        select(m.Role.code)
+        .join(m.UserRole, m.UserRole.role_id == m.Role.id)
+        .where(m.UserRole.user_id == user.id)
+    ))
+    inherited_codes = {
+        permission.value
+        for role_code in role_codes
+        for permission in permissions_by_role(session).get(role_code, ())
+    }
+    override_by_code = dict(session.execute(
+        select(m.PermissionRow.code, m.UserPermissionOverride.effect)
+        .join(
+            m.UserPermissionOverride,
+            m.UserPermissionOverride.permission_id == m.PermissionRow.id,
+        )
+        .where(m.UserPermissionOverride.user_id == user.id)
+    ).all())
+    return UserPermissionOverridesOut(
+        user_id=user.id,
+        roles=sorted(set(role_codes)),
+        permissions=[
+            UserPermissionOverrideRow(
+                permission=permission.value,
+                inherited=permission.value in inherited_codes,
+                override=override_by_code.get(permission.value),
+                effective=(
+                    False if override_by_code.get(permission.value) == "deny"
+                    else True if override_by_code.get(permission.value) == "allow"
+                    else permission.value in inherited_codes
+                ),
+            )
+            for permission in Permission
+        ],
+    )
+
+
+def _require_override_admin(manager: AccessProfile) -> None:
+    if not manager.is_system_admin:
+        raise _refuse(403, "not_authorized", "Only Admin may manage user permission overrides.")
+
+
+@router.get("/rbac/users/{user_id}/permission-overrides", response_model=UserPermissionOverridesOut)
+def get_user_permission_overrides(
+    user_id: int, manager: PermissionManager, uow_factory: UowFactoryDep
+) -> UserPermissionOverridesOut:
+    _require_override_admin(manager)
+    with uow_factory() as uow:
+        ensure_catalogue(uow._session)
+        result = _user_override_matrix(uow._session, user_id)
+        uow.commit()
+    return result
+
+
+@router.put("/rbac/users/{user_id}/permission-overrides", response_model=UserPermissionOverridesOut)
+def set_user_permission_overrides(
+    user_id: int,
+    body: UserPermissionOverridesIn,
+    manager: PermissionManager,
+    uow_factory: UowFactoryDep,
+) -> UserPermissionOverridesOut:
+    _require_override_admin(manager)
+    requested = {row.permission.value: row.effect for row in body.overrides}
+    if len(requested) != len(body.overrides):
+        raise _refuse(422, "duplicate_permission", "Each permission may be overridden once.")
+    with uow_factory() as uow:
+        session = uow._session
+        ensure_catalogue(session)
+        user = session.get(m.User, user_id)
+        if user is None:
+            raise _refuse(404, "unknown_reference", "No such user.")
+        role_codes = set(session.scalars(
+            select(m.Role.code)
+            .join(m.UserRole, m.UserRole.role_id == m.Role.id)
+            .where(m.UserRole.user_id == user.id)
+        ))
+        if RoleCode.ADMIN.value in role_codes:
+            raise _refuse(403, "protected_user", "Admin access is permanent and cannot be overridden.")
+        if RoleCode.SCHOOL_OWNER.value in role_codes and any(
+            effect == "allow" and not permission.endswith(".read")
+            for permission, effect in requested.items()
+        ):
+            raise _refuse(422, "owner_read_only", "School Owner may not receive write overrides.")
+        permission_ids = dict(session.execute(
+            select(m.PermissionRow.code, m.PermissionRow.id)
+            .where(m.PermissionRow.code.in_(requested))
+        ).all())
+        session.execute(
+            delete(m.UserPermissionOverride).where(m.UserPermissionOverride.user_id == user.id)
+        )
+        session.add_all(
+            m.UserPermissionOverride(
+                user_id=user.id, permission_id=permission_ids[permission], effect=effect
+            )
+            for permission, effect in requested.items()
+        )
+        session.flush()
+        result = _user_override_matrix(session, user.id)
+        uow.commit()
+    return result
 
 
 class UserCreateIn(BaseModel):
@@ -567,6 +820,12 @@ def update_user(
     with uow_factory() as uow:
         session = uow._session
         user = _subject_user(session, manager, user_id)
+        if body.is_active is False and _is_admin_user(session, user.id):
+            raise _refuse(
+                403,
+                "protected_role",
+                "An Admin account is permanent and cannot be deactivated through normal user management.",
+            )
         changes = body.model_dump(exclude_unset=True)
         password = changes.pop("password", None)
         for field, value in changes.items():
@@ -777,6 +1036,15 @@ def _subject_user(session, manager: AccessProfile, user_id: int) -> m.User:
     return user
 
 
+def _is_admin_user(session, user_id: int) -> bool:
+    """Whether this account carries the permanent global Admin role."""
+    return session.scalar(
+        select(m.UserRole.id)
+        .join(m.Role, m.UserRole.role_id == m.Role.id)
+        .where(m.UserRole.user_id == user_id, m.Role.code == RoleCode.ADMIN.value)
+    ) is not None
+
+
 def _scope_code(session, scope_type: ScopeType, scope_id: int | None) -> str | None:
     """The code behind one scope id, for a listing an administrator reads.
 
@@ -839,8 +1107,12 @@ def add_role(
     with uow_factory() as uow:
         session = uow._session
         subject_user = _subject_user(session, manager, user_id)
-        if body.role_code is RoleCode.SUBJECT_COORDINATOR:
-            raise _refuse(422, "invalid_value", "Subject Coordinator is no longer an assignable role.")
+        if body.role_code is RoleCode.SCHOOL_OWNER and body.scope_type is not ScopeType.SCHOOL:
+            raise _refuse(
+                422,
+                "invalid_scope",
+                "School Owner is an independent read-only role and must be scoped to one school.",
+            )
         _authorised_to_grant(session, manager, body.role_code.value)
         _validate_scope(session, manager, body.scope_type, body.scope_id)
 
@@ -885,6 +1157,12 @@ def remove_role(
     with uow_factory() as uow:
         session = uow._session
         _subject_user(session, manager, user_id)
+        if body.role_code is RoleCode.ADMIN:
+            raise _refuse(
+                403,
+                "protected_role",
+                "The Admin role is permanent and cannot be removed through the permission editor.",
+            )
         role_id = session.scalar(select(m.Role.id).where(m.Role.code == body.role_code.value))
         if role_id is not None:
             session.execute(

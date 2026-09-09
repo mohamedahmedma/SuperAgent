@@ -281,7 +281,7 @@ def read_mark_sheet(
     if (
         caller.profile is not None
         and caller.profile.has_role("teacher")
-        and not caller.profile.has_role("year_supervisor")
+        and not caller.profile.has_role("floor_supervisor")
         and not _may_record(caller, teaching, academic_year, class_code, subject)
     ):
         raise _assignment_forbidden(subject, class_code)

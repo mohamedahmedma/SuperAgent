@@ -205,7 +205,7 @@ function YearForm({ school, onSaved }) {
     name_ar: '',
     starts_on: '',
     ends_on: '',
-    is_current: true
+    status: 'upcoming'
   });
 
   const save = useAction(() =>
@@ -216,7 +216,7 @@ function YearForm({ school, onSaved }) {
       name_ar: form.values.name_ar.trim(),
       starts_on: form.values.starts_on,
       ends_on: form.values.ends_on,
-      is_current: !!form.values.is_current
+      status: form.values.status
     })
   );
 
@@ -275,21 +275,22 @@ function YearForm({ school, onSaved }) {
         >
           <Input type="date" value={form.values.ends_on} onInput={form.set('ends_on')} />
         </Field>
+        <Field className="col-12 col-sm-6 col-lg-4" label={t('Status')} required>
+          <Select
+            value={form.values.status}
+            options={[
+              { value: 'upcoming', label: t('upcoming') },
+              { value: 'active', label: t('active') },
+              { value: 'completed', label: t('completed') }
+            ]}
+            onChange={form.set('status')}
+          />
+        </Field>
       </div>
 
-      <div className="form-check">
-        <input
-          className="form-check-input"
-          type="checkbox"
-          id="year-current"
-          checked={!!form.values.is_current}
-          onChange={(event) => form.set('is_current')(event.target.checked)}
-        />
-        <label className="form-check-label small" htmlFor="year-current">
-          Make this the working year for this school. Each school has its own current year;
-          marking this one does not touch another branch's.
-        </label>
-      </div>
+      <p className="small text-body-secondary mb-0">
+        {t('Only an active year becomes the school’s working year. Status is an administrative choice and is not guessed from today’s date.')}
+      </p>
 
       <ErrorNote error={save.error} />
       <div className="d-grid d-sm-block">
@@ -516,9 +517,9 @@ export function School({ params = {} }) {
   const [addingYear, setAddingYear] = useState(false);
   const [activeTrack, setActiveTrack] = useState('');
   const mayEditStructure = Store.can('structure.write');
-  const isAdmin = Store.roles().indexOf('system_admin') >= 0;
+  const isAdmin = Store.roles().indexOf('admin') >= 0;
   const heldRoles = Store.roles();
-  const isPrincipal = heldRoles.indexOf('principal') >= 0 && heldRoles.indexOf('system_admin') < 0 && heldRoles.indexOf('school_owner') < 0;
+  const isPrincipal = heldRoles.indexOf('school_manager') >= 0 && heldRoles.indexOf('admin') < 0 && heldRoles.indexOf('school_owner') < 0;
 
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const schoolList = schools.value || [];
@@ -717,12 +718,10 @@ export function School({ params = {} }) {
                         <a className="sis-plain" href={Router.href('year', { code: row.code })}>
                         {row.code}
                       </a>
-                        {row.is_current ? (
-                          <>
-                            {' '}
-                            <Badge tone="info">{t('current')}</Badge>
-                          </>
-                        ) : null}
+                        {' '}
+                        <Badge tone={row.status === 'active' ? 'info' : row.status === 'completed' ? 'warn' : 'ok'}>
+                          {t(row.status || 'upcoming')}
+                        </Badge>
                       </>
                     )
                   },

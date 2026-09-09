@@ -17,7 +17,7 @@ check runs against it unmocked — a suite that skipped that check would not not
 the migration and the code stopped agreeing.
 """
 from collections.abc import Iterator
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,8 @@ from fastapi.testclient import TestClient
 from sis.app import create_app
 from sis.config import reset_settings_cache
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
+from sis.domain.auth import ApiKey, Scope
+from sis.api.deps import hash_api_key, key_prefix
 from sis.infrastructure.db.session import reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -78,6 +80,19 @@ def sis_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
     reset_engine()
 
     command.upgrade(Config(str(_ALEMBIC_INI)), "head")
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.api_keys.add(
+            ApiKey(
+                prefix=key_prefix(BOOTSTRAP_KEY),
+                key_hash=hash_api_key(BOOTSTRAP_KEY),
+                label="HTTP API test registrar",
+                scope=Scope.REGISTRAR,
+                is_active=True,
+                expires_at=None,
+                created_at=datetime.now(UTC),
+            )
+        )
+        uow.commit()
     yield
 
     reset_engine()

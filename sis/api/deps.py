@@ -41,6 +41,7 @@ who may ask.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import secrets
 from collections.abc import Callable, Collection, Iterator, Sequence
@@ -95,6 +96,7 @@ from sis.domain.value_objects import (
 from sis.application.ports.repositories import GradeSubjects
 from sis.application.dto import TERM_LABELS, TermPlan, term_code_for
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+from sis.infrastructure.audit import actor_context
 from sis.infrastructure.parsers import (
     SpreadsheetGradeParser,
     SpreadsheetGuardianParser,
@@ -253,10 +255,44 @@ def _require_scopes(*allowed: Scope) -> Callable[..., Caller]:
     that identifies the caller and refuses when it cannot.
     """
 
-    granted: Scope = allowed[0]
+    def dependency(
+        raw_key: Annotated[str | None, Header(alias=API_KEY_HEADER)] = None,
+        school_code: SchoolCodeDep = None,
+    ) -> Caller:
+        """Require a live machine credential with one of the route's scopes."""
+        key = (raw_key or "").strip()
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=error_detail("not_authenticated", "An API key or user session is required."),
+            )
 
-    def dependency() -> Caller:
-        return Caller(prefix=ANONYMOUS_CALLER, scope=granted)
+        # Look up only the non-secret prefix.  The comparison is performed even when
+        # the prefix is unknown so the response is not a prefix-discovery timing oracle.
+        prefix = key_prefix(key)
+        now = datetime.now(UTC)
+        with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
+            stored = uow.api_keys.get_by_prefix(prefix)
+            expected_hash = stored.key_hash if stored is not None else _ABSENT_HASH
+            verified = hmac.compare_digest(hash_api_key(key), expected_hash)
+            if stored is None or not verified or not stored.is_usable_at(now):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=error_detail(
+                        "not_authenticated", "The API key is invalid, expired, or revoked."
+                    ),
+                )
+            if not any(stored.scope.permits(required) for required in allowed):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=error_detail(
+                        "not_authorized", "This API key does not have the required scope."
+                    ),
+                )
+            uow.api_keys.touch(stored.prefix, at=now)
+            uow.commit()
+        actor_context.set((None, stored.prefix))
+        return Caller(prefix=stored.prefix, scope=stored.scope)
 
     return dependency
 
@@ -492,13 +528,17 @@ def require_permission(permission: Permission) -> Callable[..., Principal]:
 
     def dependency(
         authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+        raw_key: Annotated[str | None, Header(alias=API_KEY_HEADER)] = None,
         school_code: SchoolCodeDep = None,
     ) -> Principal:
         if not (authorization or "").strip().lower().startswith("bearer "):
             allowed = (
                 (Scope.REGISTRAR, Scope.READER) if _is_read(permission) else (Scope.REGISTRAR,)
             )
-            return Principal(caller=_require_scopes(*allowed)(), school_code=school_code)
+            return Principal(
+                caller=_require_scopes(*allowed)(raw_key=raw_key, school_code=school_code),
+                school_code=school_code,
+            )
 
         profile = get_access_profile(authorization, school_code)
         # The wide check: held anywhere, at any scope. `allows` with no target would ask
@@ -506,6 +546,7 @@ def require_permission(permission: Permission) -> Callable[..., Principal]:
         # `AccessProfile.holds`.
         if not profile.holds(permission):
             raise _forbidden(permission)
+        actor_context.set((profile.user_id, profile.username))
         return Principal(profile=profile, school_code=school_code)
 
     return dependency
@@ -966,14 +1007,22 @@ class StructureCatalogue:
             track = track_code.strip().upper()
             if track not in tracks:
                 raise ValidationError(f"track {track!r} is not active", field="track_code")
-            prefixes = ((Stage.GARDEN, "KG", "KG"), (Stage.PRIMARY, "P", "Primary"),
-                        (Stage.PREPARATORY, "PREP", "Preparatory"),
-                        (Stage.SECONDARY, "SEC", "Secondary"))
+            arabic_ordinals = {
+                1: "الأول", 2: "الثاني", 3: "الثالث", 4: "الرابع",
+                5: "الخامس", 6: "السادس",
+            }
+            prefixes = (
+                (Stage.GARDEN, "KG", "KG", "روضة"),
+                (Stage.PRIMARY, "P", "Grade", "الصف"),
+                (Stage.PREPARATORY, "PREP", "Preparatory", "الصف الإعدادي"),
+                (Stage.SECONDARY, "SEC", "Secondary", "الصف الثانوي"),
+            )
             return [
                 {"code": f"{track}-{prefix}{number}", "stage": stage.value,
-                 "name_en": f"{label} {number}", "name_ar": f"{label} {number}",
+                 "name_en": f"{label_en} {number}",
+                 "name_ar": f"{label_ar} {arabic_ordinals.get(number, str(number))}",
                  "display_order": stage.order * 10 + number}
-                for stage, prefix, label in prefixes
+                for stage, prefix, label_en, label_ar in prefixes
                 for number in range(1, school.grade_count_for(stage) + 1)
             ]
 
@@ -985,18 +1034,31 @@ class StructureCatalogue:
             year = uow.academic_years.get(academic_year_code)
             if year is None:
                 raise UnknownReference(f"no academic year {academic_year_code}", field="academic_year_code")
-            specs = self.configured_grades(year.school_code, track_code)
+            tracks = {track.code: track for track in uow.schools.list_tracks(year.school_code)}
+            track = tracks.get(track_code.strip().upper())
+            if track is None:
+                raise ValidationError(f"track {track_code!r} is not active", field="track_code")
+            specs = self.configured_grades(year.school_code, track.code)
             expected = {str(spec["code"]) for spec in specs}
             if same_count is not None:
                 counts = {code: same_count for code in expected}
             counts = counts or {}
             if set(counts) != expected:
                 raise ValidationError("class counts must name every active grade and no others", field="classes_by_grade")
-            if sequence not in {"numeric", "alphabetic"}:
-                raise ValidationError("sequence must be numeric or alphabetic", field="sequence")
+            required_sequence = "numeric" if track.department_key == "arabic" else "alphabetic"
+            if sequence != required_sequence:
+                raise ValidationError(
+                    f"{track.department_key} classes require {required_sequence} sections",
+                    field="sequence",
+                )
             for count in counts.values():
                 if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 60:
                     raise ValidationError("class count must be between 0 and 60", field="classes_by_grade")
+                if track.department_key == "languages" and count > 26:
+                    raise ValidationError(
+                        "languages classes are lettered A through Z (maximum 26)",
+                        field="classes_by_grade",
+                    )
             levels = [YearLevel(school_code=year.school_code, track_code=track_code,
                 code=str(spec["code"]), stage=str(spec["stage"]), name_en=str(spec["name_en"]),
                 name_ar=str(spec["name_ar"]), display_order=int(spec["display_order"])) for spec in specs]
@@ -1004,10 +1066,22 @@ class StructureCatalogue:
             sections = []
             for level in levels:
                 for index in range(1, counts[str(level.code)] + 1):
-                    suffix = str(index) if sequence == "numeric" else chr(64 + index)
+                    # The department relation dictates the user-facing convention;
+                    # neither its display name nor a class code is ever parsed.
+                    suffix = str(index) if track.department_key == "arabic" else chr(64 + index)
+                    name_ar = (
+                        f"{level.name_ar} - الفصل {suffix}"
+                        if track.department_key == "arabic"
+                        else f"{level.name_ar} لغات - فصل {suffix}"
+                    )
+                    name_en = (
+                        f"{level.name_en} - Section {suffix}"
+                        if track.department_key == "arabic"
+                        else f"{level.name_en} Languages - Section {suffix}"
+                    )
                     sections.append(ClassSection(code=f"{level.code}-{suffix}",
                         academic_year_code=academic_year_code, year_level_code=level.code,
-                        name_en=suffix, name_ar=suffix))
+                        name_en=name_en, name_ar=name_ar, capacity=15))
             uow.class_sections.upsert_many(sections)
             uow.commit()
             return levels, sections
@@ -1345,7 +1419,7 @@ class StudentDesk:
         to_class: ClassCode,
         on_date: date,
     ) -> tuple[ClassEnrolment | None, ClassEnrolment]:
-        """Move a child to another class from `on_date`, in one transaction.
+        """Move a child to another class or academic year from `on_date`, in one transaction.
 
         This is the whole reason a transfer is not two API calls. Between "end 3A" and
         "start 3B" the child is in no class at all, and a marks upload landing in that
@@ -1366,12 +1440,10 @@ class StudentDesk:
                 )
             current = uow.enrolments.open_enrolment(student_number)
             if current is not None:
-                if current.academic_year_code != academic_year_code:
-                    raise ValidationError(
-                        "the open placement belongs to a different academic year",
-                        field="academic_year_code",
-                    )
-                if current.class_code == to_class:
+                if (
+                    current.academic_year_code == academic_year_code
+                    and current.class_code == to_class
+                ):
                     raise ValidationError(
                         "choose a different class",
                         field="to_class_code",
@@ -1384,12 +1456,22 @@ class StudentDesk:
                         f"no class {current.class_code} in academic year {academic_year_code}",
                         field="class_code",
                     )
-                if source.year_level_code != target.year_level_code:
+                # Within one academic year this is a class transfer, not a promotion:
+                # changing grade would rewrite the cohort's meaning. Across academic
+                # years, progressing to another grade is the normal enrollment flow.
+                if (
+                    current.academic_year_code == academic_year_code
+                    and source.year_level_code != target.year_level_code
+                ):
                     raise ValidationError(
                         "a student may only transfer between classes in the same grade",
                         field="to_class_code",
                     )
-            if current is not None and current.starts_on == on_date:
+            if (
+                current is not None
+                and current.academic_year_code == academic_year_code
+                and current.starts_on == on_date
+            ):
                 opened = uow.enrolments.retarget_open_enrolment(
                     student_number,
                     academic_year_code=academic_year_code,

@@ -111,7 +111,7 @@ export function TeacherSetup() {
           <Field className="col-12" label={t('Account role')} required>
             <Select value={form.role_code} disabled={saving} options={[
               { value: 'teacher', label: t('Teacher') },
-              { value: 'year_supervisor', label: t('Class supervisor') },
+              { value: 'floor_supervisor', label: t('Floor supervisor') },
               { value: 'attendance_supervisor', label: t('Attendance supervisor') }
             ]} onChange={(value) => setForm((old) => ({ ...old, role_code: value }))} />
           </Field>

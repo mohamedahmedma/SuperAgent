@@ -22,12 +22,16 @@ from sis.api.deps import (
     UowFactoryDep,
     get_api_key_minter,
     require_registrar,
+    require_user_permission,
 )
+from sis.domain.rbac import Permission
+from sis.infrastructure.db import models as m
 from sis.api.routers import domain_errors, error_responses
 from sis.domain.access import AccessAttempt
 from sis.domain.auth import ApiKey, Scope
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
+AuditReader = Annotated[object, Depends(require_user_permission(Permission.AUDIT_READ))]
 
 
 class ApiKeyMinter(Protocol):
@@ -195,3 +199,37 @@ def read_access_audit(
             limit=limit,
         )
     return [AccessAuditOut.of(row) for row in rows]
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    actor_user_id: int | None
+    actor: str
+    action: str
+    entity_type: str
+    entity_id: str
+    old_values: dict | None
+    new_values: dict | None
+    created_at: datetime
+
+
+@router.get("/audit-log", response_model=list[AuditLogOut])
+def read_audit_log(
+    _: AuditReader,
+    uow_factory: UowFactoryDep,
+    entity_type: Annotated[str | None, Query()] = None,
+    action: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> list[AuditLogOut]:
+    """Admin-only, newest-first audit history. There is intentionally no write route."""
+    with uow_factory() as uow:
+        from sqlalchemy import select
+        statement = select(m.AuditLog)
+        if entity_type:
+            statement = statement.where(m.AuditLog.entity_type == entity_type)
+        if action:
+            statement = statement.where(m.AuditLog.action == action)
+        rows = uow._session.scalars(
+            statement.order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc()).limit(limit)
+        ).all()
+    return [AuditLogOut.model_validate(row, from_attributes=True) for row in rows]

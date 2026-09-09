@@ -21,7 +21,8 @@ class SqlAlchemyTeacherRepository:
         self._session = session
 
     def list_for_school(
-        self, school_code: SchoolCode, *, year_level_code: YearCode | None = None
+        self, school_code: SchoolCode, *, year_level_code: YearCode | None = None,
+        include_inactive: bool = False,
     ) -> Sequence[TeacherRecord]:
         """The school's teachers, or only the ones who teach on one grade.
 
@@ -34,6 +35,8 @@ class SqlAlchemyTeacherRepository:
         statement = (
             select(m.Teacher).join(m.School).where(m.School.code == str(school_code))
         )
+        if not include_inactive:
+            statement = statement.where(m.Teacher.is_active.is_(True))
         if year_level_code is not None:
             # `TeacherYearLevel` is per subject, so a teacher who teaches two subjects on
             # this grade joins twice. Distinct rather than a subquery because the id is

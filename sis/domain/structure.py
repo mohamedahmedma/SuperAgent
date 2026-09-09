@@ -37,6 +37,14 @@ _C = TypeVar("_C")
 _E = TypeVar("_E", bound="_Named")
 
 
+class AcademicYearStatus(StrEnum):
+    """Administrative lifecycle state, stated by the school rather than inferred."""
+
+    UPCOMING = "upcoming"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+
+
 def _coerce(field: str, kind: type[_C], entity: object) -> None:
     """Replace a raw cell with its value object, in place, during `__post_init__`."""
     raw = getattr(entity, field)
@@ -139,6 +147,7 @@ class AcademicTrack(_Named):
     """One academic structure inside a school: Arabic or Languages."""
 
     code: str
+    department_key: str
     school_code: SchoolCode | str
     language_type: SchoolLanguage | str
     name_en: str
@@ -151,6 +160,12 @@ class AcademicTrack(_Named):
         if not code:
             raise ValidationError("track code is required", field="track_code")
         object.__setattr__(self, "code", code)
+        department_key = str(self.department_key or "").strip().lower()
+        if department_key not in {"arabic", "languages"}:
+            raise ValidationError(
+                "department key must be arabic or languages", field="department_key"
+            )
+        object.__setattr__(self, "department_key", department_key)
         _coerce("school_code", SchoolCode, self)
         _coerce_names(self)
         if not isinstance(self.language_type, SchoolLanguage):
@@ -333,12 +348,28 @@ class AcademicYear(_Named):
     starts_on: date
     ends_on: date
     is_current: bool = False
+    # ``None`` preserves callers written before lifecycle statuses existed.
+    status: AcademicYearStatus | str | None = None
+    id: int | None = None
+    created_at: object | None = None
+    updated_at: object | None = None
 
     def __post_init__(self) -> None:
         _coerce("code", AcademicYearCode, self)
         _coerce("school_code", SchoolCode, self)
         _coerce_names(self)
         _check_range(self.starts_on, self.ends_on, "ends_on")
+        status = self.status
+        if status is None:
+            status = AcademicYearStatus.ACTIVE if self.is_current else AcademicYearStatus.UPCOMING
+        if not isinstance(status, AcademicYearStatus):
+            try:
+                status = AcademicYearStatus(status)
+            except ValueError as exc:
+                raise ValidationError("academic year status is invalid", field="status") from exc
+        if self.is_current != (status is AcademicYearStatus.ACTIVE):
+            raise ValidationError("is_current must match whether status is active", field="status")
+        object.__setattr__(self, "status", status)
 
     def contains(self, day: date) -> bool:
         """Both ends inclusive — the last day of the year is a day of the year."""

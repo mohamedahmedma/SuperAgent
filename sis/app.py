@@ -34,6 +34,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from sis.api.maintenance import SystemMaintenanceMiddleware
+import sis.infrastructure.audit  # noqa: F401 - registers the SQLAlchemy audit listener
 
 from sis.env import load_env
 

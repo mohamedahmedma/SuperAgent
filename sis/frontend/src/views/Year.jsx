@@ -1023,7 +1023,7 @@ export function Year({ params = {} }) {
   const yearList = (years.value && years.value.academic_years) || [];
   const year = yearList.find((item) => item.code === code);
   const heldRoles = Store.roles();
-  const isPrincipal = heldRoles.indexOf('principal') >= 0 && heldRoles.indexOf('system_admin') < 0 && heldRoles.indexOf('school_owner') < 0;
+  const isPrincipal = heldRoles.indexOf('school_manager') >= 0 && heldRoles.indexOf('admin') < 0 && heldRoles.indexOf('school_owner') < 0;
   const yearLocked = isStartedCurrentYear(year);
 
   const termList = (terms.value || []).slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0));

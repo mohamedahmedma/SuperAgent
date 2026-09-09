@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from sis.api.deps import (
     Principal,
@@ -35,6 +35,14 @@ ClassAssigners = Annotated[
     Principal, Depends(require_permission(Permission.TEACHERS_ASSIGN_CLASSES))
 ]
 Teachers = Annotated[TeacherManagementService, Depends(get_teacher_management_service)]
+
+
+def _may_manage_archived_staff(caller: Principal) -> bool:
+    """The permanent Admin and School Manager may perform staff lifecycle actions."""
+    return caller.profile is not None and (
+        caller.profile.is_system_admin
+        or caller.profile.has_role(RoleCode.SCHOOL_MANAGER.value)
+    )
 
 
 def _sync_teacher_role_grants(session, teacher: m.Teacher, *, actor: str) -> None:  # noqa: ANN001
@@ -101,7 +109,7 @@ class TeacherAssignmentOut(BaseModel):
 
 class TeacherRemovalOut(BaseModel):
     staff_number: str
-    account_deleted: bool
+    account_deactivated: bool
     history_preserved: bool = True
 
 
@@ -522,6 +530,27 @@ def list_teachers(
     return [TeacherOut.of(row) for row in rows]
 
 
+@router.get(
+    "/schools/{school_code}/teachers/archived",
+    response_model=list[TeacherOut],
+    summary="Archived teachers available for restoration",
+    responses=error_responses(401, 403, 404),
+)
+def list_archived_teachers(
+    school_code: str, service: Teachers, caller: Managers,
+) -> list[TeacherOut]:
+    """A manager-only audit view; inactive staff never appear in the normal directory."""
+    if not _may_manage_archived_staff(caller):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "principal_only", "message": "Only the school manager can view archived teachers."},
+        )
+    caller.narrow(Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code))
+    with domain_errors():
+        rows = service.list(SchoolCode(school_code), include_inactive=True)
+    return [TeacherOut.of(row) for row in rows if not row.teacher.is_active]
+
+
 @router.get("/schools/{school_code}/teachers/{staff_number}", response_model=TeacherOut,
     summary="One teacher",
     description="`year_level` narrows this the same way it narrows the directory: the "
@@ -627,14 +656,8 @@ def create_teacher(
 def remove_teacher(
     school_code: str, staff_number: str, caller: Managers, uow_factory: UowFactoryDep
 ) -> TeacherRemovalOut:
-    """Principal-only departure workflow.
-
-    The teaching identity is retained as an inactive historical row so staff attendance and
-    previously recorded academic facts keep resolving. Current teaching assignments are
-    removed, and a linked login account is deleted after its active roles and sessions are
-    cleared. This is intentionally narrower than granting the principal generic user-write.
-    """
-    if caller.profile is None or not caller.profile.has_role(RoleCode.PRINCIPAL.value):
+    """Principal-only soft-delete workflow for a departed teacher and linked account."""
+    if not _may_manage_archived_staff(caller):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "principal_only", "message": "Only the school manager can remove a teacher."},
@@ -673,23 +696,58 @@ def remove_teacher(
                     },
                 )
 
-        # Remove every active teaching responsibility. Historical marks are not keyed to these
-        # assignment rows, and teacher attendance remains attached to the inactive teacher row.
-        session.execute(delete(m.TeacherClassSection).where(m.TeacherClassSection.teacher_id == teacher.id))
-        session.execute(delete(m.TeacherYearLevel).where(m.TeacherYearLevel.teacher_id == teacher.id))
-        session.execute(delete(m.TeacherSubject).where(m.TeacherSubject.teacher_id == teacher.id))
+        # Keep assignment and role rows intact: they are part of the staff audit trail and
+        # make a restore deterministic. Inactive accounts cannot authenticate or use them.
         teacher.is_active = False
 
-        account_deleted = user is not None
+        account_deactivated = user is not None
         if user is not None:
-            # Detach first so this remains safe even when a database has FK actions disabled.
-            teacher.user_id = None
-            session.flush()
-            session.execute(delete(m.UserRole).where(m.UserRole.user_id == user.id))
-            session.execute(delete(m.UserSession).where(m.UserSession.user_id == user.id))
-            session.delete(user)
+            user.is_active = False
+            session.execute(
+                update(m.UserSession)
+                .where(m.UserSession.user_id == user.id, m.UserSession.revoked_at.is_(None))
+                .values(revoked_at=datetime.now(UTC))
+            )
 
         uow.commit()
         return TeacherRemovalOut(
-            staff_number=staff_number, account_deleted=account_deleted, history_preserved=True
+            staff_number=staff_number, account_deactivated=account_deactivated, history_preserved=True
         )
+
+
+@router.post(
+    "/schools/{school_code}/teachers/{staff_number}/restore",
+    response_model=TeacherRemovalOut,
+    summary="Restore a soft-deleted teacher and linked account",
+    responses=error_responses(401, 403, 404, 409),
+)
+def restore_teacher(
+    school_code: str, staff_number: str, caller: Managers, uow_factory: UowFactoryDep
+) -> TeacherRemovalOut:
+    if not _may_manage_archived_staff(caller):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "principal_only", "message": "Only the school manager can restore a teacher."},
+        )
+    caller.narrow(
+        Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
+    )
+    with uow_factory() as uow:
+        teacher = uow._session.scalar(
+            select(m.Teacher).join(m.School).where(
+                m.School.code == school_code, m.Teacher.staff_number == staff_number
+            )
+        )
+        if teacher is None or teacher.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "unknown_reference", "message": "No archived teacher with that reference exists in this school."},
+            )
+        teacher.is_active = True
+        user = uow._session.get(m.User, teacher.user_id) if teacher.user_id is not None else None
+        if user is not None:
+            user.is_active = True
+        uow.commit()
+    return TeacherRemovalOut(
+        staff_number=staff_number, account_deactivated=user is not None, history_preserved=True
+    )

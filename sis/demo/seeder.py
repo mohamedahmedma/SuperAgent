@@ -521,6 +521,7 @@ def _load_compact_school(session: Session, counts: Counts, *, code: str,
     session.add(school); session.flush(); counts.schools += 1
     system = m.EducationalSystem(
         school_id=school.id, code="AR" if language == "arabic" else "LANG",
+        department_key="arabic" if language == "arabic" else "languages",
         kind=language, name_en="Arabic Section" if language == "arabic" else "Language Section",
         name_ar="القسم العربي" if language == "arabic" else "قسم اللغات",
         display_order=1, is_active=True, created_at=now,
@@ -659,6 +660,7 @@ def _load_school(session: Session, built: _Built, counts: Counts, now: datetime)
         row = m.EducationalSystem(
             school_id=school.id,
             code=spec.code,
+            department_key="arabic" if spec.kind.value == "arabic" else "languages",
             kind=spec.kind.value,
             name_en=spec.name_en,
             name_ar=spec.name_ar,

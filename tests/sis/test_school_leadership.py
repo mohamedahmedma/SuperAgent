@@ -101,7 +101,7 @@ def test_principal_adds_supervisor_roles_without_replacing_teacher(
         )
         assert response.status_code == 200, response.text
     held = {row["role_code"] for row in response.json()}
-    assert held == {"teacher", "year_supervisor", "attendance_supervisor"}
+    assert held == {"teacher", "floor_supervisor", "attendance_supervisor"}
 
 
 def test_principal_cannot_delegate_owner_principal_or_system_admin(
