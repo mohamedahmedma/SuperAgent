@@ -49,6 +49,19 @@ class SchoolProfileTests(ProfileTestCase):
     def test_it_binds_the_records_tool(self):
         self.assertIn(RECORDS_TOOL, load_profile("school").agent.tools)
 
+    def test_social_replies_do_not_depend_on_a_model_call(self):
+        self.assertEqual("static", load_profile("school").agent.social_reply_mode)
+
+    def test_the_thank_you_sentences_that_reached_the_agent_are_listed(self):
+        """Regression, from a production transcript. «Thanks for your help» was not on
+        the list, so it was planned as a question, given a required tool it had no
+        reason to call, and answered with the provider's protocol error."""
+        from backend.chat.signals import _social_key
+
+        phrases = {_social_key(p) for p in load_profile("school").agent.social_phrases}
+        for observed in ("Thanks for your help", "شكرا على مساعدتك", "متشكر جدا"):
+            self.assertIn(_social_key(observed), phrases, observed)
+
     def test_every_tool_it_names_is_registered(self):
         """A typo here is a failed deployment, not a failing request.
 

@@ -96,6 +96,11 @@ agent:
   # Matched whole-message after normalisation, and every phrase here is one model call
   # that never happens. Base ships MSA only, so «إزيك» and «متشكر» — two of the
   # commonest Egyptian openers — fell through to the classifier.
+  #
+  # Static on this production-facing profile because the reply is already known. A
+  # greeting or acknowledgement must not depend on provider tool-call compliance, and
+  # paying a model call here only adds a failure mode to fixed copy the profile carries.
+  social_reply_mode: static
   social_phrases:
     - hi
     - hello
@@ -139,6 +144,25 @@ agent:
     - تحت أمرك
     - سلام
     - باي
+    # Whole sentences, because that is what a parent actually types. «Thanks for your
+    # help» reached the agent, was given a required tool it had no reason to call, and
+    # came back to the parent as a provider error — so the fix belongs here, where a
+    # listed phrase costs nothing and never fires on a question.
+    #
+    # Listed rather than matched by edit distance. A typo matcher that admitted this
+    # would have to accept a whole SENTENCE as one phrase plus an error budget, and at
+    # that point «thanks and what are the fees؟» is inside the budget too — which is the
+    # one mistake this rung must not make. Misspellings that matter are cheaper to add
+    # here as they are observed.
+    - thanks for your help
+    - thanks a lot
+    - many thanks
+    - thanks so much
+    - thank you so much
+    - شكرا على مساعدتك
+    - متشكر جدا
+    - متشكرة جدا
+    - شكرا على المساعدة
 
   # A school assistant is asked plenty that the corpus is not about — homework help,
   # general knowledge, chat. Without this the catalogue rung can only admit, so those
@@ -282,12 +306,12 @@ agent:
     # out of a plan that would still be holding it after she moved class.
     get_student_timetable:
       student_name: "$child_label"
-    # The three whose only argument is the child. `get_subject_teacher` is absent for the
-    # same reason `get_subject_grades` is: its `subject` comes from the message, nothing on
-    # the plan holds one, and `PLAN_PLACEHOLDERS` is a closed set with no `$subject` in it —
-    # a planned call would have to invent the argument. Undeclared, it stays bound and the
-    # model calls it the ordinary way, which is right for the one argument that is genuinely
-    # the model's to supply.
+    # The rest, whose planned argument is the child and nothing else. `get_student_grades`
+    # and `get_student_teachers` also accept a `subject`, and it is deliberately not named
+    # here: `PLAN_PLACEHOLDERS` is a closed set with no `$subject` in it, so a planned call
+    # would have to invent one. Omitting it plans the whole record and lets the model read
+    # the row it was asked about out of what came back — which is why folding the subject
+    # variants in made every tool plannable instead of making two of them unplannable.
     get_student_class:
       student_name: "$child_label"
     get_student_subjects:
