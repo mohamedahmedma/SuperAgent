@@ -39,7 +39,7 @@ def test_owner_can_read_the_school_but_cannot_change_normal_data(
     assert refused.status_code == 403
 
 
-def test_principal_is_general_read_only_and_never_a_system_admin(
+def test_principal_can_correct_student_and_guardian_records_but_never_becomes_system_admin(
     client: TestClient, ids: dict[str, int], principal: dict[str, str]
 ) -> None:
     profile = client.get("/v1/auth/me", headers=principal).json()["profile"]
@@ -52,10 +52,11 @@ def test_principal_is_general_read_only_and_never_a_system_admin(
     # rewrites the school itself or the system it runs on.
     assert "students.create" in profile["permissions"]
     assert "students.write" in profile["permissions"]
+    assert "guardians.write" in profile["permissions"]
     assert "grades.read" in profile["permissions"]
     forbidden = {
         "schools.write", "structure.write", "grades.write",
-        "guardians.write", "imports.run", "system.manage", "system.status.write",
+        "imports.run", "system.manage", "system.status.write",
     }
     assert forbidden.isdisjoint(profile["permissions"])
 
