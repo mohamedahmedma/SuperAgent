@@ -524,7 +524,7 @@ function Marks({ studentNumber }) {
 
 /* -- Attendance records for the selected date range ------------------------------ */
 
-function Attendance({ studentNumber }) {
+function Attendance({ studentNumber, academicYear }) {
   const [range, setRange] = useState(defaultWindow);
 
   const record = useResource(
@@ -533,6 +533,11 @@ function Attendance({ studentNumber }) {
     !!studentNumber
   );
   const days = (record.value && record.value.days) || [];
+  const summary = useResource(
+    `attendance-summary:${studentNumber}:${academicYear || ''}`,
+    () => api.studentAttendanceSummary(studentNumber, academicYear),
+    !!studentNumber && !!academicYear
+  );
 
   return (
     <Card
@@ -561,6 +566,16 @@ function Attendance({ studentNumber }) {
       tight
     >
       <ErrorNote error={!record.value ? record.error : null} onRetry={record.reload} />
+
+      {summary.value && <div className="row g-2 mb-3" aria-label={t('Academic year attendance summary')}>
+        {[
+          [t('Applicable days'), summary.value.applicable_days], [t('Present'), summary.value.present],
+          [t('Absent'), summary.value.absent], [t('Late'), summary.value.late],
+          [t('Excused'), summary.value.excused], [t('Attendance %'), summary.value.attendance_percent == null ? DASH : `${summary.value.attendance_percent}%`],
+          [t('Absence %'), summary.value.absence_percent == null ? DASH : `${summary.value.absence_percent}%`]
+        ].map(([label, value]) => <div className="col-6 col-md" key={label}><div className="border rounded p-2 h-100"><div className="small text-body-secondary">{label}</div><strong>{value}</strong></div></div>)}
+      </div>}
+      <ErrorNote error={summary.error} onRetry={summary.reload} />
 
       <Table
         loading={record.loading}
@@ -606,6 +621,18 @@ function Attendance({ studentNumber }) {
       />
     </Card>
   );
+}
+
+function Timeline({ studentNumber }) {
+  const events = useResource(`student-timeline:${studentNumber}`, () => api.studentTimeline(studentNumber), !!studentNumber);
+  return <Card title={t('Student Timeline')} subtitle={t('Recorded history from the audit log.')} tight>
+    <ErrorNote error={events.error} onRetry={events.reload} />
+    {events.loading ? <Skeleton rows={4} /> : !events.value?.length ? <Empty title={t('No timeline events yet')} /> :
+      <ol className="list-group list-group-flush">{events.value.map((event) => <li className="list-group-item px-0" key={event.id}>
+        <div className="d-flex justify-content-between gap-2"><strong>{event.action.replaceAll('_', ' ')}</strong><span className="small text-body-secondary">{dateText(event.at)}</span></div>
+        <div className="small text-body-secondary">{event.entity_type} · {event.actor}</div>
+      </li>)}</ol>}
+  </Card>;
 }
 
 /* -- Insights: counts and facts, and nothing derived ------------------------------ */
@@ -805,7 +832,8 @@ export function Student({ params = {} }) {
           <div className="vstack gap-3">
             {!isTeacher ? <Insights student={student} studentNumber={number} /> : null}
             {mayReadGrades ? <Marks studentNumber={number} /> : null}
-            <Attendance studentNumber={number} />
+            <Attendance studentNumber={number} academicYear={state.year} />
+            <Timeline studentNumber={number} />
           </div>
         </div>
       </div>

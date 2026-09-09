@@ -68,6 +68,8 @@ class Permission(StrEnum):
     # granting the broader correction/transfer powers carried by `students.write`.
     STUDENTS_CREATE = "students.create"
     STUDENTS_WRITE = "students.write"
+    DOCUMENTS_READ = "documents.read"
+    DOCUMENTS_WRITE = "documents.write"
 
     TEACHERS_READ = "teachers.read"
     TEACHERS_WRITE = "teachers.write"
@@ -93,6 +95,13 @@ class Permission(StrEnum):
     IMPORTS_RUN = "imports.run"
     REPORTS_READ = "reports.read"
     AUDIT_READ = "audit.read"
+
+
+class OverrideEffect(StrEnum):
+    """The two exceptional outcomes an Admin may set for one user permission."""
+
+    ALLOW = "allow"
+    DENY = "deny"
 
 
 class ScopeType(StrEnum):
@@ -164,15 +173,17 @@ class RoleCode(StrEnum):
     than by a school discovering their principal cannot log in.
     """
 
-    SYSTEM_ADMIN = "system_admin"
+    SYSTEM_ADMIN = "admin"
+    ADMIN = "admin"
     SCHOOL_OWNER = "school_owner"
-    PRINCIPAL = "principal"
-    YEAR_SUPERVISOR = "year_supervisor"
-    # Public Stage-9 terminology; kept as an alias so existing grants remain valid.
-    GRADE_SUPERVISOR = "year_supervisor"
+    PRINCIPAL = "school_manager"
+    SCHOOL_MANAGER = "school_manager"
+    YEAR_SUPERVISOR = "floor_supervisor"
+    FLOOR_SUPERVISOR = "floor_supervisor"
+    # Legacy name retained in Python only; the stored key is floor_supervisor.
+    GRADE_SUPERVISOR = "floor_supervisor"
     ATTENDANCE_SUPERVISOR = "attendance_supervisor"
     TEACHER = "teacher"
-    SUBJECT_COORDINATOR = "subject_coordinator"
 
     @classmethod
     def _missing_(cls, value: object) -> "RoleCode | None":
@@ -196,12 +207,15 @@ class RoleCode(StrEnum):
 #: Spellings accepted on input that are not themselves stored. Read by `_missing_` above,
 #: and echoed by the role catalogue so a client can show a school its own vocabulary.
 _ROLE_CODE_ALIASES: Final[dict[str, RoleCode]] = {
+    "system_admin": RoleCode.ADMIN,
+    "principal": RoleCode.SCHOOL_MANAGER,
+    "year_supervisor": RoleCode.FLOOR_SUPERVISOR,
     "grade_supervisor": RoleCode.YEAR_SUPERVISOR,
     "academic_year_supervisor": RoleCode.YEAR_SUPERVISOR,
-    "school_manager": RoleCode.PRINCIPAL,
+    "school_manager": RoleCode.SCHOOL_MANAGER,
     "manager": RoleCode.PRINCIPAL,
     "owner": RoleCode.SCHOOL_OWNER,
-    "admin": RoleCode.SYSTEM_ADMIN,
+    "admin": RoleCode.ADMIN,
     "system_administrator": RoleCode.SYSTEM_ADMIN,
 }
 
@@ -223,6 +237,9 @@ _READS: Final[tuple[Permission, ...]] = (
     Permission.TEACHERS_READ,
     Permission.TIMETABLE_READ,
     Permission.GUARDIANS_READ,
+    Permission.GRADES_READ,
+    Permission.TEACHER_ATTENDANCE_READ,
+    Permission.USERS_READ,
     Permission.REPORTS_READ,
 )
 
@@ -346,20 +363,6 @@ Permission.GRADES_READ,
             Permission.ATTENDANCE_READ,
             Permission.GRADES_READ,
             Permission.GRADES_WRITE,
-        ),
-    ),
-    RoleDefinition(
-        code=RoleCode.SUBJECT_COORDINATOR,
-        name_en="Subject Coordinator",
-        name_ar="منسّق المادة",
-        description_en="Sees their subject across every rung it is taught on.",
-        default_scope=ScopeType.SCHOOL,
-        permissions=(
-            Permission.STRUCTURE_READ,
-            Permission.STUDENTS_READ,
-            Permission.TEACHERS_READ,
-            Permission.GRADES_READ,
-            Permission.REPORTS_READ,
         ),
     ),
 )
@@ -491,12 +494,22 @@ class AccessProfile:
     # Supervisor" is something the console shows, and it is not derivable from grants.
     assignments: tuple[RoleAssignment, ...] = ()
     grants: tuple[Grant, ...] = ()
+    # Per-user exceptions are global deliberately.  They are the explicit policy that
+    # wins before a role's scoped grants; scopes continue to govern all inherited access.
+    overrides: tuple[tuple[Permission, OverrideEffect], ...] = ()
     # The school this session reads, when the user is bound to one. `None` for the system
     # administrator, who is bound to none.
     school_id: int | None = None
 
     def allows(self, permission: Permission, target: "Target" = ANYWHERE) -> bool:
         """The whole authorisation decision: any grant of this permission that covers it."""
+        if self.is_system_admin:
+            return True
+        if self.has_role(RoleCode.SCHOOL_OWNER.value) and not permission.value.endswith(".read"):
+            return False
+        override = self.override_for(permission)
+        if override is not None:
+            return override is OverrideEffect.ALLOW
         return any(
             grant.permission is permission and grant.scope.covers(target)
             for grant in self.grants
@@ -521,7 +534,20 @@ class AccessProfile:
         and a fully-named `Target`. Two checks rather than one, because the wide one can be
         answered before any database work and the narrow one cannot.
         """
-        return any(grant.permission is permission for grant in self.grants)
+        if self.is_system_admin:
+            return True
+        if self.has_role(RoleCode.SCHOOL_OWNER.value) and not permission.value.endswith(".read"):
+            return False
+        override = self.override_for(permission)
+        return override is OverrideEffect.ALLOW if override is not None else any(
+            grant.permission is permission for grant in self.grants
+        )
+
+    def override_for(self, permission: Permission) -> OverrideEffect | None:
+        for candidate, effect in self.overrides:
+            if candidate is permission:
+                return effect
+        return None
 
     def widest_scope_for(self, permission: Permission) -> ScopeType | None:
         """The least-bounded scope this permission is held at, or `None`.
@@ -530,6 +556,12 @@ class AccessProfile:
         answers a question about any class in the school without anybody having to look up
         which rung that class is on.
         """
+        if self.is_system_admin:
+            return ScopeType.GLOBAL
+        if self.has_role(RoleCode.SCHOOL_OWNER.value) and not permission.value.endswith(".read"):
+            return None
+        if self.override_for(permission) is OverrideEffect.ALLOW:
+            return ScopeType.GLOBAL
         depths = [
             SCOPE_BY_TYPE[grant.scope.type].depth
             for grant in self.grants
@@ -562,10 +594,16 @@ class AccessProfile:
         button shown from this list still has its scope checked when it is pressed,
         because hiding a control is a courtesy and the server-side check is the boundary.
         """
-        return tuple(sorted({grant.permission.value for grant in self.grants}))
+        return tuple(permission.value for permission in Permission if self.holds(permission))
 
     def scopes_for(self, permission: Permission) -> tuple[Scope, ...]:
         """Where this permission is held — how a screen knows which classes to list."""
+        if self.has_role(RoleCode.SCHOOL_OWNER.value) and not permission.value.endswith(".read"):
+            return ()
+        if self.is_system_admin or self.override_for(permission) is OverrideEffect.ALLOW:
+            return (Scope(ScopeType.GLOBAL),)
+        if self.override_for(permission) is OverrideEffect.DENY:
+            return ()
         return tuple(grant.scope for grant in self.grants if grant.permission is permission)
 
     def scope_ids(self, permission: Permission, of: ScopeType) -> tuple[int, ...]:
@@ -587,6 +625,7 @@ def build_profile(
     username: str,
     assignments: Iterable[RoleAssignment],
     permissions_by_role: dict[str, tuple[Permission, ...]],
+    overrides: Iterable[tuple[Permission, OverrideEffect]] = (),
     school_id: int | None = None,
 ) -> AccessProfile:
     """Flatten assignments into grants. The union, with duplicates collapsed.
@@ -618,6 +657,7 @@ def build_profile(
         username=username,
         assignments=tuple(held),
         grants=tuple(grants),
+        overrides=tuple(overrides),
         school_id=school_id,
     )
 

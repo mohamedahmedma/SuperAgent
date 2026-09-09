@@ -818,6 +818,9 @@ var api = {
   teachers: function (schoolCode) {
     return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers');
   },
+  archivedTeachers: function (schoolCode) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers/archived');
+  },
   saveTeacher: function (schoolCode, staffNumber, body) {
     return request('/schools/' + encodeURIComponent(schoolCode) + '/teachers/' +
       encodeURIComponent(staffNumber), { method: 'PUT', body: body });
@@ -829,6 +832,10 @@ var api = {
     return request('/schools/' + encodeURIComponent(schoolCode) + '/teachers/' +
       encodeURIComponent(staffNumber), { method: 'DELETE' });
   },
+  restoreTeacher: function (schoolCode, staffNumber) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/teachers/' +
+      encodeURIComponent(staffNumber) + '/restore');
+  },
   teacherAttendance: function (schoolCode, fromDate, toDate) {
     return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers/attendance', {
       from: fromDate || null,
@@ -836,8 +843,25 @@ var api = {
     });
   },
   rbacUsers: function () { return get('/rbac/users'); },
+  auditLog: function (filters) { return get('/admin/audit-log', filters || {}); },
+  userPermissionOverrides: function (userId) {
+    return get('/rbac/users/' + encodeURIComponent(userId) + '/permission-overrides');
+  },
+  saveUserPermissionOverrides: function (userId, overrides) {
+    return request('/rbac/users/' + encodeURIComponent(userId) + '/permission-overrides', {
+      method: 'PUT', body: { overrides: overrides }
+    });
+  },
   createSupervisor: function (body) { return post('/rbac/supervisors', body); },
   rbacRoles: function () { return get('/rbac/roles'); },
+  rolePermissionMatrix: function (roleCode) {
+    return get('/rbac/roles/' + encodeURIComponent(roleCode) + '/permission-matrix');
+  },
+  saveRolePermissionMatrix: function (roleCode, resources) {
+    return request('/rbac/roles/' + encodeURIComponent(roleCode) + '/permission-matrix', {
+      method: 'PUT', body: { resources: resources }
+    });
+  },
   rbacYearLevels: function (schoolCode) {
     return get('/rbac/year-level-scopes', { school: schoolCode });
   },
@@ -914,6 +938,14 @@ var api = {
       from: fromDate,
       to: toDate
     });
+  },
+  studentAttendanceSummary: function (studentNumber, academicYear) {
+    return get('/students/' + encodeURIComponent(studentNumber) + '/attendance/summary', {
+      academic_year: academicYear
+    });
+  },
+  studentTimeline: function (studentNumber) {
+    return get('/students/' + encodeURIComponent(studentNumber) + '/timeline');
   },
 
   /*

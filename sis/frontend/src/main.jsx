@@ -46,6 +46,7 @@ import { TeacherSetup } from './views/TeacherSetup.jsx';
 import { TeachingStaff } from './views/TeachingStaff.jsx';
 import { Attendance } from './views/Attendance.jsx';
 import { Timetable } from './views/Timetable.jsx';
+import { AuditLog } from './views/AuditLog.jsx';
 
 /*
  * Schools -> School -> Rung -> Class -> Child is a containment hierarchy, and the first five
@@ -74,6 +75,7 @@ const ROUTES = [
   { name: 'gradeAssignments', view: GradeAssignments, title: 'Class assignments' },
   { name: 'attendance', view: Attendance, title: 'Take attendance' },
   { name: 'timetable', view: Timetable, title: 'Timetable' }
+  ,{ name: 'auditLog', view: AuditLog, title: 'Audit Log' }
 ];
 
 /* The document title follows the route: browser history and a taskbar full of tabs are both

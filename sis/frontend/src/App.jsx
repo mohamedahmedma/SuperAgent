@@ -65,30 +65,32 @@ const ROUTE_PERMISSION = {
      somewhere to read it, and the panel decides which of the two they get. */
   attendance: 'attendance.read',
   timetable: 'timetable.read'
+  ,auditLog: 'audit.read'
 };
 
 /* Order is the order of the work: see the school, find a child, put children in classes,
    record who may ask about them, record what they scored, audit what was written. */
 function principalExperience() {
   const held = Store.roles();
-  return held.indexOf('principal') >= 0 && held.indexOf('system_admin') < 0 && held.indexOf('school_owner') < 0;
+  return held.indexOf('school_manager') >= 0 && held.indexOf('admin') < 0 && held.indexOf('school_owner') < 0;
 }
 
 const NAV = [
-  { name: 'school', label: 'School', icon: 'school', roles: ['system_admin', 'school_owner', 'principal'] },
+  { name: 'school', label: 'School', icon: 'school', roles: ['admin', 'school_owner', 'school_manager'] },
   { name: 'student', label: 'Find a child', icon: 'search' },
   { name: 'studentSetup', label: 'Create student', icon: 'studentAdd' },
   { name: 'roster', label: 'Roster', icon: 'roster' },
   { name: 'batches', label: 'Batches', icon: 'batches' },
-  { name: 'roles', label: 'Staff roles', icon: 'roles', roles: ['system_admin', 'school_owner'] },
+  { name: 'roles', label: 'Staff roles', icon: 'roles', roles: ['admin', 'school_owner'] },
+  { name: 'auditLog', label: 'Audit Log', icon: 'roles', roles: ['admin'] },
   { name: 'teacherSetup', label: 'Create teacher', icon: 'teacher' },
-  { name: 'teachingStaff', label: 'Teaching staff', icon: 'staff', roles: ['principal'], principalOnly: true },
+  { name: 'teachingStaff', label: 'Teaching staff', icon: 'staff', roles: ['school_manager'], principalOnly: true },
   { name: 'gradeAssignments', label: 'Class assignments', icon: 'classAssign' },
   { name: 'homework', label: 'Homework', icon: 'upload', roles: ['teacher'] },
-  { name: 'marks', label: 'Marks', icon: 'marks', roles: ['teacher', 'year_supervisor'] },
-  { name: 'attendance', label: 'Take attendance', icon: 'calendar', roles: ['teacher', 'attendance_supervisor', 'year_supervisor'] },
+  { name: 'marks', label: 'Marks', icon: 'marks', roles: ['teacher', 'floor_supervisor'] },
+  { name: 'attendance', label: 'Take attendance', icon: 'calendar', roles: ['teacher', 'attendance_supervisor', 'floor_supervisor'] },
   { name: 'timetable', label: 'Timetable', icon: 'timetable',
-    roles: ['system_admin', 'school_owner', 'principal', 'year_supervisor', 'teacher'] }
+    roles: ['admin', 'school_owner', 'school_manager', 'floor_supervisor', 'teacher'] }
 ];
 
 /* Which nav item is lit for a route that is not in the nav. The drill-down screens are
@@ -109,10 +111,10 @@ const NAV_PARENT = { year: 'school', level: 'school', class: 'school' };
  * blank â€” a role added next term shows up as `subject_coordinator` and not as nothing.
  */
 const ROLE_LABELS = {
-  system_admin: 'System Administrator',
+  admin: 'Admin',
   school_owner: 'School Owner',
-  principal: 'School Manager',
-  year_supervisor: 'Class Supervisor',
+  school_manager: 'School Manager',
+  floor_supervisor: 'Floor Supervisor',
   attendance_supervisor: 'Attendance Supervisor',
   teacher: 'Teacher'
 };
@@ -201,7 +203,7 @@ function SignIn() {
 
 function SchoolTabs() {
   const state = useStore();
-  const admin = Store.roles().indexOf('system_admin') >= 0;
+  const admin = Store.roles().indexOf('admin') >= 0;
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const list = schools.value || [];
 

@@ -14,7 +14,8 @@ class TeacherManagementService:
         self._uow_factory = uow_factory
 
     def list(
-        self, school_code: SchoolCode, *, year_level_code: YearCode | None = None
+        self, school_code: SchoolCode, *, year_level_code: YearCode | None = None,
+        include_inactive: bool = False,
     ) -> Sequence[TeacherRecord]:
         """The teaching staff a caller may read: the school's, or one grade's.
 
@@ -26,7 +27,7 @@ class TeacherManagementService:
             if uow.schools.get(school_code) is None:
                 raise UnknownReference(f"no school {school_code}", field="school_code")
             return uow.teachers.list_for_school(
-                school_code, year_level_code=year_level_code
+                school_code, year_level_code=year_level_code, include_inactive=include_inactive
             )
 
     def get(

@@ -141,6 +141,9 @@ class AcademicYear(Base):
     # year at all. The repository clears the old flag and sets the new one in one
     # transaction instead.
     is_current: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), default="upcoming", server_default="upcoming", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
@@ -1236,6 +1239,10 @@ class EducationalSystem(Base):
     __tablename__ = "educational_systems"
     __table_args__ = (
         UniqueConstraint("school_id", "code", name="uq_educational_systems_school_code"),
+        CheckConstraint(
+            "department_key IN ('arabic', 'languages')",
+            name="ck_educational_systems_department_key",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -1243,6 +1250,9 @@ class EducationalSystem(Base):
         ForeignKey("schools.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     code: Mapped[str] = mapped_column(String(_LEVEL_CODE_LEN), nullable=False)
+    # Immutable machine-readable department identity. `code` is retained for legacy
+    # integrations (AR/LANG); names are display text and must never be parsed.
+    department_key: Mapped[str] = mapped_column(String(16), nullable=False)
     # arabic / language / unspecified. Not a CHECK constraint: the domain refuses an
     # unknown value on the way in, and a constraint here would turn adding a third kind
     # into a table rebuild on every school's database.
@@ -1256,6 +1266,49 @@ class EducationalSystem(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
+
+
+class SecondaryEducationSystem(Base):
+    """A school-approved secondary curriculum, independent of department labels."""
+
+    __tablename__ = "secondary_education_systems"
+    __table_args__ = (
+        UniqueConstraint("school_id", "key", name="uq_secondary_systems_school_key"),
+        CheckConstraint("key IN ('general_secondary', 'egyptian_baccalaureate')", name="ck_secondary_system_key"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    school_id: Mapped[int] = mapped_column(ForeignKey("schools.id", ondelete="CASCADE"), nullable=False)
+    key: Mapped[str] = mapped_column(String(32), nullable=False)
+    name_en: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
+    name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class SecondaryTrack(Base):
+    """A stable specialization key beneath one stored secondary education system."""
+
+    __tablename__ = "secondary_tracks"
+    __table_args__ = (UniqueConstraint("education_system_id", "key", name="uq_secondary_tracks_system_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    education_system_id: Mapped[int] = mapped_column(ForeignKey("secondary_education_systems.id", ondelete="CASCADE"), nullable=False, index=True)
+    key: Mapped[str] = mapped_column(String(48), nullable=False)
+    name_en: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
+    name_ar: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class SecondaryTrackGrade(Base):
+    """The secondary grade(s) at which a specialization may be selected."""
+
+    __tablename__ = "secondary_track_grades"
+    __table_args__ = (
+        UniqueConstraint("secondary_track_id", "grade_number", name="uq_secondary_track_grade"),
+        CheckConstraint("grade_number IN (1, 2, 3)", name="ck_secondary_track_grade_number"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    secondary_track_id: Mapped[int] = mapped_column(ForeignKey("secondary_tracks.id", ondelete="CASCADE"), nullable=False, index=True)
+    grade_number: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class Role(Base):
@@ -1317,6 +1370,74 @@ class RolePermission(Base):
     permission_id: Mapped[int] = mapped_column(
         ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False, index=True
     )
+
+
+class UserPermissionOverride(Base):
+    """One deliberate exception to a user's inherited role permissions.
+
+    This is intentionally a sparse table: no role permission is copied here.  A missing
+    row means "use the role bundle"; the only persisted choices are the two exceptions,
+    allow and deny.
+    """
+
+    __tablename__ = "user_permission_overrides"
+    __table_args__ = (
+        UniqueConstraint("user_id", "permission_id", name="uq_user_permission_overrides_user_permission"),
+        CheckConstraint("effect IN ('allow', 'deny')", name="ck_user_permission_overrides_effect"),
+        Index("ix_user_permission_overrides_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    permission_id: Mapped[int] = mapped_column(
+        ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False
+    )
+    effect: Mapped[str] = mapped_column(String(8), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class AuditLog(Base):
+    """Append-only record of a state mutation; no application route mutates this table."""
+
+    __tablename__ = "audit_log"
+    __table_args__ = (
+        Index("ix_audit_log_created_at", "created_at"),
+        Index("ix_audit_log_entity", "entity_type", "entity_id"),
+        Index("ix_audit_log_actor", "actor_user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actor: Mapped[str] = mapped_column(String(64), default="system", nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    old_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    new_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class StudentDocument(Base):
+    __tablename__ = "student_documents"
+    __table_args__ = (Index("ix_student_documents_student_active", "student_id", "deleted_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="RESTRICT"), nullable=False)
+    document_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    uploaded_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="unverified", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class User(Base):
@@ -1634,6 +1755,9 @@ __all__ = [
     "ClassEnrolment",
     "ClassSection",
     "EducationalSystem",
+    "SecondaryEducationSystem",
+    "SecondaryTrack",
+    "SecondaryTrackGrade",
     "Guardian",
     "GuardianPhone",
     "ImportBatch",
@@ -1656,6 +1780,7 @@ __all__ = [
     "TeacherYearLevel",
     "Term",
     "User",
+    "UserPermissionOverride",
     "UserRole",
     "UserSession",
     "YearLevel",

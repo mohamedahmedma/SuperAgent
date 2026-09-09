@@ -126,7 +126,7 @@ def load(session: Session) -> dict[str, int]:
                       kg_grade_count=2, primary_grade_count=6, preparatory_grade_count=3,
                       secondary_grade_count=3, term_count=2)
     session.add(school); session.flush()
-    system = m.EducationalSystem(school_id=school.id, code="AR", kind="arabic",
+    system = m.EducationalSystem(school_id=school.id, code="AR", department_key="arabic", kind="arabic",
                                  name_en="Arabic Education", name_ar="التعليم العربي",
                                  display_order=1, is_active=True)
     session.add(system)

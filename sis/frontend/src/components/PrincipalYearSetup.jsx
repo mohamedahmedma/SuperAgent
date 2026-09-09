@@ -81,10 +81,10 @@ function TrackClassPlan({ track, grades, plan, onChange, lang }) {
           ]} onChange={(value) => onChange({ ...plan, mode: value })} />
         </Field>
         <Field className="col-12 col-md-4" label={t('Class naming')}>
-          <Select value={plan.sequence} options={[
+          <Select value={track.department_key === 'arabic' ? 'numeric' : 'alphabetic'} disabled options={[
             { value: 'numeric', label: t('Numeric sections') },
             { value: 'alphabetic', label: t('Alphabetic sections') }
-          ]} onChange={(value) => onChange({ ...plan, sequence: value })} />
+          ]} />
         </Field>
         {!custom ? (
           <Field className="col-12 col-md-4" label={t('Classes per grade')}>
@@ -178,7 +178,8 @@ export function PrincipalYearSetup({ school, schoolConfig, tracks = [], levels =
   useEffect(() => {
     const initial = {};
     tracks.forEach((track) => {
-      initial[track.code] = { mode: 'same', sameCount: 1, sequence: 'numeric', byGrade: {} };
+      const arabic = track.department_key === 'arabic';
+      initial[track.code] = { mode: 'same', sameCount: arabic ? 4 : 3, sequence: arabic ? 'numeric' : 'alphabetic', byGrade: {} };
     });
     setClassPlans((old) => ({ ...initial, ...old }));
   }, [tracks.map((row) => row.code).join('|')]);
@@ -255,7 +256,8 @@ export function PrincipalYearSetup({ school, schoolConfig, tracks = [], levels =
 
         if (tracks.length) {
           for (const track of tracks) {
-            const plan = classPlans[track.code] || { mode: 'same', sameCount: 1, sequence: 'numeric', byGrade: {} };
+            const arabic = track.department_key === 'arabic';
+            const plan = classPlans[track.code] || { mode: 'same', sameCount: arabic ? 4 : 3, sequence: arabic ? 'numeric' : 'alphabetic', byGrade: {} };
             const body = {
               academic_year_code: year.code,
               track_code: track.code,
@@ -342,7 +344,7 @@ export function PrincipalYearSetup({ school, schoolConfig, tracks = [], levels =
         {configuredError ? <ErrorNote error={configuredError} /> : null}
         {configuredLoading ? <div className="small text-body-tertiary">{t('Loading…')}</div> : null}
         {tracks.map((track) => <TrackClassPlan key={track.code} track={track} grades={configuredByTrack[track.code] || []}
-          plan={classPlans[track.code] || { mode: 'same', sameCount: 1, sequence: 'numeric', byGrade: {} }}
+          plan={classPlans[track.code] || { mode: 'same', sameCount: track.department_key === 'arabic' ? 4 : 3, sequence: track.department_key === 'arabic' ? 'numeric' : 'alphabetic', byGrade: {} }}
           onChange={(next) => setClassPlans((old) => ({ ...old, [track.code]: next }))} lang={state.lang} />)}
       </div> : <div className="row g-3">
         <Field className="col-12 col-md-4" label={t('Year levels')}>

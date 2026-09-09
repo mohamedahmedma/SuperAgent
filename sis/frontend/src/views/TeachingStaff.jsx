@@ -42,13 +42,14 @@ export function TeachingStaff() {
 
   const data = useQuery(() => Promise.all([
     api.teachers(state.school),
+    api.archivedTeachers(state.school),
     api.rbacUsers(),
     api.rbacYearLevels(state.school),
     api.subjectAssignments(state.year),
     api.classes(state.year)
   ]), [state.school, state.year], !!state.school && !!state.year);
 
-  const [teachers = [], users = [], grades = [], subjectBoard = [], classes = []] = data.value || [];
+  const [teachers = [], archivedTeachers = [], users = [], grades = [], subjectBoard = [], classes = []] = data.value || [];
   const selectedGrade = grades.find((row) => String(row.id) === gradeId);
 
   useEffect(() => {
@@ -70,7 +71,7 @@ export function TeachingStaff() {
     const attendance = [];
     users.filter((user) => user.is_active !== false).forEach((user) => {
       (user.roles || []).forEach((role) => {
-        if (role.role_code === 'year_supervisor' && role.scope_type === 'year_level' && String(role.scope_id) === gradeId) {
+        if (role.role_code === 'floor_supervisor' && role.scope_type === 'year_level' && String(role.scope_id) === gradeId) {
           year.push({ user, scope: selectedGrade.code, grant: role });
         }
         if (role.role_code === 'attendance_supervisor') {
@@ -122,6 +123,18 @@ export function TeachingStaff() {
     } finally { setRemoving(''); }
   };
 
+  const restoreTeacher = async (teacher) => {
+    setRemoving(teacher.staff_number); setRemoveError(null);
+    try {
+      await api.restoreTeacher(state.school, teacher.staff_number);
+      Store.invalidate('teachers:');
+      Store.invalidate('roles:');
+      Store.toast('ok', t('Teacher restored to active staff'), pickName(teacher, state.lang) || teacher.staff_number);
+      data.reload();
+    } catch (reason) { setRemoveError(reason); }
+    finally { setRemoving(''); }
+  };
+
   const assignSupervisor = async (userId, roleCode) => {
     setRemoving(`supervisor:${userId}`); setRemoveError(null);
     try {
@@ -167,7 +180,7 @@ export function TeachingStaff() {
         <div className="row g-3">
           <div className="col-12 col-lg-6">
             <SupervisorCard title={t('Class supervisor')} rows={supervisors.year} users={users}
-              roleCode="year_supervisor" gradeId={gradeId} lang={state.lang} busy={!!removing}
+              roleCode="floor_supervisor" gradeId={gradeId} lang={state.lang} busy={!!removing}
               onAssign={assignSupervisor} onRemove={removeSupervisor} />
           </div>
           <div className="col-12 col-lg-6">
@@ -208,10 +221,10 @@ export function TeachingStaff() {
                         confirmLabel: t('Remove teacher'),
                         changes: [
                           { label: t('Teacher'), was: pickName(teacher, state.lang) || teacher.staff_number, now: t('Removed from active staff') },
-                          { label: t('Login account'), was: teacher.username || t('No login account'), now: t('Deleted') }
+                          { label: t('Login account'), was: teacher.username || t('No login account'), now: t('Deactivated') }
                         ],
                         body: <Alert tone="warn">
-                          {t('The teacher account, active roles, and current teaching assignments will be removed. Historical attendance and recorded academic data remain preserved.')}
+                          {t('The teacher and login account will be deactivated. Their roles, teaching assignments, historical attendance, and recorded academic data remain preserved and can be restored by the school manager.')}
                         </Alert>,
                         run: () => removeTeacher(teacher)
                       })}>
@@ -224,6 +237,16 @@ export function TeachingStaff() {
           </div> : <Empty title={t('No subjects configured for this grade')} />}
         </Card>
       </> : <Empty title={t('No grades configured')} />}
+      {archivedTeachers.length ? <Card title={t('Archived teachers')} subtitle={t('These staff records and their teaching history are retained.')}>
+        <div className="vstack gap-2">{archivedTeachers.map((teacher) => <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 border rounded-3 p-3" key={teacher.staff_number}>
+          <div><strong>{pickName(teacher, state.lang) || teacher.staff_number}</strong><div className="small text-body-tertiary">{teacher.staff_number}{teacher.username ? ` · ${teacher.username}` : ''}</div></div>
+          <Button size="sm" variant="secondary" disabled={!!removing} pending={removing === teacher.staff_number} onClick={() => ask({
+            title: t('Restore teacher?'), confirmLabel: t('Restore teacher'),
+            body: t('This reactivates the teacher and their login account. Existing assignments and role scopes are retained.'),
+            run: () => restoreTeacher(teacher)
+          })}>{t('Restore teacher')}</Button>
+        </div>)}</div>
+      </Card> : null}
     </div>
   </>;
 }

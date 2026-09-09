@@ -29,7 +29,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Select, delete, select, true, tuple_, update
+from sqlalchemy import Select, case, delete, select, true, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as _postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 from sqlalchemy.orm import Session
@@ -40,6 +40,7 @@ from sis.domain.timetable import TimetableEntry, TimetablePeriod, TimetableSlot
 from sis.domain.structure import (
     AcademicTrack,
     AcademicYear,
+    AcademicYearStatus,
     ClassSection,
     School,
     SchoolLanguage,
@@ -277,6 +278,7 @@ def _to_year(row: models.AcademicYear, school_code: str) -> AcademicYear:
     and hand the code down.
     """
     return AcademicYear(
+        id=row.id,
         code=row.code,
         school_code=school_code,
         name_en=row.name_en,
@@ -284,6 +286,9 @@ def _to_year(row: models.AcademicYear, school_code: str) -> AcademicYear:
         starts_on=row.starts_on,
         ends_on=row.ends_on,
         is_current=row.is_current,
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -436,6 +441,7 @@ class SqlAlchemyAcademicYearRepository:
             )
         # Read before the write; `_sync` expires the row afterwards.
         year = _to_year(found[0], found[1])
+        today = datetime.now(timezone.utc).date()
         self._session.execute(
             update(models.AcademicYear)
             .where(
@@ -443,11 +449,17 @@ class SqlAlchemyAcademicYearRepository:
                 | (models.AcademicYear.code == wanted)
             )
             .values(
-                is_current=(models.AcademicYear.code == wanted), updated_at=_utcnow()
+                is_current=(models.AcademicYear.code == wanted),
+                status=case(
+                    (models.AcademicYear.code == wanted, AcademicYearStatus.ACTIVE.value),
+                    (models.AcademicYear.ends_on < today, AcademicYearStatus.COMPLETED.value),
+                    else_=AcademicYearStatus.UPCOMING.value,
+                ),
+                updated_at=_utcnow(),
             )
         )
         _sync(self._session)
-        return replace(year, is_current=True)
+        return replace(year, is_current=True, status=AcademicYearStatus.ACTIVE)
 
     def upsert_many(self, years: Sequence[AcademicYear]) -> Mapping[str, bool]:
         # Two statements: one SELECT of the codes already on file, one INSERT .. ON
@@ -469,6 +481,7 @@ class SqlAlchemyAcademicYearRepository:
                 "starts_on": year.starts_on,
                 "ends_on": year.ends_on,
                 "is_current": year.is_current,
+                "status": year.status.value,
                 "created_at": now,
                 "updated_at": now,
             }
@@ -484,7 +497,9 @@ class SqlAlchemyAcademicYearRepository:
             # stays out for a stronger reason — moving a year to another school would carry
             # every class, term, subject and mark in it across, under a school that never
             # taught them.
-            update_columns=("name_en", "name_ar", "starts_on", "ends_on", "updated_at"),
+            update_columns=(
+                "name_en", "name_ar", "starts_on", "ends_on", "status", "is_current", "updated_at"
+            ),
         )
         return {row["code"]: (row["code"],) not in existing for row in rows}
 
@@ -1613,6 +1628,7 @@ class SqlAlchemySchoolRepository:
         return [
             AcademicTrack(
                 code=row.code,
+                department_key=row.department_key,
                 school_code=code,
                 language_type=(
                     SchoolLanguage.ARABIC if row.kind == "arabic" else SchoolLanguage.LANGUAGES
@@ -1636,6 +1652,10 @@ class SqlAlchemySchoolRepository:
             wanted.append(("AR", "arabic", "Arabic", "العربية"))
         if school.language_type in (SchoolLanguage.LANGUAGES, SchoolLanguage.BOTH):
             wanted.append(("LANG", "language", "Languages", "اللغات"))
+        wanted = [
+            (code, kind, "arabic" if kind == "arabic" else "languages", name_en, name_ar)
+            for code, kind, name_en, name_ar in wanted
+        ]
         wanted_codes = {item[0] for item in wanted}
         self._session.execute(
             update(models.EducationalSystem)
@@ -1654,16 +1674,66 @@ class SqlAlchemySchoolRepository:
                     "school_id": school_id,
                     "code": code,
                     "kind": kind,
+                    "department_key": department_key,
                     "name_en": name_en,
                     "name_ar": name_ar,
                     "display_order": order,
                     "is_active": True,
                     "created_at": now,
                 }
-                for order, (code, kind, name_en, name_ar) in enumerate(wanted, start=1)
+                for order, (code, kind, department_key, name_en, name_ar) in enumerate(wanted, start=1)
             ],
             conflict_on=("school_id", "code"),
-            update_columns=("kind", "name_en", "name_ar", "display_order", "is_active"),
+            update_columns=("kind", "department_key", "name_en", "name_ar", "display_order", "is_active"),
+        )
+        self._sync_secondary_education_systems(school_id, now)
+
+    def _sync_secondary_education_systems(self, school_id: int, now: datetime) -> None:
+        """Persist national secondary pathways and their grade eligibility rules."""
+        systems = (
+            ("general_secondary", "General Secondary", "الثانوي العام"),
+            ("egyptian_baccalaureate", "Egyptian Baccalaureate", "البكالوريا المصرية"),
+        )
+        bulk_upsert(
+            self._session, models.SecondaryEducationSystem,
+            [{"school_id": school_id, "key": key, "name_en": en, "name_ar": ar,
+              "is_active": True, "created_at": now} for key, en, ar in systems],
+            conflict_on=("school_id", "key"), update_columns=("name_en", "name_ar", "is_active"),
+        )
+        system_ids = dict(self._session.execute(
+            select(models.SecondaryEducationSystem.key, models.SecondaryEducationSystem.id)
+            .where(models.SecondaryEducationSystem.school_id == school_id)
+        ).all())
+        definitions = (
+            ("general_secondary", "scientific", "Scientific", "علمي", (2,)),
+            ("general_secondary", "literary", "Literary", "أدبي", (2, 3)),
+            ("general_secondary", "science", "Science", "علوم", (3,)),
+            ("general_secondary", "mathematics", "Mathematics", "رياضيات", (3,)),
+            ("egyptian_baccalaureate", "medicine_life_sciences", "Medicine and Life Sciences", "الطب وعلوم الحياة", (1, 2, 3)),
+            ("egyptian_baccalaureate", "engineering_computer_science", "Engineering and Computer Science", "الهندسة وعلوم الحاسب", (1, 2, 3)),
+            ("egyptian_baccalaureate", "business", "Business", "الأعمال", (1, 2, 3)),
+            ("egyptian_baccalaureate", "arts_humanities", "Arts and Humanities", "الآداب والعلوم الإنسانية", (1, 2, 3)),
+        )
+        bulk_upsert(
+            self._session, models.SecondaryTrack,
+            [{"education_system_id": system_ids[system_key], "key": key, "name_en": en,
+              "name_ar": ar, "is_active": True}
+             for system_key, key, en, ar, _ in definitions],
+            conflict_on=("education_system_id", "key"), update_columns=("name_en", "name_ar", "is_active"),
+        )
+        track_ids = {
+            (system_key, key): identifier
+            for system_key, key, identifier in self._session.execute(
+                select(models.SecondaryEducationSystem.key, models.SecondaryTrack.key, models.SecondaryTrack.id)
+                .join(models.SecondaryTrack, models.SecondaryTrack.education_system_id == models.SecondaryEducationSystem.id)
+                .where(models.SecondaryEducationSystem.school_id == school_id)
+            ).all()
+        }
+        bulk_upsert(
+            self._session, models.SecondaryTrackGrade,
+            [{"secondary_track_id": track_ids[(system_key, key)], "grade_number": grade}
+             for system_key, key, _, _, grades in definitions for grade in grades],
+            conflict_on=("secondary_track_id", "grade_number"), update_columns=("grade_number",),
         )
 
     def upsert_many(self, schools: Sequence[School]) -> Mapping[str, bool]:

@@ -241,6 +241,16 @@ function scopeCovers(grant, at) {
  */
 function canIn(permission, at) {
   if (!state.profile) return false;
+  /* Sparse per-user overrides precede role grants, exactly as they do in the backend.
+     This is UX only; the API repeats the same effective-permission decision. */
+  var overrides = state.profile.overrides;
+  if (Array.isArray(overrides)) {
+    for (var o = 0; o < overrides.length; o += 1) {
+      if (overrides[o].permission === permission) {
+        return overrides[o].effect === 'allow';
+      }
+    }
+  }
   var grants = state.profile.grants;
   /* A payload from a service too old to send scopes. Falling back to the unscoped answer
      keeps the console usable rather than blanking every control; the server is still the

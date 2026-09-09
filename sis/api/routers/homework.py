@@ -27,6 +27,7 @@ router = APIRouter(prefix="/v1/homework", tags=["homework"])
 
 TeacherReader = Annotated[Principal, Depends(require_permission(Permission.GRADES_READ))]
 TeacherWriter = Annotated[Principal, Depends(require_permission(Permission.GRADES_WRITE))]
+HomeworkRestorer = Annotated[Principal, Depends(require_permission(Permission.SYSTEM_MANAGE))]
 Teaching = Annotated[TeachingService, Depends(get_teaching_service)]
 
 DATA_ROOT = Path(os.getenv("SIS_HOMEWORK_STORAGE", "/app/data/homework_files"))
@@ -149,7 +150,7 @@ def list_teacher_homework(
         rows = uow._session.execute(
             text(
                 "SELECT * FROM teacher_homework "
-                "WHERE academic_year_code=:y AND uploaded_by=:u "
+                "WHERE academic_year_code=:y AND uploaded_by=:u AND deleted_at IS NULL "
                 "ORDER BY uploaded_at DESC, id DESC"
             ),
             {"y": academic_year, "u": caller.username},
@@ -273,18 +274,43 @@ def delete_homework(
     _teacher_only(caller)
     with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
         row = uow._session.execute(
-            text("SELECT * FROM teacher_homework WHERE id=:id"), {"id": homework_id}
+            text("SELECT * FROM teacher_homework WHERE id=:id AND deleted_at IS NULL"), {"id": homework_id}
         ).first()
         if row is None:
             raise HTTPException(404, detail={"code": "not_found", "message": "Homework item not found."})
         if row._mapping["uploaded_by"] != caller.username:
             raise HTTPException(403, detail={"code": "not_authorized", "message": "You may delete only homework you uploaded."})
-        uow._session.execute(text("DELETE FROM teacher_homework WHERE id=:id"), {"id": homework_id})
+        uow._session.execute(
+            text("UPDATE teacher_homework SET deleted_at=:now WHERE id=:id"),
+            {"id": homework_id, "now": datetime.now(ZoneInfo("Africa/Cairo")).isoformat()},
+        )
         uow.commit()
-    stored_filename = row._mapping["stored_filename"]
-    if stored_filename:
-        (DATA_ROOT / stored_filename).unlink(missing_ok=True)
     return None
+
+
+@router.post("/{homework_id}/restore", response_model=HomeworkOut)
+def restore_homework(
+    homework_id: str,
+    caller: HomeworkRestorer,
+    school_code: SchoolCodeDep,
+) -> HomeworkOut:
+    """Restore an archived homework record without changing its original evidence."""
+    with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
+        row = uow._session.execute(
+            text("SELECT * FROM teacher_homework WHERE id=:id AND deleted_at IS NOT NULL"),
+            {"id": homework_id},
+        ).first()
+        if row is None:
+            raise HTTPException(404, detail={"code": "not_found", "message": "Archived homework item not found."})
+        uow._session.execute(
+            text("UPDATE teacher_homework SET deleted_at=NULL WHERE id=:id"),
+            {"id": homework_id},
+        )
+        uow.commit()
+        restored = uow._session.execute(
+            text("SELECT * FROM teacher_homework WHERE id=:id"), {"id": homework_id}
+        ).one()
+    return _row(restored)
 
 
 @router.get("/student/{student_number}", response_model=StudentHomeworkOut)
@@ -318,7 +344,7 @@ def homework_for_student(
             rows = session.execute(
                 text(
                     "SELECT * FROM teacher_homework "
-                    f"WHERE class_code IN ({holders}) AND uploaded_on=:d "
+                    f"WHERE class_code IN ({holders}) AND uploaded_on=:d AND deleted_at IS NULL "
                     "ORDER BY subject_code,title,uploaded_at"
                 ),
                 params,
@@ -339,11 +365,19 @@ def download_homework_file(
 ):
     with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
         row = uow._session.execute(
-            text("SELECT * FROM teacher_homework WHERE id=:id"), {"id": homework_id}
+            text("SELECT * FROM teacher_homework WHERE id=:id AND deleted_at IS NULL"), {"id": homework_id}
         ).first()
     if row is None:
         raise HTTPException(404, detail={"code": "not_found", "message": "Homework item not found."})
     m = row._mapping
+    # Holding grades.read somewhere does not make every classroom's documents visible.
+    # The same scope boundary used for a marksheet also protects its attachment.
+    caller.narrow(
+        Permission.GRADES_READ,
+        lambda scopes: scopes.for_class(
+            academic_year_code=m["academic_year_code"], class_code=m["class_code"]
+        ),
+    )
     stored_filename = m["stored_filename"]
     if not stored_filename:
         raise HTTPException(

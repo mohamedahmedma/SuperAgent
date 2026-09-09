@@ -61,6 +61,37 @@ Queries = Annotated[QueryService, Depends(get_query_service)]
 Desk = Annotated[StudentDesk, Depends(get_student_desk)]
 
 
+class StudentTimelineEventOut(BaseModel):
+    id: int
+    action: str
+    entity_type: str
+    entity_id: str
+    actor: str
+    at: datetime
+    old_values: dict | None
+    new_values: dict | None
+
+
+@router.get("/students/{student_number}/timeline", response_model=list[StudentTimelineEventOut])
+def student_timeline(student_number: str, caller: Reader, uow_factory: UowFactoryDep) -> list[StudentTimelineEventOut]:
+    """One student's projection of the shared, append-only audit stream."""
+    with uow_factory() as uow:
+        student = uow._session.scalar(select(m.Student).where(m.Student.student_number == student_number))
+        if student is None:
+            raise UnknownReference(f"no student {student_number}", field="student_number")
+        # JSON filtering differs between SQLite and Postgres, so retain one portable audit
+        # query and filter its bounded newest-first window in Python.
+        rows = uow._session.scalars(select(m.AuditLog).order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc()).limit(1000)).all()
+    def belongs(row) -> bool:
+        values = (row.old_values or {}, row.new_values or {})
+        return (row.entity_type == "Student" and row.entity_id == str(student.id)) or any(
+            str(value.get("student_id", "")) == str(student.id) for value in values
+        )
+    return [StudentTimelineEventOut(id=row.id, action=row.action, entity_type=row.entity_type,
+        entity_id=row.entity_id, actor=row.actor, at=row.created_at,
+        old_values=row.old_values, new_values=row.new_values) for row in rows if belongs(row)][:200]
+
+
 class RosterEntryOut(BaseModel):
     """One child on the register, with the placement window she is listed under."""
 
@@ -262,7 +293,7 @@ class PlacementIn(BaseModel):
 
 
 class TransferIn(BaseModel):
-    """Move a child to another class in the same year, from a date."""
+    """Move a child to another class, including a new academic year, from a date."""
 
     academic_year_code: str = Field(examples=["2025-2026"])
     to_class_code: str = Field(examples=["3B"])
@@ -632,6 +663,12 @@ def read_student_placements(
 def place_student(
     student_number: str, body: PlacementIn, desk: Desk, caller: Registrar
 ) -> PlacementOut:
+    caller.narrow(
+        Permission.STUDENTS_WRITE,
+        lambda scopes: scopes.for_class(
+            academic_year_code=body.academic_year_code, class_code=body.class_code
+        ),
+    )
     with domain_errors():
         enrolment = ClassEnrolment(
             student_number=student_number,
@@ -647,17 +684,24 @@ def place_student(
 @router.post(
     "/students/{student_number}/transfer",
     response_model=TransferOut,
-    summary="Move one child to another class",
+    summary="Move one child to another class or academic year",
     description="One transaction: the open placement is closed the day before `on_date` "
     "and a new one opens on it. Two separate calls would leave a window in which the child "
     "is in no class at all, and a marks upload landing in that window rejects every one of "
-    "her rows for having no placement. Her marks in the old class stay filed under the old "
+    "her rows for having no placement. A new academic year may use the next grade; within "
+    "one year, transfers remain limited to the same grade. Her marks in the old class stay filed under the old "
     "class — that is the point of the invariant.",
     responses=error_responses(401, 403, 404, 409, 422),
 )
 def transfer_student(
     student_number: str, body: TransferIn, desk: Desk, caller: Registrar
 ) -> TransferOut:
+    caller.narrow(
+        Permission.STUDENTS_WRITE,
+        lambda scopes: scopes.for_class(
+            academic_year_code=body.academic_year_code, class_code=body.to_class_code
+        ),
+    )
     with domain_errors():
         closed, opened = desk.transfer_student(
             StudentNumber(student_number),

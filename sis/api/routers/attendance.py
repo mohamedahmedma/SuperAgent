@@ -224,6 +224,56 @@ class StudentAttendanceOut(BaseModel):
         )
 
 
+class StudentAttendanceSummaryOut(BaseModel):
+    academic_year: str
+    applicable_days: int
+    present: int
+    absent: int
+    late: int
+    excused: int
+    attendance_percent: float | None
+    absence_percent: float | None
+
+
+@router.get("/students/{student_number}/attendance/summary", response_model=StudentAttendanceSummaryOut)
+def read_student_attendance_summary(
+    student_number: str,
+    academic_year: Annotated[str, Query(description="Required academic-year code.")],
+    caller: StudentReader,
+    uow_factory: UowFactoryDep,
+) -> StudentAttendanceSummaryOut:
+    """Attendance totals from all recorded days in exactly one academic year."""
+    caller.narrow(
+        Permission.STUDENTS_READ,
+        lambda scopes: scopes.for_student(
+            academic_year_code=academic_year, student_number=student_number
+        ),
+    )
+    with uow_factory() as uow:
+        year = uow._session.scalar(select(m.AcademicYear).where(m.AcademicYear.code == academic_year))
+        if year is None:
+            raise UnknownReference(f"no academic year {academic_year}", field="academic_year")
+        student_id = uow._session.scalar(select(m.Student.id).where(m.Student.student_number == student_number))
+        if student_id is None:
+            raise UnknownReference(f"no student {student_number}", field="student_number")
+        rows = uow._session.execute(
+            select(m.Attendance.state, func.count())
+            .join(m.ClassSection, m.Attendance.class_section_id == m.ClassSection.id)
+            .where(m.Attendance.student_id == student_id, m.ClassSection.academic_year_id == year.id)
+            .group_by(m.Attendance.state)
+        ).all()
+    counts = {state: int(total) for state, total in rows}
+    present, absent = counts.get("present", 0), counts.get("absent", 0)
+    late, excused = counts.get("late", 0), counts.get("excused", 0)
+    applicable = present + absent + late + excused
+    return StudentAttendanceSummaryOut(
+        academic_year=academic_year, applicable_days=applicable, present=present,
+        absent=absent, late=late, excused=excused,
+        attendance_percent=None if not applicable else round((present + late) * 100 / applicable, 2),
+        absence_percent=None if not applicable else round((absent + excused) * 100 / applicable, 2),
+    )
+
+
 class RegisterClassOut(BaseModel):
     """One class this caller may take, and how far its register has got on the day asked."""
 

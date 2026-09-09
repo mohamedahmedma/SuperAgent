@@ -17,14 +17,14 @@ export function ManagerMarksBrowser({ fixedClassCode = '', fixedYearLevel = '' }
   const heldRoles=Store.roles();
   const profileRoles=(state.profile&&Array.isArray(state.profile.roles))?state.profile.roles:[];
   const isYearSupervisor=
-    heldRoles.indexOf('year_supervisor')>=0 &&
-    heldRoles.indexOf('principal')<0 &&
+    heldRoles.indexOf('floor_supervisor')>=0 &&
+    heldRoles.indexOf('school_manager')<0 &&
     heldRoles.indexOf('school_owner')<0 &&
-    heldRoles.indexOf('system_admin')<0;
+    heldRoles.indexOf('admin')<0;
 
   const supervisorGrades=isYearSupervisor
     ? Array.from(new Set(profileRoles
-        .filter((row)=>row.role_code==='year_supervisor'&&row.scope_type==='year_level'&&row.scope_code)
+        .filter((row)=>row.role_code==='floor_supervisor'&&row.scope_type==='year_level'&&row.scope_code)
         .map((row)=>String(row.scope_code))))
     : [];
 

@@ -39,6 +39,8 @@ from sis.domain.rbac import (
     AccessProfile,
     BUILT_IN_ROLES,
     Permission,
+    RoleCode,
+    OverrideEffect,
     RoleAssignment,
     Scope,
     ScopeType,
@@ -62,6 +64,11 @@ log = logging.getLogger("sis.access")
 # as a literal rather than imported, because `sis/demo/` is tooling and nothing the
 # service runs may depend on it. Kept in step by name: both spell it `system.status`.
 SYSTEM_STATUS_KEY = "system.status"
+# A role permission matrix is editable data.  Once an Admin has made that choice, a
+# future catalogue reconciliation must not silently put the role back to its shipped
+# defaults.  `system_settings` is deliberately used for this small piece of metadata so
+# no duplicate RBAC implementation or schema is needed.
+ROLE_POLICY_KEY_PREFIX = "rbac.role_policy."
 
 
 def _utc(moment: datetime) -> datetime:
@@ -248,11 +255,27 @@ def profile_for(session: Session, user: m.User) -> AccessProfile:
             RoleAssignment(role_code=role_code, scope=scope, granted_by=grant.granted_by)
         )
 
+    overrides: list[tuple[Permission, OverrideEffect]] = []
+    for permission_code, effect in session.execute(
+        select(m.PermissionRow.code, m.UserPermissionOverride.effect)
+        .join(
+            m.UserPermissionOverride,
+            m.UserPermissionOverride.permission_id == m.PermissionRow.id,
+        )
+        .where(m.UserPermissionOverride.user_id == user.id)
+    ).all():
+        try:
+            overrides.append((Permission(permission_code), OverrideEffect(effect)))
+        except ValueError:
+            # An old or malformed override must fail closed rather than granting access.
+            continue
+
     return build_profile(
         user_id=user.id,
         username=user.username,
         assignments=assignments,
         permissions_by_role=permissions_by_role(session),
+        overrides=overrides,
         school_id=user.school_id,
     )
 
@@ -437,15 +460,27 @@ def sync_builtin_rbac(session: Session) -> None:
         row.is_builtin = True
     session.flush()
 
+    customised_role_keys = set(
+        session.scalars(
+            select(m.SystemSetting.key).where(
+                m.SystemSetting.key.like(f"{ROLE_POLICY_KEY_PREFIX}%")
+            )
+        ).all()
+    )
     for definition in BUILT_IN_ROLES:
         role = roles[definition.code.value]
         wanted = {permission_rows[p.value].id for p in definition.permissions}
-        session.execute(
-            delete(m.RolePermission).where(
-                m.RolePermission.role_id == role.id,
-                m.RolePermission.permission_id.not_in(wanted),
+        is_admin = definition.code is RoleCode.ADMIN
+        is_customised = f"{ROLE_POLICY_KEY_PREFIX}{definition.code.value}" in customised_role_keys
+        # Admin is permanent and always exactly full access.  Every other role keeps an
+        # Admin-configured matrix intact, including an intentional "No Access" row.
+        if is_admin:
+            session.execute(
+                delete(m.RolePermission).where(
+                    m.RolePermission.role_id == role.id,
+                    m.RolePermission.permission_id.not_in(wanted),
+                )
             )
-        )
         existing = set(
             session.scalars(
                 select(m.RolePermission.permission_id).where(
@@ -453,10 +488,11 @@ def sync_builtin_rbac(session: Session) -> None:
                 )
             ).all()
         )
-        session.add_all(
-            m.RolePermission(role_id=role.id, permission_id=pid)
-            for pid in sorted(wanted - existing)
-        )
+        if not is_customised:
+            session.add_all(
+                m.RolePermission(role_id=role.id, permission_id=pid)
+                for pid in sorted(wanted - existing)
+            )
     session.flush()
 
 
@@ -532,6 +568,7 @@ def write_system_state(
 __all__ = [
     "CATALOGUE_KEY",
     "SYSTEM_STATUS_KEY",
+    "ROLE_POLICY_KEY_PREFIX",
     "AuthenticationFailed",
     "SignedIn",
     "SystemState",
