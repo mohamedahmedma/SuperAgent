@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from sqlalchemy import event, inspect
 from sqlalchemy.orm import Session
@@ -18,7 +18,7 @@ _SECRET = {"password", "password_hash", "token", "token_hash", "key_hash"}
 
 
 def _value(value):  # noqa: ANN001
-    if isinstance(value, (datetime, date)):
+    if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     return value
 

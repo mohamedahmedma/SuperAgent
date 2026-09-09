@@ -1,5 +1,7 @@
 """Persist secondary education systems, tracks, and grade rules."""
 
+from datetime import datetime, timezone
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -66,7 +68,9 @@ def upgrade() -> None:
         ("egyptian_baccalaureate", "business", "Business", "الأعمال", (1, 2, 3)),
         ("egyptian_baccalaureate", "arts_humanities", "Arts and Humanities", "الآداب والعلوم الإنسانية", (1, 2, 3)),
     )
-    now = sa.func.now()
+    # Values passed to an executemany parameter set must be concrete Python values;
+    # SQL expressions such as ``func.now()`` cannot be bound by SQLite.
+    now = datetime.now(timezone.utc)
     for (school_id,) in bind.execute(sa.text("SELECT id FROM schools")):
         bind.execute(systems.insert(), [
             {"school_id": school_id, "key": key, "name_en": en, "name_ar": ar,
