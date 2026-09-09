@@ -44,7 +44,7 @@ Ask which subject they mean. Do not guess.
 {% elif outcome == "no_records" %}
 NO_RECORDS: the school records system has nothing recorded for this request. Tell the user plainly that nothing is recorded yet for that. This means the record is absent, NOT that the student scored zero or was absent — do not describe it as a poor result.
 {% elif outcome == "grades" %}
-STUDENT_GRADES for {{ student_label }}{% if term_label %} — {{ term_label }}{% endif %}:
+STUDENT_GRADES for {{ student_label }}{% if term_label %} — {{ term_label }}{% endif %}{% if academic_year_label %} ({{ academic_year_label }}){% endif %}:
 {% if courses %}
 {% for course in courses %}
 - {{ course.get('subject_name_ar') or course.get('subject_name_en') }}: {% if course.get('computed_percentage') is not none %}{{ course.get('computed_percentage') }}%{% if course.get('letter_grade') %} ({{ course.get('letter_grade') }}){% endif %}{% else %}no grade recorded yet{% endif %}{% if course.get('excused_count') %} — {{ course.get('excused_count') }} excused{% endif %}{% if course.get('missing_count') %} — {{ course.get('missing_count') }} not submitted{% endif %}{% if not course.get('is_complete') %} — still in progress{% endif %}
@@ -82,7 +82,7 @@ NO_CLASS_THIS_TERM: the school has no class placement on file for {{ student_lab
 {% elif status == "no_timetable" %}
 TIMETABLE_NOT_PUBLISHED: {{ student_label }} is in {{ class_label }}, and the school has not published that class's timetable for this term yet. Say exactly that — the timetable is not out yet — and suggest asking the office when it will be. Do NOT say the child has no lessons, and do not invent a schedule.
 {% else %}
-TIMETABLE for {{ student_label }} — {{ class_label }}{% if term_label %}, {{ term_label }}{% endif %}:
+TIMETABLE for {{ student_label }} — {{ class_label }}{% if term_label %}, {{ term_label }}{% endif %}{% if academic_year_label %} ({{ academic_year_label }}){% endif %}:
 {% for day in days %}
 {% if day.slots %}
 - {{ day.name }}: {% for slot in day.slots %}{{ slot.period_number }}) {% if slot.is_free %}free{% else %}{{ slot.subject }}{% endif %}{% if slot.starts_at %} {{ slot.starts_at }}{% if slot.ends_at %}-{{ slot.ends_at }}{% endif %}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}
@@ -141,3 +141,19 @@ More than one teacher is recorded for this subject in that class, and all of the
 {% endif %}
 Report the name exactly as written. No contact details are given here — if the parent wants to reach them, direct them to the school office.
 {% endif %}
+
+{# ------------------------------------------------------------------------------------
+   ONE RULE, SHARED BY EVERY BRANCH ABOVE, and deliberately outside the chain so that a
+   record tool added later inherits it without its author having to know this exists.
+
+   `backend/chat/grounding.py` checks every figure in the answer against THIS text and
+   nothing else. A number that is perfectly true but unwritten here — the academic year,
+   a total the model added up, a time no period states — reads to that check as invented,
+   and on this profile the check is `enforce`: the parent loses the whole answer and is
+   told the figures could not be verified. A correct timetable was destroyed exactly that
+   way, by the model helpfully naming the school year.
+
+   So the cheapest place to prevent it is here, one sentence, on every record turn.
+   ------------------------------------------------------------------------------------ #}
+
+Every number you state must appear somewhere above. Do not add the academic year, a total you worked out, a count of lessons or subjects, or a time no period gives — where the figure is not written above, use words instead ("this term", "the first period", "several"). This is not a style preference: a figure that is not in the text above is discarded along with your whole answer.

@@ -446,6 +446,11 @@ def _timetable_context(student_label: str, data: dict) -> dict:
     return {
         "student_label": student_label,
         "term_label": _label(data.get("term") or {}, "name_ar", "name_en", "term_id"),
+        # The year the term belongs to, rendered beside it. A parent naturally hears
+        # "which year is this?" in a record answer, and a model supplying it from its
+        # own head states a figure that is in no evidence — which the grounding check
+        # discards the whole answer over. Written here, quoting it is grounded.
+        "academic_year_label": str((data.get("term") or {}).get("academic_year") or ""),
         "status": str(data.get("status") or ""),
         "class_label": _label(data, "class_name_ar", "class_name_en", "class_code"),
         "days": days,
@@ -704,6 +709,7 @@ def _render_context(student_label: str, data: dict) -> dict:
     return {
         "student_label": student_label,
         "term_label": _label(data.get("term") or {}, "name_ar", "name_en", "term_id"),
+        "academic_year_label": str((data.get("term") or {}).get("academic_year") or ""),
         "courses": courses,
         # Precomputed so the template states each caveat only when it is true, and
         # never pays for the wording when it is not.

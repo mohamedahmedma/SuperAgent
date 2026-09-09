@@ -227,6 +227,13 @@ class GroundingReport:
     ungrounded: Tuple[float, ...] = ()
     invalid_citations: Tuple[int, ...] = ()
     cited_without_evidence: bool = False
+    #: Whether this turn read a tool at all. A FACT about the turn, never a verdict: the
+    #: citation rule below is unchanged by it, and `ok` does not consult it. It exists so
+    #: a caller can tell "cited a source that never existed" from "cited on a turn whose
+    #: evidence simply carries no `[n]`" — two failures with the same signature and very
+    #: different remedies. What to DO about the second is policy, and policy lives in
+    #: `backend/chat/service.py` beside `answer_grounding_mode`, not here.
+    tool_evidence: bool = False
 
     @property
     def reason(self) -> str:
@@ -251,6 +258,7 @@ class GroundingReport:
             "grounding_numbers_checked": self.checked,
             "grounding_ungrounded_numbers": [_render(v) for v in self.ungrounded],
             "grounding_invalid_citations": list(self.invalid_citations),
+            "grounding_tool_evidence": self.tool_evidence,
             "grounding_reason": self.reason,
         }
 
@@ -284,7 +292,9 @@ def verify(
     answer = answer or ""
     evidence_texts = [text for text in evidence if text]
     evidence_count = len(evidence_texts)
-    evidence_blob = "\n".join(evidence_texts + [text for text in extra_evidence if text])
+    tool_texts = [text for text in extra_evidence if text]
+    has_tool_evidence = bool(tool_texts)
+    evidence_blob = "\n".join(evidence_texts + tool_texts)
 
     grounded_all = numeric_claims(evidence_blob, floor=0)
     grounded = sorted(grounded_all)[:_DERIVATION_LIMIT]
@@ -305,6 +315,9 @@ def verify(
     if check_citations:
         indices = citation_indices(answer)
         if indices and evidence_count == 0:
+            # Unchanged, and deliberately so: tool text is NOT a citable chunk, and
+            # counting it as one would make `[1]` valid on a turn that retrieved nothing
+            # to cite. `tool_evidence` reports the distinction without softening the rule.
             cited_without_evidence = True
         else:
             invalid = tuple(
@@ -318,6 +331,7 @@ def verify(
         ungrounded=ungrounded,
         invalid_citations=invalid,
         cited_without_evidence=cited_without_evidence,
+        tool_evidence=has_tool_evidence,
     )
 
 
