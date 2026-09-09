@@ -35,6 +35,8 @@ Produce a `question` that someone with no access to the conversation above could
 
 Keep the user's own subject. You are resolving references, not improving the question: do not widen it, do not add a topic they did not raise, and do not answer it.
 
+A person the conversation has named is a reference like any other, and the one that matters most: it is what the rest of the system needs in order to look anything up, and it cannot be recovered once it is gone. When an earlier turn names someone and the latest message points at them instead of naming them — by a pronoun, by a possessive written as a suffix on the end of a word, or by naming nobody at all — write that name into your question, spelled as the conversation spelled it. Never stand a description in its place: "the student", "the child", "the pupil" and the like drop exactly the information you were asked to recover.
+
 Write the question in the same language the user wrote in.
 
 `constraints` are the conditions that carried over from earlier turns and still bind this answer — an age or grade range, a campus, a gender, a year, a document type. List each as a short phrase ("grades up to Year 6", "girls only", "the 2025/2026 year"). These are the difference between an answer about what was asked and an answer about everything the corpus holds, so a condition the user set earlier and has not withdrawn belongs here even when their latest message does not repeat it. Leave the list empty when the question binds nothing.

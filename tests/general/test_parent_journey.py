@@ -169,10 +169,14 @@ def _seed_sis() -> None:
     from sis.domain.value_objects import Percentage, Phone, StudentNumber
     from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
+    # The NAME is deliberately nothing like the CODE. A school's own name for a room is
+    # whatever the registrar typed — "Primary 3 Class 1", "3/1" — and a fixture that named
+    # 3A "Year 3 A" would let a bug that answers a parent with the internal code pass by
+    # looking almost right. `class_name` and `class_code` must be independently readable.
     sections = [
         ClassSection(code=code, academic_year_code="2025-2026", year_level_code="3",
-                     name_en=f"Year 3 {code[-1]}", name_ar=f"الثالث {code[-1]}")
-        for code in ("3A", "3B")
+                     name_en=f"Primary 3 Class {index}", name_ar=f"الثالث/{index}")
+        for index, code in enumerate(("3A", "3B"), start=1)
     ]
 
     with SqlAlchemyUnitOfWork() as uow:
@@ -264,7 +268,138 @@ def _seed_sis() -> None:
         uow.attendance.upsert_many(marks, recorded_by="journey")
         uow.commit()
 
+    _seed_timetable()
+    _seed_teaching_staff()
     _seed_sis_api_keys()
+
+
+def _seed_teaching_staff() -> None:
+    """A curriculum board for the rung, and the staff standing in the two rooms.
+
+    Written through the repositories like everything else in this fixture. Two decisions in
+    the arrangement, both aimed at failures the per-service suites cannot see:
+
+    **3A and 3B get DIFFERENT teachers of the SAME subject.** Both rooms are on rung 3 and
+    both teach maths, so a query that filtered by RUNG rather than by ROOM would answer
+    identically and wrongly for one of the two families. Only a test with two families can
+    catch it.
+
+    **Science in 3A has TWO teachers.** The assignment table is unique on (teacher, class,
+    subject), so a co-teacher is a legal state that only one of its two write paths guards
+    against. Anything along the four hops that collapses to one teacher per subject drops a
+    real person, and the payload is byte-identical to a correct one apart from the missing
+    row.
+
+    The board is seeded too: subjects exist per year but their assignment to a rung is a
+    separate table, and without it "what does she study" is an empty list for every child.
+    """
+    from sis.domain.value_objects import (
+        AcademicYearCode,
+        ClassCode,
+        SchoolCode,
+        SubjectCode,
+        YearCode,
+    )
+    from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+
+    with SqlAlchemyUnitOfWork() as uow:
+        for code in ("MATH", "ARB", "SCI"):
+            uow.subjects.assign_to_level(
+                SubjectCode(code),
+                AcademicYearCode("2025-2026"),
+                SchoolCode("MAIN"),
+                YearCode("3"),
+            )
+        for staff, name_ar, name_en, subject, rooms, active in (
+            ("T-001", "أ. سامي", "Sami Nabil", "MATH", ["3A"], True),
+            ("T-002", "أ. هدى", "Huda Adel", "SCI", ["3A"], True),
+            # The co-teacher, on the same subject in the same room as T-002.
+            ("T-003", "أ. منى", "Mona Fouad", "SCI", ["3A"], True),
+            # 3B's maths teacher. Must never appear in 3A's answer.
+            ("T-004", "أ. خالد", "Khaled Omar", "MATH", ["3B"], True),
+            # Left the school. Must not be offered to a parent.
+            ("T-005", "أ. فريد", "Farid Samir", "ARB", ["3A"], False),
+        ):
+            uow.teachers.save(
+                school_code=SchoolCode("MAIN"),
+                staff_number=staff,
+                full_name_en=name_en,
+                full_name_ar=name_ar,
+                # Both populated so their ABSENCE from the parent-facing payload is a
+                # property of the projection rather than of this fixture.
+                email=f"{staff.lower()}@school.example",
+                phone="+201009998888",
+                is_active=active,
+                username=None,
+                password_hash=None,
+                assignments=[
+                    (
+                        AcademicYearCode("2025-2026"),
+                        SubjectCode(subject),
+                        YearCode("3"),
+                        [ClassCode(room) for room in rooms],
+                    )
+                ],
+                assigned_by="journey",
+            )
+        uow.commit()
+
+
+def _seed_timetable() -> None:
+    """A bell schedule for the school, and a week for each of the two classes.
+
+    Written straight through the repositories like the marks above, rather than through
+    `TimetableService`, because the service's rules are its own suite's subject and this
+    fixture's job is to put rows where the far end can read them.
+
+    **The two classes get DIFFERENT weeks**, and that is the whole point of seeding 3B at
+    all. A timetable is reached from a child through the placement she holds, and a read
+    that returned some default — or the first class in the table — would look perfectly
+    correct against a single seeded week. 3A sits maths on Sunday; 3B sits science on
+    Monday, and nothing else does.
+
+    Period 2 is a break. It belongs to the grid and to no lesson, so it is the row that
+    proves the day survives the hop intact rather than arriving as lessons alone.
+    """
+    # Aliased, because this module imports the stdlib `time` at the top and a bare
+    # `from datetime import time` here would shadow it — `time.sleep` is what stops the
+    # two uvicorn workers being torn down before they have finished starting.
+    from datetime import time as clock
+
+    from sis.domain.timetable import TimetableEntry, TimetablePeriod, TimetableSlot
+    from sis.domain.value_objects import SchoolCode
+    from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.timetable.replace_periods(
+            SchoolCode("MAIN"),
+            [
+                TimetablePeriod(school_code="MAIN", period_number=1, name_en="Period 1",
+                                name_ar="حصة ١", starts_at=clock(8, 0), ends_at=clock(8, 45)),
+                TimetablePeriod(school_code="MAIN", period_number=2, name_en="Break",
+                                name_ar="فسحة", starts_at=clock(8, 45), ends_at=clock(9, 5),
+                                is_teaching=False),
+                TimetablePeriod(school_code="MAIN", period_number=3, name_en="Period 3",
+                                name_ar="حصة ٣", starts_at=clock(9, 5), ends_at=clock(9, 50)),
+            ],
+        )
+        uow.timetable.upsert_entries([
+            TimetableEntry(
+                slot=TimetableSlot(class_code="3A", term_code=TERM,
+                                   day_of_week="sunday", period_number=1),
+                academic_year_code="2025-2026", subject_code="MATH"),
+            # A stated free period: the class deliberately has this slot off, which is a
+            # different fact from nobody having planned it. It must survive as a row.
+            TimetableEntry(
+                slot=TimetableSlot(class_code="3A", term_code=TERM,
+                                   day_of_week="monday", period_number=3),
+                academic_year_code="2025-2026", subject_code=None),
+            TimetableEntry(
+                slot=TimetableSlot(class_code="3B", term_code=TERM,
+                                   day_of_week="monday", period_number=1),
+                academic_year_code="2025-2026", subject_code="SCI"),
+        ])
+        uow.commit()
 
 
 def _seed_sis_api_keys() -> None:
@@ -762,6 +897,193 @@ class TestWhatAParentCanRead:
         assert body["course"]["subject_name_ar"] == "الرياضيات"
         assert body["course"]["computed_percentage"] == 88.5
 
+    def test_her_child_s_week_arrives_named_and_whole(
+        self, identity, gateway, agent_key
+    ):
+        """The timetable across all four hops, and the class resolved on the far side.
+
+        The parent asks about a child. Nothing in the request names a room — this service
+        holds no class code and could not send one — so `3A` on the response is SIS having
+        resolved her placement for the term. That indirection is the feature, and a read
+        that quietly returned a default week would look identical without it.
+        """
+        session = _sign_in(identity, gateway, MOTHER_WA)
+
+        with _parent_client(session["access_token"], agent_key) as parent:
+            body = parent.get(
+                f"/v1/guardians/{session['guardian_id']}/students/S001/timetable",
+                params={"term": TERM},
+            ).json()
+
+        assert body["status"] == "ok"
+        assert body["class_code"] == "3A"
+        # Named in Arabic, all the way from the SIS subject table. A subject arriving as
+        # `MATH` here is the field-name disagreement this file exists to catch.
+        lessons = {(l["day_of_week"], l["period_number"]): l for l in body["lessons"]}
+        assert lessons[("sunday", 1)]["subject_name_ar"] == "الرياضيات"
+        # A stated free period survives as a row rather than being dropped as empty.
+        assert lessons[("monday", 3)]["subject_code"] == ""
+        # The grid travels with the lessons, break included, or a client cannot draw the
+        # day it is describing.
+        periods = {p["period_number"]: p for p in body["periods"]}
+        assert periods[2]["is_teaching"] is False
+        assert periods[2]["name_ar"] == "فسحة"
+        assert periods[1]["starts_at"] == "08:00"
+        # The school's own week, in the school's own order.
+        assert body["days"][0] == "sunday"
+
+    def test_each_class_has_its_own_week(self, identity, gateway, agent_key):
+        """Proof the room is resolved from the child rather than defaulted.
+
+        Fatma's daughter is in 3A and Mona's is in 3B, and the two classes sit different
+        subjects on different days. A read keyed on anything but the placement returns one
+        of these weeks for both parents, and is indistinguishable from correct until you
+        look at two families.
+        """
+        mother = _sign_in(identity, gateway, MOTHER_WA)
+        other = _sign_in(identity, gateway, OTHER_PARENT_WA)
+
+        with _parent_client(mother["access_token"], agent_key) as parent:
+            hers = parent.get(
+                f"/v1/guardians/{mother['guardian_id']}/students/S001/timetable",
+                params={"term": TERM},
+            ).json()
+        with _parent_client(other["access_token"], agent_key) as parent:
+            theirs = parent.get(
+                f"/v1/guardians/{other['guardian_id']}/students/S003/timetable",
+                params={"term": TERM},
+            ).json()
+
+        assert hers["class_code"] == "3A"
+        assert theirs["class_code"] == "3B"
+        assert [(l["day_of_week"], l["subject_code"]) for l in theirs["lessons"]] == [
+            ("monday", "SCI")
+        ]
+
+    def test_her_class_reaches_the_parent_by_name(self, identity, gateway, agent_key):
+        """The answer to "which class is my daughter in", across all four hops.
+
+        The NAME is the answer — the seed calls 3A "الثالث/1" — and the code is an internal
+        key. The two share no characters, so a mapping that dropped the name somewhere along
+        the four hops answers `3A` to a family that has never seen it, and this is what
+        fails rather than a payload that looks almost right.
+        """
+        session = _sign_in(identity, gateway, MOTHER_WA)
+
+        with _parent_client(session["access_token"], agent_key) as parent:
+            body = parent.get(
+                f"/v1/guardians/{session['guardian_id']}/students/S001/class",
+                params={"term": TERM},
+            ).json()
+
+        assert body["status"] == "ok"
+        assert body["class_name_ar"] == "الثالث/1"
+        assert body["class_name_en"] == "Primary 3 Class 1"
+        assert body["class_code"] == "3A"
+        assert body["year_level_name_ar"] == "الثالث"
+
+    def test_the_subjects_she_studies_come_from_the_board_not_from_her_marks(
+        self, identity, gateway, agent_key
+    ):
+        """All three subjects, including the one she has no mark in.
+
+        S001 has marks in MATH, ARB and SCI, but the point is the source: this is the rung's
+        assignment board, so a subject nobody has marked still appears. Built from her
+        grades instead, a subject with no mark yet would silently vanish from what she
+        studies.
+        """
+        session = _sign_in(identity, gateway, MOTHER_WA)
+
+        with _parent_client(session["access_token"], agent_key) as parent:
+            body = parent.get(
+                f"/v1/guardians/{session['guardian_id']}/students/S001/subjects",
+                params={"term": TERM},
+            ).json()
+
+        assert body["status"] == "ok"
+        # In the school's own display order, which is how the subjects were seeded.
+        assert [s["code"] for s in body["subjects"]] == ["MATH", "ARB", "SCI"]
+        assert [s["name_ar"] for s in body["subjects"]] == [
+            "الرياضيات",
+            "اللغة العربية",
+            "العلوم",
+        ]
+
+    def test_her_teachers_arrive_named_with_the_subject_each_teaches(
+        self, identity, gateway, agent_key
+    ):
+        """Who teaches her, over the real wire, with the co-teacher intact.
+
+        Science in 3A has two teachers and both must arrive. The Arabic teacher has left the
+        school and must not. Neither of those is visible from a single-service test.
+        """
+        session = _sign_in(identity, gateway, MOTHER_WA)
+
+        with _parent_client(session["access_token"], agent_key) as parent:
+            body = parent.get(
+                f"/v1/guardians/{session['guardian_id']}/students/S001/teachers",
+                params={"term": TERM},
+            ).json()
+
+        assert body["status"] == "ok"
+        pairs = {(t["subject_code"], t["full_name_ar"]) for t in body["teachers"]}
+        assert pairs == {
+            ("MATH", "أ. سامي"),
+            ("SCI", "أ. هدى"),
+            ("SCI", "أ. منى"),
+        }
+        # The teacher who left is absent, so a parent is not sent to ask for him.
+        assert "أ. فريد" not in {t["full_name_ar"] for t in body["teachers"]}
+
+    def test_no_teacher_contact_detail_survives_the_four_hops(
+        self, identity, gateway, agent_key
+    ):
+        """Every seeded teacher HAS an email and a phone, so this asserts the projection.
+
+        The shape is the privacy boundary. If a future adapter or route started copying
+        fields through, this is the test that fails rather than a parent receiving a member
+        of staff's mobile number.
+        """
+        session = _sign_in(identity, gateway, MOTHER_WA)
+
+        with _parent_client(session["access_token"], agent_key) as parent:
+            raw = parent.get(
+                f"/v1/guardians/{session['guardian_id']}/students/S001/teachers",
+                params={"term": TERM},
+            ).text
+
+        assert "@school.example" not in raw
+        assert "+201009998888" not in raw
+        assert "T-001" not in raw
+
+    def test_each_family_gets_its_own_room_s_teachers(
+        self, identity, gateway, agent_key
+    ):
+        """Proof the staff list is keyed on the ROOM and not on the rung.
+
+        3A and 3B are both rung 3 and both teach maths with different teachers. A query
+        filtered by rung answers one of these two families with the other's teacher, and is
+        indistinguishable from correct until you look at both.
+        """
+        mother = _sign_in(identity, gateway, MOTHER_WA)
+        other = _sign_in(identity, gateway, OTHER_PARENT_WA)
+
+        with _parent_client(mother["access_token"], agent_key) as parent:
+            hers = parent.get(
+                f"/v1/guardians/{mother['guardian_id']}/students/S001/teachers",
+                params={"term": TERM},
+            ).json()
+        with _parent_client(other["access_token"], agent_key) as parent:
+            theirs = parent.get(
+                f"/v1/guardians/{other['guardian_id']}/students/S003/teachers",
+                params={"term": TERM},
+            ).json()
+
+        assert "أ. سامي" in {t["full_name_ar"] for t in hers["teachers"]}
+        assert [(t["subject_code"], t["full_name_ar"]) for t in theirs["teachers"]] == [
+            ("MATH", "أ. خالد")
+        ]
+
     def test_the_term_is_named_from_the_school_s_own_calendar(
         self, identity, gateway, agent_key
     ):
@@ -819,6 +1141,68 @@ class TestWhatAParentCannotRead:
 
         assert children["students"] == []
         assert marks.status_code == 404
+
+    def test_a_barred_guardian_cannot_read_her_timetable_either(
+        self, identity, gateway, agent_key
+    ):
+        """The restriction has to hold on every parent-facing read, not most of them.
+
+        Where a child is at eleven on Tuesday is, if anything, the most sensitive of the
+        four to hand an adult a court order has barred — and a rule enforced on the marks
+        alone is a rule with a door beside it.
+        """
+        session = _sign_in(identity, gateway, BROTHER_WA)
+
+        with _parent_client(session["access_token"], agent_key) as parent:
+            week = parent.get(
+                f"/v1/guardians/{session['guardian_id']}/students/S001/timetable",
+                params={"term": TERM},
+            )
+
+        assert week.status_code == 404
+
+    def test_a_barred_guardian_learns_nothing_about_her_class_or_her_teachers(
+        self, identity, gateway, agent_key
+    ):
+        """The court order has to hold on all three of the new routes, not two of them.
+
+        Which room a child is in and who stands in front of her are exactly the facts an
+        order bars an adult from, and a rule enforced on the marks alone is a rule with
+        three doors beside it.
+        """
+        session = _sign_in(identity, gateway, BROTHER_WA)
+
+        with _parent_client(session["access_token"], agent_key) as parent:
+            base = f"/v1/guardians/{session['guardian_id']}/students/S001"
+            for path in ("class", "subjects", "teachers"):
+                refused = parent.get(f"{base}/{path}", params={"term": TERM})
+                assert refused.status_code == 404, path
+
+    def test_another_family_s_classroom_is_refused(self, identity, gateway, agent_key):
+        """A class is shared by a roomful of children, so the tempting shortcut is to
+        serve it to anyone. It is still one child's placement that reaches it."""
+        session = _sign_in(identity, gateway, MOTHER_WA)
+
+        with _parent_client(session["access_token"], agent_key) as parent:
+            base = f"/v1/guardians/{session['guardian_id']}/students/S003"
+            for path in ("class", "subjects", "teachers"):
+                refused = parent.get(f"{base}/{path}", params={"term": TERM})
+                assert refused.status_code == 404, path
+
+    def test_another_family_s_week_is_refused(self, identity, gateway, agent_key):
+        """A timetable is a class's, so the tempting shortcut is to serve it to anyone.
+
+        It is still one child's placement that reaches it, and Fatma has no child in 3B.
+        """
+        session = _sign_in(identity, gateway, MOTHER_WA)
+
+        with _parent_client(session["access_token"], agent_key) as parent:
+            refused = parent.get(
+                f"/v1/guardians/{session['guardian_id']}/students/S003/timetable",
+                params={"term": TERM},
+            )
+
+        assert refused.status_code == 404
 
     def test_a_forged_token_reads_nothing(self, agent_key):
         with _parent_client("not-a-real-token", agent_key) as impostor:

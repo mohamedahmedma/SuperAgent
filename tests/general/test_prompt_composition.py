@@ -45,7 +45,7 @@ class CompositionTests(unittest.TestCase):
         """The whole point of composing: a turn bound only to an ungrounded tool has no
         chunks and no citations, so every word about them would be waste on every one of
         its turns."""
-        prompt = self.profile.render_system_prompt(["get_student_records"])
+        prompt = self.profile.render_system_prompt(["get_student_grades"])
         self.assertNotIn("[1]", prompt)
         self.assertNotIn("Grounding rules", prompt)
         self.assertLess(len(prompt), len(self.profile.render_system_prompt(["search_knowledge_base"])))
@@ -56,7 +56,7 @@ class CompositionTests(unittest.TestCase):
                 self.assertIn("[1], or [2][3]", self.profile.render_system_prompt([name]))
 
     def test_the_persona_always_opens_the_prompt(self):
-        for tools in (None, ["search_knowledge_base"], ["get_student_records"], []):
+        for tools in (None, ["search_knowledge_base"], ["get_student_grades"], []):
             with self.subTest(tools=tools):
                 self.assertTrue(
                     self.profile.render_system_prompt(tools).startswith(
@@ -67,7 +67,7 @@ class CompositionTests(unittest.TestCase):
     def test_style_rules_survive_every_turn_shape(self):
         """Language and output shape are not tool-conditional — an ungrounded turn
         still has to answer in the user's language."""
-        for tools in (None, ["search_knowledge_base"], ["get_student_records"], []):
+        for tools in (None, ["search_knowledge_base"], ["get_student_grades"], []):
             with self.subTest(tools=tools):
                 prompt = self.profile.render_system_prompt(tools)
                 self.assertIn("language the user wrote in", prompt)
@@ -558,7 +558,7 @@ class GroundingContractTests(unittest.TestCase):
 
     def test_an_ungrounded_turn_carries_no_contract(self):
         """Nothing to cite, so the rules would be noise on every one of its turns."""
-        prompt = load_profile("base").render_system_prompt(["get_student_records"])
+        prompt = load_profile("base").render_system_prompt(["get_student_grades"])
         self.assertNotIn("Cite the chunk", prompt)
 
 

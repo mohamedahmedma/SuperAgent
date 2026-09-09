@@ -5,7 +5,11 @@ from collections.abc import Sequence
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from sis.application.ports.repositories import TeacherRecord, TeacherTeachingAssignment
+from sis.application.ports.repositories import (
+    SectionTeacher,
+    TeacherRecord,
+    TeacherTeachingAssignment,
+)
 from sis.domain.errors import DomainRuleViolation, UnknownReference, ValidationError
 from sis.domain.staff import Teacher
 from sis.domain.value_objects import AcademicYearCode, ClassCode, SchoolCode, SubjectCode, YearCode
@@ -47,6 +51,74 @@ class SqlAlchemyTeacherRepository:
         ).all()
         return [
             self._record(row, str(school_code), year_level_code=year_level_code)
+            for row in rows
+        ]
+
+    def teaching_for_section(
+        self,
+        *,
+        academic_year_code: AcademicYearCode,
+        year_level_code: YearCode,
+        class_code: ClassCode,
+    ) -> Sequence[SectionTeacher]:
+        """Who teaches this room. The port's docstring carries the reasoning.
+
+        The same four joins `TeachingService.subject_codes_for_section` walks, with the
+        predicate inverted: that read fixes the teacher and asks which subjects, this one
+        fixes the room and asks which teachers. Written here rather than there because
+        `TeachingService` is documented as the authority-checker — "a service that could
+        both grant and check its own authority is one an error in either half
+        compromises" — and a staff directory is not an authority check.
+
+        No `distinct()`. The unique constraint on `(teacher, class, subject)` makes a
+        duplicate row impossible, and a teacher who genuinely teaches two subjects in one
+        room SHOULD appear twice — once per subject, which is what the caller renders.
+        """
+        rows = self._session.execute(
+            select(
+                m.Teacher.staff_number,
+                m.Teacher.full_name_ar,
+                m.Teacher.full_name_en,
+                m.Subject.code,
+                m.Subject.name_ar,
+                m.Subject.name_en,
+            )
+            .join(
+                m.TeacherClassSection,
+                m.TeacherClassSection.teacher_id == m.Teacher.id,
+            )
+            .join(m.Subject, m.TeacherClassSection.subject_id == m.Subject.id)
+            .join(
+                m.ClassSection,
+                m.TeacherClassSection.class_section_id == m.ClassSection.id,
+            )
+            .join(m.AcademicYear, m.ClassSection.academic_year_id == m.AcademicYear.id)
+            .join(m.YearLevel, m.ClassSection.year_level_id == m.YearLevel.id)
+            .where(
+                m.AcademicYear.code == str(academic_year_code),
+                m.YearLevel.code == str(year_level_code),
+                m.ClassSection.code == str(class_code),
+                # A teacher who has left is not the answer to "who teaches my daughter
+                # maths" — see the port. Reporting them sends a parent to ask for
+                # somebody who is gone.
+                m.Teacher.is_active.is_(True),
+            )
+            # The school's own subject order, not alphabetical: alphabetical differs
+            # between the two languages this estate renders, so the same class would read
+            # in two different orders. `code` and `staff_number` only break ties, so the
+            # result is stable across calls.
+            .order_by(m.Subject.display_order, m.Subject.code, m.Teacher.staff_number)
+        ).all()
+
+        return [
+            SectionTeacher(
+                staff_number=row[0],
+                full_name_ar=row[1] or "",
+                full_name_en=row[2] or "",
+                subject_code=row[3],
+                subject_name_ar=row[4] or "",
+                subject_name_en=row[5] or "",
+            )
             for row in rows
         ]
 

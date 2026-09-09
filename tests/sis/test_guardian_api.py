@@ -28,6 +28,9 @@ from sis.config import reset_settings_cache
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.domain.auth import ApiKey, Scope
 from sis.api.deps import hash_api_key, key_prefix
+from sis.domain.people import ClassEnrolment
+from sis.domain.structure import AcademicYear, ClassSection, School, Term, YearLevel
+from sis.domain.value_objects import StudentNumber
 from sis.infrastructure.db.session import reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from tests.sis.conftest import Clock
@@ -764,3 +767,662 @@ def test_an_unknown_child_and_someone_else_s_child_look_identical_on_attendance(
 
     assert not_hers["code"] == no_such["code"]
     assert not_hers["message"] == no_such["message"]
+
+
+# ---------------------------------------------------------------------------
+# The same guard, on the timetable
+# ---------------------------------------------------------------------------
+#
+# Third near-copy of the block above, for the same reason the second one exists: the rule
+# is only a rule where it is enforced, and a parent-facing route added without it is the
+# door beside the lock. Written as copies deliberately — the failure worth catching is the
+# three drifting apart.
+#
+# What is *not* a copy is the class. Grades and attendance are facts about a child and are
+# keyed on her number; a timetable is a fact about a ROOM, and a child reaches one only
+# through the placement she holds for the term. So these also assert the resolution itself
+# — that the room is the one she sat in for the term asked about, and that having no room
+# is an answer rather than a missing record.
+
+FIRST_TERM = "2026-T1"
+SECOND_TERM = "2026-T2"
+
+
+@pytest.fixture
+def week(
+    client: TestClient,
+    registrar: dict[str, str],
+    roll: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two dated terms, a second class, a bell schedule, and one lesson in 3A's Sunday.
+
+    Dated terms are the point of the fixture. `resolve_section_for_term` asks about a
+    term's last day and falls back to its first, so a term with no dates would resolve
+    against the whole year and make the transfer assertion below vacuous.
+    """
+    # These rows describe a completed historical year, but the fixture deliberately
+    # creates them through the same structure endpoints a registrar uses.  Keep that
+    # setup on the last day before the year starts; otherwise the production lock on a
+    # started current year makes this suite depend on the wall-clock date and returns
+    # ``409 academic_year_locked`` before any timetable assertion can run.
+    monkeypatch.setattr(
+        "sis.api.routers.structure._school_today",
+        lambda: date(2025, 8, 31),
+    )
+
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.terms.upsert_many(
+            [
+                Term(
+                    code=FIRST_TERM,
+                    academic_year_code=YEAR_CODE,
+                    name_en="Term 1",
+                    name_ar="الفصل الأول",
+                    starts_on=date(2025, 9, 1),
+                    ends_on=date(2025, 12, 15),
+                    sequence=1,
+                ),
+                Term(
+                    code=SECOND_TERM,
+                    academic_year_code=YEAR_CODE,
+                    name_en="Term 2",
+                    name_ar="الفصل الثاني",
+                    starts_on=date(2026, 1, 5),
+                    ends_on=date(2026, 6, 30),
+                    sequence=2,
+                ),
+            ]
+        )
+        uow.class_sections.upsert_many(
+            [
+                ClassSection(
+                    code="3B",
+                    academic_year_code=YEAR_CODE,
+                    year_level_code="3",
+                    name_en="Year 3 B",
+                    name_ar="الثالث ب",
+                )
+            ]
+        )
+        uow.commit()
+
+    assert client.put(
+        "/v1/schools/MAIN/timetable-periods",
+        json={
+            "periods": [
+                {"period_number": 1, "name_en": "Period 1", "name_ar": "حصة ١"},
+                {"period_number": 2, "name_en": "Break", "name_ar": "فسحة", "is_teaching": False},
+                {"period_number": 3, "name_en": "Period 3", "name_ar": "حصة ٣"},
+            ]
+        },
+        headers=registrar,
+    ).status_code == 200
+
+    assert client.post(
+        "/v1/subjects",
+        json={
+            "code": "MATH",
+            "academic_year_code": YEAR_CODE,
+            "name_en": "Mathematics",
+            "name_ar": "الرياضيات",
+        },
+        headers=registrar,
+    ).status_code == 201
+    assert client.put(
+        "/v1/subject-assignments",
+        json={
+            "academic_year_code": YEAR_CODE,
+            "subject_code": "MATH",
+            "year_level_code": "3",
+            "assigned": True,
+        },
+        headers=registrar,
+    ).status_code == 204
+
+    # 3A sits maths on Sunday; 3B sits it on Monday. Two rooms with different weeks, so
+    # "which room did we resolve" is answerable from the lessons alone.
+    assert client.put(
+        "/v1/timetable",
+        json={
+            "academic_year_code": YEAR_CODE,
+            "entries": [
+                {
+                    "class_code": "3A",
+                    "term_code": FIRST_TERM,
+                    "day_of_week": "sunday",
+                    "period_number": 1,
+                    "subject_code": "MATH",
+                },
+                {
+                    "class_code": "3A",
+                    "term_code": FIRST_TERM,
+                    "day_of_week": "monday",
+                    "period_number": 3,
+                    "subject_code": None,
+                },
+                {
+                    "class_code": "3B",
+                    "term_code": SECOND_TERM,
+                    "day_of_week": "monday",
+                    "period_number": 1,
+                    "subject_code": "MATH",
+                },
+            ],
+        },
+        headers=registrar,
+    ).status_code == 200
+
+
+def _timetable(
+    client: TestClient, headers: dict[str, str], handle: str, student: str, term: str
+):
+    return client.get(
+        f"/v1/guardians/by-id/{handle}/students/{student}/timetable",
+        params={"term": term},
+        headers=headers,
+    )
+
+
+def test_a_guardian_may_read_her_own_child_s_timetable(
+    client: TestClient, registrar: dict[str, str], week: None
+) -> None:
+    """The read the chatbot performs, and the one thing it must not have to supply: a class.
+
+    A parent has no class code and the chat service has no business holding one. It asks
+    about a child; the room is resolved here.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    answer = _timetable(client, registrar, handle, "S001", FIRST_TERM)
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+
+    assert body["student_number"] == "S001"
+    assert body["class_code"] == "3A"
+    assert body["class_name_ar"] == "الثالث أ"
+    # The school's own week, in the school's own order, and never sorted alphabetically.
+    assert body["days"] == ["sunday", "monday", "tuesday", "wednesday", "thursday"]
+    # The break travels with the grid: a client cannot draw the day without it.
+    assert [p["period_number"] for p in body["periods"]] == [1, 2, 3]
+    assert body["periods"][1]["is_teaching"] is False
+    # Two teaching periods across five open days.
+    assert body["teaching_slots"] == 10
+
+    lessons = body["lessons"]
+    assert [(l["day_of_week"], l["period_number"]) for l in lessons] == [
+        ("sunday", 1),
+        ("monday", 3),
+    ]
+    # The names a parent reads, not the key the school files under.
+    assert lessons[0]["subject_name_ar"] == "الرياضيات"
+    assert lessons[0]["subject_code"] == "MATH"
+    # A stated free period stays distinguishable from a slot nobody planned: it has a row.
+    assert lessons[1]["subject_code"] is None
+    assert lessons[1]["subject_name_ar"] == ""
+
+
+def test_the_timetable_is_the_class_she_sat_in_for_that_term(
+    client: TestClient, registrar: dict[str, str], week: None
+) -> None:
+    """Invariant 2, reached through the parent-facing route.
+
+    S001 moves 3A -> 3B over the winter. Term 1 must keep answering 3A's week — that is
+    the week she actually sat — while Term 2 answers 3B's. A route that read her *current*
+    placement would reprint January's room over an autumn a parent is asking about.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.enrolments.close_open_enrolment(
+            StudentNumber("S001"), ends_on=date(2025, 12, 31)
+        )
+        uow.enrolments.upsert_many(
+            [
+                ClassEnrolment(
+                    student_number="S001",
+                    academic_year_code=YEAR_CODE,
+                    class_code="3B",
+                    starts_on=date(2026, 1, 1),
+                )
+            ]
+        )
+        uow.commit()
+
+    autumn = _timetable(client, registrar, handle, "S001", FIRST_TERM).json()
+    spring = _timetable(client, registrar, handle, "S001", SECOND_TERM).json()
+
+    assert autumn["class_code"] == "3A"
+    assert [(l["day_of_week"], l["period_number"]) for l in autumn["lessons"]] == [
+        ("sunday", 1),
+        ("monday", 3),
+    ]
+
+    assert spring["class_code"] == "3B"
+    assert [(l["day_of_week"], l["period_number"]) for l in spring["lessons"]] == [
+        ("monday", 1)
+    ]
+
+
+def test_a_class_with_no_grid_yet_is_not_the_same_as_no_class(
+    client: TestClient, registrar: dict[str, str], week: None
+) -> None:
+    """The two empty answers a parent must never be given interchangeably.
+
+    S001 has a room in Term 2 and nobody has laid out its week — a fact about the school.
+    A child with no placement at all has no room to ask about — a fact about the child.
+    Rendered identically, the first tells a parent her daughter has no lessons when the
+    truth is that nobody has typed them in yet.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    # She is in 3A all year in this fixture, and 3A has no Term 2 lessons.
+    no_grid = _timetable(client, registrar, handle, "S001", SECOND_TERM).json()
+    assert no_grid["class_code"] == "3A"
+    assert no_grid["lessons"] == []
+    # The grid itself is still there, so a client can draw an empty week rather than nothing.
+    assert [p["period_number"] for p in no_grid["periods"]] == [1, 2, 3]
+
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.enrolments.close_open_enrolment(
+            StudentNumber("S002"), ends_on=date(2025, 9, 2)
+        )
+        uow.commit()
+
+    no_class = _timetable(client, registrar, handle, "S002", SECOND_TERM)
+    assert no_class.status_code == 200, no_class.text
+    assert no_class.json()["class_code"] is None
+    assert no_class.json()["academic_year_code"] is None
+    assert no_class.json()["lessons"] == []
+
+
+def test_a_guardian_cannot_read_the_timetable_of_a_child_who_is_not_hers(
+    client: TestClient, registrar: dict[str, str], week: None
+) -> None:
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    refused = _timetable(client, registrar, brother, "S002", FIRST_TERM)
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "student_number"
+
+
+def test_a_restricted_guardian_is_refused_her_own_linked_child_s_timetable(
+    client: TestClient, registrar: dict[str, str], week: None
+) -> None:
+    """The custody restriction has to hold here too.
+
+    The brother IS linked to S001; the sheet said `can view records: no`. Where a child is
+    at eleven on Tuesday is, if anything, the most sensitive of the three reads to hand an
+    adult a court order has barred.
+    """
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    refused = _timetable(client, registrar, brother, "S001", FIRST_TERM)
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "student_number"
+
+
+def test_an_unknown_child_and_someone_else_s_child_look_identical_on_the_timetable(
+    client: TestClient, registrar: dict[str, str], week: None
+) -> None:
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    not_hers = _timetable(client, registrar, brother, "S002", FIRST_TERM).json()["detail"]
+    no_such = _timetable(client, registrar, brother, "S999", FIRST_TERM).json()["detail"]
+
+    assert not_hers["code"] == no_such["code"]
+    assert not_hers["message"] == no_such["message"]
+
+
+# ---------------------------------------------------------------------------
+# The same guard, on the classroom
+# ---------------------------------------------------------------------------
+#
+# Fourth near-copy of the refusal block, for the reason the second and third exist: a rule
+# holds only where it is enforced. What is NOT a copy is everything above the refusals —
+# this route answers three questions at once (which room, which subjects, which teachers)
+# and each has its own way of being wrong.
+#
+# The staffing assertions carry the weight here. `teacher_class_sections` is unique on
+# (teacher, class, subject) and only one of its two write paths checks for a second teacher
+# on one subject, so "exactly one teacher per subject" is an assumption the schema does not
+# support — and the payload must not quietly hold a co-teacher back. It is also the first
+# parent-facing route to touch staff data at all, so the absence of a teacher's contact
+# details is asserted rather than trusted to the response model staying lean.
+
+
+def _teacher(
+    client: TestClient,
+    headers: dict[str, str],
+    staff_number: str,
+    *,
+    name_ar: str,
+    name_en: str,
+    subject: str,
+    classes: list[str],
+    is_active: bool = True,
+):
+    """Create a teacher and place them in rooms, through the school-manager route.
+
+    Through the API rather than the repository because the assignment is the thing under
+    test at one remove: a fixture that wrote the rows directly could seed a shape the real
+    write path cannot produce, and then this suite would be asserting against fiction.
+    """
+    return client.put(
+        f"/v1/schools/MAIN/teachers/{staff_number}",
+        json={
+            "full_name_ar": name_ar,
+            "full_name_en": name_en,
+            "email": "staff@example.test",
+            "phone": "+201000000000",
+            "is_active": is_active,
+            "assignments": [
+                {
+                    "academic_year_code": YEAR_CODE,
+                    "subject_code": subject,
+                    "year_level_code": "3",
+                    "class_codes": classes,
+                }
+            ],
+        },
+        headers=headers,
+    )
+
+
+@pytest.fixture
+def classroom(client: TestClient, registrar: dict[str, str], week: None) -> None:
+    """Two subjects on the rung, and four teachers arranged to catch four mistakes.
+
+    `week` already put MATH on rung 3 and created 3A and 3B. This adds SCI, then:
+
+      T-MATH   MATH in 3A          the ordinary case
+      T-SCI    SCI  in 3A          a second subject, so ordering is observable
+      T-CO     SCI  in 3A          a CO-TEACHER — the row the schema allows and one write
+                                   path forbids, which must not be silently dropped
+      T-OTHER  MATH in 3B          another room, which must not leak into 3A's answer
+      T-GONE   MATH in 3A inactive left the school, and must not be offered to a parent
+    """
+    assert client.post(
+        "/v1/subjects",
+        json={
+            "code": "SCI",
+            "academic_year_code": YEAR_CODE,
+            "name_en": "Science",
+            "name_ar": "العلوم",
+        },
+        headers=registrar,
+    ).status_code == 201
+    assert client.put(
+        "/v1/subject-assignments",
+        json={
+            "academic_year_code": YEAR_CODE,
+            "subject_code": "SCI",
+            "year_level_code": "3",
+            "assigned": True,
+        },
+        headers=registrar,
+    ).status_code == 204
+
+    for staff, name_ar, name_en, subject, classes, active in (
+        ("T-MATH", "أ. سامي", "Mr Sami", "MATH", ["3A"], True),
+        ("T-SCI", "أ. هدى", "Ms Huda", "SCI", ["3A"], True),
+        ("T-CO", "أ. منى", "Ms Mona", "SCI", ["3A"], True),
+        ("T-OTHER", "أ. خالد", "Mr Khaled", "MATH", ["3B"], True),
+        ("T-GONE", "أ. فريد", "Mr Farid", "MATH", ["3A"], False),
+    ):
+        created = _teacher(
+            client, registrar, staff,
+            name_ar=name_ar, name_en=name_en, subject=subject,
+            classes=classes, is_active=active,
+        )
+        assert created.status_code == 200, created.text
+
+
+def _classroom(
+    client: TestClient, headers: dict[str, str], handle: str, student: str, term: str
+):
+    return client.get(
+        f"/v1/guardians/by-id/{handle}/students/{student}/classroom",
+        params={"term": term},
+        headers=headers,
+    )
+
+
+def test_a_guardian_reads_her_child_s_room_its_subjects_and_its_staff(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    """One request, three answers, and the class resolved from the child.
+
+    The parent supplies a student and a term. `3A` on the response is the school having
+    resolved her placement — nothing in the request could have named a room.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    answer = _classroom(client, registrar, handle, "S001", FIRST_TERM)
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+
+    # Which class — the NAME is the answer a parent recognises; the code is an internal key.
+    assert body["class_code"] == "3A"
+    assert body["class_name_ar"] == "الثالث أ"
+    assert body["year_level_name_ar"] == "السنة 3"
+
+    # Which subjects — the rung's board, in the school's own order.
+    assert [s["code"] for s in body["subjects"]] == ["MATH", "SCI"]
+    assert [s["name_ar"] for s in body["subjects"]] == ["الرياضيات", "العلوم"]
+
+    # Who teaches them.
+    assert {(t["subject_code"], t["full_name_ar"]) for t in body["teachers"]} == {
+        ("MATH", "أ. سامي"),
+        ("SCI", "أ. هدى"),
+        ("SCI", "أ. منى"),
+    }
+
+
+def test_a_second_teacher_of_one_subject_is_not_silently_dropped(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    """The schema permits a co-teacher, so the answer has to admit one.
+
+    `teacher_class_sections` is unique on (teacher, class, subject); two teachers of one
+    subject in one room violates nothing, and the guard against it lives in exactly one of
+    the two write paths. A response shaped as one teacher per subject — or a client calling
+    `.first()` — hides a real person from the parent asking who teaches her daughter.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    teachers = _classroom(client, registrar, handle, "S001", FIRST_TERM).json()["teachers"]
+
+    science = [t["full_name_ar"] for t in teachers if t["subject_code"] == "SCI"]
+    assert sorted(science) == ["أ. منى", "أ. هدى"]
+
+
+def test_another_room_s_teacher_does_not_leak_into_this_one(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    """The read is keyed on the room, so 3B's maths teacher is not 3A's.
+
+    Both rooms are on the same rung and teach the same subject, which is exactly the shape
+    a query that filtered by rung instead of by room would answer identically — and wrongly.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    teachers = _classroom(client, registrar, handle, "S001", FIRST_TERM).json()["teachers"]
+
+    assert "أ. خالد" not in {t["full_name_ar"] for t in teachers}
+
+
+def test_a_teacher_who_has_left_is_not_offered_to_a_parent(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    """Worse than reporting nobody: a parent would go and ask for them by name."""
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    teachers = _classroom(client, registrar, handle, "S001", FIRST_TERM).json()["teachers"]
+
+    assert "أ. فريد" not in {t["full_name_ar"] for t in teachers}
+
+
+def test_no_staff_contact_details_reach_a_parent(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    """The response model is the privacy boundary, and this is what asserts it.
+
+    Every teacher in the fixture was created WITH an email and a phone, so their absence
+    here is a property of the projection rather than of the fixture. A parent needs to know
+    who teaches their child, not how to reach a member of staff directly — and the internal
+    staff number is no more a parent's business than a database id.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    body = _classroom(client, registrar, handle, "S001", FIRST_TERM).json()
+
+    leaked = {"email", "phone", "staff_number", "username", "user_id"}
+    for teacher in body["teachers"]:
+        assert leaked.isdisjoint(teacher.keys()), teacher
+    # The values too, not only the keys: a field renamed on the way out would pass the
+    # check above while still carrying the number.
+    rendered = str(body)
+    assert "staff@example.test" not in rendered
+    assert "+201000000000" not in rendered
+
+
+def test_a_child_with_no_placement_has_no_room_rather_than_an_empty_one(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    """`class_code: null` is a fact about the child; empty lists beside a class are not.
+
+    S002 is withdrawn before Term 2 opens, so no placement covers it. That is not a missing
+    record — she had left — and it must stay distinguishable from a room whose subjects or
+    staffing nobody has entered.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.enrolments.close_open_enrolment(
+            StudentNumber("S002"), ends_on=date(2025, 9, 2)
+        )
+        uow.commit()
+
+    gone = _classroom(client, registrar, handle, "S002", SECOND_TERM)
+    assert gone.status_code == 200, gone.text
+    body = gone.json()
+    assert body["class_code"] is None
+    assert body["class_name_ar"] is None
+    assert body["academic_year_code"] is None
+    assert body["subjects"] == []
+    assert body["teachers"] == []
+
+
+def test_the_room_is_the_one_she_sat_in_for_that_term(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    """Invariant 2 again, on the route that answers "which class is my child in".
+
+    A parent asking in June about Term 1 is asking which room those marks were earned in.
+    Reading her current placement would rename her autumn.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.enrolments.close_open_enrolment(
+            StudentNumber("S001"), ends_on=date(2025, 12, 31)
+        )
+        uow.enrolments.upsert_many(
+            [
+                ClassEnrolment(
+                    student_number="S001",
+                    academic_year_code=YEAR_CODE,
+                    class_code="3B",
+                    starts_on=date(2026, 1, 1),
+                )
+            ]
+        )
+        uow.commit()
+
+    autumn = _classroom(client, registrar, handle, "S001", FIRST_TERM).json()
+    spring = _classroom(client, registrar, handle, "S001", SECOND_TERM).json()
+
+    assert autumn["class_code"] == "3A"
+    assert autumn["class_name_ar"] == "الثالث أ"
+    assert spring["class_code"] == "3B"
+    # And the staffing follows the room, so the answer changes with it.
+    assert "أ. خالد" in {t["full_name_ar"] for t in spring["teachers"]}
+    assert "أ. سامي" not in {t["full_name_ar"] for t in spring["teachers"]}
+
+
+def test_a_guardian_cannot_read_the_classroom_of_a_child_who_is_not_hers(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    refused = _classroom(client, registrar, brother, "S002", FIRST_TERM)
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "student_number"
+
+
+def test_a_restricted_guardian_is_refused_her_own_linked_child_s_classroom(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    """The court order has to hold on the fourth route as well as the first three."""
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    refused = _classroom(client, registrar, brother, "S001", FIRST_TERM)
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "student_number"
+
+
+def test_an_unknown_child_and_someone_else_s_child_look_identical_on_the_classroom(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    _upload(client, registrar)
+    brother = _handle_for(client, registrar, "+201005554444")
+
+    not_hers = _classroom(client, registrar, brother, "S002", FIRST_TERM).json()["detail"]
+    no_such = _classroom(client, registrar, brother, "S999", FIRST_TERM).json()["detail"]
+
+    assert not_hers["code"] == no_such["code"]
+    assert not_hers["message"] == no_such["message"]
+
+
+def test_an_unknown_term_is_refused_on_the_classroom_too(
+    client: TestClient, registrar: dict[str, str], classroom: None
+) -> None:
+    """A typo must not render as a child with no class, no subjects and no teachers."""
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    refused = _classroom(client, registrar, handle, "S001", "not-a-term")
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "term_code"
+
+
+def test_an_unknown_term_is_refused_rather_than_answered_empty(
+    client: TestClient, registrar: dict[str, str], week: None
+) -> None:
+    """A typo must not render as a week with no lessons in it.
+
+    "There is no such term" and "your daughter has nothing timetabled" are different
+    answers, and only one of them is something the caller can fix.
+    """
+    _upload(client, registrar)
+    handle = _handle_for(client, registrar, "+201001234567")
+
+    refused = _timetable(client, registrar, handle, "S001", "not-a-term")
+    assert refused.status_code == 404
+    assert refused.json()["detail"]["field"] == "term_code"

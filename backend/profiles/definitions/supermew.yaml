@@ -18,7 +18,9 @@ identity:
   display_name: "SuperAgent"
   api_title: "SuperAgent API"
   description: "Self-reflective RAG knowledge-base assistant"
-  persona: "You are a helpful knowledge-base assistant."
+  # persona -> prompts/templates/packs/supermew/persona.j2. Prompt text is versioned as a
+  # template so the tests that render every prompt can see it; setting `persona:` here
+  # still overrides the pack.
   redis_key_prefix: "superagent"
   langsmith_project: "superagent-rag"
 

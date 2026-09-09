@@ -88,6 +88,28 @@ class RequestSignals:
     # is "named". Never resolved here — matching it to a real child is done against
     # the school's own roster, by something that has one.
     child_name: str = ""
+    # What answering would have to READ: the child's own record, the school's material,
+    # or both. See CHILD_QUESTION_KINDS.
+    #
+    # Defaults to `both`, and that default is the whole safety argument for the tool
+    # narrowing it drives: a classifier that did not run, abstained, returned a value
+    # outside the closed set, or hit its rate limit leaves this at `both`, which binds
+    # every tool and is exactly the behaviour that existed before this field. Narrowing
+    # is an optimisation, so it may only ever happen on a positive answer.
+    child_question_kind: str = "both"
+
+    # The tools this message needs, named by the classifier from the profile's own
+    # catalogue (`agent.tool_selection`). This is `child_question_kind` generalised: that
+    # field knows about exactly two tools and answers in an enum, which stops being
+    # expressible the moment a deployment binds ten.
+    #
+    # Empty is the abstention, and it means the same as it does above — bind everything —
+    # so a deployment that ships no catalogue, a classifier that failed, and a model that
+    # named tools nobody bound all land on today's behaviour. Names outside the profile's
+    # own list are dropped rather than trusted: a plan naming an unbound tool is a
+    # `build_tools` startup error, and a hallucinated tool name must not be able to reach
+    # it.
+    needed_tools: List[str] = field(default_factory=list)
 
     # A closed-set social utterance and nothing else: "thanks", "شكرا".
     is_social: bool = False
@@ -128,6 +150,8 @@ class RequestSignals:
             "request_is_social": self.is_social,
             "request_about_child": self.about_child,
             "request_child_reference": self.child_reference,
+            "request_child_question_kind": self.child_question_kind,
+            "request_needed_tools": list(self.needed_tools),
             "request_personal_data": list(self.personal_data),
             "request_candidate_sections": list(self.candidate_sections),
             "request_scope_options": list(self.scope_options),
@@ -322,6 +346,17 @@ def _last_user_text(history: Sequence[Any]) -> str:
 #: downstream — a free-text reference would be a string nobody could branch on.
 CHILD_REFERENCES = ("none", "son", "daughter", "child", "plural", "named", "context")
 
+#: What answering a child question actually needs to READ. Closed for the same reason,
+#: and `both` is first because it is the value everything degrades to.
+#:
+#: `about_child` cannot stand in for this, and the prompt says why in as many words: "the
+#: question is about a general school matter but asked FOR that child specifically ('what
+#: are the fees for my son?' — the fee schedule is general, the year group is his)". That
+#: is `about_child` true and a KNOWLEDGE question, and «مصاريف ابني» is one of the
+#: commonest messages this deployment gets. A tool binding that read `about_child` as
+#: "records" would answer it from the wrong place every time.
+CHILD_QUESTION_KINDS = ("both", "records", "school_matter")
+
 
 class EnvelopeDetector:
     """The classification node: one small model call, three decisions.
@@ -370,6 +405,7 @@ class EnvelopeDetector:
             return None
 
         signals.personal_data = [str(item) for item in (result.get("personal_data") or [])]
+        self._read_needed_tools(result, signals, ctx.config)
         # Deliberately NOT text_to_score. With no resolver that falls back to gluing the
         # previous user turn onto this one — the module's own "blunt instrument" — and a
         # name from the turn before is exactly the carried-over guess the check exists to
@@ -407,6 +443,39 @@ class EnvelopeDetector:
             signals.scope = Scope.IN_DOMAIN
             signals.reasons.append("overridden: the message is about the caller's child")
         return signals
+
+    @staticmethod
+    def _read_needed_tools(result: dict, signals: RequestSignals, config) -> None:
+        """Take the classifier's tool selection, keeping only names the profile binds.
+
+        Filtered against `agent.tool_selection` rather than against the bound tool list,
+        and that is not the same set by accident: the catalogue is what the classifier
+        was SHOWN, so a name outside it was never on offer and is a hallucination however
+        plausible it looks. Checking against what the node could legitimately have said
+        is a tighter guard than checking against what the profile happens to bind.
+
+        Order is the catalogue's, not the model's. Two plans naming the same tools must
+        be the same plan, or an identical question produces a different `exposed_tools`
+        on every turn and nothing downstream can be compared or cached.
+
+        Silent on every failure — no catalogue, a non-list, an empty selection, names
+        nobody recognises — because every one of them means the same thing here: this
+        node has nothing to say about tools, so the planner falls back to what it did
+        before. Selection is an optimisation, and an optimisation may never be the reason
+        a capability goes unbound.
+        """
+        catalogue = dict(getattr(config, "tool_selection", None) or {})
+        if not catalogue:
+            return
+        named = result.get("needed_tools")
+        if not isinstance(named, (list, tuple)):
+            return
+        wanted = {str(item).strip() for item in named}
+        signals.needed_tools = [name for name in catalogue if name in wanted]
+        if signals.needed_tools:
+            signals.reasons.append(
+                f"classifier: needs {', '.join(signals.needed_tools)}"
+            )
 
     @staticmethod
     def _read_child(result: dict, signals: RequestSignals, *, classified_text: str = "") -> None:
@@ -456,8 +525,18 @@ class EnvelopeDetector:
         signals.child_name = name
         if signals.child_reference == "named" and not name:
             signals.child_reference = "context"
+
+        # Distrusted exactly like the reference above it, and degrading to the same
+        # place: anything outside the closed set becomes `both`, which binds every tool.
+        # A wrong value here does not select a child — it selects a TOOL — so the cost of
+        # being wrong is an answer looked up in the wrong place, and the cost of
+        # abstaining is one tool schema nobody used.
+        kind = str(result.get("child_question_kind") or "").strip().lower()
+        signals.child_question_kind = kind if kind in CHILD_QUESTION_KINDS else "both"
+
         signals.reasons.append(
-            f"classifier: about the caller's child ({signals.child_reference})"
+            f"classifier: about the caller's child ({signals.child_reference}, "
+            f"needs {signals.child_question_kind})"
         )
 
 
@@ -507,6 +586,7 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
     profile = get_profile()
     personal_fields = list(getattr(config, "personal_data_fields", None) or [])
     child_context = bool(getattr(config, "child_context_enabled", False))
+    tool_catalogue = dict(getattr(config, "tool_selection", None) or {})
 
     class RequestEnvelope(BaseModel):
         """Every field is declared and every field is required.
@@ -526,6 +606,18 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
             default_factory=list,
             description="Field names from the supplied list that the message discloses",
         )
+        # Declared unconditionally, like every other field here, because the schema is
+        # what a strict provider validates against and a schema that changes shape per
+        # deployment is a schema that gets cached wrong. It is only ever POPULATED on a
+        # deployment that ships a catalogue: with none, the prompt asks for nothing, the
+        # model returns the empty list, and `_read_needed_tools` returns immediately.
+        needed_tools: _List[str] = Field(
+            default_factory=list,
+            description=(
+                "Names from the supplied tool list that answering this message needs; "
+                "empty when no list was supplied or none of them apply"
+            ),
+        )
         about_child: bool = Field(
             default=False,
             description=(
@@ -540,6 +632,14 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
             default="",
             description="A name the message actually contained; empty otherwise",
         )
+        child_question_kind: _Literal["both", "records", "school_matter"] = Field(
+            default="both",
+            description=(
+                "What answering needs to read: 'records' for the child's own marks, "
+                "attendance or report; 'school_matter' for the school's own material "
+                "asked about this child; 'both' when it needs each, or when unsure"
+            ),
+        )
 
     prompt = render(
         "chat/request_envelope.j2",
@@ -549,6 +649,7 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
         history=_history_text(history, config),
         personal_fields=personal_fields,
         child_context=child_context,
+        tool_catalogue=tool_catalogue,
     )
     model = init_chat_model(
         model=getattr(config, "scope_summary_model", "") or os.getenv("FAST_MODEL"),

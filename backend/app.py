@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import threading
@@ -51,6 +52,25 @@ def _cors_origins() -> list[str]:
 
 
 def create_app() -> FastAPI:
+    # Give this application's own loggers somewhere to go.
+    #
+    # uvicorn configures `uvicorn.*` and leaves the root logger bare, so every
+    # `logger.info` in `backend/` is discarded by default — which silently cost the boot
+    # diagnostics their whole purpose. The provider line, the vision-credentials line and
+    # the schema-drift report all fired correctly and reached nobody, and "which provider
+    # is this deployment actually using" then has to be answered by reading `.env` and
+    # reasoning about precedence, which is exactly the thing that was got wrong in the
+    # first place.
+    #
+    # Guarded, so a process that has already set up logging — the CLI entry points in
+    # `backend/db/migrate.py` and `backend/assets/backfill.py`, a test harness, or a
+    # deployment with its own dictConfig — keeps its own configuration untouched.
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=env_value("LOG_LEVEL") or "INFO",
+            format="%(levelname)s %(name)s: %(message)s",
+        )
+
     profile = get_profile()
 
     # LangSmith reads LANGSMITH_PROJECT from the environment itself, so the profile

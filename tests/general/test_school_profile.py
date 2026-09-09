@@ -24,7 +24,7 @@ from backend.profiles.registry import (
 )
 from backend.tools import TOOL_BUILDERS, build_tools
 
-RECORDS_TOOL = "get_student_records"
+RECORDS_TOOL = "get_student_grades"
 
 
 class ProfileTestCase(unittest.TestCase):
@@ -48,6 +48,48 @@ class SchoolProfileTests(ProfileTestCase):
 
     def test_it_binds_the_records_tool(self):
         self.assertIn(RECORDS_TOOL, load_profile("school").agent.tools)
+
+    def test_social_replies_do_not_depend_on_a_model_call(self):
+        self.assertEqual("static", load_profile("school").agent.social_reply_mode)
+
+    def test_every_tool_it_binds_can_be_pre_dispatched(self):
+        """The point of folding the subject variants into their parents.
+
+        `get_subject_grades` and `get_subject_teacher` could never appear here: their
+        `subject` came from the message, nothing on the plan holds one, and
+        `PLAN_PLACEHOLDERS` is closed. So «هي جابت كام في العربي» and «مين مدرس
+        الرياضيات» — two of the commonest questions asked — were the only records
+        questions still paying a model round-trip to compose their own call, and the
+        only ones reaching the provider under `tool_choice`.
+
+        An unplannable tool is a legitimate choice; this profile just no longer has one,
+        and that is worth failing on if a future tool quietly reintroduces it.
+        """
+        agent = load_profile("school").agent
+        self.assertEqual(set(agent.tools), set(agent.planned_tool_arguments))
+
+    def test_a_subject_is_answered_by_the_same_tool_as_the_whole_record(self):
+        """The classifier is asked to tell records apart, never to tell a filter apart.
+
+        A subject-bearing question and a subject-free one differ by an argument, so they
+        must not be two entries here — near-identical descriptions are what the
+        classifier confuses, and it was measured picking between them wrongly.
+        """
+        selection = load_profile("school").agent.tool_selection
+        self.assertNotIn("get_subject_grades", selection)
+        self.assertNotIn("get_subject_teacher", selection)
+        for name in ("get_student_grades", "get_student_teachers"):
+            self.assertIn(name, selection)
+
+    def test_the_thank_you_sentences_that_reached_the_agent_are_listed(self):
+        """Regression, from a production transcript. «Thanks for your help» was not on
+        the list, so it was planned as a question, given a required tool it had no
+        reason to call, and answered with the provider's protocol error."""
+        from backend.chat.signals import _social_key
+
+        phrases = {_social_key(p) for p in load_profile("school").agent.social_phrases}
+        for observed in ("Thanks for your help", "شكرا على مساعدتك", "متشكر جدا"):
+            self.assertIn(_social_key(observed), phrases, observed)
 
     def test_every_tool_it_names_is_registered(self):
         """A typo here is a failed deployment, not a failing request.
@@ -130,7 +172,7 @@ class BindingGrantsNothingTests(ProfileTestCase):
 
     def test_a_non_parent_session_is_refused_even_with_the_tool_bound(self):
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        result = self._records_tool(ctx).invoke({"record_type": "grades"})
+        result = self._records_tool(ctx).invoke({})
 
         self.assertIn("NOT_A_PARENT_SESSION", result)
 
@@ -141,10 +183,113 @@ class BindingGrantsNothingTests(ProfileTestCase):
             session_id="s",
             caller=CallerIdentity(user_id="u", guardian_id="G-1", guardian_token=""),
         )
-        result = self._records_tool(ctx).invoke({"record_type": "grades"})
+        result = self._records_tool(ctx).invoke({})
 
         self.assertIn("NOT_A_PARENT_SESSION", result)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeterministicToolSelectionTests(ProfileTestCase):
+    """The switches that make the planner pick the tool, on the deployment that measured
+    the need for it. `test_planner_tool_selection.py` covers the policy; these cover the
+    opt-in, because a feature nobody switched on is a feature that does not run.
+    """
+
+    def test_it_lets_the_planner_bind_one_tool(self):
+        self.assertTrue(load_profile("school").agent.narrow_tools_to_the_turn)
+
+    def test_no_other_shipped_profile_does(self):
+        """Narrowing is only sound where a deployment has a child roster and a classifier
+        that separates a child's record from a school matter asked about that child."""
+        for name in available_profiles():
+            if name == "school":
+                continue
+            with self.subTest(profile=name):
+                self.assertFalse(load_profile(name).agent.narrow_tools_to_the_turn)
+
+    def test_it_watches_for_an_answer_that_denies_the_record_it_read(self):
+        agent = load_profile("school").agent
+        self.assertEqual("observe", agent.records_denial_mode)
+        self.assertTrue(agent.records_denial_phrases)
+
+    def test_it_does_not_yet_rewrite_an_answer_on_that_verdict(self):
+        """`observe` on purpose: the half of the check that reads the ANSWER is a phrase
+        list, and enforcing on a phrase list before measuring it against this corpus is
+        how a correct reply gets replaced by an error message."""
+        self.assertNotEqual("enforce", load_profile("school").agent.records_denial_mode)
+
+    def test_the_phrases_cover_both_languages_it_answers_in(self):
+        phrases = load_profile("school").agent.records_denial_phrases
+        self.assertTrue(any(any("\u0600" <= ch <= "\u06ff" for ch in p) for p in phrases))
+        self.assertTrue(any(p.isascii() for p in phrases))
+
+    def test_the_budgets_still_fit_inside_the_step_limit(self):
+        """`narrow_tools_to_the_turn` changes which tools are BOUND, and the validator
+        that keeps `recursion_limit` able to spend `tool_call_budgets` reads the full
+        list. Narrowing can only shorten it, so the check stays satisfied — pinned here
+        because the two settings are otherwise unrelated and drift silently."""
+        agent = load_profile("school").agent
+        rounds = sum(agent.budget_for_tool(name) for name in agent.tools) + 1
+        # Read off the class rather than spelled out, so adding a middleware to
+        # `create_agent_for_request` cannot leave this test asserting the old node count
+        # while real turns die at the limit.
+        self.assertGreaterEqual(
+            agent.recursion_limit, rounds * type(agent)._STEPS_PER_LOOP
+        )
+
+    def test_it_lets_the_planner_dispatch_a_set_of_tools(self):
+        """The opt-in for the other half: narrowing handles a one-tool question, this
+        handles the `both` question narrowing deliberately leaves alone."""
+        self.assertTrue(load_profile("school").agent.parallel_tool_calls)
+
+    def test_no_other_shipped_profile_dispatches(self):
+        for name in available_profiles():
+            if name == "school":
+                continue
+            with self.subTest(profile=name):
+                self.assertFalse(load_profile(name).agent.parallel_tool_calls)
+
+    def test_every_tool_it_plans_arguments_for_is_a_tool_it_binds(self):
+        """A planned call for an unbound tool reaches the graph as a call for a tool that
+        does not exist, which the provider rejects for the whole turn."""
+        agent = load_profile("school").agent
+        for name in agent.planned_tool_arguments:
+            with self.subTest(tool=name):
+                self.assertIn(name, agent.tools)
+
+    def test_every_placeholder_it_uses_is_one_the_planner_can_resolve(self):
+        """An unknown `$name` silently drops its argument, so a typo here would degrade a
+        planned records call to a blank one and nothing would say so at startup."""
+        from backend.chat.turn_policy import PLAN_PLACEHOLDERS
+
+        agent = load_profile("school").agent
+        for tool_name, args in agent.planned_tool_arguments.items():
+            for key, value in args.items():
+                if str(value).startswith("$"):
+                    with self.subTest(tool=tool_name, argument=key):
+                        self.assertIn(value, PLAN_PLACEHOLDERS)
+
+    def test_it_describes_every_tool_it_binds_to_the_classifier(self):
+        """A tool missing from the catalogue can never be selected, so it would be
+        unreachable on any turn the classifier does name tools for."""
+        agent = load_profile("school").agent
+        self.assertEqual(sorted(agent.tool_selection), sorted(agent.tools))
+
+    def test_it_asks_which_child_in_the_parents_own_language(self):
+        """Emitted with no model call, so it cannot answer an Arabic question in English
+        the way a model would — see `LocalizedText`."""
+        copy = load_profile("school").user_copy.which_child
+        self.assertTrue(copy.ar)
+        self.assertTrue(copy.en)
+
+    def test_the_question_does_not_list_the_children_itself(self):
+        """The names travel as selectable options. Writing them into the sentence would
+        make a deployment's wording depend on how a list of children is rendered, and
+        would ask a parent to re-type a name the school already knows how to spell."""
+        copy = load_profile("school").user_copy.which_child
+        for text in (copy.ar, copy.en):
+            self.assertNotIn("/", text)
+            self.assertNotIn("{", text)

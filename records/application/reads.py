@@ -1,4 +1,4 @@
-"""The four reads this facade serves, with no FastAPI in them.
+"""The six reads this facade serves, with no FastAPI in them.
 
 Each is the same three steps in the same order, and the order is a security property
 rather than a style:
@@ -17,6 +17,16 @@ reading untrusted parent text, which is exactly why the ordering is not a formal
 
 Lifted out of `records/routes.py`, where the same three steps were written out four times
 with the differences buried in the middle.
+
+`timetable` and `classroom` are the two that read something other than a fact about the
+child: a week, a subject board and a staff list all belong to the ROOM she is placed in.
+Both still take the same three steps in the same order, and both still name only a student
+— the room is resolved by the system of record, which owns the placement.
+
+`classroom` is also the one read serving more than one route. Three parent-facing URLs
+project it: which class she is in, which subjects she studies, who teaches her. They are
+separate questions and one read, because all three describe the same room and asking three
+times could be told about three different ones. See `records/ports/classroom.py`.
 """
 from __future__ import annotations
 
@@ -26,13 +36,22 @@ from datetime import datetime, timezone
 
 from records.application.access import AccessService
 from records.application.assembly import AttendanceAssembler, GradeAssembler
-from records.domain.errors import CalendarUnavailable, StudentNotFound, UnknownTerm
+from records.domain.errors import (
+    CalendarUnavailable,
+    NotConfigured,
+    StudentNotFound,
+    UnknownTerm,
+)
 from records.domain.grading import GradingPolicy
 from records.domain.marks import SubjectAttendance
 from records.domain.people import PermittedStudent
 from records.domain.terms import SchoolTerm
+from records.domain.classroom import StudentClassroom
+from records.domain.timetable import StudentTimetable
 from records.ports.calendar import SchoolCalendar
+from records.ports.classroom import StudentClassrooms
 from records.ports.lms import LmsAdapter
+from records.ports.timetable import StudentTimetables
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +82,29 @@ class AttendanceResult:
     as_of: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class TimetableResult:
+    student: PermittedStudent
+    term: SchoolTerm
+    timetable: StudentTimetable
+    as_of: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ClassroomResult:
+    """One read serving three parent-facing routes.
+
+    The routes project it — one takes the class name, one the subjects, one the teachers —
+    because all three are answers about the same room and asking three times could be told
+    about three different rooms. See `records/ports/classroom.py`.
+    """
+
+    student: PermittedStudent
+    term: SchoolTerm
+    classroom: StudentClassroom
+    as_of: datetime
+
+
 class RecordsService:
     """Every parent-facing read, over the ports the deployment wired in.
 
@@ -78,12 +120,21 @@ class RecordsService:
         calendar: SchoolCalendar,
         lms: LmsAdapter,
         policy: GradingPolicy,
+        timetables: StudentTimetables | None = None,
+        classrooms: StudentClassrooms | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         self._access = access
         self._calendar = calendar
         self._lms = lms
         self._policy = policy
+        # Optional so a caller that only reads marks — a test, a reconciliation job — need
+        # not wire a port it will not ask. `timetable()` refuses rather than inventing an
+        # empty week when one was never supplied; see there for why that is not a 404.
+        self._timetables = timetables
+        # Optional for the same reason `timetables` is: a caller that only reads marks need
+        # not wire a port it will not ask.
+        self._classrooms = classrooms
         self._clock = clock
         # One assembler each, not one per request. They are stateless — `assemble` is a
         # pure function of its argument and the policy — so rebuilding them per call was
@@ -221,6 +272,89 @@ class RecordsService:
             as_of=self._clock(),
         )
 
+    def timetable(
+        self, *, guardian_id: str, student_id: str, term_code: str | None,
+        school_code: str | None = None,
+    ) -> TimetableResult:
+        """One child's week for a term — the class she sits in, and what it does.
+
+        The same three steps in the same order as every read above, and the order is the
+        same security property: the system of record is never asked about a child the link
+        check excluded.
+
+        **No class is resolved here.** The port takes a student and a term because a
+        timetable belongs to a room, the room is a time-bounded placement, and the system of
+        record owns it — see `records/ports/timetable.py`. This service holds no class code
+        at any point, which is what keeps a stale one from ever being asked about.
+        """
+        student = self._resolve_student(guardian_id, student_id, school_code)
+        term = self.resolve_term(term_code)
+
+        if self._timetables is None:
+            # A deployment that wired no timetable port. `NotConfigured` rather than an
+            # empty week, because "this deployment cannot answer" is the operator's problem
+            # and an empty week would be read by a parent as "she has no lessons".
+            raise NotConfigured(
+                "This deployment has no timetable backend configured."
+            )
+
+        timetable = self._timetables.get_timetable(
+            student_ref=student.external_id,
+            term=term.code,
+            # The parent this read is on behalf of, carried to the system of record so it
+            # makes the same decision independently. Taken from the verified token, never
+            # from anything the model or the caller supplied.
+            guardian_ref=guardian_id,
+        )
+
+        return TimetableResult(
+            student=student, term=term, timetable=timetable, as_of=self._clock()
+        )
+
+    def classroom(
+        self, *, guardian_id: str, student_id: str, term_code: str | None,
+        school_code: str | None = None,
+    ) -> ClassroomResult:
+        """One child's room, its subject board and its staff — one read, three routes.
+
+        The same three steps in the same order as every read above, and the same security
+        property: the system of record is never asked about a child the link check excluded.
+
+        **Three parent-facing routes share this.** `/class`, `/subjects` and `/teachers`
+        each project a slice of it. They are separate URLs because they answer separate
+        questions, but there is one read behind them because all three describe the same
+        room — see `records/ports/classroom.py` on why splitting the read would let a
+        placement edited mid-flight answer with one room's subjects and another's staff.
+
+        No class is resolved here. The port takes a student and a term because a room is a
+        time-bounded placement and the system of record owns it; this service holds no
+        class code at any point, which is what keeps a stale one from ever being asked
+        about.
+        """
+        student = self._resolve_student(guardian_id, student_id, school_code)
+        term = self.resolve_term(term_code)
+
+        if self._classrooms is None:
+            # A deployment that wired no classroom port. `NotConfigured` rather than an
+            # empty room, because "this deployment cannot answer" is the operator's problem
+            # and an empty room reads to a parent as "she has no teachers".
+            raise NotConfigured(
+                "This deployment has no classroom backend configured."
+            )
+
+        classroom = self._classrooms.get_classroom(
+            student_ref=student.external_id,
+            term=term.code,
+            # The parent this read is on behalf of, carried to the system of record so it
+            # makes the same decision independently. Taken from the verified token, never
+            # from anything the model or the caller supplied.
+            guardian_ref=guardian_id,
+        )
+
+        return ClassroomResult(
+            student=student, term=term, classroom=classroom, as_of=self._clock()
+        )
+
     # -- internals ----------------------------------------------------------
 
     def _resolve_student(
@@ -236,7 +370,9 @@ class RecordsService:
 
 __all__ = [
     "AttendanceResult",
+    "ClassroomResult",
     "CourseDetailResult",
     "GradesResult",
     "RecordsService",
+    "TimetableResult",
 ]

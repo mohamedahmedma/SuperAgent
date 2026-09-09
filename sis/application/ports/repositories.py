@@ -151,6 +151,33 @@ class TeacherRecord:
     assignments: Sequence[TeacherTeachingAssignment]
 
 
+@dataclass(frozen=True, slots=True)
+class SectionTeacher:
+    """One teacher standing in one room, and the subject they teach there.
+
+    The read that answers "who teaches this class", from the other end of
+    `teacher_class_sections` than everything else in this port: every other teacher read
+    starts from a teacher and asks what they teach, and this one starts from the room.
+
+    **Deliberately not a `TeacherRecord`.** That shape carries an email, a phone number and
+    a username, because a registrar editing staff needs all three. This read exists to be
+    relayed to a parent, so it carries a name and a subject and there is nothing else on it
+    to leak — the projection is the privacy boundary, not a filter somebody has to remember
+    to apply at the far end.
+
+    One (class, subject) may genuinely have more than one teacher. The table is unique on
+    `(teacher, class, subject)`, so two teachers of one subject in one room violates
+    nothing, and only one of the two write paths checks for it. Callers must handle a list.
+    """
+
+    staff_number: str
+    full_name_ar: str
+    full_name_en: str
+    subject_code: str
+    subject_name_ar: str
+    subject_name_en: str
+
+
 class TeacherRepository(Protocol):
     """Teaching staff, their optional login, and their teaching scope."""
 
@@ -192,6 +219,39 @@ class TeacherRepository(Protocol):
         ],
         assigned_by: str,
     ) -> TeacherRecord: ...
+
+    def teaching_for_section(
+        self,
+        *,
+        academic_year_code: AcademicYearCode,
+        year_level_code: YearCode,
+        class_code: ClassCode,
+    ) -> Sequence[SectionTeacher]:
+        """Who teaches this room, and what each of them teaches in it.
+
+        The inverse of every other read here, and the one the class screen and a parent's
+        question both want. `ix_teacher_class_sections_class` exists for exactly this
+        query — its own comment says so.
+
+        **Keyed on three CODES, never a `class_section_id`.** The caller that matters is
+        the parent-facing path, which reaches a room through `resolve_section_for_term`,
+        and that returns a *domain* `ClassSection` with no database id on it. The year and
+        the rung are both required rather than padding: a class code is unique only within
+        `(academic year, year level)`, so `3A` on its own names a different room in every
+        year and possibly two in one.
+
+        Inactive teachers are excluded. A teacher who has left is not the answer to "who
+        teaches my daughter maths", and reporting them is worse than reporting nobody
+        because a parent would go and ask for them by name.
+
+        Ordered by the subject's own `display_order`, so a class reads in the order the
+        school lists its subjects rather than alphabetically in whichever language the
+        caller happens to render.
+
+        Empty is an ordinary answer: a room whose staffing nobody has entered yet. It is
+        NOT the same as an unknown class, which the caller has already established exists
+        by resolving a placement into it.
+        """
 
     def list_tracks(self, school_code: SchoolCode) -> Sequence[AcademicTrack]:
         """The school's active academic tracks, in display order."""

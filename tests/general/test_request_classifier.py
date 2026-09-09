@@ -210,6 +210,7 @@ class PromptShapeTests(unittest.TestCase):
             history="User: درجات ابني علي\nAssistant: ...",
             personal_fields=profile.agent.personal_data_fields,
             child_context=True,
+            tool_catalogue=profile.agent.tool_selection,
         )
         context.update(overrides)
         return render("chat/request_envelope.j2", **context)
@@ -234,14 +235,78 @@ class PromptShapeTests(unittest.TestCase):
         here is how an assistant starts refusing valid questions."""
         self.assertIn("term dates", self._render().lower())
 
-    def test_both_languages_are_shown_in_the_examples(self):
+    def test_both_languages_are_shown_in_the_reference_glosses(self):
+        """The `child_reference` enum lists the possessive forms it separates. Those are
+        vocabulary, not examples: a bare possessive is not a message anyone can echo."""
         rendered = self._render()
         self.assertIn("ابني", rendered)
         self.assertIn("my son", rendered)
 
-    def test_the_enclitic_possessive_case_is_taught_explicitly(self):
-        """The form requirement 4 takes in Arabic, and the one no word list can reach."""
-        self.assertIn("طيب وجدوله؟", self._render())
+    def test_the_enclitic_possessive_case_is_taught_as_a_rule(self):
+        """The form decision 3 takes in Arabic, and the one no word list can reach. Stated
+        as a property of the language rather than shown as a specimen message."""
+        rendered = self._render(question="x", history="")
+        self.assertIn("possessive attaches to the end of the word", rendered)
+
+    #: Names that have appeared in this repository's prompts, fixtures and bug reports.
+    #: None of them may appear in a prompt: a specimen message holding a real name is a
+    #: name this node can return for a message that contains none, which is the failure
+    #: `_names_the_child` exists to catch.
+    REAL_NAMES = ("ليلى", "علي", "عمر", "فاطمة", "Layla", "Ali", "Omar", "Fatma")
+
+    def test_every_example_is_marked_as_one(self):
+        """A specimen message is indistinguishable in kind from the message under THE
+        MESSAGE unless it is visibly marked, and a small model reads the nearest thing
+        that looks like input. Every example line carries the `ex` prefix and sits under
+        a heading that says what it is."""
+        rendered = self._render(question="x", history="")
+        specimens = [
+            line for line in rendered.splitlines()
+            if "->" in line and '"' in line.split("->")[0]
+        ]
+        self.assertTrue(specimens, "the examples have gone missing entirely")
+        unmarked = [line for line in specimens if not line.lstrip().startswith("ex ")]
+        self.assertEqual([], unmarked)
+        self.assertIn("Examples (similar cases)", rendered)
+
+    def test_no_example_carries_a_real_name(self):
+        """Placeholders, never values. `X` cannot be echoed as somebody's child."""
+        rendered = self._render(question="x", history="")
+        found = [name for name in self.REAL_NAMES if name in rendered]
+        self.assertEqual([], found)
+
+    def test_no_example_carries_a_figure(self):
+        """The other half of the same rule, and the half that already reached a parent:
+        an example carrying a real grade and a real fee was reproduced verbatim as the
+        answer and as the search query, on an account with no child on file."""
+        rendered = self._render(question="x", history="")
+        offenders = [
+            line for line in rendered.splitlines()
+            if line.lstrip().startswith("ex ") and any(ch.isdigit() for ch in line)
+        ]
+        self.assertEqual([], offenders)
+
+    def test_the_placeholders_are_explained_before_they_are_used(self):
+        """`X` is only safe if the model knows not to return it."""
+        rendered = self._render(question="x", history="")
+        legend = rendered.index("stands where a real message would carry a child's name")
+        first_use = min(
+            line_start for line_start in
+            [rendered.index(line) for line in rendered.splitlines()
+             if line.lstrip().startswith("ex ") and (" X" in line or "X " in line)]
+        )
+        self.assertLess(legend, first_use)
+        self.assertIn("Never put the letter `X`", rendered)
+
+    def test_the_tool_catalogue_states_subject_matter_and_nothing_else(self):
+        """Each line is read by a node that must not act on the message. A line telling
+        it to CALL something is an instruction aimed at the wrong reader."""
+        rendered = self._render()
+        for line in load_profile("school").agent.tool_selection.values():
+            with self.subTest(line=line[:40]):
+                self.assertNotIn("call ", line.lower())
+                self.assertNotIn("use this", line.lower())
+        self.assertIn("fees and", rendered)
 
     def test_a_persona_containing_jinja_is_data_not_template(self):
         rendered = self._render(persona="We are {{ evil }} school")
@@ -255,3 +320,69 @@ class PromptShapeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhatAnsweringWouldNeedToRead(unittest.TestCase):
+    """The field that separates «درجات ليلى» from «مصاريف ابني».
+
+    Both are `about_child`. Only the first is answered from the child's own record, and
+    reading `about_child` as "records" sent the second to a tool holding no fee schedule.
+    It decides which TOOLS the agent is given, so every uncertain path lands on `both`.
+    """
+
+    def test_a_records_question_is_reported_as_records(self):
+        signals = _run({
+            "scope": "in_domain", "about_child": True,
+            "child_reference": "named", "child_name": "ليلى",
+            "child_question_kind": "records",
+        }, question="درجات ليلى كام؟")
+        self.assertEqual(signals.child_question_kind, "records")
+
+    def test_a_school_matter_asked_about_a_child_is_reported_as_such(self):
+        signals = _run({
+            "scope": "in_domain", "about_child": True,
+            "child_reference": "son", "child_question_kind": "school_matter",
+        })
+        self.assertEqual(signals.child_question_kind, "school_matter")
+
+    def test_a_kind_outside_the_closed_set_degrades_to_both(self):
+        for kind in ("everything", "eldest", "", None, 7):
+            with self.subTest(kind=kind):
+                signals = _run({
+                    "scope": "in_domain", "about_child": True,
+                    "child_reference": "son", "child_question_kind": kind,
+                })
+                self.assertEqual(signals.child_question_kind, "both")
+
+    def test_case_and_padding_are_tolerated(self):
+        """The same tolerance `child_reference` above it already grants, and for the same
+        reason: a provider that upper-cased an enum value said what it meant."""
+        for kind in ("RECORDS", " records ", "Records"):
+            with self.subTest(kind=kind):
+                signals = _run({
+                    "scope": "in_domain", "about_child": True,
+                    "child_reference": "son", "child_question_kind": kind,
+                })
+                self.assertEqual(signals.child_question_kind, "records")
+
+    def test_a_classifier_that_omits_the_field_leaves_it_at_both(self):
+        """Which is what a provider dropping an optional field produces, and what every
+        deployment on the previous schema produces."""
+        signals = _run({
+            "scope": "in_domain", "about_child": True, "child_reference": "son",
+        })
+        self.assertEqual(signals.child_question_kind, "both")
+
+    def test_a_turn_that_is_not_about_a_child_is_left_at_both(self):
+        signals = _run({
+            "scope": "in_domain", "about_child": False,
+            "child_question_kind": "records",
+        })
+        self.assertEqual(signals.child_question_kind, "both")
+
+    def test_the_trace_carries_it(self):
+        signals = _run({
+            "scope": "in_domain", "about_child": True,
+            "child_reference": "son", "child_question_kind": "school_matter",
+        })
+        self.assertEqual(signals.as_trace()["request_child_question_kind"], "school_matter")

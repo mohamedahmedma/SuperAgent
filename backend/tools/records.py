@@ -1,4 +1,41 @@
-"""The get_student_records tool — a thin relay to the records facade.
+"""The student-record tools — thin relays to the records facade.
+
+ONE TOOL PER CAPABILITY, and per question a parent actually asks: grades for the term, one
+subject's breakdown, attendance, the weekly timetable, which class the child is in, what
+they study, who teaches them, and who teaches them one named subject. That is the whole
+structure of this file.
+
+The last four sit over THREE facade endpoints rather than four, because three of those
+questions are answers about the same room and the facade resolves it once — see
+`records/ports/classroom.py`. The tool layer still gets one name per question, which is
+what the planner selects on.
+
+They were a single `get_student_records(record_type=…)` until the planner learned to
+dispatch a SET of tools rather than pick one, at which point the merged shape stopped
+being able to say what a turn needed. A planner that has decided a turn is about
+attendance cannot express that as a tool NAME while the tool is chosen by an argument —
+it has to guess the argument too, and a guessed `record_type` is a wrong lookup the
+model then pays a round trip to correct. Split, the same decision is `needed_tools`,
+which is already how every other tool is selected, and a question about marks AND
+absences dispatches both at once instead of serialising two calls through one name.
+
+Adding a capability is therefore: a builder here, a line in `TOOL_BUILDERS`, and a line
+in the profile's `tool_selection`. No argument enum, no branch in a dispatcher, nothing
+that has to know about the others. `get_student_timetable` is the one that proved it: it
+slotted in beside the other three when the facade grew the endpoint, and nothing in the
+planner, the narrowing or the dispatcher had to learn it existed.
+
+The last five are the ones whose subject is not the child. Marks and attendance are facts
+about the child; a week, a class name, a subject board and a staff list all belong to the
+ROOM they are placed in. That resolution stays behind the facade — this file sends a
+student number and no class code, because a placement changes mid-year and a class code
+cached up here would eventually name a room the child has left.
+
+The cost is honest and worth stating: eight tool schemas reach the model every turn
+instead of one, and each keeps its own call budget rather than sharing one ceiling. The
+audited-read ceiling is NOT one of those budgets — `_resolve_student` takes a slot from a
+single per-turn allowance shared by every tool here, so splitting a capability into two
+names never widens how much of a minor's record one turn may read.
 
 This file is deliberately the smallest thing that could work. All the judgement lives
 elsewhere: authorisation in the records facade, identity in the identity service,
@@ -104,9 +141,40 @@ def _match_student(
     A name the model supplied still wins over the pin, so "and how is Omar?" moves the
     conversation on even when the previous question was about his sister — that is
     route 1 of the shared resolver, reached by passing `reference="named"`.
+
+    ## The planner's answer wins over both
+
+    When the turn planner already resolved a child, that is who this reads, and the
+    `student_name` argument is not consulted at all. Both ends of that trade are
+    measured:
+
+    What is given up is nothing. The planner reaches its answer through the SAME
+    resolver, on the same roster, from a classifier that reports a name the message
+    actually contains — so "and how is Omar?" arrives here as a resolved Omar, by route
+    1, exactly as it did before. The one case the argument used to cover on its own is
+    the case the planner now covers first.
+
+    What is bought is the failure this closes. `student_name` is the model's
+    transcription of a name it read once, and «ليلى أحمد» came back mis-spelled often
+    enough to matter: the roster matcher then found nobody, the tool asked which child,
+    and a parent who had named their daughter in plain words was asked to name her
+    again. The planner's answer is a roster row — it cannot be mis-spelled, because it
+    was never re-typed.
+
+    This never widens what may be read. The id came from a roster fetched under this
+    turn's guardian token, and the facade re-checks that token on the read itself.
     """
     if not students:
         return None
+    planned = getattr(ctx, "planned_child_id", "")
+    if planned:
+        resolved = next((s for s in students if s.student_id == planned), None)
+        if resolved is not None:
+            return resolved
+        # On the roster the planner read and not on this one. A child withdrawn
+        # mid-conversation, or two reads either side of a change. Fall through and
+        # resolve from what is actually here rather than answering about nobody.
+        logger.info("the planner's child is not on the roster this call read")
     pin = getattr(ctx, "child", None)
     found = resolve_child(
         reference="named" if student_name else "context",
@@ -119,137 +187,503 @@ def _match_student(
     return next((s for s in students if s.student_id == found.student_id), None)
 
 
-def make_get_student_records(ctx: ChatRequestContext):
-    @tool("get_student_records")
-    def get_student_records(
-        record_type: str = "grades", student_name: str = "", subject: str = ""
-    ) -> str:
-        """Look up the signed-in parent's own child's school records.
+#: The tools this module builds, in the order a profile would naturally list them.
+#: Named here so that policy and profile code can talk about "the record tools" without
+#: importing this module, which reaches the request context and the HTTP layer.
+GRADES_TOOL = "get_student_grades"
+ATTENDANCE_TOOL = "get_student_attendance"
+TIMETABLE_TOOL = "get_student_timetable"
+CLASS_TOOL = "get_student_class"
+SUBJECTS_TOOL = "get_student_subjects"
+TEACHERS_TOOL = "get_student_teachers"
 
-        Use this for anything about a specific student's academic record: grades,
-        marks, results, how they are doing in a subject, absences, attendance, or a
-        report card. Do not use it for school policies, fees or general information —
-        those come from the knowledge base.
 
-        record_type: "grades" for all subjects, "subject" for one subject's
-            assignment-by-assignment breakdown, or "attendance".
-        student_name: the child's name, in Arabic or English. Leave empty if the
-            parent has only one child or has not said which.
-        subject: required when record_type is "subject" — the subject name as the
-            parent said it.
+def _reporter(ctx: ChatRequestContext, tool_name: str):
+    """Render one outcome, and tell the turn which one it was.
+
+    Every return from every tool below goes through this, so the string the model reads
+    and the string the turn records are produced from the same variable and cannot come
+    to disagree. The recorded half is what lets something downstream know that a record
+    WAS retrieved — see `ChatRequestContext.note_tool_outcome` for why a call count on
+    its own could not.
+
+    The OUTCOME names are shared across the three tools and unchanged by the split:
+    `service.RECORDS_RETRIEVED` reads outcomes rather than tool names, so the check that
+    catches an answer denying the record it just read keeps working without needing to
+    know how many tools can produce one.
+    """
+
+    def _result(outcome: str, **context) -> str:
+        ctx.note_tool_outcome(tool_name, outcome)
+        return render_prompt("tools/records_result.j2", outcome=outcome, **context)
+
+    return _result
+
+
+def _refused(ctx: ChatRequestContext, outcome: str, result) -> str:
+    """A refusal is evidence the cached roster is stale; an outage is not.
+
+    The pin is dropped only here, and deliberately not on `unavailable`: a hint the
+    reader re-checks anyway is not worth discarding over a timeout, and doing so would
+    re-ask the parent for a reason they could never see.
+    """
+    if outcome == "not_authorized":
+        forget(ctx)
+        ctx.forget_child()
+    return result(outcome)
+
+
+def _resolve_student(ctx: ChatRequestContext, student_name: str, result):
+    """Everything that has to be true before any record can be read.
+
+    Returns `(refusal, student)` with exactly one of them set. Shared by all three tools
+    rather than repeated in each, because these are not conveniences — they are the
+    budget, the identity check and the roster match, and three copies of them is three
+    places for one of the checks to go missing.
+
+    The budget slot is taken HERE, so it is shared ACROSS the record tools rather than
+    held per tool. That is deliberate: it exists because every call is an audited read of
+    a minor's records, and splitting one tool into three must not silently triple how
+    many of those a single turn can perform.
+    """
+    if not ctx.acquire_records_tool_slot():
+        return result("call_limit"), None
+
+    # No verified guardian on this session. Staff, a test, or a signed-out user.
+    if not ctx.guardian_token or not ctx.guardian_id:
+        return result("not_a_parent"), None
+
+    # One cached read per conversation, shared with anything else in the turn that needs
+    # to know who this parent's children are.
+    roster_outcome, students = load_roster(ctx)
+    # The roster's outcome names are the template's outcome names, so a refusal or an
+    # outage relays unchanged and keeps its own careful wording.
+    if roster_outcome in ("unavailable", "not_authorized"):
+        return _refused(ctx, roster_outcome, result), None
+    if not students:
+        return result("no_students"), None
+
+    student = _match_student(students, student_name, ctx=ctx)
+    if student is None:
+        # Either several children and no name, or a name matching more than one. Both
+        # are questions for the parent, never a coin flip.
+        return result("which_student", options=[s.label for s in students]), None
+
+    # Pinned for the rest of the conversation, so a parent who answered once is not
+    # asked again. Recorded only after a child has actually been resolved, so a turn
+    # that failed to identify one leaves nothing wrong pinned behind it.
+    #
+    # The label rides along because the pin is durable: a later turn that wants to say
+    # which child it is answering about would otherwise have only an opaque student
+    # number to show a parent.
+    ctx.remember_child(student.student_id, label=student.label, gender=student.gender)
+    return None, student
+
+
+def _student_path(ctx: ChatRequestContext, student_id: str) -> str:
+    return f"/v1/guardians/{ctx.guardian_id}/students/{student_id}"
+
+
+#: Appended to every tool docstring below. Stated once rather than written out three
+#: times, because it is the same guarantee each time and a copy that drifts is a copy
+#: that tells the model something untrue about whose records it is reading.
+_STUDENT_NAME_NOTE = """
+        student_name: leave this empty. Which child the question is about has already
+        been worked out from the school's own list of this parent's children, and that
+        answer is used. Fill it in only if you are starting a subject the conversation
+        has not mentioned at all.
 
         You never supply the parent's identity; it is taken from their signed-in
-        session. If the tool asks you to clarify which child, put that question to the
-        parent rather than choosing one.
+        session. Which child is settled the same way. If the tool asks you to clarify
+        which child, put that question to the parent rather than choosing one.
         """
-        if not ctx.acquire_records_tool_slot():
-            return render_prompt("tools/records_result.j2", outcome="call_limit")
 
-        # No verified guardian on this session. Staff, a test, or a signed-out user.
-        if not ctx.guardian_token or not ctx.guardian_id:
-            return render_prompt("tools/records_result.j2", outcome="not_a_parent")
 
-        def _refused(outcome: str) -> str:
-            """A refusal is evidence the cached roster is stale; an outage is not.
+def make_get_student_grades(ctx: ChatRequestContext):
+    @tool(GRADES_TOOL)
+    def get_student_grades(student_name: str = "", subject: str = "") -> str:
+        """Read one child's marks for the current term, across every subject or one.
 
-            The pin is dropped only here too, and deliberately not on `unavailable`: a
-            hint the reader re-checks anyway is not worth discarding over a timeout, and
-            doing so would re-ask the parent for a reason they could never see.
-            """
-            if outcome == "not_authorized":
-                forget(ctx)
-                ctx.forget_child()
-            return render_prompt("tools/records_result.j2", outcome=outcome)
+        Use this for how a child is doing overall, their results or their report card,
+        and equally for their mark in one named subject — what she got in Arabic. For
+        absences use get_student_attendance. Do not use either for school policies, fees
+        or general information; those come from the knowledge base.
 
-        base = f"/v1/guardians/{ctx.guardian_id}"
+        subject: OPTIONAL, and the only argument that is yours to supply — it comes from
+        the message itself. Leave it empty whenever the question names no subject; naming
+        one adds that subject's assignment-by-assignment detail, and a name matching none
+        is answered with the subjects the child actually takes, so a wrong guess costs
+        nothing.
+        """
+        result = _reporter(ctx, GRADES_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
 
-        # One cached read per conversation, shared with anything else in the turn that
-        # needs to know who this parent's children are. This was a fresh HTTP round trip
-        # on every one of the tool's four permitted calls.
-        roster_outcome, students = load_roster(ctx)
-        # The roster's outcome names are the template's outcome names, so a refusal or
-        # an outage relays unchanged and keeps its own careful wording.
-        if roster_outcome in ("unavailable", "not_authorized"):
-            return _refused(roster_outcome)
-        if not students:
-            return render_prompt("tools/records_result.j2", outcome="no_students")
-
-        student = _match_student(students, student_name, ctx=ctx)
-        if student is None:
-            # Either several children and no name, or a name matching more than one.
-            # Both are questions for the parent, never a coin flip.
-            return render_prompt(
-                "tools/records_result.j2",
-                outcome="which_student",
-                options=[s.label for s in students],
-            )
-
-        student_id = student.student_id
-        # Pinned for the rest of the conversation, so a parent who answered "Layla" once
-        # is not asked again. Recorded only after a child has actually been resolved, so a
-        # turn that failed to identify one leaves nothing wrong pinned behind it.
-        #
-        # The label rides along because the pin is now durable: a later turn that wants to
-        # say which child it is answering about would otherwise have only an opaque
-        # student number to show a parent.
-        ctx.remember_child(student_id, label=student.label, gender=student.gender)
-        kind = (record_type or "grades").strip().lower()
-
-        if kind == "attendance":
-            outcome, data = _get(f"{base}/students/{student_id}/attendance", ctx)
-            template_outcome = "attendance"
-        elif kind == "subject":
-            grades_outcome, grades = _get(f"{base}/students/{student_id}/grades", ctx)
-            if grades_outcome != "ok":
-                return _refused(grades_outcome)
-
-            # Folded, not casefolded: a parent asks about «الرياضيات» however their
-            # keyboard produced it, and the subject table spells it one fixed way. Same
-            # class of failure as the child-name matcher above it, same fix. Folded
-            # rather than stemmed because a subject name is a proper noun — see
-            # backend/text_matching.py.
-            needle = name_key(subject)
-            course = next(
-                (
-                    c
-                    for c in grades.get("courses") or []
-                    if needle
-                    and (
-                        needle in name_key(c.get("subject_name_ar") or "")
-                        or needle in name_key(c.get("subject_name_en") or "")
-                    )
-                ),
-                None,
-            )
-            if course is None:
-                return render_prompt(
-                    "tools/records_result.j2",
-                    outcome="which_subject",
-                    student=student,
-                    options=[
-                        c.get("subject_name_ar") or c.get("subject_name_en")
-                        for c in grades.get("courses") or []
-                    ],
-                )
-
-            outcome, data = _get(
-                f"{base}/students/{student_id}/grades/{course.get('course_id')}", ctx
-            )
-            template_outcome = "subject"
-        else:
-            outcome, data = _get(f"{base}/students/{student_id}/grades", ctx)
-            template_outcome = "grades"
-
+        path = _student_path(ctx, student.student_id)
+        # The term's rollup first, whichever question was asked. Without a subject it IS
+        # the answer; with one it is how a subject named in words becomes the course id
+        # the facade addresses a breakdown by.
+        outcome, data = _get(f"{path}/grades", ctx)
         if outcome != "ok":
-            return _refused(outcome)
+            return _refused(ctx, outcome, result)
 
-        return render_prompt(
-            "tools/records_result.j2",
-            outcome=template_outcome,
-            **_render_context(student.label, data),
+        wanted = (subject or "").strip()
+        if not wanted:
+            return result("grades", **_render_context(student.label, data))
+
+        course = _match_course(data, wanted)
+        if course is None:
+            return result(
+                "which_subject",
+                student=student,
+                options=[
+                    c.get("subject_name_ar") or c.get("subject_name_en")
+                    for c in data.get("courses") or []
+                ],
+            )
+
+        detail_outcome, detail = _get(f"{path}/grades/{course.get('course_id')}", ctx)
+        if detail_outcome != "ok":
+            return _refused(ctx, detail_outcome, result)
+        return result("subject", **_render_context(student.label, detail))
+
+    get_student_grades.description += _STUDENT_NAME_NOTE
+    return get_student_grades
+
+
+def make_get_student_attendance(ctx: ChatRequestContext):
+    @tool(ATTENDANCE_TOOL)
+    def get_student_attendance(student_name: str = "") -> str:
+        """Read one child's attendance: the days they were present, absent or late.
+
+        Use this for absences, lateness and attendance. For marks use
+        get_student_grades.
+        """
+        result = _reporter(ctx, ATTENDANCE_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/attendance", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result("attendance", **_render_context(student.label, data))
+
+    get_student_attendance.description += _STUDENT_NAME_NOTE
+    return get_student_attendance
+
+
+def make_get_student_timetable(ctx: ChatRequestContext):
+    @tool(TIMETABLE_TOOL)
+    def get_student_timetable(student_name: str = "") -> str:
+        """Read one child's weekly class timetable: which lessons fall on which day.
+
+        Use this for their schedule, their timetable, what lessons they have on a given
+        day, when a subject is taught, or what time the school day runs to. For marks use
+        get_student_grades; for absences use get_student_attendance. Do not use it for term
+        dates, holidays or exam schedules — those are school-wide and come from the
+        knowledge base.
+        """
+        result = _reporter(ctx, TIMETABLE_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        # No class code is sent, and there is none to send. A timetable belongs to a room,
+        # the room is the child's placement for the term, and the facade resolves it
+        # through SIS — which is the only thing that knows a placement changed in March.
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/timetable", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result("timetable", **_timetable_context(student.label, data))
+
+    get_student_timetable.description += _STUDENT_NAME_NOTE
+    return get_student_timetable
+
+
+def _timetable_context(student_label: str, data: dict) -> dict:
+    """Flatten a week into the day-by-day shape the template renders.
+
+    Grouped here rather than in Jinja for the reason `_render_context` gives: a filter
+    chain over rows that may be missing a key is one optional field away from raising
+    mid-turn under StrictUndefined. And the grouping itself is a decision — a parent asks
+    "what does she have on Sunday", so the model is handed days rather than a flat list it
+    would have to sort, in the school's own week order rather than any order Python would
+    pick.
+
+    `status` arrives from the facade already saying which of the three answers this is, so
+    nothing here infers "no lessons" from an empty list — that is the conflation the whole
+    contract is shaped to prevent.
+    """
+    lessons = data.get("lessons") or []
+    periods = {
+        int(row.get("period_number") or 0): row for row in data.get("periods") or []
+    }
+
+    def _slot(lesson: dict) -> dict:
+        period = periods.get(int(lesson.get("period_number") or 0)) or {}
+        return {
+            "period_number": lesson.get("period_number"),
+            "subject": _label(lesson, "subject_name_ar", "subject_name_en"),
+            "is_free": not (lesson.get("subject_code") or ""),
+            "starts_at": period.get("starts_at") or "",
+            "ends_at": period.get("ends_at") or "",
+        }
+
+    days = [
+        {
+            "name": day,
+            "slots": [
+                _slot(lesson)
+                for lesson in lessons
+                if str(lesson.get("day_of_week") or "").lower() == str(day).lower()
+            ],
+        }
+        for day in data.get("days") or []
+    ]
+
+    return {
+        "student_label": student_label,
+        "term_label": _label(data.get("term") or {}, "name_ar", "name_en", "term_id"),
+        # The year the term belongs to, rendered beside it. A parent naturally hears
+        # "which year is this?" in a record answer, and a model supplying it from its
+        # own head states a figure that is in no evidence — which the grounding check
+        # discards the whole answer over. Written here, quoting it is grounded.
+        "academic_year_label": str((data.get("term") or {}).get("academic_year") or ""),
+        "status": str(data.get("status") or ""),
+        "class_label": _label(data, "class_name_ar", "class_name_en", "class_code"),
+        "days": days,
+        # The breaks, so the model can say when the day ends and when the break falls
+        # without having to read them out of the lessons, which never contain them.
+        "breaks": [
+            {
+                "name": _label(row, "name_ar", "name_en"),
+                "starts_at": row.get("starts_at") or "",
+                "ends_at": row.get("ends_at") or "",
+            }
+            for row in data.get("periods") or []
+            if not row.get("is_teaching", True)
+        ],
+        "data": data,
+    }
+
+
+# --- the room she sits in: her class, her subjects, her teachers -------------------
+#
+# Three facade endpoints and three tools over them, one each. A parent who names a
+# subject wants one answer rather than a list to read through, and that used to be its
+# own tool — but a filter is not a different record: the classifier had to tell two
+# near-identical descriptions apart every turn, and a tool whose argument comes from the
+# message can never be pre-dispatched. It is an optional `subject` on the parent tool now.
+#
+# None of them sends a class code, and none of them could: the facade resolves the room
+# from the child's placement for the term. A class code held up here would be one that
+# keeps naming 3A after she has moved to 3B.
+
+
+def make_get_student_class(ctx: ChatRequestContext):
+    @tool(CLASS_TOOL)
+    def get_student_class(student_name: str = "") -> str:
+        """Read which class one child is in — the class name the school uses for it.
+
+        Use this when the question asks which class, section or room a child is in, or
+        what their class is called. For the lessons that class sits use
+        get_student_timetable; for the subjects it studies use get_student_subjects.
+        """
+        result = _reporter(ctx, CLASS_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/class", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result(
+            "class",
+            student_label=student.label,
+            status=str(data.get("status") or ""),
+            # The NAME, and only the name: the code is an internal key and a parent has
+            # never seen it. `_label` falls back to the other script rather than to blank.
+            class_label=_label(data, "class_name_ar", "class_name_en"),
+            year_label=_label(data, "year_level_name_ar", "year_level_name_en"),
         )
 
-    return get_student_records
+    get_student_class.description += _STUDENT_NAME_NOTE
+    return get_student_class
+
+
+def make_get_student_subjects(ctx: ChatRequestContext):
+    @tool(SUBJECTS_TOOL)
+    def get_student_subjects(student_name: str = "") -> str:
+        """Read the list of subjects one child studies this year.
+
+        Use this for which subjects a child takes, what they study, or their curriculum.
+        For their marks in those subjects use get_student_grades; for when each one is
+        taught use get_student_timetable; for who teaches them use get_student_teachers.
+        """
+        result = _reporter(ctx, SUBJECTS_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/subjects", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+        return result(
+            "subjects",
+            student_label=student.label,
+            status=str(data.get("status") or ""),
+            class_label=_label(data, "class_name_ar", "class_name_en"),
+            subjects=[
+                _label(row, "name_ar", "name_en", "code")
+                for row in data.get("subjects") or []
+            ],
+        )
+
+    get_student_subjects.description += _STUDENT_NAME_NOTE
+    return get_student_subjects
+
+
+def make_get_student_teachers(ctx: ChatRequestContext):
+    @tool(TEACHERS_TOOL)
+    def get_student_teachers(student_name: str = "", subject: str = "") -> str:
+        """Read who teaches one child, for every subject or for one named subject.
+
+        Use this for who a child's teachers are, and equally for who teaches them one
+        subject — who their maths teacher is, who gives them Arabic. Do not use it for
+        how to contact a teacher or for parent-meeting times; those come from the
+        knowledge base.
+
+        subject: OPTIONAL, and the only argument that is yours to supply — it comes from
+        the message itself. Leave it empty whenever the question names no subject; a name
+        matching none is answered with the subjects the child actually has a teacher for,
+        so a wrong guess costs nothing.
+        """
+        result = _reporter(ctx, TEACHERS_TOOL)
+        refusal, student = _resolve_student(ctx, student_name, result)
+        if refusal:
+            return refusal
+
+        # One call either way. The teacher rows carry their own subject names, so a named
+        # subject is matched against what came back rather than resolved through a second
+        # endpoint first — which is what the grades tool has to do only because a
+        # subject's detail lives at its own URL.
+        outcome, data = _get(f"{_student_path(ctx, student.student_id)}/teachers", ctx)
+        if outcome != "ok":
+            return _refused(ctx, outcome, result)
+
+        wanted = (subject or "").strip()
+        if not wanted:
+            return result("teachers", **_teachers_context(student.label, data))
+
+        rows = data.get("teachers") or []
+        matched = _match_subject_rows(rows, wanted)
+        if not matched:
+            return result(
+                "which_subject",
+                student=student,
+                options=sorted(
+                    {_label(row, "subject_name_ar", "subject_name_en", "subject_code")
+                     for row in rows}
+                ),
+            )
+        # Every teacher of that subject, never the first: two teachers for one subject is a
+        # state the school's records permit, and dropping one hides a real person from the
+        # parent who asked.
+        return result(
+            "subject_teacher",
+            student_label=student.label,
+            status=str(data.get("status") or ""),
+            subject_label=_label(
+                matched[0], "subject_name_ar", "subject_name_en", "subject_code"
+            ),
+            teachers=[_label(row, "full_name_ar", "full_name_en") for row in matched],
+        )
+
+    get_student_teachers.description += _STUDENT_NAME_NOTE
+    return get_student_teachers
+
+
+def _match_subject_rows(rows: list, subject: str) -> list:
+    """The teacher rows whose subject is the one the parent named.
+
+    Folded, not casefolded, for the reason `_match_course` gives: a parent writes
+    «الرياضيات» however their keyboard produced it and the subject table spells it one
+    fixed way. Matched against both scripts and the code, so "maths", "Math" and the
+    school's own «الرياضيات» all land.
+    """
+    needle = name_key(subject)
+    if not needle:
+        return []
+    return [
+        row
+        for row in rows
+        if needle in name_key(row.get("subject_name_ar") or "")
+        or needle in name_key(row.get("subject_name_en") or "")
+        or needle in name_key(row.get("subject_code") or "")
+    ]
+
+
+def _teachers_context(student_label: str, data: dict) -> dict:
+    """Flatten the staff list into one entry per subject, teachers grouped under it.
+
+    Grouped here rather than in Jinja for the reason `_render_context` gives, and grouped
+    at all because the payload is one row per (teacher, subject): rendered flat, a subject
+    with two teachers reads as two separate facts, and a teacher taking two subjects reads
+    as two people. Grouping also makes the co-teacher case say what it is — "maths: A and
+    B" rather than two lines a model may summarise into one.
+
+    Order is preserved from the payload, which is the school's own subject order.
+    """
+    groups: list[dict] = []
+    seen: dict[str, dict] = {}
+    for row in data.get("teachers") or []:
+        code = str(row.get("subject_code") or "")
+        label = _label(row, "subject_name_ar", "subject_name_en", "subject_code")
+        key = code or label
+        group = seen.get(key)
+        if group is None:
+            group = {"subject": label, "teachers": []}
+            seen[key] = group
+            groups.append(group)
+        name = _label(row, "full_name_ar", "full_name_en")
+        if name:
+            group["teachers"].append(name)
+
+    return {
+        "student_label": student_label,
+        "status": str(data.get("status") or ""),
+        "class_label": _label(data, "class_name_ar", "class_name_en"),
+        # A subject whose every teacher row has no name on file is dropped rather than
+        # rendered as "maths: " with nothing after it. The school can create a teacher
+        # with neither name spelling filled in, and a blank beside a subject reads to a
+        # parent as a missing answer rather than as missing data — if that empties the
+        # list entirely, the template's "not recorded yet" branch says so honestly.
+        "subject_groups": [group for group in groups if group["teachers"]],
+    }
+
+
+def _match_course(grades: dict, subject: str):
+    """The course a parent meant, matched by name against what the child actually takes.
+
+    Folded, not casefolded: a parent asks about «الرياضيات» however their keyboard
+    produced it, and the subject table spells it one fixed way. Same class of failure as
+    the child-name matcher above, and the same fix. Folded rather than stemmed because a
+    subject name is a proper noun — see backend/text_matching.py.
+    """
+    needle = name_key(subject)
+    if not needle:
+        return None
+    return next(
+        (
+            c
+            for c in grades.get("courses") or []
+            if needle in name_key(c.get("subject_name_ar") or "")
+            or needle in name_key(c.get("subject_name_en") or "")
+        ),
+        None,
+    )
 
 
 def _label(record: dict, *keys: str) -> str:
@@ -275,6 +709,7 @@ def _render_context(student_label: str, data: dict) -> dict:
     return {
         "student_label": student_label,
         "term_label": _label(data.get("term") or {}, "name_ar", "name_en", "term_id"),
+        "academic_year_label": str((data.get("term") or {}).get("academic_year") or ""),
         "courses": courses,
         # Precomputed so the template states each caveat only when it is true, and
         # never pays for the wording when it is not.

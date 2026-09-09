@@ -148,16 +148,52 @@ def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
     """
     if ctx is None:
         return
+    hints = {
+        "carried_constraints": plan.carried_constraints,
+        "is_followup": plan.is_followup,
+        "language": plan.language,
+        "child_year": plan.child_year,
+        "child_id": plan.child_id,
+        "child_label": plan.child_hint,
+        "forced_tool": plan.forced_tool,
+        "planned_calls": plan.planned_calls,
+    }
     try:
-        ctx.note_turn_plan(
-            plan.retrieval_sections,
-            plan.scope_options,
-            carried_constraints=plan.carried_constraints,
-            is_followup=plan.is_followup,
-            language=plan.language,
-        )
+        ctx.note_turn_plan(plan.retrieval_sections, plan.scope_options, **hints)
+        return
+    except TypeError:
+        # A context written against an earlier signature — a test double, an integrating
+        # deployment. `note_turn_plan` promises those keep working, and until now that
+        # promise held only for callers that passed FEWER arguments: adding one here made
+        # every older context reject the call, and the blanket handler below then threw
+        # away the sections, the conditions and the language too. Losing one new hint is
+        # a degradation; losing all of them because a hint was added is the regression
+        # this module says it cannot cause. So drop the hints it does not know, newest
+        # first, and hand over what it does.
+        logger.debug("context rejected the turn plan's newer hints; retrying older ones")
     except Exception:  # pragma: no cover - a hint must never break a turn
         logger.debug("could not hand the turn plan to the graph", exc_info=True)
+        return
+
+    # Newest first, so an older context loses the hint it has never heard of rather than
+    # the four it understands. Anything added to `hints` above belongs at the FRONT of
+    # this tuple on the same commit — a key missing from it is a key that is never
+    # dropped, so the retry re-sends the argument that caused the TypeError and the
+    # ladder walks all the way down handing over nothing at all.
+    for dropped in (
+        "planned_calls", "forced_tool", "child_label", "child_id", "child_year",
+        "language", "is_followup", "carried_constraints",
+    ):
+        hints.pop(dropped, None)
+        try:
+            ctx.note_turn_plan(plan.retrieval_sections, plan.scope_options, **hints)
+            return
+        except TypeError:
+            continue
+        except Exception:  # pragma: no cover - a hint must never break a turn
+            logger.debug("could not hand the turn plan to the graph", exc_info=True)
+            return
+    logger.debug("context accepted none of the turn plan's hints")
 
 
 class _LadderConfig:
@@ -256,6 +292,15 @@ def _emit(ctx: Optional[ChatRequestContext], signals: RequestSignals, plan: Turn
             )
         if plan.short_circuit:
             ctx.emit_rag_step("🚪", "Answered without searching", "; ".join(plan.reasons)[:90])
+        elif plan.planned_calls:
+            # Ahead of the narrowing step below, because it is the more specific fact:
+            # every planned turn also narrowed, and "looking two things up at once" is
+            # what the person waiting can actually see happening.
+            ctx.emit_rag_step(
+                "⚡",
+                f"Looking up {len(plan.planned_calls)} things at once",
+                ", ".join(str(call.get("name") or "") for call in plan.planned_calls)[:90],
+            )
         elif plan.exposed_tools is not None:
             ctx.emit_rag_step(
                 "🎯", f"Narrowed to {len(plan.exposed_tools)} tool(s)", "; ".join(plan.reasons)[:90]

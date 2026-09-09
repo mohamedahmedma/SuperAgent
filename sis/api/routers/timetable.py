@@ -5,11 +5,19 @@ differently from the ladder it hangs on. The structure routes answer "what does 
 consist of" and are read once a term by a registrar setting up; these answer "what is 3A
 doing on Tuesday" and are read by whoever is standing in front of 3A.
 
-Three shapes of route, and the middle one is the whole feature:
+Four shapes of route, and the middle one is the whole feature:
 
   `/schools/{code}/timetable-periods`   the school's day — how many periods, when they ring
   `/timetable`                          lessons: read a week, place lessons, clear slots
   `/timetable/week`                     one class's week drawn against the school's own grid
+  `/guardians/by-id/.../timetable`      the same week, reached from a child by her parent
+
+**The last one exists because a parent has no class code.** A timetable is a statement about
+a room, and the only route into it a family has is the child placed in that room. So that
+route takes a student number and resolves the class itself, in one transaction — the same
+shape the guardian-scoped grades and attendance routes take, and for the same reason: the
+caller is a chat service running a language model over text a stranger can write, so the
+link is re-checked here rather than trusted from whatever it was handed.
 
 **Writes are whole-batch and all-or-nothing.** `PUT /timetable` takes every lesson a
 registrar has laid out and either applies all of them or refuses the lot. A partially
@@ -31,10 +39,21 @@ from typing import Annotated, Protocol
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 
-from sis.api.deps import Principal, get_timetable_service, require_permission
+from sis.api.deps import (
+    Principal,
+    RequestId,
+    get_query_service,
+    get_timetable_service,
+    require_permission,
+)
 from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
-from sis.application.services import TimetableService, WeekPlan
+from sis.application.services import (
+    QueryService,
+    StudentWeek,
+    TimetableService,
+    WeekPlan,
+)
 from sis.domain.timetable import (
     MAX_PERIODS_PER_DAY,
     TimetableEntry,
@@ -45,6 +64,7 @@ from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,
     SchoolCode,
+    StudentNumber,
     TermCode,
     YearCode,
 )
@@ -54,6 +74,7 @@ router = APIRouter(prefix="/v1", tags=["timetable"])
 Reader = Annotated[Principal, Depends(require_permission(Permission.TIMETABLE_READ))]
 Registrar = Annotated[Principal, Depends(require_permission(Permission.TIMETABLE_WRITE))]
 Timetables = Annotated[TimetableService, Depends(get_timetable_service)]
+Queries = Annotated[QueryService, Depends(get_query_service)]
 
 
 # -- Shapes -----------------------------------------------------------------
@@ -196,9 +217,14 @@ class TimetableEntryOut(BaseModel):
     )
     teacher_staff_number: str | None = Field(
         default=None,
-        description="Always `null` in this stage: teacher records exist but nobody manages "
-        "them yet. The field and its conflict rule are already in place, so assigning a "
-        "teacher later is a write rather than a migration.",
+        description="Who is timetabled to take this lesson, when anything has said so — "
+        "which over HTTP is never. `PUT /timetable` has no input for it and writes `null`, "
+        "so on any school set up through this API the column is empty; a demo loader does "
+        "populate it, which is why the field is read back rather than hardcoded here.\n\n"
+        "**This is not the way to find out who teaches a class.** Staffing lives in the "
+        "teacher assignments a principal and a year supervisor write — see "
+        "`/guardians/by-id/.../classroom` and the teacher routes — and a client reading it "
+        "from here would report every lesson as unstaffed.",
     )
 
     @classmethod
@@ -246,6 +272,124 @@ class WeekPlanOut(BaseModel):
             days=[str(day) for day in plan.days],
             periods=[TimetablePeriodOut.of(period) for period in plan.periods],
             entries=[TimetableEntryOut.of(entry) for entry in plan.entries],
+            teaching_slots=plan.teaching_slots,
+        )
+
+
+class StudentLessonOut(BaseModel):
+    """One lesson on a child's week, named rather than coded.
+
+    Leaner than `TimetableEntryOut` on purpose: the class, term and year are stated once on
+    the envelope, so repeating them on all thirty-five rows would be payload a parent-facing
+    client pays for on every question and reads never.
+
+    It carries the subject's **names** because this is the one timetable route whose reader
+    is a person rather than a registrar's screen. `MATH` is the school's own key and means
+    nothing to a family; the names are what a parent recognises.
+    """
+
+    day_of_week: str
+    period_number: int
+    subject_code: str | None = Field(
+        default=None,
+        description="`null` is a stated free period — the class deliberately has this slot "
+        "off. A slot nobody has planned has no row here at all.",
+    )
+    subject_name_ar: str = Field(
+        default="",
+        description="Empty when the subject row could not be loaded, or when the slot is a "
+        "stated free period. The lesson is still listed: a week that quietly drops a row is "
+        "one nobody can tell is incomplete.",
+    )
+    subject_name_en: str = ""
+
+
+class StudentWeekOut(BaseModel):
+    """One child's week: the class she sat in for the term, and what that class does.
+
+    Two `null` states, and they are not the same answer:
+
+    * `class_code: null` — no placement covered this term. She had left, or had not yet
+      joined. `lessons` is then empty because there is no room to ask about.
+    * `class_code` set with `lessons: []` — she has a class and nobody has laid out its
+      grid yet. That is a fact about the school, not about the child.
+
+    A client that renders both as "no timetable" tells a parent something false in the
+    second case, which is why the codes are on the payload rather than inferred from
+    emptiness.
+    """
+
+    student_number: str
+    term_code: str
+    academic_year_code: str | None = Field(
+        default=None, description="`null` when no placement covered the term."
+    )
+    class_code: str | None = Field(
+        default=None,
+        description="The class she sat in **for this term**, not her current one — a child "
+        "who moved 3A->3B in March still reads 3A for Term 1, because that is the week she "
+        "actually sat. `null` means no placement covered the term.",
+    )
+    class_name_ar: str | None = None
+    class_name_en: str | None = None
+    days: list[str] = Field(
+        default_factory=list,
+        description="The school's working days, **in the school's own order**. Do not sort "
+        "this: the week begins on Saturday at some schools and Sunday at others.",
+    )
+    periods: list[TimetablePeriodOut] = Field(
+        default_factory=list,
+        description="The rows of the grid, in period order, breaks included. Read together "
+        "with the lessons so a client cannot draw a seven-row grid against an eight-period "
+        "day.",
+    )
+    lessons: list[StudentLessonOut] = Field(
+        default_factory=list,
+        description="Ordered by day — in the school's week order — then by period.",
+    )
+    teaching_slots: int = Field(
+        default=0,
+        description="How many slots this week could hold a lesson: teaching periods times "
+        "open days. The denominator for 'how full is this timetable'.",
+    )
+
+    @classmethod
+    def of(cls, week: StudentWeek) -> "StudentWeekOut":
+        section = week.class_section
+        plan = week.plan
+        if plan is None or section is None:
+            return cls(
+                student_number=week.student_number, term_code=week.term_code
+            )
+        return cls(
+            student_number=week.student_number,
+            term_code=week.term_code,
+            academic_year_code=plan.academic_year_code,
+            class_code=str(section.code),
+            class_name_ar=section.name_ar,
+            class_name_en=section.name_en,
+            days=[str(day) for day in plan.days],
+            periods=[TimetablePeriodOut.of(period) for period in plan.periods],
+            lessons=[
+                StudentLessonOut(
+                    day_of_week=str(entry.slot.day_of_week),
+                    period_number=entry.slot.period_number,
+                    subject_code=(
+                        None if entry.subject_code is None else str(entry.subject_code)
+                    ),
+                    subject_name_ar=(
+                        week.subjects[str(entry.subject_code)].name_ar
+                        if str(entry.subject_code) in week.subjects
+                        else ""
+                    ),
+                    subject_name_en=(
+                        week.subjects[str(entry.subject_code)].name_en
+                        if str(entry.subject_code) in week.subjects
+                        else ""
+                    ),
+                )
+                for entry in plan.entries
+            ],
             teaching_slots=plan.teaching_slots,
         )
 
@@ -347,6 +491,61 @@ def read_week(
             AcademicYearCode(academic_year), ClassCode(class_code), TermCode(term)
         )
     return WeekPlanOut.of(plan)
+
+
+@router.get(
+    "/guardians/by-id/{public_id}/students/{student_number}/timetable",
+    response_model=StudentWeekOut,
+    summary="A child's week, read by one of her guardians",
+    description="The same week as the route above, for a caller that holds a guardian "
+    "handle and a student number rather than a registrar's authority and a class code.\n\n"
+    "**The class is resolved here, not by the caller.** A parent has no class code and a "
+    "parent-facing service has no business holding one — it changes mid-year, and a client "
+    "that cached one would eventually ask for the week of a room the child has left. This "
+    "route resolves her placement *for the term asked about* and reads that class's week in "
+    "one transaction, so the two cannot disagree.\n\n"
+    "The guardian-to-child link is re-checked on this request: a caller naming a child who "
+    "is not hers, or whose access a court order has restricted, gets the same 404 as one "
+    "naming a child who does not exist. This is the route a parent-facing chat service "
+    "should use.\n\n"
+    "A child with no placement covering the term answers 200 with `class_code: null` rather "
+    "than 404 — she was enrolled for September, or has left, and neither is a missing "
+    "record. See `StudentWeekOut` on why that is not the same as a class with no lessons.",
+    responses=error_responses(401, 403, 404, 422),
+)
+def read_guardian_student_week(
+    public_id: str,
+    student_number: str,
+    timetables: Timetables,
+    queries: Queries,
+    caller: Reader,
+    request_id: RequestId,
+    term: Annotated[
+        str,
+        Query(
+            description="Term code. Required, for the reason the guardian grades route "
+            "gives: a bare 'this term' would be answered from a clock, and a timetable is "
+            "a statement about a named stretch of the year.",
+            examples=["2026-T1"],
+        ),
+    ],
+) -> StudentWeekOut:
+    # No `caller.narrow`, and the asymmetry with every other route in this module is
+    # deliberate — the same one the guardian-scoped grades route makes. A registrar's key
+    # is bounded by the rooms they hold; this caller is a service acting for one family,
+    # and what bounds it is the link re-checked below, from the registrar's own data, on
+    # this request. Narrowing by scope would refuse it for holding no class at all.
+    with domain_errors():
+        queries.require_guardian_may_see(
+            public_id,
+            StudentNumber(student_number),
+            actor=caller.prefix,
+            request_id=request_id,
+        )
+        week = timetables.week_for_student(
+            StudentNumber(student_number), TermCode(term)
+        )
+    return StudentWeekOut.of(week)
 
 
 @router.get(

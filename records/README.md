@@ -193,7 +193,39 @@ GET  /v1/guardians/{gid}/students
 GET  /v1/guardians/{gid}/students/{sid}/grades?term=
 GET  /v1/guardians/{gid}/students/{sid}/grades/{course_id}
 GET  /v1/guardians/{gid}/students/{sid}/attendance?term=
+GET  /v1/guardians/{gid}/students/{sid}/timetable?term=
+GET  /v1/guardians/{gid}/students/{sid}/class?term=
+GET  /v1/guardians/{gid}/students/{sid}/subjects?term=
+GET  /v1/guardians/{gid}/students/{sid}/teachers?term=
 ```
+
+The last three are **three URLs over one read**. Which class she is in, what she studies and
+who teaches her are all answers about the same room, resolved from one time-bounded
+placement — so they are separate questions and one call to the system of record. Asked as
+three reads, a placement edited in between could answer with one room's subjects beside
+another room's staff.
+
+`/class` answers with the room's NAME — "Primary 1 Class 1", "3/1" — which is what a family
+recognises; `class_code` ("3A", "P1-01") is the school's internal key and is carried for
+correlation, not for reading out. All three share a two-value `status`: `no_class` means no
+placement covered the term, and is a fact about the child. An empty `subjects` or `teachers`
+list beside `status: ok` is a fact about the school's admin instead — nobody has curated the
+board, or entered the staffing — and the two must never be reported alike.
+
+`/teachers` carries a name and a subject per entry and nothing else: no staff number, no
+email, no phone. The shape is the privacy boundary rather than a filter a consumer has to
+remember. It is also **present tense** — the term resolves which room she sat in, but the
+school's assignment table carries no term, so this cannot report who taught that room last
+November.
+
+The timetable is the one read whose subject is not the child. A week belongs to the *class*
+she is placed in, and that placement is time-bounded — so the route still names only a
+student, and the system of record resolves the room for the term asked about. Nothing above
+SIS holds a class code, which is what stops a cached one naming a room a child has left. It
+answers three states, in `status`: `ok`, `no_class` (no placement covered the term) and
+`no_timetable` (she has a class whose week is not published). The last two are both empty
+and must never be reported alike — one is a fact about the child, the other about the
+school's admin.
 
 `/v1/admin/...` holds three routes and all three answer **410**, naming the SIS routes that
 replaced them. A 404 would read as "wrong URL" and invite a retry; accepting the write

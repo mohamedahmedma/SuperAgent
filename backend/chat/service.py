@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -23,6 +24,8 @@ from backend.chat.assets_bridge import (
 )
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.child_context import load_child_state, save_child_state
+from backend.chat.finalize import Finalizer, finalize_text, message_text
+from backend.chat.grounding import strip_citations
 from backend.chat.orchestrator import plan_turn, resolve_turn_question
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import ResolvedQuestion, conversation_text
@@ -31,6 +34,10 @@ from backend.chat.storage import storage
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
 from backend.schemas.chat import PendingHitlState, normalize_rag_trace
+from backend.text_matching import name_key
+from backend.tools import CHECKED_TOOLS, GROUNDED_TOOLS
+
+logger = logging.getLogger(__name__)
 
 _PROFILE = get_profile()
 _COPY = _PROFILE.user_copy
@@ -116,6 +123,72 @@ def _build_pending_hitl(
     ).model_dump()
 
 
+def _child_choice_pending(turn_plan, original_question: str) -> dict | None:
+    """The clarification for "which of your children?", when the planner asked one.
+
+    Built here rather than by `_build_pending_hitl` because that one reads a `rag_trace`,
+    and this question never went near retrieval — it comes from a roster and a length
+    check. Everything the client needs to render selectable names is on the plan already.
+
+    `resume_state` is None, and that is the whole difference between this route and the
+    other two: there is no half-finished search to pick up. The answer pins a child to
+    the session, and the original question is planned again from the start — which is
+    also why `original_question` has to be carried, since the next message will be a
+    name and nothing else.
+    """
+    options = [str(name) for name in (getattr(turn_plan, "child_options", None) or []) if name]
+    question = (getattr(turn_plan, "static_reply", "") or "").strip()
+    if not options or not question:
+        return None
+    return PendingHitlState(
+        id=uuid4().hex,
+        original_question=original_question or question,
+        prompt=question,
+        options=options,
+        route="child_select",
+        retrieval_status="needs_child_choice",
+        answers=[],
+        resume_state=None,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    ).model_dump()
+
+
+def _pin_the_child_the_parent_named(ctx, chosen: str) -> bool:
+    """Settle the pending "which child?" against the roster, with no model involved.
+
+    The reply is matched by the same resolver every other route uses, so a parent who
+    typed the name rather than tapping the option is read the same way, and a reply
+    matching nobody pins nothing — the next plan then asks again rather than answering
+    about a child nobody chose.
+
+    Pinning is what makes the answer stick: `resolve_child` consults the pin only among
+    the candidates a stated sex already allows, so "my son" asked again later still
+    means a son, and the pin only breaks the tie it was created to break.
+    """
+    if not chosen or ctx is None:
+        return False
+    try:
+        from backend.chat.child_resolution import resolve_child
+        from backend.chat.child_roster import OK, load_roster
+
+        outcome, roster = load_roster(ctx)
+        if outcome != OK or not roster:
+            return False
+        found = resolve_child(reference="named", child_name=chosen, roster=roster)
+        if not found.resolved:
+            return False
+        picked = next((c for c in roster if c.student_id == found.student_id), None)
+        ctx.remember_child(
+            found.student_id,
+            label=found.label,
+            gender=getattr(picked, "gender", "") or "",
+        )
+        return True
+    except Exception:  # pragma: no cover - a pin must never break a turn
+        logger.warning("could not settle the child the parent chose", exc_info=True)
+        return False
+
+
 def _build_hitl_event(pending_hitl: dict) -> dict:
     return {
         "id": pending_hitl["id"],
@@ -166,6 +239,10 @@ class _TurnEntry:
     effective_user_text: str = ""
     hitl_answers: list = field(default_factory=list)
     original_question: str = ""
+    # The child the parent just chose, when this message answers a "which child?"
+    # question. A name as they typed or tapped it — resolved against the roster later,
+    # by code holding a verified identity this dataclass deliberately does not.
+    child_choice: str = ""
 
 
 def _enter_turn(user_text: str, messages: list, metadata: dict) -> _TurnEntry:
@@ -186,6 +263,18 @@ def _enter_turn(user_text: str, messages: list, metadata: dict) -> _TurnEntry:
     entry.pending_hitl = _current_pending_hitl(stored)
     entry.invalid_pending_hitl = stored is not None and entry.pending_hitl is None
     if not isinstance(entry.pending_hitl, dict):
+        return entry
+
+    if entry.pending_hitl.get("route") == "child_select":
+        # No resolver call and no model. The pending question was "which of your
+        # children", the reply is a name, and matching it belongs to the roster — so this
+        # turn simply becomes the ORIGINAL question again, planned from the start now
+        # that the pin can settle it. Deliberately not a `hitl_resume`: there is no
+        # search to continue, and folding the name into the old query as the other routes
+        # do would retrieve for "علي" rather than for what the parent actually asked.
+        entry.child_choice = user_text
+        entry.original_question = entry.pending_hitl.get("original_question") or user_text
+        entry.effective_user_text = entry.original_question
         return entry
 
     entry.resolution = resolve_turn_question(
@@ -227,18 +316,15 @@ def _pending_resume_state(pending_hitl: dict | None) -> dict | None:
 
 
 def _extract_ai_content(msg) -> str:
-    content = getattr(msg, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        text = ""
-        for block in content:
-            if isinstance(block, str):
-                text += block
-            elif isinstance(block, dict) and block.get("type") == "text":
-                text += block.get("text", "")
-        return text
-    return str(content or "")
+    """The text of a model message, as a user may see it.
+
+    Reading the content and cleaning it are one step on purpose. This function is the
+    only way a direct `model.invoke`/`model.astream` result becomes a string in this
+    module, so putting the transcript strip anywhere else would leave the paths that
+    bypass the agent — the HITL resume answer, the persistent note — able to put a raw
+    Harmony envelope in front of a user. See `backend/chat/finalize.py`.
+    """
+    return finalize_text(message_text(msg))
 
 
 def _format_retrieved_chunks(docs: list[dict]) -> str:
@@ -338,6 +424,7 @@ async def _stream_static_reply(
     metadata: dict,
     persistent_note: str,
     is_first_message: bool,
+    pending_hitl: dict | None = None,
 ):
     """Emit a planned reply that no model composed, and persist the turn.
 
@@ -345,13 +432,23 @@ async def _stream_static_reply(
     `content`, `trace`, `[DONE]` — because a client must not need to know which path
     produced its answer. The saving is that no agent was built: no system prompt, no
     tool schemas, no search.
+
+    `pending_hitl` is set when the planned reply is a QUESTION rather than an answer —
+    today, "which of your children?". It rides the same `hitl_request` event the
+    retrieval clarifications use, so a client that already renders selectable options
+    renders these without knowing a planner produced them, and it is persisted so the
+    next message is read as the answer rather than as a new question.
     """
     if is_first_message:
         title = generate_session_title(user_text)
         yield f"data: {json.dumps({'type': 'session_title', 'title': title, 'session_id': session_id})}\n\n"
 
     reply = turn_plan.static_reply or ""
+    if pending_hitl:
+        reply = _format_hitl_message(reply, pending_hitl["options"])
     yield f"data: {json.dumps({'type': 'content', 'content': reply})}\n\n"
+    if pending_hitl:
+        yield f"data: {json.dumps({'type': 'hitl_request', 'hitl': _build_hitl_event(pending_hitl)})}\n\n"
 
     rag_trace = normalize_rag_trace({**turn_plan.as_trace(), **turn_signals.as_trace()})
     yield f"data: {json.dumps({'type': 'trace', 'rag_trace': rag_trace})}\n\n"
@@ -360,7 +457,7 @@ async def _stream_static_reply(
     # A turn the corpus never saw contributes nothing worth summarising, so the
     # persistent note is deliberately left alone — updating it would spend a model
     # call on the one path whose whole point is not making one.
-    save_meta[PENDING_HITL_KEY] = None
+    save_meta[PENDING_HITL_KEY] = pending_hitl or None
     if is_first_message:
         save_meta.setdefault("title", generate_session_title(user_text))
 
@@ -378,6 +475,294 @@ def _no_knowledge_response() -> str:
 
 def _retrieval_error_response() -> str:
     return _COPY.retrieval_error
+
+
+def _turn_is_asking_a_question(ctx) -> bool:
+    """Whether retrieval has decided this turn ends in a question, not an answer.
+
+    Read from the live trace rather than passed in, because the decision is made by the
+    knowledge tool part-way through the turn — after the stream has already started.
+    Named because two places have to consult it and a copy of the lookup in each is how
+    they come apart: the second one did, and a clarification prompt was shown twice.
+    """
+    stored = ctx.peek_rag_trace()
+    return _is_hitl_trace(
+        normalize_rag_trace(stored.get("rag_trace") if stored else None)
+    )
+
+
+def _evidence_texts(rag_trace: dict | None) -> list:
+    """The text of every chunk this turn retrieved, as the grounding check reads it."""
+    chunks = (rag_trace or {}).get("retrieved_chunks") or []
+    return [
+        str(chunk.get("text") or "")
+        for chunk in chunks
+        if isinstance(chunk, dict) and chunk.get("text")
+    ]
+
+
+def _tool_messages_in(result) -> list:
+    """Every tool result in a finished agent run, for the path that has no stream.
+
+    The streamed path sees each `ToolMessage` go past and hands it to the finalizer
+    there. The synchronous path gets one dictionary at the end instead, so the same
+    messages have to be read back out of it — same objects, same order, arrived
+    differently. Tolerant of every shape `invoke` can return, because a grounding check
+    that raised on an unexpected result would take the answer down with it.
+    """
+    if not isinstance(result, dict):
+        return []
+    return [m for m in (result.get("messages") or []) if isinstance(m, ToolMessage)]
+
+
+def _grounding_expected(turn_plan) -> bool:
+    """Whether this turn is one whose figures have to come from somewhere.
+
+    A turn that bound a checked tool is answerable from evidence, so a figure in its
+    answer is a claim about that evidence. A social reply or an out-of-domain refusal
+    bound nothing to read, never claimed to, and must not be checked as though it had —
+    that is how a check earns the right to be enforced rather than merely observed.
+
+    `CHECKED_TOOLS` and not `GROUNDED_TOOLS`. The citation set answers "must this answer
+    cite?", which is a question about the PROMPT; this is asking "may this answer state a
+    number?", which is a question about the ANSWER, and `get_student_records` is on the
+    wrong side of the first and the right side of the second. Reading the citation set
+    here meant a turn that fetched a child's marks was checked against nothing — and once
+    the planner began narrowing a records turn to `["get_student_records"]`, the
+    narrowing itself became what switched the check off. See backend/tools/__init__.py.
+    """
+    exposed = getattr(turn_plan, "exposed_tools", None)
+    bound = _PROFILE.agent.tools if exposed is None else exposed
+    return bool(set(bound) & CHECKED_TOOLS)
+
+
+def _citations_expected(turn_plan) -> bool:
+    """Whether a `[n]` marker in this answer has to point at a real retrieved chunk.
+
+    Deliberately `GROUNDED_TOOLS`, not `CHECKED_TOOLS` — a citation is a claim about
+    the PROMPT'S OWN CONTRACT, and that contract is only ever shown to the model when
+    a grounded tool is bound (`agent/system.j2`'s `grounded` flag, computed from the
+    same set). `get_student_records` never receives that contract, so it stating `[1]`
+    is not a fabricated pointer to be caught — it is unrequested habit, most often
+    picked up from the Arabic style pack's worked examples
+    (backend/prompts/templates/packs/school/arabic_style.j2), which use `[1]`/`[2]`
+    purely to demonstrate keeping figures exact and are shown on every Arabic turn
+    regardless of which tools are bound.
+
+    Measured live: a records-only turn answered "٨٨٪ (A)... [1]" — correct, and
+    grounded via `extra_evidence` — and the citation check on its own, seeing zero RAG
+    chunks retrieved, flagged it as "cited evidence on a turn that retrieved none" and
+    replaced a correct grades answer with the could-not-verify copy. That is what this
+    function exists to stop: the NUMBER in that answer must still be checked (that is
+    `_grounding_expected`'s job, unchanged), but the stray `[1]` must not be judged by
+    a contract the prompt never gave this turn.
+    """
+    exposed = getattr(turn_plan, "exposed_tools", None)
+    bound = _PROFILE.agent.tools if exposed is None else exposed
+    return bool(set(bound) & GROUNDED_TOOLS)
+
+
+def _nothing_usable_reply(finalizer: Finalizer, turn_plan) -> str:
+    """Copy for a turn whose model output contained no answer at all.
+
+    Measured on the live provider: on one turn in three the model emitted a transcript —
+    reasoning plus a fabricated tool call — and never opened a final channel. The
+    finalizer correctly withholds all of it, and the turn then had nothing to say, so
+    the parent got an empty bubble. Suppressing a non-answer is right; showing nothing
+    in its place is not.
+
+    `retrieval_error` is the honest copy for it. The knowledge base was fine — the
+    model's reply was unusable — and what that copy tells a parent is exactly what this
+    situation warrants: a brief technical problem, try again in a moment. Inventing a
+    cheerier message would be claiming to know something about a turn that produced no
+    information at all.
+
+    Returns "" when the turn legitimately had nothing to say — a social reply that was
+    short-circuited, or a plan that answered without the model — so this never
+    manufactures an error out of a quiet success.
+    """
+    if turn_plan is not None and getattr(turn_plan, "short_circuit", False):
+        return ""
+    # Only when the finalizer actually withheld something. A model that returned an
+    # empty string on its own is a different fault and not one this copy describes.
+    trace = finalizer.as_trace()
+    withheld = (
+        trace.get("finalize_dropped_tool_call_messages")
+        or trace.get("finalize_harmony_messages")
+        or trace.get("finalize_dropped_chars")
+    )
+    if not withheld:
+        return ""
+    logger.warning(
+        "the model produced no answer channel this turn; serving the retry copy"
+    )
+    return _COPY.retrieval_error
+
+
+def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan) -> str:
+    """Verify the assembled answer; return replacement copy when it must not stand.
+
+    Returns "" when the answer is fine, when the check is off, or when this turn is not
+    one the check applies to. The verdict is recorded on the finalizer either way, so
+    `observe` mode produces the same trace as `enforce` and a deployment can measure the
+    check against its own corpus before letting it act.
+    """
+    mode = _PROFILE.agent.answer_grounding_mode
+    if mode == "off" or not (finalizer.answer or "").strip():
+        return ""
+    if not _grounding_expected(turn_plan):
+        return ""
+    report = finalizer.verify(
+        _evidence_texts(rag_trace),
+        floor=_PROFILE.agent.answer_grounding_number_floor,
+        check_citations=_citations_expected(turn_plan),
+    )
+    if report.ok or mode != "enforce":
+        return ""
+
+    # Failed on the citation marker ALONE, on a turn that answered from a tool.
+    #
+    # `grounding.verify` is right to call this `cited_without_evidence`: tool text is not
+    # a citable chunk, and it must never make `[1]` valid — the tests in
+    # test_planner_tool_selection.py pin exactly that, and the rule stays. What is policy,
+    # and therefore lives here beside `answer_grounding_mode`, is what to DO about it.
+    #
+    # A records turn retrieves no chunks by design. Its evidence is what the tool
+    # returned, its figures were checked against that text above and passed, and the
+    # `[n]` is the model reaching for a habit the prompt teaches it on knowledge turns.
+    # Withdrawing a verified answer over a dangling marker is the harm, not the marker:
+    # it turned a correct timetable into "I could not verify these figures".
+    #
+    # So the marker is removed and the answer stands — and only when nothing else failed.
+    # An ungrounded figure or an out-of-range citation still costs the whole answer, on a
+    # records turn exactly as on any other.
+    #
+    # Generic by construction: the condition is "a tool returned evidence", so every tool
+    # bound today and every one added later is covered without knowing this rule exists.
+    if (
+        report.cited_without_evidence
+        and report.tool_evidence
+        and not report.ungrounded
+        and not report.invalid_citations
+    ):
+        cleaned = " ".join(strip_citations(finalizer.answer).split())
+        if cleaned:
+            logger.info("stripped a citation marker from a tool-evidenced answer")
+            return cleaned
+
+    return _COPY.unverified_answer
+
+
+#: Outcomes where `get_student_records` actually returned a child's record. Anything
+#: else — no_records, unavailable, not_authorized, which_student — is a turn that
+#: legitimately has nothing to report, and an answer saying so is the CORRECT answer.
+#: Every outcome name that means a record actually came back. It must grow with each new
+#: record tool: an outcome missing from here cannot trip `_denies_the_records` at all, so
+#: a turn that read a child's record and then told the parent nothing was found passes
+#: unnoticed. `timetable` was missing for exactly that reason until the classroom tools
+#: were added and the gap was noticed.
+RECORDS_RETRIEVED = frozenset(
+    {
+        "grades",
+        "subject",
+        "attendance",
+        "timetable",
+        "class",
+        "subjects",
+        "teachers",
+        "subject_teacher",
+    }
+)
+
+
+def _denies_the_records(ctx, answer: str) -> bool:
+    """Whether the answer tells the parent nothing was found, on a turn that found it.
+
+    The failure, verbatim from the deployment: `get_student_records` returned 87.5% and
+    91.0% for a named child, and the assistant replied that it could not find any
+    records. Nothing in the system contradicted it — the graph knew the tool had been
+    called and not what it returned, and the numeric check cannot see a claim that
+    states no number.
+
+    Both halves are required and they come from opposite ends. What the tool returned is
+    fact, reported by the tool itself (`note_tool_outcome`). What the answer claims is a
+    phrase list, which is a guess — so the phrases are the deployment's own copy, and the
+    mode this drives starts at `observe` for exactly that reason.
+    """
+    phrases = list(getattr(_PROFILE.agent, "records_denial_phrases", None) or [])
+    if not phrases:
+        return False
+    outcomes = getattr(ctx, "tool_outcomes", None) or []
+    if not any(outcome in RECORDS_RETRIEVED for name, outcome in outcomes):
+        return False
+    folded = name_key(answer or "")
+    if not folded:
+        return False
+    # Folded first, then tested for emptiness — not `if phrase`, which was the bug.
+    # A phrase of "   " is truthy and folds to "", and "" is a substring of every answer,
+    # so one stray blank line in a deployment's `records_denial_phrases` made EVERY
+    # records answer read as a denial. Under `records_denial_mode: enforce` that would
+    # have replaced every correct answer about a child's marks with the could-not-verify
+    # copy — a config typo turning into a total outage of the feature it guards.
+    needles = [key for key in (name_key(phrase) for phrase in phrases) if key]
+    return any(needle in folded for needle in needles)
+
+
+def _enforce_records_agreement(finalizer: Finalizer, ctx, turn_plan) -> str:
+    """Replacement copy for an answer that denies a record the turn actually read.
+
+    A sibling of `_enforce_grounding` rather than part of it: that check verifies figures
+    against evidence and reports a `GroundingReport`, and folding a second, differently
+    evidenced verdict into the same report would make one trace field mean two things.
+    Same shape, same contract — "" when there is nothing to do.
+    """
+    mode = getattr(_PROFILE.agent, "records_denial_mode", "off")
+    if mode == "off" or turn_plan is None or getattr(turn_plan, "short_circuit", False):
+        return ""
+    if not _denies_the_records(ctx, finalizer.answer or ""):
+        return ""
+    logger.warning(
+        "the answer denies a record this turn retrieved; mode=%s", mode
+    )
+    return _COPY.unverified_answer if mode == "enforce" else ""
+
+
+def _enforce_forced_tool_ran(finalizer: Finalizer, ctx, turn_plan) -> str:
+    """Replacement copy for an answer whose required tool never actually ran.
+
+    `_ForcePlannedTool` asks the provider to require a tool; it cannot make it. When the
+    endpoint returns an ordinary assistant message instead, that middleware relaxes the
+    requirement and gives the model one more pass — and an unforced model may answer the
+    question from memory, which is the single outcome forcing exists to prevent.
+
+    So the requirement is checked here, where the turn's actual tool traffic is known,
+    rather than trusted at the point it was requested. Two failures are closed at once,
+    and it is the same replacement that closes both:
+
+      * **The invented record.** `_enforce_grounding` only sees figures at or above
+        `answer_grounding_number_floor`, and marks sit under it — 84.0 and 87.5 are
+        below 100 — while a claim about a class, a subject or a teacher carries no
+        number at all. Neither is checkable against evidence that was never fetched.
+      * **The doubled answer.** The retry happens after the first attempt's prose has
+        already streamed to the browser, so the reader would otherwise see the rejected
+        answer followed by the second one. A replacement is an assignment on the client,
+        not an append, so it clears both.
+
+    Same shape and same contract as its two siblings above — "" when there is nothing to
+    do — and it asks only the question those cannot: was a tool this turn REQUIRED to
+    call among the tools it called?
+    """
+    forced = (getattr(ctx, "forced_tool", "") or "").strip()
+    if not forced or turn_plan is None or getattr(turn_plan, "short_circuit", False):
+        return ""
+    # The planner's own dispatch satisfies the requirement as surely as a model call
+    # does: a seeded result is the tool having run. `tool_outcomes` records both.
+    if any(name == forced for name, _ in (getattr(ctx, "tool_outcomes", None) or [])):
+        return ""
+    logger.warning(
+        "the turn required %s and no such tool ran; replacing the answer", forced
+    )
+    return _COPY.unverified_answer
 
 
 def _resume_rag_from_hitl_sync(
@@ -449,10 +834,15 @@ def _turn_context_message(turn_plan) -> SystemMessage | None:
     constraints = [str(item) for item in (getattr(turn_plan, "carried_constraints", None) or [])]
     child_hint = (getattr(turn_plan, "child_hint", "") or "").strip()
     child_year = (getattr(turn_plan, "child_year", "") or "").strip()
-    child_options = [str(item) for item in (getattr(turn_plan, "child_options", None) or [])]
+    # `child_options` is deliberately absent. A turn that could not settle which child is
+    # meant no longer reaches the agent at all — the planner ends it with the question
+    # and the candidates as selectable options — so there is nothing to render and no
+    # reason to pay for a render. See the note where that block used to be in
+    # agent/turn_context.j2.
+    #
     # This condition is the feature's single point of failure: a plan carrying a child
     # and nothing else renders nothing at all unless the child is named here too.
-    if not resolved and not constraints and not child_hint and not child_options:
+    if not resolved and not constraints and not child_hint:
         return None
     rendered = resolve_prompt(
         "",
@@ -461,7 +851,6 @@ def _turn_context_message(turn_plan) -> SystemMessage | None:
         constraints=constraints,
         child_hint=child_hint,
         child_year=child_year,
-        child_options=child_options,
     )
     return SystemMessage(content=rendered) if rendered else None
 
@@ -622,6 +1011,11 @@ def chat_with_agent(
         child=child_state,
     )
     ctx.reset_knowledge_tool_budget()
+    # Settled before anything plans this turn, so the pin is in place by the time the
+    # planner resolves a child. `child_state` is threaded by reference, so the choice is
+    # already in what this turn will persist.
+    if entry.child_choice:
+        _pin_the_child_the_parent_named(ctx, entry.child_choice)
 
     try:
         messages.append(HumanMessage(content=user_text))
@@ -655,12 +1049,19 @@ def chat_with_agent(
                 effective_user_text, messages[:-1], ctx, resolution=entry.resolution
             )
             if turn_plan.short_circuit:
-                # A confirmed out-of-domain question, or a social turn a profile
-                # answers statically. The agent is never built, so this costs neither
-                # the system prompt nor a single tool schema.
-                response_content = turn_plan.static_reply
+                # A confirmed out-of-domain question, a social turn a profile answers
+                # statically, or a parent with two children who both match what they
+                # said. The agent is never built, so this costs neither the system
+                # prompt nor a single tool schema.
+                next_pending_hitl = _child_choice_pending(
+                    turn_plan, original_question or user_text
+                )
+                response_content = (
+                    _format_hitl_message(turn_plan.static_reply, next_pending_hitl["options"])
+                    if next_pending_hitl
+                    else turn_plan.static_reply
+                )
                 rag_trace = normalize_rag_trace(turn_plan.as_trace())
-                next_pending_hitl = None
             else:
                 request_agent = create_agent_for_request(ctx, turn_plan.exposed_tools, turn_plan.language)
                 context_messages = _build_context_messages(
@@ -674,16 +1075,28 @@ def chat_with_agent(
                 response_content = ""
                 if isinstance(result, dict):
                     if "output" in result:
-                        response_content = result["output"]
+                        response_content = str(result["output"])
                     elif "messages" in result and result["messages"]:
-                        msg = result["messages"][-1]
-                        response_content = getattr(msg, "content", str(msg))
+                        response_content = message_text(result["messages"][-1])
                     else:
                         response_content = str(result)
                 elif hasattr(result, "content"):
-                    response_content = result.content
+                    response_content = message_text(result)
                 else:
                     response_content = str(result)
+                # Same rules as the streamed path. The agent loop has ended, so the last
+                # message answered rather than called a tool — but it may still be
+                # wearing its transcript. See `backend/chat/finalize.py`.
+                raw_response = response_content
+                response_content = finalize_text(response_content)
+                if raw_response.strip() and not response_content.strip():
+                    # Everything the model said was transcript and none of it was an
+                    # answer. The streamed path reaches this through the finalizer's
+                    # counters; here the comparison IS the signal.
+                    logger.warning(
+                        "the model produced no answer channel this turn; serving the retry copy"
+                    )
+                    response_content = _COPY.retrieval_error
 
                 stored_trace = ctx.take_rag_trace()
                 rag_trace = normalize_rag_trace(stored_trace.get("rag_trace") if stored_trace else None)
@@ -700,6 +1113,28 @@ def chat_with_agent(
                         next_pending_hitl["prompt"],
                         next_pending_hitl["options"],
                     )
+                else:
+                    # Same check the streamed path runs, and it has to be here too: this
+                    # path serves the same answers to the same parents, and a rule that
+                    # holds on one of two entry points is not a rule.
+                    sync_finalizer = Finalizer()
+                    # Including what the tools returned. The streamed path collects these
+                    # as they arrive; here the whole conversation is in hand at once, so
+                    # they are replayed off it. Without this the check on THIS path had no
+                    # record of a child's marks and passed every answer about them.
+                    for tool_message in _tool_messages_in(result):
+                        sync_finalizer.note_tool_result(tool_message)
+                    sync_finalizer.replace_answer(response_content)
+                    replacement = (
+                        _enforce_grounding(sync_finalizer, rag_trace, turn_plan)
+                        or _enforce_records_agreement(sync_finalizer, ctx, turn_plan)
+                        or _enforce_forced_tool_ran(sync_finalizer, ctx, turn_plan)
+                    )
+                    if replacement:
+                        response_content = replacement
+                    sync_finalizer.log_summary()
+                    if rag_trace:
+                        rag_trace.update(sync_finalizer.as_trace())
 
         # Assets this turn surfaced, rendered for whatever the caller can display.
         capabilities = effective_capabilities(client_capabilities, _PROFILE.assets.delivery)
@@ -809,6 +1244,11 @@ async def chat_with_agent_stream(
         child=child_state,
     )
     ctx.reset_knowledge_tool_budget()
+    # Settled before anything plans this turn, so the pin is in place by the time the
+    # planner resolves a child. `child_state` is threaded by reference, so the choice is
+    # already in what this turn will persist.
+    if entry.child_choice:
+        _pin_the_child_the_parent_named(ctx, entry.child_choice)
 
     try:
         messages.append(HumanMessage(content=user_text))
@@ -940,6 +1380,7 @@ async def chat_with_agent_stream(
             async for chunk in _stream_static_reply(
                 turn_plan, turn_signals, user_text, user_id, session_id,
                 messages, metadata, persistent_note, is_first_message,
+                _child_choice_pending(turn_plan, entry.original_question or user_text),
             ):
                 yield chunk
             return
@@ -956,6 +1397,11 @@ async def chat_with_agent_stream(
 
         full_response = ""
         agent_error = None
+        # Every chunk the model produces crosses this, and nothing reaches the browser
+        # that it did not return. Held out here rather than inside the worker because
+        # the grounding check below needs it once the stream has finished — see
+        # `backend/chat/finalize.py`.
+        finalizer = Finalizer()
 
         async def _agent_worker():
             nonlocal full_response, agent_error
@@ -966,31 +1412,35 @@ async def chat_with_agent_stream(
                     config={"recursion_limit": _PROFILE.agent.recursion_limit},
                 ):
                     if isinstance(msg, ToolMessage):
+                        finalizer.note_tool_result(msg)
                         continue
                     if not isinstance(msg, AIMessageChunk):
                         continue
-                    if getattr(msg, "tool_call_chunks", None):
-                        continue
 
-                    content = ""
-                    if isinstance(msg.content, str):
-                        content = msg.content
-                    elif isinstance(msg.content, list):
-                        for block in msg.content:
-                            if isinstance(block, str):
-                                content += block
-                            elif isinstance(block, dict) and block.get("type") == "text":
-                                content += block.get("text", "")
-
-                    if content:
-                        stored_trace = ctx.peek_rag_trace()
-                        rag_trace = normalize_rag_trace(
-                            stored_trace.get("rag_trace") if stored_trace else None
-                        )
-                        if _is_hitl_trace(rag_trace):
-                            continue
+                    # Not `continue`-d on a tool-call chunk any more: the model's prose
+                    # arrives in DIFFERENT chunks of the same message, so skipping only
+                    # the chunks carrying a tool-call delta forwarded all of it. The
+                    # finalizer suppresses by message, which is the unit the rule is
+                    # actually about.
+                    content = finalizer.consider(msg)
+                    if content and not _turn_is_asking_a_question(ctx):
                         full_response += content
                         await output_queue.put({"type": "content", "content": content})
+
+                # The last message is only known to be over once the stream ends, so
+                # whatever it was still holding is released here.
+                #
+                # Through the SAME gate as the chunks above, and that is not belt and
+                # braces: the finalizer holds the opening of a message until it can rule
+                # out a transcript header, so a reply SHORTER than that hold never takes
+                # the streaming path at all and arrives entirely as this tail. A
+                # clarification prompt is exactly that short, and it reaches the user as
+                # a `hitl_request` event — putting it on the wire as content too showed
+                # it twice.
+                tail = finalizer.finish()
+                if tail and not _turn_is_asking_a_question(ctx):
+                    full_response += tail
+                    await output_queue.put({"type": "content", "content": tail})
             except Exception as e:
                 agent_error = str(e)
                 await output_queue.put({"type": "error", "content": str(e)})
@@ -1040,6 +1490,22 @@ async def chat_with_agent_stream(
                 next_pending_hitl["prompt"],
                 next_pending_hitl["options"],
             )
+        else:
+            # The answer is settled and the evidence is in hand, so this is the first
+            # moment the two can be compared. A failure replaces what was streamed
+            # rather than appending to it: the reader has already seen the figure, and
+            # a correction underneath it would leave both on screen.
+            replacement = _enforce_grounding(finalizer, rag_trace, turn_plan)
+            if not replacement:
+                replacement = _enforce_records_agreement(finalizer, ctx, turn_plan)
+            if not replacement:
+                replacement = _enforce_forced_tool_ran(finalizer, ctx, turn_plan)
+            if not replacement and not full_response.strip():
+                replacement = _nothing_usable_reply(finalizer, turn_plan)
+            if replacement:
+                full_response = finalizer.replace_answer(replacement)
+                yield f"data: {json.dumps({'type': 'content_replace', 'content': replacement})}\n\n"
+            finalizer.log_summary()
 
         asset_references = build_asset_references(
             asset_ids_for_answer(full_response, ctx, rag_trace, _PROFILE.assets.delivery),
@@ -1053,6 +1519,12 @@ async def chat_with_agent_stream(
             ]
             yield f"data: {json.dumps({'type': 'assets', 'assets': payload})}\n\n"
         rag_trace = attach_assets_to_trace(rag_trace, asset_references)
+        if rag_trace:
+            # What the finalize stage withheld, and what it made of the answer. Recorded
+            # on every turn it ran, not only the failing ones: "nothing was dropped" and
+            # "the stage never ran" are different facts, and a provider switch is
+            # exactly when telling them apart matters.
+            rag_trace.update(finalizer.as_trace())
 
         if rag_trace:
             yield f"data: {json.dumps({'type': 'trace', 'rag_trace': rag_trace})}\n\n"

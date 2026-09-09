@@ -1,6 +1,6 @@
 # School assistant — answers parents about the school, and about their own child.
 #
-# The only profile that binds `get_student_records`, and deliberately so. Every bound
+# The only profile that binds the student-record tools, and deliberately so. Every bound
 # tool ships its name, description and argument schema to the model on every single
 # call — that is where the cost sits, not in the system prompt, which varies only by
 # whether any bound tool is grounded. Adding student records to `base` would bill every
@@ -23,18 +23,9 @@ identity:
   display_name: "مساعد المدرسة"
   api_title: "School Assistant API"
   description: "Answers parents about school information and their own child's records"
-  # Injected verbatim as {persona}. Two rules earn their place here rather than in a
-  # tool result, because they hold on every turn regardless of what any tool returned:
-  # answer in the parent's language, and never invent a figure about a child.
-  persona: >-
-    You are the school's assistant, helping parents and guardians. You reply in the
-    language the parent wrote in — Arabic when they write Arabic — and you keep
-    answers short, warm and practical. When a parent asks about their own child's
-    grades, attendance or report card, you look the answer up rather than recalling
-    it. You never state, estimate or guess a mark, an average or an attendance figure:
-    if the records cannot be reached, you say so plainly and suggest trying again
-    shortly. For anything you cannot do — changing a record, arranging a meeting — you
-    point the parent to the school office.
+  # persona lives in prompts/templates/packs/school/persona.j2 — see the `agent` section
+  # below for why prompt text left this file. Setting `persona:` here still overrides
+  # the pack, for a deployment that would rather keep its voice in one YAML.
   redis_key_prefix: "school"
   langsmith_project: "school-assistant"
 
@@ -42,55 +33,60 @@ agent:
   # Lists replace rather than merge, so this list is the whole set, not an addition
   # to base's.
   #
-  # `get_student_records` covers grades, subject breakdowns and attendance in one tool
-  # rather than three. The model chooses between them with a `record_type` argument, so
-  # the prompt carries one tool description instead of three near-identical ones, and a
-  # parent asking about two children in one turn stays inside a single budget.
+  # ONE TOOL PER RECORD, not one tool with a `record_type` argument. The planner selects
+  # tools by NAME, so a capability reachable only through an argument is one the planner
+  # cannot ask for — it had to guess `grades` and let the model spend a round trip
+  # correcting it. Split, a question about absences AND marks dispatches both at once,
+  # which the merged shape could not express at all.
+  #
+  # But one tool per RECORD, not per QUESTION ABOUT a record. `get_subject_grades` and
+  # `get_subject_teacher` used to stand beside their parents as separate tools, and that
+  # was the split applied one level too far: they read the same record from the same
+  # endpoint and differed only by a filter. It cost twice — the classifier had to tell
+  # near-identical descriptions apart on every turn, and a tool whose argument comes from
+  # the message can never be pre-dispatched. Folded in as an optional `subject`, both
+  # questions reach the same name and every record tool is plannable. See
+  # `planned_tool_arguments` below.
+  #
+  # The line: merge along "same record, optional filter"; never along "different record,
+  # type argument", which is the `record_type` mistake this comment opens with.
+  #
+  # The cost is a tool schema per record on the wire every turn instead of one. Paid
+  # knowingly: the round trip it removes is worth more than the schemas it adds, and the
+  # audited-read ceiling is shared across all of them, so splitting did not multiply it.
   tools:
     - search_knowledge_base
-    - get_student_records
+    - get_student_grades
+    - get_student_attendance
+    - get_student_timetable
+    - get_student_class
+    - get_student_subjects
+    - get_student_teachers
 
-  # Register and dialect, set here rather than in `identity.persona` because persona is
-  # ALSO rendered into the classifier prompts (request_envelope, resolve_question,
-  # scope_check, section_summary, corpus_digest). Style examples there would be billed
-  # on every classifier call and shown to a node explicitly told it never talks to the
-  # user. `system_prompt` reaches the agent and nothing else.
+  # PROMPT TEXT LIVES IN prompts/templates/packs/school/, not here.
   #
-  # THE COST OF SETTING THIS: schema.render_system_prompt returns this string verbatim
-  # and composes nothing, so agent/system.j2 — including agent/_grounding.j2 — is
-  # bypassed. The three grounding rules below are copied from that fragment and must
-  # stay in step with it: asset attribution parses [n] out of the answer, so dropping
-  # the citation line silently breaks figure delivery, not just provenance.
+  # A profile answers "what is this deployment"; a prompt answers "how does the system
+  # talk". Only the first is something a domain owner should have to write, and mixing
+  # them cost real money once: a worked example carrying a real grade and a real fee was
+  # reproduced verbatim by the model — as its answer, and as its search query — on
+  # accounts with no child on file. Prose that the model reads is now versioned as
+  # templates, where the tests that render every prompt can see it.
   #
-  # Written in Arabic on purpose. An English instruction to "reply in Egyptian Arabic"
-  # barely moves a 20B English-centric model's output distribution; the same instruction
-  # in Arabic anchors it. The worked examples are there for the same reason — register
-  # is imitative, and a small model cannot instantiate "friendly semi-formal" from the
-  # adjectives alone. حضرتك is the marker doing most of the work: respectful without
-  # being stiff, which is exactly the target.
+  #   identity.persona     -> packs/school/persona.j2
+  #   system_prompt        -> packs/school/system.j2
+  #   arabic_style_prompt  -> packs/school/arabic_style.j2
   #
-  # BUDGETED AT 500 TOKENS, rendered, and that ceiling is enforced by
-  # test_prompt_budget.py rather than left to whoever edits this next. It is paid on
-  # every single turn, and Arabic costs roughly three tokens a word on this tokenizer,
-  # so prose here is several times more expensive than it looks — the first draft came
-  # to 588. What survived the trim is what a small model actually acts on: the register
-  # written in Arabic, the use/avoid word lists, ONE three-way contrast (small models
-  # overshoot in one direction, and the contrast is what stops it), and TWO worked
-  # examples. Descriptions of the tone were cut first; they were the part the model
-  # could not use.
-  system_prompt: |
-    {persona}
-
-    {language_directive}
-
-    Search once, then answer from what comes back.
-
-    Grounding rules:
-    - Base every factual claim on the retrieved chunks.
-    - Cite the chunk behind each claim inline by its index: [1], or [2][3].
-    - Say plainly when the retrieved context does not answer the question.
-
-    Keep answers to a few short paragraphs or a bulleted list. Markdown is supported.
+  # Each is loaded at profile load by registry._apply_prompt_packs. Setting any of them
+  # here still wins, so a deployment can pin a prompt in YAML without moving the file.
+  #
+  # Register belongs in `system_prompt`/`arabic_style_prompt` rather than in
+  # `identity.persona` because persona is ALSO rendered into five classifier prompts
+  # (request_envelope, resolve_question, scope_check, section_summary, corpus_digest).
+  # Style examples there would be billed on every classifier call and shown to a node
+  # explicitly told it never talks to the user.
+  #
+  # BUDGETED AT 500 TOKENS rendered, enforced by test_prompt_budget.py. It is paid on
+  # every single turn, and Arabic costs roughly three tokens a word on this tokenizer.
 
   # A school serves parents who write Arabic or English and nobody else, so both can be
   # named outright. The global map names only Arabic, on the grounds that `en` is what
@@ -102,32 +98,19 @@ agent:
     ar: Arabic
     en: English
 
-  # Appended only when the turn is being answered in ARABIC. An English turn renders
-  # none of it — 203 tokens instead of 459 — and never carries a register it cannot
-  # use. See AgentConfig.arabic_style_prompt.
-  arabic_style_prompt: |
-    الرد يبقى مصري مهذّب:
-    استخدم: حضرتك، عايز/عايزة، إيه، إمتى، كام، دلوقتي، ممكن، تمام.
-    بلاش فصحى رسمية (يُرجى، نُحيطكم علماً، ماذا، متى، كم) وبلاش عامية زيادة (يا باشا، خالص كده).
-
-      رسمي زيادة: «يُرجى مراجعة إدارة المدرسة»
-      عامي زيادة: «يا باشا كلم المدرسة»
-      المطلوب:    «كلّم حضرتك مكتب المدرسة وهما هيساعدوك»
-
-      «المصاريف كام للصف الرابع؟»
-      «مصاريف الصف الرابع 45 ألف جنيه على تلات دفعات. لو حضرتك عايزة المواعيد أقولك. [1]»
-
-      «ممكن أقابل المس بتاعته؟»
-      «المقابلات بتتنظم عن طريق مكتب المدرسة — كلّم حضرتك المكتب وهما هيحددوا ميعاد. [2]»
-
-    الأرقام والتواريخ والمبالغ زي ما هي في المصدر بالظبط — العامية في الأسلوب مش في المعلومة.
-    خلي كل الرد بنفس الأسلوب ده، مش أول جملة بس.
+  # arabic_style_prompt -> packs/school/arabic_style.j2. Appended only when the turn is
+  # answered in ARABIC: an English turn renders none of it — 203 tokens instead of 459.
 
   # Replaces base's list rather than adding to it, so this is the whole set.
   #
   # Matched whole-message after normalisation, and every phrase here is one model call
   # that never happens. Base ships MSA only, so «إزيك» and «متشكر» — two of the
   # commonest Egyptian openers — fell through to the classifier.
+  #
+  # Static on this production-facing profile because the reply is already known. A
+  # greeting or acknowledgement must not depend on provider tool-call compliance, and
+  # paying a model call here only adds a failure mode to fixed copy the profile carries.
+  social_reply_mode: static
   social_phrases:
     - hi
     - hello
@@ -171,6 +154,25 @@ agent:
     - تحت أمرك
     - سلام
     - باي
+    # Whole sentences, because that is what a parent actually types. «Thanks for your
+    # help» reached the agent, was given a required tool it had no reason to call, and
+    # came back to the parent as a provider error — so the fix belongs here, where a
+    # listed phrase costs nothing and never fires on a question.
+    #
+    # Listed rather than matched by edit distance. A typo matcher that admitted this
+    # would have to accept a whole SENTENCE as one phrase plus an error budget, and at
+    # that point «thanks and what are the fees؟» is inside the budget too — which is the
+    # one mistake this rung must not make. Misspellings that matter are cheaper to add
+    # here as they are observed.
+    - thanks for your help
+    - thanks a lot
+    - many thanks
+    - thanks so much
+    - thank you so much
+    - شكرا على مساعدتك
+    - متشكر جدا
+    - متشكرة جدا
+    - شكرا على المساعدة
 
   # A school assistant is asked plenty that the corpus is not about — homework help,
   # general knowledge, chat. Without this the catalogue rung can only admit, so those
@@ -235,6 +237,183 @@ agent:
   # ChatRequestContext.acquire_records_tool_slot.
   max_knowledge_calls_per_turn: 2
 
+  # What each tool may be called in one turn, enforced by withholding the tool from the
+  # request rather than refusing the call once it arrives. `search_knowledge_base` is
+  # deliberately not listed here: it takes the number above, so retrieval keeps one
+  # budget rather than two that can drift apart.
+  #
+  # Two per record tool, because a parent asking about two children is a legitimate
+  # sequence — read one, then the other. These are GRAPH budgets, deciding what stays on
+  # offer; the audited-read ceiling that actually protects the facade is
+  # `RECORDS_MAX_CALLS_PER_TURN`, which all three tools share, so a number raised here
+  # cannot widen how much of a minor's record one turn may read.
+  tool_call_budgets:
+    get_student_grades: 2
+    get_student_attendance: 2
+    get_student_timetable: 2
+    get_student_class: 2
+    get_student_subjects: 2
+    get_student_teachers: 2
+  default_tool_call_budget: 1
+
+  # `recursion_limit` is deliberately NOT set here, and adding the timetable tool is what
+  # tested that. Base carries it, sized against this profile's budgets — see the comment
+  # on it there — because this is the profile with the most tools and therefore the one
+  # that decides the number. `test_school_profile.py` asserts the two stay equal, so a
+  # local override here would be a silent fork of a ceiling that is meant to be one value.
+
+  # Bind the one tool the question needs, when the planner already knows which. This
+  # deployment is where the failure was measured: with both tools on the wire, «درجات
+  # ليلى أحمد كام؟» was answered by searching the fee corpus and telling a parent no
+  # information about their daughter existed, while the records tool sat unused beside
+  # it. Three of three runs on that question, and two more questions like it.
+  #
+  # Safe here specifically because this profile has both halves the switch depends on: a
+  # child roster from the records facade, and a classifier that separates a question
+  # about a child's own record from a school matter asked about that child. Without the
+  # second, «مصاريف ابني» would be sent to the records tool, which is why it is a
+  # classifier field and not a keyword rule.
+  narrow_tools_to_the_turn: true
+
+  # When the classifier names more than one tool, dispatch them together instead of
+  # letting the model discover them one at a time.
+  #
+  # `narrow_tools_to_the_turn` above narrows to a FAMILY and stops; this acts on the
+  # tool-by-tool answer `tool_selection` produces. «درجات ليلى كام والمصاريف كام؟» is classified
+  # a two-part question used to mean: bind everything, let the model search, wait, read,
+  # ask for the records, wait, read, answer — four model round-trips with the two lookups
+  # strictly one after the other. Planned, it is one round-trip with both running at once.
+  parallel_tool_calls: true
+
+  # What a planned call looks like for each tool. A tool missing from here is never
+  # pre-dispatched; it stays bound and the model calls it the ordinary way.
+  #
+  # There is no `record_type` to fill in any more, and that is the point of the split
+  # above: WHICH record to read is now the tool's name, which the classifier selects,
+  # rather than an argument the planner had to guess and the model had to correct.
+  #
+  # `subject` is NOT planned, and every record tool is still plannable — which is the
+  # whole reason the subject variants were folded into their parents. As separate tools
+  # they were unplannable by construction: `subject` comes from the message, nothing in
+  # the plan holds one, and `PLAN_PLACEHOLDERS` is a closed set. So the two commonest
+  # record questions a parent asks — «هي جابت كام في العربي», «مين مدرس الرياضيات» — were
+  # exactly the two that paid a full model round-trip to compose the call, and the two
+  # that reached the provider under `tool_choice`, which is where the endpoint's
+  # unhonoured-requirement error was actually met.
+  #
+  # Folded in, the planned call is `student_name` alone. The subject is dropped from the
+  # PLAN, not from the tool: a planned call returns the whole term or every teacher, and
+  # the model reads the one row it was asked about out of grounded evidence instead of
+  # guessing a string that has to match the school's own naming. The tool still accepts
+  # `subject` when the model calls it the ordinary way.
+  planned_tool_arguments:
+    search_knowledge_base:
+      query: "$resolved_question"
+    get_student_grades:
+      # The label the ROSTER matched, never a name the model transcribed. The tool
+      # re-resolves it against the same roster, so a planned call names the same child
+      # the prompt does.
+      student_name: "$child_label"
+    get_student_attendance:
+      student_name: "$child_label"
+    # Plannable for the same reason attendance is: the only argument is the child, and
+    # the plan already holds her. Note there is no class here to fill in — the timetable
+    # is resolved from her placement behind the facade, which is what keeps a room code
+    # out of a plan that would still be holding it after she moved class.
+    get_student_timetable:
+      student_name: "$child_label"
+    # The rest, whose planned argument is the child and nothing else. `get_student_grades`
+    # and `get_student_teachers` also accept a `subject`, and it is deliberately not named
+    # here: `PLAN_PLACEHOLDERS` is a closed set with no `$subject` in it, so a planned call
+    # would have to invent one. Omitting it plans the whole record and lets the model read
+    # the row it was asked about out of what came back — which is why folding the subject
+    # variants in made every tool plannable instead of making two of them unplannable.
+    get_student_class:
+      student_name: "$child_label"
+    get_student_subjects:
+      student_name: "$child_label"
+    get_student_teachers:
+      student_name: "$child_label"
+
+  # What each tool is for, for the classifier to choose between. This is what makes
+  # selection work past the two-tool case, and it is now also what decides WHICH record
+  # is read — so a new capability is a tool plus a line here, and nothing else.
+  #
+  # Written for a node that judges a message it must not act on, so each line states
+  # SUBJECT MATTER and nothing else: no instruction to call anything, and no worked
+  # example. An example here is a sentence the classifier can mistake for the message it
+  # was given — this deployment has already had model-facing example text reproduced
+  # verbatim as an answer and as a search query.
+  tool_selection:
+    search_knowledge_base: >-
+      The school's own published material, the same for every family: fees and
+      instalments, term dates and holidays, admissions, uniform, books and equipment to
+      buy, transport and bus routes, the school day, attendance rules, exam schedules,
+      trips, medical policy, contact details. Not which subjects one child's class is
+      assigned, which class the child is in, or who teaches them — those differ per child
+      and have their own tools.
+    get_student_grades: >-
+      One child's own marks — across every subject this term, or inside one named subject
+      assignment by assignment. How they are doing overall, their results, their report
+      card, what they scored, whether they are doing well, and equally what they got in
+      maths or Arabic. Name this one whether or not a subject is mentioned; the subject,
+      when there is one, is an argument to it and not a different tool.
+    get_student_attendance: >-
+      One child's own attendance: the days they were present, absent or late.
+    get_student_timetable: >-
+      One child's own weekly class schedule — which lessons fall on which day, what the
+      child has on a particular day, when a subject is taught, and what their school day
+      looks like. This is the one to name when the message asks about a schedule or a timetable
+      rather than about marks or absences, including when it says so in dialect. It is not
+      for term dates, holidays or exam schedules, which are the same for every family.
+    get_student_class: >-
+      Which class one child is in, and what that class is called. For a message asking
+      about the child's class, section or which room they are in — not what happens in it.
+    get_student_subjects: >-
+      Which subjects one child studies — the list of subjects their class is taught. For
+      a message asking what the child studies or which subjects they take, without asking
+      about marks in them or when they are taught. This one covers their curriculum too:
+      the subjects THAT child's class is assigned are their own record, not published
+      material.
+      بالعربي: مواد ابني، بياخد أنهي مواد، بتدرس ايه، كام مادة، المنهج بتاعه، بياخد مادة
+      معينة ولا لأ.
+    get_student_teachers: >-
+      Who teaches one child — all of their teachers with the subject each takes, or the
+      teacher of one named subject. Name this one whether or not a subject is mentioned;
+      the subject, when there is one, is an argument to it and not a different tool.
+      بالعربي: مين مدرسين ابني، اسماء المدرسين بتوع فصله، مين بيدرسله، وكمان مين مدرس
+      الرياضيات/الحساب/العلوم/العربي، مين مدرسة العلوم بتاعة بنتي، بياخد المادة دي مع مين.
+
+  # A fee, an instalment, a deadline — the figures in this corpus are what a parent acts
+  # on, so a figure that is in no retrieved chunk must not be served. Enforced rather
+  # than observed because the failure this closes actually reached a parent: an invented
+  # «45 ألف» for a grade the child is not in. See backend/chat/grounding.py.
+  # An answer that tells a parent no record exists, on a turn where the records tool
+  # returned one. Measured here: the tool came back with 87.5% and 91.0% for a named
+  # child and the reply was "I couldn't find any records." The numeric check above cannot
+  # see it — a denial states no figure, and a mark is under the 100 floor in any case.
+  #
+  # `observe` and not `enforce`, for now and on purpose. The half of this check that
+  # reads the tool is fact; the half that reads the ANSWER is the list below, and a
+  # phrase list is the part that can be wrong about a correct reply. Observing puts every
+  # disagreement in the trace and the log, which is the evidence this deployment needs
+  # before it lets the check rewrite an answer a parent would otherwise have read.
+  records_denial_mode: observe
+  # Folded before matching, so a different alif or teh marbuta does not slip past.
+  records_denial_phrases:
+    - "ما لقيتش"
+    - "مالقيتش"
+    - "لم أجد"
+    - "لا توجد"
+    - "مفيش"
+    - "مش موجود"
+    - "couldn't find"
+    - "could not find"
+    - "no records"
+    - "not find any"
+
+  answer_grounding_mode: enforce
+
   # Six turns of conversation, which is TWELVE messages — this is counted in messages,
   # not exchanges, and setting it to 6 would give a parent three turns of memory.
   #
@@ -263,6 +442,13 @@ models:
 # Register matches agent.system_prompt above — these sit next to model-written replies
 # in the same conversation, and base's MSA boilerplate reads as a different assistant.
 user_copy:
+  # Asked with no model call when this parent's own roster holds more than one child
+  # matching what they said — "my son" with two sons on file. The names follow as
+  # selectable options, so the question deliberately does not list them itself: a parent
+  # taps one rather than re-typing a name the school already knows how to spell.
+  which_child:
+    en: Which child do you mean?
+    ar: حضرتك تقصد أنهي واحد فيهم؟
   out_of_domain:
     en: >-
       That's outside what I can help with here — I answer questions about the school.
@@ -278,6 +464,9 @@ user_copy:
     مش متأكد منها. أنصح حضرتك تتواصل مع مكتب المدرسة.
   retrieval_error: >-
     في مشكلة تقنية مؤقتة منعتني أوصل لمصادر المدرسة. ممكن حضرتك تجرّب تاني بعد شوية؟
+  unverified_answer: >-
+    معلش، مقدرتش أتأكد من الأرقام دي من مستندات المدرسة نفسها، ومش عايز أقول لحضرتك رقم
+    غلط في حاجة زي المصاريف. الأفضل تتواصل مع مكتب المدرسة عشان الرقم الأكيد.
   hitl_clarify_default: >-
     لقيت محتوى قريب من سؤالك، بس المعلومات مش كفاية أحدد إجابة أكيدة. ممكن حضرتك
     تديني تفاصيل أكتر؟

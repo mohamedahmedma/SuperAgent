@@ -148,6 +148,20 @@ class RagTraceFields(StrictSchema):
     auto_merge_figure_threshold: Optional[int] = None
     auto_merge_replaced_chunks: Optional[int] = None
     auto_merge_steps: Optional[int] = None
+    # What the finalize stage did between the model and the reader, and what it made of
+    # the answer. Carried here because both are facts about how this turn's retrieval
+    # and its answer relate — see backend/chat/finalize.py.
+    finalize_dropped_tool_call_messages: Optional[int] = None
+    finalize_dropped_chars: Optional[int] = None
+    finalize_harmony_messages: Optional[int] = None
+    finalize_tool_results: Optional[int] = None
+    grounding_ok: Optional[bool] = None
+    grounding_evidence_chunks: Optional[int] = None
+    grounding_numbers_checked: Optional[int] = None
+    grounding_ungrounded_numbers: Optional[List[str]] = None
+    grounding_invalid_citations: Optional[List[int]] = None
+    grounding_reason: Optional[str] = None
+
     retrieved_chunks: Optional[List[RetrievedChunk]] = None
     initial_retrieved_chunks: Optional[List[RetrievedChunk]] = None
     rewrite_retrieved_chunks: Optional[List[RetrievedChunk]] = None
@@ -195,14 +209,27 @@ class HitlResumeState(StrictSchema):
 
 
 class PendingHitlState(StrictSchema):
+    """A question the assistant put to the user, and what to do with the answer.
+
+    `child_select` is unlike the other two routes, and the difference is the point of
+    the feature: the other two are asked because RETRIEVAL could not settle something,
+    so they carry a `resume_state` that lets the graph pick up where it stopped. This one
+    is asked because a parent has two children who both match what they said, and the
+    answer settles a fact rather than a search — the child is pinned to the session and
+    the ORIGINAL question is simply planned again, now that it resolves. There is no
+    graph state to resume, which is why `resume_state` is optional.
+    """
+
     id: str = Field(min_length=1)
     original_question: str = Field(min_length=1)
     prompt: str = Field(min_length=1)
     options: List[str] = Field(default_factory=list)
-    route: Literal["clarify", "scope_select"]
-    retrieval_status: Literal["needs_clarification", "needs_scope_selection"]
+    route: Literal["clarify", "scope_select", "child_select"]
+    retrieval_status: Literal[
+        "needs_clarification", "needs_scope_selection", "needs_child_choice"
+    ]
     answers: List[str] = Field(default_factory=list)
-    resume_state: HitlResumeState
+    resume_state: Optional[HitlResumeState] = None
     created_at: str
 
 

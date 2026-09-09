@@ -17,6 +17,7 @@ from backend.chat.turn_policy import TurnPlan
 from backend.profiles import get_profile
 from backend.profiles.registry import load_profile, set_profile
 from backend.rag.evidence import Certainty
+from backend.tools import KNOWLEDGE_TOOL
 
 
 class RecordingContext:
@@ -387,43 +388,64 @@ class TerminalShortCircuitMiddlewareTests(unittest.TestCase):
         def note_short_circuit(self, status):
             self.noted = status
 
-    def _state(self, tool_results):
+    def _state(self, tool_names):
+        """Tool results named explicitly, because WHICH tool ran is the whole rule.
+
+        The names used to be `tool_0`, `tool_1` placeholders: the guard counted results
+        and never read them. It now counts tools, so a fixture that names them
+        arbitrarily is describing a different turn than it means to.
+        """
         from langchain_core.messages import HumanMessage, ToolMessage
 
         messages = [HumanMessage(content="what is partner")]
         messages += [
-            ToolMessage(content="NO_KNOWLEDGE", tool_call_id=f"c{i}", name=f"tool_{i}")
-            for i in range(tool_results)
+            ToolMessage(content="NO_KNOWLEDGE", tool_call_id=f"c{i}", name=name)
+            for i, name in enumerate(tool_names)
         ]
         return {"messages": messages}
 
-    def _decide(self, status, tool_results):
+    def _decide(self, status, tool_names):
         import backend.chat.runtime as runtime
 
         ctx = self.Ctx(status)
         middleware = runtime._end_turn_on_terminal_retrieval(ctx)
-        return middleware.before_model(self._state(tool_results), None), ctx
+        return middleware.before_model(self._state(tool_names), None), ctx
 
     def test_a_terminal_result_ends_the_graph_before_the_second_model_call(self):
-        verdict, ctx = self._decide("no_knowledge", 1)
+        verdict, ctx = self._decide("no_knowledge", [KNOWLEDGE_TOOL])
         self.assertEqual({"jump_to": "end"}, verdict)
         self.assertEqual("no_knowledge", ctx.noted)
 
+    def test_duplicate_knowledge_calls_still_end_the_graph(self):
+        """The regression that let an invented fee reach a parent.
+
+        This model emits the same search_knowledge_base call two to five times in one
+        message (measured on 4 of 6 turns). The guard counted RESULTS, so a turn whose
+        corpus said `no_knowledge` arrived with two or three of them, `!= 1` was true,
+        and the rail stood down — leaving the model free to answer a fees question from
+        its own knowledge. Repeat calls to one tool are one tool having run.
+        """
+        for count in (2, 3, 5):
+            with self.subTest(duplicate_calls=count):
+                verdict, ctx = self._decide("no_knowledge", [KNOWLEDGE_TOOL] * count)
+                self.assertEqual({"jump_to": "end"}, verdict)
+                self.assertEqual("no_knowledge", ctx.noted)
+
     def test_the_first_model_call_is_never_cut(self):
         """Nothing has retrieved yet, so there is no trace and nothing to short-circuit."""
-        verdict, ctx = self._decide(None, 0)
+        verdict, ctx = self._decide(None, [])
         self.assertIsNone(verdict)
         self.assertIsNone(ctx.noted)
 
     def test_a_usable_result_leaves_the_loop_alone(self):
-        verdict, ctx = self._decide("answerable", 1)
+        verdict, ctx = self._decide("answerable", [KNOWLEDGE_TOOL])
         self.assertIsNone(verdict)
         self.assertIsNone(ctx.noted)
 
     def test_a_second_tool_keeps_the_model_call(self):
-        """A turn that also called, say, the weather tool still has material to answer
+        """A turn that also called, say, the records tool still has material to answer
         from, and cutting it there would throw that away."""
-        verdict, ctx = self._decide("no_knowledge", 2)
+        verdict, ctx = self._decide("no_knowledge", [KNOWLEDGE_TOOL, "get_student_grades"])
         self.assertIsNone(verdict)
         self.assertIsNone(ctx.noted)
 
@@ -435,15 +457,24 @@ class TerminalShortCircuitMiddlewareTests(unittest.TestCase):
         middleware = runtime._end_turn_on_terminal_retrieval(self.Ctx("no_knowledge"))
         self.assertEqual(["end"], getattr(middleware.before_model, "__can_jump_to__", None))
 
-    def test_the_agent_is_built_with_the_short_circuit_bound(self):
+    def test_the_agent_is_built_with_both_guards_bound(self):
+        """Named rather than counted: an unbound middleware is inert, and a bare count
+        says nothing about WHICH of the two went missing."""
         import backend.chat.runtime as runtime
 
         captured = {}
-        with patch.object(runtime, "build_tools", lambda names, ctx: []), \
+        # A real bound tool is what makes these tool-traffic guards relevant. Returning
+        # [] here used to construct the invalid graph this regression now prevents.
+        with patch.object(runtime, "build_tools", lambda names, ctx: [object()]), \
              patch.object(runtime, "create_agent", lambda **kw: captured.update(kw)):
-            runtime.create_agent_for_request(self.Ctx("no_knowledge"), [])
+            runtime.create_agent_for_request(self.Ctx("no_knowledge"), [KNOWLEDGE_TOOL])
 
-        self.assertEqual(1, len(captured["middleware"]))
+        bound = " ".join(
+            f"{type(item).__name__} {getattr(item, 'name', '')}"
+            for item in captured["middleware"]
+        )
+        self.assertIn("_drop_repeated_calls", bound)
+        self.assertIn("_stop_after_a_terminal_tool_result", bound)
 
 
 class ShortCircuitedStreamTests(unittest.IsolatedAsyncioTestCase):
@@ -524,3 +555,60 @@ class ShortCircuitedStreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, calls["model"], "the composing call was supposed to be skipped")
         self.assertEqual("retrieval_error", ctx.short)
 
+
+
+class TheContextReceivesThePlan(unittest.TestCase):
+    """`_hand_to_graph` is the only route from the plan to the tools.
+
+    It is wrapped in a blanket `except`, deliberately — a hint must never break a turn —
+    which is exactly what makes it worth testing directly: a field that never arrives
+    fails silently and looks like a feature that was never switched on.
+    """
+
+    def _handed(self, **plan_kwargs):
+        from backend.chat.caller_identity import CallerIdentity
+        from backend.chat.orchestrator import _hand_to_graph
+        from backend.chat.request_context import ChatRequestContext
+
+        ctx = ChatRequestContext(
+            user_id="u-1",
+            session_id="s-1",
+            caller=CallerIdentity(user_id="u-1", guardian_id="G-1", guardian_token="t"),
+        )
+        _hand_to_graph(ctx, TurnPlan(**plan_kwargs))
+        return ctx
+
+    def test_the_resolved_child_reaches_the_tools(self):
+        ctx = self._handed(child_hint="ليلى أحمد", child_id="S-1")
+        self.assertEqual(ctx.planned_child_id, "S-1")
+        self.assertEqual(ctx.planned_child_label, "ليلى أحمد")
+
+    def test_the_required_tool_reaches_the_middleware(self):
+        ctx = self._handed(forced_tool="get_student_grades")
+        self.assertEqual(ctx.forced_tool, "get_student_grades")
+
+    def test_a_plan_that_settled_nothing_leaves_nothing_behind(self):
+        ctx = self._handed()
+        self.assertEqual(ctx.planned_child_id, "")
+        self.assertEqual(ctx.forced_tool, "")
+
+    def test_an_older_context_still_gets_the_hints_it_understands(self):
+        """The version ladder. A context predating these arguments must keep working and
+        simply carry fewer hints — the promise `note_turn_plan` makes in as many words.
+        Anything added to the hints must go to the FRONT of the drop list, or the retry
+        re-sends the argument that raised and the ladder hands over nothing at all."""
+        from backend.chat.orchestrator import _hand_to_graph
+
+        class _OldContext:
+            def note_turn_plan(self, retrieval_sections, scope_options, *,
+                               carried_constraints=(), is_followup=False, language=""):
+                self.sections = list(retrieval_sections)
+                self.language = language
+
+        ctx = _OldContext()
+        _hand_to_graph(ctx, TurnPlan(
+            retrieval_sections=["fees"], language="ar",
+            child_hint="ليلى", child_id="S-1", forced_tool="get_student_grades",
+        ))
+        self.assertEqual(ctx.sections, ["fees"])
+        self.assertEqual(ctx.language, "ar")

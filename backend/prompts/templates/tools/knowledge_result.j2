@@ -75,6 +75,27 @@ SCOPE OF THE ANSWER: the user set these conditions earlier — {{ constraints | 
 SCOPE OF THE ANSWER: the user set these conditions earlier — {{ constraints | join("; ") }}. Where the material distinguishes by them, answer for their case; where it states one rule for everyone, give that rule and say it applies generally. Answer either way — never refuse because the conditions are not named above.
 {% endif %}
 {% endif %}
+{% if child_year is defined and child_year %}
+{# `is defined` because the environment is StrictUndefined and this block is optional:
+   the resume path and the direct renders in tests pass the variables they know about,
+   and a turn that is not about a child must not have to name a variable to say so.
+
+   The child's year is the condition the PARENT did not have to state, and the one the
+   corpus is most likely to vary by. It gets the same three-state treatment as a carried
+   condition and for the same reason: told to answer only within it, a model handed a
+   document list written once for everybody refuses a question whose answer is in chunk
+   1. `discriminate` is the grader's verdict on whether this material varies by year. #}
+{% if discriminate == "yes" %}
+
+THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}. The material above gives different answers by year group, so state the figures and rules for {{ child_year }} and leave the other year groups out — do not list them as extra detail, and do not answer for a year the student is not in.
+{% elif discriminate == "no" %}
+
+THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}, but the material above does not vary by year group — it is one answer that applies to every year. Give it in full and say plainly that it is the same for every year. Do NOT withhold it or claim the knowledge base lacks a version for their year.
+{% else %}
+
+THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}. Where the material above distinguishes by year group, answer for {{ child_year }}; where it states one rule for every year, give that rule and say it applies generally. Never state a figure for a different year group as though it were theirs.
+{% endif %}
+{% endif %}
 {% if partial %}
 
 PARTIAL_EVIDENCE: these chunks are about what the user asked, but they were graded as not settling it on their own. Answer anyway, from what they do establish, and cite it. Read the subject of the question rather than its exact words: chunks that cover partnerships answer "what is partner" even though they never phrase it that way. Refusing here is the wrong outcome — the material is above, and the user cannot see it.

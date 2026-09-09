@@ -28,6 +28,11 @@ def load_env() -> None:
     global _LOADED
     if _LOADED:
         return
+    # `.env.local` first, and it WINS: `load_dotenv` does not override a name already
+    # set. `.env` is the PRODUCTION file, uploaded to the server as it stands; anything a
+    # laptop needs differently goes in `.env.local`, which is gitignored and never
+    # uploaded. See backend/env.py for the incident that split them.
+    load_dotenv(PROJECT_ROOT / ".env.local")
     load_dotenv(PROJECT_ROOT / ".env")
     _LOADED = True
 

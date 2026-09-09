@@ -102,6 +102,13 @@ const createControlledSseFetch = () => {
         value: encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
       });
     },
+    // The `[DONE]` sentinel is not JSON, so it cannot go through `pushEvent`. It marks
+    // the answer as complete while the connection stays OPEN — which is exactly the
+    // window the server uses for its persistent-note summary, and the state the
+    // composer must already be released in.
+    pushDone() {
+      resolveNextRead({ done: false, value: encoder.encode('data: [DONE]\n\n') });
+    },
     close() {
       closed = true;
       resolveNextRead({ done: true, value: undefined });
@@ -281,6 +288,79 @@ describe('chat store streaming sessions', () => {
     expect(chatStore.streamingSessionId).toBeNull();
   });
 
+  it('releases the composer at [DONE] rather than at connection close', async () => {
+    // The server keeps the stream open past `[DONE]` to summarise the conversation into
+    // its persistent note — a further model call. Waiting for the close left the send
+    // button disabled for seconds after the last word had rendered.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+
+    chatStore.userInput = 'Who teaches her maths?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+
+    stream.pushEvent({ type: 'content', content: 'Mr Hany teaches her maths.' });
+    await flushPromises();
+    expect(chatStore.isLoading).toBe(true);
+
+    stream.pushDone();
+    await flushPromises();
+
+    // Released, with the connection still open and no `done` read yet.
+    expect(chatStore.isLoading).toBe(false);
+    expect(chatStore.streamingSessionId).toBeNull();
+    expect(chatStore.messagesBySession.session_current[1]).toMatchObject({
+      text: 'Mr Hany teaches her maths.',
+      isThinking: false,
+    });
+
+    // Events that arrive in the window after `[DONE]` are still applied.
+    stream.pushEvent({ type: 'trace', rag_trace: { turn_forced_tool: 'get_student_teachers' } });
+    await flushPromises();
+    expect(chatStore.messagesBySession.session_current[1].ragTrace).toMatchObject({
+      turn_forced_tool: 'get_student_teachers',
+    });
+
+    stream.close();
+    await sendPromise;
+    expect(chatStore.isLoading).toBe(false);
+  });
+
+  it('does not let a drained stream clear a newer request state', async () => {
+    // Releasing the composer early means a next message can start while the previous
+    // connection is still draining. That stream's teardown must not clear the state the
+    // newer request owns, or the send button would re-enable mid-answer.
+    const first = createControlledSseFetch();
+    vi.stubGlobal('fetch', first.fetchMock);
+    const { chatStore } = setupStores();
+
+    chatStore.userInput = 'What is her timetable?';
+    const firstSend = chatStore.handleSend();
+    await flushPromises();
+    first.pushDone();
+    await flushPromises();
+    expect(chatStore.isLoading).toBe(false);
+
+    const second = createControlledSseFetch();
+    vi.stubGlobal('fetch', second.fetchMock);
+    chatStore.userInput = 'And who teaches her?';
+    const secondSend = chatStore.handleSend();
+    await flushPromises();
+    expect(chatStore.isLoading).toBe(true);
+
+    // The first connection only closes now, after the second is already streaming.
+    first.close();
+    await firstSend;
+    expect(chatStore.isLoading).toBe(true);
+    expect(chatStore.streamingSessionId).toBe('session_current');
+
+    second.pushDone();
+    second.close();
+    await secondSend;
+    expect(chatStore.isLoading).toBe(false);
+  });
+
   it('turns hitl_request events into a pending HITL prompt', async () => {
     const stream = createControlledSseFetch();
     vi.stubGlobal('fetch', stream.fetchMock);
@@ -389,6 +469,58 @@ describe('chat store streaming sessions', () => {
       text: 'Danjin has the Nihility element.',
       hitlResumeText: 'Danjin',
     });
+  });
+
+  // An answer can be streamed and then fail verification against the evidence it
+  // claimed — a fee figure that is in none of the retrieved chunks. The server sends
+  // `content_replace`, and the whole point is that it REPLACES: a correction appended
+  // underneath would leave the unverified number on screen next to the retraction,
+  // which is worse than either alone.
+  it('replaces a streamed answer when the server retracts an unverified figure', async () => {
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+
+    const { chatStore } = setupStores();
+    chatStore.userInput = 'مصاريف ابني كام';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+
+    stream.pushEvent({ type: 'content', content: 'مصاريف ابنك 45 ألف جنيه' });
+    await flushPromises();
+    expect(chatStore.messagesBySession.session_current[1]).toMatchObject({
+      text: 'مصاريف ابنك 45 ألف جنيه',
+    });
+
+    stream.pushEvent({
+      type: 'content_replace',
+      content: 'معلش، مقدرتش أتأكد من الأرقام دي من مستندات المدرسة.',
+    });
+    stream.close();
+    await sendPromise;
+
+    const bubble = chatStore.messagesBySession.session_current[1];
+    expect(bubble.text).toBe('معلش، مقدرتش أتأكد من الأرقام دي من مستندات المدرسة.');
+    expect(bubble.text).not.toContain('45');
+    expect(bubble.isThinking).toBe(false);
+  });
+
+  it('leaves a clean answer alone when no retraction arrives', async () => {
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+
+    const { chatStore } = setupStores();
+    chatStore.userInput = 'مصاريف ابني كام';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+
+    stream.pushEvent({ type: 'content', content: 'رسوم الصف الأول ' });
+    stream.pushEvent({ type: 'content', content: '30,000 جنيه. [1]' });
+    stream.close();
+    await sendPromise;
+
+    expect(chatStore.messagesBySession.session_current[1].text).toBe(
+      'رسوم الصف الأول 30,000 جنيه. [1]',
+    );
   });
 });
 

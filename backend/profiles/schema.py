@@ -15,9 +15,9 @@ Design rules that the rest of the codebase relies on:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Sequence
+from typing import Any, ClassVar, Dict, List, Literal, Optional, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.assets.attributes import AttributeSpec
 
@@ -190,8 +190,226 @@ class AgentConfig(_Section):
 
     tools: List[str] = Field(default_factory=lambda: ["search_knowledge_base"])
 
-    recursion_limit: int = 8
+    # 64 and not the 8 this shipped with: every tool call costs a whole pass of the agent
+    # loop, and the budgets below are allowed to buy several. The default has to be able
+    # to spend the default budgets or a bare `AgentConfig` fails its own validator.
+    #
+    # Raised from 32 by two changes together. The planner's dispatch middleware is a sixth
+    # graph node in every pass (see `_STEPS_PER_LOOP`), and splitting the records tool
+    # into one per record gave the school profile three budgets where it had one — nine
+    # passes at six steps, so 54. A profile sitting inside the old ceiling would otherwise
+    # have started dying at the limit HOLDING A FINISHED ANSWER. A ceiling is not a cost:
+    # a turn that ends normally never reaches it, so headroom here is free and running
+    # out is not.
+    recursion_limit: int = 64
     max_knowledge_calls_per_turn: int = 1
+
+    # How many times each tool may be called in one turn, enforced in the GRAPH rather
+    # than inside the tool.
+    #
+    # The tools already refuse a call past their own ceiling, and that refusal is the
+    # problem: it comes back as a tool result the model reads as a failure, so it tries
+    # again — reworded, and refused again. Measured against `openai/gpt-oss-20b`, one
+    # question whose search returned nothing produced 29 consecutive
+    # `search_knowledge_base` requests, and an earlier variant produced 85 before the
+    # recursion limit ended the turn. Those are requests rather than executions —
+    # duplicate collapsing and the retrieval memo absorb many — but each one still costs
+    # a model round-trip and a step of the recursion budget.
+    #
+    # A budget spent in the graph does not refuse anything. It stops OFFERING the tool,
+    # so the model cannot ask for it a second time and answers from what it already has.
+    # The per-tool ceilings stay where they are as a backstop for anything that reaches a
+    # tool by another route, and must be >= the numbers here or the refusal path returns.
+    #
+    # Unlisted tools get `default_tool_call_budget`. `search_knowledge_base` falls back to
+    # `max_knowledge_calls_per_turn` so retrieval keeps one number rather than two that
+    # can disagree.
+    tool_call_budgets: Dict[str, int] = Field(default_factory=dict)
+    default_tool_call_budget: int = 1
+
+    # Whether the turn planner may bind ONE tool when it already knows which one the
+    # question needs, instead of binding every tool and letting the model choose.
+    #
+    # Off by default, and it has to be: narrowing is only sound where a deployment has
+    # a child roster and a classifier that separates "my daughter's marks" from "the
+    # fees for my daughter". A profile without those never resolves a child, so nothing
+    # would fire anyway — but leaving the switch off means that is a decision rather
+    # than an accident.
+    #
+    # It is on in `school.yaml`, where the failure was measured: handed both tools,
+    # `openai/gpt-oss-20b` answered «درجات ليلى أحمد كام؟» by searching a fee corpus and
+    # reported that no information about the child existed. See `_plan_tools` in
+    # backend/chat/turn_policy.py for why this is not the unbinding that module's
+    # docstring forbids.
+    narrow_tools_to_the_turn: bool = False
+
+    # Whether the planner DISPATCHES the tools it chose, instead of binding them and
+    # waiting for the model to discover them one at a time.
+    #
+    # The distinction is the whole feature. Narrowing above decides WHAT is bound; this
+    # decides WHO calls it. With it off, a question needing three tools costs four model
+    # round-trips — one to ask for each tool, one to answer — and the tools run strictly
+    # in sequence because a model emits its calls one message at a time. With it on, the
+    # planner writes all three calls into a single assistant message and hands it to the
+    # graph's tool node, which fans them out concurrently (one `Send` per call). One
+    # model round-trip, and the tools overlap.
+    #
+    # Off by default. A deployment turning it on is asserting that its planner is good
+    # enough to choose tools without seeing their results, which is a real claim: a wrong
+    # single tool choice today wastes one call and the model recovers on the next pass,
+    # while a wrong PLAN is the whole turn's tool use. The mitigations are in
+    # `_DispatchPlannedTools` — the chosen tools stay bound afterwards with their budgets
+    # only partly spent, so the model can still call what the planner missed.
+    parallel_tool_calls: bool = False
+
+    # How the planner fills in each tool's arguments when it dispatches that tool itself.
+    #
+    # Required, because a plan is a set of CALLS and a call is a name plus arguments. The
+    # model is not there to supply them — that is the round trip being removed — so the
+    # profile has to say what a planned call looks like. A tool with no entry here is
+    # never pre-dispatched; it stays bound and the model calls it the ordinary way, which
+    # is what makes this safe to adopt one tool at a time.
+    #
+    # Values are either literals or one `$placeholder` naming something the planner
+    # already worked out. The set is closed and lives in `turn_policy.PLAN_PLACEHOLDERS`
+    # — deliberately not arbitrary expressions, because this file is data a domain owner
+    # edits and an expression language here would be code nothing tests.
+    #
+    #   planned_tool_arguments:
+    #     search_knowledge_base:
+    #       query: "$resolved_question"
+    #     get_student_records:
+    #       record_type: "grades"
+    #       student_name: "$child_label"
+    #
+    # A placeholder resolving to nothing drops its argument rather than sending an empty
+    # string, and a tool left with no arguments at all is skipped instead of being called
+    # blank — a search for "" is a wasted retrieval, not a search.
+    planned_tool_arguments: Dict[str, Dict[str, str]] = Field(default_factory=dict)
+
+    # What each tool is for, in one line, for the request classifier to choose between.
+    #
+    # This is what generalises tool selection past the two-tool case. With it set, the
+    # classifier is shown the catalogue and returns the tools this message needs; with it
+    # empty, selection falls back to `child_question_kind`, which knows about exactly two
+    # tools and is the school deployment's measured special case.
+    #
+    # Written here rather than read off the bound tools' own descriptions on purpose. A
+    # tool description is written FOR THE AGENT — "call this whenever the user asks
+    # something the corpus would know" — and is tuned to make the agent call it. The
+    # classifier is answering a different question, about a message it must not act on,
+    # and it judges better against a plain statement of subject matter. They also change
+    # for different reasons: an agent description is tuned when the agent mis-calls, this
+    # is tuned when the classifier mis-selects.
+    tool_selection: Dict[str, str] = Field(default_factory=dict)
+
+    # What to do about an answer that tells a parent no record exists on a turn where
+    # the records tool returned one.
+    #
+    # This is a different fault from the one `answer_grounding_mode` catches, and it
+    # needs its own check because the numeric one cannot see it. Grounding asks whether a
+    # figure came from somewhere; a denial states no figure at all. And the marks are
+    # under `answer_grounding_number_floor` in any case — 87.5 and 91.0 are below the
+    # 100 that separates a fee from a formatting difference — so even a records answer
+    # full of figures is mostly beneath the numeric check. Measured: the tool returned
+    # both of those marks and the reply was "I couldn't find any records."
+    #
+    # `off` by default and `observe` where it is switched on, because the detector is a
+    # phrase list and a phrase list is the one part of this that CAN be wrong about a
+    # correct answer. Observing writes the disagreement into the trace and the log, which
+    # is what tells a deployment whether its own phrases are safe to enforce.
+    records_denial_mode: Literal["off", "observe", "enforce"] = "off"
+    # Wordings that assert no record was found, in every language the deployment answers
+    # in. Matched on a folded substring, so orthography does not defeat them. Deliberately
+    # empty here: these are copy, they belong to a deployment, and a default list written
+    # in this file would be one nobody had checked against their own assistant's voice.
+    records_denial_phrases: List[str] = Field(default_factory=list)
+
+    #: Graph nodes crossed per pass of the agent loop — the planner's dispatch hook and
+    #: the terminal-retrieval hook (both before_model), the model, two after_model
+    #: middleware, and the tool node. Used only by the check below.
+    #:
+    #: Counted whether or not a middleware acts: these are NODES, and the graph walks
+    #: every one of them on every pass. Adding a middleware to
+    #: `create_agent_for_request` without raising this number silently overspends the
+    #: recursion limit, which surfaces as a turn ending empty rather than as an error.
+    _STEPS_PER_LOOP: ClassVar[int] = 6
+
+    #: The tool whose budget is `max_knowledge_calls_per_turn` rather than its own entry.
+    #: Spelled out rather than imported: `backend.tools` reaches back into the request
+    #: context, and a profile schema that cannot be loaded without the tool layer is a
+    #: circular import waiting for the first person who validates a profile in isolation.
+    _KNOWLEDGE_TOOL: ClassVar[str] = "search_knowledge_base"
+
+    def budget_for_tool(self, name: str) -> int:
+        """How many times `name` may be called in one turn. See `tool_call_budgets`."""
+        if name in (self.tool_call_budgets or {}):
+            return int(self.tool_call_budgets[name])
+        if name == self._KNOWLEDGE_TOOL:
+            return int(self.max_knowledge_calls_per_turn)
+        return int(self.default_tool_call_budget)
+
+    @model_validator(mode="after")
+    def _the_budgets_must_fit_inside_the_step_limit(self):
+        """A budget the graph cannot afford to spend is worse than no budget at all.
+
+        The two numbers are independent and they interact: every tool call costs a whole
+        pass of the agent loop, so budgets totalling more passes than `recursion_limit`
+        allows produce a turn that dies at the limit HOLDING A FINISHED ANSWER it never
+        emits. That is exactly what happened — `get_student_records: 4` alongside two
+        knowledge calls needs about thirty steps, the limit was sixteen, and one question
+        failed three times out of three with an empty reply while every other question
+        passed. Nothing in either setting hints at the other, which is why this is checked
+        here rather than left as a comment for somebody to notice.
+
+        The `+ 1` is the pass that produces the answer once every tool is spent.
+        """
+        rounds = sum(self.budget_for_tool(name) for name in self.tools) + 1
+        needed = rounds * self._STEPS_PER_LOOP
+        if self.recursion_limit < needed:
+            raise ValueError(
+                f"recursion_limit={self.recursion_limit} cannot spend the configured tool "
+                f"budgets: {rounds} agent passes x {self._STEPS_PER_LOOP} graph steps "
+                f"needs at least {needed}. Raise recursion_limit or lower "
+                f"tool_call_budgets."
+            )
+        return self
+
+    # Whether an answer's figures are checked against the evidence the turn retrieved,
+    # and what happens when one is not there. See backend/chat/grounding.py.
+    #
+    #   off      — no check, no trace field
+    #   observe  — check and record the verdict, serve the answer either way
+    #   enforce  — an answer stating a figure that is in no retrieved chunk is replaced
+    #              with `user_copy.unverified_answer`
+    #
+    # `observe` is the default because enforcement's cost is borne by whichever
+    # deployment has a corpus this check reads badly, and that has to be discovered from
+    # its own traces rather than assumed here. A deployment whose numbers are the thing
+    # users act on sets `enforce` — the school profile does.
+    answer_grounding_mode: Literal["off", "observe", "enforce"] = "observe"
+
+    # Figures below this are counts, not claims, and are not checked. See the module
+    # docstring for why chasing them produces false positives and buys no safety.
+    answer_grounding_number_floor: int = 100
+
+    # Words that mean the question scoped itself to a year group. When one appears, the
+    # child's year from the roster is NOT applied as a condition: the parent said which
+    # year they meant, and «مصاريف ابني في الصف الرابع» is a real question a parent with
+    # a Year 1 child asks. Matched literally, folded through `text_matching.name_key`.
+    #
+    # Only needed for the "my child, but a different year" case. A question naming a year
+    # and NOT the child — «مصاريف الصف الرابع كام» — is already classified `about_child:
+    # false`, so nothing is applied to it and no marker is consulted.
+    #
+    # Failing to match degrades to today's behaviour (the year is applied) rather than
+    # to a wrong narrowing, so an incomplete list costs nothing it did not already cost.
+    year_reference_markers: List[str] = Field(
+        default_factory=lambda: [
+            "الصف", "صف", "ابتدائي", "اعدادي", "ثانوي", "روضه", "حضانه",
+            "grade", "year", "primary", "prep", "secondary", "kg", "class",
+        ]
+    )
 
 
 
@@ -313,6 +531,13 @@ class AgentConfig(_Section):
 
 class RagConfig(_Section):
     """Prompts and routing policy for the retrieval graph."""
+
+    # How a child's year group is phrased when it is handed to the grader and the answer
+    # prompt as a condition. `{year}` is the roster's own string («الصف الأول الابتدائي»),
+    # which is the vocabulary the corpus uses, so it is inserted rather than translated.
+    # Says the school's records are the source, because they are — see
+    # `backend/rag/pipeline.py:grading_conditions`.
+    child_year_condition: str = "the student this question is about is in {year}, according to the school's records"
 
     evidence_grade_prompt: str = ""
     complexity_prompt: str = ""
@@ -600,6 +825,18 @@ class CopyConfig(_Section):
         )
     )
 
+    # Asked when the parent's own roster holds more than one child matching what they
+    # said. Localized because the planner emits it with no model call at all — see
+    # `LocalizedText`. The names are appended by the caller as selectable options rather
+    # than written into this string, so a deployment rewrites the question without
+    # having to know how a list of children is rendered.
+    which_child: LocalizedText = Field(
+        default_factory=lambda: LocalizedText(
+            en="Which child do you mean?",
+            ar="أي طفل تقصد؟",
+        )
+    )
+
     no_knowledge: str = (
         "The knowledge base does not contain reliable relevant information, "
         "so this question can't be answered from it right now."
@@ -607,6 +844,14 @@ class CopyConfig(_Section):
     retrieval_error: str = (
         "A temporary technical issue prevented searching the knowledge base. "
         "Please try again in a moment."
+    )
+    # Served in place of an answer whose figures are not in the retrieved evidence, when
+    # `agent.answer_grounding_mode` is `enforce`. Deliberately says nothing about what
+    # went wrong internally: the user needs to know the number was not verified, not
+    # that a check fired.
+    unverified_answer: str = (
+        "I couldn't verify those figures against the school's own documents, "
+        "so I'd rather not state them. Please check with the school office."
     )
     hitl_clarify_default: str = (
         "I found relevant content, but the evidence isn't enough to determine an answer. "

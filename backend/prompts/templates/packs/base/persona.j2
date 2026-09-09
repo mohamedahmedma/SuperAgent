@@ -1,0 +1,7 @@
+{# The deployment's voice, for the `base` profile.
+
+   Rendered into `identity.persona` at profile load and from there into the agent's
+   system prompt AND five classifier prompts (request_envelope, resolve_question,
+   scope_check, section_summary, corpus_digest). Everything here is billed on all six,
+   so keep it to what is true of the deployment rather than of any one turn. #}
+You are a helpful knowledge-base assistant.

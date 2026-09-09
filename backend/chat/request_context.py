@@ -52,6 +52,13 @@ class ChatRequestContext:
     _records_tool_slots_used: int = 0
     _short_circuit_status: Optional[str] = None
     _surfaced_asset_ids: list = field(default_factory=list)
+    _duplicate_tool_calls: int = 0
+    _planned_dispatches: int = 0
+    # `(tool, outcome)` per call this turn. See `note_tool_outcome`.
+    _tool_outcomes: list = field(default_factory=list)
+    # Retrieval results already produced this turn, keyed by normalised query. See
+    # `remember_retrieval` for why a request-scoped memo is the right lifetime.
+    _retrieval_memo: dict = field(default_factory=dict)
     _started_at: float = field(default_factory=time.monotonic)
     _last_step_at: Optional[float] = None
 
@@ -67,6 +74,31 @@ class ChatRequestContext:
     # Whether this turn's subject came from the conversation. Routing reads it to
     # decide whether offering the user a choice of subjects could possibly help.
     is_followup: bool = False
+    # The year group the school's records put this turn's child in, when the turn is
+    # about one child and the question did not name a year itself. Travels BESIDE the
+    # question, never inside it — see `backend/rag/pipeline.py:_search_query` for the
+    # measurement that settled that.
+    child_year: str = ""
+    # WHICH child this turn is about, as the planner resolved it against the school's
+    # own roster, before the agent ran. Empty when the turn is not about one child, or
+    # when which child is still an open question.
+    #
+    # Per TURN, and deliberately not the same thing as `child` above: that is the pin the
+    # conversation settled on and outlives this message; this is one turn's answer, and a
+    # turn that resolves nobody must leave nothing behind. The records tool reads it in
+    # preference to the name the MODEL supplied, which is the point — a 20B model
+    # transcribing «ليلى أحمد» out of a message it half-read is the least reliable link
+    # in a chain whose other end is the school's own roster.
+    planned_child_id: str = ""
+    planned_child_label: str = ""
+    # A tool this turn must call rather than merely be offered, when the planner narrowed
+    # to exactly one. Read by the middleware that sets `tool_choice` on the turn's first
+    # model call; empty on every turn that did not narrow, which is most of them.
+    forced_tool: str = ""
+    # Complete tool calls the planner decided on, for the dispatch middleware to run
+    # ahead of the model's first call. `[{"name": str, "args": dict}, ...]`, empty on
+    # every turn the planner did not plan a set — which is most of them.
+    planned_calls: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Settle the caller, and refuse a context whose identity contradicts itself.
@@ -142,6 +174,11 @@ class ChatRequestContext:
         carried_constraints=(),
         is_followup: bool = False,
         language: str = "",
+        child_year: str = "",
+        child_id: str = "",
+        child_label: str = "",
+        forced_tool: str = "",
+        planned_calls=(),
     ) -> None:
         """Hand the planner's findings to the RAG graph.
 
@@ -168,6 +205,23 @@ class ChatRequestContext:
             self.carried_constraints = list(carried_constraints or [])
             self.is_followup = bool(is_followup)
             self.language = (language or "").strip()
+            self.child_year = (child_year or "").strip()
+            # Both or neither. A label with no id names a child nothing can read, and an
+            # id with no label leaves the tool nothing to call them — either half alone
+            # is a state every reader downstream would have to handle, so it is not one.
+            child_id = (child_id or "").strip()
+            child_label = (child_label or "").strip()
+            self.planned_child_id = child_id if child_id and child_label else ""
+            self.planned_child_label = child_label if child_id and child_label else ""
+            self.forced_tool = (forced_tool or "").strip()
+            # Copied, not aliased, and DEEPLY — the arguments are a nested dict, so a
+            # shallow copy still shares them. The plan outlives this call and the
+            # middleware reads this list on another thread; sharing either level would let
+            # a later edit change what a running turn is about to dispatch.
+            self.planned_calls = [
+                {"name": call.get("name"), "args": dict(call.get("args") or {})}
+                for call in (planned_calls or [])
+            ]
 
     def emit_rag_step(
         self,
@@ -299,6 +353,34 @@ class ChatRequestContext:
         with self._lock:
             self.child.clear()
 
+    def note_tool_outcome(self, tool: str, outcome: str) -> None:
+        """Record what a tool call actually came back with.
+
+        The counterpart to the graph's `tool_calls_made`, which knows how MANY times a
+        tool ran and nothing about what happened. Both halves are needed for the same
+        reason: a turn that called the records tool once and a turn that called it once
+        and got a child's marks are different facts, and only the second one contradicts
+        an answer saying no record exists.
+
+        Reported BY the tool, with the same string it hands its own template, rather than
+        read back out of the rendered text. Parsing the render would put the outcome in
+        two places — a branch here and a sentence in
+        `backend/prompts/templates/tools/records_result.j2` — that could be edited apart,
+        and the wording is translated copy that is expected to change.
+        """
+        if not tool or not outcome:
+            return
+        with self._lock:
+            if not self._active:
+                return
+            self._tool_outcomes.append((str(tool), str(outcome)))
+
+    @property
+    def tool_outcomes(self) -> list:
+        """Every `(tool, outcome)` this turn produced, in the order they happened."""
+        with self._lock:
+            return list(self._tool_outcomes)
+
     def acquire_records_tool_slot(self) -> bool:
         """Budget for get_student_records, separate from the other tool budgets.
 
@@ -334,6 +416,56 @@ class ChatRequestContext:
     def surfaced_asset_ids(self) -> list:
         with self._lock:
             return list(self._surfaced_asset_ids)
+
+    def note_duplicate_tool_calls(self, count: int) -> None:
+        """Record calls the model asked for more than once. Diagnostic only."""
+        if count <= 0:
+            return
+        with self._lock:
+            self._duplicate_tool_calls += int(count)
+
+    @property
+    def duplicate_tool_calls(self) -> int:
+        return self._duplicate_tool_calls
+
+    def note_planned_dispatch(self, count: int) -> None:
+        """Record that the planner ran `count` tools together rather than one at a time.
+
+        Diagnostic, and it is the number worth watching: it is how often the plan was
+        good enough to act on, which is the whole claim `parallel_tool_calls` makes. A
+        deployment where it stays at zero has turned the feature on and is paying for the
+        catalogue in every classifier call without getting anything back.
+        """
+        if count <= 0:
+            return
+        with self._lock:
+            self._planned_dispatches += int(count)
+
+    @property
+    def planned_dispatches(self) -> int:
+        return self._planned_dispatches
+
+    def remembered_retrieval(self, key: str):
+        """A retrieval already run for `key` this turn, or None."""
+        if not key:
+            return None
+        with self._lock:
+            return self._retrieval_memo.get(key)
+
+    def remember_retrieval(self, key: str, result) -> None:
+        """Keep a retrieval so an identical query this turn does not run it again.
+
+        Request-scoped rather than cached in Redis, and that is the whole design: two
+        identical searches within ONE turn are the same question asked twice and must
+        give the same answer, while the same question next week must be answered from
+        whatever the corpus says then. A turn is exactly the window where reuse is
+        certainly correct, so it is the window this holds.
+        """
+        if not key:
+            return
+        with self._lock:
+            if self._active:
+                self._retrieval_memo[key] = result
 
     def acquire_knowledge_tool_slot(self) -> bool:
         # Budget comes from the profile: a catalogue deployment may legitimately allow

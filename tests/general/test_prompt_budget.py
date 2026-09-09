@@ -24,7 +24,20 @@ from backend.profiles.registry import load_profile
 ENCODING = "o200k_base"
 
 #: Rendered ceiling for the school profile, in tokens. Every turn pays it.
-SCHOOL_PROMPT_BUDGET = 500
+#:
+#: Raised from 500 when the worked examples were labelled. A model that cannot tell a
+#: style example from real context reuses the example's CONTENT: this profile shipped a
+#: worked answer carrying a grade and a fee, and the model reproduced both verbatim —
+#: as its answer and as its search query — for accounts with no child on file. The
+#: labels («أمثلة أسلوب، مش أسئلة ولا معلومات», and «س»/«ج» on each pair) are what say
+#: "illustration" rather than "context", and they cost about 28 tokens a turn. That is
+#: the trade: a fixed, small, per-turn cost against a fabricated fee reaching a parent.
+#:
+#: 505 is deliberately close to what the prompt actually renders (500). The labels are
+#: not to be trimmed to buy headroom — shortening them is what made the examples
+#: mistakable for context in the first place. Anything that needs more room here should
+#: come out of the prose, or move the ceiling on purpose.
+SCHOOL_PROMPT_BUDGET = 505
 
 
 def count(text: str) -> int:
@@ -35,7 +48,7 @@ class SchoolPromptBudgetTests(unittest.TestCase):
     def setUp(self):
         self.profile = load_profile("school")
         self.prompt = self.profile.render_system_prompt(
-            ["search_knowledge_base", "get_student_records"], language="ar"
+            ["search_knowledge_base", "get_student_grades"], language="ar"
         )
 
     def test_the_rendered_prompt_fits_the_budget(self):
@@ -113,7 +126,7 @@ class SchoolPromptBudgetTests(unittest.TestCase):
         thing that changes the prompt."""
         sizes = {
             count(self.profile.render_system_prompt(tools, language="ar"))
-            for tools in (["search_knowledge_base"], ["get_student_records"], None)
+            for tools in (["search_knowledge_base"], ["get_student_grades"], None)
         }
         self.assertEqual(1, len(sizes), f"the prompt varies by bound tools: {sizes}")
 
