@@ -153,15 +153,26 @@ def percentages_in(text: str) -> Set[float]:
 def _multiplier_after(text: str, position: int) -> int:
     """The scale word following a number, or 1.
 
-    Only the FIRST word after the number is considered, and only within a short window.
-    Looking further would let a «مليون» three sentences away scale a figure it has
-    nothing to do with.
+    Only the FIRST word after the number is considered, and only when it STARTS within a
+    short window. Looking further would let a «مليون» three sentences away scale a figure
+    it has nothing to do with.
+
+    The word is read WHOLE, out of the full text; the window bounds only where it may
+    BEGIN. Slicing the text first and matching inside the slice truncates whatever word
+    straddles the boundary, and a truncated word can collide with a real multiplier —
+    «الفيزياء» cut at 14 characters is «الف», which is the Arabic for "thousand".
+
+    That is not hypothetical. A parent asked for their daughter's timetable, the model
+    wrote «10:00» and then, on the next line, a physics lesson; the truncation read
+    10,000, no such figure was in the evidence, and the entire correct timetable was
+    replaced with "I couldn't verify those figures". Every Arabic word beginning الف
+    collided the same way — الفصل, الفسحة, الفلسفة, الفنون, الفرنسية — as did مليونير
+    against مليون, and «الفصل الدراسي» after a number is about as common as Arabic gets.
     """
-    window = text[position : position + _MULTIPLIER_WINDOW]
-    word = _WORD.search(window)
-    if word is None:
+    match = _WORD.search(text, position)
+    if match is None or match.start() >= position + _MULTIPLIER_WINDOW:
         return 1
-    return _MULTIPLIERS.get(word.group(0).strip().lower(), 1)
+    return _MULTIPLIERS.get(match.group(0).strip().lower(), 1)
 
 
 def _close(left: float, right: float) -> bool:

@@ -172,5 +172,48 @@ class TheCallerStripsRatherThanRefuses(unittest.TestCase):
         self.assertEqual("", self._verdict("الأحد: 1) اللغة العربية.", extra=[self.TOOL]))
 
 
+class AWordMustNotBeTruncatedIntoAMultiplier(unittest.TestCase):
+    """The window bounds where a scale word may BEGIN, never where it ends.
+
+    Found by running the real model against a real timetable: it wrote «10:00» and then,
+    on the next line, a physics lesson. `_multiplier_after` sliced 14 characters, which
+    cut «الفيزياء» down to «الف» — the Arabic for "thousand" — so the answer was read as
+    claiming 10,000, no such figure was in the evidence, and a correct timetable was
+    replaced with "I couldn't verify those figures".
+
+    Arabic makes this common rather than exotic: every word beginning الف collides, and
+    «الفصل الدراسي» after a number is ordinary in a grades answer.
+    """
+
+    def test_a_truncated_word_does_not_scale_the_number_before_it(self):
+        for text in (
+            "10:00\n  4) الفيزياء",
+            "13:30\n  9) الفسحة",
+            "درجات 85 الفصل الدراسي الأول",
+            "الحصة 12 الفنون التشكيلية",
+            "عندنا 3 مليونير في المدرسة",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(set(), numeric_claims(text, floor=100), text)
+
+    def test_a_real_multiplier_still_scales(self):
+        for text, expected in (
+            ("45 ألف جنيه", 45000.0),
+            ("45 الف جنيه", 45000.0),
+            ("45 thousand pounds", 45000.0),
+            ("45k", 45000.0),
+            ("3 مليون", 3000000.0),
+        ):
+            with self.subTest(text=text):
+                self.assertIn(expected, numeric_claims(text, floor=0))
+
+    def test_a_multiplier_starting_beyond_the_window_is_still_ignored(self):
+        """The rule the window exists for: a «مليون» far away scales nothing."""
+        self.assertEqual({45.0}, numeric_claims("45" + " " * 20 + "مليون", floor=0))
+
+    def test_a_word_that_merely_contains_a_multiplier_does_not_scale(self):
+        self.assertEqual({45.0}, numeric_claims("45 طالب", floor=0))
+
+
 if __name__ == "__main__":
     unittest.main()
