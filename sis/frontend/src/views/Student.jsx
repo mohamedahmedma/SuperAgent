@@ -24,13 +24,12 @@
  * newest first — a transfer in March leaves October's placement intact rather than rewriting it,
  * and this screen is where that pays off.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, gradeText } from '../api.js';
 import { Router } from '../router.js';
 import { Store } from '../store.js';
 import {
   DASH,
-  countText,
   dateText,
   labelOf,
   pickName,
@@ -53,8 +52,7 @@ import {
   SearchField,
   Select,
   Skeleton,
-  Table,
-  Tile
+  Table
 } from '../components/Ui.jsx';
 import { StudentEditor } from '../components/StudentEditor.jsx';
 import { t } from '../i18n.js';
@@ -74,9 +72,59 @@ function Finder({ initial }) {
   const state = useStore();
   const [typed, setTyped] = useState(initial || '');
   const [asked, setAsked] = useState('');
+  const [teacherClass, setTeacherClass] = useState('');
+  const studentGrants = ((state.profile && state.profile.grants) || [])
+    .filter((grant) => grant.permission === 'students.read');
+  const searchableLevels = [...new Set(studentGrants
+    .filter((grant) => grant.scope_type === 'year_level')
+    .map((grant) => grant.scope_code)
+    .filter(Boolean))];
+  const [searchLevel, setSearchLevel] = useState(searchableLevels[0] || '');
+  /* A teacher who only holds class-scoped student access must choose from their own
+     registers. Do not key this branch off the role name: roles are additive, so a
+     principal who is also a teacher still has school-wide search and must not be
+     accidentally reduced to their teaching timetable. */
+  const usesClassPicker = studentGrants.length > 0 && studentGrants.every(
+    (grant) => grant.scope_type === 'class_section'
+  );
+  useEffect(() => {
+    if (searchableLevels.length && !searchableLevels.includes(searchLevel)) {
+      setSearchLevel(searchableLevels[0]);
+    }
+  }, [searchableLevels.join('|'), searchLevel]);
+  const teaching = useQuery(() => api.teachingAssignments(state.year), [state.year], usesClassPicker && !!state.year);
+  const teacherClasses = [...new Map((((teaching.value || {}).assignments) || [])
+    .map((row) => [row.class_code, row])).values()];
+  useEffect(() => {
+    if (!teacherClass && teacherClasses.length) setTeacherClass(teacherClasses[0].class_code);
+  }, [teacherClasses.length]);
+  const roster = useQuery(() => api.classRoster(teacherClass, state.year),
+    [teacherClass, state.year], usesClassPicker && !!teacherClass && !!state.year);
 
-  const found = useQuery(() => api.searchStudents(asked), [asked], !!asked);
+  const found = useQuery(
+    () => api.searchStudents(asked, false, state.year, searchLevel || null),
+    [asked, state.year, searchLevel],
+    !!asked && !!state.year && (!searchableLevels.length || !!searchLevel)
+  );
   const students = (found.value && found.value.students) || [];
+
+  if (usesClassPicker) return (
+    <Card title={t('Find a child in your classes')}>
+      <div className="row g-3">
+        <Field className="col-12 col-md-5" label={t('Class')}>
+          <Select value={teacherClass} options={teacherClasses.map((row) => ({
+            value: row.class_code, label: pickName(row, state.lang) || row.class_code
+          }))} onChange={setTeacherClass} />
+        </Field>
+        <Field className="col-12 col-md-7" label={t('Student')}>
+          <Select value="" options={[{ value: '', label: t('Choose…') }, ...(((roster.value || {}).students) || []).map((row) => ({
+            value: row.student_number, label: `${pickName(row, state.lang) || row.student_number} · ${row.student_number}`
+          }))]} onChange={(number) => number && Router.go('student', { number })} />
+        </Field>
+      </div>
+      <ErrorNote error={teaching.error || roster.error} />
+    </Card>
+  );
 
   return (
     <div className="vstack gap-4">
@@ -89,20 +137,31 @@ function Finder({ initial }) {
           }}
         >
           <Field
-            className="col-12 col-sm"
+            className={searchableLevels.length > 1 ? 'col-12 col-md-8' : 'col-12'}
             label={t('Student number or name')}
             hint={t('A partial name matches in either script.')}
           >
             {/* No placeholder: the field's own label already says what goes in it, and a
                 placeholder repeating it is a second copy that disappears the moment anyone
                 types. */}
-            <SearchField value={typed} onInput={setTyped} />
-          </Field>
-          <div className="col-12 col-sm-auto d-grid">
-            <Button type="submit" variant="primary" icon="search">
+            {/* AUREXIS_INLINE_SEARCH_ACTION */}
+            <div className="d-flex align-items-stretch gap-2">
+              <div className="flex-grow-1"><SearchField value={typed} onInput={setTyped} /></div>
+              <Button type="submit" variant="primary" icon="search">
               {t('Search')}
             </Button>
-          </div>
+            </div>
+          </Field>
+          {searchableLevels.length > 1 ? (
+            <Field className="col-12 col-md-4" label={t('Grade')}>
+              <Select
+                value={searchLevel}
+                options={searchableLevels.map((code) => ({ value: code, label: code }))}
+                onChange={setSearchLevel}
+              />
+            </Field>
+          ) : null}
+
         </form>
       </Card>
 
@@ -184,8 +243,6 @@ function Identity({ student }) {
         student.age === null || student.age === undefined ? null : `${student.age} years`,
       note: 'Read from her date of birth, never stored beside it.'
     },
-    { label: 'Phone', value: student.contact_phone, mono: true },
-    { label: 'Email', value: student.contact_email },
     { label: 'Address', value: student.address }
   ];
 
@@ -230,93 +287,6 @@ function Identity({ student }) {
 
 /* -- Where she has been placed ---------------------------------------------------- */
 
-function Placements({ studentNumber }) {
-  const state = useStore();
-  const placements = useResource(
-    Store.keys.placements(studentNumber),
-    () => api.studentPlacements(studentNumber),
-    !!studentNumber
-  );
-
-  /* `.placements`, not the response itself: the route answers
-     `{student_number, count, placements: [...]}`. Reading it as a bare array threw
-     `rows.filter is not a function` and took the whole screen out — found by walking the
-     console against the real service, because the smoke fixture had the shape wrong in the
-     same way the screen did. */
-  const rows = ((placements.value && placements.value.placements) || [])
-    .slice()
-    .sort((a, b) => String(b.starts_on).localeCompare(String(a.starts_on)));
-
-  return (
-    <Card
-      title={t('Placements')}
-      subtitle={t('{0} in the record — newest first', [rows.length])}
-      actions={
-        <Button size="sm" icon="refresh" onClick={placements.reload}>
-          {t('Reload')}
-        </Button>
-      }
-      tight
-    >
-      <ErrorNote error={placements.error} onRetry={placements.reload} />
-      <Table
-        loading={placements.loading}
-        rows={rows}
-        rowKey={(row) => `${row.academic_year_code}:${row.class_code}:${row.starts_on}`}
-        empty={
-          <Empty title={t('She has never been placed in a class')}>
-            {t('Her record exists and no class has claimed her. Place her from a class register.')}
-          </Empty>
-        }
-        columns={[
-          {
-            key: 'class',
-            header: t('Class'),
-            className: 'sis-code',
-            cell: (row) => (
-              <a
-                href={Router.href('class', {
-                  code: row.class_code,
-                  year: row.academic_year_code
-                })}
-              >
-                {row.class_code}
-              </a>
-            )
-          },
-          {
-            key: 'year',
-            header: t('Year'),
-            className: 'sis-code',
-            hide: 'sm',
-            cell: (row) => row.academic_year_code
-          },
-          {
-            key: 'from',
-            header: t('From'),
-            className: 'sis-num',
-            cell: (row) => <span className="font-monospace small">{dateText(row.starts_on)}</span>
-          },
-          {
-            key: 'to',
-            header: t('To'),
-            className: 'sis-num',
-            cell: (row) =>
-              row.is_open ? (
-                <Badge tone="ok">{t('open')}</Badge>
-              ) : (
-                <span className="font-monospace small">{dateText(row.ends_on)}</span>
-              )
-          }
-        ]}
-      />
-      <div className="card-footer small text-body-tertiary">
-        {t('A placement is a dated membership, so a transfer closes one row and opens another. October still says what it said in October — nothing here is rewritten when she moves.')}
-      </div>
-    </Card>
-  );
-}
-
 /* -- Who to call ------------------------------------------------------------------ */
 
 function Guardians({ studentNumber }) {
@@ -339,14 +309,14 @@ function Guardians({ studentNumber }) {
       }
       tight
     >
-      <ErrorNote error={guardians.error} onRetry={guardians.reload} />
+      <ErrorNote error={!guardians.value ? guardians.error : null} onRetry={guardians.reload} />
       <Table
         loading={guardians.loading}
         rows={rows}
         rowKey={(row) => row.phone}
         empty={
-          <Empty title={t('No adult is linked to her')}>
-            {t('Nobody here can be told she was absent. Link a guardian from the Guardians screen.')}
+          <Empty title={t('No guardian data recorded yet')}>
+            {t('No guardian information has been recorded for this student yet.')}
           </Empty>
         }
         columns={[
@@ -467,7 +437,7 @@ function Marks({ studentNumber }) {
       }
       tight
     >
-      <ErrorNote error={report.error} onRetry={report.reload} />
+      <ErrorNote error={!report.value ? report.error : null} onRetry={report.reload} />
 
       {card ? (
         <div className="card-body pb-0">
@@ -490,8 +460,8 @@ function Marks({ studentNumber }) {
         rows={lines}
         rowKey={(row) => row.subject_code}
         empty={
-          <Empty title={t('No subject rows for this term')}>
-            {t('Either the year has no subjects yet, or nothing has been uploaded against this term.')}
+          <Empty title={t('No marks recorded yet')}>
+            {t('No marks have been recorded for this student in this term yet.')}
           </Empty>
         }
         columns={[
@@ -552,9 +522,9 @@ function Marks({ studentNumber }) {
   );
 }
 
-/* -- Which days she was in the room, and the counts over them ---------------------- */
+/* -- Attendance records for the selected date range ------------------------------ */
 
-function Attendance({ studentNumber }) {
+function Attendance({ studentNumber, academicYear }) {
   const [range, setRange] = useState(defaultWindow);
 
   const record = useResource(
@@ -562,8 +532,12 @@ function Attendance({ studentNumber }) {
     () => api.studentAttendance(studentNumber, range.from, range.to),
     !!studentNumber
   );
-  const counts = (record.value && record.value.counts) || null;
   const days = (record.value && record.value.days) || [];
+  const summary = useResource(
+    `attendance-summary:${studentNumber}:${academicYear || ''}`,
+    () => api.studentAttendanceSummary(studentNumber, academicYear),
+    !!studentNumber && !!academicYear
+  );
 
   return (
     <Card
@@ -591,41 +565,17 @@ function Attendance({ studentNumber }) {
       }
       tight
     >
-      <ErrorNote error={record.error} onRetry={record.reload} />
+      <ErrorNote error={!record.value ? record.error : null} onRetry={record.reload} />
 
-      {counts ? (
-        <div className="card-body">
-          <div className="row g-2 row-cols-2 row-cols-sm-3 row-cols-lg-6">
-            <div className="col">
-              <Tile label={t('Recorded days')} value={countText(counts.recorded)} />
-            </div>
-            <div className="col">
-              <Tile label={t('Present')} value={countText(counts.present)} />
-            </div>
-            <div className="col">
-              <Tile label={t('Late')} value={countText(counts.late)} />
-            </div>
-            <div className="col">
-              <Tile label={t('Absent')} value={countText(counts.absent)} />
-            </div>
-            <div className="col">
-              <Tile label={t('Excused')} value={countText(counts.excused)} />
-            </div>
-            <div className="col">
-              <Tile
-                label={t('In the room')}
-                value={countText(counts.in_the_room)}
-                note="Present plus late."
-              />
-            </div>
-          </div>
-          <p className="small text-body-tertiary mt-3 mb-0">
-            Counted over the {counts.recorded} day(s) somebody actually marked in this window. A
-            day nobody marked is not in this list and is in none of these counts — it is not an
-            absence.
-          </p>
-        </div>
-      ) : null}
+      {summary.value && <div className="row g-2 mb-3" aria-label={t('Academic year attendance summary')}>
+        {[
+          [t('Applicable days'), summary.value.applicable_days], [t('Present'), summary.value.present],
+          [t('Absent'), summary.value.absent], [t('Late'), summary.value.late],
+          [t('Excused'), summary.value.excused], [t('Attendance %'), summary.value.attendance_percent == null ? DASH : `${summary.value.attendance_percent}%`],
+          [t('Absence %'), summary.value.absence_percent == null ? DASH : `${summary.value.absence_percent}%`]
+        ].map(([label, value]) => <div className="col-6 col-md" key={label}><div className="border rounded p-2 h-100"><div className="small text-body-secondary">{label}</div><strong>{value}</strong></div></div>)}
+      </div>}
+      <ErrorNote error={summary.error} onRetry={summary.reload} />
 
       <Table
         loading={record.loading}
@@ -635,8 +585,8 @@ function Attendance({ studentNumber }) {
           row.state === 'present' ? 'ok' : row.state === 'absent' ? 'bad' : 'warn'
         }
         empty={
-          <Empty title={t('No marks in this window')}>
-            {t('Nobody took a register for her between these two dates. Widen the window, or take one from her class.')}
+          <Empty title={t('No attendance data recorded yet')}>
+            {t('No attendance has been recorded for this student in the selected period yet.')}
           </Empty>
         }
         columns={[
@@ -673,6 +623,56 @@ function Attendance({ studentNumber }) {
   );
 }
 
+function Timeline({ studentNumber }) {
+  const events = useResource(`student-timeline:${studentNumber}`, () => api.studentTimeline(studentNumber), !!studentNumber);
+  return <Card title={t('Student Timeline')} subtitle={t('Recorded history from the audit log.')} tight>
+    <ErrorNote error={events.error} onRetry={events.reload} />
+    {events.loading ? <Skeleton rows={4} /> : !events.value?.length ? <Empty title={t('No timeline events yet')} /> :
+      <ol className="list-group list-group-flush">{events.value.map((event) => <li className="list-group-item px-0" key={event.id}>
+        <div className="d-flex justify-content-between gap-2"><strong>{event.action.replaceAll('_', ' ')}</strong><span className="small text-body-secondary">{dateText(event.at)}</span></div>
+        <div className="small text-body-secondary">{event.entity_type} · {event.actor}</div>
+      </li>)}</ol>}
+  </Card>;
+}
+
+function Documents({ studentNumber }) {
+  const canWrite = Store.can('documents.write');
+  const docs = useResource(`student-documents:${studentNumber}`, () => api.studentDocuments(studentNumber), !!studentNumber);
+  const [file, setFile] = useState(null);
+  const [documentType, setDocumentType] = useState('identity');
+  const [expiryDate, setExpiryDate] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const upload = async (event) => {
+    event.preventDefault();
+    if (!file || !documentType.trim() || saving) return;
+    setSaving(true); setError(null);
+    try { await api.uploadStudentDocument(studentNumber, documentType.trim(), file, expiryDate); setFile(null); setExpiryDate(''); await docs.reload(); }
+    catch (reason) { setError(reason); } finally { setSaving(false); }
+  };
+  const remove = async (id) => {
+    try { await api.deleteStudentDocument(studentNumber, id); await docs.reload(); }
+    catch (reason) { setError(reason); }
+  };
+  return <Card title={t('Documents')} subtitle={t('Files recorded against this student.')} tight>
+    <ErrorNote error={error || docs.error} onRetry={docs.reload} />
+    {canWrite ? <form className="row g-2 p-3 border-bottom" onSubmit={upload}>
+      <Field className="col-12 col-md-3" label={t('Document type')}><Input value={documentType} onInput={setDocumentType} /></Field>
+      <Field className="col-12 col-md-4" label={t('File')}><input className="form-control" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(event) => setFile(event.target.files?.[0] || null)} /></Field>
+      <Field className="col-8 col-md-3" label={t('Expiry date')}><Input type="date" value={expiryDate} onInput={setExpiryDate} /></Field>
+      <div className="col-4 col-md-2 d-grid align-items-end"><Button type="submit" variant="primary" pending={saving} disabled={!file}>{t('Upload')}</Button></div>
+    </form> : null}
+    <Table loading={docs.loading} rows={docs.value || []} rowKey={(row) => row.id}
+      empty={<Empty title={t('No documents recorded yet')} />}
+      columns={[
+        { key: 'name', header: t('Document'), cell: (row) => <><a href={api.studentDocumentFileUrl(studentNumber, row.id)}>{row.original_filename}</a><div className="small text-body-secondary">{row.document_type} · {Math.ceil(row.size_bytes / 1024)} KB</div></> },
+        { key: 'status', header: t('Status'), hide: 'sm', cell: (row) => <Badge>{row.status}</Badge> },
+        { key: 'uploaded', header: t('Uploaded'), hide: 'md', cell: (row) => dateText(row.uploaded_at) },
+        { key: 'actions', header: '', cell: (row) => canWrite ? <Button size="sm" variant="danger" onClick={() => remove(row.id)}>{t('Delete')}</Button> : null }
+      ]} />
+  </Card>;
+}
+
 /* -- Insights: counts and facts, and nothing derived ------------------------------ */
 
 function Insights({ student, studentNumber }) {
@@ -685,23 +685,16 @@ function Insights({ student, studentNumber }) {
     () => api.studentAttendance(studentNumber, range.from, range.to),
     !!studentNumber
   );
-  const placements = useResource(
-    Store.keys.placements(studentNumber),
-    () => api.studentPlacements(studentNumber),
-    !!studentNumber
-  );
-  const guardians = useResource(
+const guardians = useResource(
     Store.keys.guardians(studentNumber),
     () => api.studentGuardians(studentNumber),
     !!studentNumber
   );
 
-  if (attendance.loading || placements.loading || guardians.loading) return <Skeleton rows={4} />;
+  if (attendance.loading || guardians.loading) return <Skeleton rows={4} />;
 
   const counts = (attendance.value && attendance.value.counts) || null;
-  const rows = (placements.value && placements.value.placements) || [];
-  const open = rows.filter((row) => row.is_open);
-  const contacts = (guardians.value && guardians.value.guardians) || [];
+const contacts = (guardians.value && guardians.value.guardians) || [];
   const readers = contacts.filter((row) => row.can_view_records);
 
   /* Every line below is a count of something recorded, or the plain absence of a record. There
@@ -717,36 +710,29 @@ function Insights({ student, studentNumber }) {
       : null,
     counts
       ? {
-          label: 'Days marked present or late',
-          value: `${counts.in_the_room} of ${counts.recorded} recorded`,
-          note: 'A count over recorded days, not a rate over the term.'
+          label: 'Days present or late',
+          value: `${counts.in_the_room}`,
+          note: `${counts.present} present, ${counts.late} late.`
         }
       : null,
-    counts && counts.away
+    counts
       ? {
-          label: 'Days marked absent or excused',
-          value: `${counts.away} of ${counts.recorded} recorded`,
+          label: 'Days absent or excused',
+          value: `${counts.away}`,
           note: `${counts.absent} absent, ${counts.excused} excused.`
         }
       : null,
     {
-      label: 'Classes in her record',
-      value: `${rows.length}`,
-      note: open.length
-        ? `Currently in ${open.map((row) => row.class_code).join(', ')}.`
-        : t('No open placement — she is on no current register.')
-    },
-    {
-      label: 'Adults on her contact list',
+      label: 'Adults on contact list',
       value: `${contacts.length}`,
-      note: `${readers.length} may read her records.`
+      note: `${readers.length} may read the student record.`
     },
     {
       label: 'Date of birth',
       value: student.date_of_birth ? dateText(student.date_of_birth) : 'not on file',
       note:
         student.age === null || student.age === undefined
-          ? t('No age can be stated without one.')
+          ? null
           : `${student.age} years old today.`
     }
   ].filter(Boolean);
@@ -772,9 +758,6 @@ function Insights({ student, studentNumber }) {
           </tbody>
         </table>
       </div>
-      <div className="card-footer small text-body-tertiary">
-        {t('No attendance rate, no subject average, no ranking and no trend. Each of those is a figure the school never stated, computed over a denominator this screen would have chosen for it.')}
-      </div>
     </Card>
   );
 }
@@ -786,7 +769,11 @@ export function Student({ params = {} }) {
   const number = params.number || '';
   const [editing, setEditing] = useState(false);
 
-  const record = useResource(Store.keys.student(number), () => api.student(number), !!number);
+  const record = useResource(
+    `${Store.keys.student(number)}:${state.year || ''}`,
+    () => api.student(number, state.year),
+    !!number && !!state.year
+  );
 
   /* No number in the URL is not an error: it is the Find-a-child screen, which is what the nav
      link points at. */
@@ -815,7 +802,7 @@ export function Student({ params = {} }) {
     return (
       <>
         <PageHead title={number} />
-        <ErrorNote error={record.error} onRetry={record.reload} />
+        <ErrorNote error={!record.value ? record.error : null} onRetry={record.reload} />
         <Finder initial={number} />
       </>
     );
@@ -825,6 +812,8 @@ export function Student({ params = {} }) {
   if (!student) return null;
 
   const name = pickName(student, state.lang);
+  const isTeacher = Store.roles().indexOf('teacher') >= 0;
+  const mayReadGrades = Store.can('grades.read');const mayEditStudent = Store.can('students.write');
 
   return (
     <>
@@ -844,9 +833,9 @@ export function Student({ params = {} }) {
         }
         actions={
           <>
-            <Button variant={editing ? 'primary' : 'outline'} onClick={() => setEditing(!editing)}>
+            {mayEditStudent ? <Button variant={editing ? 'primary' : 'outline'} onClick={() => setEditing(!editing)}>
               {editing ? t('Close') : t('Edit her record')}
-            </Button>
+            </Button> : null}
             <Button icon="refresh" onClick={record.reload}>
               {t('Reload')}
             </Button>
@@ -874,15 +863,16 @@ export function Student({ params = {} }) {
         <div className="col-12 col-lg-6">
           <div className="vstack gap-3">
             <Identity student={student} />
-            <Guardians studentNumber={number} />
-            <Placements studentNumber={number} />
+            {!isTeacher ? <Guardians studentNumber={number} /> : null}
           </div>
         </div>
         <div className="col-12 col-lg-6">
           <div className="vstack gap-3">
-            <Insights student={student} studentNumber={number} />
-            <Marks studentNumber={number} />
-            <Attendance studentNumber={number} />
+            {!isTeacher ? <Insights student={student} studentNumber={number} /> : null}
+            {mayReadGrades ? <Marks studentNumber={number} /> : null}
+            <Attendance studentNumber={number} academicYear={state.year} />
+            <Documents studentNumber={number} />
+            <Timeline studentNumber={number} />
           </div>
         </div>
       </div>

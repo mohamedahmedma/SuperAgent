@@ -210,6 +210,15 @@ def superseded_filenames(language: str) -> List[str]:
 
     An unknown or unsupported language excludes nothing, so a question the detector
     could not place still searches the whole corpus.
+
+    ONE EXCEPTION, and it is the same principle applied to pictures. A translation is
+    redundant only when it is redundant in full. A text-only Arabic rendering of an
+    English handbook carries none of the handbook's figures, so excluding the English
+    half on an Arabic question drops every image the corpus has — the parent gets the
+    uniform described in words and no picture of it, and nothing in the answer says
+    why. So a twin that carries a figure this side does NOT have is kept: redundant
+    prose is a smaller cost than a missing picture, and this rule exists to prefer a
+    language, never to restrict the corpus to one.
     """
     other = {ARABIC: ENGLISH, ENGLISH: ARABIC}.get(language or "")
     if not other:
@@ -219,10 +228,75 @@ def superseded_filenames(language: str) -> List[str]:
     db = SessionLocal()
     try:
         rows = (
-            db.query(drop_column)
+            db.query(keep_column, drop_column)
             .filter(keep_column != "", drop_column != "")
             .all()
         )
-        return [name for (name,) in rows if name]
     finally:
         db.close()
+
+    candidates = [(keep, drop) for keep, drop in rows if keep and drop]
+    # Deployments that never pair anything return here, having touched one table and
+    # asked nothing about assets — the feature still costs a single lookup until it
+    # is actually used.
+    if not candidates:
+        return []
+    return _without_the_sides_holding_unique_pictures(candidates)
+
+
+def _without_the_sides_holding_unique_pictures(candidates: List[tuple]) -> List[str]:
+    """`candidates` is [(kept filename, twin filename)]; returns the twins safe to drop.
+
+    Safe means: every picture the twin can show, the kept side can show too. Compared
+    by image content HASH, because the usual case is the same image embedded in both
+    halves of a translated pair — those are genuinely redundant and must still be
+    excluded, or pairing would stop narrowing anything the moment a document had a
+    figure in it.
+    """
+    hashes = _displayable_hashes({name for pair in candidates for name in pair})
+    if hashes is None:
+        # Nothing can be shown, so nothing can be lost — the plain rule applies. See
+        # _displayable_hashes for why this is the right direction to fail in.
+        return [drop for _, drop in candidates]
+
+    superseded = []
+    for keep, drop in candidates:
+        unique = hashes.get(drop, set()) - hashes.get(keep, set())
+        if unique:
+            logger.debug(
+                "keeping %s alongside %s: it carries %d figure(s) %s cannot show",
+                drop, keep, len(unique), keep,
+            )
+            continue
+        superseded.append(drop)
+    return superseded
+
+
+def _displayable_hashes(filenames):
+    """{filename: {sha256}} for the images each file can show, or None when unknowable.
+
+    None is not an error path, it is "this deployment has no pictures at stake", and
+    the caller then applies the plain exclusion. Both routes to it are that:
+
+      - assets are off by profile, so no document has a figure to lose;
+      - the asset table cannot be read, in which case `build_asset_references` cannot
+        read it either and the turn would attach no image whichever side survived.
+
+    So keeping a redundant translation eligible here would buy no picture and cost the
+    narrowing that pairing exists for. That is the opposite of the trade this whole
+    function makes when the pictures ARE real, and the difference is exactly whether a
+    figure can actually reach the user.
+    """
+    try:
+        from backend.profiles import get_profile
+
+        if not get_profile().assets.enabled:
+            return None
+        from backend.assets.store import get_asset_store
+
+        return get_asset_store().displayable_hashes_by_filename(filenames)
+    except Exception:
+        logger.exception(
+            "could not read document assets; pairing without figure awareness"
+        )
+        return None

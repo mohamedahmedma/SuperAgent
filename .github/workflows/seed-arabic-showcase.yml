@@ -1,0 +1,54 @@
+name: Seed Arabic showcase
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-arabic-showcase-seed
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    name: Seed and verify production SIS
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    env:
+      DEPLOY_HOST: 13.140.153.131
+      DEPLOY_PORT: '22'
+      DEPLOY_USER: root
+      DEPLOY_PATH: /opt/superagent
+      SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
+    steps:
+      - name: Validate access configuration
+        run: |
+          test -n "$SSHPASS"
+          case "$DEPLOY_PORT" in *[!0-9]*|'') exit 1 ;; esac
+
+      - name: Install SSH password client
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Trust deployment server
+        run: |
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Seed once and verify
+        run: |
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            bash -s -- "$DEPLOY_PATH" <<'REMOTE'
+          set -eu
+          cd "$1"
+          compose="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+          if $compose exec -T sis python -m sis.demo validate-arabic-showcase </dev/null; then
+            echo "Arabic showcase already exists; no rows were changed."
+          else
+            $compose exec -T sis python -m sis.demo arabic-showcase \
+              --confirm-production-showcase </dev/null
+          fi
+          $compose exec -T sis python -m sis.demo validate-arabic-showcase </dev/null
+          $compose ps sis
+          REMOTE

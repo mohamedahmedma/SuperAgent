@@ -1,0 +1,25 @@
+/*
+  AUREXIS Responsive Welcome Copy v11.11.1
+  Desktop/Laptop/Tablet >= 901px:
+    full Aurexis description
+  Phone <= 900px:
+    short mobile description
+*/
+
+.welcome-description-desktop {
+  display: inline !important;
+}
+
+.welcome-description-mobile {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  .welcome-description-desktop {
+    display: none !important;
+  }
+
+  .welcome-description-mobile {
+    display: inline !important;
+  }
+}

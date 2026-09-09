@@ -23,10 +23,9 @@ session ownership work unchanged. Its `password_hash` column now holds a sentine
 matches no hash format, and nothing in this codebase reads it any more.
 """
 import logging
-import os
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from backend.db.models import User
@@ -35,11 +34,54 @@ from backend.infra.identity import IdentityError, IdentityNotConfigured, verify_
 
 logger = logging.getLogger(__name__)
 
-# Points at the identity service so the OpenAPI "Authorize" button still works. It is
-# an absolute URL because that service is a different origin — the old relative
-# "/auth/login" would now point at a route this app no longer serves.
-IDENTITY_BASE_URL = os.getenv("IDENTITY_BASE_URL", "http://localhost:8200").rstrip("/")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{IDENTITY_BASE_URL}/v1/auth/login")
+# This service verifies bearer tokens. It does not issue them and cannot take part in any
+# grant, and `HTTPBearer` is the scheme that says so: /docs then offers one "paste your
+# token" box instead of a sign-in form.
+#
+# It replaced `OAuth2PasswordBearer(tokenUrl=f"{IDENTITY_BASE_URL}/v1/auth/login")`, which
+# was wrong three separate ways:
+#
+#   * It advertised the OAuth2 password grant, so Swagger POSTed form-encoded
+#     username/password/client_id/client_secret — while identity's `/v1/auth/login` reads
+#     a JSON body (`LoginIn`). The Authorize button could not have worked against it at
+#     any URL; it was a 422 waiting to happen.
+#   * `tokenUrl` is copied verbatim into the public `openapi.json`, so a deployment that
+#     pointed IDENTITY_BASE_URL at an in-cluster name published `http://identity:8200` —
+#     a host no browser resolves, and a piece of internal topology no reader needed.
+#   * It made this service's documentation depend on another service's address for no
+#     runtime benefit whatsoever: nothing here has ever called that URL. Verification is
+#     offline against IDENTITY_JWKS_URL (see `backend/infra/identity.py`).
+#
+# Runtime behaviour is deliberately unchanged. FastAPI builds the same refusal for both
+# schemes — 401, detail "Not authenticated", `WWW-Authenticate: Bearer` — so a caller that
+# omits the header sees exactly what it saw before.
+bearer_scheme = HTTPBearer(
+    description=(
+        "An access token from the identity service. Obtain one with "
+        "POST /v1/auth/login there, then paste it here."
+    ),
+)
+
+
+def bearer_token(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> str:
+    """The token out of the `Authorization` header, as a plain string.
+
+    One line of adapter, and it earns its place: `HTTPBearer` yields the parsed header
+    object where `OAuth2PasswordBearer` yielded the bare parameter. Unwrapping it here
+    means `get_current_user` keeps the signature it has always had — `token: str` — so no
+    call site and no test had to be touched to change what /docs advertises.
+    """
+    return credentials.credentials
+
+
+#: The name this module has always exported for its security dependency, and the module
+#: docstring names it as part of the contract. Nothing outside this file imports it today,
+#: so it is an alias rather than a deprecation — and it is aliased to `bearer_token`, not
+#: to the scheme, because what callers depended on was "the dependency that yields the
+#: token", which is what this still is.
+oauth2_scheme = bearer_token
 
 # Written into the projection row's NOT NULL password_hash. Matches no hash format any
 # verifier here accepts, and there is no longer any code that would check it — but a
@@ -162,7 +204,7 @@ def _ensure_projection_row(db: Session, username: str) -> None:
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    token: str = Depends(bearer_token), db: Session = Depends(get_db)
 ) -> AuthenticatedUser:
     """Verify the bearer token and return its subject.
 

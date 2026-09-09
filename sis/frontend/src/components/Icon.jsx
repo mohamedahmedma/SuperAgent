@@ -16,6 +16,17 @@ export function cx(...parts) {
 }
 
 const PATHS = {
+  /* AUREXIS_SIS_NAV_ICONS_V1 â€” distinct registrar navigation glyphs */
+  school: 'M4 10.5 12 4l8 6.5V20H4zM8 20v-6h8v6',
+  studentAdd: 'M15 19v-1a4 4 0 0 0-8 0v1M11 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 8v6m-3-3h6',
+  roster: 'M6 4h12v16H6zM9 8h6M12 17v-6m0 0-2.5 2.5M12 11l2.5 2.5',
+  guardian: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20v-2a5 5 0 0 1 8-4M17 9l4 2v3c0 3-2 5-4 6-2-1-4-3-4-6v-3z',
+  roles: 'M4 5h16v14H4zM8 9h4M8 13h5M16 9h.01M16 13h.01',
+  teacher: 'M4 5h16v10H9M14 9h3M7 21v-3m-3 3v-2a3 3 0 0 1 6 0v2M7 14a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  staff: 'M5 20v-2a4 4 0 0 1 4-4h2a4 4 0 0 1 4 4v2M10 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM17 7h4M19 5v4M17 13h4M19 11v4',
+  classAssign: 'M4 5h7v6H4zM13 5h7v6h-7zM4 13h7v6H4zM15 16h5m-2.5-2.5V19',
+  attendance: 'M5 5h14v15H5zM5 9h14M9 3v4m6-4v4M8 14l2 2 4-4',
+  timetable: 'M4 5h16v15H4zM4 10h16M9 5v15m6-15v15M4 15h16',
   dashboard: 'M4 13h7V4H4v9zm0 7h7v-5H4v5zm9 0h7V11h-7v9zm0-16v5h7V4h-7z',
   structure: 'M4 6h16M4 12h16M4 18h10',
   upload: 'M12 16V4m0 0L8 8m4-4 4 4M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2',
@@ -29,6 +40,8 @@ const PATHS = {
   sun: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 2v2m0 16v2M4 12H2m20 0h-2M5.6 5.6 4.2 4.2m15.6 1.4 1.4-1.4M5.6 18.4l-1.4 1.4m15.6-1.4 1.4 1.4',
   moon: 'M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z',
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zm5.5-1.5L21 21',
+  eye: 'M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6zM12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6z',
+  eyeOff: 'M3 3l18 18M10.6 6.1A10.8 10.8 0 0 1 12 6c6 0 9.5 6 9.5 6a15.2 15.2 0 0 1-2.1 2.8M6.2 6.2C3.8 7.8 2.5 12 2.5 12s3.5 6 9.5 6a9.8 9.8 0 0 0 3.1-.5M9.9 9.9A3 3 0 0 0 14.1 14',
   download: 'M12 4v12m0 0-4-4m4 4 4-4M4 20h16',
   calendar: 'M4 6h16v14H4zM4 10h16M8 3v4m8-4v4',
   empty: 'M4 7h16v13H4zM4 7l2-3h12l2 3M9 12h6',
@@ -40,7 +53,10 @@ const PATHS = {
   droplet: 'M12 3.2 6.8 8.4a7.3 7.3 0 1 0 10.4 0L12 3.2z',
   /* Points down; the dropdown rotates it 180deg when the menu is open, so one glyph does both
      states and they cannot drift apart. */
-  chevron: 'm6 9 6 6 6-6'
+  chevron: 'm6 9 6 6 6-6',
+  /* A door with an arrow leaving it. The arrow points out of the frame rather than into it,
+     which is the only thing separating "sign out" from "sign in" at 16px. */
+  signout: 'M9 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h4M16 17l5-5-5-5M21 12H9'
 };
 
 export function Icon({ name, size = 16, weight = 1.7 }) {

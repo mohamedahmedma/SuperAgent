@@ -17,7 +17,7 @@ check runs against it unmocked — a suite that skipped that check would not not
 the migration and the code stopped agreeing.
 """
 from collections.abc import Iterator
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,8 @@ from fastapi.testclient import TestClient
 from sis.app import create_app
 from sis.config import reset_settings_cache
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
+from sis.domain.auth import ApiKey, Scope
+from sis.api.deps import hash_api_key, key_prefix
 from sis.infrastructure.db.session import reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -59,6 +61,13 @@ GRADES_CSV = (
     "S002,MATH,0\n"
 ).encode("utf-8")
 
+FAMILY_CSV = (
+    "student_number,full_name_ar,full_name_en,class_code,"
+    "guardian_name_ar,guardian_name_en,guardian_phone,relationship_type,"
+    "is_primary_contact,can_view_records\n"
+    "S100,,Mariam Hassan,3A,,Hassan Ali,01001234567,father,yes,yes\n"
+).encode("utf-8")
+
 
 @pytest.fixture
 def sis_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
@@ -71,6 +80,19 @@ def sis_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
     reset_engine()
 
     command.upgrade(Config(str(_ALEMBIC_INI)), "head")
+    with SqlAlchemyUnitOfWork() as uow:
+        uow.api_keys.add(
+            ApiKey(
+                prefix=key_prefix(BOOTSTRAP_KEY),
+                key_hash=hash_api_key(BOOTSTRAP_KEY),
+                label="HTTP API test registrar",
+                scope=Scope.REGISTRAR,
+                is_active=True,
+                expires_at=None,
+                created_at=datetime.now(UTC),
+            )
+        )
+        uow.commit()
     yield
 
     reset_engine()
@@ -103,7 +125,7 @@ def _seed_academic_year() -> None:
                     name_ar="٢٠٢٥-٢٠٢٦",
                     starts_on=date(2025, 9, 1),
                     ends_on=date(2026, 6, 30),
-                    is_current=True,
+                    is_current=False,
                 )
             ]
         )
@@ -211,6 +233,49 @@ def test_a_file_this_service_cannot_read_is_refused_by_name(
         response, status=response.status_code, code="unsupported_file_type"
     )
     assert response.json()["detail"]["field"] == "file"
+
+
+def test_one_roster_row_creates_student_guardian_and_link_atomically(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    _seed_academic_year()
+    _seed_generated_structure()
+
+    preview = client.post(
+        "/v1/imports/roster/preview",
+        files=_csv_upload("families.csv", FAMILY_CSV),
+        data={"academic_year_code": YEAR_CODE},
+        headers=registrar,
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["ok_count"] == 1
+    assert body["rejected_count"] == 0
+
+    # Preview is read-only for both halves of the family row.
+    assert client.get("/v1/students/S100/guardians", headers=registrar).status_code == 404
+
+    committed = client.post(
+        f"/v1/imports/roster/{body['batch_id']}/commit", headers=registrar
+    )
+    assert committed.status_code == 200, committed.text
+
+    guardians = client.get("/v1/students/S100/guardians", headers=registrar)
+    assert guardians.status_code == 200, guardians.text
+    family = guardians.json()
+    assert family["student_number"] == "S100"
+    assert family["count"] == 1
+    assert family["guardians"][0] == {
+        "phone": "+201001234567",
+        "phones": ["+201001234567"],
+        "full_name_ar": "",
+        "full_name_en": "Hassan Ali",
+        "relationship_type": "father",
+        "relationship_label": "",
+        "is_primary_contact": True,
+        "can_view_records": True,
+        "restriction_note": "",
+    }
 
 
 def test_structure_generate_creates_a_rung_and_its_sections_idempotently(

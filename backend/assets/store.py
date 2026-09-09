@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set
 
 from sqlalchemy import func
 
@@ -220,6 +220,41 @@ class AssetStore:
         finally:
             session.close()
         return [found[item] for item in ids if item in found]
+
+    def displayable_hashes_by_filename(self, filenames) -> Dict[str, Set[str]]:
+        """Content hashes of the images each of `filenames` can actually SHOW.
+
+        Two scalar columns, no dossiers: this runs on the retrieval path (see
+        `pair_store.superseded_filenames`, which uses it to avoid excluding a
+        translation that is the only side carrying a picture), so it must stay one
+        indexed query and must not pay to rebuild an AssetDossier per row.
+
+        "Displayable" is `storage_uri != ""`. A row whose bytes were never stored is a
+        figure the presenter can only return as metadata — no picture — so counting it
+        would keep a redundant document eligible in exchange for nothing.
+
+        Keyed by sha256 rather than by count because the same image is usually embedded
+        in both halves of a translated pair: comparing counts would call those halves
+        different, comparing content correctly calls them the same.
+        """
+        names = [name for name in (filenames or []) if name]
+        if not names:
+            return {}
+        DocumentAsset, _ = self._models()
+        session = self.session_factory()
+        try:
+            rows = (
+                session.query(DocumentAsset.filename, DocumentAsset.sha256)
+                .filter(DocumentAsset.filename.in_(names), DocumentAsset.storage_uri != "")
+                .all()
+            )
+        finally:
+            session.close()
+        hashes: Dict[str, Set[str]] = {name: set() for name in names}
+        for filename, sha256 in rows:
+            if sha256:
+                hashes[filename].add(sha256)
+        return hashes
 
     def list_by_filename(self, filename: str, indexable_only: bool = False) -> List[AssetDossier]:
         if not filename:

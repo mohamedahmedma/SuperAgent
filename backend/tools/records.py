@@ -27,13 +27,18 @@ from langchain_core.tools import tool
 from backend.chat.child_resolution import resolve_child
 from backend.chat.child_roster import ChildOption, forget, load_roster
 from backend.chat.request_context import ChatRequestContext
+from backend.env import records_api_key, records_base_url
 from backend.prompts import render as render_prompt
 from backend.text_matching import name_key
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = os.getenv("RECORDS_BASE_URL", "http://localhost:8100").rstrip("/")
-API_KEY = os.getenv("RECORDS_API_KEY", "")
+# Resolved in `backend.env`, which `backend.chat.child_roster` reads too. Both talk to the
+# same facade with the same credentials, and two copies of the default is how they end up
+# talking to two different ones — the marks from the configured facade, the child roster
+# from wherever the other copy pointed.
+BASE_URL = records_base_url()
+API_KEY = records_api_key()
 # Short. This sits inside a chat turn a parent is waiting on, and a slow answer that
 # arrives is worse than a fast "records are unavailable" they can act on.
 TIMEOUT_SECONDS = float(os.getenv("RECORDS_TIMEOUT_SECONDS") or 8)

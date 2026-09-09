@@ -239,6 +239,39 @@
   --bs-btn-color: var(--ink-soft);
 }
 
+/* A real segmented control for equal, adjacent choices. Bootstrap's negative button-group
+   margins left a square seam between Arabic and Languages, especially obvious in RTL.
+   The track owns the border and radius; its children only own their selected state. */
+.sis-segmented {
+  display: inline-flex;
+  width: min(100%, 28rem);
+  gap: 2px;
+  padding: 2px;
+  overflow: hidden;
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.sis-segmented > .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--control-h);
+  margin: 0 !important;
+  padding-inline: var(--space-4);
+  white-space: normal;
+  border: 0;
+  border-radius: calc(var(--radius) - 3px) !important;
+}
+
+.sis-segmented > .btn-outline-secondary {
+  background: transparent;
+}
+
+.sis-segmented > .btn-primary {
+  box-shadow: var(--shadow-sm);
+}
+
 /* ===================================================================================
  * Surfaces — the grey slabs a screen is divided into
  * =================================================================================== */

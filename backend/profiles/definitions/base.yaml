@@ -54,10 +54,25 @@ models:
 agent:
   tools:
     - search_knowledge_base
-    - view_figure
+  # LangGraph supersteps, not tool calls. The agent graph is
+  #   before_model -> model -> tools -> before_model -> model -> ...
+  # (the extra node is the terminal-retrieval middleware in chat/runtime.py), so ONE
+  # tool call costs three supersteps and writing the answer afterwards costs two more:
+  #
+  #     supersteps needed = 3 x (tool calls) + 2
+  #
+  # This has to be read against the budget right below it, which is counted in TOOL
+  # CALLS, and the two must be changed together. They drifted apart once and the cost
+  # was a GraphRecursionError streamed into the middle of a parent's answer: the
+  # profile granted five calls (a search plus figure reads) and the graph could pay
+  # for two. Raise the budget and you must raise this by three per extra call.
+  #
+  # 8 is 3 x 2 + 2 — the two knowledge calls the widest shipped profile allows, plus
+  # the step that writes the answer. There is no figure tool to pay for any more:
+  # images are read into text at ingest and attached by citation, so a turn that shows
+  # a picture costs exactly the same as one that does not.
   recursion_limit: 8
   max_knowledge_calls_per_turn: 1
-  max_figure_calls_per_turn: 3
   # 14 messages = 7 user/assistant turns. Counted in MESSAGES, not turns, because that
   # is what the slice operates on — halving it silently drops the assistant side of
   # every exchange, and the assistant's own replies are what later follow-ups refer
@@ -348,13 +363,18 @@ assets:
   delivery:
     base_path: "/media"   # not /assets — that collides with Vite's build output
     attach_to_response: true
-    max_assets_per_response: 8
-    # Show only the figures the answer cited, not every figure retrieval touched.
+    # Three, not eight. A uniform question hits every uniform image in the document,
+    # and the citation below normally narrows that to one — this is the ceiling for
+    # the turns where it does not.
+    max_assets_per_response: 3
+    # Show the figure the answer CITED, not every figure retrieval touched. The chunk
+    # header marks which chunks are figures, so the [n] the agent already emits says
+    # which picture it described — no extra model call, and a question about the PE kit
+    # stops arriving with two pictures of day wear. Off means "attach everything the
+    # turn surfaced", for a client that would rather filter for itself.
     attach_only_cited: true
     max_inline_bytes: 512000      # ceiling on base64 inlining, whatever a client asks for
     cache_max_age_seconds: 31536000   # content-addressed, therefore immutable
-    max_pixel_reads_per_asset: 2      # after this, answer from recorded observations
-    max_observations_per_asset: 6
   # Deterministic pre-filter; every image rejected here is a VLM call never made.
   triage:
     min_width: 64

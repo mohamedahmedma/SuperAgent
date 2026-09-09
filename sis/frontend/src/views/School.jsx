@@ -34,25 +34,9 @@ import {
   Tile,
   useConfirm
 } from '../components/Ui.jsx';
+import { SCHOOL_LEVELS, STAGES, byStage } from '../structure.js';
+import { PrincipalYearSetup } from '../components/PrincipalYearSetup.jsx';
 
-/* The order a school lists its own divisions in, and the labels it uses. */
-const STAGES = [
-  { key: 'garden', label: 'Garden' },
-  { key: 'primary', label: 'Primary' },
-  { key: 'preparatory', label: 'Preparatory' },
-  { key: 'secondary', label: 'Secondary' },
-  { key: 'unspecified', label: 'Not yet grouped' }
-];
-
-/* The stages a school can switch on when it is created: the column each one is stored in and
-   the most grades the curriculum defines for it. Derived from STAGES rather than restated, so
-   the two lists cannot drift apart and a stage is named the same word in both. */
-const GRADE_LIMITS = { garden: 3, primary: 6, preparatory: 3, secondary: 3 };
-const SCHOOL_LEVELS = STAGES.filter((stage) => stage.key in GRADE_LIMITS).map((stage) => ({
-  ...stage,
-  column: stage.key === 'garden' ? 'kg_grade_count' : `${stage.key}_grade_count`,
-  max: GRADE_LIMITS[stage.key]
-}));
 /* The week, Saturday first, as an Egyptian school reads it. The value is what the service
    stores. The labels are built by a call rather than held in a constant because `t` has to run
    after the language is known, and again on every switch — a module-level table would freeze
@@ -130,7 +114,7 @@ function SchoolForm({ onSaved }) {
           />
         </Field>
         <Field className="col-12 col-sm-4" label={t('Name (English)')} required>
-          <Input value={form.values.name_en} required onInput={form.set('name_en')} />
+          <Input className="sis-name-en" value={form.values.name_en} required onInput={form.set('name_en')} />
         </Field>
         <Field className="col-12 col-sm-4" label={t('Name (Arabic)')} required>
           <Input className="sis-name-ar" value={form.values.name_ar} required onInput={form.set('name_ar')} />
@@ -221,7 +205,7 @@ function YearForm({ school, onSaved }) {
     name_ar: '',
     starts_on: '',
     ends_on: '',
-    is_current: true
+    status: 'upcoming'
   });
 
   const save = useAction(() =>
@@ -232,7 +216,7 @@ function YearForm({ school, onSaved }) {
       name_ar: form.values.name_ar.trim(),
       starts_on: form.values.starts_on,
       ends_on: form.values.ends_on,
-      is_current: !!form.values.is_current
+      status: form.values.status
     })
   );
 
@@ -269,7 +253,7 @@ function YearForm({ school, onSaved }) {
           />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-4" label={t('Name (English)')}>
-          <Input value={form.values.name_en} onInput={form.set('name_en')} />
+          <Input className="sis-name-en" value={form.values.name_en} onInput={form.set('name_en')} />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-4" label={t('Name (Arabic)')}>
           <Input className="sis-name-ar" value={form.values.name_ar} onInput={form.set('name_ar')} />
@@ -291,21 +275,22 @@ function YearForm({ school, onSaved }) {
         >
           <Input type="date" value={form.values.ends_on} onInput={form.set('ends_on')} />
         </Field>
+        <Field className="col-12 col-sm-6 col-lg-4" label={t('Status')} required>
+          <Select
+            value={form.values.status}
+            options={[
+              { value: 'upcoming', label: t('upcoming') },
+              { value: 'active', label: t('active') },
+              { value: 'completed', label: t('completed') }
+            ]}
+            onChange={form.set('status')}
+          />
+        </Field>
       </div>
 
-      <div className="form-check">
-        <input
-          className="form-check-input"
-          type="checkbox"
-          id="year-current"
-          checked={!!form.values.is_current}
-          onChange={(event) => form.set('is_current')(event.target.checked)}
-        />
-        <label className="form-check-label small" htmlFor="year-current">
-          Make this the working year for this school. Each school has its own current year;
-          marking this one does not touch another branch's.
-        </label>
-      </div>
+      <p className="small text-body-secondary mb-0">
+        {t('Only an active year becomes the school’s working year. Status is an administrative choice and is not guessed from today’s date.')}
+      </p>
 
       <ErrorNote error={save.error} />
       <div className="d-grid d-sm-block">
@@ -319,7 +304,7 @@ function YearForm({ school, onSaved }) {
 
 /* -- Add a rung ------------------------------------------------------------------ */
 
-function LevelForm({ school, schoolConfig, count, onSaved }) {
+function LevelForm({ school, schoolConfig, track, count, onSaved }) {
   /* Only the stages this school switched on at creation. A rung the school does not run is
      not an option here, and the service refuses it anyway. */
   const enabledStages = SCHOOL_LEVELS.filter(
@@ -330,13 +315,15 @@ function LevelForm({ school, schoolConfig, count, onSaved }) {
     name_en: '',
     name_ar: '',
     display_order: String((count || 0) + 1),
-    stage: enabledStages[0] ? enabledStages[0].key : 'unspecified'
+    stage: enabledStages[0] ? enabledStages[0].key : 'unspecified',
+    track_code: track
   });
 
   const save = useAction(() =>
     api.createLevel({
       code: form.values.code.trim(),
       school_code: school,
+      track_code: track,
       name_en: form.values.name_en.trim(),
       name_ar: form.values.name_ar.trim(),
       display_order: Number(form.values.display_order) || 0,
@@ -388,7 +375,7 @@ function LevelForm({ school, schoolConfig, count, onSaved }) {
           />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-3" label={t('Name (English)')}>
-          <Input value={form.values.name_en} onInput={form.set('name_en')} />
+          <Input className="sis-name-en" value={form.values.name_en} onInput={form.set('name_en')} />
         </Field>
         <Field className="col-12 col-sm-6 col-lg-3" label={t('Name (Arabic)')}>
           <Input className="sis-name-ar" value={form.values.name_ar} onInput={form.set('name_ar')} />
@@ -528,6 +515,11 @@ export function School({ params = {} }) {
   const [addingSchool, setAddingSchool] = useState(false);
   const [addingLevel, setAddingLevel] = useState(false);
   const [addingYear, setAddingYear] = useState(false);
+  const [activeTrack, setActiveTrack] = useState('');
+  const mayEditStructure = Store.can('structure.write');
+  const isAdmin = Store.roles().indexOf('admin') >= 0;
+  const heldRoles = Store.roles();
+  const isPrincipal = heldRoles.indexOf('school_manager') >= 0 && heldRoles.indexOf('admin') < 0 && heldRoles.indexOf('school_owner') < 0;
 
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const schoolList = schools.value || [];
@@ -539,7 +531,12 @@ export function School({ params = {} }) {
   }, [params.code]);
 
   const levels = useResource(Store.keys.levels(code), () => api.schoolLevels(code), !!code);
+  const tracks = useResource(Store.keys.tracks(code), () => api.schoolTracks(code), !!code);
   const years = useResource(Store.keys.years(code), () => api.years(code), !!code);
+  const trackList = tracks.value || [];
+  const selectedTrack = trackList.some((track) => track.code === activeTrack)
+    ? activeTrack
+    : (trackList[0] && trackList[0].code) || '';
 
   /* The remembered year, but only once it is known to be one of *this* school's.
      `Store.setSchool` drops the year when the school changes, and says why. It runs in the
@@ -579,7 +576,14 @@ export function School({ params = {} }) {
 
   const school = schoolList.find((item) => item.code === code);
   const yearList = (years.value && years.value.academic_years) || [];
-  const levelList = levels.value || [];
+  /* Rungs of the selected track, plus any that belong to no track at all.
+     An untracked rung is one the school had before it declared its sections — revision 0009
+     could only place those where the school runs a single section. Hiding it under every
+     track would make it unreachable from the only screen that lists rungs, which is a worse
+     answer than showing it in both. */
+  const levelList = (levels.value || []).filter(
+    (level) => !selectedTrack || !level.track_code || level.track_code === selectedTrack
+  );
 
   /* Classes per rung, for the count on each card. Counted from the selected year's classes: a
      rung's class count is a statement about a year, not about the rung. */
@@ -588,36 +592,55 @@ export function School({ params = {} }) {
     perLevel[section.year_level_code] = (perLevel[section.year_level_code] || 0) + 1;
   });
 
-  const grouped = STAGES.map((stage) => ({
-    stage,
-    levels: levelList.filter((level) => (level.stage || 'unspecified') === stage.key)
-  })).filter((group) => group.levels.length > 0);
+  const grouped = byStage(levelList);
+
 
   return (
     <>
       <PageHead
         title={school ? pickName(school, state.lang) || code : code || 'School'}
         lede={
-          school
-            ? t('Its academic years, and its ladder grouped by division. Open a rung to see its classes.')
-            : t('This school is not on file.')
+          isPrincipal
+            ? undefined
+            : school
+              ? t('Its academic years, and its ladder grouped by division. Open a rung to see its classes.')
+              : t('This school is not on file.')
         }
         actions={
-          <>
-            <Button onClick={() => setAddingSchool(!addingSchool)}>
-              {addingSchool ? t('Close') : t('Add school')}
+          isPrincipal ? (
+            <Button variant="primary" disabled={!code} onClick={() => setAddingYear(!addingYear)}>
+              {addingYear ? t('Close') : t('Create academic year')}
             </Button>
+          ) : mayEditStructure ? <>
+            {isAdmin ? <Button onClick={() => setAddingSchool(!addingSchool)}>
+              {addingSchool ? t('Close') : t('Add school')}
+            </Button> : null}
             <Button disabled={!code} onClick={() => setAddingLevel(!addingLevel)}>
               {addingLevel ? t('Close') : t('Add rung')}
             </Button>
             <Button variant="primary" disabled={!code} onClick={() => setAddingYear(!addingYear)}>
               {addingYear ? t('Close') : t('Add academic year')}
             </Button>
-          </>
+          </> : null
         }
       />
 
       <div className="vstack gap-4">
+        {trackList.length ? (
+          <Card title={t('Academic track')} subtitle={t('You are managing this structure independently.')}>
+            <div className="btn-group sis-segmented" role="group" aria-label={t('Academic track')}>
+              {trackList.map((track) => (
+                <Button
+                  key={track.code}
+                  variant={track.code === selectedTrack ? 'primary' : 'secondary'}
+                  onClick={() => setActiveTrack(track.code)}
+                >
+                  {pickName(track, state.lang)}
+                </Button>
+              ))}
+            </div>
+          </Card>
+        ) : null}
         {addingSchool ? (
           <Card className="sis-rise" title={t('New school')}>
             <SchoolForm onSaved={() => setAddingSchool(false)} />
@@ -625,9 +648,26 @@ export function School({ params = {} }) {
         ) : null}
 
         {addingYear && code ? (
-          <Card className="sis-rise" title={t('New academic year in {0}', [code])}>
-            <YearForm school={code} onSaved={() => setAddingYear(false)} />
-          </Card>
+          isPrincipal ? (
+            <div className="sis-rise">
+              <PrincipalYearSetup
+                school={code}
+                schoolConfig={school}
+                tracks={trackList}
+                levels={levels.value || []}
+                years={yearList}
+                onSaved={() => {
+                  years.reload();
+                  levels.reload();
+                  classes.reload();
+                }}
+              />
+            </div>
+          ) : (
+            <Card className="sis-rise" title={t('New academic year in {0}', [code])}>
+              <YearForm school={code} onSaved={() => setAddingYear(false)} />
+            </Card>
+          )
         ) : null}
 
         {addingLevel && code ? (
@@ -635,6 +675,7 @@ export function School({ params = {} }) {
             <LevelForm
               school={code}
               schoolConfig={school}
+              track={selectedTrack}
               count={levelList.length}
               onSaved={() => setAddingLevel(false)}
             />
@@ -677,12 +718,10 @@ export function School({ params = {} }) {
                         <a className="sis-plain" href={Router.href('year', { code: row.code })}>
                         {row.code}
                       </a>
-                        {row.is_current ? (
-                          <>
-                            {' '}
-                            <Badge tone="info">{t('current')}</Badge>
-                          </>
-                        ) : null}
+                        {' '}
+                        <Badge tone={row.status === 'active' ? 'info' : row.status === 'completed' ? 'warn' : 'ok'}>
+                          {t(row.status || 'upcoming')}
+                        </Badge>
                       </>
                     )
                   },
@@ -730,7 +769,7 @@ export function School({ params = {} }) {
                   note={t('Academic years on file')}
                 />
                 <Tile
-                  label={t('Classes')}
+                  label={t('Class sections')}
                   value={(classes.value || []).length}
                   loading={classes.loading && !classes.ready}
                   note={activeYear ? t('In {0}', [activeYear]) : t('Pick a year')}

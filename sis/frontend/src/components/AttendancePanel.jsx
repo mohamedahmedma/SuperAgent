@@ -34,14 +34,25 @@ import { t } from '../i18n.js';
 /* The four states, in the order a teacher reaches for them: present first because it is the
    overwhelming majority, excused last because it needs a reason typed. */
 const STATES = [
-  { key: 'present', label: 'Present', short: 'P' },
-  { key: 'absent', label: 'Absent', short: 'A' },
-  { key: 'late', label: 'Late', short: 'L' },
-  { key: 'excused', label: 'Excused', short: 'E' }
+  { key: 'present', label: 'Present', short: 'P', shortAr: 'ح' },
+  { key: 'absent', label: 'Absent', short: 'A', shortAr: 'غ' },
+  { key: 'late', label: 'Late', short: 'L', shortAr: 'م' },
+  { key: 'excused', label: 'Excused', short: 'E', shortAr: 'ع' }
 ];
 
-export function AttendancePanel({ classCode, year, on }) {
+export function AttendancePanel({ classCode, year, on, scope }) {
   const state = useStore();
+  /*
+   * Whether this person may write *this* register — not registers in general.
+   *
+   * `scope` names where the class sits, and the check walks the signed-in person's grants
+   * for one covering it. A form teacher of 3A opening 3B gets the register read-only; the
+   * server refuses the write either way, and this only decides whether they are offered a
+   * Save button that would fail. A missing `scope` falls back to the class code and the
+   * remembered school, which is enough for a class- or school-scoped grant.
+   */
+  const where = scope || { school: state.school, classSection: classCode };
+  const mayWrite = Store.canIn('attendance.write', where);
   const [day, setDay] = useState(on || today());
   /* Local edits, keyed by student number. Empty until a teacher taps something, and cleared
      when the day changes — carrying yesterday's taps into today would be the worst possible bug
@@ -54,15 +65,31 @@ export function AttendancePanel({ classCode, year, on }) {
     !!(classCode && year)
   );
 
+  useEffect(() => {
+    setDay(on && on <= today() ? on : today());
+  }, [on, classCode]);
   useEffect(() => setDraft({}), [day, classCode]);
 
-  const save = useAction((entries) => api.takeRegister(classCode, year, day, entries));
+  const save = useAction((entries, closing) =>
+    api.takeRegister(classCode, year, day, entries, closing)
+  );
 
   const report = register.value;
   const lines = (report && report.students) || [];
   const pending = Object.keys(draft);
+  const isPast = day < today();
+  const isFuture = day > today();
+  const mayEdit = mayWrite && !isFuture;
+
+  function canChangeState(line, next) {
+    if (!mayEdit) return false;
+    if (!isPast) return true;
+    return next === 'excused' && !!line && line.state === 'absent';
+  }
 
   function mark(number, next) {
+    const line = lines.find((item) => item.student_number === number);
+    if (!canChangeState(line, next)) return;
     setDraft((current) => {
       const copy = { ...current };
       /* Tapping the state a child already has clears the draft entry rather than re-stating it:
@@ -83,10 +110,42 @@ export function AttendancePanel({ classCode, year, on }) {
 
   /** What a row shows: the draft if the teacher touched it, else what is on file. */
   const shown = (line) => (draft[line.student_number] || {}).state ?? line.state;
+
   const shownNote = (line) => (draft[line.student_number] || {}).note ?? (line.note || '');
+
+  /* Children who would be recorded absent by "Finish" — blank on file and untouched here.
+     Counted from what is on screen rather than from `report.unmarked`, so the number on the
+     button accounts for the taps not yet saved. */
+  const blanks = lines.filter((line) => !shown(line)).length;
+
+  /** Both buttons, one path. `closing` is the only difference between them. */
+  function submit(closing) {
+    if (isFuture) return Promise.resolve();
+    return save
+      .run(
+        pending.map((number) => ({
+          student_number: number,
+          state: draft[number].state,
+          note: draft[number].note || ''
+        })),
+        closing
+      )
+      .then((saved) => {
+        setDraft({});
+        register.reload();
+        Store.toast(
+          'ok',
+          `Register saved for ${day}`,
+          `${saved.counts.recorded} of ${saved.size} marked` +
+            (saved.unmarked ? ` — ${saved.unmarked} still blank` : '')
+        );
+      })
+      .catch(() => {});
+  }
 
   /** Mark every child still blank, without overwriting anything already on file or edited. */
   function fillUntouched(value) {
+    if (isFuture) return;
     setDraft((current) => {
       const copy = { ...current };
       lines.forEach((line) => {
@@ -107,84 +166,97 @@ export function AttendancePanel({ classCode, year, on }) {
       }
       actions={
         <div className="d-flex align-items-center gap-2">
-          <Input type="date" className="form-control-sm" value={day} onInput={setDay} />
+          <Input type="date" max={today()} className="form-control-sm" value={day}
+            onInput={(value) => setDay(value > today() ? today() : value)} />
           <Button size="sm" icon="refresh" onClick={register.reload}>
             {t('Reload')}
           </Button>
         </div>
       }
       footer={
+        !mayEdit ? (
+          /* Read-only, and said so rather than shown as a dead Save button. A control that
+             is present but permanently disabled reads as a bug in the page; a sentence
+             naming the reason is something a teacher can act on. */
+          <span className="small text-body-tertiary">
+            {t('Read-only attendance view. Recording controls are hidden for this account.')}
+          </span>
+        ) : (
         <div className="d-grid gap-2 d-sm-flex align-items-sm-center w-100">
           <Button
             variant="primary"
             disabled={!pending.length}
             pending={save.pending}
             pendingLabel={t('Saving…')}
-            onClick={() =>
-              save
-                .run(
-                  pending.map((number) => ({
-                    student_number: number,
-                    state: draft[number].state,
-                    note: draft[number].note || ''
-                  }))
-                )
-                .then((saved) => {
-                  setDraft({});
-                  register.reload();
-                  Store.toast(
-                    'ok',
-                    `Register saved for ${day}`,
-                    `${saved.counts.recorded} of ${saved.size} marked` +
-                      (saved.unmarked ? ` — ${saved.unmarked} still blank` : '')
-                  );
-                })
-                .catch(() => {})
-            }
+            onClick={() => submit(false)}
           >
             Save {pending.length || ''} mark(s)
+          </Button>
+          {/* The second button is the whole of the supervisor's workflow: name the children
+              in the room, press this, and the rest are recorded absent. It is a separate
+              control rather than a mode on the first because it writes marks for children
+              nobody touched, and that has to be something the user chose in one visible
+              act rather than a side effect of saving. */}
+          <Button
+            variant="secondary"
+            disabled={isPast || !blanks}
+            pending={save.pending}
+            pendingLabel={t('Saving…')}
+            onClick={() => submit(true)}
+            title={t('Records every child still blank as absent.')}
+          >
+            {t('Finish — rest absent')} {blanks ? `(${blanks})` : ''}
           </Button>
           <Button variant="quiet" disabled={!pending.length} onClick={() => setDraft({})}>
             {t('Discard changes')}
           </Button>
           <span className="small text-body-tertiary">
             {pending.length
-              ? `${pending.length} change(s) not yet saved.`
-              : 'Nothing is written until you save. Saving again corrects the day rather than adding a second set of marks.'}
+              ? t('{0} change(s) not yet saved.', [pending.length])
+              : t('Nothing is written until you save. Saving again corrects the day rather than adding a second set of marks.')}
           </span>
         </div>
+        )
       }
       tight
     >
       <div className="card-body vstack gap-3">
         {report ? (
           <div className="d-flex flex-wrap gap-2">
-            <Badge tone="ok">{report.counts.present} present</Badge>
-            <Badge tone="bad">{report.counts.absent} absent</Badge>
-            <Badge tone="warn">{report.counts.late} late</Badge>
-            <Badge tone="info">{report.counts.excused} excused</Badge>
-            <Badge>{report.unmarked} not yet marked</Badge>
+            <Badge tone="ok">{t('{0} present', [report.counts.present])}</Badge>
+            <Badge tone="bad">{t('{0} absent', [report.counts.absent])}</Badge>
+            <Badge tone="warn">{t('{0} late', [report.counts.late])}</Badge>
+            <Badge tone="info">{t('{0} excused', [report.counts.excused])}</Badge>
+            <Badge>{t('{0} not yet marked', [report.unmarked])}</Badge>
           </div>
         ) : null}
 
         <p className="small text-body-tertiary mb-0">
-          {t('A child nobody has marked shows')} <span className="sis-ungraded">{DASH}</span> {t('and is counted as')} <strong>{t('not yet marked')}</strong> — never as present. The counts above are over
-          the {report ? report.counts.recorded : 0} mark(s) actually recorded, not over the{' '}
-          {report ? report.size : 0} children on the register.
+          {t('An unmarked child shows {0}. The counts use the {1} recorded marks, not all {2} children.', [
+            <span className="sis-ungraded">{DASH}</span>,
+            report ? report.counts.recorded : 0,
+            report ? report.size : 0
+          ])}
         </p>
 
-        <div className="d-grid gap-2 d-sm-flex align-items-sm-center">
-          <Button size="sm" onClick={() => fillUntouched('present')}>
-            {t('Mark the rest present')}
-          </Button>
-          <span className="small text-body-tertiary">
-            {t('Fills only the children still blank, and leaves every mark already on file alone.')}
-          </span>
-        </div>
+        {mayWrite ? (
+          <div className="d-grid gap-2 d-sm-flex align-items-sm-center">
+            <Button size="sm" disabled={isPast} onClick={() => fillUntouched('present')}>
+              {t('Mark the rest present')}
+            </Button>
+            <span className="small text-body-tertiary">
+              {t('Fills only the children still blank, and leaves every mark already on file alone.')}
+            </span>
+          </div>
+        ) : (
+          <div className="small text-body-tertiary">
+            {t('Read-only attendance view. You can review every recorded status for this class and date.')}
+          </div>
+        )}
       </div>
 
       <ErrorNote error={register.error} onRetry={register.reload} />
-      <ErrorNote error={save.error} />
+      {mayWrite ? <ErrorNote error={save.error} /> : null}
 
       <Table
         loading={register.loading}
@@ -199,8 +271,7 @@ export function AttendancePanel({ classCode, year, on }) {
         }}
         empty={
           <Empty title={t('Nobody is on this register')}>
-            A register is a statement about a day. Either this class is empty, or nobody was
-            placed in it on {day}.
+            {t('Either this class is empty, or nobody was placed in it on {0}.', [day])}
           </Empty>
         }
         columns={[
@@ -218,7 +289,7 @@ export function AttendancePanel({ classCode, year, on }) {
             cell: (row) => (
               <>
                 {pickName(row, state.lang) || (
-                  <span className="sis-ungraded">{DASH} name not on file</span>
+                  <span className="sis-ungraded">{DASH} {t('name not on file')}</span>
                 )}
                 {/* The number rides under the name on a phone, where its own column is gone. */}
                 <div className="sis-code sis-xs text-body-tertiary d-md-none">
@@ -233,9 +304,23 @@ export function AttendancePanel({ classCode, year, on }) {
             cell: (row) => {
               const value = shown(row);
               const dirty = !!draft[row.student_number];
+              if (!mayWrite) {
+                const option = STATES.find((item) => item.key === value);
+                const tone =
+                  value === 'present' ? 'ok' :
+                  value === 'absent' ? 'bad' :
+                  value === 'late' || value === 'excused' ? 'warn' : null;
+                return value ? (
+                  <Badge tone={tone}>{option ? t(option.label) : value}</Badge>
+                ) : (
+                  <span className="sis-ungraded small text-nowrap">
+                    {DASH} {t('not yet marked')}
+                  </span>
+                );
+              }
               return (
                 <div className="vstack gap-1">
-                  <div className="btn-group btn-group-sm w-100" role="group">
+                  <div className="btn-group btn-group-sm w-100 sis-attendance-states" role="group">
                     {STATES.map((option) => (
                       <button
                         key={option.key}
@@ -247,19 +332,24 @@ export function AttendancePanel({ classCode, year, on }) {
                               : 'btn-danger'
                             : 'btn-outline-secondary'
                         )}
+                        /* Disabled rather than hidden when this person may not record
+                           the day: the marks already taken are still worth reading, and
+                           removing the buttons would make a read-only register look like
+                           one nobody has started. */
+                        disabled={!canChangeState(row, option.key)}
                         onClick={() => mark(row.student_number, option.key)}
-                        title={option.label}
+                        title={t(option.label)}
                       >
                         {/* The initial on a phone, the word when there is room. Four full words
                             in a button group at 360px is four buttons of two characters each. */}
-                        <span className="d-lg-none">{option.short}</span>
-                        <span className="d-none d-lg-inline">{option.label}</span>
+                        <span className="d-lg-none">{state.lang === 'ar' ? option.shortAr : option.short}</span>
+                        <span className="d-none d-lg-inline">{t(option.label)}</span>
                       </button>
                     ))}
                   </div>
                   <div className="d-flex flex-wrap gap-2 align-items-center">
                     {value ? null : (
-                      <span className="sis-ungraded small text-nowrap">{DASH} not yet marked</span>
+                      <span className="sis-ungraded small text-nowrap">{DASH} {t('not yet marked')}</span>
                     )}
                     {dirty ? <Badge tone="info">{t('unsaved')}</Badge> : null}
                   </div>
@@ -272,6 +362,13 @@ export function AttendancePanel({ classCode, year, on }) {
             header: t('Reason'),
             cell: (row) => {
               const value = shown(row);
+              if (!mayWrite) {
+                return shownNote(row) ? (
+                  <span className="small text-body-tertiary">{shownNote(row)}</span>
+                ) : (
+                  <span className="sis-ungraded">{DASH}</span>
+                );
+              }
               /* Only for an excused absence, which is the one state the service requires a reason
                  for: without it, it cannot be told apart from an ordinary absence marked by
                  mistake. */
@@ -285,6 +382,7 @@ export function AttendancePanel({ classCode, year, on }) {
                   className="form-control-sm"
                   value={shownNote(row)}
                   placeholder={t('Required — e.g. medical appointment')}
+                  disabled={!mayEdit || (isPast && row.state !== 'absent')}
                   onInput={(text) => note(row.student_number, text)}
                 />
               );

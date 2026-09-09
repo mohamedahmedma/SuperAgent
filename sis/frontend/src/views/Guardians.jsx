@@ -191,13 +191,15 @@ function StudentLookup({ initial }) {
           }}
         >
           <Field className="col-12 col-sm-8" label={t('Student number')}>
-            <SearchField className="sis-code" value={typed} placeholder="10432" onInput={setTyped} />
-          </Field>
-          <div className="col-12 col-sm-4 d-grid">
-            <Button type="submit" variant="primary" icon="search" disabled={!typed.trim()}>
+            {/* AUREXIS_INLINE_SEARCH_ACTION */}
+            <div className="d-flex align-items-stretch gap-2">
+              <div className="flex-grow-1"><SearchField className="sis-code" value={typed} placeholder="10432" onInput={setTyped} /></div>
+              <Button type="submit" variant="primary" icon="search" disabled={!typed.trim()}>
               {t('Look up')}
             </Button>
-          </div>
+            </div>
+          </Field>
+
         </form>
       </div>
 

@@ -25,6 +25,8 @@ must not read.
 from collections.abc import Mapping
 from typing import Final
 
+from dataclasses import replace
+
 from sis.application.dto import ParsedRosterRow, ParseResult, RowCode, RowOutcome
 from sis.domain.errors import UnreadableImportFile, ValidationError
 from sis.domain.people import Gender
@@ -42,7 +44,7 @@ from sis.infrastructure.parsers.columns import (
 )
 from sis.infrastructure.parsers.workbook import MAX_ROWS, Sheet, load_sheet
 
-__all__ = ["ROSTER_COLUMNS", "SpreadsheetRosterParser"]
+__all__ = ["ROSTER_COLUMNS", "SpreadsheetFamilyRosterParser", "SpreadsheetRosterParser"]
 
 #: The columns a roster file may carry. `STUDENT_NUMBER` is the only required one — a
 #: school that keeps names in Arabic alone files a perfectly good roster — so the
@@ -100,6 +102,51 @@ class SpreadsheetRosterParser:
             diagnostics=tuple(diagnostics),
             total_lines=sheet.total_lines,
             headers=sheet.headers,
+        )
+
+
+class SpreadsheetFamilyRosterParser:
+    """Read the optional guardian columns from the same physical roster row.
+
+    A file with no guardian columns keeps the legacy roster behaviour.  Once any
+    guardian column is present, the guardian parser validates that part and a bad
+    guardian rejects the whole family row instead of creating an orphan student.
+    """
+
+    def __init__(self, *, default_country_code: str) -> None:
+        from sis.infrastructure.parsers.guardians import SpreadsheetGuardianParser
+
+        self._roster = SpreadsheetRosterParser()
+        self._guardians = SpreadsheetGuardianParser(
+            default_country_code=default_country_code
+        )
+
+    def parse(self, content: bytes, filename: str) -> ParseResult[ParsedRosterRow]:
+        from sis.infrastructure.parsers.columns import map_columns
+        from sis.infrastructure.parsers.guardians import GUARDIAN_COLUMNS
+
+        roster = self._roster.parse(content, filename)
+        guardian_map = map_columns(roster.headers, GUARDIAN_COLUMNS)
+        guardian_fields = {spec.field for spec in GUARDIAN_COLUMNS if spec.field != "student_number"}
+        if not guardian_fields.intersection(guardian_map.mapping):
+            return roster
+
+        guardians = self._guardians.parse(content, filename)
+        by_line = {row.line_number: row for row in guardians.rows}
+        rejected_lines = {row.line for row in guardians.diagnostics}
+        rows = tuple(
+            replace(row, guardian=by_line[row.line_number])
+            for row in roster.rows
+            if row.line_number in by_line and row.line_number not in rejected_lines
+        )
+        diagnostics = tuple(
+            sorted((*roster.diagnostics, *guardians.diagnostics), key=lambda row: row.line)
+        )
+        return ParseResult(
+            rows=rows,
+            diagnostics=diagnostics,
+            total_lines=roster.total_lines,
+            headers=roster.headers,
         )
 
 

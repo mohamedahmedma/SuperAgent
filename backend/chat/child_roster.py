@@ -43,15 +43,18 @@ from urllib.parse import quote
 
 import requests
 
+from backend.env import records_api_key, records_base_url
 from backend.infra.cache import cache
 
 logger = logging.getLogger(__name__)
 
-# Same service and the same credentials the records tool uses; each module reads the
-# environment itself rather than importing the other, because `backend.tools.records`
-# already imports from `backend.chat` and reversing that would be a cycle.
-BASE_URL = os.getenv("RECORDS_BASE_URL", "http://localhost:8100").rstrip("/")
-API_KEY = os.getenv("RECORDS_API_KEY", "")
+# Same service and the same credentials the records tool uses. Both now read them from
+# `backend.env`: the cycle that stopped these two importing each other — `backend.tools.
+# records` already imports from `backend.chat` — does not apply to a module that imports
+# from neither, and one copy of the default is one fewer way for the roster and the marks
+# to come from different places.
+BASE_URL = records_base_url()
+API_KEY = records_api_key()
 
 # Short enough that a registrar's change is visible within a question or two, long
 # enough to cover a conversation's worth of turns. Passed explicitly — the cache's own

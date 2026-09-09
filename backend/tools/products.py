@@ -43,7 +43,9 @@ def _describe(result) -> str:
                 for name, value in hit.attributes.items()
             )
             parts.append(rendered)
-        # The asset_id is what makes the image showable and view_figure callable.
+        # A product hit IS its image, so the id is the record's identity here rather
+        # than a handle for looking at pixels — unlike a knowledge chunk, whose header
+        # carries a bare [FIGURE] marker and no id at all (backend/tools/knowledge.py).
         parts.append(f"asset_id: {hit.asset_id}")
         lines.append("\n    ".join(parts))
 

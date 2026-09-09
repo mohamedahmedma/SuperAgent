@@ -10,6 +10,11 @@ vi.mock('@/utils/api', () => ({
     get: vi.fn(),
     delete: vi.fn(),
   },
+  // The store now builds its stream URL through this. Mocked as the identity function,
+  // which is what an unconfigured VITE_API_BASE_URL produces — so every existing
+  // assertion in this file still sees the same '/chat/stream' it always did.
+  apiUrl: (path: string) => path,
+  API_BASE_URL: '',
 }));
 
 type PendingRead = {

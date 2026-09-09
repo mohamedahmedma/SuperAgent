@@ -43,6 +43,9 @@ from schoolauth.claims import (
     school_from_claims,
 )
 from schoolauth.verification import (
+    DEFAULT_AUDIENCE,
+    DEFAULT_ISSUER,
+    DEFAULT_JWKS_TTL_SECONDS,
     IdentityConfig,
     IdentityError,
     IdentityNotConfigured,
@@ -51,6 +54,9 @@ from schoolauth.verification import (
 )
 
 __all__ = [
+    "DEFAULT_AUDIENCE",
+    "DEFAULT_ISSUER",
+    "DEFAULT_JWKS_TTL_SECONDS",
     "IdentityConfig",
     "IdentityError",
     "IdentityNotConfigured",

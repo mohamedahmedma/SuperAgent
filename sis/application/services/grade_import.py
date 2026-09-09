@@ -581,15 +581,27 @@ class GradeImportService:
         and a cache keyed on the student alone would quietly give her Term 1 marks the
         class she moved to in March.
         """
+        # The years the terms belong to, in one lookup rather than one per term. Needed
+        # because term dates are optional: an undated term is resolved against its year's
+        # window, and `resolve_sections_for_term` will not guess one. A term whose year is
+        # somehow missing is skipped rather than resolved against a substitute — every row
+        # for it is then rejected for having no placement, which is the honest outcome and
+        # is visible in the preview.
+        years = uow.academic_years.get_many(
+            {AcademicYearCode(str(term.academic_year_code)) for term in terms.values()}
+        )
         resolved: dict[tuple[str, str], ClassSection] = {}
         for code, term in terms.items():
+            year = years.get(str(term.academic_year_code))
+            if year is None:
+                continue
             numbers = {
                 r.row.student_number
                 for r in requests
                 if str(r.row.term_code) == code and str(r.row.student_number) in students
             }
             for number, section in resolve_sections_for_term(
-                uow.enrolments, numbers, term
+                uow.enrolments, numbers, term, year
             ).items():
                 resolved[(code, number)] = section
         return resolved

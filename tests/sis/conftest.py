@@ -37,7 +37,7 @@ from collections.abc import Callable, Collection, Iterator, Mapping, Sequence  #
 from dataclasses import replace  # noqa: E402
 from datetime import UTC, date, datetime  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import Any, Protocol  # noqa: E402
+from typing import Any, Final, Protocol  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -309,8 +309,76 @@ def two_databases(_migrated_template: str) -> Iterator[dict[str, str]]:
     shutil.rmtree(directory, ignore_errors=True)
 
 
+#: The day every SIS API test is run "on", unless it moves the clock itself.
+#:
+#: It sits inside the 2026-2027 academic year the fixtures build, on the first day of it,
+#: which is what the roster and placement dates in the suites are written against.
+SUITE_TODAY: Final = date(2026, 9, 1)
+
+
+class Clock:
+    """A `today` the suite owns, and can move.
+
+    `take_register` refuses a day that has not happened and freezes a day that has, so the
+    calendar is not decoration in these tests: it decides whether a write is allowed at
+    all. Reading the wall clock instead would mean the only writable day is the real one,
+    which is how the attendance suites ended up with every date rewritten to match the
+    afternoon they were last touched — green that day, red the next morning.
+    """
+
+    def __init__(self, today: date) -> None:
+        self._today = today
+        self._apps: list[Any] = []
+
+    def __call__(self) -> date:
+        return self._today
+
+    def set(self, day: date | str) -> None:
+        """Move to `day`, so a test can be Tuesday and then Wednesday."""
+        self._today = date.fromisoformat(day) if isinstance(day, str) else day
+
+    def install(self, app: Any) -> None:
+        """Pin this clock on `app`.
+
+        Taken per-app rather than once on the module singleton because some suites build
+        their own with `create_app()`, and an override installed on someone else's app is
+        a fixture that silently does nothing.
+        """
+        from sis.api.deps import get_today
+
+        app.dependency_overrides[get_today] = self
+        self._apps.append(app)
+
+    def uninstall(self) -> None:
+        from sis.api.deps import get_today
+
+        for app in self._apps:
+            app.dependency_overrides.pop(get_today, None)
+        self._apps.clear()
+
+
 @pytest.fixture()
-def client(api_keys: dict[str, str]) -> Iterator[TestClient]:
+def clock() -> Iterator[Clock]:
+    """Pins the register's idea of today, and hands the test the dial.
+
+    This is the one dependency the API suites override, and the reason is the opposite of
+    the usual one: overriding it is what makes the test agree with `deps.py` rather than
+    with itself. Everything else — the key lookup, the service factory, the unit of work —
+    stays the code that ships; only the calendar is held still, because a rule about
+    "today" cannot otherwise be stated by a suite that runs on every day but one.
+    """
+    from sis.app import app
+
+    moving = Clock(SUITE_TODAY)
+    moving.install(app)
+    try:
+        yield moving
+    finally:
+        moving.uninstall()
+
+
+@pytest.fixture()
+def client(api_keys: dict[str, str], clock: Clock) -> Iterator[TestClient]:
     """The real app over the migrated database, lifespan and startup gate included.
 
     Carries the stored **registrar** key by default, so every test that is about

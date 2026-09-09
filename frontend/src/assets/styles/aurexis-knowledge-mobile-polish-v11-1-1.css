@@ -1,0 +1,334 @@
+/*
+  AUREXIS Knowledge Base Mobile Polish v11.1.1
+  Mobile-only refinement for the current Knowledge Base screen.
+  Desktop remains unchanged.
+*/
+
+@media (max-width: 900px) {
+  /* -------------------------------------------------
+     Page shell: reserve a clean top zone for menu button
+     so it never overlaps MEMORY / Knowledge Base.
+     ------------------------------------------------- */
+  .settings-panel {
+    padding:
+      calc(max(14px, env(safe-area-inset-top)) + 52px)
+      10px
+      max(18px, env(safe-area-inset-bottom)) !important;
+    scroll-padding-top: calc(max(14px, env(safe-area-inset-top)) + 52px) !important;
+  }
+
+  /* Keep the mobile sidebar toggle visually independent from page content. */
+  .mobile-menu-button {
+    top: max(10px, env(safe-area-inset-top)) !important;
+    left: 10px !important;
+    z-index: 120 !important;
+  }
+
+  /* -------------------------------------------------
+     Header: strong hierarchy, no overlap, cleaner spacing
+     ------------------------------------------------- */
+  .settings-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 42px !important;
+    align-items: start !important;
+    gap: 12px !important;
+
+    margin: 0 0 12px !important;
+    padding: 0 0 14px !important;
+  }
+
+  .settings-header > div {
+    min-width: 0 !important;
+  }
+
+  .settings-header .panel-eyebrow {
+    margin: 0 0 7px !important;
+    font-size: 8px !important;
+    line-height: 1.2 !important;
+    letter-spacing: .14em !important;
+  }
+
+  .settings-header h1 {
+    max-width: 100% !important;
+    margin: 0 0 7px !important;
+
+    font-size: clamp(25px, 7.8vw, 31px) !important;
+    line-height: 1.04 !important;
+    letter-spacing: -.045em !important;
+
+    text-wrap: balance !important;
+    overflow-wrap: normal !important;
+    word-break: normal !important;
+  }
+
+  .settings-header p {
+    max-width: 290px !important;
+    margin: 0 !important;
+
+    font-size: 10.5px !important;
+    line-height: 1.55 !important;
+  }
+
+  .settings-refresh-btn {
+    align-self: start !important;
+    justify-self: end !important;
+
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border-radius: 11px !important;
+    font-size: 0 !important;
+  }
+
+  .settings-refresh-btn i {
+    font-size: 12px !important;
+  }
+
+  /* -------------------------------------------------
+     Stats: equal cards, better rhythm and alignment
+     ------------------------------------------------- */
+  .settings-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+
+    margin: 0 0 10px !important;
+  }
+
+  .settings-stats article {
+    min-height: 76px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+
+    padding: 12px 12px 11px !important;
+    border-radius: 12px !important;
+  }
+
+  .settings-stats article > span {
+    min-height: 10px !important;
+    margin: 0 0 7px !important;
+
+    font-size: 7.5px !important;
+    line-height: 1.15 !important;
+  }
+
+  .settings-stats article > strong {
+    margin: 0 0 5px !important;
+
+    font-size: 19px !important;
+    line-height: 1 !important;
+  }
+
+  .settings-stats article > small {
+    margin: 0 !important;
+
+    font-size: 7.8px !important;
+    line-height: 1.3 !important;
+  }
+
+  /* -------------------------------------------------
+     Main sections: consistent widths/radii/padding
+     ------------------------------------------------- */
+  .settings-grid {
+    width: 100% !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .documents-section,
+  .upload-section {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+
+    border-radius: 14px !important;
+    overflow: hidden !important;
+  }
+
+  .documents-section-head {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 11px !important;
+
+    padding: 15px 14px 14px !important;
+  }
+
+  .documents-section-head h2,
+  .upload-section h2 {
+    margin: 0 0 4px !important;
+
+    font-size: 15px !important;
+    line-height: 1.2 !important;
+  }
+
+  .documents-section-head p,
+  .upload-section-head p {
+    margin: 0 !important;
+
+    font-size: 9px !important;
+    line-height: 1.45 !important;
+  }
+
+  /* Search box: full width, aligned, not inset awkwardly. */
+  .document-search {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+  }
+
+  .document-search input {
+    width: 100% !important;
+    min-height: 46px !important;
+
+    padding: 11px 13px 11px 38px !important;
+
+    border-radius: 11px !important;
+    box-sizing: border-box !important;
+
+    font-size: 16px !important;
+    line-height: 1.2 !important;
+  }
+
+  .document-search > i {
+    left: 13px !important;
+    font-size: 12px !important;
+  }
+
+  /* -------------------------------------------------
+     Documents list + empty state: less oversized and more balanced
+     ------------------------------------------------- */
+  .documents-list {
+    width: 100% !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 10px !important;
+    box-sizing: border-box !important;
+  }
+
+  .loading-indicator,
+  .empty-documents {
+    width: 100% !important;
+    min-height: 245px !important;
+    padding: 28px 20px !important;
+    box-sizing: border-box !important;
+  }
+
+  .loading-orb,
+  .empty-documents .empty-icon {
+    width: 50px !important;
+    height: 50px !important;
+    margin-bottom: 14px !important;
+
+    border-radius: 14px !important;
+  }
+
+  .loading-indicator strong,
+  .empty-documents h3 {
+    margin: 0 0 7px !important;
+
+    font-size: 15px !important;
+    line-height: 1.25 !important;
+  }
+
+  .loading-indicator p,
+  .empty-documents p {
+    max-width: 280px !important;
+    margin: 0 auto !important;
+
+    font-size: 10.5px !important;
+    line-height: 1.55 !important;
+  }
+
+  /* -------------------------------------------------
+     Upload section: same visual geometry as documents card
+     ------------------------------------------------- */
+  .upload-section {
+    position: static !important;
+    top: auto !important;
+    padding: 14px !important;
+  }
+
+  .upload-section-head {
+    margin-bottom: 14px !important;
+  }
+
+  .pair-title-field {
+    margin-bottom: 11px !important;
+  }
+
+  .pair-title-field input {
+    min-height: 46px !important;
+
+    border-radius: 11px !important;
+
+    font-size: 16px !important;
+    box-sizing: border-box !important;
+  }
+
+  .pair-row {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .pair-slot {
+    min-height: 104px !important;
+    border-radius: 11px !important;
+  }
+
+  /* Prevent accidental horizontal overflow from any nested document/upload component. */
+  .settings-panel *,
+  .documents-section *,
+  .upload-section * {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 380px) {
+  .settings-panel {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  .settings-header {
+    grid-template-columns: minmax(0, 1fr) 40px !important;
+    gap: 9px !important;
+  }
+
+  .settings-header h1 {
+    font-size: 24px !important;
+  }
+
+  .settings-header p {
+    max-width: 250px !important;
+    font-size: 10px !important;
+  }
+
+  .settings-refresh-btn {
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+  }
+
+  .settings-stats {
+    gap: 6px !important;
+  }
+
+  .settings-stats article {
+    min-height: 72px !important;
+    padding: 10px !important;
+  }
+
+  .documents-section-head {
+    padding: 13px 12px !important;
+  }
+
+  .documents-list {
+    padding: 8px !important;
+  }
+}

@@ -27,10 +27,25 @@ _FALSE_VALUES = ("false", "0", "no", "off")
 
 
 def load_env() -> None:
+    """Load `.env`, then collapse the selected LLM provider block onto the generic names.
+
+    The provider step has to happen here and not at any call site: the modules that read
+    `MODEL` / `BASE_URL` / `ARK_API_KEY` capture them at import, several at module scope,
+    so the only moment the selection can still take effect is between `load_dotenv` and
+    the first of those imports. An unset `LLM_PROVIDER` makes it a no-op — see
+    backend/llm_provider.py for what it resolves and in what order.
+    """
     global _LOADED
     if _LOADED:
         return
     load_dotenv(PROJECT_ROOT / ".env")
+
+    # Imported here rather than at module scope so that `backend.env` keeps importing
+    # nothing from the rest of the backend, which is what lets every other module import
+    # it without thinking about cycles.
+    from backend.llm_provider import apply_provider_env
+
+    apply_provider_env()
     _LOADED = True
 
 
@@ -75,3 +90,40 @@ def env_bool(name: str, default: bool) -> bool:
         return False
     logger.warning("Invalid boolean %s=%r — using %r", name, raw, default)
     return default
+
+
+#: Where the records facade lives when nothing says otherwise. The port `records/`
+#: documents for itself.
+RECORDS_BASE_URL_DEFAULT = "http://localhost:8100"
+
+
+def records_base_url() -> str:
+    """The records facade's origin, with no trailing slash.
+
+    Read here rather than in the two modules that need it. `backend/tools/records.py` and
+    `backend/chat/child_roster.py` each used to call `os.getenv` with their own copy of the
+    default, and the second one carried a comment explaining why: `tools.records` imports
+    from `backend.chat`, so importing back the other way is a cycle. The explanation was
+    correct and the conclusion was not — `backend.env` imports nothing from either, so it
+    can hold the value both need.
+
+    Two copies of a default is a slow failure. Change one and the marks arrive from the
+    configured facade while the child roster is fetched from wherever the other copy
+    points, and a parent is offered a list of children that does not match the records
+    behind it.
+
+    Blank counts as unset, per this module's rule. That is a change of one kind: the old
+    `os.getenv(name, default)` returned `""` for `RECORDS_BASE_URL=`, which made every
+    request go to a bare path and fail. Falling back to the default cannot be worse.
+    """
+    return (env_value("RECORDS_BASE_URL") or RECORDS_BASE_URL_DEFAULT).rstrip("/")
+
+
+def records_api_key() -> str:
+    """The secret the records facade admits, or `""` when none is configured.
+
+    Empty is meaningful and is preserved: `records/` FAILS CLOSED on it, refusing every
+    request with a 503 rather than admitting everyone. Substituting anything here would
+    turn a loud misconfiguration into a quiet one.
+    """
+    return env_value("RECORDS_API_KEY") or ""

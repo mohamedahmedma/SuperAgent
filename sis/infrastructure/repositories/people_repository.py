@@ -25,10 +25,11 @@ from collections.abc import Collection, Iterator, Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Select, insert, or_, select, update
+from sqlalchemy import Select, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 
 from sis.application.ports.repositories import EnrolmentKey
+from sis.domain.arabic import SEARCH_FOLDING, fold_for_search
 from sis.domain.errors import DuplicateCode, UnknownReference
 from sis.domain.people import ClassEnrolment, Student
 from sis.domain.structure import ClassSection
@@ -41,11 +42,58 @@ from sis.infrastructure.db import models
 # data, so every `IN` below is chunked. "One query" in this module means one per chunk.
 _IN_CHUNK = 400
 
+# Extra equivalences used by everyday Arabic name search.  Kept here in addition to the
+# domain table so older databases/builds get the same behaviour without a data migration.
+# Both sides of the comparison are folded through the same sequence.
+_EXTRA_SEARCH_FOLDING = (
+    ("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ٱ", "ا"),
+    ("ة", "ه"), ("ى", "ي"), ("ئ", "ي"), ("ؤ", "و"),
+    ("ـ", ""),
+    ("ً", ""), ("ٌ", ""), ("ٍ", ""), ("َ", ""), ("ُ", ""),
+    ("ِ", ""), ("ّ", ""), ("ْ", ""), ("ٰ", ""),
+)
+
+
+def _search_folding() -> tuple[tuple[str, str], ...]:
+    rows: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for pair in (*SEARCH_FOLDING, *_EXTRA_SEARCH_FOLDING):
+        if pair not in seen:
+            rows.append(pair)
+            seen.add(pair)
+    return tuple(rows)
+
+
+def _fold_search_text(value: str) -> str:
+    folded = fold_for_search(value)
+    for written, matched in _EXTRA_SEARCH_FOLDING:
+        folded = folded.replace(written, matched)
+    return folded
+
 
 def _chunked(values: Sequence[Any]) -> Iterator[Sequence[Any]]:
     """Split an `IN` list into batches SQLite will accept."""
     for start in range(0, len(values), _IN_CHUNK):
         yield values[start : start + _IN_CHUNK]
+
+
+def _folded(column: Any) -> Any:
+    """The same folding `fold_for_search` performs, expressed in SQL over one column.
+
+    Nested `replace()` rather than a stored key column, and that is a deliberate trade.
+    A `search_key` column would be indexable, but it is also a second copy of every name
+    that a migration has to backfill and every write has to keep in step — and the first
+    write that forgets makes a child unfindable with nothing on screen to say why. This
+    computes the key on the way past instead. The scan it costs is the scan the leading
+    wildcard already forced, over a table the size of one school.
+
+    Built from `SEARCH_FOLDING` in the domain, in its order, so the SQL half and the
+    Python half of this comparison cannot disagree about what folds onto what.
+    """
+    expression = column
+    for written, matched in _search_folding():
+        expression = func.replace(expression, written, matched)
+    return expression
 
 
 def _like_term(query: str) -> str:
@@ -189,18 +237,25 @@ class SqlAlchemyStudentRepository:
 
         `ilike` rather than `like` because a registrar types "ahmed" looking for "Ahmed";
         against `full_name_ar` it is a no-op, which is correct — Arabic has no case — and
-        not an accident. The leading wildcard means `ix_students_name_*` cannot serve
-        this scan; those indexes serve the ordered listing. A school-sized table makes
-        that acceptable, and `limit` caps what crosses the wire.
+        not an accident. Arabic's own version of the same problem is spelling rather than
+        case, and `_folded` is the answer to it: both the typed term and the stored name
+        are folded onto one key, so `فاطمه` finds `فاطمة` and `احمد` finds `أحمد`. Fold
+        one side only and the search does not degrade, it stops working — which is why
+        both sides are built from `SEARCH_FOLDING` and neither has a table of its own.
+
+        The leading wildcard means `ix_students_name_*` cannot serve this scan; those
+        indexes serve the ordered listing, and folding the column would have ruled them
+        out here in any case. A school-sized table makes that acceptable, and `limit`
+        caps what crosses the wire.
         """
         if not query.strip():
             return []
-        term = _like_term(query)
+        term = _like_term(_fold_search_text(query))
         stmt = select(models.Student).where(
             or_(
-                models.Student.student_number.ilike(term, escape="\\"),
-                models.Student.full_name_ar.ilike(term, escape="\\"),
-                models.Student.full_name_en.ilike(term, escape="\\"),
+                _folded(models.Student.student_number).ilike(term, escape="\\"),
+                _folded(models.Student.full_name_ar).ilike(term, escape="\\"),
+                _folded(models.Student.full_name_en).ilike(term, escape="\\"),
             )
         )
         if not include_inactive:
@@ -488,6 +543,50 @@ class SqlAlchemyEnrolmentRepository:
             .values(ends_on=ends_on)
         )
         return closed
+
+    def retarget_open_enrolment(
+        self,
+        student_id: StudentNumber,
+        *,
+        academic_year_code: AcademicYearCode,
+        to_class: ClassCode,
+    ) -> ClassEnrolment | None:
+        """Retarget only the current open placement, without committing."""
+        row = self._session.execute(
+            _enrolment_query().where(
+                models.Student.student_number == str(student_id),
+                models.ClassEnrolment.ends_on.is_(None),
+            )
+        ).first()
+        if row is None:
+            return None
+
+        section_ids = self._section_ids(
+            {(str(academic_year_code), str(to_class))}
+        )
+        section_id = section_ids.get(
+            (str(academic_year_code), str(to_class))
+        )
+        if section_id is None:
+            raise UnknownReference(
+                f"no class {to_class} in academic year {academic_year_code}",
+                field="to_class_code",
+            )
+
+        self._session.execute(
+            update(models.ClassEnrolment)
+            .where(models.ClassEnrolment.id == row.enrolment_id)
+            .values(class_section_id=section_id)
+        )
+        self._session.flush()
+
+        return ClassEnrolment(
+            student_number=row.student_number,
+            academic_year_code=academic_year_code,
+            class_code=to_class,
+            starts_on=row.starts_on,
+            ends_on=None,
+        )
 
     def upsert_many(
         self, enrolments: Sequence[ClassEnrolment]

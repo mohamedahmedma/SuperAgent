@@ -25,7 +25,6 @@ identity:
 agent:
   tools:
     - search_knowledge_base
-    - view_figure
     - search_products
   # A question this corpus is not about is confirmed by a model before anything is
   # refused. Without this the catalogue rung can only ever admit, so an off-topic
@@ -83,4 +82,3 @@ assets:
   delivery:
     attach_to_response: true
     max_assets_per_response: 8
-    max_pixel_reads_per_asset: 2

@@ -2,18 +2,18 @@
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="logo-icon" aria-hidden="true">
-        <i class="fa-solid fa-robot"></i>
+        <BrandLogo size="md" />
       </div>
       <div class="brand-copy">
-        <h1>Agent Assistant</h1>
-        <span>Knowledge Copilot</span>
+        <h1>Aurexis</h1>
+        <span>School Assistant</span>
       </div>
     </div>
 
     <div class="workspace-switcher">
       <span class="workspace-orb" aria-hidden="true"></span>
       <span class="workspace-copy">
-        <strong>SuperAgent Knowledge Space</strong>
+        <strong>Private School Space</strong>
         <small>{{ workspaceMeta }}</small>
       </span>
       <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
@@ -29,6 +29,7 @@
         <i class="fa-regular fa-message"></i>
         <span>Chat</span>
       </button>
+
       <button
         type="button"
         :class="['nav-btn', { active: chatStore.activeNav === 'history' }]"
@@ -41,6 +42,7 @@
           {{ sessionStore.sessions.length }}
         </small>
       </button>
+
       <button
         v-if="authStore.isAdmin"
         type="button"
@@ -56,30 +58,47 @@
     <template v-if="authStore.isAuthenticated">
       <div class="sidebar-section-label">Recent sessions</div>
       <div class="sidebar-recents">
-        <button
+        <div
           v-for="session in recentSessions"
           :key="session.session_id"
-          type="button"
-          :class="['recent-session', { active: session.session_id === chatStore.sessionId }]"
-          @click="onLoadSession(session.session_id)"
+          class="recent-session-row"
         >
-          <span class="recent-dot" aria-hidden="true"></span>
-          <span class="recent-copy">
-            <strong>{{ session.title || 'Untitled session' }}</strong>
-            <small>
-              {{ session.isStreaming ? 'Generating' : session.message_count + ' messages' }}
-              · {{ formatRelativeTime(session.updated_at) }}
-            </small>
-          </span>
-        </button>
-
+          <button
+            type="button"
+            :class="['recent-session', { active: session.session_id === chatStore.sessionId }]"
+            @click="onLoadSession(session.session_id)"
+          >
+            <span class="recent-dot" aria-hidden="true"></span>
+            <span class="recent-copy">
+              <strong>{{ session.title || 'Untitled session' }}</strong>
+              <small>
+                {{ session.isStreaming ? 'Generating' : session.message_count + ' messages' }}
+                Â· {{ formatRelativeTime(session.updated_at) }}
+              </small>
+            </span>
+          </button>
+          <button
+            type="button"
+            class="recent-session-delete"
+            :title="`Delete ${session.title || 'session'}`"
+            aria-label="Delete recent session"
+            @click.stop="onDeleteRecentSession(session.session_id)"
+          >
+            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+          </button>
+        </div>
         <div v-if="!recentSessions.length" class="recent-empty">
-          No conversations yet — ask Agent a question.
+          No conversations yet — ask Aurexis a question.
         </div>
       </div>
     </template>
 
     <div class="sidebar-bottom">
+      <div class="language-control" aria-label="Language">
+        <button type="button" :class="{ active: language === 'en' }" :aria-pressed="language === 'en'" @click="$emit('set-language', 'en')">EN</button>
+        <button type="button" :class="{ active: language === 'ar' }" :aria-pressed="language === 'ar'" @click="$emit('set-language', 'ar')">العربية</button>
+      </div>
+
       <div class="theme-control">
         <span class="theme-control-label">
           <i :class="theme === 'light' ? 'fa-regular fa-sun' : 'fa-regular fa-moon'"></i>
@@ -95,7 +114,13 @@
           <small>{{ roleLabel }}</small>
         </span>
         <span class="user-actions">
-          <button type="button" title="Clear current chat" aria-label="Clear current chat" @click="chatStore.handleClearChat">
+          <button
+            type="button"
+            class="clear-chat-btn"
+            title="Clear current chat"
+            aria-label="Clear current chat"
+            @click="chatStore.handleClearChat"
+          >
             <i class="fa-regular fa-trash-can"></i>
           </button>
           <button type="button" title="Log out" aria-label="Log out" @click="onLogout">
@@ -110,17 +135,13 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue';
 import ThemeToggle from '@/components/ThemeToggle.vue';
+import BrandLogo from '@/components/BrandLogo.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useChatStore } from '@/stores/chat';
 import { useSessionStore } from '@/stores/sessions';
 
-defineProps<{
-  theme: 'dark' | 'light';
-}>();
-
-defineEmits<{
-  (e: 'toggle-theme'): void;
-}>();
+defineProps<{ theme: 'dark' | 'light'; language: 'en' | 'ar' }>();
+defineEmits<{ (e: 'toggle-theme'): void; (e: 'set-language', language: 'en' | 'ar'): void }>();
 
 const authStore = useAuthStore();
 const chatStore = useChatStore();
@@ -129,11 +150,13 @@ const sessionStore = useSessionStore();
 const recentSessions = computed(() => sessionStore.sessions.slice(0, 4));
 
 const workspaceMeta = computed(() => {
-  if (!authStore.isAuthenticated) return 'Log in to connect your private knowledge';
+  if (!authStore.isAuthenticated) return 'Private';
   return (sessionStore.sessions.length || 0) + ' sessions · Private';
 });
 
-const roleLabel = computed(() => authStore.currentUser?.role === 'admin' ? 'Administrator' : 'Standard user');
+const roleLabel = computed(() =>
+  authStore.currentUser?.role === 'admin' ? 'Administrator' : 'Standard user'
+);
 
 const userInitials = computed(() => {
   const name = authStore.currentUser?.username || 'ME';
@@ -158,9 +181,7 @@ watch(
   { immediate: true }
 );
 
-const onNewChat = () => {
-  chatStore.handleNewChat();
-};
+const onNewChat = () => chatStore.handleNewChat();
 
 const onHistory = async () => {
   chatStore.activeNav = 'history';
@@ -184,6 +205,18 @@ const onSettings = () => {
   sessionStore.showHistorySidebar = false;
 };
 
+
+const onDeleteRecentSession = async (sessionId: string) => {
+  try {
+    const deletingCurrent = sessionId === chatStore.sessionId;
+    await sessionStore.deleteSession(sessionId);
+    if (deletingCurrent) {
+      chatStore.handleNewChat();
+    }
+  } catch (error: any) {
+    alert('Failed to delete session: ' + (error?.message || 'Unknown error'));
+  }
+};
 const onLoadSession = async (sessionId: string) => {
   try {
     await chatStore.loadSession(sessionId);

@@ -88,7 +88,7 @@ what lets a test replace any of it through `app.dependency_overrides`.
 
 ```bash
 pip install -r identity/requirements.txt
-IDENTITY_ADMIN_KEY=... uvicorn identity.app:app --port 8200
+IDENTITY_BOOTSTRAP_ADMIN_USER=registrar IDENTITY_BOOTSTRAP_ADMIN_PASSWORD=$(python -c "import secrets;print(secrets.token_urlsafe(24))")   uvicorn identity.app:app --port 8200
 pytest tests/identity -q
 ```
 
@@ -96,7 +96,7 @@ pytest tests/identity -q
 | --- | --- | --- |
 | `IDENTITY_DATABASE_URL` | `sqlite:///./identity.db` | Point at Postgres for real data. |
 | `IDENTITY_PRIVATE_KEY_PEM` | — | **Required in production.** Without it a dev key is generated and a warning logged. |
-| `IDENTITY_ADMIN_KEY` | — | Guards account creation and guardian binding. |
+| `IDENTITY_BOOTSTRAP_ADMIN_USER` / `_PASSWORD` | — | The administrator seeded on **every** startup, so one exists however the database arrived. Never overwrites an existing username, so a password changed through the API survives the next deploy. Set both or neither. |
 | `IDENTITY_ISSUER` / `IDENTITY_AUDIENCE` | `school-identity` / `school-services` | Must match the verifier's settings. |
 | `IDENTITY_ACCESS_TTL_MINUTES` | `30` | Bounds the revocation window. |
 | `IDENTITY_MAX_FAILED_ATTEMPTS` | `8` | Then locked for `IDENTITY_LOCKOUT_MINUTES`. |
@@ -149,9 +149,20 @@ POST /v1/auth/whatsapp/webhook                           inbound messages, signe
 POST /v1/auth/whatsapp/status                            poll a verification
 POST /v1/auth/whatsapp/verify                            code -> tokens
 
-POST   /v1/admin/accounts                                admin key
-PUT    /v1/admin/accounts/{username}/guardian-binding    admin key
-DELETE /v1/admin/accounts/{username}/guardian-binding    admin key; revokes sessions
+GET    /v1/admin/accounts                                list, paged (limit/offset)
+POST   /v1/admin/accounts                                create a login
+PATCH  /v1/admin/accounts/{username}                     change password/role/active/profile
+DELETE /v1/admin/accounts/{username}                     delete; revokes sessions
+PUT    /v1/admin/accounts/{username}/guardian-binding    bind a guardian
+DELETE /v1/admin/accounts/{username}/guardian-binding    unbind; revokes sessions
+```
+
+Every route above `/v1/admin/` takes an **administrator's own bearer token** — there is no
+shared admin key. `PATCH` cannot write `guardian_external_id`: the field is absent from its
+schema and extras are forbidden, so binding stays a deliberate act with its own audit event.
+The last active administrator cannot be deleted, demoted or deactivated.
+
+```
 ```
 
 ## Decisions worth knowing

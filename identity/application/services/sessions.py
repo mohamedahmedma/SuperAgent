@@ -32,7 +32,7 @@ from identity.application.ports.repositories import (
     RefreshTokenRepository,
 )
 from identity.application.ports.security import PasswordHasher, TokenIssuer
-from identity.domain.accounts import LockoutPolicy, resolve_registration_role
+from identity.domain.accounts import LockoutPolicy
 from identity.domain.errors import (
     AccountLocked,
     BadRequest,
@@ -59,7 +59,6 @@ class SessionService:
         hasher: PasswordHasher,
         issuer: TokenIssuer,
         lockout: LockoutPolicy,
-        admin_invite_code: str = "",
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         self._accounts = accounts
@@ -68,7 +67,6 @@ class SessionService:
         self._hasher = hasher
         self._issuer = issuer
         self._lockout = lockout
-        self._admin_invite_code = admin_invite_code
         self._clock = clock
 
     # -- signing in ---------------------------------------------------------
@@ -148,49 +146,6 @@ class SessionService:
             self._accounts.set_password_hash(account, self._hasher.hash(password))
         except Exception:  # noqa: BLE001 - an upgrade must never cost a successful login
             logger.exception("Password hash upgrade failed for %s", account.username)
-
-    def register(
-        self,
-        *,
-        username: str,
-        password: str,
-        role: str | None = None,
-        admin_code: str | None = None,
-        display_name: str = "",
-        preferred_language: str = "ar",
-        client_ip: str = "",
-    ) -> IssuedSession:
-        """Self-registration.
-
-        Produces an account that can sign in and read no student records whatsoever: the
-        guardian binding is a separate, admin-only write, and nothing on this path can
-        reach it. That is what makes leaving self-registration open acceptable — the worst
-        a stranger gets is a chat account.
-        """
-        username = (username or "").strip()
-        password = (password or "").strip()
-        if not username or not password:
-            raise BadRequest("Username and password cannot be empty.")
-        if self._accounts.by_username(username) is not None:
-            raise Conflict("Username already exists.")
-
-        # Raises on a wrong invite code rather than silently downgrading the role.
-        resolved = resolve_registration_role(
-            role, admin_code, invite_code=self._admin_invite_code
-        )
-
-        account = self._accounts.create(
-            username=username,
-            password_hash=self._hasher.hash(password),
-            role=resolved,
-            display_name=display_name,
-            preferred_language=preferred_language,
-        )
-        session = self.issue_session(account)
-        self._audit.write(
-            username=username, event="register", reason="ok", succeeded=True, client_ip=client_ip
-        )
-        return session
 
     # -- staying signed in --------------------------------------------------
 

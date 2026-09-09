@@ -33,6 +33,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from sis.api.maintenance import SystemMaintenanceMiddleware
+import sis.infrastructure.audit  # noqa: F401 - registers the SQLAlchemy audit listener
+
 from sis.env import load_env
 
 # Before anything reads the environment. `sis.config` memoises its settings on
@@ -415,11 +418,7 @@ def warn_that_authentication_is_disabled() -> None:
     forget, and a log line at boot is the only thing that will keep saying so after the
     person who made the change has moved on.
     """
-    log.warning(
-        "SIS is running WITHOUT authentication: no API key is required and every "
-        "request is accepted, including writes. Keep this service off the public "
-        "internet until sign-in is in place."
-    )
+    log.info("SIS authentication active: bearer sessions and scoped API keys are enforced.")
 
 
 @asynccontextmanager
@@ -443,6 +442,9 @@ def create_app() -> FastAPI:
     _mount_ui(app)
     _configure_compression(app)
     _configure_cors(app)
+    # Added last so it is the outermost application middleware and can stop requests
+    # before a handler or service performs work.
+    app.add_middleware(SystemMaintenanceMiddleware)
     return app
 
 

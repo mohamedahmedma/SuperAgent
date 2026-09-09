@@ -5,10 +5,12 @@
         <span class="hitl-icon"><i class="fa-solid fa-circle-question"></i></span>
         <span>
           <strong>Just need a bit more from you</strong>
-          <small>Agent will continue the original search based on your choice</small>
+          <small>Aurexis will continue the original search based on your choice</small>
         </span>
       </div>
+
       <div class="hitl-panel-prompt">{{ chatStore.currentPendingHitl.prompt }}</div>
+
       <div
         v-if="chatStore.currentPendingHitl.options && chatStore.currentPendingHitl.options.length"
         class="hitl-options"
@@ -36,11 +38,20 @@
         <i class="fa-solid fa-paperclip"></i>
       </button>
 
-      <textarea
+      <button
+        class="voice-btn"
+        type="button"
+        title="Voice input is coming soon"
+        aria-label="Voice input unavailable"
+        disabled
+      >
+        <i class="fa-solid fa-microphone"></i>
+      </button>
+
+      <textarea data-gramm="false" data-gramm_editor="false" spellcheck="false"
         ref="textareaRef"
         v-model="chatStore.userInput"
-        class="chat-input-textarea"
-        :placeholder="chatStore.inputPlaceholder"
+        class="chat-input-textarea" :placeholder="language === 'ar' ? 'اكتب رسالتك إلى أوركسيس...' : 'Say something to Aurexis...'"
         :disabled="chatStore.isInputLocked"
         rows="1"
         @keydown="handleKeyDown"
@@ -72,11 +83,6 @@
         <i class="fa-regular fa-paper-plane"></i>
       </button>
     </div>
-
-    <div class="input-footer">
-      <span>AI-generated content may contain errors — verify important conclusions against the cited sources.</span>
-      <span><kbd>Enter</kbd> to send · <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</span>
-    </div>
   </div>
 </template>
 
@@ -84,17 +90,13 @@
 import { nextTick, ref } from 'vue';
 import { useChatStore } from '@/stores/chat';
 
+defineProps<{ language: 'en' | 'ar' }>();
 const chatStore = useChatStore();
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const isComposing = ref(false);
 
-const handleCompositionStart = () => {
-  isComposing.value = true;
-};
-
-const handleCompositionEnd = () => {
-  isComposing.value = false;
-};
+const handleCompositionStart = () => { isComposing.value = true; };
+const handleCompositionEnd = () => { isComposing.value = false; };
 
 const handleKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Enter' && !event.shiftKey && !isComposing.value) {

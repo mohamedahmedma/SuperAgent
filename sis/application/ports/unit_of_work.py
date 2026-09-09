@@ -41,6 +41,8 @@ from sis.application.ports.repositories import (
     SubjectRepository,
     SchoolRepository,
     TermRepository,
+    TimetableRepository,
+    TeacherRepository,
     YearLevelRepository,
 )
 
@@ -61,6 +63,13 @@ class UnitOfWork(Protocol):
     class_sections: ClassSectionRepository
     terms: TermRepository
     subjects: SubjectRepository
+
+    # The weekly plan. A first-class repository rather than a collection on a class
+    # section, for the reason `enrolments` is one: the question that matters — "what is
+    # in this slot" — starts from the slot, and the conflict rules are about slots rather
+    # than about any one class.
+    timetable: TimetableRepository
+    teachers: TeacherRepository
 
     # People and their time-bounded placements (decision 2). `enrolments` is a first-class
     # repository, not a collection hanging off a student, because the query that matters

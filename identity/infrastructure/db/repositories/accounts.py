@@ -95,6 +95,50 @@ class SqlAccountRepository:
             account.locked_until = locked_until
         self._db.commit()
 
+    # -- administration -----------------------------------------------------
+
+    def list_page(self, *, limit: int, offset: int) -> list[Account]:
+        # Ordered by id, not by username: id is immutable and unique, so a rename between
+        # two pages cannot move a row across the boundary and make the pager skip it.
+        return (
+            self._db.query(Account)
+            .order_by(Account.id)
+            .limit(limit)
+            .offset(offset)
+            .all()
+        )
+
+    def count(self) -> int:
+        return self._db.query(Account.id).count()
+
+    def count_active_admins(self, *, excluding_id: int | None = None) -> int:
+        query = self._db.query(Account.id).filter(
+            Account.role == "admin", Account.is_active.is_(True)
+        )
+        if excluding_id is not None:
+            query = query.filter(Account.id != excluding_id)
+        return query.count()
+
+    def set_role(self, account: Account, role: str) -> None:
+        account.role = role
+        self._db.commit()
+
+    def set_active(self, account: Account, is_active: bool) -> None:
+        account.is_active = is_active
+        self._db.commit()
+
+    def set_phone(self, account: Account, phone: str) -> None:
+        account.phone = phone
+        self._db.commit()
+
+    def set_preferred_language(self, account: Account, preferred_language: str) -> None:
+        account.preferred_language = preferred_language
+        self._db.commit()
+
+    def delete(self, account: Account) -> None:
+        self._db.delete(account)
+        self._db.commit()
+
 
 class SqlRefreshTokenRepository:
     """`RefreshTokenRepository` over SQLAlchemy."""

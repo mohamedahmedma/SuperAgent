@@ -1,0 +1,286 @@
+/*
+  AUREXIS Mobile Sidebar Bottom Exact v10.9.5
+  Targets the ACTUAL Sidebar.vue structure:
+    .sidebar-bottom
+      .theme-control
+      .user-panel
+        .user-avatar
+        .user-copy
+        .user-actions
+  Mobile only. Desktop is untouched.
+*/
+
+@media (max-width: 900px) {
+  /* Make the sidebar a true full-height column. */
+  .mobile-sidebar-shell .sidebar {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  /* Recents/nav may scroll, but footer must stay pinned at bottom. */
+  .mobile-sidebar-shell .sidebar .sidebar-recents {
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  /* THIS is the only element that gets margin-top:auto. */
+  .mobile-sidebar-shell .sidebar .sidebar-bottom {
+    position: relative !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-end !important;
+    gap: 0 !important;
+
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: auto 0 0 !important;
+    padding:
+      10px
+      2px
+      max(4px, env(safe-area-inset-bottom)) !important;
+
+    border-top: 1px solid rgba(111, 157, 190, .17) !important;
+    background: #06182a !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Cancel older generic mobile rules that accidentally turned footer into a row. */
+  .mobile-sidebar-shell .sidebar .sidebar-bottom > * {
+    flex: none !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  /* -----------------------------------------
+     Theme row — desktop-like hierarchy
+     ----------------------------------------- */
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .theme-control {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+
+    min-height: 44px !important;
+    margin: 0 !important;
+    padding: 6px 4px 8px !important;
+
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .theme-control-label {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 8px !important;
+
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+
+    color: rgba(217, 233, 244, .88) !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .theme-control-label > i {
+    width: 14px !important;
+    min-width: 14px !important;
+    margin: 0 !important;
+
+    color: #78b7dd !important;
+    font-size: 11px !important;
+    text-align: center !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .theme-control-label > span {
+    display: inline !important;
+    margin: 0 !important;
+    color: inherit !important;
+    font-size: inherit !important;
+  }
+
+  /* ThemeToggle is the right-side control, never centered. */
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .theme-control > :last-child {
+    flex: 0 0 auto !important;
+    margin-left: auto !important;
+    transform: none !important;
+  }
+
+  /* -----------------------------------------
+     User row — divider + identity + actions
+     ----------------------------------------- */
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-panel {
+    display: grid !important;
+    grid-template-columns: 32px minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    column-gap: 9px !important;
+
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 58px !important;
+
+    margin: 0 !important;
+    padding: 10px 4px 4px !important;
+
+    border: 0 !important;
+    border-top: 1px solid rgba(111, 157, 190, .17) !important;
+    border-radius: 0 !important;
+
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-avatar {
+    grid-column: 1 !important;
+
+    display: grid !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    place-items: center !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 9px !important;
+
+    background: #0d6f9b !important;
+    color: #ffffff !important;
+
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    line-height: 1 !important;
+    letter-spacing: .01em !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-copy {
+    grid-column: 2 !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    gap: 2px !important;
+
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+
+    text-align: left !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-copy > strong {
+    display: block !important;
+    width: 100% !important;
+    max-width: 145px !important;
+
+    margin: 0 !important;
+    overflow: hidden !important;
+
+    color: #f5fbff !important;
+    font-size: 10.5px !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-copy > small {
+    display: block !important;
+    width: 100% !important;
+    max-width: 145px !important;
+
+    margin: 0 !important;
+    overflow: hidden !important;
+
+    color: rgba(153, 190, 215, .72) !important;
+    font-size: 8.5px !important;
+    font-weight: 500 !important;
+    line-height: 1.15 !important;
+
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-actions {
+    grid-column: 3 !important;
+
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 3px !important;
+
+    width: auto !important;
+    min-width: max-content !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-actions > button {
+    display: grid !important;
+    width: 30px !important;
+    min-width: 30px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    place-items: center !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    border-radius: 8px !important;
+
+    color: #76b4db !important;
+    background: transparent !important;
+    box-shadow: none !important;
+
+    font-size: 13px !important;
+    cursor: pointer !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-actions > button:hover,
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-actions > button:focus-visible {
+    color: #ffffff !important;
+    background: rgba(35, 107, 151, .14) !important;
+    outline: none !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-actions > button:active {
+    transform: scale(.94) !important;
+  }
+}
+
+/* Narrow phones: preserve hierarchy without crushing the email. */
+@media (max-width: 360px) {
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-panel {
+    grid-template-columns: 30px minmax(0, 1fr) auto !important;
+    column-gap: 7px !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-copy > strong,
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-copy > small {
+    max-width: 120px !important;
+  }
+
+  .mobile-sidebar-shell .sidebar .sidebar-bottom .user-actions > button {
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+  }
+}

@@ -5,7 +5,6 @@ records facade trusts, so anything that lets it be set by the wrong party defeat
 every check downstream.
 """
 from identity.app import app
-from tests.identity.conftest import ADMIN_HEADERS
 
 
 def decode_own_token(token: str) -> dict:
@@ -68,13 +67,13 @@ def test_refresh_returns_a_fresh_access_token(client, parent):
     assert decode_own_token(response.json()["access_token"])["guardian_id"] == "G-1"
 
 
-def test_refresh_re_reads_the_binding_rather_than_copying_it(client, parent):
+def test_refresh_re_reads_the_binding_rather_than_copying_it(client, parent, admin_headers):
     """A custody change must take effect without waiting for the parent to log out."""
     tokens = client.post("/v1/auth/login", json=parent).json()
 
     client.put(
         f"/v1/admin/accounts/{parent['username']}/guardian-binding",
-        headers=ADMIN_HEADERS,
+        headers=admin_headers,
         json={"guardian_external_id": "G-99"},
     )
 
@@ -82,11 +81,11 @@ def test_refresh_re_reads_the_binding_rather_than_copying_it(client, parent):
     assert decode_own_token(refreshed["access_token"])["guardian_id"] == "G-99"
 
 
-def test_unbinding_revokes_existing_sessions(client, parent):
+def test_unbinding_revokes_existing_sessions(client, parent, admin_headers):
     """The urgent custody path: remove the binding and the session dies."""
     tokens = client.post("/v1/auth/login", json=parent).json()
 
-    client.delete(f"/v1/admin/accounts/{parent['username']}/guardian-binding", headers=ADMIN_HEADERS)
+    client.delete(f"/v1/admin/accounts/{parent['username']}/guardian-binding", headers=admin_headers)
 
     response = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
     assert response.status_code == 401
@@ -120,7 +119,7 @@ def test_account_creation_requires_the_admin_key(client):
     assert response.status_code == 401
 
 
-def test_creating_an_account_cannot_set_a_guardian_binding(client):
+def test_creating_an_account_cannot_set_a_guardian_binding(client, admin_headers):
     """Creation and binding are two calls on purpose.
 
     Even holding the admin key, the create route must not accept a guardian id — an
@@ -128,7 +127,7 @@ def test_creating_an_account_cannot_set_a_guardian_binding(client):
     """
     client.post(
         "/v1/admin/accounts",
-        headers=ADMIN_HEADERS,
+        headers=admin_headers,
         json={
             "username": "0507777777",
             "password": "correct-horse-battery",

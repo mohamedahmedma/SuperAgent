@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:20.19.5-alpine AS builder
+FROM node:24.19.0-alpine AS builder
 WORKDIR /app
 ARG VITE_IDENTITY_BASE_URL=""
 ENV VITE_IDENTITY_BASE_URL=${VITE_IDENTITY_BASE_URL}

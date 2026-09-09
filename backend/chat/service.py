@@ -19,8 +19,6 @@ from backend.chat.assets_bridge import (
     attach_assets_to_trace,
     build_asset_references,
     effective_capabilities,
-    load_asset_state,
-    save_asset_state,
     trace_for_storage,
 )
 from backend.chat.caller_identity import CallerIdentity
@@ -339,7 +337,6 @@ async def _stream_static_reply(
     messages: list,
     metadata: dict,
     persistent_note: str,
-    asset_state,
     is_first_message: bool,
 ):
     """Emit a planned reply that no model composed, and persist the turn.
@@ -360,7 +357,6 @@ async def _stream_static_reply(
     yield f"data: {json.dumps({'type': 'trace', 'rag_trace': rag_trace})}\n\n"
 
     save_meta = dict(metadata)
-    save_asset_state(save_meta, asset_state)
     # A turn the corpus never saw contributes nothing worth summarising, so the
     # persistent note is deliberately left alone — updating it would spend a model
     # call on the one path whose whole point is not making one.
@@ -604,7 +600,6 @@ def chat_with_agent(
     """
     caller, user_id = _resolve_caller(caller, user_id)
     messages, metadata = storage.load_with_meta(user_id, session_id)
-    asset_state = load_asset_state(metadata)
     # The pin travels by reference into the turn's context and back out into
     # `save_meta`, so a turn that resolves a child has already recorded it.
     child_state = load_child_state(metadata, guardian_id=caller.guardian_id if caller else "")
@@ -623,7 +618,6 @@ def chat_with_agent(
     ctx = ChatRequestContext.for_sync(
         user_id=user_id,
         session_id=session_id,
-        asset_state=asset_state,
         caller=caller,
         child=child_state,
     )
@@ -717,7 +711,6 @@ def chat_with_agent(
         rag_trace = attach_assets_to_trace(rag_trace, asset_references)
 
         save_meta = dict(metadata)
-        save_asset_state(save_meta, asset_state)
         save_child_state(save_meta, child_state)
         if invalid_pending_hitl:
             save_meta[PENDING_HITL_KEY] = None
@@ -788,7 +781,6 @@ async def chat_with_agent_stream(
     yield f"data: {json.dumps(initial_step)}\n\n"
 
     messages, metadata = storage.load_with_meta(user_id, session_id)
-    asset_state = load_asset_state(metadata)
     # The pin travels by reference into the turn's context and back out into
     # `save_meta`, so a turn that resolves a child has already recorded it.
     child_state = load_child_state(metadata, guardian_id=caller.guardian_id if caller else "")
@@ -813,7 +805,6 @@ async def chat_with_agent_stream(
         user_id=user_id,
         session_id=session_id,
         output_queue=output_queue,
-        asset_state=asset_state,
         caller=caller,
         child=child_state,
     )
@@ -903,7 +894,6 @@ async def chat_with_agent_stream(
             yield "data: [DONE]\n\n"
 
             save_meta = dict(metadata)
-            save_asset_state(save_meta, asset_state)
             save_child_state(save_meta, child_state)
             if invalid_pending_hitl:
                 save_meta[PENDING_HITL_KEY] = None
@@ -949,7 +939,7 @@ async def chat_with_agent_stream(
         if turn_plan.short_circuit:
             async for chunk in _stream_static_reply(
                 turn_plan, turn_signals, user_text, user_id, session_id,
-                messages, metadata, persistent_note, asset_state, is_first_message,
+                messages, metadata, persistent_note, is_first_message,
             ):
                 yield chunk
             return
@@ -1073,7 +1063,6 @@ async def chat_with_agent_stream(
         yield "data: [DONE]\n\n"
 
         save_meta = dict(metadata)
-        save_asset_state(save_meta, asset_state)
         save_child_state(save_meta, child_state)
         if invalid_pending_hitl:
             save_meta[PENDING_HITL_KEY] = None

@@ -22,6 +22,11 @@ import './styles/tokens.css';
 import './styles/theme.css';
 import './styles/base.css';
 import './styles/sis.css';
+import './styles/aurexis-sis-precision-fix-v5.css';
+import './styles/aurexis-sis-guardian-access-footer-v4.css';
+import './styles/aurexis-sis-student-detail-footer-v3.css';
+import './styles/aurexis-sis-header-nav-footer-v2.css';
+import './styles/aurexis-sis-header-nav-student-setup-v1.css';
 
 import { Router } from './router.js';
 import { App } from './App.jsx';
@@ -30,10 +35,18 @@ import { Level } from './views/Level.jsx';
 import { Year } from './views/Year.jsx';
 import { Klass } from './views/Klass.jsx';
 import { Student } from './views/Student.jsx';
-import { Roster } from './views/Roster.jsx';
+import { Roster, StudentSetup } from './views/Roster.jsx';
 import { Guardians } from './views/Guardians.jsx';
+import { Homework } from './views/Homework.jsx';
 import { Marks } from './views/Marks.jsx';
 import { Batches } from './views/Batches.jsx';
+import { Roles } from './views/Roles.jsx';
+import { GradeAssignments } from './views/GradeAssignments.jsx';
+import { TeacherSetup } from './views/TeacherSetup.jsx';
+import { TeachingStaff } from './views/TeachingStaff.jsx';
+import { Attendance } from './views/Attendance.jsx';
+import { Timetable } from './views/Timetable.jsx';
+import { AuditLog } from './views/AuditLog.jsx';
 
 /*
  * Schools -> School -> Rung -> Class -> Child is a containment hierarchy, and the first five
@@ -51,9 +64,18 @@ const ROUTES = [
   { name: 'class', view: Klass, title: 'Class' },
   { name: 'student', view: Student, title: 'Student' },
   { name: 'roster', view: Roster, title: 'Roster' },
+  { name: 'studentSetup', view: StudentSetup, title: 'Create student' },
   { name: 'guardians', view: Guardians, title: 'Guardians' },
+  { name: 'homework', view: Homework, title: 'Homework' },
   { name: 'marks', view: Marks, title: 'Marks' },
-  { name: 'batches', view: Batches, title: 'Batches' }
+  { name: 'batches', view: Batches, title: 'Batches' },
+  { name: 'roles', view: Roles, title: 'Teacher roles' },
+  { name: 'teacherSetup', view: TeacherSetup, title: 'Create teacher' },
+  { name: 'teachingStaff', view: TeachingStaff, title: 'Teaching staff' },
+  { name: 'gradeAssignments', view: GradeAssignments, title: 'Class assignments' },
+  { name: 'attendance', view: Attendance, title: 'Take attendance' },
+  { name: 'timetable', view: Timetable, title: 'Timetable' }
+  ,{ name: 'auditLog', view: AuditLog, title: 'Audit Log' }
 ];
 
 /* The document title follows the route: browser history and a taskbar full of tabs are both

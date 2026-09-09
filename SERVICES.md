@@ -90,7 +90,11 @@ its own terminal.
 
 ```bash
 # 1. identity  :8200
-IDENTITY_ADMIN_KEY=dev-admin-key uvicorn identity.app:app --port 8200
+# Seeds this administrator on every startup, so there is always a way in. It is how
+# you reach /v1/admin/* — there is no shared admin key any more.
+IDENTITY_BOOTSTRAP_ADMIN_USER=registrar \
+IDENTITY_BOOTSTRAP_ADMIN_PASSWORD=dev-registrar-password \
+  uvicorn identity.app:app --port 8200
 
 # 2. records   :8100
 RECORDS_API_KEY=dev-records-agent \
@@ -182,13 +186,20 @@ the registrar's fact. Setup, and the reason the number must carry its `+`, are i
 ## First-run setup
 
 ```bash
+# Sign in as the seeded administrator. This token is the credential for every
+# /v1/admin/* call below; there is no shared key to hold any more.
+TOKEN=$(curl -s -X POST localhost:8200/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"registrar","password":"dev-registrar-password"}' \
+  | python -c "import json,sys;print(json.load(sys.stdin)['access_token'])")
+
 # A parent login, then the binding that makes it a guardian. Two calls on purpose.
 curl -X POST localhost:8200/v1/admin/accounts \
-  -H "X-Admin-Key: dev-admin-key" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"username":"0501234567","password":"...","display_name":"Umm Layla"}'
 
 curl -X PUT localhost:8200/v1/admin/accounts/0501234567/guardian-binding \
-  -H "X-Admin-Key: dev-admin-key" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"guardian_external_id":"G-1"}'
 ```
 

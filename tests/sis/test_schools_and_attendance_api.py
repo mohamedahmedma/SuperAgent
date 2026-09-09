@@ -27,14 +27,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from tests.sis.conftest import registrar_headers
+from tests.sis.conftest import Clock, registrar_headers
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
 NC = "NC"
 MD = "MD"
-NC_YEAR = "NC-2025-2026"
-MD_YEAR = "MD-2025-2026"
+NC_YEAR = "NC-2026-2027"
+MD_YEAR = "MD-2026-2027"
 
 
 def _seed_two_schools() -> None:
@@ -55,19 +55,19 @@ def _seed_two_schools() -> None:
                 AcademicYear(
                     code=NC_YEAR,
                     school_code=NC,
-                    name_en="2025-2026 Nasr City",
-                    name_ar="٢٠٢٥",
-                    starts_on=date(2025, 9, 1),
-                    ends_on=date(2026, 6, 30),
+                    name_en="2026-2027 Nasr City",
+                    name_ar="٢٠٢٦",
+                    starts_on=date(2026, 9, 1),
+                    ends_on=date(2027, 6, 30),
                     is_current=True,
                 ),
                 AcademicYear(
                     code=MD_YEAR,
                     school_code=MD,
-                    name_en="2025-2026 Maadi",
-                    name_ar="٢٠٢٥",
-                    starts_on=date(2025, 9, 1),
-                    ends_on=date(2026, 6, 30),
+                    name_en="2026-2027 Maadi",
+                    name_ar="٢٠٢٦",
+                    starts_on=date(2026, 9, 1),
+                    ends_on=date(2027, 6, 30),
                     is_current=True,
                 ),
             ]
@@ -197,6 +197,85 @@ def test_school_creation_stores_stage_two_configuration(
     assert body["secondary_grade_count"] == 0
     assert body["term_count"] == 3
     assert body["working_days"] == ["sunday", "monday", "wednesday"]
+
+
+def test_bilingual_school_has_two_independent_academic_tracks(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    created = client.post(
+        "/v1/schools",
+        json={
+            "code": "DUAL",
+            "name_en": "Dual Track School",
+            "name_ar": "مدرسة بمسارين",
+            "language_type": "both",
+            "kg_grade_count": 0,
+            "primary_grade_count": 1,
+            "preparatory_grade_count": 0,
+            "secondary_grade_count": 0,
+            "term_count": 2,
+            "working_days": ["sunday"],
+        },
+        headers=registrar,
+    )
+    assert created.status_code == 201, created.text
+    tracks = client.get("/v1/schools/DUAL/tracks", headers=registrar).json()
+    assert [(track["code"], track["language_type"]) for track in tracks] == [
+        ("AR", "arabic"),
+        ("LANG", "languages"),
+    ]
+
+    for code, track in (("AR-P1", "AR"), ("LG-P1", "LANG")):
+        response = client.post(
+            "/v1/structure/levels",
+            json={
+                "code": code,
+                "school_code": "DUAL",
+                "track_code": track,
+                "name_en": code,
+                "name_ar": code,
+                "display_order": 1,
+                "stage": "primary",
+            },
+            headers=registrar,
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["track_code"] == track
+
+    levels = client.get("/v1/schools/DUAL/levels", headers=registrar).json()
+    assert {(level["code"], level["track_code"]) for level in levels} == {
+        ("AR-P1", "AR"),
+        ("LG-P1", "LANG"),
+    }
+
+
+def test_configured_grade_and_class_creation_uses_only_active_grades(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    client.post("/v1/schools", json={"code":"S4","name_en":"Stage Four","name_ar":"المرحلة الرابعة",
+        "language_type":"languages","kg_grade_count":2,"primary_grade_count":1,
+        "preparatory_grade_count":0,"secondary_grade_count":0,"term_count":2,
+        "working_days":["sunday"]}, headers=registrar)
+    client.post("/v1/academic-years", json={"code":"S4-2026","school_code":"S4",
+        "name_en":"2026","name_ar":"2026","starts_on":"2026-09-01","ends_on":"2027-06-30","is_current":False},
+        headers=registrar)
+    grades = client.get("/v1/schools/S4/tracks/LANG/configured-grades", headers=registrar).json()
+    assert [grade["code"] for grade in grades] == ["LANG-KG1", "LANG-KG2", "LANG-P1"]
+    made = client.post("/v1/structure/configured-classes", json={"academic_year_code":"S4-2026",
+        "track_code":"LANG","mode":"custom","classes_by_grade":{"LANG-KG1":1,"LANG-KG2":2,"LANG-P1":1},
+        "sequence":"alphabetic"}, headers=registrar)
+    assert made.status_code == 200, made.text
+    assert {row["code"] for row in made.json()} == {"LANG-KG1-A","LANG-KG2-A","LANG-KG2-B","LANG-P1-A"}
+    client.post("/v1/subjects", json={"code":"SCI","academic_year_code":"S4-2026",
+        "name_en":"Science","name_ar":"العلوم"}, headers=registrar)
+    assignment = {"academic_year_code":"S4-2026","subject_code":"SCI",
+        "year_level_code":"LANG-P1","assigned":True}
+    assert client.put("/v1/subject-assignments", json=assignment, headers=registrar).status_code == 204
+    assert client.put("/v1/subject-assignments", json=assignment, headers=registrar).status_code == 204
+    assigned = client.get("/v1/subject-assignments?academic_year=S4-2026", headers=registrar).json()
+    assert [(row["year_level_code"], [subject["code"] for subject in row["subjects"]]) for row in assigned] == [
+        ("LANG-P1", ["SCI"])
+    ]
 
 
 def test_school_creation_validates_levels_terms_and_grade_limits(
@@ -333,6 +412,49 @@ def test_disabled_school_level_cannot_be_added(
     assert refused.status_code == 422, refused.text
 
 
+def test_school_level_count_selected_at_creation_is_enforced_later(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    created = client.post(
+        "/v1/schools",
+        json={
+            "code": "ONE",
+            "name_en": "One Primary Grade",
+            "name_ar": "صف ابتدائي واحد",
+            "language_type": "arabic",
+            "kg_grade_count": 0,
+            "primary_grade_count": 1,
+            "preparatory_grade_count": 0,
+            "secondary_grade_count": 0,
+            "term_count": 2,
+            "working_days": ["sunday"],
+        },
+        headers=registrar,
+    )
+    assert created.status_code == 201, created.text
+
+    def add_level(code: str) -> object:
+        return client.post(
+            "/v1/structure/levels",
+            json={
+                "code": code,
+                "school_code": "ONE",
+                "name_en": code,
+                "name_ar": code,
+                "display_order": 1,
+                "stage": "primary",
+            },
+            headers=registrar,
+        )
+
+    assert add_level("P1").status_code == 201
+    # Reposting the same rung is a relabel, not a second grade.
+    assert add_level("P1").status_code == 200
+    refused = add_level("P2")
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["field"] == "stage"
+
+
 def test_a_closed_branch_is_hidden_but_not_deleted(
     client: TestClient, registrar: dict[str, str]
 ) -> None:
@@ -374,11 +496,11 @@ def test_two_schools_each_run_their_own_Y1_and_3A(
     assert md_levels[0]["school_code"] == MD
 
     _add_child(two_schools, registrar, "NC-1", "Nasr City Child")
-    _place(two_schools, registrar, "NC-1", NC_YEAR, "3A", "2025-09-01")
+    _place(two_schools, registrar, "NC-1", NC_YEAR, "3A", "2026-09-01")
 
     def register(year: str) -> list[str]:
         response = two_schools.get(
-            f"/v1/classes/3A/students?academic_year={year}&on=2025-10-01",
+            f"/v1/classes/3A/students?academic_year={year}&on=2026-09-01",
             headers=registrar,
         )
         assert response.status_code == 200, response.text
@@ -504,8 +626,8 @@ def test_a_year_naming_a_school_that_does_not_exist_is_refused_by_field(
             "school_code": "NOPE",
             "name_en": "y",
             "name_ar": "y",
-            "starts_on": "2025-09-01",
-            "ends_on": "2026-06-30",
+            "starts_on": "2099-09-01",
+            "ends_on": "2100-06-30",
         },
         headers=registrar,
     )
@@ -581,7 +703,7 @@ def test_a_rung_is_reclassified_without_detaching_its_classes(
 ) -> None:
     """A stage is a label, so correcting it moves the rung between groups and nothing else."""
     _add_child(two_schools, registrar, "NC-2", "Child Two")
-    _place(two_schools, registrar, "NC-2", NC_YEAR, "3A", "2025-09-01")
+    _place(two_schools, registrar, "NC-2", NC_YEAR, "3A", "2026-09-01")
 
     again = two_schools.post(
         "/v1/structure/levels",
@@ -599,7 +721,7 @@ def test_a_rung_is_reclassified_without_detaching_its_classes(
     assert again.json()["stage"] == "garden"
 
     register = two_schools.get(
-        f"/v1/classes/3A/students?academic_year={NC_YEAR}&on=2025-10-01", headers=registrar
+        f"/v1/classes/3A/students?academic_year={NC_YEAR}&on=2026-09-01", headers=registrar
     )
     assert [row["student_number"] for row in register.json()["students"]] == ["NC-2"]
 
@@ -620,10 +742,10 @@ def test_a_child_nobody_marked_is_null_and_not_absent(
     """
     for number in ("A-1", "A-2", "A-3"):
         _add_child(two_schools, registrar, number, f"Child {number}")
-        _place(two_schools, registrar, number, NC_YEAR, "3A", "2025-09-01")
+        _place(two_schools, registrar, number, NC_YEAR, "3A", "2026-09-01")
 
     taken = two_schools.put(
-        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2025-10-01",
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01",
         json={
             "entries": [
                 {"student_number": "A-1", "state": "present"},
@@ -656,10 +778,10 @@ def test_the_register_holds_every_placed_child_even_before_anyone_marks_it(
     """Built from the enrolments, not from the marks. Otherwise an untouched register is
     an empty class with perfect attendance."""
     _add_child(two_schools, registrar, "B-1", "Child B1")
-    _place(two_schools, registrar, "B-1", NC_YEAR, "3A", "2025-09-01")
+    _place(two_schools, registrar, "B-1", NC_YEAR, "3A", "2026-09-01")
 
     fresh = two_schools.get(
-        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2025-10-02", headers=registrar
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01", headers=registrar
     )
     assert fresh.status_code == 200, fresh.text
     body = fresh.json()
@@ -674,9 +796,9 @@ def test_taking_the_register_twice_corrects_it_rather_than_duplicating(
 ) -> None:
     """A day holds one statement per child, so the second save is a correction."""
     _add_child(two_schools, registrar, "C-1", "Child C1")
-    _place(two_schools, registrar, "C-1", NC_YEAR, "3A", "2025-09-01")
+    _place(two_schools, registrar, "C-1", NC_YEAR, "3A", "2026-09-01")
 
-    url = f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2025-10-03"
+    url = f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01"
     first = two_schools.put(
         url,
         json={"entries": [{"student_number": "C-1", "state": "absent"}]},
@@ -701,9 +823,9 @@ def test_a_partial_register_leaves_the_unnamed_children_alone(
     """Saving the twelve present so far must not mark the other twenty-eight absent."""
     for number in ("D-1", "D-2"):
         _add_child(two_schools, registrar, number, f"Child {number}")
-        _place(two_schools, registrar, number, NC_YEAR, "3A", "2025-09-01")
+        _place(two_schools, registrar, number, NC_YEAR, "3A", "2026-09-01")
 
-    url = f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2025-10-06"
+    url = f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01"
     two_schools.put(
         url,
         json={"entries": [{"student_number": "D-1", "state": "present"}]},
@@ -725,9 +847,9 @@ def test_an_excused_absence_needs_a_reason(
 ) -> None:
     """Without one it cannot be told apart from an ordinary absence marked by mistake."""
     _add_child(two_schools, registrar, "E-1", "Child E1")
-    _place(two_schools, registrar, "E-1", NC_YEAR, "3A", "2025-09-01")
+    _place(two_schools, registrar, "E-1", NC_YEAR, "3A", "2026-09-01")
 
-    url = f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2025-10-07"
+    url = f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01"
     refused = two_schools.put(
         url,
         json={"entries": [{"student_number": "E-1", "state": "excused"}]},
@@ -755,10 +877,10 @@ def test_marking_a_child_who_is_not_in_the_class_that_day_is_refused(
     """A stale screen or the wrong class. Writing it files her under a room she had left."""
     _add_child(two_schools, registrar, "F-1", "Child F1")
     # Placed in Maadi, marked in Nasr City.
-    _place(two_schools, registrar, "F-1", MD_YEAR, "3A", "2025-09-01")
+    _place(two_schools, registrar, "F-1", MD_YEAR, "3A", "2026-09-01")
 
     refused = two_schools.put(
-        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2025-10-08",
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01",
         json={"entries": [{"student_number": "F-1", "state": "present"}]},
         headers=registrar,
     )
@@ -772,9 +894,9 @@ def test_a_late_child_was_in_the_room_and_is_not_an_absence(
     """Late is its own state: eleven late days is a conversation, and folding them into
     present makes the pattern invisible."""
     _add_child(two_schools, registrar, "G-1", "Child G1")
-    _place(two_schools, registrar, "G-1", NC_YEAR, "3A", "2025-09-01")
+    _place(two_schools, registrar, "G-1", NC_YEAR, "3A", "2026-09-01")
     two_schools.put(
-        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2025-10-09",
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01",
         json={"entries": [{"student_number": "G-1", "state": "late"}]},
         headers=registrar,
     )
@@ -786,30 +908,96 @@ def test_a_late_child_was_in_the_room_and_is_not_an_absence(
 
 
 def test_a_child_attendance_record_carries_counts_and_no_rate(
-    two_schools: TestClient, registrar: dict[str, str]
+    two_schools: TestClient, registrar: dict[str, str], clock: Clock
 ) -> None:
     """`recorded` is the only denominator this service can state honestly, so no rate is
-    computed for the caller."""
+    computed for the caller.
+
+    Two days, not two writes to one day: `recorded` counting to 2 is only a claim about a
+    denominator if the register actually spans more than a morning, and an upsert of the
+    same date twice leaves one row however many times it is called. The clock moves
+    between them because a past day is frozen — which is the rule under test's neighbour,
+    not an inconvenience to route around.
+    """
     _add_child(two_schools, registrar, "H-1", "Child H1")
-    _place(two_schools, registrar, "H-1", NC_YEAR, "3A", "2025-09-01")
-    for day, state in (("2025-10-13", "present"), ("2025-10-14", "absent")):
-        two_schools.put(
+    _place(two_schools, registrar, "H-1", NC_YEAR, "3A", "2026-09-01")
+    for day, state in (("2026-09-01", "present"), ("2026-09-02", "absent")):
+        clock.set(day)
+        response = two_schools.put(
             f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on={day}",
             json={"entries": [{"student_number": "H-1", "state": state}]},
             headers=registrar,
         )
+        assert response.status_code == 200, response.text
 
     record = two_schools.get("/v1/students/H-1/attendance", headers=registrar).json()
     assert record["counts"]["recorded"] == 2
-    assert [day["on_date"] for day in record["days"]] == ["2025-10-13", "2025-10-14"]
+    assert [day["on_date"] for day in record["days"]] == ["2026-09-01", "2026-09-02"]
     assert "rate" not in record["counts"]
     assert "percentage" not in record["counts"]
 
     bounded = two_schools.get(
-        "/v1/students/H-1/attendance?from=2025-10-14&to=2025-10-14", headers=registrar
+        "/v1/students/H-1/attendance?from=2026-09-02&to=2026-09-02", headers=registrar
     ).json()
     assert bounded["counts"]["recorded"] == 1
     assert bounded["counts"]["absent"] == 1
+
+
+def test_a_register_is_refused_for_a_day_that_has_not_happened(
+    two_schools: TestClient, registrar: dict[str, str], clock: Clock
+) -> None:
+    """A register is a record of a room somebody stood in. Tomorrow's has no subject yet,
+    and accepting one would let a term be filled in ahead of itself."""
+    _add_child(two_schools, registrar, "J-1", "Child J1")
+    _place(two_schools, registrar, "J-1", NC_YEAR, "3A", "2026-09-01")
+    clock.set("2026-09-01")
+
+    response = two_schools.put(
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-02",
+        json={"entries": [{"student_number": "J-1", "state": "present"}]},
+        headers=registrar,
+    )
+    assert response.status_code == 422, response.text
+    assert "future" in response.text
+
+
+def test_a_past_day_only_opens_far_enough_to_excuse_an_absence(
+    two_schools: TestClient, registrar: dict[str, str], clock: Clock
+) -> None:
+    """Yesterday's register is closed, with one door left in it.
+
+    A note arriving the next morning is the reason the door exists at all, so excusing a
+    child already marked absent is allowed. Everything else is refused: re-marking a
+    settled day is how an attendance record stops being evidence of anything.
+    """
+    _add_child(two_schools, registrar, "K-1", "Child K1")
+    _place(two_schools, registrar, "K-1", NC_YEAR, "3A", "2026-09-01")
+    clock.set("2026-09-01")
+    url = f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01"
+    assert two_schools.put(
+        url, json={"entries": [{"student_number": "K-1", "state": "absent"}]},
+        headers=registrar,
+    ).status_code == 200
+
+    clock.set("2026-09-02")
+    refused = two_schools.put(
+        url, json={"entries": [{"student_number": "K-1", "state": "present"}]},
+        headers=registrar,
+    )
+    assert refused.status_code == 422, refused.text
+
+    allowed = two_schools.put(
+        url,
+        json={
+            "entries": [
+                {"student_number": "K-1", "state": "excused", "note": "note from home"}
+            ]
+        },
+        headers=registrar,
+    )
+    assert allowed.status_code == 200, allowed.text
+    record = two_schools.get("/v1/students/K-1/attendance", headers=registrar).json()
+    assert record["days"][0]["state"] == "excused"
 
 
 def test_a_mark_keeps_the_class_she_was_in_that_day(
@@ -828,9 +1016,9 @@ def test_a_mark_keeps_the_class_she_was_in_that_day(
         headers=registrar,
     )
     _add_child(two_schools, registrar, "I-1", "Child I1")
-    _place(two_schools, registrar, "I-1", NC_YEAR, "3A", "2025-09-01")
+    _place(two_schools, registrar, "I-1", NC_YEAR, "3A", "2026-09-01")
     two_schools.put(
-        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2025-10-15",
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01",
         json={"entries": [{"student_number": "I-1", "state": "present"}]},
         headers=registrar,
     )
@@ -845,7 +1033,7 @@ def test_a_mark_keeps_the_class_she_was_in_that_day(
     )
 
     record = two_schools.get("/v1/students/I-1/attendance", headers=registrar).json()
-    october = [day for day in record["days"] if day["on_date"] == "2025-10-15"][0]
+    october = [day for day in record["days"] if day["on_date"] == "2026-09-01"][0]
     assert october["class_code"] == "3A", "a past register was rewritten by a transfer"
 
 
@@ -935,3 +1123,5 @@ def test_patching_contact_details_leaves_the_rest_of_the_record_alone(
     assert body["contact_phone"] == "+201111111111"
     assert body["date_of_birth"] == "2015-05-05", "a birth date was erased by omission"
     assert body["full_name_en"] == "Child M1"
+
+

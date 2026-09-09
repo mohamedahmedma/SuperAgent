@@ -81,6 +81,25 @@ function Invoke-Compose([string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "docker compose failed: $($Arguments -join ' ')" }
 }
 
+function Sync-PostgresPassword {
+    $user = Get-ConfigValue 'POSTGRES_USER' 'postgres'
+    $password = Get-ConfigValue 'POSTGRES_PASSWORD' ''
+    if (-not $password) { throw 'POSTGRES_PASSWORD is empty after runtime configuration.' }
+
+    Invoke-Compose @('up', '-d', 'postgres')
+    $deadline = (Get-Date).AddMinutes(2)
+    do {
+        & docker @compose exec -T postgres pg_isready -U $user -q <# stdin is not attached by PowerShell here #>
+        if ($LASTEXITCODE -eq 0) { break }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL did not become ready within two minutes.' }
+
+    "ALTER USER CURRENT_USER WITH PASSWORD :'pw';" |
+        & docker @compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $user -d postgres -v "pw=$password" *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not reconcile the PostgreSQL role with the local runtime password.' }
+}
+
 function Wait-Healthy {
     $deadline = (Get-Date).AddMinutes(8)
     do {
@@ -112,6 +131,7 @@ function Start-System([switch]$Build) {
     Ensure-Docker; Ensure-Config
     Invoke-Compose @('config', '--quiet')
     Assert-HostPortsAvailable
+    Sync-PostgresPassword
     $args = @('up', '-d')
     if ($Build) { $args += '--build' }
     Invoke-Compose $args

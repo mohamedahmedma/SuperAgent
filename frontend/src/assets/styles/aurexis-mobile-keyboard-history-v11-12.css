@@ -1,0 +1,298 @@
+/*
+ AUREXIS Mobile Keyboard + History precision fix v11.12
+ Mobile only. Desktop/tablet behavior is untouched.
+*/
+
+@media (max-width: 900px) {
+  /* ---------- CHAT / SOFT KEYBOARD ---------- */
+  html.aurexis-keyboard-open,
+  html.aurexis-keyboard-open body,
+  html.aurexis-keyboard-open #app {
+    height: var(--aurexis-visual-height, 100dvh) !important;
+    min-height: var(--aurexis-visual-height, 100dvh) !important;
+    overflow: hidden !important;
+  }
+
+  html.aurexis-keyboard-open .app-page,
+  html.aurexis-keyboard-open .app-wrapper,
+  html.aurexis-keyboard-open .main-content,
+  html.aurexis-keyboard-open .chat-area {
+    height: var(--aurexis-visual-height, 100dvh) !important;
+    min-height: 0 !important;
+    max-height: var(--aurexis-visual-height, 100dvh) !important;
+    overflow: hidden !important;
+  }
+
+  /* Keep the welcome identity centered in the usable area above composer. */
+  html.aurexis-keyboard-open .welcome-screen {
+    position: absolute !important;
+    inset: 0 0 82px 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 18px 24px !important;
+    margin: 0 !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+
+    overflow: hidden !important;
+    transform: none !important;
+  }
+
+  html.aurexis-keyboard-open .welcome-screen h1,
+  html.aurexis-keyboard-open .welcome-screen h2,
+  html.aurexis-keyboard-open .welcome-screen p {
+    flex: 0 0 auto !important;
+    text-align: center !important;
+  }
+
+  /* Composer remains a normal, compact bar directly above the keyboard. */
+  html.aurexis-keyboard-open .input-area-wrapper {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    padding: 8px 8px 10px !important;
+    margin: 0 !important;
+    transform: none !important;
+    background: linear-gradient(180deg, rgba(24,43,62,0), #182b3e 42%) !important;
+  }
+
+  html.aurexis-keyboard-open .input-area {
+    min-height: 58px !important;
+    height: auto !important;
+    padding: 6px 7px 6px 9px !important;
+    display: flex !important;
+    align-items: center !important;
+    overflow: hidden !important;
+  }
+
+  html.aurexis-keyboard-open .chat-input-textarea {
+    min-height: 42px !important;
+    height: 42px !important;
+    max-height: 96px !important;
+    margin: 0 !important;
+    padding: 10px 4px !important;
+    line-height: 22px !important;
+    font-size: 16px !important;
+    align-self: center !important;
+  }
+
+  html.aurexis-keyboard-open .chat-input-textarea::placeholder {
+    line-height: 22px !important;
+  }
+
+  html.aurexis-keyboard-open .input-area .voice-btn,
+  html.aurexis-keyboard-open .input-area .mic-btn,
+  html.aurexis-keyboard-open .input-area button:has(.fa-microphone),
+  html.aurexis-keyboard-open .send-btn {
+    align-self: center !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  /* ---------- HISTORY ---------- */
+  .history-backdrop {
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  .history-sidebar {
+    width: 100% !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+
+  .history-header {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    padding: max(18px, env(safe-area-inset-top)) 18px 16px !important;
+    align-items: center !important;
+  }
+
+  .history-header .panel-eyebrow {
+    margin: 0 0 7px !important;
+    font-size: 9px !important;
+    line-height: 1.2 !important;
+  }
+
+  .history-header h2 {
+    margin: 0 !important;
+    font-size: clamp(22px, 6.3vw, 27px) !important;
+    line-height: 1.08 !important;
+  }
+
+  .history-header .close-btn {
+    flex: 0 0 42px !important;
+    width: 42px !important;
+    height: 42px !important;
+    min-width: 42px !important;
+    min-height: 42px !important;
+    margin: 0 !important;
+  }
+
+  .history-summary {
+    flex: 0 0 auto !important;
+    min-height: 62px !important;
+    padding: 10px 18px !important;
+  }
+
+  .history-summary > span {
+    font-size: 14px !important;
+  }
+
+  .history-summary button {
+    min-height: 40px !important;
+    padding: 8px 13px !important;
+    font-size: 12px !important;
+  }
+
+  /* Critical repair: force actual session content to render as cards.
+     This overrides generic mobile/sidebar rules that can collapse the rows. */
+  .history-list {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    padding: 12px 12px max(18px, env(safe-area-inset-bottom)) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .history-list > .history-item {
+    position: relative !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 70px !important;
+    height: auto !important;
+
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 42px !important;
+    align-items: stretch !important;
+    gap: 4px !important;
+
+    margin: 0 0 9px !important;
+    padding: 0 !important;
+
+    border: 1px solid rgba(109,165,202,.16) !important;
+    border-radius: 14px !important;
+    background: rgba(9,32,52,.92) !important;
+
+    opacity: 1 !important;
+    visibility: visible !important;
+    overflow: hidden !important;
+  }
+
+  .history-list > .history-item > .session-body {
+    position: relative !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 68px !important;
+    height: auto !important;
+
+    display: grid !important;
+    grid-template-columns: 8px minmax(0,1fr) !important;
+    align-items: center !important;
+    gap: 11px !important;
+
+    margin: 0 !important;
+    padding: 12px 8px 12px 13px !important;
+
+    border: 0 !important;
+    background: transparent !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    text-align: left !important;
+  }
+
+  .history-list .session-state-dot {
+    display: block !important;
+    width: 7px !important;
+    height: 7px !important;
+    min-width: 7px !important;
+    border-radius: 50% !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+
+  .history-list .session-info {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    overflow: visible !important;
+  }
+
+  .history-list .session-title {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+
+    color: #eff8ff !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    line-height: 1.25 !important;
+
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .history-list .session-meta {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 4px 9px !important;
+    width: 100% !important;
+    height: auto !important;
+
+    color: rgba(148,186,211,.72) !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+
+    font-size: 10px !important;
+    line-height: 1.3 !important;
+    white-space: normal !important;
+  }
+
+  .history-list .history-delete-btn {
+    align-self: center !important;
+    justify-self: center !important;
+    display: grid !important;
+    place-items: center !important;
+
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    min-height: 34px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+}

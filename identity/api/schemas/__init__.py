@@ -10,7 +10,6 @@ from identity.api.schemas.auth import (
     LoginIn,
     MeOut,
     RefreshIn,
-    RegisterIn,
     TokenOut,
 )
 from identity.api.schemas.common import ErrorOut
@@ -30,7 +29,6 @@ __all__ = [
     "LoginIn",
     "MeOut",
     "RefreshIn",
-    "RegisterIn",
     "TokenOut",
     "WhatsAppStartOut",
     "WhatsAppStatusIn",

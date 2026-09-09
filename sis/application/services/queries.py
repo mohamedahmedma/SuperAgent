@@ -67,6 +67,7 @@ def resolve_sections_for_term(
     enrolments: EnrolmentRepository,
     student_numbers: Collection[StudentNumber],
     term: Term,
+    year: AcademicYear,
 ) -> Mapping[str, ClassSection]:
     """Which class each of these children was in *as at* `term`, keyed by student number.
 
@@ -87,26 +88,35 @@ def resolve_sections_for_term(
     is a real answer — she had left, or had not yet arrived — and callers must treat it as
     one rather than substituting a class, which is how a grade sheet acquires a child who
     was never in the room.
+
+    The **year** is an argument because term dates are optional (revision 0011). A term the
+    school has not dated yet still has to file marks somewhere, and the year is the window
+    it is unarguably inside — so an undated term asks the same two questions about the
+    year's last and first day. `Term.resolution_window` is the one place that choice is
+    made; nothing here branches on whether the dates are present, which is what stops the
+    two paths from drifting into two different rules.
     """
     if not student_numbers:
         return {}
-    resolved = dict(enrolments.class_sections_on(student_numbers, term.ends_on))
+    starts_on, ends_on = term.resolution_window(year)
+    resolved = dict(enrolments.class_sections_on(student_numbers, ends_on))
     missing = [s for s in student_numbers if s.value not in resolved]
     # Second query only for the children the first one could not place. A file of 600
     # marks for a settled class costs one query, not two.
     if missing:
-        for number, section in enrolments.class_sections_on(
-            missing, term.starts_on
-        ).items():
+        for number, section in enrolments.class_sections_on(missing, starts_on).items():
             resolved.setdefault(number, section)
     return resolved
 
 
 def resolve_section_for_term(
-    enrolments: EnrolmentRepository, student_number: StudentNumber, term: Term
+    enrolments: EnrolmentRepository,
+    student_number: StudentNumber,
+    term: Term,
+    year: AcademicYear,
 ) -> ClassSection | None:
     """One child's class as at a term. Same rule as the bulk form, never a second one."""
-    return resolve_sections_for_term(enrolments, [student_number], term).get(
+    return resolve_sections_for_term(enrolments, [student_number], term, year).get(
         student_number.value
     )
 
@@ -355,7 +365,11 @@ class QueryService:
             return tuple(uow.terms.list_for_year(academic_year_code))
 
     def list_subjects(
-        self, academic_year_code: AcademicYearCode, *, include_inactive: bool = False
+        self,
+        academic_year_code: AcademicYearCode,
+        *,
+        include_inactive: bool = False,
+        year_level_code: YearCode | None = None,
     ) -> Sequence[Subject]:
         """One year's subjects in `display_order`; retired ones only when asked for.
 
@@ -363,12 +377,25 @@ class QueryService:
         is per-year now, so "the subjects" is not a question with an answer — and a silent
         default would put next year's catalogue on screen for a registrar who is working
         through last year's marks, with nothing on the page to say which they were shown.
+
+        `year_level_code` narrows to the subjects assigned to that rung. An unknown rung
+        is a refusal rather than an empty list, for the reason an unknown year is: a typo
+        and a rung that teaches nothing read identically on screen, and the second is a
+        thing a registrar has to be able to see is true.
         """
         with self._uow_factory() as uow:
-            self._require_year(uow, academic_year_code)
+            year = self._require_year(uow, academic_year_code)
+            if year_level_code is not None:
+                if uow.year_levels.get(year_level_code, year.school_code) is None:
+                    raise UnknownReference(
+                        f"no year level {year_level_code} in school {year.school_code}",
+                        field="year_level",
+                    )
             return tuple(
                 uow.subjects.list_for_year(
-                    academic_year_code, include_inactive=include_inactive
+                    academic_year_code,
+                    include_inactive=include_inactive,
+                    year_level_code=year_level_code,
                 )
             )
 
@@ -778,6 +805,17 @@ class QueryService:
             term = uow.terms.get(term_code)
             if term is None:
                 raise UnknownReference(f"no term {term_code}", field="term_code")
+            # The term's year, which is what an undated term is resolved against. A term
+            # whose year is missing is a broken foreign key rather than a normal state, so
+            # this refuses rather than falling back to something arbitrary.
+            year = uow.academic_years.get(
+                AcademicYearCode(str(term.academic_year_code))
+            )
+            if year is None:
+                raise UnknownReference(
+                    f"no academic year {term.academic_year_code}",
+                    field="academic_year_code",
+                )
             grades = uow.grades.list_for_student(student_number, term_code=term_code)
             # Resolved within the term's own year, which is the only year these marks can
             # be about. A lookup by code alone would have to guess, and the guess it would
@@ -791,7 +829,9 @@ class QueryService:
                 ],
                 term.academic_year_code,
             )
-            section = resolve_section_for_term(uow.enrolments, student_number, term)
+            section = resolve_section_for_term(
+                uow.enrolments, student_number, term, year
+            )
         return StudentTermGrades(
             student=student,
             term=term,
@@ -823,9 +863,16 @@ class QueryService:
             raise UnknownReference(f"no school {code}", field="school_code")
 
     @staticmethod
-    def _require_year(uow: UnitOfWork, code: AcademicYearCode) -> None:
-        """One unknown-year check, so every listing fails the same way it succeeds."""
-        if uow.academic_years.get(code) is None:
+    def _require_year(uow: UnitOfWork, code: AcademicYearCode) -> AcademicYear:
+        """One unknown-year check, so every listing fails the same way it succeeds.
+
+        Returns the year rather than nothing: callers that go on to resolve something
+        school-scoped need the school, and reading it again would be a second query for
+        a row this method has already fetched.
+        """
+        year = uow.academic_years.get(code)
+        if year is None:
             raise UnknownReference(
                 f"no academic year {code}", field="academic_year_code"
             )
+        return year

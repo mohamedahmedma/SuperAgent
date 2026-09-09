@@ -74,11 +74,22 @@ class ChallengeStatus:
 
 @dataclass(frozen=True, slots=True)
 class AccountSummary:
-    """What the admin routes echo back. Never a password hash, never a token."""
+    """What the admin routes echo back. Never a password hash, never a token.
+
+    That is a property of the SHAPE, not of a filtering step somebody has to remember:
+    there is nowhere here to put a hash, so no admin response can leak one by accident.
+
+    The last two fields carry defaults because they were added for the management screen
+    after `create_account`, `bind_guardian` and `unbind_guardian` were already returning
+    this. Those three say nothing about activity or display name, and defaulting is what
+    let them stay untouched.
+    """
 
     username: str
     role: str
     guardian_external_id: str | None
+    is_active: bool = True
+    display_name: str = ""
 
 
 @dataclass(frozen=True, slots=True)

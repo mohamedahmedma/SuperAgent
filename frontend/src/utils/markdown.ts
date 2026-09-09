@@ -9,6 +9,35 @@ renderer.code = (code, language) => {
   return `<pre><code class="hljs language-${validLanguage}">${highlighted}</code></pre>`;
 };
 
+/**
+ * Images written by the MODEL are dropped.
+ *
+ * The backend never sends markup: a figure reaches the UI as a structured
+ * AssetReference and is rendered by MessageAssets, which fetches the bytes with the
+ * Bearer token an `<img>` cannot carry. So an image in this text can only have been
+ * invented by the model, and it can only ever break — the URL is guessed (often the
+ * bare asset_id it was shown for view_figure), it is loaded with no Authorization
+ * header, and on a split UI/API deployment it resolves against the UI's own origin.
+ * What the user sees is a broken-image glyph sitting next to the caption of a picture
+ * the system was about to render properly one element further down.
+ *
+ * Dropping it costs nothing and closes the other half of the problem: this HTML goes
+ * straight into `v-html`, so model-authored tags are worth admitting one at a time.
+ */
+renderer.image = () => '';
+
+/**
+ * Raw HTML written by the model is dropped too, tags only — the text inside them is a
+ * separate token and survives, so `<b>bold</b>` still reads "bold".
+ *
+ * `<img src=...>` is the same failure as above by a second route, and marked stops
+ * sanitizing anything as of v5: without this, every tag a model emits reaches `v-html`
+ * verbatim. Answers are markdown by contract (the profile prompt says so and nothing
+ * downstream renders HTML), so there is nothing here to lose and an `onerror=` to
+ * avoid.
+ */
+renderer.html = () => '';
+
 marked.use({
   renderer,
   breaks: true,

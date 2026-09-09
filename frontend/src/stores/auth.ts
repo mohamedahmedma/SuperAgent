@@ -74,12 +74,9 @@ export const useAuthStore = defineStore('auth', {
     token: localStorage.getItem(ACCESS_TOKEN_KEY) || '',
     refreshToken: localStorage.getItem(REFRESH_TOKEN_KEY) || '',
     currentUser: null as CurrentUser | null,
-    authMode: 'login' as 'login' | 'register',
     authForm: {
       username: '',
       password: '',
-      role: 'user' as 'user' | 'admin',
-      admin_code: '',
     },
     authLoading: false,
 
@@ -144,6 +141,7 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
+    /** Sign in with a username and password. Staff and administrators only. */
     async handleAuthSubmit() {
       if (this.authLoading) return;
       const username = this.authForm.username.trim();
@@ -154,20 +152,18 @@ export const useAuthStore = defineStore('auth', {
 
       this.authLoading = true;
       try {
-        const endpoint =
-          this.authMode === 'login' ? '/v1/auth/login' : '/v1/auth/register';
-        const payload: Record<string, unknown> = { username, password };
-        if (this.authMode === 'register') {
-          payload.role = this.authForm.role;
-          payload.admin_code = this.authForm.admin_code || null;
-        }
+        /* Login only. There is no registration endpoint any more: `/v1/auth/register` was
+           removed from identity when the shared admin key was, because an administrator is
+           now exactly an account with role=admin — so a public route that could mint one
+           would be a public route into every family's records.
 
-        const { data } = await identityApi.post(endpoint, payload);
+           Accounts are created by an administrator through POST /v1/admin/accounts, and
+           the first administrator is seeded from configuration on every startup. Parents
+           never come through here at all; they sign in over WhatsApp. */
+        const { data } = await identityApi.post('/v1/auth/login', { username, password });
         this.applySession(data);
 
-        // Reset password fields
         this.authForm.password = '';
-        this.authForm.admin_code = '';
       } catch (error: any) {
         // The identity service returns `detail` as an object with a machine-readable
         // `code`; the old backend returned a bare string. Both are handled so a

@@ -407,6 +407,7 @@ Because the pairing lives in a table rather than on the chunks, pairing or unpai
 
 ## Environment Variables
 Configure these at the repo root or in your runtime environment:
+- Model provider: `LLM_PROVIDER` (`groq` | `together`) selects one of the prefixed credential blocks in `.env` — `TOGETHER_API_KEY` / `TOGETHER_BASE_URL` / `TOGETHER_MODEL` / … and the `GROQ_*` equivalents — and copies it onto the generic names below at startup. A block value beats the generic name; the generic name is the fallback for whatever the live block does not mention; `BASE_URL` falls back once more to the provider's own endpoint. Switching provider is therefore one word rather than six coordinated edits, and both blocks stay written so neither can be half-applied. Leaving `LLM_PROVIDER` unset is a supported no-op and the right choice for a provider without a block (OpenRouter, vLLM, an in-house gateway) — set the generic names directly. The resolution and its reasoning live in [backend/llm_provider.py](backend/llm_provider.py); the boot log names the provider, model, and endpoint actually in use. Vision is the one group with a rule of its own: it does **not** follow the switch unless the live block names a `<PREFIX>_VISION_MODEL`, in which case the block's key and endpoint follow it too — so a deployment that deliberately pins vision to another provider keeps it, and one that wants vision moved sets a single line.
 - Model-related: `ARK_API_KEY`, `MODEL`, `FAST_MODEL`, `GRADE_MODEL`, `BASE_URL`. `FAST_MODEL` handles complexity planning and the Step-back / HyDE single-choice rewrite; `GRADE_MODEL` is dedicated to evidence grading. Both are explicitly required and never substitute for each other or fall back to `MODEL`.
 - Dense vectors: `EMBEDDING_MODEL`, `EMBEDDING_DEVICE`, `DENSE_EMBEDDING_DIM` (must match the `dense_embedding` field dimension in the Milvus collection)
 - Dense and sparse: dense vectors come from the local embedding model; sparse vectors are automatically generated and maintained by Milvus's Chinese analyzer and BM25 Function
@@ -414,15 +415,24 @@ Configure these at the repo root or in your runtime environment:
 - Milvus: `MILVUS_HOST`, `MILVUS_PORT`, `MILVUS_COLLECTION`; Attu dashboard host port: `ATTU_HOST_PORT` (default `8081`)
 - Database/cache: `DATABASE_URL`, `REDIS_URL`
 - Auth-related: `JWT_SECRET_KEY`, `ADMIN_INVITE_CODE`, `JWT_ALGORITHM`, `JWT_EXPIRE_MINUTES`
+  — **all legacy and read by nothing.** Authentication moved to `identity/`, which
+  verifies with `IDENTITY_JWKS_URL` and seeds its administrator from
+  `IDENTITY_BOOTSTRAP_ADMIN_USER` / `_PASSWORD`.
 - Password parameters: `PASSWORD_PBKDF2_ROUNDS`
 - Retrieval candidate pool: `RETRIEVAL_CANDIDATE_K` (a fixed candidate count, takes priority), `RETRIEVAL_CANDIDATE_MULTIPLIER` (used when K isn't set: `max(top_k x multiplier, top_k)`, default `3`)
 - Auto-merging: `AUTO_MERGE_ENABLED`, `AUTO_MERGE_THRESHOLD`, `LEAF_RETRIEVE_LEVEL`
 
 ## API Overview
-- Auth
-  - `POST /auth/register`: registration (supports a regular-user mode and an admin invite-code mode).
-  - `POST /auth/login`: login, returns a Bearer token.
-  - `GET /auth/me`: fetch the current logged-in user's info.
+- Auth — **served by `identity/`, not by this backend.** It moved there when the estate
+  split into services; the backend only *verifies* the tokens it is handed. See
+  [identity/README.md](identity/README.md).
+  - `POST /v1/auth/login` on identity: login, returns a Bearer token.
+  - `GET /v1/auth/me` on identity: fetch the current logged-in user's info.
+  - Parents do not use a password at all — they sign in over WhatsApp
+    (`/v1/auth/whatsapp/*`).
+  - There is **no registration endpoint**. Accounts are created by an administrator through
+    `POST /v1/admin/accounts`, and the first administrator is seeded from
+    `IDENTITY_BOOTSTRAP_ADMIN_USER` / `_PASSWORD` on every startup.
 - Chat
   - `POST /chat`: chat (non-streaming), params `message`, `session_id`.
   - `POST /chat/stream`: chat (streaming SSE), same params, returns `text/event-stream`.

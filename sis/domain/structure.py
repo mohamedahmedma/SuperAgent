@@ -37,6 +37,14 @@ _C = TypeVar("_C")
 _E = TypeVar("_E", bound="_Named")
 
 
+class AcademicYearStatus(StrEnum):
+    """Administrative lifecycle state, stated by the school rather than inferred."""
+
+    UPCOMING = "upcoming"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+
+
 def _coerce(field: str, kind: type[_C], entity: object) -> None:
     """Replace a raw cell with its value object, in place, during `__post_init__`."""
     raw = getattr(entity, field)
@@ -132,6 +140,43 @@ class SchoolLanguage(StrEnum):
     ARABIC = "arabic"
     LANGUAGES = "languages"
     BOTH = "both"
+
+
+@dataclass(frozen=True, slots=True)
+class AcademicTrack(_Named):
+    """One academic structure inside a school: Arabic or Languages."""
+
+    code: str
+    department_key: str
+    school_code: SchoolCode | str
+    language_type: SchoolLanguage | str
+    name_en: str
+    name_ar: str
+    display_order: int
+    is_active: bool = True
+
+    def __post_init__(self) -> None:
+        code = str(self.code or "").strip().upper()
+        if not code:
+            raise ValidationError("track code is required", field="track_code")
+        object.__setattr__(self, "code", code)
+        department_key = str(self.department_key or "").strip().lower()
+        if department_key not in {"arabic", "languages"}:
+            raise ValidationError(
+                "department key must be arabic or languages", field="department_key"
+            )
+        object.__setattr__(self, "department_key", department_key)
+        _coerce("school_code", SchoolCode, self)
+        _coerce_names(self)
+        if not isinstance(self.language_type, SchoolLanguage):
+            try:
+                object.__setattr__(self, "language_type", SchoolLanguage(str(self.language_type)))
+            except ValueError:
+                raise ValidationError(
+                    "track language must be arabic or languages", field="language_type"
+                ) from None
+        if self.language_type is SchoolLanguage.BOTH:
+            raise ValidationError("a track cannot contain both languages", field="language_type")
 
 
 class WorkingDay(StrEnum):
@@ -303,12 +348,28 @@ class AcademicYear(_Named):
     starts_on: date
     ends_on: date
     is_current: bool = False
+    # ``None`` preserves callers written before lifecycle statuses existed.
+    status: AcademicYearStatus | str | None = None
+    id: int | None = None
+    created_at: object | None = None
+    updated_at: object | None = None
 
     def __post_init__(self) -> None:
         _coerce("code", AcademicYearCode, self)
         _coerce("school_code", SchoolCode, self)
         _coerce_names(self)
         _check_range(self.starts_on, self.ends_on, "ends_on")
+        status = self.status
+        if status is None:
+            status = AcademicYearStatus.ACTIVE if self.is_current else AcademicYearStatus.UPCOMING
+        if not isinstance(status, AcademicYearStatus):
+            try:
+                status = AcademicYearStatus(status)
+            except ValueError as exc:
+                raise ValidationError("academic year status is invalid", field="status") from exc
+        if self.is_current != (status is AcademicYearStatus.ACTIVE):
+            raise ValidationError("is_current must match whether status is active", field="status")
+        object.__setattr__(self, "status", status)
 
     def contains(self, day: date) -> bool:
         """Both ends inclusive — the last day of the year is a day of the year."""
@@ -343,6 +404,7 @@ class YearLevel(_Named):
     name_ar: str
     display_order: int
     stage: Stage = Stage.UNSPECIFIED
+    track_code: str | None = None
 
     def __post_init__(self) -> None:
         _coerce("code", YearCode, self)
@@ -361,6 +423,9 @@ class YearLevel(_Named):
                     + ", ".join(member.value for member in Stage),
                     field="stage",
                 ) from None
+        if self.track_code is not None:
+            track = str(self.track_code).strip().upper()
+            object.__setattr__(self, "track_code", track or None)
         # A bool is an int, and `display_order=True` would silently mean "position 1".
         if isinstance(self.display_order, bool) or not isinstance(self.display_order, int):
             raise ValidationError(
@@ -434,33 +499,87 @@ class Term(_Named):
     to a year. `is_closed` is stated rather than derived from `ends_on` because a school
     keeps entering late marks for a week after a term ends, and a clock-derived close
     would reject them; `TermClosed` is raised only once a human has said so.
+
+    **The dates are optional, and that is a deliberate widening.** A school declares how
+    many terms it runs when it is created, and the year's term sections are built from that
+    number — in June, months before anyone has decided when the second term starts. Forcing
+    a date at that moment would mean either blocking the setup until the calendar is
+    settled, or inviting a registrar to type a placeholder; and a placeholder date is worse
+    than no date, because nothing downstream can tell it from a real one. `None` means "the
+    school has not said yet", which is a fact the service can carry honestly.
+
+    What that costs, stated plainly because it is the reason the dates existed: a term with
+    no window cannot answer "which class was this child in during it" on its own. Invariant
+    2 still holds — the answer is resolved against the *year's* window instead, which is the
+    same rule one level up. See `resolution_window` and its caller in `queries.py`.
+
+    `sequence` is what orders terms, not the dates, so an undated term still sorts into its
+    right place on every screen.
     """
 
     code: TermCode | str
     academic_year_code: AcademicYearCode | str
     name_en: str
     name_ar: str
-    starts_on: date
-    ends_on: date
+    starts_on: date | None = None
+    ends_on: date | None = None
     sequence: int = 1
     is_closed: bool = False
 
-    # Term dates are the input to invariant 2: a placement covers a term when the
-    # membership overlaps this range, which is why the range must never be inverted.
+    # A stated range is still the input to invariant 2: a placement covers a term when the
+    # membership overlaps it, which is why a stated range must never be inverted. An absent
+    # one is checked no further — there is nothing to invert.
     def __post_init__(self) -> None:
         _coerce("code", TermCode, self)
         _coerce("academic_year_code", AcademicYearCode, self)
         _coerce_names(self)
-        _check_range(self.starts_on, self.ends_on, "ends_on")
+        if self.starts_on is not None and self.ends_on is not None:
+            _check_range(self.starts_on, self.ends_on, "ends_on")
         if isinstance(self.sequence, bool) or not isinstance(self.sequence, int):
             raise ValidationError("sequence must be a whole number", field="sequence")
 
+    @property
+    def is_dated(self) -> bool:
+        """Whether the school has stated both ends of this term.
+
+        One end alone is not a window. A term with a start and no end is a school that has
+        said when teaching begins and not when reporting closes, and every question asked
+        of a term is asked of the whole period — so a half-stated range answers nothing
+        that a wholly absent one does not.
+        """
+        return self.starts_on is not None and self.ends_on is not None
+
+    def resolution_window(self, fallback: "AcademicYear") -> tuple[date, date]:
+        """The days this term is resolved against: its own, or the year's when it has none.
+
+        The fallback is the honest one rather than a convenience. A term inside a year is,
+        at minimum, inside that year — so a school that has not yet dated its terms is
+        asking the same question about a wider period, not a different question. What it
+        must never become is a guess at a narrower period: splitting the year into equal
+        thirds would produce dates nobody stated and file a child's marks under the class
+        she happened to be in on a boundary the service invented.
+        """
+        if self.is_dated:
+            return self.starts_on, self.ends_on
+        return fallback.starts_on, fallback.ends_on
+
     def contains(self, day: date) -> bool:
-        """Both ends inclusive; the last day of term is a teaching day."""
-        return self.starts_on <= day <= self.ends_on
+        """Both ends inclusive; the last day of term is a teaching day.
+
+        An undated term contains no day at all. That is a refusal, not an oversight: the
+        school has said nothing about when this term runs, and answering `True` for every
+        day — or for none by accident — would put a decision in this method that belongs to
+        whoever knows the year. Callers that need a window use `resolution_window`.
+        """
+        return self.is_dated and self.starts_on <= day <= self.ends_on
 
     def overlaps(self, starts_on: date, ends_on: date | None) -> bool:
-        """Whether an open-ended period touches this term — `None` end means "still on"."""
+        """Whether an open-ended period touches this term — `None` end means "still on".
+
+        `False` for an undated term, for the reason `contains` returns `False`.
+        """
+        if not self.is_dated:
+            return False
         return starts_on <= self.ends_on and (ends_on is None or ends_on >= self.starts_on)
 
     @property

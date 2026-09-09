@@ -16,18 +16,35 @@ deliberate: a register naming a child who had already transferred is either a st
 or the wrong class, and writing it would file her attendance under a room she had left —
 the same failure invariant 2 exists to prevent for marks.
 
-Ports only. No sqlalchemy, no fastapi, no clock: the day is always an argument, so a test
-of "she is not on Monday's register" does not depend on the day the suite runs.
+Ports only: no sqlalchemy, no fastapi. The day a register is *about* is always an
+argument, so a test of "she is not on Monday's register" does not depend on the day the
+suite runs.
+
+Today is the one exception, and it is injected rather than read. `take_register` enforces
+two rules that only a calendar can answer — no register for a day that has not happened,
+and a past day may only have an absence excused — so the service has to know what day it
+is. It takes that as a callable instead of calling `datetime.now` itself, because a rule
+written against the wall clock is a rule no test can state: a suite that records Tuesday
+and Wednesday has to be able to *be* Tuesday and then Wednesday, and pinning the test data
+to whatever today happens to be turns a green suite into one that goes red overnight with
+no commit in between. The default is the real clock, so production wiring says nothing.
 """
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.domain.attendance import AttendanceMark, AttendanceState, AttendanceTally, tally
 from sis.domain.errors import UnknownReference, ValidationError
 from sis.domain.people import Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
+
+
+_SIS_TIMEZONE = ZoneInfo("Africa/Cairo")
+
+def _sis_today() -> date:
+    return datetime.now(_SIS_TIMEZONE).date()
 
 __all__ = [
     "AttendanceService",
@@ -108,8 +125,14 @@ class StudentAttendance:
 class AttendanceService:
     """The daily register: build one, take one, read one child's back."""
 
-    def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(
+        self,
+        uow_factory: Callable[[], UnitOfWork],
+        *,
+        today: Callable[[], date] | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._today = today or _sis_today
 
     # -- Reads -------------------------------------------------------------
 
@@ -238,6 +261,7 @@ class AttendanceService:
         *,
         notes: Mapping[str, str] | None = None,
         actor: str = "",
+        absent_unlisted: bool = False,
     ) -> ClassRegister:
         """Record a day for a whole class, and return the register as it now stands.
 
@@ -247,12 +271,29 @@ class AttendanceService:
         this service does not offer, because "she was marked present by mistake" is
         corrected by marking her correctly, not by removing the statement.
 
+        **`absent_unlisted` closes the register.** With it, every child still blank at the
+        end of this call is written `absent`, which is how a supervisor takes a register by
+        naming only the children in the room. It is a parameter rather than the default
+        because the two readings of an unnamed child — "not here" and "not looked at yet" —
+        are different facts, and only the caller knows which one it is holding. The default
+        keeps the partial save honest; this flag is a caller stating that the pass is
+        finished.
+
+        It fills blanks and overwrites nothing. A child already marked `excused` this
+        morning stays excused when the register is closed at noon: closing a register is a
+        statement about the children nobody had reached, not a re-statement about the ones
+        somebody had. Without that rule the flag would quietly destroy the notes an earlier
+        pass had typed, which is the kind of loss a register cannot show afterwards.
+
         Every child named must be placed in this class on this day. A name that is not is
         refused with the number in the message — a stale screen or the wrong class, and
         writing it would file her attendance under a room she had left.
         """
         notes = notes or {}
-        if not states:
+        today = self._today()
+        if on_date > today:
+            raise ValidationError("attendance cannot be recorded for a future day", field="on_date")
+        if not states and not absent_unlisted:
             raise ValidationError(
                 "no attendance was stated; the register has nothing to record",
                 field="states",
@@ -275,6 +316,21 @@ class AttendanceService:
                     academic_year_code, class_code, on_date
                 )
             }
+            if on_date < today:
+                existing = uow.attendance.marks_for_class(section_id, on_date)
+                invalid = sorted(
+                    number for number, state in states.items()
+                    if not (
+                        state == AttendanceState.EXCUSED.value
+                        and number in existing
+                        and existing[number].state == AttendanceState.ABSENT
+                    )
+                )
+                if absent_unlisted or invalid:
+                    raise ValidationError(
+                        "past attendance may only change an existing absent mark to excused",
+                        field="states",
+                    )
             strangers = sorted(set(states) - placed)
             if strangers:
                 raise ValidationError(
@@ -283,6 +339,15 @@ class AttendanceService:
                     "transferred is marked in the class she is in now.",
                     field="states",
                 )
+
+            stated = dict(states)
+            if absent_unlisted:
+                # Only the children who are blank *after* this call's own entries are
+                # applied: one already on file, and one being marked right now, are both
+                # children somebody has reached.
+                already = set(uow.attendance.marks_for_class(section_id, on_date))
+                for number in sorted(placed - set(stated) - already):
+                    stated[number] = AttendanceState.ABSENT.value
 
             marks = [
                 AttendanceMark(
@@ -293,9 +358,10 @@ class AttendanceService:
                     class_code=class_code,
                     note=notes.get(number, ""),
                 )
-                for number, state in states.items()
+                for number, state in stated.items()
             ]
-            uow.attendance.upsert_many(marks, recorded_by=actor)
+            if marks:
+                uow.attendance.upsert_many(marks, recorded_by=actor)
             uow.commit()
 
         # Read back rather than assembling the answer from what was just written: the

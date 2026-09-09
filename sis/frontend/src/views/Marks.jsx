@@ -16,6 +16,7 @@
  * stated and putting it in front of a parent.
  */
 import { useEffect, useState } from 'react';
+import { ManagerMarksBrowser } from '../components/ManagerMarksBrowser.jsx';
 import { api, gradeText } from '../api.js';
 import { Router } from '../router.js';
 import { Store } from '../store.js';
@@ -250,9 +251,185 @@ function StudentMarks({ initial, initialTerm }) {
   );
 }
 
+/* -- Teacher workspace ---------------------------------------------------------- */
+
+function TeacherMarks() {
+  const state = useStore();
+  const year = state.year;
+  const [term, setTerm] = useState('');
+  const [assignmentKey, setAssignmentKey] = useState('');
+  const [assessmentType, setAssessmentType] = useState('');
+  const [assessmentName, setAssessmentName] = useState('');
+  const [maxPoints, setMaxPoints] = useState('');
+  const [draft, setDraft] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const terms = useResource(Store.keys.terms(year), () => api.terms(year), !!year);
+  const teaching = useQuery(() => api.teachingAssignments(year), [year], !!year);
+  const assignments = (teaching.value && teaching.value.assignments) || [];
+  const selected = assignments.find((row) =>
+    `${row.class_code}\u0000${row.subject_code}` === assignmentKey
+  );
+  const invalidMarks = Object.values(draft).some((value) =>
+    value !== '' && (!Number.isFinite(Number(value)) || Number(value) < 0 ||
+      !Number(maxPoints) || Number(value) > Number(maxPoints))
+  );
+  const enteredMarks = Object.entries(draft).filter(([, value]) => value !== '');
+  const sheet = useQuery(
+    () => api.classMarkSheet(selected.class_code, year, term, selected.subject_code),
+    [year, term, assignmentKey],
+    !!(selected && term)
+  );
+
+  useEffect(() => {
+    if (!term && terms.value && terms.value.length) setTerm(terms.value[0].code);
+  }, [term, (terms.value || []).length]);
+  useEffect(() => {
+    if (!assignmentKey && assignments.length) {
+      setAssignmentKey(`${assignments[0].class_code}\u0000${assignments[0].subject_code}`);
+    }
+  }, [assignmentKey, assignments.length]);
+  useEffect(() => {
+    const next = {};
+    ((sheet.value && sheet.value.students) || []).forEach((student) => {
+      next[student.student_number] = '';
+    });
+    setDraft(next);
+  }, [sheet.value]);
+
+  if (!year) return <><PageHead title={t('Marks')} /><NoYearNotice /></>;
+
+  const save = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await api.recordClassMarks(selected.class_code, year, {
+        term_code: term,
+        subject_code: selected.subject_code,
+        assessment_type: assessmentType,
+        assessment_name: assessmentName.trim(),
+        marks: enteredMarks.map(([number, value]) => ({
+          student_number: number,
+          points: Number(value),
+          max_points: Number(maxPoints),
+          clear: false,
+          absent: false
+        }))
+      });
+      Store.toast(t('Marks saved.'), 'success');
+      sheet.reload();
+    } catch (error) {
+      setSaveError(error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveAndMarkRestAbsent = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const students = (sheet.value && sheet.value.students) || [];
+      await api.recordClassMarks(selected.class_code, year, {
+        term_code: term,
+        subject_code: selected.subject_code,
+        assessment_type: assessmentType,
+        assessment_name: assessmentName.trim(),
+        marks: students.map((student) => {
+          const value = draft[student.student_number];
+          if (value === undefined || value === '') {
+            return {
+              student_number: student.student_number,
+              clear: false,
+              absent: true
+            };
+          }
+          return {
+            student_number: student.student_number,
+            points: Number(value),
+            max_points: Number(maxPoints),
+            clear: false,
+            absent: false
+          };
+        })
+      });
+      Store.toast(t('Marks saved; blank students were marked absent.'), 'success');
+      sheet.reload();
+    } catch (error) {
+      setSaveError(error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <>
+    <PageHead title={t('Marks')} lede={t('Only your assigned classes and subjects are shown.')} />
+    <Card title={t('Enter class marks')} tight>
+      <div className="card-body row g-3">
+        <Field className="col-12 col-md-4" label={t('Assessment type')} required>
+          <Select
+            value={assessmentType}
+            strict
+            placeholder={t('— choose assessment type —')}
+            options={[
+              { value: 'exam', label: t('Exam') },
+              { value: 'assignment', label: t('Homework assignment') }
+            ]}
+            onChange={setAssessmentType}
+          />
+        </Field>
+        <Field className="col-12 col-md-4" label={t('Assessment name')} required>
+          <Input value={assessmentName} placeholder={t('January monthly exam')} onInput={setAssessmentName} />
+        </Field>
+        <Field className="col-12 col-md-4" label={t('Maximum mark')} required>
+          <Input type="number" min="0.01" step="0.01" value={maxPoints} onInput={setMaxPoints} />
+        </Field>
+        <Field className="col-12 col-md-8" label={t('Class')}>
+          <Select value={assignmentKey} strict options={assignments.map((row) => ({
+            value: `${row.class_code}\u0000${row.subject_code}`,
+            label: `${pickName(row, state.lang) || row.class_code} · ${state.lang === 'ar' ? (row.subject_name_ar || row.subject_code) : (row.subject_name_en || row.subject_code)} · ${row.year_level_code}`
+          }))} onChange={setAssignmentKey} />
+        </Field>
+        <Field className="col-12 col-md-4" label={t('Term')}>
+          <Select value={term} strict options={(terms.value || []).map((row) => ({
+            value: row.code, label: labelOf(row, state.lang)
+          }))} onChange={setTerm} />
+        </Field>
+      </div>
+      <ErrorNote error={teaching.error || sheet.error || saveError} onRetry={sheet.reload} />
+      {!teaching.loading && !assignments.length ?
+        <Empty title={t('No teaching assignments')}>{t('Ask your school manager to assign your subjects and classes.')}</Empty> :
+        <Table loading={sheet.loading} rows={(sheet.value && sheet.value.students) || []}
+          rowKey={(row) => row.student_number} columns={[
+            { key: 'number', header: t('Student number'), className: 'sis-code', cell: (row) => row.student_number },
+            { key: 'name', header: t('Student'), cell: (row) => pickName(row, state.lang) },
+            { key: 'mark', header: assessmentName
+              ? `${t(assessmentType === 'assignment' ? 'Homework assignment' : 'Exam')} · ${assessmentName} / ${maxPoints || '—'}`
+              : t('Mark'), cell: (row) => <Input type="number" min="0" max={maxPoints || undefined} step="0.01"
+              value={draft[row.student_number] === undefined ? '' : draft[row.student_number]}
+              disabled={!sheet.value || !sheet.value.may_record || sheet.value.term_is_closed}
+              onInput={(value) => setDraft((old) => ({ ...old, [row.student_number]: value }))} /> }
+          ]} />}
+      {sheet.value ? <div className="card-body d-flex flex-column align-items-end gap-2">
+        {invalidMarks ? <span className="small text-danger">
+          {t('Every mark must be between zero and the maximum mark.')}
+        </span> : null}
+        <div className="d-flex flex-wrap gap-2 justify-content-end">
+          <Button variant="quiet" icon="save"
+            disabled={saving || !enteredMarks.length || invalidMarks || !maxPoints || !assessmentType || !assessmentName.trim() || !sheet.value.may_record || sheet.value.term_is_closed}
+            onClick={save}>{saving ? t('Saving…') : t('Save marks')}</Button>
+          <Button variant="primary" icon="check"
+            disabled={saving || invalidMarks || !maxPoints || !assessmentType || !assessmentName.trim() || !sheet.value.may_record || sheet.value.term_is_closed || !(sheet.value.students || []).length}
+            onClick={saveAndMarkRestAbsent}>{saving ? t('Saving…') : t('Save and mark blanks absent')}</Button>
+        </div>
+      </div> : null}
+    </Card>
+  </>;
+}
+
 /* -- Screen ---------------------------------------------------------------------- */
 
-export function Marks({ params = {} }) {
+function RegistrarMarks({ params = {} }) {
   const state = useStore();
   const year = state.year;
   const [term, setTerm] = useState('');
@@ -260,14 +437,36 @@ export function Marks({ params = {} }) {
   const [classCode, setClassCode] = useState('');
 
   const terms = useResource(Store.keys.terms(year), () => api.terms(year), !!year);
-  /* This year's catalogue. A subject belongs to a year now, so the picker cannot offer a code
-     the chosen term's year does not teach. */
+  const classes = useResource(Store.keys.classes(year), () => api.classes(year), !!year);
+
+  /*
+   * The subjects the picker may offer.
+   *
+   * With no class chosen this is the year's whole catalogue, because the sheet is allowed to
+   * name its own classes and the upload may span several rungs. Name a class and it narrows
+   * to what *that* rung is assigned to teach: the class fixes the rung, and a picker still
+   * offering Physics to a Primary class is offering to file a mark against a lesson those
+   * children never sat.
+   *
+   * Both branches are one `useResource` with a key that carries the rung, so switching class
+   * refetches rather than re-labelling the previous rung's list.
+   */
+  const chosenClass = (classes.value || []).find((item) => item.code === classCode);
+  const rung = (chosenClass && chosenClass.year_level_code) || '';
   const subjects = useResource(
-    Store.keys.subjects(year, false),
-    () => api.subjects(year, false),
+    rung ? Store.keys.gradeSubjects(year, rung) : Store.keys.subjects(year, false),
+    () => api.subjects(year, false, rung),
     !!year
   );
-  const classes = useResource(Store.keys.classes(year), () => api.classes(year), !!year);
+
+  /* A subject that the newly chosen class does not teach cannot stay selected: it would be
+     posted with the upload and refused, with nothing on screen to say why. */
+  const offered = subjects.value || [];
+  useEffect(() => {
+    if (subject && offered.length && !offered.some((item) => item.code === subject)) {
+      setSubject('');
+    }
+  }, [rung, offered.length]);
 
   const termList = (terms.value || []).slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
 
@@ -306,13 +505,17 @@ export function Marks({ params = {} }) {
         <Field
           className="col-12 col-sm-4"
           label={t('Subject')}
-          hint={t('Optional. Leave empty if the sheet has a subject_code column.')}
+          hint={
+            rung
+              ? t('Optional. Only what {0} is assigned to teach.', [rung])
+              : t('Optional. Leave empty if the sheet has a subject_code column.')
+          }
         >
           <Select
             className="sis-code"
             value={subject}
             placeholder={t('— from the file —')}
-            options={(subjects.value || []).map((item) => ({
+            options={offered.map((item) => ({
               value: item.code,
               label: labelOf(item, state.lang)
             }))}
@@ -380,4 +583,15 @@ export function Marks({ params = {} }) {
       </div>
     </>
   );
+}
+
+export function Marks({ params = {} }) {
+  useStore();
+  if (Store.roles().indexOf('teacher') >= 0) return <TeacherMarks />;
+  if (Store.can('grades.write')) return <RegistrarMarks params={params} />;
+  if (Store.can('grades.read')) return <>
+    <PageHead title={t('Marks')} lede={t('Read-only class assessment browser.')} />
+    <ManagerMarksBrowser />
+  </>;
+  return <><PageHead title={t('Marks')} /><StudentMarks initial={params.student} initialTerm={params.term} /></>;
 }

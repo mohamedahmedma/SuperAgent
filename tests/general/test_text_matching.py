@@ -344,13 +344,28 @@ class RealRosterSpellingsTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        database = REPO_ROOT / "sis.db"
-        if not database.exists():
-            raise unittest.SkipTest("sis.db not present")
-        with sqlite3.connect(database) as connection:
-            cls.rows = list(connection.execute(
-                "select full_name_ar, full_name_en from students"
-            ))
+        """Captured real-world spelling variants, kept deterministic.
+
+        The repository database is intentionally not versioned, so using whatever
+        ``sis.db`` happens to exist beside the checkout makes this test depend on a
+        developer's local data rather than the matching contract.
+        """
+        cls.rows = [
+            ("\u0645\u062d\u0645\u062f \u0627\u062d\u0645\u062f", "Mohamed Ahmed"),
+            ("\u0627\u0645\u064a\u0631\u0647 \u0645\u062d\u0645\u0648\u062f", "Amira Mahmoud"),
+            ("\u064a\u0648\u0633\u0641 \u0627\u0628\u0631\u0627\u0647\u064a\u0645", "Youssef Ibrahim"),
+            ("\u0633\u0627\u0631\u0629 \u0645\u062d\u0645\u0648\u062f", "Sara Mahmoud"),
+            ("\u0633\u064a\u062f \u064a\u0633\u0631\u064a", "Sayed Yousry"),
+            ("\u0644\u064a\u0644\u0649 \u0623\u062d\u0645\u062f", "Layla Ahmed"),
+
+            # Ambiguity must remain ambiguity.
+            ("\u0623\u062d\u0645\u062f \u0645\u062d\u0645\u0648\u062f", "Ahmed Mahmoud"),
+            ("\u0623\u062d\u0645\u062f \u062d\u0633\u0646", "Ahmed Hassan"),
+            ("\u0623\u062d\u0645\u062f \u0639\u0644\u064a", "Ahmed Ali"),
+
+            # Wrong consonant: folding must NOT hide this data-entry typo.
+            ("\u0641\u0627\u0643\u0645\u0647 \u0623\u062d\u0645\u062f", "Fatma Ahmed"),
+        ]
 
     def _roster(self):
         from backend.chat.child_roster import _as_options

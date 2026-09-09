@@ -1,0 +1,87 @@
+/*
+ AUREXIS Auth Field Border v11.14
+ Exact target: the OUTER rounded border around Username + Password.
+ Desktop and phone.
+*/
+
+:root {
+  --aurexis-auth-cyan: #22c6e8;
+  --aurexis-auth-cyan-soft: rgba(34, 198, 232, .18);
+  --aurexis-auth-cyan-ring: rgba(34, 198, 232, .08);
+}
+
+/* The field itself if the border lives directly on the input. */
+.auth-panel input[type="text"],
+.auth-panel input[type="email"],
+.auth-panel input[type="password"],
+.auth-panel input[name="username"],
+.auth-panel input[name="password"] {
+  accent-color: var(--aurexis-auth-cyan) !important;
+}
+
+.auth-panel input[type="text"]:focus,
+.auth-panel input[type="text"]:focus-visible,
+.auth-panel input[type="email"]:focus,
+.auth-panel input[type="email"]:focus-visible,
+.auth-panel input[type="password"]:focus,
+.auth-panel input[type="password"]:focus-visible,
+.auth-panel input[name="username"]:focus,
+.auth-panel input[name="username"]:focus-visible,
+.auth-panel input[name="password"]:focus,
+.auth-panel input[name="password"]:focus-visible {
+  outline: none !important;
+  border-color: var(--aurexis-auth-cyan) !important;
+  box-shadow:
+    0 0 0 1px var(--aurexis-auth-cyan-soft),
+    0 0 0 3px var(--aurexis-auth-cyan-ring) !important;
+  caret-color: var(--aurexis-auth-cyan) !important;
+}
+
+/* The screenshot shows the border is likely on a rounded wrapper.
+   Cover the auth wrappers only when they actually contain an input. */
+.auth-panel .input-wrapper:has(input):focus-within,
+.auth-panel .password-wrapper:has(input):focus-within,
+.auth-panel .password-field:has(input):focus-within,
+.auth-panel .input-field:has(input):focus-within,
+.auth-panel .form-control:has(input):focus-within,
+.auth-panel .field-control:has(input):focus-within,
+.auth-panel .input-container:has(input):focus-within {
+  outline: none !important;
+  border-color: var(--aurexis-auth-cyan) !important;
+  box-shadow:
+    0 0 0 1px var(--aurexis-auth-cyan-soft),
+    0 0 0 3px var(--aurexis-auth-cyan-ring) !important;
+}
+
+/* Kill legacy green focus/valid ring on the two credential fields. */
+.auth-panel input[name="username"]:valid,
+.auth-panel input[name="password"]:valid {
+  border-color: inherit;
+}
+
+.auth-panel input[name="username"]:valid:focus,
+.auth-panel input[name="password"]:valid:focus {
+  border-color: var(--aurexis-auth-cyan) !important;
+}
+
+/* Same exact behavior on phones. */
+@media (max-width: 900px) {
+  .auth-panel input[type="text"]:focus,
+  .auth-panel input[type="email"]:focus,
+  .auth-panel input[type="password"]:focus,
+  .auth-panel input[name="username"]:focus,
+  .auth-panel input[name="password"]:focus,
+  .auth-panel .input-wrapper:has(input):focus-within,
+  .auth-panel .password-wrapper:has(input):focus-within,
+  .auth-panel .password-field:has(input):focus-within,
+  .auth-panel .input-field:has(input):focus-within,
+  .auth-panel .form-control:has(input):focus-within,
+  .auth-panel .field-control:has(input):focus-within,
+  .auth-panel .input-container:has(input):focus-within {
+    outline: none !important;
+    border-color: var(--aurexis-auth-cyan) !important;
+    box-shadow:
+      0 0 0 1px var(--aurexis-auth-cyan-soft),
+      0 0 0 3px var(--aurexis-auth-cyan-ring) !important;
+  }
+}

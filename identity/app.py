@@ -36,6 +36,10 @@ load_env()
 from identity.infrastructure.crypto.jwt import JwtTokenIssuer  # noqa: E402
 from identity.infrastructure.crypto.keys import signing_key_from  # noqa: E402
 from identity.infrastructure.crypto.passwords import Pbkdf2PasswordHasher  # noqa: E402
+from identity.infrastructure.db.bootstrap import (  # noqa: E402
+    has_any_admin,
+    seed_bootstrap_admin,
+)
 from identity.infrastructure.db.schema import init_db  # noqa: E402
 from identity.infrastructure.directory.fake import FakeGuardianDirectory  # noqa: E402
 from identity.infrastructure.directory.sis import SisGuardianDirectory  # noqa: E402
@@ -47,15 +51,17 @@ logger = logging.getLogger(__name__)
 def _build_directory(resolved):
     """Point the guardian directory at the school's system of record.
 
-    Left as the in-memory fake when `IDENTITY_SIS_BASE_URL` is unset, which means an
-    unconfigured deployment refuses every parent rather than authenticating them against
-    nothing. That is the safe direction: a login that cannot succeed is a support call, and
-    a login that succeeds against an empty directory is a stranger holding a token.
+    Left as the in-memory fake when neither `IDENTITY_SIS_BASE_URL` nor `SIS_BASE_URL` is
+    set, which means an unconfigured deployment refuses every parent rather than
+    authenticating them against nothing. That is the safe direction: a login that cannot
+    succeed is a support call, and a login that succeeds against an empty directory is a
+    stranger holding a token.
     """
     if not resolved.sis_base_url:
         logger.warning(
-            "IDENTITY_SIS_BASE_URL is not set; guardian lookups use an empty in-memory "
-            "directory and every parent will be told their number is not registered."
+            "Neither IDENTITY_SIS_BASE_URL nor SIS_BASE_URL is set; guardian lookups use "
+            "an empty in-memory directory and every parent will be told their number is "
+            "not registered."
         )
         return FakeGuardianDirectory()
 
@@ -66,8 +72,9 @@ def _build_directory(resolved):
         # (`sis/api/deps.py`), so an unset key costs nothing today. Warned rather than
         # dropped, because it is the line that has to come back when SIS has sign-in.
         logger.warning(
-            "IDENTITY_SIS_BASE_URL is set without IDENTITY_SIS_API_KEY. Harmless only "
-            "while SIS authenticates nobody; set it again when SIS has sign-in."
+            "The SIS base URL is set without an API key (IDENTITY_SIS_API_KEY or "
+            "SIS_API_KEY). Harmless only while SIS authenticates nobody; set it again "
+            "when SIS has sign-in."
         )
 
     return SisGuardianDirectory(
@@ -109,6 +116,28 @@ async def lifespan(app: FastAPI):
     """
     resolved = settings()
     init_db()
+
+    # Immediately after the schema, and before anything starts serving. The account has to
+    # exist however this database arrived — fresh, upgraded, restored, or with the row
+    # deleted — which is why it is seeded on every boot rather than by a one-off migration.
+    # Existing usernames are left untouched, so a password changed through the admin routes
+    # survives the next deploy.
+    seed_bootstrap_admin(
+        username=resolved.bootstrap_admin_user,
+        password=resolved.bootstrap_admin_password,
+        pbkdf2_rounds=resolved.pbkdf2_rounds,
+    )
+
+    if not has_any_admin():
+        # Said once, at boot, because the alternative is discovering it at the moment
+        # somebody needs to bind a parent to their children and finds no way in. Every
+        # admin route answers on a signed token carrying role=admin, and with no such
+        # account in the database there is nothing that can mint one.
+        logger.warning(
+            "No active administrator account exists. Nobody can create accounts or bind a "
+            "guardian until one does. Set IDENTITY_BOOTSTRAP_ADMIN_USER and "
+            "IDENTITY_BOOTSTRAP_ADMIN_PASSWORD and restart."
+        )
 
     app.state.settings = resolved
 

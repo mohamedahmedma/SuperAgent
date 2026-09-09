@@ -16,10 +16,13 @@ That refusal is `QueryService`'s, not this router's — it is a rule, and rules 
 here.
 """
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
+from uuid import uuid4
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Query, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 
 from sis.api.deps import (
     Caller,
@@ -28,22 +31,65 @@ from sis.api.deps import (
     get_student_desk,
     require_read_access,
     require_registrar,
+    Principal,
+    require_permission,
+    UowFactoryDep,
 )
+from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services import QueryService
 from sis.application.services.queries import ClassRosterEntry
 from sis.domain.errors import UnknownReference
+from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
 from sis.domain.people import ClassEnrolment, Gender, Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
+from sis.domain.value_objects import Phone
+from sis.infrastructure.db import models as m
+from sis.config import get_settings
 
 router = APIRouter(prefix="/v1", tags=["students"])
+_SCHOOL_TZ = ZoneInfo("Africa/Cairo")
 
 # Both scopes, spelled out: scope comparison is exact equality, so a reader-only check
 # would refuse the registrar reading her own register.
-Reader = Annotated[Caller, Depends(require_read_access)]
-Registrar = Annotated[Caller, Depends(require_registrar)]
+Reader = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_READ))]
+Registrar = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_WRITE))]
+AdmissionsManager = Annotated[
+    Principal, Depends(require_permission(Permission.STUDENTS_CREATE))
+]
 Queries = Annotated[QueryService, Depends(get_query_service)]
 Desk = Annotated[StudentDesk, Depends(get_student_desk)]
+
+
+class StudentTimelineEventOut(BaseModel):
+    id: int
+    action: str
+    entity_type: str
+    entity_id: str
+    actor: str
+    at: datetime
+    old_values: dict | None
+    new_values: dict | None
+
+
+@router.get("/students/{student_number}/timeline", response_model=list[StudentTimelineEventOut])
+def student_timeline(student_number: str, caller: Reader, uow_factory: UowFactoryDep) -> list[StudentTimelineEventOut]:
+    """One student's projection of the shared, append-only audit stream."""
+    with uow_factory() as uow:
+        student = uow._session.scalar(select(m.Student).where(m.Student.student_number == student_number))
+        if student is None:
+            raise UnknownReference(f"no student {student_number}", field="student_number")
+        # JSON filtering differs between SQLite and Postgres, so retain one portable audit
+        # query and filter its bounded newest-first window in Python.
+        rows = uow._session.scalars(select(m.AuditLog).order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc()).limit(1000)).all()
+    def belongs(row) -> bool:
+        values = (row.old_values or {}, row.new_values or {})
+        return (row.entity_type == "Student" and row.entity_id == str(student.id)) or any(
+            str(value.get("student_id", "")) == str(student.id) for value in values
+        )
+    return [StudentTimelineEventOut(id=row.id, action=row.action, entity_type=row.entity_type,
+        entity_id=row.entity_id, actor=row.actor, at=row.created_at,
+        old_values=row.old_values, new_values=row.new_values) for row in rows if belongs(row)][:200]
 
 
 class RosterEntryOut(BaseModel):
@@ -106,7 +152,13 @@ def read_class_roster(
         Query(description="The day to answer for. Defaults to today, echoed as `as_of`."),
     ] = None,
 ) -> ClassRosterOut:
-    on_date = on or datetime.now(UTC).date()
+    caller.narrow(
+        Permission.STUDENTS_READ,
+        lambda scopes: scopes.for_class(
+            academic_year_code=academic_year, class_code=class_code
+        ),
+    )
+    on_date = on or datetime.now(_SCHOOL_TZ).date()
     with domain_errors():
         entries = queries.class_roster(
             AcademicYearCode(academic_year), ClassCode(class_code), on_date
@@ -241,7 +293,7 @@ class PlacementIn(BaseModel):
 
 
 class TransferIn(BaseModel):
-    """Move a child to another class in the same year, from a date."""
+    """Move a child to another class, including a new academic year, from a date."""
 
     academic_year_code: str = Field(examples=["2025-2026"])
     to_class_code: str = Field(examples=["3B"])
@@ -292,6 +344,52 @@ class PlacementHistoryOut(BaseModel):
     placements: list[PlacementOut]
 
 
+class StudentAdmissionIn(BaseModel):
+    """Every fact required to admit one child; no partial records are accepted."""
+
+    full_name_ar: str = Field(min_length=1)
+    full_name_en: str = Field(min_length=1)
+    gender: Gender
+    date_of_birth: date
+    contact_phone: str = Field(
+        default="",
+        description="Optional child contact number; guardian contact is stored separately.",
+    )
+    contact_email: str = Field(
+        default="",
+        description="Optional. An empty string means no email address is on file.",
+    )
+    address: str = Field(min_length=1)
+    guardian_full_name_ar: str = Field(min_length=1)
+    guardian_full_name_en: str = Field(min_length=1)
+    guardian_phone: str = Field(min_length=1)
+    relationship_type: RelationshipType
+    relationship_label: str = Field(
+        default="",
+        description="Optional free-text detail for relationships such as 'big brother'.",
+    )
+    academic_year_code: str = Field(min_length=1)
+    class_code: str = Field(min_length=1)
+
+    @field_validator(
+        "full_name_ar", "full_name_en", "address", "guardian_full_name_ar",
+        "guardian_full_name_en", "guardian_phone",
+        "academic_year_code", "class_code",
+    )
+    @classmethod
+    def no_blank_fields(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("this field is required")
+        return cleaned
+
+
+class StudentAdmissionOut(BaseModel):
+    student: StudentOut
+    placement: PlacementOut
+    guardian_phone: str
+
+
 @router.get(
     "/students",
     response_model=StudentSearchOut,
@@ -304,14 +402,122 @@ class PlacementHistoryOut(BaseModel):
 def search_students(
     queries: Queries,
     caller: Reader,
+    uow_factory: UowFactoryDep,
     q: Annotated[str, Query(description="Number or part of a name.", examples=["ahmed"])] = "",
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     include_inactive: bool = False,
+    academic_year: Annotated[str | None, Query()] = None,
+    year_level: Annotated[str | None, Query()] = None,
 ) -> StudentSearchOut:
+    if academic_year and year_level:
+        caller.narrow(
+            Permission.STUDENTS_READ,
+            lambda scopes: scopes.for_year_level(
+                school_id=caller.school_id, year_level_code=year_level
+            ),
+        )
+    else:
+        caller.narrow(
+            Permission.STUDENTS_READ,
+            lambda scopes: scopes.for_year(academic_year),
+        )
     with domain_errors():
         found = queries.search_students(q, limit=limit, include_inactive=include_inactive)
+    if academic_year and year_level and found:
+        numbers = [str(student.student_number) for student in found]
+        with uow_factory() as uow:
+            allowed = set(uow._session.scalars(
+                select(m.Student.student_number)
+                .join(m.ClassEnrolment)
+                .join(m.ClassSection)
+                .join(m.AcademicYear)
+                .join(m.YearLevel, m.ClassSection.year_level_id == m.YearLevel.id)
+                .where(
+                    m.Student.student_number.in_(numbers),
+                    m.AcademicYear.code == academic_year,
+                    m.YearLevel.code == year_level,
+                )
+            ).all())
+        found = [student for student in found if str(student.student_number) in allowed]
     return StudentSearchOut(
         query=q, count=len(found), students=[StudentOut.of(s) for s in found]
+    )
+
+
+@router.post(
+    "/students/admissions",
+    response_model=StudentAdmissionOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Admit one child with a complete family record",
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+def admit_student(
+    body: StudentAdmissionIn,
+    desk: Desk,
+    caller: AdmissionsManager,
+    uow_factory: UowFactoryDep,
+) -> StudentAdmissionOut:
+    caller.narrow(
+        Permission.STUDENTS_CREATE,
+        lambda scopes: scopes.for_class(
+            academic_year_code=body.academic_year_code, class_code=body.class_code
+        ),
+    )
+    with domain_errors():
+        # A new admission starts on the first day of the selected academic year. The
+        # form no longer asks the registrar to repeat a date the year already owns.
+        with uow_factory() as uow:
+            academic_year = uow.academic_years.get(
+                AcademicYearCode(body.academic_year_code)
+            )
+        if academic_year is None:
+            raise UnknownReference(
+                f"no academic year {body.academic_year_code}",
+                field="academic_year_code",
+            )
+        # The form accepts the way a registrar actually writes an Egyptian guardian
+        # number (01024066401) and stores one canonical value (+201024066401).
+        country = get_settings().default_country_code
+        guardian_phone = Phone.parse(
+            body.guardian_phone, default_country_code=country
+        )
+        # A student number is an internal, immutable reference.  It is minted here so a
+        # manager never has to guess the next number or coordinate with another desk.
+        student_number = f"S-{uuid4().hex[:12].upper()}"
+        student = Student(
+            student_number=student_number,
+            full_name_ar=body.full_name_ar,
+            full_name_en=body.full_name_en,
+            gender=body.gender,
+            date_of_birth=body.date_of_birth,
+            contact_phone=body.contact_phone,
+            contact_email=body.contact_email,
+            address=body.address,
+        )
+        guardian = Guardian(
+            phones=(guardian_phone,),
+            full_name_ar=body.guardian_full_name_ar,
+            full_name_en=body.guardian_full_name_en,
+        )
+        link = StudentGuardian(
+            student_number=student.student_number,
+            guardian_phone=guardian.primary_phone,
+            relationship_type=body.relationship_type,
+            relationship_label=body.relationship_label,
+            is_primary_contact=True,
+            can_view_records=True,
+        )
+        placement = ClassEnrolment(
+            student_number=student.student_number,
+            academic_year_code=body.academic_year_code,
+            class_code=body.class_code,
+            starts_on=academic_year.starts_on,
+        )
+        desk.create_family(student, guardian, link, placement)
+    return StudentAdmissionOut(
+        student=StudentOut.of(student),
+        placement=PlacementOut.of(placement),
+        guardian_phone=str(guardian.primary_phone),
     )
 
 
@@ -324,7 +530,16 @@ def search_students(
     "field to read. Ask `/students/{student_number}/placements` for the history.",
     responses=error_responses(401, 403, 404, 422),
 )
-def read_student(student_number: str, queries: Queries, caller: Reader) -> StudentOut:
+def read_student(
+    student_number: str, queries: Queries, caller: Reader,
+    academic_year: Annotated[str | None, Query()] = None,
+) -> StudentOut:
+    caller.narrow(
+        Permission.STUDENTS_READ,
+        lambda scopes: scopes.for_student(
+            academic_year_code=academic_year or "", student_number=student_number
+        ),
+    )
     with domain_errors():
         student = queries.get_student(StudentNumber(student_number))
     return StudentOut.of(student)
@@ -419,6 +634,14 @@ def read_student_placements(
 ) -> PlacementHistoryOut:
     with domain_errors():
         placements = queries.student_placements(StudentNumber(student_number))
+    caller.narrow_all(
+        Permission.STUDENTS_READ,
+        lambda scopes: (
+            scopes.for_class(
+                academic_year_code=str(row.academic_year_code), class_code=str(row.class_code)
+            ) for row in placements
+        ),
+    )
     return PlacementHistoryOut(
         student_number=student_number,
         count=len(placements),
@@ -440,6 +663,12 @@ def read_student_placements(
 def place_student(
     student_number: str, body: PlacementIn, desk: Desk, caller: Registrar
 ) -> PlacementOut:
+    caller.narrow(
+        Permission.STUDENTS_WRITE,
+        lambda scopes: scopes.for_class(
+            academic_year_code=body.academic_year_code, class_code=body.class_code
+        ),
+    )
     with domain_errors():
         enrolment = ClassEnrolment(
             student_number=student_number,
@@ -455,17 +684,24 @@ def place_student(
 @router.post(
     "/students/{student_number}/transfer",
     response_model=TransferOut,
-    summary="Move one child to another class",
+    summary="Move one child to another class or academic year",
     description="One transaction: the open placement is closed the day before `on_date` "
     "and a new one opens on it. Two separate calls would leave a window in which the child "
     "is in no class at all, and a marks upload landing in that window rejects every one of "
-    "her rows for having no placement. Her marks in the old class stay filed under the old "
+    "her rows for having no placement. A new academic year may use the next grade; within "
+    "one year, transfers remain limited to the same grade. Her marks in the old class stay filed under the old "
     "class — that is the point of the invariant.",
     responses=error_responses(401, 403, 404, 409, 422),
 )
 def transfer_student(
     student_number: str, body: TransferIn, desk: Desk, caller: Registrar
 ) -> TransferOut:
+    caller.narrow(
+        Permission.STUDENTS_WRITE,
+        lambda scopes: scopes.for_class(
+            academic_year_code=body.academic_year_code, class_code=body.to_class_code
+        ),
+    )
     with domain_errors():
         closed, opened = desk.transfer_student(
             StudentNumber(student_number),

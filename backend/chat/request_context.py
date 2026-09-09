@@ -8,7 +8,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from backend.chat.asset_context import SessionAssetState
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.child_context import SessionChild
 from backend.schemas.chat import HitlResumeState, normalize_rag_trace
@@ -38,14 +37,10 @@ class ChatRequestContext:
     # nothing.
     caller: Optional[CallerIdentity] = None
 
-    # Assets surfaced and read during this conversation. Carried on the context (not
-    # a module global) so concurrent requests cannot see each other's state.
-    asset_state: SessionAssetState = field(default_factory=SessionAssetState)
-
     # The child this conversation settled on. Loaded from session metadata at turn
     # start and threaded BY REFERENCE, so a turn that resolves a child has already
-    # written it back by the time the metadata is saved — the same arrangement
-    # `asset_state` uses. A default-constructed pin is the correct shape for a staff
+    # written it back by the time the metadata is saved. A default-constructed pin is
+    # the correct shape for a staff
     # session, a background job or a test: empty, and never consulted, because nothing
     # asks about a child without a guardian to ask on behalf of.
     child: SessionChild = field(default_factory=SessionChild)
@@ -54,7 +49,6 @@ class ChatRequestContext:
     _active: bool = True
     _rag_trace: Optional[dict] = None
     _knowledge_tool_slots_used: int = 0
-    _figure_tool_slots_used: int = 0
     _records_tool_slots_used: int = 0
     _short_circuit_status: Optional[str] = None
     _surfaced_asset_ids: list = field(default_factory=list)
@@ -112,7 +106,6 @@ class ChatRequestContext:
         user_id: str,
         session_id: str,
         output_queue: asyncio.Queue,
-        asset_state: Optional[SessionAssetState] = None,
         caller: Optional[CallerIdentity] = None,
         child: Optional[SessionChild] = None,
     ) -> ChatRequestContext:
@@ -121,7 +114,6 @@ class ChatRequestContext:
             session_id=session_id,
             output_queue=output_queue,
             loop=asyncio.get_running_loop(),
-            asset_state=asset_state or SessionAssetState(),
             caller=caller,
             child=child if child is not None else SessionChild(),
         )
@@ -132,14 +124,12 @@ class ChatRequestContext:
         *,
         user_id: str,
         session_id: str,
-        asset_state: Optional[SessionAssetState] = None,
         caller: Optional[CallerIdentity] = None,
         child: Optional[SessionChild] = None,
     ) -> ChatRequestContext:
         return cls(
             user_id=user_id,
             session_id=session_id,
-            asset_state=asset_state or SessionAssetState(),
             caller=caller,
             child=child if child is not None else SessionChild(),
         )
@@ -263,7 +253,6 @@ class ChatRequestContext:
     def reset_knowledge_tool_budget(self) -> None:
         with self._lock:
             self._knowledge_tool_slots_used = 0
-            self._figure_tool_slots_used = 0
 
     @property
     def remembered_child(self) -> str:
@@ -327,24 +316,13 @@ class ChatRequestContext:
             self._records_tool_slots_used += 1
             return True
 
-    def acquire_figure_tool_slot(self) -> bool:
-        """Budget for view_figure, separate from the knowledge-tool budget: looking at
-        a figure must not consume the turn's single retrieval."""
-        from backend.profiles import get_profile
-
-        limit = get_profile().agent.max_figure_calls_per_turn
-        with self._lock:
-            if self._figure_tool_slots_used >= limit:
-                return False
-            self._figure_tool_slots_used += 1
-            return True
-
     def note_surfaced_assets(self, asset_ids) -> None:
         """Record assets that retrieval put in front of the model.
 
-        Pinning here (rather than when a figure is read) is what lets a client attach
-        images to a response the model never explicitly looked at — the common case,
-        since a caption usually answers the question on its own.
+        This is the whole of the query-time image feature: the figure was read into
+        text at ingest, so the model answers from the chunk and never looks at pixels.
+        These ids are what a citation is resolved against when the turn decides which
+        picture to attach (backend/chat/assets_bridge.py).
         """
         with self._lock:
             if not self._active:
@@ -352,7 +330,6 @@ class ChatRequestContext:
             for asset_id in asset_ids or []:
                 if asset_id and asset_id not in self._surfaced_asset_ids:
                     self._surfaced_asset_ids.append(asset_id)
-            self.asset_state.pin_many(list(self._surfaced_asset_ids))
 
     def surfaced_asset_ids(self) -> list:
         with self._lock:

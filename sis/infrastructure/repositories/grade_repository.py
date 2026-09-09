@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from sis.application.ports.repositories import GradeKey
 from sis.domain.errors import UnknownReference
 from sis.domain.grades import SubjectGrade
+from sis.infrastructure.audit import actor_context
 from sis.domain.value_objects import (
     Percentage,
     StudentNumber,
@@ -150,13 +151,23 @@ class SqlAlchemyGradeRepository:
             "term",
             "term_code",
         )
+        self._validate_academic_context(latest.values(), subjects, terms)
         existing = self._existing_ids(students.values(), subjects.values(), terms.values())
+        existing_rows = {
+            row.id: row
+            for row in self._session.scalars(
+                select(models.SubjectGrade).where(
+                    models.SubjectGrade.id.in_(list(existing.values()) or [-1])
+                )
+            )
+        }
 
         created: dict[GradeKey, bool] = {}
         to_insert: list[dict[str, Any]] = []
         to_update: list[dict[str, Any]] = []
         for key, grade in latest.items():
             triple = (students[key[0]], subjects[key[1]], terms[key[2]])
+            actor_user_id, actor = actor_context.get()
             stated: dict[str, Any] = {
                 "class_section_id": grade.class_section_id,
                 # Invariant 1, at the only point where it can be broken silently: the
@@ -175,6 +186,7 @@ class SqlAlchemyGradeRepository:
                         "student_id": triple[0],
                         "subject_id": triple[1],
                         "term_id": triple[2],
+                        "recorded_by": actor,
                         **stated,
                     }
                 )
@@ -183,7 +195,19 @@ class SqlAlchemyGradeRepository:
                 # `remark` and `recorded_by` are deliberately absent: a re-import
                 # restates the figure, and rewriting them to the column default would
                 # erase the teacher's note and the audit trail of who entered the mark.
-                to_update.append({"id": row_id, **stated})
+                to_update.append({"id": row_id, "recorded_by": actor, **stated})
+                previous = existing_rows[row_id]
+                old_values = {
+                    "percentage": previous.percentage, "points": previous.points,
+                    "max_points": previous.max_points, "recorded_by": previous.recorded_by,
+                }
+                new_values = {**stated, "recorded_by": actor, "student_id": triple[0]}
+                if old_values != new_values:
+                    self._session.add(models.AuditLog(
+                        actor_user_id=actor_user_id, actor=actor, action="grade_edit",
+                        entity_type="SubjectGrade", entity_id=str(row_id),
+                        old_values=old_values, new_values=new_values,
+                    ))
                 created[key] = False
 
         if to_insert:
@@ -192,6 +216,58 @@ class SqlAlchemyGradeRepository:
             self._session.execute(update(models.SubjectGrade), to_update)
         self._session.flush()
         return created
+
+    def _validate_academic_context(
+        self,
+        grades: Collection[SubjectGrade],
+        subjects: Mapping[str, int],
+        terms: Mapping[str, int],
+    ) -> None:
+        """Refuse a mark whose class, subject, and term describe different years.
+
+        Foreign keys prove that each id exists; they cannot prove that the four ids belong
+        to the same academic context.  This bulk lookup is the server-side half of that
+        invariant and remains authoritative for imports and direct API calls alike.
+        """
+        section_ids = {grade.class_section_id for grade in grades}
+        sections = {
+            row.id: (row.academic_year_id, row.year_level_id)
+            for row in self._session.scalars(
+                select(models.ClassSection).where(models.ClassSection.id.in_(section_ids))
+            )
+        }
+        subject_years = dict(self._session.execute(
+            select(models.Subject.id, models.Subject.academic_year_id)
+            .where(models.Subject.id.in_(subjects.values()))
+        ).all())
+        term_years = dict(self._session.execute(
+            select(models.Term.id, models.Term.academic_year_id)
+            .where(models.Term.id.in_(terms.values()))
+        ).all())
+        allowed_pairs = set(self._session.execute(
+            select(models.SubjectYearLevel.subject_id, models.SubjectYearLevel.year_level_id)
+            .where(models.SubjectYearLevel.subject_id.in_(subjects.values()))
+        ).all())
+        for grade in grades:
+            section = sections.get(grade.class_section_id)
+            subject_id = subjects[str(grade.subject_code)]
+            term_id = terms[str(grade.term_code)]
+            if section is None:
+                raise UnknownReference("no class section for this grade", field="class_section_id")
+            year_id, level_id = section
+            if subject_years[subject_id] != year_id or term_years[term_id] != year_id:
+                raise UnknownReference(
+                    "grade subject, term, and class must belong to the same academic year",
+                    field="academic_year_code",
+                )
+            # Legacy imports may predate subject-to-grade configuration entirely. Once a
+            # subject has any configured grades, that configuration is authoritative.
+            subject_pairs = {pair for pair in allowed_pairs if pair[0] == subject_id}
+            if subject_pairs and (subject_id, level_id) not in subject_pairs:
+                raise UnknownReference(
+                    "subject is not configured for the class grade level",
+                    field="subject_code",
+                )
 
     # -- internals -----------------------------------------------------------
 

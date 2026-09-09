@@ -3,14 +3,12 @@
     v-if="!msg.isHitlRequest && !msg.isHitlAnswer"
     :class="['message', msg.isUser ? 'user-message' : 'bot-message']"
   >
-    <div v-if="!msg.isUser" class="message-avatar" aria-hidden="true">
-      <i class="fa-solid fa-robot"></i>
-    </div>
+    <div v-if="!msg.isUser" class="message-avatar" aria-hidden="true"><BrandLogo size="sm" /></div>
 
     <div class="message-column">
       <div v-if="!msg.isUser" class="message-author">
-        <span>Agent Assistant</span>
-        <small v-if="msg.ragTrace?.retrieved_chunks?.length">
+        <span>Aurexis School Assistant</span>
+        <small v-if="showAdvanced && msg.ragTrace?.retrieved_chunks?.length">
           Cited {{ msg.ragTrace.retrieved_chunks.length }} sources
         </small>
       </div>
@@ -40,12 +38,13 @@
           />
           <MessageAssets :assets="msg.assets" />
           <References
+            v-if="showAdvanced"
             ref="referencesRef"
             :msg="msg"
             :msg-index="msgIndex"
             @cite-click="onCiteClick"
           />
-          <RetrievalTraceDetails :msg="msg" />
+          <RetrievalTraceDetails v-if="showAdvanced" :msg="msg" />
         </template>
       </template>
     </div>
@@ -53,6 +52,7 @@
 </template>
 
 <script setup lang="ts">
+import BrandLogo from '@/components/BrandLogo.vue';
 import { ref } from 'vue';
 import MessageAssets from './MessageAssets.vue';
 import MessageContent from './MessageContent.vue';
@@ -64,6 +64,7 @@ import type { Message } from '@/types/chat';
 defineProps<{
   msg: Message;
   msgIndex: number;
+  showAdvanced?: boolean;
 }>();
 
 const emit = defineEmits<{

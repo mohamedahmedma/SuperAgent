@@ -31,8 +31,9 @@ from sis.application.services.grade_import import GradeImportService
 from sis.domain.grades import SubjectGrade
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import Student
-from sis.domain.structure import ClassSection, Subject, Term
+from sis.domain.structure import AcademicYear, ClassSection, Subject, Term
 from sis.domain.value_objects import (
+    AcademicYearCode,
     ClassCode,
     Percentage,
     StudentNumber,
@@ -58,6 +59,23 @@ class FakeTerms:
         self._by_code = {str(t.code): t for t in terms}
 
     def get_many(self, codes: Collection[TermCode]) -> Mapping[str, Term]:
+        return {str(c): self._by_code[str(c)] for c in codes if str(c) in self._by_code}
+
+
+class FakeAcademicYears:
+    """Just enough of the port for the import to resolve a term's year.
+
+    The import needs the year because term dates are optional: an undated term is
+    resolved against the year's window, and nothing in the service invents one. Seeded
+    with the one year this module's fixtures use, so a term naming any other year
+    resolves to nothing — which is the same answer the real repository gives and is what
+    keeps "unknown year" a testable outcome rather than a crash.
+    """
+
+    def __init__(self, *years: AcademicYear) -> None:
+        self._by_code = {str(y.code): y for y in years}
+
+    def get_many(self, codes: Collection[AcademicYearCode]) -> Mapping[str, AcademicYear]:
         return {str(c): self._by_code[str(c)] for c in codes if str(c) in self._by_code}
 
 
@@ -191,12 +209,14 @@ class FakeUnitOfWork:
         *,
         terms: FakeTerms,
         students: FakeStudents,
+        academic_years: FakeAcademicYears | None = None,
         subjects: FakeSubjects,
         enrolments: FakeEnrolments,
         class_sections: FakeClassSections,
         grades: FakeGrades,
     ) -> None:
         self.terms = terms
+        self.academic_years = academic_years or FakeAcademicYears(_year())
         self.students = students
         self.subjects = subjects
         self.enrolments = enrolments
@@ -238,6 +258,19 @@ class FakeGradeParser:
 
 
 # --------------------------------------------------------------------------- world
+
+
+def _year() -> AcademicYear:
+    """The year the fixtures' term sits in. Its window is what an undated term falls back to."""
+    return AcademicYear(
+        code=YEAR,
+        school_code="MAIN",
+        name_en="2025-2026",
+        name_ar="٢٠٢٥-٢٠٢٦",
+        starts_on=date(2025, 9, 1),
+        ends_on=date(2026, 6, 30),
+        is_current=True,
+    )
 
 
 def _term(code: str = TERM, *, is_closed: bool = False) -> Term:

@@ -14,22 +14,6 @@ class LoginIn(BaseModel):
     password: str
 
 
-class RegisterIn(BaseModel):
-    """Self-registration, ported from the old chat backend's `/auth/register`.
-
-    `role` may only be "user" or "admin", and "admin" requires `admin_code`. There is
-    deliberately no way to self-register as a parent: that role is paired with a
-    guardian binding, and both are an administrator's decision.
-    """
-
-    username: str
-    password: str
-    role: str = Field(default="user", description="user | admin")
-    admin_code: str | None = None
-    display_name: str = ""
-    preferred_language: str = "ar"
-
-
 class TokenOut(BaseModel):
     """What a successful login returns.
 
@@ -75,6 +59,5 @@ __all__ = [
     "LoginIn",
     "MeOut",
     "RefreshIn",
-    "RegisterIn",
     "TokenOut",
 ]

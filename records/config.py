@@ -34,6 +34,8 @@ from typing import Final
 
 from dotenv import load_dotenv
 
+from schoolauth import DEFAULT_AUDIENCE, DEFAULT_ISSUER
+
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
@@ -194,8 +196,10 @@ def settings() -> Settings:
         calendar_cache_seconds=float_env(
             "RECORDS_CALENDAR_CACHE_SECONDS", _DEFAULT_CALENDAR_CACHE_SECONDS
         ),
-        identity_issuer=env_value("IDENTITY_ISSUER") or "school-identity",
-        identity_audience=env_value("IDENTITY_AUDIENCE") or "school-services",
+        # Defaults from `schoolauth`, so this service, the backend and the minter cannot
+        # drift apart into an estate-wide 401 that names nothing.
+        identity_issuer=env_value("IDENTITY_ISSUER") or DEFAULT_ISSUER,
+        identity_audience=env_value("IDENTITY_AUDIENCE") or DEFAULT_AUDIENCE,
         identity_jwks_url=env_value("IDENTITY_JWKS_URL"),
         identity_jwks_ttl_seconds=int_env("IDENTITY_JWKS_TTL_SECONDS", 600),
         primary_figure=primary_figure(),

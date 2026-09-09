@@ -1,0 +1,383 @@
+/* =====================================================================
+   AUREXIS FULLSCREEN / TYPOGRAPHY V7
+   - Full-screen workspace: no white outer frame, no "window" effect
+   - No LED/glow dots
+   - Stronger typography hierarchy
+   - Clear-chat restored beside logout
+   - Keeps V5/V6 structure and theme behavior
+   ===================================================================== */
+
+:root{
+  --ax-full-bg:#182638;
+  --ax-full-bg-2:#1c2b3e;
+  --ax-sidebar-bg:#04111f;
+  --ax-sidebar-bg-2:#06172b;
+  --ax-text:#f7f9fc;
+  --ax-soft:#d8e3ec;
+  --ax-muted:#7f9bb5;
+  --ax-cyan:#20bddc;
+}
+
+/* ---------------- FULL SCREEN: NO OUTER WHITE FRAME ---------------- */
+html,
+body,
+#app{
+  width:100%!important;
+  height:100%!important;
+  min-height:100%!important;
+  margin:0!important;
+  padding:0!important;
+  overflow:hidden!important;
+  background:var(--ax-full-bg)!important;
+}
+
+.app-page{
+  width:100%!important;
+  height:100%!important;
+  min-height:100vh!important;
+  margin:0!important;
+  padding:0!important;
+  overflow:hidden!important;
+  background:var(--ax-full-bg)!important;
+}
+
+.app-wrapper{
+  width:100%!important;
+  height:100%!important;
+  min-height:100vh!important;
+  margin:0!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  overflow:hidden!important;
+  background:linear-gradient(180deg,var(--ax-full-bg-2) 0%,var(--ax-full-bg) 100%)!important;
+}
+
+/* Absolutely remove every decorative LED/light layer */
+.app-wrapper::before,
+.app-wrapper::after,
+.app-page::before,
+.app-page::after,
+.public-page::before,
+.auth-page::before,
+.aurora-orb,
+[class*="aurora-orb"]{
+  content:none!important;
+  display:none!important;
+  background:none!important;
+  box-shadow:none!important;
+  filter:none!important;
+}
+
+/* ---------------- SIDEBAR ---------------- */
+.sidebar{
+  background:linear-gradient(180deg,var(--ax-sidebar-bg-2),var(--ax-sidebar-bg))!important;
+  border-right:1px solid rgba(70,125,162,.14)!important;
+}
+
+.sidebar-header{
+  padding-top:4px!important;
+}
+
+.brand-copy h1{
+  font-size:17px!important;
+  font-weight:800!important;
+  letter-spacing:-.03em!important;
+  line-height:1!important;
+}
+.brand-copy span{
+  margin-top:6px!important;
+  font-size:9px!important;
+  font-weight:800!important;
+  letter-spacing:.14em!important;
+}
+
+/* workspace */
+.workspace-copy strong{
+  font-size:12px!important;
+  font-weight:750!important;
+}
+.workspace-copy small{
+  font-size:9px!important;
+  font-weight:500!important;
+}
+
+/* nav: bigger and heavier like the reference */
+.nav-btn{
+  min-height:46px!important;
+  padding:11px 13px!important;
+}
+.nav-btn span{
+  font-size:12px!important;
+  font-weight:700!important;
+}
+.nav-btn i{
+  font-size:14px!important;
+}
+.nav-btn.active{
+  background:#0b3b58!important;
+}
+
+/* section title and recent items */
+.sidebar-section-label{
+  margin-top:24px!important;
+  font-size:8.5px!important;
+  font-weight:850!important;
+  letter-spacing:.18em!important;
+}
+.recent-empty{
+  font-size:9.5px!important;
+  line-height:1.6!important;
+}
+
+/* bottom */
+.theme-control-label{
+  font-size:9.5px!important;
+  font-weight:600!important;
+}
+.user-copy strong{
+  font-size:10.5px!important;
+  font-weight:750!important;
+}
+.user-copy small{
+  font-size:8.5px!important;
+}
+.user-actions{
+  display:inline-flex!important;
+  align-items:center!important;
+  gap:2px!important;
+}
+.user-actions button{
+  display:grid!important;
+  place-items:center!important;
+  width:32px!important;
+  height:32px!important;
+  min-width:32px!important;
+  border:0!important;
+  border-radius:9px!important;
+  color:#7898b5!important;
+  background:transparent!important;
+  transition:background .18s ease,color .18s ease,transform .18s ease!important;
+}
+.user-actions button:hover{
+  color:#ddecf7!important;
+  background:rgba(255,255,255,.055)!important;
+}
+.user-actions .clear-chat-btn:hover{
+  color:#f1b6b6!important;
+  background:rgba(185,65,65,.10)!important;
+}
+
+/* ---------------- HEADER ---------------- */
+.chat-header{
+  min-height:68px!important;
+  padding:16px 24px!important;
+}
+.header-info h1{
+  font-size:15px!important;
+  font-weight:800!important;
+  letter-spacing:-.025em!important;
+}
+
+/* ---------------- CENTER WELCOME ---------------- */
+.welcome-screen{
+  width:min(820px,100%)!important;
+  max-width:820px!important;
+  padding:0 24px 38px!important;
+}
+
+.aurexis-logo-object--xl{
+  --ax-logo-size:92px!important;
+}
+
+.welcome-eyebrow{
+  margin-top:5px!important;
+  font-size:9px!important;
+  font-weight:900!important;
+  letter-spacing:.10em!important;
+}
+
+.welcome-screen h2{
+  margin-top:12px!important;
+  font-size:clamp(38px,3.2vw,48px)!important;
+  font-weight:850!important;
+  line-height:1!important;
+  letter-spacing:-.055em!important;
+}
+
+.welcome-screen>p{
+  max-width:680px!important;
+  margin-top:15px!important;
+  font-size:12.5px!important;
+  font-weight:450!important;
+  line-height:1.7!important;
+  color:#8aa5bf!important;
+}
+
+.welcome-capabilities{
+  margin-top:18px!important;
+  gap:9px!important;
+}
+.welcome-capabilities span{
+  padding:5px 10px!important;
+  font-size:8.5px!important;
+  font-weight:600!important;
+  color:#7897b3!important;
+  background:rgba(7,37,58,.42)!important;
+}
+
+/* ---------------- COMPOSER ---------------- */
+.input-area-wrapper{
+  padding:10px 52px 24px!important;
+}
+.input-area{
+  min-height:58px!important;
+  grid-template-columns:36px 36px minmax(0,1fr) 42px!important;
+  gap:4px!important;
+  padding:8px 10px!important;
+  border-radius:16px!important;
+  background:rgba(5,27,45,.62)!important;
+}
+.attach-btn,
+.voice-btn{
+  width:36px!important;
+  height:36px!important;
+  min-width:36px!important;
+  font-size:14px!important;
+}
+.chat-input-textarea{
+  padding:9px 10px!important;
+  font-size:12.5px!important;
+  line-height:1.45!important;
+}
+.send-btn{
+  width:42px!important;
+  height:42px!important;
+  font-size:15px!important;
+}
+
+/* ---------------- LIGHT MODE ----------------
+   Full screen too. No outer white canvas; soft blue-gray only.
+*/
+html[data-theme="light"] body,
+html[data-theme="light"] #app,
+html[data-theme="light"] .app-page{
+  background:#d7e1ea!important;
+}
+
+html[data-theme="light"] .app-wrapper{
+  background:linear-gradient(180deg,#d6e1eb 0%,#cbd9e5 100%)!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+}
+
+html[data-theme="light"] .sidebar{
+  background:linear-gradient(180deg,#c3d3df,#b9cad7)!important;
+  border-right-color:rgba(58,105,138,.18)!important;
+}
+
+html[data-theme="light"] .brand-copy h1,
+html[data-theme="light"] .header-info h1,
+html[data-theme="light"] .welcome-screen h2{
+  color:#172538!important;
+}
+
+html[data-theme="light"] .brand-copy span,
+html[data-theme="light"] .welcome-screen>p,
+html[data-theme="light"] .recent-empty,
+html[data-theme="light"] .workspace-copy small,
+html[data-theme="light"] .theme-control-label,
+html[data-theme="light"] .user-copy small{
+  color:#617c94!important;
+}
+
+html[data-theme="light"] .workspace-copy strong,
+html[data-theme="light"] .user-copy strong{
+  color:#203548!important;
+}
+
+html[data-theme="light"] .nav-btn{
+  color:#506d86!important;
+}
+html[data-theme="light"] .nav-btn.active{
+  color:#17344b!important;
+  background:#aac7d7!important;
+}
+html[data-theme="light"] .nav-btn:hover{
+  color:#1e4058!important;
+  background:#b5cedb!important;
+}
+
+html[data-theme="light"] .workspace-switcher{
+  background:rgba(180,202,217,.70)!important;
+  border-color:rgba(60,116,151,.22)!important;
+}
+
+html[data-theme="light"] .input-area{
+  background:rgba(185,205,219,.70)!important;
+  border-color:rgba(50,116,154,.25)!important;
+  box-shadow:none!important;
+}
+
+html[data-theme="light"] .chat-input-textarea{
+  color:#1a3348!important;
+}
+html[data-theme="light"] .chat-input-textarea::placeholder{
+  color:#69839b!important;
+}
+
+html[data-theme="light"] .welcome-capabilities span{
+  color:#58748d!important;
+  background:rgba(175,198,214,.56)!important;
+}
+
+html[data-theme="light"] .user-actions button{
+  color:#58768f!important;
+}
+html[data-theme="light"] .user-actions button:hover{
+  color:#1c3c53!important;
+  background:rgba(61,103,133,.09)!important;
+}
+
+/* ---------------- AUTH / SIGN-IN: also full screen ---------------- */
+.public-page,
+.public-shell,
+.auth-page,
+.auth-shell{
+  width:100%!important;
+  min-height:100vh!important;
+  margin:0!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  background:linear-gradient(180deg,#182638 0%,#142131 100%)!important;
+}
+
+html[data-theme="light"] .public-page,
+html[data-theme="light"] .public-shell,
+html[data-theme="light"] .auth-page,
+html[data-theme="light"] .auth-shell{
+  background:linear-gradient(180deg,#d6e1eb,#cbd9e5)!important;
+}
+
+/* responsive */
+@media(max-width:920px){
+  .welcome-screen h2{
+    font-size:36px!important;
+  }
+}
+@media(max-width:720px){
+  .app-page{
+    padding:0!important;
+  }
+  .app-wrapper{
+    min-height:100vh!important;
+  }
+  .input-area-wrapper{
+    padding:8px 12px 12px!important;
+  }
+  .chat-container{
+    padding-inline:14px!important;
+  }
+}

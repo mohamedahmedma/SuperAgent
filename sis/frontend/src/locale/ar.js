@@ -22,9 +22,98 @@
  * register. The English "rung" is this system's own coinage for a year-level; it is صف دراسي.
  */
 export const AR = {
+  'upcoming': 'قادم',
+  'completed': 'مكتمل',
+  'Only an active year becomes the school’s working year. Status is an administrative choice and is not guessed from today’s date.':
+    'السنة النشطة فقط تصبح سنة العمل بالمدرسة. الحالة قرار إداري ولا تُستنتج من تاريخ اليوم.',
+  'Admit a new student': 'إضافة طالب جديد',
+  'All student, guardian, grade and class fields are required.':
+    'يجب استكمال جميع بيانات الطالب وولي الأمر والصف والفصل.',
+  'Student information': 'بيانات الطالب',
+  'Guardian information': 'بيانات ولي الأمر',
+  'Guardian Arabic name': 'اسم ولي الأمر بالعربية',
+  'Guardian English name': 'اسم ولي الأمر بالإنجليزية',
+  'Guardian phone': 'هاتف ولي الأمر',
+  'Student phone': 'هاتف الطالب',
+  'Student email': 'البريد الإلكتروني للطالب',
+  'Gender': 'النوع',
+  'Male': 'ذكر',
+  'Female': 'أنثى',
+  'Date of birth': 'تاريخ الميلاد',
+  'Address': 'العنوان',
+  'Relationship': 'صلة القرابة',
+  'Relationship description': 'وصف صلة القرابة',
+  'Father': 'الأب',
+  'Mother': 'الأم',
+  'Guardian': 'ولي أمر',
+  'Sibling': 'أخ أو أخت',
+  'Grandparent': 'جد أو جدة',
+  'Other': 'أخرى',
+  'Placement': 'القيد الدراسي',
+  'Placement starts': 'تاريخ بداية القيد',
+  'Grade and class': 'الصف والفصل',
+  'Create student and guardian': 'إنشاء الطالب وولي الأمر',
+  'Student admitted successfully.': 'تم تسجيل الطالب بنجاح.',
+  'Create student': 'إنشاء طالب',
+  'Create one complete student record with a guardian and first class placement.':
+    'أنشئ ملفًا كاملًا للطالب مع ولي الأمر وأول قيد في الفصل.',
+  'The student was added to class {0}.': 'تمت إضافة الطالب إلى الفصل {0}.',
+  'Teacher created with reference {0}.': 'تم إنشاء المعلّم بالرقم المرجعي {0}.',
+  /* -- Signing in, and what a person's roles reach ---------------------------------
+   *
+   * صلاحية is the word an Egyptian school uses for a permission, and دور for a role. The
+   * refusal sentences name who to ask rather than what went wrong: a teacher reading
+   * "you do not have permission" has nothing to do next, and the person who can fix it is
+   * always whoever assigns roles at their own school. */
+  'Sign in': 'تسجيل الدخول',
+  'Sign in failed': 'تعذر تسجيل الدخول',
+  'Show password': 'إظهار كلمة المرور',
+  'Hide password': 'إخفاء كلمة المرور',
+  'Signing in…': 'جارٍ تسجيل الدخول…',
+  'Sign out': 'تسجيل الخروج',
+  'Signing in shows you the classes and screens your roles cover.':
+    'تسجيل الدخول يعرض لك الفصول والشاشات التي تغطيها أدوارك.',
+  'No role': 'بلا دور',
+  'Not your screen': 'هذه الشاشة ليست ضمن صلاحياتك',
+  'Your roles do not cover this part of the console. Ask whoever manages roles at your school if you need it.':
+    'أدوارك لا تشمل هذا الجزء من النظام. راجع المسؤول عن الأدوار في مدرستك إن كنت تحتاج إليه.',
+  'You can read this register but not record it. Ask whoever manages roles at your school for the classes you take.':
+    'يمكنك الاطلاع على هذا الكشف دون تسجيله. راجع المسؤول عن الأدوار في مدرستك لإضافة الفصول التي تدرّسها.',
+  /* The six roles, as a school names them. */
+  'System Administrator': 'مدير النظام',
+  'School Owner': 'مالك المدرسة',
+  'School Manager': 'مدير المدرسة',
+  'Grade Supervisor': 'مشرف الصف',
+  'Class Supervisor': 'مشرف الصف',
+  'A class supervisor may also remain an ordinary teacher.': 'يمكن أن يكون مشرف الصف معلّمًا أيضًا.',
+  'Attendance Supervisor': 'مشرف الحضور والغياب',
+  'Choose a grade': 'اختر السنة الدراسية',
+  'This account will only see this grade’s classes and students in attendance.':
+    'سيظهر لهذا الحساب فصول وطلاب هذه السنة فقط في الغياب.',
+  Teacher: 'معلّم',
+  'Subject Coordinator': 'منسّق المادة',
+  Username: 'اسم المستخدم',
+  Password: 'كلمة المرور',
   /* -- The shell ----------------------------------------------------------------- */
   'Student Information Service': 'نظام معلومات الطلاب',
   'Registrar console': 'وحدة تحكم شؤون الطلاب',
+  'Powered by': 'بدعم من',
+  'Information unavailable': 'المعلومات غير متاحة حاليًا',
+  'This information is temporarily unavailable. Please try again in a moment.':
+    'هذه المعلومات غير متاحة مؤقتًا. يُرجى المحاولة بعد قليل.',
+  'Your session needs to be refreshed before this information can be shown.':
+    'يلزم تحديث جلستك قبل عرض هذه المعلومات.',
+  'This information is not available for your account.':
+    'هذه المعلومات غير متاحة لحسابك.',
+  'This file is larger than the supported size. Try uploading it in smaller parts.':
+    'حجم الملف أكبر من الحد المدعوم. جرّب رفعه على أجزاء أصغر.',
+  'This information is no longer available. Please refresh it and try again.':
+    'لم تعد هذه المعلومات متاحة. يُرجى تحديثها والمحاولة مرة أخرى.',
+  'This information is not available yet. Please try again shortly.':
+    'هذه المعلومات غير متاحة بعد. يُرجى المحاولة بعد قليل.',
+  'This information is not available yet.': 'هذه المعلومات لم تُضف بعد.',
+  'We could not sign you in. Please check your details and try again.':
+    'تعذّر تسجيل الدخول. يُرجى مراجعة البيانات والمحاولة مرة أخرى.',
   School: 'المدرسة',
   'Find a child': 'البحث عن طالب',
   Roster: 'كشف القيد',
@@ -140,6 +229,12 @@ export const AR = {
     'اختر ملف الدرجات',
   'Choose the roster sheet':
     'اختر ملف كشف القيد',
+  'Choose one student and guardian roster sheet':
+    'اختر ملفًا واحدًا للطلاب وأولياء الأمور',
+  'One row per student. Include the guardian in the same row; alternate guardian fields remain optional.':
+    'صف واحد لكل طالب، ويتضمن ولي الأمر في الصف نفسه، وتظل بيانات الاتصال البديلة اختيارية.',
+  'student_number,full_name_ar,full_name_en,class_code,guardian_name_ar,guardian_name_en,guardian_phone,relationship_type,is_primary_contact,can_view_records':
+    'student_number,full_name_ar,full_name_en,class_code,guardian_name_ar,guardian_name_en,guardian_phone,relationship_type,is_primary_contact,can_view_records',
   'Choose the term first. A marks file with no term named is a file the service cannot place.':
     'اختر الفصل الدراسي أولًا. فملف درجات بلا فصل مُسمّى ملف لا تستطيع الخدمة تحديد موضعه.',
   'Chosen in the header, for every screen.':
@@ -773,6 +868,10 @@ export const AR = {
     'اختر فصلًا دراسيًا',
   'Choose a class':
     'اختر صفًا',
+  'No other class in this grade':
+    'لا يوجد فصل آخر في هذا الصف الدراسي',
+  'She can only be moved to another section of the same grade, and this grade has no other. Add one first.':
+    'لا يمكن نقلها إلا إلى فصل آخر في الصف الدراسي نفسه، وهذا الصف ليس به فصل آخر. أضف فصلًا أولًا.',
   'Nothing changed':
     'لم يتغير شيء',
   'Guardian removed':
@@ -865,4 +964,468 @@ export const AR = {
     'ثانوي',
   'Not yet grouped':
     'غير مصنَّف بعد',
+  'Academic track':
+    'المسار الأكاديمي',
+  'You are managing this structure independently.':
+    'أنت تدير هذا الهيكل بشكل مستقل.',
+  'Assign subjects to grades': 'تعيين المواد للصفوف',
+  'Available subjects': 'المواد المتاحة',
+  'Remove assignment': 'إزالة التعيين',
+  'Drop subjects here': 'اسحب المواد هنا',
+
+  /* The subject board. */
+  'Which grades teach what':
+    'الصفوف وما تدرّسه',
+  'A subject is taught only where it is placed':
+    'تُدرَّس المادة حيث تُعيَّن فقط',
+  'A subject appears only where it is assigned. Physics assigned to Secondary does not appear in Primary, and the two academic tracks are assigned separately.':
+    'تظهر المادة حيث تُعيَّن فقط. الفيزياء المعيَّنة للثانوي لا تظهر في الابتدائي، ويُعيَّن المساران الأكاديميان كلٌّ على حدة.',
+  'Drag a subject onto a grade, or tap it to pick it up.':
+    'اسحب المادة إلى الصف، أو انقر عليها لاختيارها.',
+  'Now choose a grade below, or tap the subject again to put it back.':
+    'اختر صفًا بالأسفل، أو انقر المادة مرة أخرى لإعادتها.',
+  'No active subject in this year to assign.':
+    'لا توجد مادة مفعَّلة في هذا العام لتعيينها.',
+  'Teaches nothing yet.':
+    'لا يُدرَّس فيه شيء بعد.',
+  'Assign here':
+    'عيِّن هنا',
+  'Already here':
+    'معيَّنة هنا بالفعل',
+  'Remove {0} from {1}':
+    'إزالة {0} من {1}',
+  'No grades on this school yet':
+    'لا توجد صفوف في هذه المدرسة بعد',
+  'A subject is assigned to a grade, so the ladder has to exist first. Add rungs on the school screen, or generate them below.':
+    'تُعيَّن المادة إلى صف، فلا بد من وجود الصفوف أولًا. أضِف الصفوف من شاشة المدرسة، أو أنشئها بالأسفل.',
+  'No grades in this track':
+    'لا توجد صفوف في هذا المسار',
+  'Add a rung to this track on the school screen, and it will appear here.':
+    'أضِف صفًا إلى هذا المسار من شاشة المدرسة ليظهر هنا.',
+  'Optional. Only what {0} is assigned to teach.':
+    'اختياري. فقط ما عُيِّن لتدريسه في {0}.',
+
+  /* Stage 6 — the year's terms, and what the year is attached to. */
+  'Optional':
+    'اختياري',
+  'Term {0}':
+    'الفصل {0}',
+  'Save dates':
+    'حفظ التواريخ',
+  'No dates yet. The term still holds marks and still closes — dates are only needed to say when it runs.':
+    'لا توجد تواريخ بعد. الفصل يستقبل الدرجات ويُغلق كالمعتاد — التواريخ لازمة فقط لبيان موعده.',
+  'These sections come from the number of terms the school runs. Dates are optional — a term works without them, and they can be filled in whenever the calendar is settled.':
+    'تُنشأ هذه الأقسام من عدد الفصول التي تعمل بها المدرسة. التواريخ اختيارية — يعمل الفصل بدونها، ويمكن إدخالها متى استقر التقويم.',
+  '{0} term section(s), one panel each':
+    '{0} قسم فصلي، لكلٍّ لوحته',
+  'none yet':
+    'لا شيء بعد',
+  'Add a term':
+    'إضافة فصل',
+  'Terms are created with the year, from the number the school runs. If none are here, this year predates that — add one, or re-save the year from the school screen.':
+    'تُنشأ الفصول مع العام الدراسي من العدد الذي تعمل به المدرسة. إن لم يكن هنا شيء فهذا العام أقدم من ذلك — أضِف فصلًا، أو أعِد حفظ العام من شاشة المدرسة.',
+  'This year is attached to':
+    'يرتبط هذا العام بـ',
+  'School, tracks, grades and classes — read together':
+    'المدرسة والمسارات والصفوف والفصول — تُقرأ معًا',
+  '{0} selected by the school':
+    '{0} اختارتها المدرسة',
+  'Terms':
+    'الفصول',
+  'Grades':
+    'الصفوف',
+  'Tracks':
+    'المسارات',
+  'Not yet in a track':
+    'خارج المسارات بعد',
+  '{0} grade(s), {1} class(es)':
+    '{0} صف، {1} فصل',
+  'No grades on this track yet.':
+    'لا توجد صفوف في هذا المسار بعد.',
+  'Teacher roles': 'أدوار المعلّمين',
+  'Staff roles': 'أدوار العاملين',
+  'Choose a grade and subject to review its teachers. Supervisors are managed separately and may also be teachers.':
+    'اختر الصف والمادة لعرض معلّميها. وتُدار قائمة المشرفين بشكل مستقل، ويمكن أن يكون المشرف معلّماً أيضاً.',
+  'Teachers': 'المعلّمون',
+  'Teachers come from their subject and class assignments.': 'تُحدد قائمة المعلّمين حسب المواد والفصول المسندة إليهم.',
+  'Teacher subject': 'مادة المعلّم',
+  'All subjects': 'كل المواد',
+  'No teachers match this grade and subject.': 'لا يوجد معلّمون مطابقون لهذا الصف وهذه المادة.',
+  'Supervisors': 'المشرفون',
+  'A supervisor may also remain an ordinary teacher. Roles are additive.': 'يمكن أن يكون المشرف معلّماً عادياً أيضاً؛ فالأدوار تُضاف ولا يستبدل أحدها الآخر.',
+  'Supervisor scope': 'نطاق الإشراف',
+  'Roles are additive. Selecting a supervisor role keeps the Teacher role active.':
+    'الأدوار تراكمية؛ اختيار دور إشرافي يُبقي دور المعلّم فعالًا.',
+  'Active roles': 'الأدوار الفعالة',
+  'Active': 'فعال',
+  'No login account': 'لا يوجد حساب دخول',
+  'Create or link a login account before assigning roles.':
+    'أنشئ حساب دخول أو اربطه قبل تعيين الأدوار.',
+  'Teacher attendance': 'حضور المعلّمين',
+  '{0} record(s)': '{0} سجل',
+  'Date': 'التاريخ',
+  'Note': 'ملاحظة',
+  'Class assignments': 'تعيينات الفصول',
+  'Choose a managed grade, subject, eligible teacher, and one or more classes.':
+    'اختر صفًا دراسيًا تحت إشرافك، ثم المادة والمعلّم المؤهل وفصلًا أو أكثر.',
+  'No managed grades are assigned to this account.':
+    'لم تُعيَّن لهذا الحساب صفوف دراسية للإشراف عليها.',
+  '1. Grade': '١. الصف الدراسي',
+  '2. Subject': '٢. المادة',
+  '3. Eligible teacher': '٣. المعلّم المؤهل',
+  '4. Classes': '٤. الفصول',
+  'Assign teacher': 'تعيين المعلّم',
+  'Teaching staff on this grade': 'هيئة التدريس في هذا الصف',
+  'Read-only. Each teacher is shown as they stand on this grade alone.':
+    'للاطّلاع فقط. يظهر كل معلّم بما يخصّ هذا الصف وحده.',
+  'Teacher': 'المعلّم',
+  'Staff number': 'الرقم الوظيفي',
+  'Subjects': 'المواد',
+  'Assigned classes': 'الفصول المسندة',
+
+  /* Stage 13 — taking the register. */
+  'Take attendance': 'رصد الحضور',
+  'Choose a day, a grade and a class. Mark the children who are here; the rest are recorded absent.':
+    'اختر اليوم والصف الدراسي والفصل. علّم الطلاب الحاضرين، ويُسجَّل الباقون غائبين.',
+  '1. Day, grade and class': '١. اليوم والصف والفصل',
+  'Grade': 'الصف الدراسي',
+  'done': 'مكتمل',
+  'No classes are assigned to this account.': 'لا توجد فصول مسندة لهذا الحساب.',
+  'A register is taken by whoever holds the class. Ask whoever manages roles at your school for the classes you take.':
+    'يرصد الحضورَ من يُسند إليه الفصل. راجع مسؤول الصلاحيات في مدرستك بشأن الفصول التي ترصدها.',
+  'This register was already taken for this day. Saving again corrects it rather than recording it twice.':
+    'سبق رصد الحضور في هذا اليوم. الحفظ مرة أخرى يصحّح الرصد ولا يكرّره.',
+  'Finish — rest absent': 'إنهاء — الباقون غائبون',
+  'Records every child still blank as absent.': 'يسجّل كل طالب لم يُعلَّم بعد بوصفه غائبًا.',
+  '{0} change(s) not yet saved.': '{0} تغييرات لم تُحفظ بعد.',
+  'Nothing is written until you save. Saving again corrects the day rather than adding a second set of marks.':
+    'لن يُكتب شيء قبل الحفظ. والحفظ مرة أخرى يصحّح اليوم ولا يضيف سجلاً مكرراً.',
+  '{0} present': '{0} حاضر',
+  '{0} absent': '{0} غائب',
+  '{0} late': '{0} متأخر',
+  '{0} excused': '{0} بعذر',
+  '{0} not yet marked': '{0} لم يُرصد بعد',
+  'An unmarked child shows {0}. The counts use the {1} recorded marks, not all {2} children.':
+    'يظهر الطالب غير المرصود بالعلامة {0}. وتعتمد الأعداد على {1} سجلات محفوظة، لا على كل الطلاب وعددهم {2}.',
+  'Either this class is empty, or nobody was placed in it on {0}.':
+    'إما أن الفصل فارغ، أو لم يكن أي طالب مقيداً فيه يوم {0}.',
+  'name not on file': 'الاسم غير مسجل',
+  /* Stage 14 — teacher academic access and mark entry. */
+  'Only your assigned classes and subjects are shown.': 'تظهر فقط الفصول والمواد المسندة إليك.',
+  'Enter class marks': 'إدخال درجات الفصل',
+  'Assigned class and subject': 'الفصل والمادة المسندان',
+  'No teaching assignments': 'لا توجد تكليفات تدريسية',
+  'Ask your school manager to assign your subjects and classes.': 'اطلب من مدير المدرسة إسناد موادك وفصولك.',
+  'Student': 'الطالب',
+  'Save marks': 'حفظ الدرجات',
+  'Marks saved.': 'تم حفظ الدرجات.',
+  'Upload this class marks file': 'رفع ملف درجات هذا الفصل',
+  'CSV only. Columns: student_number, percentage. Only the selected class and your assigned subject are accepted.':
+    'ملف CSV فقط بالأعمدة student_number وpercentage. لا تُقبل إلا درجات الفصل المحدد والمادة المسندة إليك.',
+  'The file has no student rows.': 'الملف لا يحتوي على صفوف طلاب.',
+  'Required columns: student_number and percentage.': 'الأعمدة المطلوبة: student_number وpercentage.',
+  'Every percentage must be between 0 and 100.': 'يجب أن تكون كل درجة بين 0 و100.',
+  'Could not read the marks file.': 'تعذرت قراءة ملف الدرجات.',
+  '{0} marks loaded from the file.': 'تم تحميل {0} درجات من الملف.',
+  /* Stage 15 — principal teacher eligibility workflow. */
+  'Create teacher': 'إنشاء معلّم',
+  'Define the teacher account, subjects, eligible grades, and track scope. Grade supervisors assign classes afterward.':
+    'حدّد حساب المعلّم ومواده والصفوف المؤهل لها ونطاق المسار، ثم يعيّن موجّه الصف الفصول لاحقًا.',
+  'Teacher account': 'حساب المعلّم',
+  'Existing teacher': 'معلّم موجود',
+  'Create a teacher': 'إنشاء معلّم',
+  'English name': 'الاسم بالإنجليزية',
+  'Arabic name': 'الاسم بالعربية',
+  'Required for a new account; leave blank to keep an existing password.':
+    'مطلوبة للحساب الجديد؛ اتركها فارغة للاحتفاظ بكلمة المرور الحالية.',
+  'Subject, grade, and track eligibility': 'أهلية المادة والصف والمسار',
+  'Choose a compatible subject and grade': 'اختر مادة وصفًا متوافقين',
+  'Add eligibility': 'إضافة أهلية',
+  'No eligible grades yet': 'لا توجد صفوف مؤهلة بعد',
+  'Track': 'المسار',
+  'Save teacher configuration': 'حفظ إعداد المعلّم',
+  'Teacher configuration saved.': 'تم حفظ إعداد المعلّم.',
+  'Assessment name': 'اسم التقييم',
+  'Choose grade': 'اختر الصف',
+  'Choose a grade first.': 'اختر الصف أولًا.',
+  'Only classes in the selected grade are shown.': 'تظهر فصول الصف المحدد فقط.',
+  'Choose stage': 'اختر المرحلة',
+  'Choose subject': 'اختر المادة',
+  'Create teacher': 'إنشاء معلّم',
+  'Every mark must be between zero and the maximum mark.': 'يجب أن تكون كل درجة بين صفر والحد الأقصى للدرجات.',
+  'Find a child in your classes': 'ابحث عن طالب في فصولك',
+  'January monthly exam': 'الاختبار الشهري لشهر يناير',
+  'Maximum mark': 'الحد الأقصى للدرجات',
+  'New teacher account': 'حساب معلّم جديد',
+  'This staff number already belongs to another teacher.': 'هذا الرقم الوظيفي مسجّل بالفعل لمعلّم آخر.',
+  'Timetable': 'الجدول',
+  'Choose a class to view its weekly timetable. Supervisors can drag subjects into lessons and swap existing lessons.': 'اختر الفصل لعرض جدوله الأسبوعي. يستطيع المشرف سحب المواد إلى الحصص وتبديل الحصص الموجودة.',
+  'Class and term': 'الفصل والفصل الدراسي',
+  'Term': 'الفصل الدراسي',
+  'Editable timetable': 'جدول قابل للتعديل',
+  'View only': 'عرض فقط',
+  'Teachers only see classes assigned to them. Supervisors see classes in their managed grade.': 'يرى المدرس الفصول المسندة إليه فقط، ويرى المشرف فصول الصف الذي يشرف عليه.',
+  'Drag a subject onto any lesson. Drag one lesson onto another to swap them.': 'اسحب المادة إلى أي حصة، أو اسحب حصة إلى أخرى لتبديلهما.',
+  'Weekly timetable': 'الجدول الأسبوعي',
+  'Period': 'الحصة',
+  'Drop subject here': 'ضع المادة هنا',
+  'Clear lesson': 'حذف الحصة',
+  '{0} timetable change(s) not yet saved.': '{0} تعديلات على الجدول لم تُحفظ بعد.',
+  'No unsaved timetable changes.': 'لا توجد تعديلات غير محفوظة على الجدول.',
+  'Discard changes': 'إلغاء التعديلات',
+  'Save timetable': 'حفظ الجدول',
+  'Timetable saved to the database.': 'تم حفظ الجدول في قاعدة البيانات.',
+  'Break': 'فسحة',
+  'All rights reserved.': 'جميع الحقوق محفوظة.',
+  'Sunday': 'الأحد', 'Monday': 'الاثنين', 'Tuesday': 'الثلاثاء',
+  'Wednesday': 'الأربعاء', 'Thursday': 'الخميس', 'Friday': 'الجمعة', 'Saturday': 'السبت',
+
+  /* Removing a child from a class. The English says "last day" and so does the Arabic: the
+     whole point of these three sentences is that "تمت الإزالة" on its own is what made a
+     registrar think the button had done nothing, because the child is still on the register
+     she was removed from — correctly, for one more day. */
+  'Today is her last day in {0}, so she stays on today’s register — this morning’s attendance is taken against it — and is off it from tomorrow.':
+    'اليوم هو آخر يوم لها في {0}، لذلك تظل في كشف اليوم — لأن غياب اليوم يُسجَّل عليه — وتخرج منه اعتبارًا من الغد.',
+  'It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class tomorrow.':
+    'هذا لا يحذفها: يبقى ملفها ودرجاتها وحضورها كما هي، ويمكن إلحاقها بفصل آخر غدًا.',
+  'Today is her last day, so she is on the register once more and off it tomorrow.':
+    'اليوم آخر يوم لها، لذلك تظهر في الكشف مرة أخيرة وتخرج منه غدًا.',
+  '{0} on their last day':
+    '{0} في آخر يوم لهم',
+  'Last day {0} — off the register after it':
+    'آخر يوم {0} — تخرج من الكشف بعده',
+
+  'No attendance data recorded yet': 'لم تُسجّل بيانات حضور لهذا الطالب بعد',
+  'No attendance has been recorded for this student in the selected period yet.': 'لم يتم تسجيل حضور أو غياب لهذا الطالب خلال الفترة المحددة حتى الآن.',
+  'No marks recorded yet': 'لم تُسجّل درجات لهذا الطالب بعد',
+  'No marks have been recorded for this student in this term yet.': 'لم يتم تسجيل درجات لهذا الطالب في هذا الفصل الدراسي حتى الآن.',
+  'No guardian data recorded yet': 'لم تُسجّل بيانات ولي أمر لهذا الطالب بعد',
+  'No guardian information has been recorded for this student yet.': 'لم يتم تسجيل بيانات ولي أمر لهذا الطالب حتى الآن.',
+
+  'Days marked in this school year so far': 'أيام الحضور المسجلة هذا العام حتى الآن',
+  'Days present or late': 'أيام الحضور أو التأخير',
+  'Days absent or excused': 'أيام الغياب أو الغياب بعذر',
+  'Adults on contact list': 'أولياء الأمور المسجلون',
+
+  'Assessment type': 'نوع التقييم',
+  'Exam': 'امتحان',
+  'Homework assignment': 'واجب منزلي',
+  '— choose assessment type —': '— اختر نوع التقييم —',
+
+  'Class marks': 'درجات الفصل',
+  'Read only': 'للقراءة فقط',
+  'Assessment': 'التقييم',
+  '— choose grade —': '— اختر الصف الدراسي —',
+  '— choose class —': '— اختر الفصل —',
+  '— choose subject —': '— اختر المادة —',
+  '— choose assessment —': '— اختر التقييم —',
+  'No assessments recorded': 'لا توجد تقييمات مسجلة',
+  'Choose the filters above': 'اختر البيانات المطلوبة',
+  'Choose grade, class, subject and assessment type to read the recorded marks.': 'اختر الصف والفصل والمادة ونوع التقييم لعرض الدرجات المسجلة.',
+  'No saved assessments of this type exist yet.': 'لا توجد تقييمات محفوظة من هذا النوع حتى الآن.',
+  'Read-only class assessment browser.': 'عرض درجات الفصول والتقييمات للقراءة فقط.',
+
+  'Read-only attendance view. Recording controls are hidden for this account.': 'عرض الحضور والغياب للقراءة فقط. أدوات تسجيل الغياب غير متاحة لهذا الحساب.',
+  'Read-only attendance view. You can review every recorded status for this class and date.': 'عرض للقراءة فقط: يمكنك مراجعة حالة الحضور المسجلة لكل طالب في هذا الفصل والتاريخ.',
+
+  'Confirm student transfer': 'تأكيد نقل الطالب',
+  'Confirm transfer': 'تأكيد النقل',
+  'Review the transfer before confirming': 'راجع بيانات النقل قبل التأكيد',
+  'The transfer is applied to the student’s real class placement, not only to this screen.': 'سيتم تطبيق النقل فعليًا على قيد الطالب الدراسي، وليس كتغيير شكلي في هذه الشاشة.',
+  'Transfer date': 'تاريخ النقل',
+  'Current class': 'الفصل الحالي',
+  'New class': 'الفصل الجديد',
+  'What will happen': 'ما الذي سيحدث؟',
+  'The current class placement closes and the new class placement opens in one transaction on the selected date. Existing marks and attendance history are preserved.': 'سيُغلق قيد الفصل الحالي ويُفتح قيد الفصل الجديد في عملية واحدة بتاريخ النقل المحدد، مع الاحتفاظ بسجل الدرجات والحضور السابق كما هو.',
+  'Move student': 'نقل الطالب',
+
+  'Review transfer': 'مراجعة النقل',
+  'Review the transfer details before applying the change to the student record.': 'راجع بيانات النقل قبل تطبيق التغيير فعليًا على قيد الطالب.',
+  'Real data change': 'تغيير فعلي في البيانات',
+  'This transfer closes the current class placement and opens the new class placement in the same backend transaction. Existing attendance and marks history remains attached to the student.': 'هذا النقل يغلق قيد الفصل الحالي ويفتح قيد الفصل الجديد في نفس معاملة قاعدة البيانات، مع الاحتفاظ بتاريخ الحضور والدرجات السابق للطالب.',
+  'Moving…': 'جارٍ النقل…',
+  'Student transferred': 'تم نقل الطالب',
+  'This academic year is not current': 'هذه السنة الدراسية ليست السنة الحالية',
+  'Today is outside this academic year. For a historical correction, choose a transfer date between {0} and {1}. For a current transfer, switch to the current academic year.': 'تاريخ اليوم خارج حدود هذه السنة الدراسية. لتصحيح تاريخي اختر تاريخ نقل بين {0} و{1}. أما النقل الحالي فانتقل أولًا إلى السنة الدراسية الحالية.',
+  'Transfer date is outside the academic year': 'تاريخ النقل خارج حدود السنة الدراسية',
+  'Choose a date between {0} and {1}. The backend will also reject dates outside these boundaries.': 'اختر تاريخًا بين {0} و{1}. وسيمنع الخادم أيضًا أي تاريخ خارج هذه الحدود.',
+
+  'The system selects the current academic year automatically when one is configured.': 'يختار النظام السنة الدراسية الحالية تلقائيًا عند وجودها.',
+  'Choose academic year': 'اختر السنة الدراسية',
+  'Current': 'الحالية',
+  'The transfer date must be inside the selected academic year.': 'يجب أن يكون تاريخ النقل داخل حدود السنة الدراسية المختارة.',
+  'No current academic year is configured': 'لا توجد سنة دراسية حالية مُعَدّة',
+  'Choose a configured academic year for a historical transfer, or create/select the current academic year before recording a transfer for today.': 'اختر سنة دراسية مُعدة لنقل تاريخي، أو أنشئ/اختر السنة الدراسية الحالية قبل تسجيل نقل بتاريخ اليوم.',
+  'No destination class is available': 'لا يوجد فصل متاح للنقل',
+  'There is no other class in this grade for the selected academic year.': 'لا يوجد فصل آخر في نفس الصف ضمن السنة الدراسية المختارة.',
+  'The transfer is executed by the backend and updates the student placement record. It is not a visual-only change.': 'يتم تنفيذ النقل فعليًا في الخادم وتحديث قيد الطالب الدراسي، وليس كتغيير شكلي في الواجهة.',
+  'Choose a date between {0} and {1}.': 'اختر تاريخًا بين {0} و{1}.',
+
+  'Any transfer date is allowed.': 'يمكن تنفيذ النقل بأي تاريخ.',
+  'There is no other class in the same grade to transfer this student to.': 'لا يوجد فصل آخر في نفس الصف الدراسي يمكن نقل الطالب إليه.',
+
+  'Save and mark blanks absent': 'حفظ والباقي غياب',
+  'Marks saved; blank students were marked absent.': 'تم حفظ الدرجات وتسجيل الطلاب المتروكين فارغين كغياب.',
+
+  'Homework': 'الواجبات',
+  'Publish today’s assignment for your own class and subject.': 'ارفع واجب اليوم للفصل والمادة المسندين إليك.',
+  'Publish homework': 'رفع واجب',
+  'Class and subject': 'الفصل والمادة',
+  'Homework title': 'عنوان الواجب',
+  'Example: Solve exercises 1–10': 'مثال: حل التمارين من 1 إلى 10',
+  'Teacher notes': 'ملاحظات المعلم',
+  'These notes are also available to the parent chatbot.': 'هذه الملاحظات متاحة أيضاً لشات بوت ولي الأمر.',
+  'Attachment': 'الملف',
+  'Choose homework file': 'اختر ملف الواجب',
+  'PDF, image or Word document · maximum 20 MB': 'PDF أو صورة أو ملف Word · بحد أقصى 20 ميجابايت',
+  'Publishing…': 'جارٍ الرفع…',
+  'Homework published.': 'تم رفع الواجب.',
+  'Published homework': 'الواجبات المرفوعة',
+  'File': 'الملف',
+  'No homework published yet': 'لا توجد واجبات مرفوعة بعد',
+  'Homework you publish appears here with its upload date.': 'الواجبات التي ترفعها تظهر هنا بتاريخ رفعها.',
+  'Delete this homework item?': 'هل تريد حذف هذا الواجب؟',
+  'Homework deleted.': 'تم حذف الواجب.',
+
+
+  /* AUREXIS_PRINCIPAL_MANAGER_UPGRADE_V1 */
+  'Teaching staff': 'هيئة التدريس',
+  'Create academic year': 'إنشاء عام دراسي',
+  'Create the first academic year': 'إنشاء أول عام دراسي',
+  'Create the first academic year to start configuring classes and subjects.': 'أنشئ أول عام دراسي لبدء إعداد الفصول والمواد.',
+  'Academic year setup': 'إعداد العام الدراسي',
+  'Create one or several academic years, build their classes, then configure subjects by drag and drop. Existing years and data are never deleted by this setup.': 'أنشئ عامًا دراسيًا واحدًا أو عدة أعوام، وأنشئ فصولها، ثم وزّع المواد على الصفوف بالسحب والإفلات. لا يحذف هذا الإعداد أي عام أو بيانات موجودة.',
+  '1. Academic years': '1. الأعوام الدراسية',
+  'Add as many years as you need before saving.': 'أضف عدد الأعوام التي تحتاجها قبل الحفظ.',
+  'Academic year {0}': 'العام الدراسي {0}',
+  'Make current academic year': 'تعيين كعام دراسي حالي',
+  'Add another academic year': 'إضافة عام دراسي آخر',
+  '2. Classes and sections': '2. الصفوف والفصول',
+  'The same class plan is applied to every year in this batch.': 'سيتم تطبيق نفس خطة الفصول على كل عام في هذه الدفعة.',
+  'Class distribution': 'توزيع الفصول',
+  'Same number for every grade': 'نفس العدد لكل صف دراسي',
+  'Different number per grade': 'عدد مختلف لكل صف دراسي',
+  'Class naming': 'تسمية الفصول',
+  'Numeric sections': 'فصول بالأرقام',
+  'Alphabetic sections': 'فصول بالحروف',
+  'Classes per grade': 'عدد الفصول لكل صف',
+  'The school is configured for {0} term(s). Term sections are created automatically with every academic year.': 'المدرسة مُعدّة على {0} فصل/فترة دراسية. يتم إنشاء الفترات تلقائيًا مع كل عام دراسي.',
+  'Creating…': 'جارٍ الإنشاء…',
+  'Create academic year setup': 'إنشاء العام وإعداد الفصول',
+  'Every year needs a code, first day and last day.': 'كل عام يحتاج إلى كود وتاريخ بداية وتاريخ نهاية صحيحين.',
+  'Academic years created': 'تم إنشاء الأعوام الدراسية',
+  '{0} academic year(s) created': 'تم إنشاء {0} عام/أعوام دراسية',
+  'Classes were created from the school plan.': 'تم إنشاء الفصول وفق خطة المدرسة.',
+  '3. Subjects and grade assignment': '3. المواد وتوزيعها على الصفوف',
+  'Select a year, add subjects, then drag each subject onto the grades that teach it.': 'اختر عامًا، وأضف المواد، ثم اسحب كل مادة إلى الصفوف التي تدرسها.',
+  'Subject code': 'كود المادة',
+  'Subject added': 'تمت إضافة المادة',
+  'Create an academic year first': 'أنشئ عامًا دراسيًا أولًا',
+  'Subject configuration becomes available as soon as an academic year exists.': 'يصبح إعداد المواد متاحًا بمجرد وجود عام دراسي.',
+  'Choose a grade to see its supervisors and subject teachers.': 'اختر الصف الدراسي لعرض مشرف الدور ومشرف الغياب ومدرسي المواد.',
+  'Class supervisor': 'مشرف الدور',
+  'Floor supervisor': 'مشرف الدور',
+  'Floor Supervisor': 'مشرف الدور',
+  'Role': 'الدور',
+  'Role permissions': 'صلاحيات الأدوار',
+  'Admin-only access policy. Admin permissions are permanent.': 'سياسة وصول للمدير فقط. صلاحيات المدير دائمة.',
+  'Choose No Access, Read Only, or Read + Write for each resource.': 'اختر بلا وصول أو قراءة فقط أو قراءة وكتابة لكل مورد.',
+  'No Access': 'بلا وصول',
+  'Read Only': 'قراءة فقط',
+  'Read + Write': 'قراءة وكتابة',
+  'Save permissions': 'حفظ الصلاحيات',
+  'Individual user overrides': 'استثناءات صلاحيات المستخدم',
+  'Overrides apply only to this staff user. Default returns to inherited role access.': 'تنطبق الاستثناءات على هذا الموظف فقط. الإعداد الافتراضي يعيد صلاحيات الدور الموروثة.',
+  'Staff user': 'الموظف',
+  'Roles': 'الأدوار',
+  'No roles assigned': 'لا توجد أدوار مُسندة',
+  'Permission': 'الصلاحية',
+  'Inherited': 'موروثة',
+  'Override': 'استثناء',
+  'Effective': 'فعّالة',
+  'Default (inherit role)': 'افتراضي (حسب الدور)',
+  'Allow': 'سماح',
+  'Deny': 'منع',
+  'Allowed': 'مسموح',
+  'Not allowed': 'غير مسموح',
+  'Save overrides': 'حفظ الاستثناءات',
+  'No staff users available for overrides.': 'لا يوجد موظفون متاحون للاستثناءات.',
+  'Attendance supervisor': 'مشرف الغياب',
+  'No class supervisor assigned': 'لا يوجد مشرف دور مُعيّن لهذا الصف',
+  'No attendance supervisor assigned': 'لا يوجد مشرف غياب مُعيّن لهذا الصف',
+  'Subject teachers': 'مدرسو المواد',
+  'No class assigned yet': 'لم يتم إسناد فصل بعد',
+  'Remove teacher from the system?': 'حذف المدرس من النظام؟',
+  'Remove teacher': 'حذف المدرس',
+  'Removed from active staff': 'تمت إزالته من هيئة التدريس النشطة',
+  'Login account': 'حساب الدخول',
+  'Deleted': 'محذوف',
+  'Deactivated': 'مُعطّل',
+  'The teacher account, active roles, and current teaching assignments will be removed. Historical attendance and recorded academic data remain preserved.': 'سيتم حذف حساب دخول المدرس وأدواره النشطة وإسناداته التدريسية الحالية، مع الاحتفاظ بسجل الحضور والبيانات الدراسية التاريخية المسجلة.',
+  'The teacher and login account will be deactivated. Their roles, teaching assignments, historical attendance, and recorded academic data remain preserved and can be restored by the school manager.': 'سيتم تعطيل المدرس وحساب دخوله. ستبقى أدواره وإسناداته التدريسية وسجل الحضور والبيانات الدراسية المسجلة محفوظة، ويمكن لمدير المدرسة استعادتها.',
+  'Teacher removed from active staff': 'تم حذف المدرس من هيئة التدريس النشطة',
+  'Teacher restored to active staff': 'تمت استعادة المدرس إلى هيئة التدريس النشطة',
+  'Archived teachers': 'المدرسون المؤرشفون',
+  'These staff records and their teaching history are retained.': 'يتم الاحتفاظ بسجلات هؤلاء المدرسين وتاريخ إسناداتهم التعليمية.',
+  'Restore teacher?': 'استعادة المدرس؟',
+  'Restore teacher': 'استعادة المدرس',
+  'This reactivates the teacher and their login account. Existing assignments and role scopes are retained.': 'سيؤدي ذلك إلى إعادة تفعيل المدرس وحساب دخوله. ستبقى الإسنادات ونطاقات الأدوار الحالية محفوظة.',
+  'No teacher assigned to this subject': 'لا يوجد مدرس مُعيّن لهذه المادة',
+  'No subjects configured for this grade': 'لا توجد مواد مُعدّة لهذا الصف الدراسي',
+  'No grades configured': 'لا توجد صفوف دراسية مُعدّة',
+  'School': 'المدرسة',
+  'Schools': 'المدارس',
+  'Year': 'العام',
+  '{0} term section(s)': '{0} فترة دراسية',
+  'Year codes must be new and unique within this batch.': 'يجب أن تكون أكواد الأعوام جديدة وغير مكررة داخل هذه الدفعة.',
+  'Class sections': 'الفصول',
+  'Academic year locked': 'العام الدراسي مقفل',
+  'Locked': 'مقفل',
+  'This is the current academic year and its first day has arrived. Its structure is now read-only: terms, subjects, grade assignments and classes cannot be added, removed or changed.': 'هذا هو العام الدراسي الحالي وقد بدأ بالفعل. أصبح هيكله للعرض فقط، ولا يمكن إضافة أو حذف أو تعديل الفترات أو المواد أو توزيع المواد أو الفصول.',
+  'This is the current academic year and its first day has arrived. Subjects, grade assignments and classes are now read-only.': 'هذا هو العام الدراسي الحالي وقد بدأ بالفعل. المواد وتوزيعها والفصول أصبحت للعرض فقط.',
+  'Subject assignments are read-only because this current academic year has already started.': 'توزيع المواد للعرض فقط لأن العام الدراسي الحالي قد بدأ بالفعل.',
+  'Enter the academic year name in English, Arabic, or both.': 'اكتب اسم العام الدراسي بالإنجليزية أو بالعربية أو باللغتين.',
+  'Each academic year needs at least one name: English, Arabic, or both.': 'يجب كتابة اسم واحد على الأقل لكل عام دراسي: بالإنجليزية أو بالعربية أو باللغتين.',
+  'A current academic year must be fully configured before its first day.': 'يجب إكمال إعداد العام الدراسي الحالي قبل تاريخ بدايته.',
+
+  'Delete': 'حذف',
+  'Percentage': 'النسبة المئوية',
+  'Settings ? appearance and language': 'الإعدادات — المظهر واللغة',
+  'Signing in?': 'جارٍ تسجيل الدخول؟',
+  'Teacher setup': 'إعداد المعلمين',
+  'New staff account': 'حساب جديد لهيئة التدريس والإشراف',
+  'Account role': 'دور الحساب',
+  'Supervision grade': 'الصف المسؤول عنه المشرف',
+  'Supervisor account created': 'تم إنشاء حساب المشرف',
+  'Create supervisor account': 'إنشاء حساب المشرف',
+  'Remove supervisor': 'حذف المشرف',
+  'No supervisor assigned': 'لم يتم تعيين مشرف',
+  'Choose an existing account': 'اختر حسابًا موجودًا',
+  'Assign supervisor': 'تعيين مشرف',
+  'Remove supervisor assignment?': 'حذف تعيين المشرف؟',
+  'This removes supervision permissions for this grade. The account and its other assignments are preserved.': 'سيتم إلغاء تعيين المشرف وصلاحيات إشرافه على هذا الصف، مع الاحتفاظ بالحساب وتعييناته الأخرى.',
+  'Create a teacher or supervisor account and choose its role and assigned grades.': 'أنشئ حساب معلم أو مشرف، واختر دوره والصفوف المسؤول عنها.',
+  'Audit Log': 'سجل التدقيق',
+  'Append-only record of important changes.': 'سجل غير قابل للتعديل للتغييرات المهمة.',
+  'No audit entries': 'لا توجد سجلات تدقيق',
+  'When': 'الوقت',
+  'Actor': 'المستخدم',
+  'Action': 'الإجراء',
+  'Resource': 'المورد',
+  'Changes': 'التغييرات',
+  'View': 'عرض',
+  'Academic year attendance summary': 'ملخص الحضور للعام الدراسي',
+  'Applicable days': 'أيام الدوام المطبقة',
+  'Attendance %': 'نسبة الحضور',
+  'Absence %': 'نسبة الغياب',
+  'Student Timeline': 'التسلسل الزمني للطالب',
+  'Recorded history from the audit log.': 'السجل الموثق من سجل التدقيق.',
+  'No timeline events yet': 'لا توجد أحداث مسجلة بعد',
+  'Documents': 'المستندات',
+  'Files recorded against this student.': 'ملفات مسجلة لهذا الطالب.',
+  'Document type': 'نوع المستند',
+  'Expiry date': 'تاريخ الانتهاء',
+  'Upload': 'رفع',
+  'No documents recorded yet': 'لا توجد مستندات مسجلة بعد',
+  'Document': 'المستند',
 };

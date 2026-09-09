@@ -206,7 +206,6 @@ class SingleSourceOfTruthTests(unittest.TestCase):
     def test_every_builder_degrades_without_credentials(self):
         from backend.assets.entity_extractor import HeuristicEntityExtractor, build_entity_extractor
         from backend.assets.extractors import HeuristicExtractor, build_extractor
-        from backend.assets.reader import build_figure_reader
 
         profile = load_profile("ecommerce")
         figures = profile.assets.figures.model_copy(update={"vision_enabled": True})
@@ -218,12 +217,10 @@ class SingleSourceOfTruthTests(unittest.TestCase):
         with env():
             self.assertIsInstance(build_extractor(figures), HeuristicExtractor)
             self.assertIsInstance(build_entity_extractor(entities, schema), HeuristicEntityExtractor)
-            self.assertFalse(build_figure_reader(figures).available)
 
     def test_every_builder_activates_with_credentials(self):
         from backend.assets.entity_extractor import VisionEntityExtractor, build_entity_extractor
         from backend.assets.extractors import VisionExtractor, build_extractor
-        from backend.assets.reader import build_figure_reader
         from backend.assets.attributes import build_attribute_schema
 
         profile = load_profile("ecommerce")
@@ -234,7 +231,6 @@ class SingleSourceOfTruthTests(unittest.TestCase):
         with env(VISION_MODEL="vl", VISION_API_KEY="k", VISION_BASE_URL="https://v"):
             self.assertIsInstance(build_extractor(figures), VisionExtractor)
             self.assertIsInstance(build_entity_extractor(entities, schema), VisionEntityExtractor)
-            self.assertTrue(build_figure_reader(figures).available)
 
     def test_a_disabled_profile_never_activates_vision_even_with_credentials(self):
         from backend.assets.extractors import HeuristicExtractor, build_extractor

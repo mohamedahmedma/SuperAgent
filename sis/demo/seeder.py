@@ -35,11 +35,12 @@ import os
 import random
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from sis.application.services.access import sync_builtin_rbac
 from sis.config import get_settings
 from sis.demo import blueprint as bp
 from sis.demo.names import family_of, guardian_name, student_name
@@ -143,6 +144,7 @@ class Counts:
     year_levels: int = 0
     class_sections: int = 0
     subjects: int = 0
+    subject_year_levels: int = 0
     students: int = 0
     enrolments: int = 0
     guardians: int = 0
@@ -154,6 +156,8 @@ class Counts:
     teacher_class_sections: int = 0
     attendance: int = 0
     grades: int = 0
+    timetable_periods: int = 0
+    timetable_entries: int = 0
 
     def as_lines(self) -> list[str]:
         return [
@@ -172,63 +176,20 @@ def sync_roles(session: Session) -> tuple[int, int]:
     """Insert or update the built-in roles and the permission catalogue. Idempotent.
 
     Not demo data — a real deployment runs this too, which is why it is a separate
-    function and why `reset` never removes it. Existing rows are updated rather than
-    replaced, so a role a school has granted to forty people keeps its id.
+    function and why `reset` never removes it.
 
-    Returns `(roles touched, permissions touched)`.
+    **The reconcile itself lives in the service**, in `sis/application/services/access.py`,
+    and this delegates to it. It used to be written out again here, and the two copies had
+    already drifted: the service's version wrote a permission's Arabic label as `""` while
+    this one derived a real label, so which name an administrator saw depended on whether
+    a school had been seeded or had merely been logged into. One implementation, called
+    from both places, is the only arrangement where that cannot happen. The dependency
+    runs the right way round — tooling on the service, never the reverse.
+
+    Returns `(roles, permissions)` as counts of the catalogue now in the database.
     """
-    existing_permissions = {
-        row.code: row for row in session.scalars(select(m.PermissionRow)).all()
-    }
-    for permission in Permission:
-        row = existing_permissions.get(permission.value)
-        # The label is derived from the code rather than kept in a second table: "noun.verb"
-        # reads as "Verb noun" and that is a better label than most hand-written ones.
-        noun, _, verb = permission.value.rpartition(".")
-        label = f"{verb.replace('_', ' ').title()} {noun.replace('.', ' ')}"
-        if row is None:
-            session.add(
-                m.PermissionRow(code=permission.value, name_en=label, name_ar=label)
-            )
-        else:
-            row.name_en = row.name_en or label
-    session.flush()
-
-    permission_ids = {
-        row.code: row.id for row in session.scalars(select(m.PermissionRow)).all()
-    }
-
-    roles_touched = 0
-    for definition in BUILT_IN_ROLES:
-        role = session.scalars(
-            select(m.Role).where(m.Role.code == definition.code.value)
-        ).one_or_none()
-        if role is None:
-            role = m.Role(code=definition.code.value)
-            session.add(role)
-        role.name_en = definition.name_en
-        role.name_ar = definition.name_ar
-        role.description = definition.description_en
-        role.default_scope = definition.default_scope.value
-        role.is_builtin = True
-        session.flush()
-        roles_touched += 1
-
-        # Re-stated wholesale rather than diffed: a built-in role's permission set is
-        # owned by the code, and a row somebody added by hand should not survive an
-        # upgrade that removed the permission it grants.
-        session.execute(
-            delete(m.RolePermission).where(m.RolePermission.role_id == role.id)
-        )
-        for permission in definition.permissions:
-            session.add(
-                m.RolePermission(
-                    role_id=role.id, permission_id=permission_ids[permission.value]
-                )
-            )
-
-    session.flush()
-    return roles_touched, len(permission_ids)
+    sync_builtin_rbac(session)
+    return len(BUILT_IN_ROLES), len(list(Permission))
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +418,13 @@ def remove(session: Session) -> int:
     if class_ids:
         wipe(delete(m.ClassSection).where(m.ClassSection.id.in_(class_ids)))
     if subject_ids:
+        # Before the subjects themselves: the assignment rows point at both a subject and a
+        # rung, and the rung outlives this statement by four lines.
+        wipe(
+            delete(m.SubjectYearLevel).where(
+                m.SubjectYearLevel.subject_id.in_(subject_ids)
+            )
+        )
         wipe(delete(m.Subject).where(m.Subject.id.in_(subject_ids)))
     if term_ids:
         wipe(delete(m.Term).where(m.Term.id.in_(term_ids)))
@@ -504,14 +472,175 @@ def load(session: Session, counts: Counts | None = None) -> Counts:
 
     _load_school(session, built, counts, now)
     _load_structure(session, built, counts, now)
+    _load_curriculum(session, built, counts, now)
     _load_students(session, built, counts, now)
     _load_accounts(session, built, counts, now)
     _load_teaching(session, built, counts, now)
+    _load_timetable(session, built, counts, now)
     _load_registers(session, built, counts, now)
     _load_marks(session, built, counts, now)
     _ensure_system_status(session, now)
     session.flush()
     return counts
+
+
+def load_showcase_portfolio(session: Session) -> Counts:
+    """Load three deliberately different, populated schools for the sales demo.
+
+    The full mixed Arabic/languages school remains the deep workflow fixture.  The other
+    two are smaller but complete tenants, with their own leaders, ladder, rooms, pupils,
+    teachers, attendance and marks.  Their different stage coverage makes the estate
+    screen useful instead of showing three cosmetic copies of one school.
+    """
+    counts = load(session)
+    _load_compact_school(
+        session, counts, code="FUTURE", name_en="Future Pioneers Arabic School",
+        name_ar="مدرسة رواد المستقبل العربية", language="arabic", include_kg=False,
+        primary=6, preparatory=3, secondary=0,
+    )
+    _load_compact_school(
+        session, counts, code="HORIZON", name_en="Horizon Language Academy",
+        name_ar="أكاديمية هورايزون للغات", language="languages", include_kg=True,
+        primary=6, preparatory=3, secondary=0,
+    )
+    session.flush()
+    return counts
+
+
+def _load_compact_school(session: Session, counts: Counts, *, code: str,
+    name_en: str, name_ar: str, language: str, include_kg: bool,
+    primary: int, preparatory: int, secondary: int) -> None:
+    """Build a realistic independent tenant without sharing a row with another school."""
+    now = datetime.now(UTC)
+    school = m.School(
+        code=code, name_en=name_en, name_ar=name_ar, language_type=language,
+        kg_grade_count=2 if include_kg else 0, primary_grade_count=primary,
+        preparatory_grade_count=preparatory, secondary_grade_count=secondary,
+        term_count=2, is_active=True, created_at=now,
+    )
+    session.add(school); session.flush(); counts.schools += 1
+    system = m.EducationalSystem(
+        school_id=school.id, code="AR" if language == "arabic" else "LANG",
+        department_key="arabic" if language == "arabic" else "languages",
+        kind=language, name_en="Arabic Section" if language == "arabic" else "Language Section",
+        name_ar="القسم العربي" if language == "arabic" else "قسم اللغات",
+        display_order=1, is_active=True, created_at=now,
+    )
+    session.add(system); session.flush(); counts.sections += 1
+    year = m.AcademicYear(
+        code=f"{code}-2025-2026", school_id=school.id, name_en="2025 / 2026",
+        name_ar="٢٠٢٥ / ٢٠٢٦", starts_on=bp.YEAR_STARTS, ends_on=bp.YEAR_ENDS,
+        is_current=True, created_at=now, updated_at=now,
+    )
+    session.add(year); session.flush(); counts.academic_years += 1
+    terms = []
+    for spec in bp.TERMS:
+        row = m.Term(code=f"{code}-{spec.code}", academic_year_id=year.id,
+            name_en=spec.name_en, name_ar=spec.name_ar, starts_on=spec.starts_on,
+            ends_on=spec.ends_on, sequence=spec.sequence, is_closed=False,
+            created_at=now, updated_at=now)
+        session.add(row); session.flush(); terms.append(row); counts.terms += 1
+    subjects = {}
+    for spec in bp.SUBJECTS:
+        row = m.Subject(code=spec.code, academic_year_id=year.id, name_en=spec.name_en,
+            name_ar=spec.name_ar, display_order=spec.display_order, is_active=True,
+            created_at=now)
+        session.add(row); session.flush(); subjects[spec.code] = row; counts.subjects += 1
+
+    stages = ([] if not include_kg else [("KG", 2, "garden")]) + [
+        ("P", primary, "primary"), ("PR", preparatory, "preparatory"),
+        ("S", secondary, "secondary")]
+    rooms = []
+    order = 0
+    for prefix, total, stage in stages:
+        for grade in range(1, total + 1):
+            order += 1
+            level = m.YearLevel(code=f"{prefix}{grade}", school_id=school.id,
+                name_en=(f"KG {grade}" if stage == "garden" else f"Grade {grade}"),
+                name_ar=(f"KG {grade}" if stage == "garden" else f"الصف {grade}"),
+                display_order=order, stage=stage, educational_system_id=system.id,
+                grade_number=grade, created_at=now)
+            session.add(level); session.flush(); counts.year_levels += 1
+            taught = ("AR", "EN", "MA", "SC") if stage in {"garden", "primary"} else ("AR", "EN", "MA", "SC", "SS", "CS")
+            for subject_code in taught:
+                session.add(m.SubjectYearLevel(subject_id=subjects[subject_code].id,
+                    year_level_id=level.id, created_at=now)); counts.subject_year_levels += 1
+            for room_no in range(1, 3 if stage == "garden" else 4):
+                room = m.ClassSection(academic_year_id=year.id, year_level_id=level.id,
+                    code=f"{code}-{prefix}{grade}-{room_no}", name_en=f"Class {room_no}",
+                    name_ar=f"فصل {room_no}", section_number=room_no, capacity=30,
+                    is_active=True, created_at=now, updated_at=now)
+                session.add(room); session.flush(); rooms.append((room, level, taught)); counts.class_sections += 1
+
+    roles = {row.code: row.id for row in session.scalars(select(m.Role)).all()}
+    shared_hash = hash_password(bp.DEMO_PASSWORD)
+    for role_code, suffix, title_en, title_ar in (
+        (RoleCode.SCHOOL_OWNER.value, "owner", "School Owner", "مالك المدرسة"),
+        (RoleCode.PRINCIPAL.value, "principal", "School Principal", "مدير المدرسة"),
+    ):
+        user = m.User(username=f"{code.lower()}.{suffix}", password_hash=shared_hash,
+            email=f"{suffix}@{code.lower()}.demo", full_name_en=f"{name_en} {title_en}",
+            full_name_ar=f"{title_ar} - {name_ar}", preferred_language="ar",
+            school_id=school.id, is_active=True, created_at=now, updated_at=now)
+        session.add(user); session.flush(); counts.users += 1
+        session.add(m.UserRole(user_id=user.id, role_id=roles[role_code],
+            scope_type=ScopeType.SCHOOL.value, scope_id=school.id, granted_by="seed",
+            created_at=now)); counts.role_grants += 1
+
+    serial = 0
+    teacher_by_subject = {}
+    for index, subject_code in enumerate(("AR", "EN", "MA", "SC", "SS", "CS"), 1):
+        user = m.User(username=f"{code.lower()}.t.{subject_code.lower()}",
+            password_hash=shared_hash, email=f"{subject_code.lower()}@{code.lower()}.demo",
+            full_name_en=f"{subjects[subject_code].name_en} Teacher",
+            full_name_ar=f"معلم {subjects[subject_code].name_ar}", preferred_language="ar",
+            school_id=school.id, is_active=True, created_at=now, updated_at=now)
+        session.add(user); session.flush(); counts.users += 1
+        teacher = m.Teacher(staff_number=f"{code}-T{index:02d}", school_id=school.id,
+            user_id=user.id, full_name_en=user.full_name_en, full_name_ar=user.full_name_ar,
+            email=user.email, phone=f"0100000{index:04d}", is_active=True, created_at=now)
+        session.add(teacher); session.flush(); teacher_by_subject[subject_code] = (teacher, user); counts.teachers += 1
+        session.add(m.TeacherSubject(teacher_id=teacher.id, subject_id=subjects[subject_code].id,
+            academic_year_id=year.id, is_primary=True, created_at=now)); counts.teacher_subjects += 1
+
+    for room, level, taught in rooms:
+        student_ids = []
+        for seat in range(1, 19):
+            serial += 1; female = serial % 2 == 0
+            ar_name, en_name = student_name(serial + (1000 if code == "FUTURE" else 2000), female=female)
+            student = m.Student(student_number=f"{code}-2026-{serial:05d}",
+                full_name_ar=ar_name, full_name_en=en_name, is_active=True,
+                date_of_birth=date(2012, (seat % 12) + 1, (seat % 27) + 1),
+                gender=(Gender.FEMALE if female else Gender.MALE).value,
+                contact_phone="", contact_email="", address="", created_at=now, updated_at=now)
+            session.add(student); session.flush(); student_ids.append(student.id); counts.students += 1
+            session.add(m.ClassEnrolment(student_id=student.id, class_section_id=room.id,
+                starts_on=bp.YEAR_STARTS, ends_on=None, reason="initial", created_at=now,
+                updated_at=now)); counts.enrolments += 1
+        for subject_code in taught:
+            teacher, user = teacher_by_subject[subject_code]
+            if room.section_number == 1:
+                session.add(m.TeacherYearLevel(teacher_id=teacher.id, year_level_id=level.id,
+                    subject_id=subjects[subject_code].id, created_at=now))
+                counts.teacher_year_levels += 1
+            session.add(m.TeacherClassSection(teacher_id=teacher.id, class_section_id=room.id,
+                subject_id=subjects[subject_code].id, assigned_by="seed", created_at=now))
+            counts.teacher_class_sections += 1
+            session.add(m.UserRole(user_id=user.id, role_id=roles[RoleCode.TEACHER.value],
+                scope_type=ScopeType.CLASS_SECTION.value, scope_id=room.id,
+                granted_by="seed", created_at=now)); counts.role_grants += 1
+            for student_id in student_ids:
+                score = 58 + _dice(code, room.code, subject_code, student_id).randint(0, 40)
+                session.add(m.SubjectGrade(student_id=student_id, subject_id=subjects[subject_code].id,
+                    term_id=terms[0].id, class_section_id=room.id, percentage=float(score),
+                    points=float(score), max_points=100.0, remark="", recorded_by="seed",
+                    created_at=now, updated_at=now)); counts.grades += 1
+        for day in school_days(ending=REGISTER_ANCHOR, count=5):
+            for student_id in student_ids:
+                state = AttendanceState.ABSENT if _dice(code, student_id, day).random() < .06 else AttendanceState.PRESENT
+                session.add(m.Attendance(student_id=student_id, class_section_id=room.id,
+                    on_date=day, state=state.value, note="", recorded_by="seed",
+                    created_at=now, updated_at=now)); counts.attendance += 1
 
 
 def _load_school(session: Session, built: _Built, counts: Counts, now: datetime) -> None:
@@ -531,6 +660,7 @@ def _load_school(session: Session, built: _Built, counts: Counts, now: datetime)
         row = m.EducationalSystem(
             school_id=school.id,
             code=spec.code,
+            department_key="arabic" if spec.kind.value == "arabic" else "languages",
             kind=spec.kind.value,
             name_en=spec.name_en,
             name_ar=spec.name_ar,
@@ -633,6 +763,33 @@ def _load_structure(session: Session, built: _Built, counts: Counts, now: dateti
             session.flush()
             built.rooms[bp.room_ref(rung.code, label_en)] = room.id
             counts.class_sections += 1
+
+
+def _load_curriculum(session: Session, built: _Built, counts: Counts, now: datetime) -> None:
+    """Which subjects each rung is taught — the assignment the grade supervisor picks from.
+
+    Driven by `_SUBJECTS_BY_DEPTH`, the same table the marks are written from, because the
+    two are one fact: a rung marked in Science is a rung taught Science. Seeding them from
+    separate lists is how a demo ends up grading children in a subject their grade is not
+    assigned, which the service would refuse from any other client.
+
+    Without these rows the estate looks complete and is not. Teachers are eligible, classes
+    exist, marks are on file — and the supervisor's subject picker is empty, because it
+    reads this table and nothing else. That was the state before this function: every
+    screen populated except the one the role exists for.
+    """
+    for rung in bp.RUNGS:
+        depth = _depth_for(rung.grade_number, rung.stage.value)
+        for subject_code in _SUBJECTS_BY_DEPTH[depth]:
+            session.add(
+                m.SubjectYearLevel(
+                    subject_id=built.subjects[subject_code],
+                    year_level_id=built.rungs[rung.code],
+                    created_at=now,
+                )
+            )
+            counts.subject_year_levels += 1
+    session.flush()
 
 
 def _load_students(session: Session, built: _Built, counts: Counts, now: datetime) -> None:
@@ -870,6 +1027,53 @@ def _load_teaching(session: Session, built: _Built, counts: Counts, now: datetim
                 )
             )
             counts.teacher_class_sections += 1
+
+
+def _load_timetable(session: Session, built: _Built, counts: Counts, now: datetime) -> None:
+    """A populated week for every demo room, ready for the timetable screen.
+
+    Seven visible rows include a real break at period four. Lessons rotate through only
+    the subjects assigned to that room's rung, so every seeded entry obeys the same
+    curriculum rule as a lesson placed through the API.
+    """
+    bells = (
+        (1, "Period 1", "الحصة الأولى", time(8, 0), time(8, 45), True),
+        (2, "Period 2", "الحصة الثانية", time(8, 50), time(9, 35), True),
+        (3, "Period 3", "الحصة الثالثة", time(9, 40), time(10, 25), True),
+        (4, "Break", "الفسحة", time(10, 25), time(10, 50), False),
+        (5, "Period 4", "الحصة الرابعة", time(10, 50), time(11, 35), True),
+        (6, "Period 5", "الحصة الخامسة", time(11, 40), time(12, 25), True),
+        (7, "Period 6", "الحصة السادسة", time(12, 30), time(13, 15), True),
+    )
+    for number, name_en, name_ar, starts, ends, teaching in bells:
+        session.add(m.TimetablePeriod(
+            school_id=built.school_id, period_number=number, name_en=name_en,
+            name_ar=name_ar, starts_at=starts, ends_at=ends, is_teaching=teaching,
+            created_at=now, updated_at=now,
+        ))
+        counts.timetable_periods += 1
+
+    rung_by_room = {
+        bp.room_ref(rung.code, label_en): rung
+        for rung in bp.RUNGS
+        for _, label_en, _ in rung.rooms
+    }
+    days = ("sunday", "monday", "tuesday", "wednesday", "thursday")
+    teaching_periods = (1, 2, 3, 5, 6, 7)
+    term_id = built.terms[bp.TERMS[0].code]
+    for room_key, room_id in built.rooms.items():
+        rung = rung_by_room[room_key]
+        subjects = _SUBJECTS_BY_DEPTH[_depth_for(rung.grade_number, rung.stage.value)]
+        for day_index, day in enumerate(days):
+            for period_index, period_number in enumerate(teaching_periods):
+                subject_code = subjects[(day_index + period_index) % len(subjects)]
+                session.add(m.TimetableEntry(
+                    class_section_id=room_id, academic_year_id=built.year_id,
+                    term_id=term_id, day_of_week=day, period_number=period_number,
+                    subject_id=built.subjects[subject_code], teacher_id=None,
+                    created_at=now, updated_at=now,
+                ))
+                counts.timetable_entries += 1
 
 
 def _load_registers(session: Session, built: _Built, counts: Counts, now: datetime) -> None:

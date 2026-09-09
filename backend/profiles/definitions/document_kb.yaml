@@ -23,7 +23,6 @@ agent:
   # bind.
   tools:
     - search_knowledge_base
-    - view_figure
 
 retrieval:
   top_k: 8
