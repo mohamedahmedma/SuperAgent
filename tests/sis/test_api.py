@@ -81,17 +81,25 @@ def sis_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
 
     command.upgrade(Config(str(_ALEMBIC_INI)), "head")
     with SqlAlchemyUnitOfWork() as uow:
-        uow.api_keys.add(
-            ApiKey(
-                prefix=key_prefix(BOOTSTRAP_KEY),
-                key_hash=hash_api_key(BOOTSTRAP_KEY),
-                label="HTTP API test registrar",
-                scope=Scope.REGISTRAR,
-                is_active=True,
-                expires_at=None,
-                created_at=datetime.now(UTC),
+        # Migration 0026 seeds this same key from `SIS_BOOTSTRAP_REGISTRAR_KEY`, which the
+        # fixture sets above — so by the time `upgrade head` returns, the row usually
+        # exists already. Adding it unconditionally violated the unique prefix.
+        #
+        # Still added when absent rather than deleted outright: this fixture's contract is
+        # "a registrar key exists and `registrar_headers` works", and it must hold whether
+        # or not a future migration happens to provide one.
+        if uow.api_keys.get_by_prefix(key_prefix(BOOTSTRAP_KEY)) is None:
+            uow.api_keys.add(
+                ApiKey(
+                    prefix=key_prefix(BOOTSTRAP_KEY),
+                    key_hash=hash_api_key(BOOTSTRAP_KEY),
+                    label="HTTP API test registrar",
+                    scope=Scope.REGISTRAR,
+                    is_active=True,
+                    expires_at=None,
+                    created_at=datetime.now(UTC),
+                )
             )
-        )
         uow.commit()
     yield
 
