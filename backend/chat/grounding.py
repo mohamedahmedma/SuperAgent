@@ -83,6 +83,23 @@ _WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 #: or 27,000, and treating it as a quantity is what made a sibling discount look invented.
 _PERCENT = re.compile(r"(\d+(?:[.٫]\d+)?)\s*(?:%|٪|في المئة|في المية|بالمئة|percent)")
 
+#: A clock time. Read as ONE typed value and then removed, never as the loose digits it
+#: is made of, because those digits are not claims about anything.
+#:
+#: This is the typed half of the rule the module docstring states. «10:00» is a time; it
+#: is not a 10 and a 0, and it is certainly not a 10 that the next word may scale. Both
+#: readings did real damage:
+#:
+#:   * A physics lesson after «10:00» made 10,000 — the lookahead read a truncated
+#:     «الفيزياء» as «الف» — and a correct timetable was discarded as ungrounded.
+#:   * «45 حصة» passed as grounded because 45 appears inside «07:45». A wrong figure
+#:     colliding with the digits of an unrelated time is a false NEGATIVE in a safety
+#:     check, which is the worse of the two failures and the quieter one.
+#:
+#: Masked in the answer and in the evidence by the same function, so the two can never
+#: disagree about what a time is.
+_TIME = re.compile(r"(?<!\d)(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?!\d)")
+
 #: Below this, a figure is a count rather than a claim. See the module docstring.
 DEFAULT_FLOOR = 100
 
@@ -107,6 +124,16 @@ def strip_citations(text: str) -> str:
     return _CITATION.sub(" ", text or "")
 
 
+def strip_times(text: str) -> str:
+    """Remove clock times, so a time is never read as a quantity.
+
+    A space, not an empty string: the digits must not be allowed to close up against
+    whatever followed them, or a masked time would leave the next word adjacent to the
+    number before it and the multiplier lookahead would read the two as one claim.
+    """
+    return _TIME.sub(" ", text or "")
+
+
 def citation_indices(text: str) -> List[int]:
     """The chunk numbers an answer claims to be citing, in the order written."""
     return [int(match.group(1)) for match in _CITATION.finditer(normalize_digits(text or ""))]
@@ -119,7 +146,7 @@ def numeric_claims(text: str, *, floor: int = 0) -> Set[float]:
     within a short window, so «45 ألف جنيه» and "45 thousand pounds" both read as 45000
     while "45 students" stays 45.
     """
-    cleaned = normalize_digits(strip_citations(text))
+    cleaned = strip_times(normalize_digits(strip_citations(text)))
     found: Set[float] = set()
     for match in _NUMBER.finditer(cleaned):
         raw = match.group(0).replace(",", "").replace("٬", "").replace("٫", ".")
@@ -153,15 +180,26 @@ def percentages_in(text: str) -> Set[float]:
 def _multiplier_after(text: str, position: int) -> int:
     """The scale word following a number, or 1.
 
-    Only the FIRST word after the number is considered, and only within a short window.
-    Looking further would let a «مليون» three sentences away scale a figure it has
-    nothing to do with.
+    Only the FIRST word after the number is considered, and only when it STARTS within a
+    short window. Looking further would let a «مليون» three sentences away scale a figure
+    it has nothing to do with.
+
+    The word is read WHOLE, out of the full text; the window bounds only where it may
+    BEGIN. Slicing the text first and matching inside the slice truncates whatever word
+    straddles the boundary, and a truncated word can collide with a real multiplier —
+    «الفيزياء» cut at 14 characters is «الف», which is the Arabic for "thousand".
+
+    That is not hypothetical. A parent asked for their daughter's timetable, the model
+    wrote «10:00» and then, on the next line, a physics lesson; the truncation read
+    10,000, no such figure was in the evidence, and the entire correct timetable was
+    replaced with "I couldn't verify those figures". Every Arabic word beginning الف
+    collided the same way — الفصل, الفسحة, الفلسفة, الفنون, الفرنسية — as did مليونير
+    against مليون, and «الفصل الدراسي» after a number is about as common as Arabic gets.
     """
-    window = text[position : position + _MULTIPLIER_WINDOW]
-    word = _WORD.search(window)
-    if word is None:
+    match = _WORD.search(text, position)
+    if match is None or match.start() >= position + _MULTIPLIER_WINDOW:
         return 1
-    return _MULTIPLIERS.get(word.group(0).strip().lower(), 1)
+    return _MULTIPLIERS.get(match.group(0).strip().lower(), 1)
 
 
 def _close(left: float, right: float) -> bool:

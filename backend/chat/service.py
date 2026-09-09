@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -599,7 +600,63 @@ def _nothing_usable_reply(finalizer: Finalizer, turn_plan) -> str:
     return _COPY.retrieval_error
 
 
-def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan) -> str:
+#: How every branch of `tools/records_result.j2` opens. These headers address the MODEL —
+#: they name an outcome and carry instructions — and a parent must never see one.
+#:
+#: Uppercase ASCII on an Arabic-first deployment, so there is no wording a reply could
+#: legitimately contain that collides with them.
+_EVIDENCE_MARKERS = re.compile(
+    r"^\s*(?:TIMETABLE|STUDENT_GRADES|SUBJECT_DETAIL|SUBJECTS|TEACHERS|SUBJECT_TEACHER"
+    r"|CLASS|ATTENDANCE|NO_RECORDS|NO_STUDENTS_LINKED|NO_CLASS_THIS_TERM|NOT_AUTHORIZED"
+    r"|NOT_A_PARENT_SESSION|RECORDS_UNAVAILABLE|TOOL_CALL_LIMIT_REACHED"
+    r"|NEEDS_STUDENT_CHOICE|NEEDS_SUBJECT_CHOICE|TIMETABLE_NOT_PUBLISHED"
+    r"|SUBJECTS_NOT_PUBLISHED|TEACHERS_NOT_ASSIGNED)\b",
+    re.MULTILINE,
+)
+
+
+def _drop_leaked_evidence(answer: str) -> str:
+    """The answer up to the point where it starts relaying the tool's own text.
+
+    Asking the model not to retype the grid moved the problem rather than solving it: it
+    stopped reformatting the table and began pasting the MODEL-FACING render instead —
+    outcome header, raw `07:45:00` timestamps, English day keys and all. Measured on the
+    live model, first try.
+
+    A prompt cannot be relied on for this, which is the lesson of every other guard in
+    this file. The headers are a closed set this repo owns, so the cut is exact: the
+    prose before the first one is the framing sentence that was asked for, and everything
+    from it onward is evidence the reader was never meant to see. The properly rendered
+    block is appended afterwards regardless, so nothing is lost by cutting.
+    """
+    text = answer or ""
+    found = _EVIDENCE_MARKERS.search(text)
+    if not found:
+        return text
+    logger.warning("the answer relayed tool evidence; cut at %r", found.group(0).strip())
+    return text[: found.start()].rstrip()
+
+
+def _append_answer_blocks(answer: str, ctx) -> str:
+    """The answer with each tool-rendered block underneath it, or unchanged.
+
+    The data a record tool returns is a table, and a table is the one thing a model
+    should not be asked to retype. Every time it did, it was one paraphrase away from a
+    figure that verification then had to catch — and catching it meant discarding the
+    whole answer, so a formatting habit cost a parent their timetable.
+
+    Rendered once by the tool, appended here untouched. Nothing the parent reads as data
+    passes through the model at all, which is a stronger guarantee than any check applied
+    afterwards could be.
+    """
+    blocks = [block for block in (getattr(ctx, "answer_blocks", None) or []) if block]
+    if not blocks:
+        return answer
+    prose = _drop_leaked_evidence(answer).rstrip()
+    return "\n\n".join(([prose] if prose else []) + blocks)
+
+
+def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan, ctx=None) -> str:
     """Verify the assembled answer; return replacement copy when it must not stand.
 
     Returns "" when the answer is fine, when the check is off, or when this turn is not
@@ -611,6 +668,20 @@ def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan) 
     if mode == "off" or not (finalizer.answer or "").strip():
         return ""
     if not _grounding_expected(turn_plan):
+        return ""
+    if getattr(ctx, "answer_blocks", None):
+        # The data this turn is about was rendered by the tool and is appended to the
+        # reply verbatim, so the figures the parent reads never passed through the model.
+        # There is nothing left for a numeric check to protect, and every time it ran
+        # here it was reading the model's PROSE about a table it did not author — which
+        # is how a physics lesson after «10:00» became a 10,000 that no evidence held,
+        # and a correct timetable was withdrawn.
+        #
+        # The turn is not unguarded. `_enforce_forced_tool_ran` still requires that the
+        # tool actually ran, `_enforce_records_agreement` still catches an answer denying
+        # what it returned, and the block itself cannot be wrong about the record because
+        # it IS the record.
+        logger.info("grounding skipped: the data is a rendered block, not model prose")
         return ""
     report = finalizer.verify(
         _evidence_texts(rag_trace),
@@ -650,6 +721,19 @@ def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan) 
             logger.info("stripped a citation marker from a tool-evidenced answer")
             return cleaned
 
+    # WHICH refusal, decided by what the evidence actually was.
+    #
+    # One string used to serve both, and it names the school's documents and the fees.
+    # Served for a timetable question it told a parent their FIGURES could not be checked
+    # against the FEE SCHEDULE — a sentence about neither the question nor the verdict.
+    # That mismatch is not cosmetic: it sent a real investigation looking at the corpus
+    # while the failing claim was about a child's own record.
+    #
+    # The turn retrieved no chunks and read a tool, so the evidence was a record.
+    if report.tool_evidence and report.evidence_count == 0:
+        logger.warning("records answer withheld: %s", report.reason)
+        return _COPY.unverified_record
+    logger.warning("document answer withheld: %s", report.reason)
     return _COPY.unverified_answer
 
 
@@ -1126,12 +1210,16 @@ def chat_with_agent(
                         sync_finalizer.note_tool_result(tool_message)
                     sync_finalizer.replace_answer(response_content)
                     replacement = (
-                        _enforce_grounding(sync_finalizer, rag_trace, turn_plan)
+                        _enforce_grounding(sync_finalizer, rag_trace, turn_plan, ctx)
                         or _enforce_records_agreement(sync_finalizer, ctx, turn_plan)
                         or _enforce_forced_tool_ran(sync_finalizer, ctx, turn_plan)
                     )
                     if replacement:
                         response_content = replacement
+                    else:
+                        # Same rule as the streamed path: the record goes under the
+                        # sentence when the answer stands, and never under a refusal.
+                        response_content = _append_answer_blocks(response_content, ctx)
                     sync_finalizer.log_summary()
                     if rag_trace:
                         rag_trace.update(sync_finalizer.as_trace())
@@ -1495,7 +1583,7 @@ async def chat_with_agent_stream(
             # moment the two can be compared. A failure replaces what was streamed
             # rather than appending to it: the reader has already seen the figure, and
             # a correction underneath it would leave both on screen.
-            replacement = _enforce_grounding(finalizer, rag_trace, turn_plan)
+            replacement = _enforce_grounding(finalizer, rag_trace, turn_plan, ctx)
             if not replacement:
                 replacement = _enforce_records_agreement(finalizer, ctx, turn_plan)
             if not replacement:
@@ -1505,6 +1593,20 @@ async def chat_with_agent_stream(
             if replacement:
                 full_response = finalizer.replace_answer(replacement)
                 yield f"data: {json.dumps({'type': 'content_replace', 'content': replacement})}\n\n"
+            else:
+                # Nothing was withheld, so the record goes underneath the sentence — as
+                # the TOOL rendered it, never as the model retyped it.
+                #
+                # After the replacement decisions, deliberately: a refusal must not be
+                # followed by the very table it declined to stand behind.
+                #
+                # `content_replace` rather than a `content` append, because the client
+                # ASSIGNS on replace — so what the bubble ends up holding is exactly what
+                # gets stored, with no chance of the two diverging.
+                with_blocks = _append_answer_blocks(full_response, ctx)
+                if with_blocks != full_response:
+                    full_response = finalizer.replace_answer(with_blocks)
+                    yield f"data: {json.dumps({'type': 'content_replace', 'content': with_blocks})}\n\n"
             finalizer.log_summary()
 
         asset_references = build_asset_references(

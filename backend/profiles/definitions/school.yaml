@@ -467,6 +467,12 @@ user_copy:
   unverified_answer: >-
     معلش، مقدرتش أتأكد من الأرقام دي من مستندات المدرسة نفسها، ومش عايز أقول لحضرتك رقم
     غلط في حاجة زي المصاريف. الأفضل تتواصل مع مكتب المدرسة عشان الرقم الأكيد.
+  # A record, not a document — so it must not mention fees or the school's papers. The
+  # generic wording above was served for a timetable question, and the reply talked about
+  # «المصاريف», which sent a real investigation looking in the wrong place entirely.
+  unverified_record: >-
+    معلش، مقدرتش أتأكد من التفاصيل دي من سجلات المدرسة دلوقتي، ومش عايز أقول لحضرتك
+    معلومة غير مؤكدة عن بنت حضرتك. الأفضل تتواصل مع مكتب المدرسة.
   hitl_clarify_default: >-
     لقيت محتوى قريب من سؤالك، بس المعلومات مش كفاية أحدد إجابة أكيدة. ممكن حضرتك
     تديني تفاصيل أكتر؟

@@ -1,0 +1,31 @@
+{# The parent-facing render of a record. Shown VERBATIM — this text is not evidence for
+   the model, it IS the answer's data.
+
+   Separate from records_result.j2 because the two have different readers and different
+   jobs. That file talks to the MODEL: it names the outcome, explains what the shape
+   means and instructs it on what not to say. This one talks to a PARENT, so it carries
+   the figures and nothing else — no outcome codes, no instructions, no caveats the
+   surrounding sentence is already responsible for.
+
+   Only the outcomes whose payload is a TABLE are here. A class name or a subject list is
+   one short phrase, and a model states one phrase without retyping a grid — those stay
+   in prose, where they read better than a rendered block would.
+
+   Whitespace matters: this ends up in a chat bubble, so lines are short and there is no
+   trailing guidance paragraph. #}
+{% if outcome == "timetable" %}
+{% for day in days %}
+{% if day.slots %}
+**{{ day.shows_as or day.name }}**
+{% for slot in day.slots %}
+{{ slot.period_number }}) {% if slot.is_free %}—{% else %}{{ slot.subject }}{% endif %}{% if slot.shows_from %} · {{ slot.shows_from }}{% if slot.shows_to %}–{{ slot.shows_to }}{% endif %}{% endif %}
+
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% elif outcome == "grades" %}
+{% for course in courses %}
+{{ course.get('subject_name_ar') or course.get('subject_name_en') }}: {% if course.get('computed_percentage') is not none %}{{ course.get('computed_percentage') }}%{% if course.get('letter_grade') %} ({{ course.get('letter_grade') }}){% endif %}{% else %}—{% endif %}{% if course.get('missing_count') %} · {{ course.get('missing_count') }} غير مسلّم{% endif %}{% if not course.get('is_complete') %} · لسه جاري{% endif %}
+
+{% endfor %}
+{% endif %}

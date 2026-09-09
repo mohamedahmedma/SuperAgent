@@ -853,6 +853,16 @@ class CopyConfig(_Section):
         "I couldn't verify those figures against the school's own documents, "
         "so I'd rather not state them. Please check with the school office."
     )
+    # The same refusal, for a turn whose evidence was a RECORD rather than a document.
+    # Separate because the wording above names the school's documents and the fees, and a
+    # parent who asked for a timetable and was told the figures could not be checked
+    # against the fee schedule is being told something that is not about their question.
+    # That mismatch cost a real investigation: the message pointed at the corpus while the
+    # actual verdict was about a child's own record.
+    unverified_record: str = (
+        "I couldn't confirm those details against the school's records just now, "
+        "so I'd rather not state them. Please check with the school office."
+    )
     hitl_clarify_default: str = (
         "I found relevant content, but the evidence isn't enough to determine an answer. "
         "Please provide more detail about what you're asking."
