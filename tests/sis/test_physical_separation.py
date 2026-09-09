@@ -15,14 +15,16 @@ they are told apart only by which database answered.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
 from sis import tenancy
-from sis.api.deps import SCHOOL_HEADER
+from sis.api.deps import SCHOOL_HEADER, hash_api_key, key_prefix
+from sis.domain.auth import ApiKey, Scope
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
-from tests.sis.conftest import MD, NC
+from tests.sis.conftest import MD, NC, REGISTRAR_KEY
 
 # `two_databases` and the two school codes live in `conftest.py`: `test_authentication.py`
 # proves a *key* does not cross between these files, and one copy of the tenancy wiring is
@@ -156,7 +158,16 @@ def split_client(two_databases: dict[str, str]) -> Iterator[TestClient]:
     """
     from sis.app import app
 
-    with TestClient(app) as test_client:
+    for school_code in (NC, MD):
+        with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
+            uow.api_keys.add(ApiKey(
+                prefix=key_prefix(REGISTRAR_KEY), key_hash=hash_api_key(REGISTRAR_KEY),
+                label="split-estate registrar", scope=Scope.REGISTRAR, is_active=True,
+                expires_at=None, created_at=datetime.now(UTC),
+            ))
+            uow.commit()
+
+    with TestClient(app, headers={"X-API-Key": REGISTRAR_KEY}) as test_client:
         yield test_client
 
 

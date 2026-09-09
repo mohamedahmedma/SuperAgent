@@ -847,9 +847,9 @@ var api = {
   userPermissionOverrides: function (userId) {
     return get('/rbac/users/' + encodeURIComponent(userId) + '/permission-overrides');
   },
-  saveUserPermissionOverrides: function (userId, overrides) {
+  saveUserPermissionOverrides: function (userId, body) {
     return request('/rbac/users/' + encodeURIComponent(userId) + '/permission-overrides', {
-      method: 'PUT', body: { overrides: overrides }
+      method: 'PUT', body: body
     });
   },
   createSupervisor: function (body) { return post('/rbac/supervisors', body); },

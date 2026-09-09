@@ -266,7 +266,7 @@ class TestRolesAreAdditive:
         assert left.status_code == 200, left.text
         assert [row["scope_id"] for row in left.json()] == [ids["class_P1B"]]
 
-    def test_grade_supervisor_is_the_same_role_as_year_supervisor(
+    def test_grade_supervisor_is_the_same_role_as_floor_supervisor(
         self, client: TestClient, ids: dict[str, int], principal: dict[str, str]
     ) -> None:
         """Two words for one job. Granting under either spelling produces one grant.
@@ -279,7 +279,7 @@ class TestRolesAreAdditive:
             user_id = _make_user(uow._session, "supervisor.9", school_id=ids["school"])
             uow.commit()
 
-        for spelling in ("grade_supervisor", "year_supervisor"):
+        for spelling in ("grade_supervisor", "floor_supervisor"):
             assert (
                 client.post(
                     f"/v1/rbac/users/{user_id}/roles",
@@ -294,7 +294,7 @@ class TestRolesAreAdditive:
             )
 
         grants = client.get(f"/v1/rbac/users/{user_id}/roles", headers=principal).json()
-        assert [row["role_code"] for row in grants] == ["year_supervisor"]
+        assert [row["role_code"] for row in grants] == ["floor_supervisor"]
 
 
 # ---------------------------------------------------------------------------
@@ -706,10 +706,10 @@ class TestCatalogue:
         assert roles.status_code == 200, roles.text
         codes = {row["code"] for row in roles.json()}
         assert {
-            "system_admin",
+            "admin",
             "school_owner",
-            "principal",
-            "year_supervisor",
+            "school_manager",
+            "floor_supervisor",
             "attendance_supervisor",
             "teacher",
         } <= codes
@@ -720,8 +720,8 @@ class TestCatalogue:
         """So a console can explain a role without shipping the table itself."""
         rows = {row["code"]: row for row in client.get("/v1/rbac/roles", headers=principal).json()}
         assert "grades.write" in rows["teacher"]["permissions"]
-        assert "grades.read" in rows["principal"]["permissions"]
-        assert "students.write" in rows["principal"]["permissions"]
+        assert "grades.read" in rows["school_manager"]["permissions"]
+        assert "students.write" in rows["school_manager"]["permissions"]
         assert "attendance.write" in rows["attendance_supervisor"]["permissions"]
         # The owner looks and does not touch — asserted here rather than trusted.
         assert not [p for p in rows["school_owner"]["permissions"] if p.endswith(".write")]
@@ -730,7 +730,7 @@ class TestCatalogue:
         self, client: TestClient, principal: dict[str, str]
     ) -> None:
         rows = {row["code"]: row for row in client.get("/v1/rbac/roles", headers=principal).json()}
-        assert "grade_supervisor" in rows["year_supervisor"]["aliases"]
+        assert "grade_supervisor" in rows["floor_supervisor"]["aliases"]
 
     def test_the_scope_ladder_is_served_widest_first(
         self, client: TestClient, principal: dict[str, str]

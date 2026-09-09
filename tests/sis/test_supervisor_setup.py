@@ -9,7 +9,7 @@ from tests.sis.test_rbac_api import PASSWORD, _sign_in, ids, principal  # noqa: 
 from tests.sis.test_timetable_api import registrar, school  # noqa: F401
 
 
-@pytest.mark.parametrize("role", ["year_supervisor", "attendance_supervisor"])
+@pytest.mark.parametrize("role", ["floor_supervisor", "attendance_supervisor"])
 def test_create_remove_and_replace_supervisor(client: TestClient, ids, principal, role):
     body = {
         "username": f"new.{role}", "password": PASSWORD,
@@ -49,7 +49,7 @@ def test_create_remove_and_replace_supervisor(client: TestClient, ids, principal
 ])
 def test_invalid_supervisor_leaves_no_account(client: TestClient, ids, principal, changes, status):
     body = {"username": "invalid.supervisor", "password": PASSWORD,
-            "role_code": "year_supervisor", "year_level_id": ids["level_p1"], **changes}
+            "role_code": "floor_supervisor", "year_level_id": ids["level_p1"], **changes}
     response = client.post("/v1/rbac/supervisors", headers=principal, json=body)
     assert response.status_code == status, response.text
     with SqlAlchemyUnitOfWork() as uow:
