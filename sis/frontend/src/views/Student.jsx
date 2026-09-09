@@ -289,8 +289,58 @@ function Identity({ student }) {
 
 /* -- Who to call ------------------------------------------------------------------ */
 
-function Guardians({ studentNumber }) {
+function GuardianEditor({ studentNumber, guardian, onDone }) {
+  const [form, setForm] = useState(() => ({
+    full_name_ar: guardian.full_name_ar || '',
+    full_name_en: guardian.full_name_en || '',
+    relationship_type: guardian.relationship_type || 'guardian',
+    relationship_label: guardian.relationship_label || '',
+    is_primary_contact: !!guardian.is_primary_contact
+  }));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.updateGuardianDetails(studentNumber, guardian.phone, form);
+      Store.toast('ok', t('Guardian details updated.'));
+      onDone();
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <div className="border rounded p-3">
+    <div className="d-flex justify-content-between align-items-center gap-2 mb-3">
+      <strong className="sis-name-ar">{pickName(guardian, 'ar') || guardian.phone}</strong>
+      <span className="font-monospace sis-xs text-body-secondary">{guardian.phone}</span>
+    </div>
+    <div className="row g-3">
+      <Field className="col-12 col-md-6" label={t('Arabic name')}><Input className="sis-name-ar" value={form.full_name_ar}
+        onInput={(value) => setForm((old) => ({ ...old, full_name_ar: value }))} /></Field>
+      <Field className="col-12 col-md-6" label={t('English name')}><Input value={form.full_name_en}
+        onInput={(value) => setForm((old) => ({ ...old, full_name_en: value }))} /></Field>
+      <Field className="col-12 col-md-4" label={t('Relationship')}><select className="form-select" value={form.relationship_type}
+        onChange={(event) => setForm((old) => ({ ...old, relationship_type: event.target.value }))}>
+        {['father', 'mother', 'guardian', 'sibling', 'grandparent', 'other'].map((value) => <option key={value} value={value}>{t(value)}</option>)}
+      </select></Field>
+      <Field className="col-12 col-md-8" label={t('Relationship label')}><Input value={form.relationship_label}
+        onInput={(value) => setForm((old) => ({ ...old, relationship_label: value }))} /></Field>
+      <div className="col-12"><label className="form-check mb-0"><input className="form-check-input" type="checkbox" checked={form.is_primary_contact}
+        onChange={(event) => setForm((old) => ({ ...old, is_primary_contact: event.target.checked }))} /> {t('Primary contact')}</label></div>
+    </div>
+    <ErrorNote error={error} />
+    <div className="mt-3"><Button size="sm" variant="primary" pending={saving} onClick={save}>{t('Save')}</Button></div>
+  </div>;
+}
+
+function Guardians({ studentNumber, editMode = false }) {
   const state = useStore();
+  const mayEditGuardians = Store.can('guardians.write');
   const guardians = useResource(
     Store.keys.guardians(studentNumber),
     () => api.studentGuardians(studentNumber),
@@ -302,11 +352,6 @@ function Guardians({ studentNumber }) {
     <Card
       title={t('Guardians')}
       subtitle={guardians.value ? t('{0} on her contact list', [guardians.value.count]) : null}
-      actions={
-        <a className="btn btn-sm btn-quiet" href={Router.href('guardians')}>
-          {t('Manage')}
-        </a>
-      }
       tight
     >
       <ErrorNote error={!guardians.value ? guardians.error : null} onRetry={guardians.reload} />
@@ -375,6 +420,10 @@ function Guardians({ studentNumber }) {
           }
         ]}
       />
+      {editMode && mayEditGuardians && rows.length ? <div className="vstack gap-3 mt-3">
+        <div className="small text-body-secondary">{t('Edit guardian details')}</div>
+        {rows.map((guardian) => <GuardianEditor key={guardian.phone} studentNumber={studentNumber} guardian={guardian} onDone={guardians.reload} />)}
+      </div> : null}
     </Card>
   );
 }
@@ -525,7 +574,24 @@ function Marks({ studentNumber }) {
 /* -- Attendance records for the selected date range ------------------------------ */
 
 function Attendance({ studentNumber, academicYear }) {
+  const state = useStore();
+  const [term, setTerm] = useState('');
+  const [customRange, setCustomRange] = useState(false);
   const [range, setRange] = useState(defaultWindow);
+  const roles = Store.roles();
+  const mayFilterRange = ['admin', 'school_owner', 'school_manager', 'floor_supervisor', 'attendance_supervisor'].some((role) => roles.includes(role));
+  const terms = useResource(Store.keys.terms(academicYear), () => api.terms(academicYear), !!academicYear);
+  const termList = (terms.value || []).slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+  useEffect(() => {
+    if (term || !termList.length) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const active = termList.find((item) => item.starts_on && item.ends_on && item.starts_on <= today && item.ends_on >= today) || termList.find((item) => !item.is_closed) || termList[0];
+    setTerm(active.code);
+  }, [term, termList.length]);
+  const selectedTerm = termList.find((item) => item.code === term);
+  useEffect(() => {
+    if (!customRange && selectedTerm?.starts_on && selectedTerm?.ends_on) setRange({ from: selectedTerm.starts_on, to: selectedTerm.ends_on });
+  }, [selectedTerm?.code, selectedTerm?.starts_on, selectedTerm?.ends_on, customRange]);
 
   const record = useResource(
     Store.keys.attendance(studentNumber, range.from, range.to),
@@ -535,21 +601,18 @@ function Attendance({ studentNumber, academicYear }) {
   const days = (record.value && record.value.days) || [];
   const summary = useResource(
     `attendance-summary:${studentNumber}:${academicYear || ''}`,
-    () => api.studentAttendanceSummary(studentNumber, academicYear),
-    !!studentNumber && !!academicYear
+    () => api.studentAttendanceSummary(studentNumber, academicYear, term),
+    !!studentNumber && !!academicYear && !!term
   );
 
   return (
     <Card
       title={t('Attendance')}
-      subtitle={
-        record.value
-          ? `${dateText(record.value.from_date)} to ${dateText(record.value.to_date)}, both included`
-          : null
-      }
+      subtitle={selectedTerm ? `${t('Term')} · ${labelOf(selectedTerm, state.lang) || selectedTerm.code}` : null}
       actions={
         <div className="d-flex flex-wrap gap-2 align-items-end">
-          <Input
+          {mayFilterRange ? <Button size="sm" variant={customRange ? 'primary' : 'quiet'} onClick={() => setCustomRange((value) => !value)}>{customRange ? t('Term total') : t('Choose date range')}</Button> : null}
+          {customRange ? <><Input
             type="date"
             className="form-control-sm"
             value={range.from}
@@ -560,20 +623,25 @@ function Attendance({ studentNumber, academicYear }) {
             className="form-control-sm"
             value={range.to}
             onInput={(value) => setRange({ ...range, to: value })}
-          />
+          /></> : null}
         </div>
       }
       tight
     >
       <ErrorNote error={!record.value ? record.error : null} onRetry={record.reload} />
 
-      {summary.value && <div className="row g-2 mb-3" aria-label={t('Academic year attendance summary')}>
+      {summary.value && <div className="mb-3">
+        <div className="small text-body-secondary mb-2">
+          {summary.value.term_code ? t('Term attendance total') : t('Academic year attendance summary')} · <span className="sis-code">{summary.value.term_code || summary.value.academic_year}</span>
+        </div>
+        <div className="row g-2" aria-label={t('Academic year attendance summary')}>
         {[
           [t('Applicable days'), summary.value.applicable_days], [t('Present'), summary.value.present],
           [t('Absent'), summary.value.absent], [t('Late'), summary.value.late],
           [t('Excused'), summary.value.excused], [t('Attendance %'), summary.value.attendance_percent == null ? DASH : `${summary.value.attendance_percent}%`],
           [t('Absence %'), summary.value.absence_percent == null ? DASH : `${summary.value.absence_percent}%`]
         ].map(([label, value]) => <div className="col-6 col-md" key={label}><div className="border rounded p-2 h-100"><div className="small text-body-secondary">{label}</div><strong>{value}</strong></div></div>)}
+        </div>
       </div>}
       <ErrorNote error={summary.error} onRetry={summary.reload} />
 
@@ -585,8 +653,8 @@ function Attendance({ studentNumber, academicYear }) {
           row.state === 'present' ? 'ok' : row.state === 'absent' ? 'bad' : 'warn'
         }
         empty={
-          <Empty title={t('No attendance data recorded yet')}>
-            {t('No attendance has been recorded for this student in the selected period yet.')}
+          <Empty title={t('No detailed attendance records in this period')}>
+            {t('The academic-year summary above may include records outside the selected date range.')}
           </Empty>
         }
         columns={[
@@ -626,7 +694,6 @@ function Attendance({ studentNumber, academicYear }) {
 function Timeline({ studentNumber }) {
   const events = useResource(`student-timeline:${studentNumber}`, () => api.studentTimeline(studentNumber), !!studentNumber);
   return <Card title={t('Student Timeline')} subtitle={t('Recorded history from the audit log.')} tight>
-    <ErrorNote error={events.error} onRetry={events.reload} />
     {events.loading ? <Skeleton rows={4} /> : !events.value?.length ? <Empty title={t('No timeline events yet')} /> :
       <ol className="list-group list-group-flush">{events.value.map((event) => <li className="list-group-item px-0" key={event.id}>
         <div className="d-flex justify-content-between gap-2"><strong>{event.action.replaceAll('_', ' ')}</strong><span className="small text-body-secondary">{dateText(event.at)}</span></div>
@@ -813,7 +880,7 @@ export function Student({ params = {} }) {
 
   const name = pickName(student, state.lang);
   const isTeacher = Store.roles().indexOf('teacher') >= 0;
-  const mayReadGrades = Store.can('grades.read');const mayEditStudent = Store.can('students.write');
+  const mayReadGrades = Store.can('grades.read');const mayEditStudent = Store.can('students.write');const mayEditGuardians = Store.can('guardians.write');
 
   return (
     <>
@@ -833,8 +900,8 @@ export function Student({ params = {} }) {
         }
         actions={
           <>
-            {mayEditStudent ? <Button variant={editing ? 'primary' : 'outline'} onClick={() => setEditing(!editing)}>
-              {editing ? t('Close') : t('Edit her record')}
+            {(mayEditStudent || mayEditGuardians) ? <Button variant={editing ? 'primary' : 'outline'} onClick={() => setEditing(!editing)}>
+              {editing ? t('Close') : t('Edit record')}
             </Button> : null}
             <Button icon="refresh" onClick={record.reload}>
               {t('Reload')}
@@ -845,14 +912,17 @@ export function Student({ params = {} }) {
 
       {editing ? (
         <div className="mb-3">
-          <Card className="sis-rise" title={t('Edit {0}', [student.student_number])}>
-            <StudentEditor
+          <Card className="sis-rise" title={t('Edit record')}
+            subtitle={t('Update student and guardian details from one place.')}>
+            {mayEditStudent ? <StudentEditor
               student={student}
               onDone={() => {
-                setEditing(false);
                 record.reload();
               }}
-            />
+            /> : null}
+            {mayEditGuardians ? <div className={mayEditStudent ? 'border-top mt-3 pt-3' : ''}>
+              <Guardians studentNumber={number} editMode />
+            </div> : null}
           </Card>
         </div>
       ) : null}
@@ -863,7 +933,10 @@ export function Student({ params = {} }) {
         <div className="col-12 col-lg-6">
           <div className="vstack gap-3">
             <Identity student={student} />
-            {!isTeacher ? <Guardians studentNumber={number} /> : null}
+            {!isTeacher ? <>
+              <Guardians studentNumber={number} />
+              <Timeline studentNumber={number} />
+            </> : null}
           </div>
         </div>
         <div className="col-12 col-lg-6">
@@ -871,8 +944,6 @@ export function Student({ params = {} }) {
             {!isTeacher ? <Insights student={student} studentNumber={number} /> : null}
             {mayReadGrades ? <Marks studentNumber={number} /> : null}
             <Attendance studentNumber={number} academicYear={state.year} />
-            <Documents studentNumber={number} />
-            <Timeline studentNumber={number} />
           </div>
         </div>
       </div>

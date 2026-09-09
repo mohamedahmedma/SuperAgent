@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, time, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from sis.application.services.access import sync_builtin_rbac
@@ -77,6 +77,22 @@ LEVELS = (
           ("AR", "EN", "L2", "BIO", "CHEM", "PHY", "GEOL"), True),
     Level("SEC3-LIT", "Secondary 3 Literary", "الصف الثالث الثانوي أدبي", "secondary", 36, 3, 30,
           ("AR", "EN", "L2", "HIST", "GEO", "PHIL", "LOGIC"), True),
+)
+
+# Keep the final client dataset deliberately regular: the configured school has the usual
+# fourteen rungs (2 KG + 6 primary + 3 preparatory + 3 secondary), each with seven rooms
+# of fifteen pupils.  The full catalogue above remains readable, while this selection keeps
+# the seed at a realistic 1,470 pupils rather than silently hand-writing people or relying
+# on a magic aggregate count.
+_FINAL_LEVEL_CODES = frozenset({
+    "KG1", "KG2", "P1", "P2", "P3", "P4", "P5", "P6",
+    "PREP1", "PREP2", "PREP3", "SEC1", "SEC2-SCI", "SEC3-SCI",
+})
+_FINAL_CODE = {"SEC2-SCI": "SEC2", "SEC3-SCI": "SEC3"}
+LEVELS = tuple(
+    replace(level, code=_FINAL_CODE.get(level.code, level.code), classes=7, students=15)
+    for level in LEVELS
+    if level.code in _FINAL_LEVEL_CODES
 )
 
 
@@ -319,6 +335,57 @@ def load(session: Session) -> dict[str, int]:
             "attendance": (student_number - 1) * len(school_days),
             "grades": sum(x.classes * x.students * len(x.subjects) * 2 for x in LEVELS),
             "timetable_entries": sum(x.classes for x in LEVELS) * 45}
+
+
+def remove(session: Session) -> int:
+    """Remove this showcase school only; reference/system rows are deliberately retained."""
+    school = session.scalar(select(m.School).where(m.School.code == SCHOOL_CODE))
+    if school is None:
+        return 0
+    years = list(session.scalars(select(m.AcademicYear.id).where(m.AcademicYear.school_id == school.id)))
+    levels = list(session.scalars(select(m.YearLevel.id).where(m.YearLevel.school_id == school.id)))
+    classes = list(session.scalars(select(m.ClassSection.id).where(m.ClassSection.academic_year_id.in_(years)))) if years else []
+    subjects = list(session.scalars(select(m.Subject.id).where(m.Subject.academic_year_id.in_(years)))) if years else []
+    terms = list(session.scalars(select(m.Term.id).where(m.Term.academic_year_id.in_(years)))) if years else []
+    students = list(session.scalars(select(m.ClassEnrolment.student_id).where(m.ClassEnrolment.class_section_id.in_(classes)).distinct())) if classes else []
+    teachers = list(session.scalars(select(m.Teacher.id).where(m.Teacher.school_id == school.id)))
+    users = list(session.scalars(select(m.User.id).where(m.User.school_id == school.id)))
+    removed = 0
+    def wipe(statement):
+        nonlocal removed
+        removed += session.execute(statement).rowcount or 0
+    if teachers:
+        wipe(delete(m.TeacherClassSection).where(m.TeacherClassSection.teacher_id.in_(teachers)))
+        wipe(delete(m.TeacherYearLevel).where(m.TeacherYearLevel.teacher_id.in_(teachers)))
+        wipe(delete(m.TeacherSubject).where(m.TeacherSubject.teacher_id.in_(teachers)))
+        wipe(delete(m.TeacherAttendance).where(m.TeacherAttendance.teacher_id.in_(teachers)))
+        wipe(delete(m.Teacher).where(m.Teacher.id.in_(teachers)))
+    if students:
+        guardians = list(session.scalars(select(m.StudentGuardian.guardian_id).where(m.StudentGuardian.student_id.in_(students)).distinct()))
+        wipe(delete(m.SubjectGrade).where(m.SubjectGrade.student_id.in_(students)))
+        wipe(delete(m.Attendance).where(m.Attendance.student_id.in_(students)))
+        wipe(delete(m.ClassEnrolment).where(m.ClassEnrolment.student_id.in_(students)))
+        wipe(delete(m.StudentGuardian).where(m.StudentGuardian.student_id.in_(students)))
+        if guardians:
+            wipe(delete(m.GuardianPhone).where(m.GuardianPhone.guardian_id.in_(guardians)))
+            wipe(delete(m.Guardian).where(m.Guardian.id.in_(guardians)))
+        wipe(delete(m.Student).where(m.Student.id.in_(students)))
+    if classes:
+        wipe(delete(m.ClassSection).where(m.ClassSection.id.in_(classes)))
+    if subjects:
+        wipe(delete(m.SubjectYearLevel).where(m.SubjectYearLevel.subject_id.in_(subjects)))
+        wipe(delete(m.Subject).where(m.Subject.id.in_(subjects)))
+    if terms: wipe(delete(m.Term).where(m.Term.id.in_(terms)))
+    if levels: wipe(delete(m.YearLevel).where(m.YearLevel.id.in_(levels)))
+    if years: wipe(delete(m.AcademicYear).where(m.AcademicYear.id.in_(years)))
+    if users:
+        wipe(delete(m.UserSession).where(m.UserSession.user_id.in_(users)))
+        wipe(delete(m.UserRole).where(m.UserRole.user_id.in_(users)))
+        wipe(delete(m.User).where(m.User.id.in_(users)))
+    wipe(delete(m.EducationalSystem).where(m.EducationalSystem.school_id == school.id))
+    wipe(delete(m.School).where(m.School.id == school.id))
+    session.flush()
+    return removed
 
 
 def validate(session: Session) -> list[str]:

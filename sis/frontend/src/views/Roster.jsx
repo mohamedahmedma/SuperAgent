@@ -1,10 +1,9 @@
 /* Roster — enrol children into classes, and read the register back. */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api.js';
-import { Router } from '../router.js';
 import { Store } from '../store.js';
-import { DASH, dateText, labelOf, pickName, useQuery, useResource, useStore } from '../hooks.js';
-import { Badge, Button, Card, Empty, ErrorNote, Field, Input, NoYearNotice, PageHead, Select, Table } from '../components/Ui.jsx';
+import { labelOf, pickName, useResource, useStore } from '../hooks.js';
+import { Button, Card, ErrorNote, Field, Input, NoYearNotice, PageHead, Select } from '../components/Ui.jsx';
 import { ImportFlow } from '../components/ImportFlow.jsx';
 import { t } from '../i18n.js';
 
@@ -159,6 +158,10 @@ export function StudentSetup() {
 /* -- The register ---------------------------------------------------------------- */
 
 function Register({ year, classCode }) {
+  // Kept temporarily as an internal implementation detail while the roster
+  // import flow is the sole UI exposed on this screen.
+  return null;
+
   const state = useStore();
   const [picked, setPicked] = useState(classCode || '');
   const [gradeCode, setGradeCode] = useState('');
@@ -321,7 +324,7 @@ function Register({ year, classCode }) {
 
 /* -- Screen ---------------------------------------------------------------------- */
 
-export function Roster({ params = {} }) {
+export function Roster() {
   const state = useStore();
   const year = state.year;
   const [classCode, setClassCode] = useState('');
@@ -412,7 +415,6 @@ export function Roster({ params = {} }) {
           onCommit={(batchId) => api.commitRoster(batchId)}
         />
 
-        <Register year={year} classCode={classCode || params.class} />
       </div>
     </>
   );

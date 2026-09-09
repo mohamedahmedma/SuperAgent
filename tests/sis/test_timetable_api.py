@@ -185,6 +185,66 @@ def _week(client: TestClient, headers: dict[str, str], class_code: str) -> dict:
     return response.json()
 
 
+def test_a_term_two_timetable_is_copied_once_then_remains_independent(
+    client: TestClient, registrar: dict[str, str], school: None
+) -> None:
+    """The Term 1 default is a real guarded write, never a read-time illusion."""
+    second_term = f"{YEAR}-T2"
+    assert client.post(
+        "/v1/terms",
+        json={
+            "code": second_term,
+            "academic_year_code": YEAR,
+            "name_en": "Term 2",
+            "name_ar": "Term 2",
+            "sequence": 2,
+        },
+        headers=registrar,
+    ).status_code == 201
+    assert _periods(client, registrar).status_code == 200
+    assert _place(
+        client,
+        registrar,
+        [_lesson("P1A", "sunday", 1), _lesson("P1A", "monday", 2, None)],
+    ).status_code == 200
+
+    copied = client.post(
+        "/v1/timetable/copy-term",
+        json={
+            "academic_year_code": YEAR,
+            "class_code": "P1A",
+            "source_term_code": TERM,
+            "target_term_code": second_term,
+        },
+        headers=registrar,
+    )
+    assert copied.status_code == 200, copied.text
+    assert {(row["day_of_week"], row["period_number"], row["subject_code"]) for row in copied.json()} == {
+        ("sunday", 1, "MATH"), ("monday", 2, None)
+    }
+
+    target = client.get(
+        "/v1/timetable/week",
+        params={"academic_year": YEAR, "class_code": "P1A", "term": second_term},
+        headers=registrar,
+    )
+    assert target.status_code == 200
+    assert len(target.json()["entries"]) == 2
+
+    # A second click cannot erase or replace the target plan.
+    repeated = client.post(
+        "/v1/timetable/copy-term",
+        json={
+            "academic_year_code": YEAR,
+            "class_code": "P1A",
+            "source_term_code": TERM,
+            "target_term_code": second_term,
+        },
+        headers=registrar,
+    )
+    assert repeated.status_code == 409, repeated.text
+
+
 # -- The school's day -------------------------------------------------------
 
 

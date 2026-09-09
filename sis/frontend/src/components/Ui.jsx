@@ -201,7 +201,7 @@ export function Card({ title, subtitle, actions, footer, tight, className, child
  * rather than one on a phone because a count is short — a single column of four tiles is a
  * screenful of scrolling to read four numbers.
  */
-export function Tile({ label, value, loading, note, to, linkText }) {
+export function Tile({ label, value, loading, note, to, linkText, action }) {
   const body = (
     <div className="card-body">
       <div className="sis-tile-label">{label}</div>
@@ -213,6 +213,7 @@ export function Tile({ label, value, loading, note, to, linkText }) {
         )}
       </div>
       {note ? <div className="small text-body-tertiary">{note}</div> : null}
+      {action ? <div className="mt-2">{action}</div> : null}
       {to ? <div className="small mt-2">{linkText || 'Open'} →</div> : null}
     </div>
   );
