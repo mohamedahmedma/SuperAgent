@@ -213,8 +213,22 @@ def _reporter(ctx: ChatRequestContext, tool_name: str):
     know how many tools can produce one.
     """
 
+    #: Outcomes whose payload is a TABLE, and which therefore go to the reader as a
+    #: rendered block instead of being retyped by the model. See
+    #: `ChatRequestContext.note_answer_block`.
+    presented = {"timetable", "grades"}
+
     def _result(outcome: str, **context) -> str:
         ctx.note_tool_outcome(tool_name, outcome)
+        if outcome in presented:
+            # Rendered from the SAME context the model's copy is rendered from, so the
+            # grid the parent reads and the grid the model was shown cannot drift.
+            try:
+                ctx.note_answer_block(
+                    render_prompt("tools/records_block.j2", outcome=outcome, **context)
+                )
+            except Exception:  # pragma: no cover - a block must never break a turn
+                logger.warning("could not render the %s block", outcome, exc_info=True)
         return render_prompt("tools/records_result.j2", outcome=outcome, **context)
 
     return _result
@@ -396,13 +410,42 @@ def make_get_student_timetable(ctx: ChatRequestContext):
         outcome, data = _get(f"{_student_path(ctx, student.student_id)}/timetable", ctx)
         if outcome != "ok":
             return _refused(ctx, outcome, result)
-        return result("timetable", **_timetable_context(student.label, data))
+        return result(
+            "timetable",
+            **_timetable_context(student.label, data, getattr(ctx, "language", "")),
+        )
 
     get_student_timetable.description += _STUDENT_NAME_NOTE
     return get_student_timetable
 
 
-def _timetable_context(student_label: str, data: dict) -> dict:
+#: Week day names for the block a PARENT reads. The model used to translate these on its
+#: way past; now that the grid reaches the reader untouched, the presentation is ours to
+#: do. A parent asking in Arabic and being shown «sunday» is the cost of rendering
+#: verbatim, and this is where that cost is paid rather than handed back to the model.
+_DAY_NAMES_AR = {
+    "sunday": "الأحد", "monday": "الاثنين", "tuesday": "الثلاثاء",
+    "wednesday": "الأربعاء", "thursday": "الخميس", "friday": "الجمعة",
+    "saturday": "السبت",
+}
+
+
+def _clock(value: str) -> str:
+    """`07:45:00` as `07:45`. Seconds are never what a school means by a bell time."""
+    text = str(value or "").strip()
+    parts = text.split(":")
+    return f"{parts[0]}:{parts[1]}" if len(parts) >= 2 else text
+
+
+def _day_label(day: str, language: str) -> str:
+    """The day as the reader says it, falling back to the school's own spelling."""
+    key = str(day or "").strip().lower()
+    if str(language or "").startswith("ar"):
+        return _DAY_NAMES_AR.get(key, str(day or ""))
+    return str(day or "").capitalize()
+
+
+def _timetable_context(student_label: str, data: dict, language: str = "") -> dict:
     """Flatten a week into the day-by-day shape the template renders.
 
     Grouped here rather than in Jinja for the reason `_render_context` gives: a filter
@@ -429,11 +472,17 @@ def _timetable_context(student_label: str, data: dict) -> dict:
             "is_free": not (lesson.get("subject_code") or ""),
             "starts_at": period.get("starts_at") or "",
             "ends_at": period.get("ends_at") or "",
+            # Trimmed copies for the parent-facing block. Kept BESIDE the raw values
+            # rather than replacing them: the model-facing render quotes the school's
+            # own strings, and the grounding check reads that text.
+            "shows_from": _clock(period.get("starts_at") or ""),
+            "shows_to": _clock(period.get("ends_at") or ""),
         }
 
     days = [
         {
             "name": day,
+            "shows_as": _day_label(day, language),
             "slots": [
                 _slot(lesson)
                 for lesson in lessons

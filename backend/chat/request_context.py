@@ -56,6 +56,9 @@ class ChatRequestContext:
     _planned_dispatches: int = 0
     # `(tool, outcome)` per call this turn. See `note_tool_outcome`.
     _tool_outcomes: list = field(default_factory=list)
+    #: Parent-facing text a tool rendered itself, to be shown VERBATIM. See
+    #: `note_answer_block`.
+    _answer_blocks: list = field(default_factory=list)
     # Retrieval results already produced this turn, keyed by normalised query. See
     # `remember_retrieval` for why a request-scoped memo is the right lifetime.
     _retrieval_memo: dict = field(default_factory=dict)
@@ -374,6 +377,36 @@ class ChatRequestContext:
             if not self._active:
                 return
             self._tool_outcomes.append((str(tool), str(outcome)))
+
+    def note_answer_block(self, text: str) -> None:
+        """Hand over text the PARENT will be shown exactly as rendered.
+
+        The data a record tool returns is a table, and a table is the one thing a model
+        should not be asked to retype. Every time it did, it was one paraphrase away from
+        a figure that verification then had to catch — and catching it meant discarding
+        the answer, so a formatting habit cost a parent their timetable.
+
+        So the tool renders the grid once, that render goes to the reader untouched, and
+        the model is left with the job it is actually good at: the sentence around it.
+        Nothing the parent reads as data passes through the model at all, which is a
+        stronger guarantee than any check applied afterwards could be.
+
+        Held per turn and never persisted here — the answer it becomes part of is what
+        gets stored.
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+        with self._lock:
+            if not self._active:
+                return
+            self._answer_blocks.append(text)
+
+    @property
+    def answer_blocks(self) -> list:
+        """Rendered blocks this turn owes the reader, in the order the tools produced them."""
+        with self._lock:
+            return list(self._answer_blocks)
 
     @property
     def tool_outcomes(self) -> list:
