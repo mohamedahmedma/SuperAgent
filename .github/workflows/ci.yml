@@ -1,4 +1,5 @@
 name: CI
+
 on:
   # `main` is deliberately absent. Deploy fires on every push to main and calls this
   # workflow as its first job, so listing main here would race two CI runs over the same
@@ -9,10 +10,13 @@ on:
     branches: [main, develop]
   # Lets Deploy run this entire suite as a gate before it builds or ships anything.
   workflow_call:
+
 permissions:
   contents: read
+
 jobs:
-  backend:
+  backend-dependencies:
+    name: CI - Backend dependencies and lockfile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,51 +24,153 @@ jobs:
         with: {version: "0.8.14", enable-cache: true}
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      # --locked, not --frozen. --frozen installs whatever uv.lock says and never checks
-      # it against pyproject.toml, so a dependency added to pyproject without re-locking
-      # is simply not installed. --no-sync then stops `uv run` from quietly re-resolving
-      # and installing the missing package, which is what hid exactly that: CI passed on
-      # a lockfile the production image could not work from, and the backend died at
-      # import on a module the tests had had all along.
+      # --locked checks that pyproject.toml and uv.lock describe the same environment.
       - run: uv sync --locked --dev
-      - run: uv run --no-sync pytest -q
-  frontend:
+
+  backend-compile:
+    name: CI - Python syntax compilation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: python -m compileall -q backend schoolauth identity records sis
+
+  backend-tests-general:
+    name: CI - Backend tests (general)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {version: "0.8.14", enable-cache: true}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: uv sync --locked --dev
+      - run: uv run --no-sync pytest -q tests/general
+
+  backend-tests-identity:
+    name: CI - Backend tests (identity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {version: "0.8.14", enable-cache: true}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: uv sync --locked --dev
+      - run: uv run --no-sync pytest -q tests/identity
+
+  backend-tests-records:
+    name: CI - Backend tests (records)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {version: "0.8.14", enable-cache: true}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: uv sync --locked --dev
+      - run: uv run --no-sync pytest -q tests/records
+
+  backend-tests-sis:
+    name: CI - Backend tests (sis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {version: "0.8.14", enable-cache: true}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: uv sync --locked --dev
+      - run: uv run --no-sync pytest -q tests/sis
+
+  backend-tests-schoolauth:
+    name: CI - Backend tests (schoolauth)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {version: "0.8.14", enable-cache: true}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: uv sync --locked --dev
+      - run: uv run --no-sync pytest -q tests/schoolauth
+
+  frontend-tests:
+    name: CI - Frontend tests
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: frontend}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # Kept in step with the sis-frontend job below, which needs >= 22.22.2 for
-          # jsdom. Aligned rather than split so both suites test one runtime.
           node-version: "24.19.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm test
+
+  frontend-build:
+    name: CI - Frontend type-check and build
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
       - run: npm run build
       - name: Report dependency vulnerabilities
         run: npm audit --audit-level=critical
         continue-on-error: true
-  sis-frontend:
+
+  sis-frontend-smoke:
+    name: CI - SIS frontend smoke tests
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: sis/frontend}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # The smoke test mounts the console in jsdom 30, whose undici 8 dependency calls
-          # worker_threads.markAsUncloneable — absent before Node 22. jsdom declares
-          # engines ^22.22.2 || ^24.15.0, undici declares >= 22.19.0, so the 20.19.5 this
-          # used to pin failed with "markAsUncloneable is not a function" before a single
-          # screen rendered. Do not lower this below 22.22.2.
           node-version: "24.19.0"
           cache: npm
           cache-dependency-path: sis/frontend/package-lock.json
       - run: npm ci
       - run: npm run smoke
+
+  sis-frontend-i18n:
+    name: CI - SIS frontend translation audit
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: sis/frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: sis/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run i18n:audit
+
+  sis-frontend-build:
+    name: CI - SIS frontend build
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: sis/frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: sis/frontend/package-lock.json
+      - run: npm ci
       - run: npm run build
-  containers:
+
+  compose-validate:
+    name: CI - Docker Compose validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,20 +181,29 @@ jobs:
           MINIO_ROOT_PASSWORD: ci-password
           LOCAL_SERVICE_KEY: ci-service-key
         run: docker compose config --quiet
+
+  image-build:
+    name: CI - Container build (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {name: backend, file: Dockerfile}
+          - {name: frontend, file: frontend/Dockerfile}
+          - {name: identity, file: identity/Dockerfile}
+          - {name: records, file: records/Dockerfile}
+          - {name: sis, file: sis/Dockerfile}
+    steps:
+      - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
+          file: ${{ matrix.file }}
           push: false
-          tags: superagent/backend:ci
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: frontend/Dockerfile
-          push: false
-          tags: superagent/frontend:ci
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
+          tags: superagent/${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          build-args: |
+            VITE_IDENTITY_BASE_URL=${{ matrix.name == 'frontend' && 'https://auth.aurexis.cc' || '' }}
