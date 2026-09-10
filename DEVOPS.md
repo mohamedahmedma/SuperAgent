@@ -29,6 +29,58 @@ does not need to be created. Production credentials stay in GitHub Secrets and i
 server-side `.env` that `PROD_ENV_FILE` writes. No secret is ever committed, and
 deployment never deletes production volumes.
 
+## Changing `.env` on a live server
+
+**Never `scp` a `.env` and then run `docker compose up` yourself.** Use the script, which
+is the only supported way to apply the file and is safe to re-run:
+
+```
+scp .env root@HOST:$DEPLOY_PATH/.env       # from the laptop, NOT from inside ssh
+ssh root@HOST
+cd $DEPLOY_PATH && chmod 600 .env
+bash deploy/scripts/apply-env.sh backend records identity sis frontend
+```
+
+The pipeline calls the same script (`deploy.yml`, before its release), so the manual and
+automated routes cannot drift. It validates the file, reconciles Postgres, proves the
+credential authenticates, and only then recreates anything — a wrong value fails while
+the previous containers are still serving.
+
+Two things about this estate make the manual route dangerous without it:
+
+**`POSTGRES_PASSWORD` has two independent homes, and writing `.env` changes one.** The
+postgres image reads it only while initialising an *empty* data directory. Once
+`postgres_data` exists, the role keeps the password it was created with, so editing
+`.env` rotates what the backend **sends** and never what the role **accepts**. `pg_isready`
+does not authenticate, so the container stays `(healthy)` and `depends_on:
+service_healthy` goes green while every connection is refused. The backend is the only
+service that speaks to Postgres, so it is the only one that breaks — which reads like a
+broken image rather than a credential. `apply-env.sh` reconciles the role with the file
+(`ALTER USER CURRENT_USER`, over the container's trusted local socket, so it works even
+while the password is wrong) and then proves it over TCP, the way the application
+connects. Rotating the password is therefore just: edit `.env`, run the script.
+
+**An edited `.env` reaches nothing on its own.** Compose hashes a service's own
+configuration to decide what to recreate, and the *contents* of an `env_file` are not part
+of that hash — so a new file sits unread behind containers Compose considers up to date.
+`restart` does nothing. `--force-recreate` is mandatory, and the script always passes it.
+
+If Compose reports `required variable ... is missing a value`, it stops interpolating
+*everything* — `ps` and `logs` included. The running containers still hold what they were
+created with, so recover from them rather than guessing:
+
+```
+docker inspect superagent-postgres --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ^POSTGRES_
+docker inspect superagent-minio    --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ^MINIO_ROOT_
+docker inspect superagent-records  --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ^RECORDS_API_KEY=
+```
+
+`RECORDS_API_KEY` is the value of `LOCAL_SERVICE_KEY`; Compose hands that one secret to
+five services under different names.
+
+`docker compose config` renders **every** secret in plaintext. Use `config --quiet`, which
+prints nothing and still fails on an unresolvable variable.
+
 ## Pipeline order
 
 `deploy.yml` runs `ci.yml` as its first job and everything else depends on it, so a push

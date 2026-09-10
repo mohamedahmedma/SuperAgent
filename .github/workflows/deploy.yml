@@ -336,47 +336,22 @@ jobs:
             timeout 300 sh -c 'until wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1 && wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1; do sleep 5; done'
           }
 
-          # Postgres applies POSTGRES_PASSWORD only while initialising an empty data
-          # directory. On an estate whose postgres_data volume already exists, a rotated
-          # password in .env is silently ignored: the role keeps the one it was created
-          # with. The backend is the only service that speaks to postgres, so it is the
-          # only one that fails — and it fails authenticating at boot while pg_isready
-          # still reports the container healthy, which reads like a broken image rather
-          # than a credential. Reconcile the role with what .env now says, so the file is
-          # the single source of truth it is already rewritten as on every deploy.
-          # PROD_ENV_FILE is commonly authored on Windows, and compose strips the CR it
-          # leaves on each value. Reading the file directly does not, so without `tr` the
-          # role would be set to the password plus a carriage return — matching nothing
-          # the backend ever sends, and failing exactly like the mismatch this repairs.
-          pg_user="$(sed -n 's/^POSTGRES_USER=//p' .env | head -1 | tr -d '\r')"
-          pg_pass="$(sed -n 's/^POSTGRES_PASSWORD=//p' .env | head -1 | tr -d '\r')"
-          : "${pg_user:=postgres}"
-          if [ -n "$pg_pass" ]; then
-            $compose up -d postgres
-            waited=0
-            # `</dev/null` is load-bearing on every exec below. This script reaches the
-            # server on ssh's stdin, via `bash -s`, and `compose exec -T` attaches stdin
-            # and drains it — so an exec that inherits it swallows the unread remainder
-            # of the script. Bash then runs only what it had buffered and exits 0 at the
-            # early EOF: the release never happens and the job still reports success.
-            until $compose exec -T postgres pg_isready -U "$pg_user" -q </dev/null; do
-              waited=$((waited + 2))
-              if [ "$waited" -gt 120 ]; then
-                echo "postgres did not become ready in ${waited}s"
-                exit 1
-              fi
-              sleep 2
-            done
-            # psql quotes :'pw' itself, so a password containing shell or SQL syntax is
-            # carried through as data rather than parsed. It interpolates only input it
-            # lexes, though — never -c, which goes to the server verbatim and fails on
-            # the colon — so the statement has to arrive on stdin. Output is discarded
-            # rather than logged.
-            echo "ALTER USER CURRENT_USER WITH PASSWORD :'pw';" \
-              | $compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$pg_user" \
-                  -d postgres -v pw="$pg_pass" >/dev/null
-            echo "postgres role '$pg_user' reconciled with .env"
-          fi
+          # Reconcile the postgres role with .env, and prove the credential authenticates
+          # over TCP, before the release recreates anything.
+          #
+          # This used to be forty lines inline here, and that placement was the bug. A
+          # heredoc delivered on ssh's stdin is unreachable from an ssh session, so the
+          # only path that knew POSTGRES_PASSWORD needs reconciling was the pipeline —
+          # and on 2026-09-10 the estate was taken down by a manual `scp .env` followed
+          # by `compose up`, a route with no reconcile step at all. One committed script,
+          # both callers, so the manual route cannot skip what this one does.
+          #
+          # `</dev/null` is load-bearing. This script reaches the server on ssh's stdin
+          # via `bash -s`, and `compose exec -T` inside the callee attaches stdin and
+          # drains it — so a call that inherits it swallows the unread remainder of this
+          # script. Bash then runs only what it had buffered and exits 0 at the early
+          # EOF: the release never happens and the job still reports success.
+          bash deploy/scripts/apply-env.sh --path "$deploy_path" </dev/null || exit 1
 
           # Everything that has to hold for a release to count, behind one status. It is
           # called as an `if` condition, which is the point: `set -e` is suspended for the
