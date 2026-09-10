@@ -1061,7 +1061,10 @@ export function Year({ params = {} }) {
   const yearList = (years.value && years.value.academic_years) || [];
   const year = yearList.find((item) => item.code === code);
   const heldRoles = Store.roles();
-  const isPrincipal = heldRoles.indexOf('school_manager') >= 0 && heldRoles.indexOf('admin') < 0 && heldRoles.indexOf('school_owner') < 0;
+  // The owner follows the school-manager academic view here: both can maintain the
+  // school structure, but neither needs registrar-only helpers such as ladder
+  // generation, marks-upload shortcuts, or implementation notes.
+  const isPrincipal = (heldRoles.indexOf('school_manager') >= 0 || heldRoles.indexOf('school_owner') >= 0) && heldRoles.indexOf('admin') < 0;
   const canEditStructure = Store.can('structure.write') || isPrincipal;
   // Cards stay closed by default, but an authorised manager may intentionally open an editor
   // even for the active year. The API enforces that same permission server-side.

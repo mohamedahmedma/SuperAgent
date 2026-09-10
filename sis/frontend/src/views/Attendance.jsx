@@ -27,7 +27,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { AttendancePanel } from '../components/AttendancePanel.jsx';
 import { pickName, today, useQuery, useStore } from '../hooks.js';
-import { Badge, Card, Empty, ErrorNote, Input, PageHead, Select, Skeleton } from '../components/Ui.jsx';
+import { Card, Empty, ErrorNote, Input, PageHead, Select, Skeleton } from '../components/Ui.jsx';
 import { t } from '../i18n.js';
 
 export function Attendance() {
@@ -56,6 +56,7 @@ export function Attendance() {
     }
   });
   const inGrade = classes.filter((row) => row.year_level_code === grade);
+  const classLabel = (row) => `${pickName(row, state.lang) || row.class_code} — ${row.size}`;
 
   /* One grade, or one class within it, is not a choice — it is an obstacle. The effect
      settles on the only option whenever there is exactly one, and clears a class that the
@@ -111,7 +112,7 @@ export function Attendance() {
                   { value: '', label: t('Choose…') },
                   ...inGrade.map((row) => ({
                     value: row.class_code,
-                    label: pickName(row, state.lang) || row.class_code
+                    label: classLabel(row)
                   }))
                 ]}
               />
@@ -125,24 +126,25 @@ export function Attendance() {
               glance which of their rooms are still to do — and which are already done. */}
           {inGrade.length ? (
             <div className="d-flex flex-wrap gap-2 mt-3">
-              {inGrade.map((row) => (
-                <button
-                  key={row.class_code}
-                  type="button"
-                  className={
-                    'btn btn-sm ' +
-                    (row.class_code === klass ? 'btn-primary' : 'btn-outline-secondary')
-                  }
-                  onClick={() => setKlass(row.class_code)}
-                >
-                  {pickName(row, state.lang) || row.class_code}{' '}
-                  {row.is_complete ? (
-                    <Badge tone="ok">{t('done')}</Badge>
-                  ) : (
-                    <Badge>{`${row.marked}/${row.size}`}</Badge>
-                  )}
-                </button>
-              ))}
+              {inGrade.map((row) => {
+                const isSelected = row.class_code === klass;
+                return (
+                  <button
+                    key={row.class_code}
+                    type="button"
+                    className={
+                      'btn btn-sm ' +
+                      (row.is_complete
+                        ? 'btn-success'
+                        : `btn-outline-secondary${isSelected ? ' sis-attendance-class-selected' : ''}`)
+                    }
+                    aria-pressed={isSelected}
+                    onClick={() => setKlass(row.class_code)}
+                  >
+                    {classLabel(row)}{row.is_complete ? ` — ${t('Attendance recorded')}` : ''}
+                  </button>
+                );
+              })}
             </div>
           ) : null}
         </Card>

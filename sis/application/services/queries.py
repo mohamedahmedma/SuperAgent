@@ -483,13 +483,20 @@ class QueryService:
                     if isinstance(e.student_number, StudentNumber)
                 ]
             )
+        # A deactivated child is retained for audit and historical reporting, but is no
+        # longer an active member of a classroom. Keeping the enrolment row intact makes
+        # restoration safe; filtering here keeps normal rosters current.
         return tuple(
             ClassRosterEntry(
                 student_number=str(enrolment.student_number),
                 enrolment=enrolment,
-                student=students.get(str(enrolment.student_number)),
+                student=student,
             )
             for enrolment in enrolments
+            if (
+                student := students.get(str(enrolment.student_number))
+            ) is not None
+            and student.is_active
         )
 
     # -- Guardians ---------------------------------------------------------

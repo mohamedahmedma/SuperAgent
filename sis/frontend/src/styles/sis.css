@@ -1397,6 +1397,17 @@
 .sis-login-page { min-height: 100dvh; display: grid; place-items: center; padding: var(--space-4); background: var(--tint); }
 .sis-login-card { width: min(100%, 26rem); overflow: hidden; background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); }
 
+/* The owner works from the full school register; keep its long list on the page's normal
+   scroll path instead of showing a second, distracting scrollbar inside the card. */
+@media (min-width: 768px) {
+  .sis-owner-register .table-responsive { overflow: visible; }
+}
+
+.sis-attendance-mark { font-weight: 700; }
+.sis-attendance-mark.is-ok { color: var(--bs-success-text-emphasis); }
+.sis-attendance-mark.is-bad { color: var(--bs-danger-text-emphasis); }
+.sis-attendance-mark.is-warn { color: var(--bs-warning-text-emphasis); }
+
 /* Attendance choices are four distinct tap targets. Keeping a small gap and rounding every
    segment avoids the hard rectangular strip Bootstrap's joined button group produces. */
 .sis-attendance-states {

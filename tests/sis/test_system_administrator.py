@@ -115,3 +115,11 @@ def test_system_administrator_can_manage_accounts(client: TestClient, school: No
     )
     assert updated.status_code == 200
     assert updated.json()["is_active"] is False
+
+
+def test_system_administrator_can_read_the_audit_log(client: TestClient, school: None) -> None:
+    admin = _account(client, RoleCode.SYSTEM_ADMIN, "sysadmin.audit")
+    response = client.get("/v1/admin/audit-log?limit=50&offset=0", headers=admin)
+    assert response.status_code == 200, response.text
+    assert isinstance(response.json(), list)
+    assert all(row["entity_type"] != "User" for row in response.json())

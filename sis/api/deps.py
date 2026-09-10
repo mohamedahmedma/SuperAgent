@@ -69,6 +69,7 @@ from sis.application.services.scopes import ScopeResolver
 from sis.api.errors import error_detail
 from sis.domain.rbac import ANYWHERE, AccessProfile, Permission, ScopeType, Target
 from sis.config import get_settings
+from sis.domain.attendance import AttendanceMark, AttendanceState
 from sis.domain.auth import PREFIX_LENGTH, ApiKey, Scope
 from sis.domain.errors import ImportBatchNotFound, UnknownReference, ValidationError
 from sis.domain.guardians import Guardian, StudentGuardian
@@ -1331,8 +1332,14 @@ class StudentDesk:
     does not ask it to.
     """
 
-    def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(
+        self,
+        uow_factory: Callable[[], UnitOfWork],
+        *,
+        today: Callable[[], date] | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._today = today or (lambda: datetime.now(UTC).date())
 
     def save_student(self, student: Student) -> bool:
         """Create or correct one child by student number; `True` when created.
@@ -1398,16 +1405,48 @@ class StudentDesk:
         return bool(next(iter(created.values()), False))
 
     def end_placement(
-        self, student_number: StudentNumber, *, ends_on: date
+        self, student_number: StudentNumber, *, ends_on: date, actor: str = ""
     ) -> ClassEnrolment | None:
         """Close the child's open placement on her last day; `None` if she had none.
 
         `ends_on` is her **last day in the class**, not the day after. The distinction is
         the one thing about this route worth getting right: off by one, and a report card
         for the term that ended that week resolves to the wrong class.
+
+        Ending a placement on today's date also files today's attendance, in the same
+        transaction, as `absent`. She was in the room for at least part of today, so
+        today's register still owes an answer for her, and whoever is closing her
+        placement — owner, manager, or anyone else `students.write` reaches — is in the
+        position to give it immediately, rather than leaving a name on the register for
+        an attendance-taker to notice and chase down later. A mark already on file for
+        today (present before lunch, say) is left exactly as recorded: this fills a
+        blank, the same rule `AttendanceService.take_register` holds for the manual pass.
         """
         with self._uow_factory() as uow:
             closed = uow.enrolments.close_open_enrolment(student_number, ends_on=ends_on)
+            if closed is not None and ends_on == self._today():
+                section_ids = uow.class_sections.ids_for(
+                    [(str(closed.academic_year_code), str(closed.class_code))]
+                )
+                section_id = section_ids.get(
+                    (str(closed.academic_year_code), str(closed.class_code))
+                )
+                if section_id is not None:
+                    marked = uow.attendance.marks_for_class(section_id, ends_on)
+                    if str(student_number) not in marked:
+                        uow.attendance.upsert_many(
+                            [
+                                AttendanceMark(
+                                    student_number=str(student_number),
+                                    on_date=ends_on,
+                                    state=AttendanceState.ABSENT.value,
+                                    class_section_id=section_id,
+                                    class_code=closed.class_code,
+                                    note="",
+                                )
+                            ],
+                            recorded_by=actor,
+                        )
             uow.commit()
         return closed
 
@@ -1566,9 +1605,9 @@ def get_attendance_service(
     return AttendanceService(uow_factory, today=lambda: today)
 
 
-def get_student_desk(uow_factory: UowFactoryDep) -> StudentDesk:
+def get_student_desk(uow_factory: UowFactoryDep, today: TodayDep) -> StudentDesk:
     """Single-student and single-placement writes, committed per call."""
-    return StudentDesk(uow_factory)
+    return StudentDesk(uow_factory, today=lambda: today)
 
 
 def get_api_key_minter(uow_factory: UowFactoryDep) -> ApiKeyMinter:

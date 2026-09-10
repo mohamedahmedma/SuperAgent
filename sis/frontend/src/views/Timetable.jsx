@@ -31,6 +31,7 @@ function changedSlots(before, after) {
 export function Timetable() {
   const state = useStore();
   const [klass, setKlass] = useState('');
+  const [grade, setGrade] = useState('');
   const [term, setTerm] = useState('');
   const [dragged, setDragged] = useState(null);
   const [savedEntries, setSavedEntries] = useState([]);
@@ -72,10 +73,24 @@ export function Timetable() {
 
   const classes = (options.value && options.value.classes) || [];
   const terms = (options.value && options.value.terms) || [];
+  const isSchoolLeader = (state.profile?.roles || []).some((role) =>
+    role.role_code === 'school_owner' || role.role_code === 'school_manager'
+  );
+  const grades = useMemo(() => [...new Map(classes.map((row) => [row.year_level_code, {
+    code: row.year_level_code,
+    name_en: row.year_level_name_en,
+    name_ar: row.year_level_name_ar
+  }])).values()].filter((row) => row.code), [classes]);
+  const visibleClasses = isSchoolLeader && grade
+    ? classes.filter((row) => row.year_level_code === grade)
+    : classes;
 
   useEffect(() => {
-    if (!classes.some((row) => row.code === klass)) setKlass(classes[0]?.code || '');
-  }, [options.value, state.year]);
+    if (isSchoolLeader && !grades.some((row) => row.code === grade)) setGrade(grades[0]?.code || '');
+  }, [grades, grade, isSchoolLeader]);
+  useEffect(() => {
+    if (!visibleClasses.some((row) => row.code === klass)) setKlass(visibleClasses[0]?.code || '');
+  }, [visibleClasses, klass]);
   useEffect(() => {
     if (!terms.some((row) => row.code === term)) setTerm(terms[0]?.code || '');
   }, [options.value, state.year]);
@@ -253,13 +268,17 @@ export function Timetable() {
     <div className="vstack gap-3">
       <Card title={t('Class and term')}>
         <div className="row g-3">
-          <div className="col-12 col-md-6"><label className="form-label">{t('Class')}</label>
+          {isSchoolLeader ? <div className="col-12 col-md-4"><label className="form-label">{t('Grade')}</label>
+            <Select value={grade} onChange={setGrade} disabled={!grades.length || saving || hasChanges}
+              options={grades.map((row) => ({ value: row.code, label: pickName(row, state.lang) || row.code }))} />
+          </div> : null}
+          <div className={`col-12 ${isSchoolLeader ? 'col-md-4' : 'col-md-6'}`}><label className="form-label">{t('Class')}</label>
             <Select value={klass} onChange={setKlass}
-              disabled={!classes.length || saving || hasChanges}
-              options={classes.map((row) => ({ value: row.code,
+              disabled={!visibleClasses.length || saving || hasChanges}
+              options={visibleClasses.map((row) => ({ value: row.code,
                 label: `${pickName(row, state.lang) || row.code} · ${row.code}` }))} />
           </div>
-          <div className="col-12 col-md-6"><label className="form-label">{t('Term')}</label>
+          <div className={`col-12 ${isSchoolLeader ? 'col-md-4' : 'col-md-6'}`}><label className="form-label">{t('Term')}</label>
             <Select value={term} onChange={setTerm}
               disabled={!terms.length || saving || hasChanges}
               options={terms.map((row) => ({ value: row.code, label: pickName(row, state.lang) || row.code }))} />

@@ -19,6 +19,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy import delete, update
 
 from sis.api.deps import (
     Caller,
@@ -34,9 +35,11 @@ from sis.api.routers import domain_errors, error_responses
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.application.services import QueryService
 from sis.application.services.queries import GuardianIdentity, GuardianLink
-from sis.domain.errors import UnknownReference
+from sis.domain.errors import UnknownReference, ValidationError
 from datetime import UTC, datetime
 
+from sis.config import get_settings
+from sis.infrastructure.db import models as m
 from sis.domain.people import Gender
 from sis.domain.guardians import RelationshipType
 from sis.domain.value_objects import Phone, StudentNumber
@@ -173,8 +176,9 @@ class LinkOut(BaseModel):
 
 
 class GuardianDetailsIn(BaseModel):
-    """The editable contact and relationship facts; the phone remains the identity."""
+    """The editable contact and relationship facts for one guardian."""
 
+    phone: str = Field(min_length=1, max_length=32)
     full_name_ar: str = Field(default="", max_length=240)
     full_name_en: str = Field(default="", max_length=240)
     relationship_type: RelationshipType
@@ -389,9 +393,8 @@ def set_records_access(
     "/students/{student_number}/guardians/{phone}/details",
     response_model=GuardianOut,
     summary="Edit a guardian's contact details and this child's relationship",
-    description="Updates the guardian's displayed name for all of their linked children and "
-    "updates the relationship/primary-contact facts only for this child. Phone number is "
-    "the guardian identity and is intentionally not changed by this route.",
+    description="Updates the guardian's displayed name and primary phone for all linked "
+    "children, and relationship/primary-contact facts only for this child.",
     responses=error_responses(401, 403, 404, 422),
 )
 def update_guardian_details(
@@ -411,8 +414,41 @@ def update_guardian_details(
             guardian = uow.guardians.get(parsed)
             if guardian is None:
                 raise UnknownReference(f"no guardian reachable on {parsed}", field="phone")
+            replacement_phone = Phone.parse(
+                body.phone, default_country_code=get_settings().default_country_code
+            )
+            if replacement_phone != parsed:
+                occupied_by = uow.guardians.get(replacement_phone)
+                if occupied_by is not None and occupied_by.identity != guardian.identity:
+                    raise ValidationError(
+                        "This phone number belongs to another guardian.", field="phone"
+                    )
+                guardian_id = uow.guardians.ids_for([parsed]).get(str(parsed))
+                if guardian_id is None:
+                    raise UnknownReference(f"no guardian reachable on {parsed}", field="phone")
+                # A contact number is shared by siblings through the guardian record. Move the
+                # primary number once, rather than creating an unrelated guardian per child.
+                session = uow._session  # type: ignore[attr-defined]
+                session.execute(
+                    update(m.GuardianPhone)
+                    .where(m.GuardianPhone.guardian_id == guardian_id)
+                    .values(is_primary=False)
+                )
+                session.add(m.GuardianPhone(
+                    guardian_id=guardian_id, phone=str(replacement_phone), is_primary=True
+                ))
+                session.execute(
+                    delete(m.GuardianPhone).where(
+                        m.GuardianPhone.guardian_id == guardian_id,
+                        m.GuardianPhone.phone == str(parsed),
+                    )
+                )
             updated_guardian = replace(
                 guardian,
+                phones=(
+                    replacement_phone,
+                    *(known for known in guardian.phones if known != parsed and known != replacement_phone),
+                ),
                 full_name_ar=body.full_name_ar,
                 full_name_en=body.full_name_en,
             )
@@ -426,7 +462,7 @@ def update_guardian_details(
             uow.student_guardians.upsert_many([updated_link])
             uow.commit()
     return GuardianOut(
-        phone=str(parsed),
+        phone=str(replacement_phone),
         phones=[str(item) for item in updated_guardian.phones],
         full_name_ar=updated_guardian.full_name_ar,
         full_name_en=updated_guardian.full_name_en,

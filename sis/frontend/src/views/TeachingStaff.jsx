@@ -5,7 +5,7 @@ import { pickName, useQuery, useStore } from '../hooks.js';
 import { t } from '../i18n.js';
 import { Alert, Badge, Button, Card, Empty, ErrorNote, NoYearNotice, PageHead, Select, Skeleton, useConfirm } from '../components/Ui.jsx';
 
-function SupervisorCard({ title, rows, users, roleCode, gradeId, lang, busy, onAssign, onRemove }) {
+function SupervisorCard({ title, rows, users, roleCode, gradeId, lang, busy, onAssign, onRemove, readOnly = false }) {
   const [userId, setUserId] = useState('');
   useEffect(() => setUserId(''), [gradeId]);
   const candidates = users.filter((user) => user.is_active !== false && !rows.some((row) => row.user.id === user.id));
@@ -17,10 +17,10 @@ function SupervisorCard({ title, rows, users, roleCode, gradeId, lang, busy, onA
           <div className="small text-body-tertiary">{user.username}</div>
           <div className="d-flex flex-wrap gap-1 mt-2">{scopes.map((scope) => <Badge key={scope}>{scope}</Badge>)}</div>
         </div>
-        <Button size="sm" variant="danger" disabled={busy} onClick={() => onRemove(user, grants)}>{t('Remove supervisor')}</Button>
+        {!readOnly ? <Button size="sm" variant="danger" disabled={busy} onClick={() => onRemove(user, grants)}>{t('Remove supervisor')}</Button> : null}
       </div>)}
       {!rows.length ? <Empty title={t('No supervisor assigned')} /> : null}
-      <div className="d-flex flex-wrap gap-2">
+      {!readOnly ? <div className="d-flex flex-wrap gap-2">
         <Select className="flex-grow-1" value={userId} disabled={busy} options={[
           { value: '', label: t('Choose an existing account') },
           ...candidates.map((user) => ({ value: String(user.id), label: `${pickName(user, lang) || user.username} (${user.username})` }))
@@ -28,13 +28,14 @@ function SupervisorCard({ title, rows, users, roleCode, gradeId, lang, busy, onA
         <Button disabled={busy || !candidates.some((user) => String(user.id) === userId)} onClick={async () => {
           if (await onAssign(userId, roleCode)) setUserId('');
         }}>{t('Assign supervisor')}</Button>
-      </div>
+      </div> : null}
     </div>
   </Card>;
 }
 
 export function TeachingStaff() {
   const state = useStore();
+  const mayManage = Store.can('teachers.assign_subjects');
   const [gradeId, setGradeId] = useState('');
   const [removing, setRemoving] = useState('');
   const [removeError, setRemoveError] = useState(null);
@@ -42,12 +43,12 @@ export function TeachingStaff() {
 
   const data = useQuery(() => Promise.all([
     api.teachers(state.school),
-    api.archivedTeachers(state.school),
+    mayManage ? api.archivedTeachers(state.school) : Promise.resolve([]),
     api.rbacUsers(),
     api.rbacYearLevels(state.school),
     api.subjectAssignments(state.year),
     api.classes(state.year)
-  ]), [state.school, state.year], !!state.school && !!state.year);
+  ]), [state.school, state.year, mayManage], !!state.school && !!state.year);
 
   const [teachers = [], archivedTeachers = [], users = [], grades = [], subjectBoard = [], classes = []] = data.value || [];
   const selectedGrade = grades.find((row) => String(row.id) === gradeId);
@@ -181,12 +182,12 @@ export function TeachingStaff() {
           <div className="col-12 col-lg-6">
             <SupervisorCard title={t('Class supervisor')} rows={supervisors.year} users={users}
               roleCode="floor_supervisor" gradeId={gradeId} lang={state.lang} busy={!!removing}
-              onAssign={assignSupervisor} onRemove={removeSupervisor} />
+              onAssign={assignSupervisor} onRemove={removeSupervisor} readOnly={!mayManage} />
           </div>
           <div className="col-12 col-lg-6">
             <SupervisorCard title={t('Attendance supervisor')} rows={supervisors.attendance} users={users}
               roleCode="attendance_supervisor" gradeId={gradeId} lang={state.lang} busy={!!removing}
-              onAssign={assignSupervisor} onRemove={removeSupervisor} />
+              onAssign={assignSupervisor} onRemove={removeSupervisor} readOnly={!mayManage} />
           </div>
         </div>
 
@@ -214,7 +215,7 @@ export function TeachingStaff() {
                         {classCodes.length ? classCodes.map((code) => <Badge key={code}>{code}</Badge>) : <span className="small text-body-tertiary">{t('No class assigned yet')}</span>}
                       </div>
                     </div>
-                    <Button size="sm" variant="danger" disabled={!!removing} pending={removing === teacher.staff_number}
+                    {mayManage ? <Button size="sm" variant="danger" disabled={!!removing} pending={removing === teacher.staff_number}
                       onClick={() => ask({
                         title: t('Remove teacher from the system?'),
                         tone: 'bad',
@@ -229,7 +230,7 @@ export function TeachingStaff() {
                         run: () => removeTeacher(teacher)
                       })}>
                       {t('Remove teacher')}
-                    </Button>
+                    </Button> : null}
                   </div>;
                 })}</div> : <Empty title={t('No teacher assigned to this subject')} />}
               </div>;
@@ -237,7 +238,7 @@ export function TeachingStaff() {
           </div> : <Empty title={t('No subjects configured for this grade')} />}
         </Card>
       </> : <Empty title={t('No grades configured')} />}
-      {archivedTeachers.length ? <Card title={t('Archived teachers')} subtitle={t('These staff records and their teaching history are retained.')}>
+      {mayManage && archivedTeachers.length ? <Card title={t('Archived teachers')} subtitle={t('These staff records and their teaching history are retained.')}>
         <div className="vstack gap-2">{archivedTeachers.map((teacher) => <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 border rounded-3 p-3" key={teacher.staff_number}>
           <div><strong>{pickName(teacher, state.lang) || teacher.staff_number}</strong><div className="small text-body-tertiary">{teacher.staff_number}{teacher.username ? ` · ${teacher.username}` : ''}</div></div>
           <Button size="sm" variant="secondary" disabled={!!removing} pending={removing === teacher.staff_number} onClick={() => ask({

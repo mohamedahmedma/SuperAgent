@@ -722,9 +722,16 @@ class TestCatalogue:
         assert "grades.write" in rows["teacher"]["permissions"]
         assert "grades.read" in rows["school_manager"]["permissions"]
         assert "students.write" in rows["school_manager"]["permissions"]
+        assert "attendance.write" not in rows["school_manager"]["permissions"]
         assert "attendance.write" in rows["attendance_supervisor"]["permissions"]
-        # The owner looks and does not touch — asserted here rather than trusted.
-        assert not [p for p in rows["school_owner"]["permissions"] if p.endswith(".write")]
+        # The owner can maintain the approved in-school academic setup, but not records,
+        # marks, system administration, or school creation.
+        assert {"structure.write", "teachers.assign_subjects", "teachers.assign_classes", "roles.assign"}.issubset(
+            rows["school_owner"]["permissions"]
+        )
+        assert not {"grades.write", "schools.write", "system.manage", "students.write", "attendance.write"}.intersection(
+            rows["school_owner"]["permissions"]
+        )
 
     def test_the_grade_supervisor_spelling_is_advertised(
         self, client: TestClient, principal: dict[str, str]
