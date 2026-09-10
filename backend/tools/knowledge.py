@@ -14,6 +14,10 @@ from langchain_core.tools import tool
 from backend.chat.request_context import ChatRequestContext
 from backend.prompts import render as render_prompt
 
+#: The name the model calls, the planner forces, and the turn records. One spelling,
+#: so the three cannot drift apart.
+KNOWLEDGE_TOOL = "search_knowledge_base"
+
 
 def _figure_markers(docs: list) -> tuple:
     """`(numbers per chunk, {number: asset_id})`, assigned in retrieval order.
@@ -77,7 +81,28 @@ def _format_chunk(index: int, doc: dict, figure_numbers=()) -> str:
 
 
 def make_search_knowledge_base(ctx: ChatRequestContext):
-    @tool("search_knowledge_base")
+    def _result(outcome: str, **context) -> str:
+        """Render one outcome, and tell the turn which one it was.
+
+        The same shape as `records._reporter`, for the same reason: every return below
+        goes through this, so what the model reads and what the turn records come from
+        one variable and cannot disagree.
+
+        The recorded half is load-bearing. A turn the planner REQUIRED this tool on is
+        checked afterwards by `service._enforce_forced_tool_ran`, which reads
+        `ctx.tool_outcomes` to see whether the required tool ran — and a tool that never
+        reported there was, to that check, a tool that never ran. That is how every
+        knowledge-base answer on a forced turn came to be replaced by the
+        could-not-verify copy, fee refusal included, for a question about the school's
+        partners: retrieval ran, the model answered, and nothing had said so.
+
+        Reported on EVERY branch, `call_limit` included. A refused second call is still
+        this tool having been reached this turn, and the first call already reported.
+        """
+        ctx.note_tool_outcome(KNOWLEDGE_TOOL, outcome)
+        return render_prompt("tools/knowledge_result.j2", outcome=outcome, **context)
+
+    @tool(KNOWLEDGE_TOOL)
     def search_knowledge_base(query: str) -> str:
         """Search the knowledge base for documents that answer the user's question.
 
@@ -87,7 +112,7 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         need in your own words.
         """
         if not ctx.acquire_knowledge_tool_slot():
-            return render_prompt("tools/knowledge_result.j2", outcome="call_limit")
+            return _result("call_limit")
 
         # Delayed import keeps tests and lightweight imports away from RAG/embedding startup.
         from backend.rag.pipeline import run_rag_graph
@@ -106,30 +131,28 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         status = rag_trace.get("retrieval_status") if isinstance(rag_trace, dict) else None
         route = rag_trace.get("route") if isinstance(rag_trace, dict) else None
         if status == "needs_clarification" or route == "clarify":
-            return render_prompt(
-                "tools/knowledge_result.j2",
-                outcome="needs_clarification",
+            return _result(
+                "needs_clarification",
                 prompt=rag_trace.get("hitl_prompt")
                 or "I found related knowledge, but need one more detail before answering.",
             )
 
         if status == "needs_scope_selection" or route == "scope_select":
-            return render_prompt(
-                "tools/knowledge_result.j2",
-                outcome="needs_scope_selection",
+            return _result(
+                "needs_scope_selection",
                 prompt=rag_trace.get("hitl_prompt")
                 or "I found multiple related knowledge-base directions. Ask the user to choose one.",
                 options=[str(item) for item in (rag_trace.get("hitl_options") or [])],
             )
 
         if status == "retrieval_error" or route == "retrieval_error":
-            return render_prompt("tools/knowledge_result.j2", outcome="retrieval_error")
+            return _result("retrieval_error")
 
         if status == "no_knowledge" or route == "no_knowledge":
-            return render_prompt("tools/knowledge_result.j2", outcome="no_knowledge")
+            return _result("no_knowledge")
 
         if not docs:
-            return render_prompt("tools/knowledge_result.j2", outcome="empty")
+            return _result("empty")
 
         # Pin every asset retrieval surfaced, whether or not the model goes on to look
         # at one. This is what lets a client attach the picture to a response that was
@@ -145,9 +168,8 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         figure_numbers, figure_map = _figure_markers(docs)
         ctx.note_figure_numbers(figure_map)
 
-        return render_prompt(
-            "tools/knowledge_result.j2",
-            outcome="chunks",
+        return _result(
+            "chunks",
             chunks="\n\n---\n\n".join(
                 _format_chunk(i, doc, numbers)
                 for i, (doc, numbers) in enumerate(zip(docs, figure_numbers), 1)

@@ -8,7 +8,7 @@ emission) and stateless ones share one signature.
 from typing import Callable, Dict, List
 
 from backend.chat.request_context import ChatRequestContext
-from backend.tools.knowledge import make_search_knowledge_base
+from backend.tools.knowledge import KNOWLEDGE_TOOL, make_search_knowledge_base
 from backend.tools.products import make_search_products
 from backend.tools.records import (
     ATTENDANCE_TOOL,
@@ -25,10 +25,9 @@ from backend.tools.records import (
     make_get_student_timetable,
 )
 
-#: The corpus tool, named once. It is the tool whose verdict `retrieval_status` reports,
-#: so the runtime's terminal-retrieval guard has to be able to recognise its results
-#: among a turn's other tool results — see `backend/chat/runtime.py`.
-KNOWLEDGE_TOOL = "search_knowledge_base"
+# `KNOWLEDGE_TOOL` is imported from the tool's own module, where the decorator and the
+# outcome reporter read it too — one spelling for the name the model calls, the planner
+# forces and the turn records.
 
 # name -> builder(ctx) -> tool
 TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
