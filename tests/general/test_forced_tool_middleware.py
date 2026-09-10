@@ -607,9 +607,9 @@ class TheRequirementIsCheckedAfterTheTurn(unittest.TestCase):
 
     The middleware's retry relaxes the requirement to recover a turn that would
     otherwise 500. An unforced model may then answer from memory, which is the one
-    outcome forcing exists to prevent — and neither existing check catches it: grounding
-    only sees figures at or above `answer_grounding_number_floor` (marks sit under it),
-    and `_denies_the_records` needs a tool result to disagree with.
+    outcome forcing exists to prevent — and nothing else catches it: the figures a parent
+    reads come from a rendered block, so an answer with no tool behind it has no block
+    either, and `_denies_the_records` needs a tool result to disagree with.
     """
 
     class _Ctx:

@@ -378,7 +378,7 @@ class ChatRequestContext:
                 return
             self._tool_outcomes.append((str(tool), str(outcome)))
 
-    def note_answer_block(self, text: str) -> None:
+    def note_answer_block(self, text: str, *, kind: str = "") -> None:
         """Hand over text the PARENT will be shown exactly as rendered.
 
         The data a record tool returns is a table, and a table is the one thing a model
@@ -391,6 +391,10 @@ class ChatRequestContext:
         Nothing the parent reads as data passes through the model at all, which is a
         stronger guarantee than any check applied afterwards could be.
 
+        `kind` is the outcome that produced it — "timetable", "grades". Carried so the
+        caller can narrow the block to what the parent actually asked about: a question
+        about Arabic should not be answered with every subject's mark underneath it.
+
         Held per turn and never persisted here — the answer it becomes part of is what
         gets stored.
         """
@@ -400,7 +404,7 @@ class ChatRequestContext:
         with self._lock:
             if not self._active:
                 return
-            self._answer_blocks.append(text)
+            self._answer_blocks.append({"kind": str(kind or ""), "text": text})
 
     @property
     def answer_blocks(self) -> list:

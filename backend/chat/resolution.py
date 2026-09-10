@@ -212,6 +212,14 @@ def conversation_text(history: Sequence[Any], limit: int = 6, max_chars: int = 6
     lines: List[str] = []
     for message in list(history)[-max(1, limit):]:
         role, text = message_role_and_text(message)
+        # Blocks out, before the clip. A rendered record is most of the message it is
+        # attached to, so a 600-character window spent on lesson rows leaves nothing of
+        # the sentence that says what the turn was about — and a follow-up then resolves
+        # against the table instead of the subject. See `service.strip_answer_blocks`.
+        if role == "assistant":
+            from backend.chat.service import strip_answer_blocks
+
+            text = strip_answer_blocks(text)
         clean = _WHITESPACE.sub(" ", text or "").strip()
         if not role or not clean:
             continue

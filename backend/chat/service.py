@@ -26,7 +26,6 @@ from backend.chat.assets_bridge import (
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.child_context import load_child_state, save_child_state
 from backend.chat.finalize import Finalizer, finalize_text, message_text
-from backend.chat.grounding import strip_citations
 from backend.chat.orchestrator import plan_turn, resolve_turn_question
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import ResolvedQuestion, conversation_text
@@ -36,7 +35,6 @@ from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
 from backend.schemas.chat import PendingHitlState, normalize_rag_trace
 from backend.text_matching import name_key
-from backend.tools import CHECKED_TOOLS, GROUNDED_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -492,16 +490,6 @@ def _turn_is_asking_a_question(ctx) -> bool:
     )
 
 
-def _evidence_texts(rag_trace: dict | None) -> list:
-    """The text of every chunk this turn retrieved, as the grounding check reads it."""
-    chunks = (rag_trace or {}).get("retrieved_chunks") or []
-    return [
-        str(chunk.get("text") or "")
-        for chunk in chunks
-        if isinstance(chunk, dict) and chunk.get("text")
-    ]
-
-
 def _tool_messages_in(result) -> list:
     """Every tool result in a finished agent run, for the path that has no stream.
 
@@ -514,53 +502,6 @@ def _tool_messages_in(result) -> list:
     if not isinstance(result, dict):
         return []
     return [m for m in (result.get("messages") or []) if isinstance(m, ToolMessage)]
-
-
-def _grounding_expected(turn_plan) -> bool:
-    """Whether this turn is one whose figures have to come from somewhere.
-
-    A turn that bound a checked tool is answerable from evidence, so a figure in its
-    answer is a claim about that evidence. A social reply or an out-of-domain refusal
-    bound nothing to read, never claimed to, and must not be checked as though it had —
-    that is how a check earns the right to be enforced rather than merely observed.
-
-    `CHECKED_TOOLS` and not `GROUNDED_TOOLS`. The citation set answers "must this answer
-    cite?", which is a question about the PROMPT; this is asking "may this answer state a
-    number?", which is a question about the ANSWER, and `get_student_records` is on the
-    wrong side of the first and the right side of the second. Reading the citation set
-    here meant a turn that fetched a child's marks was checked against nothing — and once
-    the planner began narrowing a records turn to `["get_student_records"]`, the
-    narrowing itself became what switched the check off. See backend/tools/__init__.py.
-    """
-    exposed = getattr(turn_plan, "exposed_tools", None)
-    bound = _PROFILE.agent.tools if exposed is None else exposed
-    return bool(set(bound) & CHECKED_TOOLS)
-
-
-def _citations_expected(turn_plan) -> bool:
-    """Whether a `[n]` marker in this answer has to point at a real retrieved chunk.
-
-    Deliberately `GROUNDED_TOOLS`, not `CHECKED_TOOLS` — a citation is a claim about
-    the PROMPT'S OWN CONTRACT, and that contract is only ever shown to the model when
-    a grounded tool is bound (`agent/system.j2`'s `grounded` flag, computed from the
-    same set). `get_student_records` never receives that contract, so it stating `[1]`
-    is not a fabricated pointer to be caught — it is unrequested habit, most often
-    picked up from the Arabic style pack's worked examples
-    (backend/prompts/templates/packs/school/arabic_style.j2), which use `[1]`/`[2]`
-    purely to demonstrate keeping figures exact and are shown on every Arabic turn
-    regardless of which tools are bound.
-
-    Measured live: a records-only turn answered "٨٨٪ (A)... [1]" — correct, and
-    grounded via `extra_evidence` — and the citation check on its own, seeing zero RAG
-    chunks retrieved, flagged it as "cited evidence on a turn that retrieved none" and
-    replaced a correct grades answer with the could-not-verify copy. That is what this
-    function exists to stop: the NUMBER in that answer must still be checked (that is
-    `_grounding_expected`'s job, unchanged), but the stray `[1]` must not be judged by
-    a contract the prompt never gave this turn.
-    """
-    exposed = getattr(turn_plan, "exposed_tools", None)
-    bound = _PROFILE.agent.tools if exposed is None else exposed
-    return bool(set(bound) & GROUNDED_TOOLS)
 
 
 def _nothing_usable_reply(finalizer: Finalizer, turn_plan) -> str:
@@ -645,96 +586,104 @@ def _append_answer_blocks(answer: str, ctx) -> str:
     figure that verification then had to catch — and catching it meant discarding the
     whole answer, so a formatting habit cost a parent their timetable.
 
-    Rendered once by the tool, appended here untouched. Nothing the parent reads as data
-    passes through the model at all, which is a stronger guarantee than any check applied
+    Rendered once by the tool, appended here. Nothing the parent reads as data passes
+    through the model at all, which is a stronger guarantee than any check applied
     afterwards could be.
+
+    Narrowed to what was asked, and marked so it stays out of the model's history — see
+    `_narrow_block` and `BLOCK_MARKER`.
     """
-    blocks = [block for block in (getattr(ctx, "answer_blocks", None) or []) if block]
+    blocks = [b for b in (getattr(ctx, "answer_blocks", None) or []) if b]
     if not blocks:
         return answer
     prose = _drop_leaked_evidence(answer).rstrip()
-    return "\n\n".join(([prose] if prose else []) + blocks)
+    rendered = [
+        f"{BLOCK_MARKER}\n{shown}"
+        for shown in (
+            _narrow_block(b.get("kind", ""), b.get("text", ""), prose)
+            if isinstance(b, dict)
+            else _narrow_block("", str(b), prose)
+            for b in blocks
+        )
+        if shown
+    ]
+    return "\n\n".join(([prose] if prose else []) + rendered)
 
 
-def _enforce_grounding(finalizer: Finalizer, rag_trace: dict | None, turn_plan, ctx=None) -> str:
-    """Verify the assembled answer; return replacement copy when it must not stand.
+#: Put on the line before every rendered block. The frontend's markdown renderer drops
+#: raw HTML outright (`renderer.html = () => ''`), so a reader never sees this — and the
+#: backend can therefore find where a block starts in a stored message.
+#:
+#: It exists because the block belongs to the READER and not to the model's context. See
+#: `strip_answer_blocks`.
+BLOCK_MARKER = "<!--record-block-->"
 
-    Returns "" when the answer is fine, when the check is off, or when this turn is not
-    one the check applies to. The verdict is recorded on the finalizer either way, so
-    `observe` mode produces the same trace as `enforce` and a deployment can measure the
-    check against its own corpus before letting it act.
+
+def strip_answer_blocks(text: str) -> str:
+    """A stored answer with its rendered blocks removed, for the model to read back.
+
+    The block is 95% of the message it is attached to — a week's timetable is about 1,240
+    characters against 52 of prose. History reaches the resolver and the classifier
+    through `conversation_text`, which clips each message to 600 characters, so once a
+    block was stored the next turn's context was a wall of lesson rows and almost none of
+    the sentence that said what the turn was about.
+
+    Measured: «ومين بيديها في الفصل» — who teaches her — was resolved against that wall,
+    classified as a timetable question, and answered with the timetable again. The model
+    was not wrong; it was handed the wrong record because the previous record had crowded
+    the question out.
+
+    So the block stays in the stored message, where the reader and a re-rendered history
+    still get the table, and is dropped from what the model reads. The prose survives, and
+    the prose is what a follow-up actually needs: "her timetable for the second term" is
+    the subject; the forty-five rows are not.
     """
-    mode = _PROFILE.agent.answer_grounding_mode
-    if mode == "off" or not (finalizer.answer or "").strip():
-        return ""
-    if not _grounding_expected(turn_plan):
-        return ""
-    if getattr(ctx, "answer_blocks", None):
-        # The data this turn is about was rendered by the tool and is appended to the
-        # reply verbatim, so the figures the parent reads never passed through the model.
-        # There is nothing left for a numeric check to protect, and every time it ran
-        # here it was reading the model's PROSE about a table it did not author — which
-        # is how a physics lesson after «10:00» became a 10,000 that no evidence held,
-        # and a correct timetable was withdrawn.
-        #
-        # The turn is not unguarded. `_enforce_forced_tool_ran` still requires that the
-        # tool actually ran, `_enforce_records_agreement` still catches an answer denying
-        # what it returned, and the block itself cannot be wrong about the record because
-        # it IS the record.
-        logger.info("grounding skipped: the data is a rendered block, not model prose")
-        return ""
-    report = finalizer.verify(
-        _evidence_texts(rag_trace),
-        floor=_PROFILE.agent.answer_grounding_number_floor,
-        check_citations=_citations_expected(turn_plan),
-    )
-    if report.ok or mode != "enforce":
-        return ""
+    body = text or ""
+    cut = body.find(BLOCK_MARKER)
+    return body[:cut].rstrip() if cut != -1 else body
 
-    # Failed on the citation marker ALONE, on a turn that answered from a tool.
-    #
-    # `grounding.verify` is right to call this `cited_without_evidence`: tool text is not
-    # a citable chunk, and it must never make `[1]` valid — the tests in
-    # test_planner_tool_selection.py pin exactly that, and the rule stays. What is policy,
-    # and therefore lives here beside `answer_grounding_mode`, is what to DO about it.
-    #
-    # A records turn retrieves no chunks by design. Its evidence is what the tool
-    # returned, its figures were checked against that text above and passed, and the
-    # `[n]` is the model reaching for a habit the prompt teaches it on knowledge turns.
-    # Withdrawing a verified answer over a dangling marker is the harm, not the marker:
-    # it turned a correct timetable into "I could not verify these figures".
-    #
-    # So the marker is removed and the answer stands — and only when nothing else failed.
-    # An ungrounded figure or an out-of-range citation still costs the whole answer, on a
-    # records turn exactly as on any other.
-    #
-    # Generic by construction: the condition is "a tool returned evidence", so every tool
-    # bound today and every one added later is covered without knowing this rule exists.
-    if (
-        report.cited_without_evidence
-        and report.tool_evidence
-        and not report.ungrounded
-        and not report.invalid_citations
-    ):
-        cleaned = " ".join(strip_citations(finalizer.answer).split())
-        if cleaned:
-            logger.info("stripped a citation marker from a tool-evidenced answer")
-            return cleaned
 
-    # WHICH refusal, decided by what the evidence actually was.
-    #
-    # One string used to serve both, and it names the school's documents and the fees.
-    # Served for a timetable question it told a parent their FIGURES could not be checked
-    # against the FEE SCHEDULE — a sentence about neither the question nor the verdict.
-    # That mismatch is not cosmetic: it sent a real investigation looking at the corpus
-    # while the failing claim was about a child's own record.
-    #
-    # The turn retrieved no chunks and read a tool, so the evidence was a record.
-    if report.tool_evidence and report.evidence_count == 0:
-        logger.warning("records answer withheld: %s", report.reason)
-        return _COPY.unverified_record
-    logger.warning("document answer withheld: %s", report.reason)
-    return _COPY.unverified_answer
+def _narrow_block(kind: str, block: str, answer: str) -> str:
+    """The block, cut down to the rows the answer actually talks about.
+
+    A parent asking «هي جابت كام في العربي» was given the Arabic mark in the sentence and
+    then every other subject's mark underneath it, which answers a question nobody asked
+    and buries the one they did.
+
+    The model's own sentence is the filter, and that is the whole idea: the tool decides
+    what is TRUE and the model decides what is RELEVANT, which is the division of labour
+    it is actually good at. Nothing is rewritten — a row either survives or it does not,
+    so a figure the parent reads is still the tool's own.
+
+    Falls back to the whole block whenever the answer names nothing, because "show me her
+    grades" should still show all of them.
+    """
+    lines = [line for line in (block or "").split("\n") if line.strip()]
+    if not lines or not (answer or "").strip():
+        return block
+    folded = name_key(answer)
+
+    if kind == "grades":
+        # `subject: 84.0% (B)` — the label is what precedes the colon.
+        kept = [ln for ln in lines if name_key(ln.split(":")[0]) and name_key(ln.split(":")[0]) in folded]
+        return "\n".join(kept) if kept else block
+
+    if kind == "timetable":
+        # Day headings own the rows beneath them, so a day is kept or dropped whole.
+        days, current, keeping = [], [], False
+        for line in lines:
+            if line.startswith("**"):
+                keeping = name_key(line.strip("*")) in folded
+                current = [line] if keeping else []
+                if keeping:
+                    days.append(current)
+                continue
+            if keeping and current is not None:
+                current.append(line)
+        kept = ["\n".join(day) for day in days if len(day) > 1]
+        return "\n".join(kept) if kept else block
+
+    return block
 
 
 #: Outcomes where `get_student_records` actually returned a child's record. Anything
@@ -795,10 +744,11 @@ def _denies_the_records(ctx, answer: str) -> bool:
 def _enforce_records_agreement(finalizer: Finalizer, ctx, turn_plan) -> str:
     """Replacement copy for an answer that denies a record the turn actually read.
 
-    A sibling of `_enforce_grounding` rather than part of it: that check verifies figures
-    against evidence and reports a `GroundingReport`, and folding a second, differently
-    evidenced verdict into the same report would make one trace field mean two things.
-    Same shape, same contract — "" when there is nothing to do.
+    The numeric grounding check that used to sit beside this is gone: it read the
+    model's prose about a table the model no longer writes. This one asks a different
+    question and survives it — what the tool RETURNED against what the answer CLAIMED,
+    which is not a figure comparison at all. Contract unchanged: "" when there is
+    nothing to do.
     """
     mode = getattr(_PROFILE.agent, "records_denial_mode", "off")
     if mode == "off" or turn_plan is None or getattr(turn_plan, "short_circuit", False):
@@ -823,10 +773,9 @@ def _enforce_forced_tool_ran(finalizer: Finalizer, ctx, turn_plan) -> str:
     rather than trusted at the point it was requested. Two failures are closed at once,
     and it is the same replacement that closes both:
 
-      * **The invented record.** `_enforce_grounding` only sees figures at or above
-        `answer_grounding_number_floor`, and marks sit under it — 84.0 and 87.5 are
-        below 100 — while a claim about a class, a subject or a teacher carries no
-        number at all. Neither is checkable against evidence that was never fetched.
+      * **The invented record.** Nothing else checks it. The figures a parent reads
+        now come from a rendered block, so an answer with no tool behind it has no
+        block either — and its prose is the one thing left that could be invented.
       * **The doubled answer.** The retry happens after the first attempt's prose has
         already streamed to the browser, so the reader would otherwise see the rejected
         answer followed by the second one. A replacement is an assignment on the client,
@@ -957,7 +906,15 @@ def _build_context_messages(
                 )
             )
         )
-    context_messages.extend(short_term)
+    # Same reason `conversation_text` strips them: the agent is deciding what this turn
+    # needs, and a previous turn's table is not evidence about this one. The reader keeps
+    # the block; the model gets the sentence.
+    context_messages.extend(
+        AIMessage(content=strip_answer_blocks(message.content))
+        if isinstance(message, AIMessage) and isinstance(message.content, str)
+        else message
+        for message in short_term
+    )
     # After the history and before the message it describes, so the model reads the
     # conversation, then what that conversation makes this message mean, then the
     # message itself.
@@ -1210,8 +1167,7 @@ def chat_with_agent(
                         sync_finalizer.note_tool_result(tool_message)
                     sync_finalizer.replace_answer(response_content)
                     replacement = (
-                        _enforce_grounding(sync_finalizer, rag_trace, turn_plan, ctx)
-                        or _enforce_records_agreement(sync_finalizer, ctx, turn_plan)
+                        _enforce_records_agreement(sync_finalizer, ctx, turn_plan)
                         or _enforce_forced_tool_ran(sync_finalizer, ctx, turn_plan)
                     )
                     if replacement:
@@ -1583,9 +1539,7 @@ async def chat_with_agent_stream(
             # moment the two can be compared. A failure replaces what was streamed
             # rather than appending to it: the reader has already seen the figure, and
             # a correction underneath it would leave both on screen.
-            replacement = _enforce_grounding(finalizer, rag_trace, turn_plan, ctx)
-            if not replacement:
-                replacement = _enforce_records_agreement(finalizer, ctx, turn_plan)
+            replacement = _enforce_records_agreement(finalizer, ctx, turn_plan)
             if not replacement:
                 replacement = _enforce_forced_tool_ran(finalizer, ctx, turn_plan)
             if not replacement and not full_response.strip():

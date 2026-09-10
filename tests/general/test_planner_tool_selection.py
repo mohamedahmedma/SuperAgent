@@ -28,7 +28,6 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from backend.chat import runtime
 from backend.chat.child_resolution import no_child, resolve_child
 from backend.chat.child_roster import ChildOption
-from backend.chat.grounding import verify
 from backend.chat.signals import RequestSignals
 from backend.chat.turn_policy import (
     KNOWLEDGE_TOOL,
@@ -281,59 +280,11 @@ class ForcingTheCall(unittest.TestCase):
         self.assertIsInstance(_chosen(state), str)
 
 
-class RecordsAreCheckedToo(unittest.TestCase):
-    """The narrowing and the grounding check are one change, not two.
-
-    `_grounding_expected` asks whether any BOUND tool is checked. Under the old single
-    set, narrowing a records turn to `[get_student_records]` removed the last checked
-    tool from the turn — so the narrowing itself would have switched the check off,
-    precisely on the turns that most needed it.
-    """
-
-    def test_a_records_only_turn_is_still_checked(self):
-        from backend.chat import service
-
-        self.assertTrue(service._grounding_expected(
-            _plan(_settled(), about_child=True, child_question_kind="records")
-        ))
-
-    def test_a_turn_that_bound_nothing_is_not_checked(self):
-        from backend.chat import service
-
-        self.assertFalse(service._grounding_expected(
-            _plan(_settled(), is_social=True)
-        ))
-
-    def test_the_citation_set_stays_a_subset_of_the_checked_set(self):
-        from backend.tools import CHECKED_TOOLS, GROUNDED_TOOLS, TOOL_BUILDERS
-
-        self.assertTrue(GROUNDED_TOOLS <= CHECKED_TOOLS)
-        self.assertEqual(set(), CHECKED_TOOLS - set(TOOL_BUILDERS))
-
-    def test_records_text_grounds_a_figure_no_chunk_holds(self):
-        report = verify("الرسوم 45000 جنيه", [], extra_evidence=["الرسوم 45000 جنيه"])
-        self.assertTrue(report.ok)
-
-    def test_a_figure_in_neither_is_still_caught(self):
-        report = verify("الرسوم 45000 جنيه", [], extra_evidence=["الرياضيات 87.5%"])
-        self.assertFalse(report.ok)
-        self.assertEqual(report.ungrounded, (45000.0,))
-
-    def test_records_text_never_makes_a_citation_valid(self):
-        """A child's marks carry no `[n]`. Counting them as chunks would make `[1]` valid
-        on a turn that retrieved nothing to cite — which is the fault the citation check
-        exists to catch."""
-        report = verify("لا يوجد رقم هنا [1]", [], extra_evidence=["الرياضيات 87.5%"])
-        self.assertFalse(report.ok)
-        self.assertTrue(report.cited_without_evidence)
-        self.assertEqual(report.evidence_count, 0)
-
-
 class DenyingWhatTheToolReturned(unittest.TestCase):
     """The failure the numeric check cannot see.
 
     A denial states no figure, so there is nothing for grounding to verify — and a mark
-    is under `answer_grounding_number_floor` in any case. The contradiction is only
+    is a two-digit figure no numeric check would have flagged. The contradiction is only
     visible by holding what the tool RETURNED against what the answer CLAIMED.
     """
 

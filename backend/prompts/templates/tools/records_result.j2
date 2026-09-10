@@ -146,14 +146,10 @@ Report the name exactly as written. No contact details are given here — if the
    ONE RULE, SHARED BY EVERY BRANCH ABOVE, and deliberately outside the chain so that a
    record tool added later inherits it without its author having to know this exists.
 
-   `backend/chat/grounding.py` checks every figure in the answer against THIS text and
-   nothing else. A number that is perfectly true but unwritten here — the academic year,
-   a total the model added up, a time no period states — reads to that check as invented,
-   and on this profile the check is `enforce`: the parent loses the whole answer and is
-   told the figures could not be verified. A correct timetable was destroyed exactly that
-   way, by the model helpfully naming the school year.
-
-   So the cheapest place to prevent it is here, one sentence, on every record turn.
+   A record's own figures reach the reader as a rendered block, so anything the model
+   states BESIDE that block is unverified prose about a child. The rule is cheap to
+   state here and there is no check behind it any more — this sentence is the whole of
+   what stops an invented year or an invented total.
    ------------------------------------------------------------------------------------ #}
 
 THE TABLE IS ALREADY BEING SHOWN. For a timetable or a full set of marks, the grid above is appended to your reply exactly as rendered, underneath whatever you write. So do NOT retype it, reformat it, translate it or summarise it row by row — the parent would see it twice.

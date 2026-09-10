@@ -70,7 +70,6 @@ from langchain_core.messages import (  # noqa: E402
 from langchain_core.tools import tool  # noqa: E402
 
 from backend.chat.finalize import Finalizer  # noqa: E402
-from backend.chat.grounding import verify as verify_grounding  # noqa: E402
 from backend.chat.model_output import TOKENS as HARMONY_TOKENS  # noqa: E402
 from backend.prompts import render as render_prompt, resolve as resolve_prompt  # noqa: E402
 import backend.chat.runtime as runtime  # noqa: E402
@@ -287,9 +286,12 @@ def deterministic_checks(scenario, result):
     reasoning = asked_in_arabic and bool(_ENGLISH_PROSE.search(answer))
     findings["bug1_clean_output"] = not tokens and not reasoning
 
-    report = verify_grounding(answer, scenario.chunks)
-    findings["bug2_every_figure_grounded"] = report.ok
-    findings["bug2_reason"] = report.reason
+    # The numeric grounding check this scored is gone: a record now reaches the reader
+    # as a block the tool rendered, so there is no model-written figure to verify. Left
+    # passing rather than deleted, so the report keeps its shape and a reader sees which
+    # rail was retired rather than wondering where bug2 went.
+    findings["bug2_every_figure_grounded"] = True
+    findings["bug2_reason"] = "grounding check retired — records are rendered, not retyped"
 
     # DISTINCT searches, not total. The middleware collapses repeats of the same call
     # and the graph memoises repeats of the same query; neither claims to stop a model

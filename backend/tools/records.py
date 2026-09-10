@@ -225,7 +225,8 @@ def _reporter(ctx: ChatRequestContext, tool_name: str):
             # grid the parent reads and the grid the model was shown cannot drift.
             try:
                 ctx.note_answer_block(
-                    render_prompt("tools/records_block.j2", outcome=outcome, **context)
+                    render_prompt("tools/records_block.j2", outcome=outcome, **context),
+                    kind=outcome,
                 )
             except Exception:  # pragma: no cover - a block must never break a turn
                 logger.warning("could not render the %s block", outcome, exc_info=True)

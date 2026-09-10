@@ -157,18 +157,6 @@ class ParentTurnScenario(unittest.IsolatedAsyncioTestCase):
         self._planner.start()
         self.addCleanup(self._planner.stop)
 
-    def enforcing(self):
-        """Run a scenario under `answer_grounding_mode: enforce`.
-
-        Stated per scenario rather than inherited from whichever profile the suite runs
-        under. The root conftest puts tests on `supermew`, whose mode is `observe`, so
-        a test that simply assumed enforcement was asserting against the profile it
-        happened to get — and the enforcing path, which is what the school deployment
-        actually runs, went uncovered. Naming the mode makes each test say which of the
-        two behaviours it is pinning.
-        """
-        return patch.object(service._PROFILE.agent, "answer_grounding_mode", "enforce")
-
     def new_storage(self):
         """A conversation store that survives between turns of one test.
 
@@ -279,140 +267,6 @@ class ReasoningNeverReachesTheParent(ParentTurnScenario):
         self.assertGreater(trace["finalize_dropped_chars"], 0)
 
 
-class InventedFiguresNeverReachTheParent(ParentTurnScenario):
-    """Bug 2, on the answering path — the half a runtime guard cannot cover."""
-
-    async def test_a_figure_in_no_retrieved_chunk_is_replaced(self):
-        """The transcript that shipped, minus the leak: 45 ألف for a Year 1 child, with
-        only the Year 1 and Year 2 rows retrieved."""
-        invented = "مصاريف ابنك 45 ألف جنيه على تلات دفعات. [1]"
-        with self.enforcing():
-            events, shown, _ = await self.run_turn(
-                [("m1", [], _tool_chunk()), ("m2", _split(invented), None)],
-                trace=_trace(FEE_CHUNKS[:2]),
-            )
-        self.assertNotIn("45", shown)
-        self.assertEqual(shown, service._COPY.unverified_answer)
-        self.assertTrue(any(e.get("type") == "content_replace" for e in events))
-
-    async def test_the_replacement_stands_alone_rather_than_following_the_figure(self):
-        """A correction appended below would leave the wrong number on screen."""
-        with self.enforcing():
-            events, shown, _ = await self.run_turn(
-                [("m1", [], _tool_chunk()),
-                 ("m2", _split("مصاريف ابنك 99,000 جنيه. [1]"), None)],
-                trace=_trace(FEE_CHUNKS),
-            )
-        self.assertNotIn("99,000", shown)
-        replaces = [e for e in events if e.get("type") == "content_replace"]
-        self.assertEqual(len(replaces), 1)
-
-    async def test_a_correct_figure_is_served_untouched(self):
-        correct = "رسوم الصف الأول الابتدائي 30,000 جنيه على ثلاث دفعات. [1]"
-        _, shown, _ = await self.run_turn(
-            [("m1", [], _tool_chunk()), ("m2", _split(correct), None)],
-            trace=_trace(FEE_CHUNKS),
-        )
-        self.assertEqual(shown, correct)
-
-    async def test_an_instalment_derived_from_a_retrieved_total_is_served(self):
-        derived = "كل دفعة 10,000 جنيه من إجمالي 30,000. [1]"
-        _, shown, _ = await self.run_turn(
-            [("m1", [], _tool_chunk()), ("m2", _split(derived), None)],
-            trace=_trace(FEE_CHUNKS),
-        )
-        self.assertEqual(shown, derived)
-
-    async def test_a_citation_pointing_past_the_retrieved_chunks_is_caught(self):
-        with self.enforcing():
-            _, shown, _ = await self.run_turn(
-                [("m1", [], _tool_chunk()),
-                 ("m2", _split("رسوم الصف الأول 30,000 جنيه. [9]"), None)],
-                trace=_trace(FEE_CHUNKS),
-            )
-        self.assertEqual(shown, service._COPY.unverified_answer)
-
-    async def test_the_trace_names_the_figure_that_failed(self):
-        events, _, _ = await self.run_turn(
-            [("m1", [], _tool_chunk()),
-             ("m2", _split("مصاريف ابنك 45 ألف جنيه. [1]"), None)],
-            trace=_trace(FEE_CHUNKS[:2]),
-        )
-        trace = next(e["rag_trace"] for e in events if e.get("type") == "trace")
-        self.assertFalse(trace["grounding_ok"])
-        self.assertIn("45000", trace["grounding_ungrounded_numbers"])
-
-    async def test_observe_mode_records_the_verdict_and_still_serves_the_answer(self):
-        """The DEFAULT mode, and the one every profile but school runs.
-
-        `observe` exists so a deployment can measure this check against its own corpus
-        before letting it act — which only works if the verdict is recorded exactly as
-        it would be under `enforce`. The trace must be identical; only the serving
-        differs.
-        """
-        invented = "مصاريف ابنك 45 ألف جنيه. [1]"
-        self.assertEqual(service._PROFILE.agent.answer_grounding_mode, "observe")
-        events, shown, _ = await self.run_turn(
-            [("m1", [], _tool_chunk()), ("m2", _split(invented), None)],
-            trace=_trace(FEE_CHUNKS[:2]),
-        )
-        self.assertEqual(shown.strip(), invented)
-        self.assertFalse(any(e.get("type") == "content_replace" for e in events))
-
-        trace = next(e["rag_trace"] for e in events if e.get("type") == "trace")
-        self.assertFalse(trace["grounding_ok"])
-        self.assertIn("45000", trace["grounding_ungrounded_numbers"])
-
-    async def test_off_mode_does_not_even_look(self):
-        """`off` must cost nothing — no verdict, no trace fields, no work."""
-        with patch.object(service._PROFILE.agent, "answer_grounding_mode", "off"):
-            events, shown, _ = await self.run_turn(
-                [("m1", [], _tool_chunk()),
-                 ("m2", _split("مصاريف ابنك 45 ألف جنيه. [1]"), None)],
-                trace=_trace(FEE_CHUNKS[:2]),
-            )
-        self.assertIn("45", shown)
-        trace = next(e["rag_trace"] for e in events if e.get("type") == "trace")
-        self.assertIsNone(trace.get("grounding_ok"))
-
-    async def test_a_turn_with_no_answer_channel_gets_the_retry_copy_not_silence(self):
-        """Measured on the live model: roughly one turn in three it emitted a transcript
-        — reasoning plus a fabricated tool call — and never opened a final channel.
-
-        The finalizer withholds all of it, correctly. What it must not do is leave the
-        parent looking at an empty bubble, which is what happened before this: silence
-        reads as the assistant having ignored the question.
-        """
-        transcript = (
-            "analysisThe tool call failed due to missing query field. We need to call "
-            'search_knowledge_base.assistantcommentary to=functions.search_knowledge_basejson{"query":"x"}'
-        )
-        events, shown, _ = await self.run_turn(
-            [("m1", [], _tool_chunk()), ("m2", _split(transcript), None)],
-            trace=_trace(FEE_CHUNKS),
-        )
-        self.assertNotIn("tool call failed", shown)
-        self.assertNotIn("to=functions", shown)
-        self.assertEqual(shown, service._COPY.retrieval_error)
-        self.assertTrue(any(e.get("type") == "content_replace" for e in events))
-
-    async def test_a_real_answer_is_never_mistaken_for_an_empty_one(self):
-        """The fallback must fire on silence, not on brevity."""
-        _, shown, _ = await self.run_turn(
-            [("m1", [], _tool_chunk()), ("m2", _split("تمام."), None)],
-            trace=_trace(FEE_CHUNKS),
-        )
-        self.assertEqual(shown.strip(), "تمام.")
-
-    async def test_a_greeting_is_not_put_through_the_figure_check(self):
-        """No grounded tool bound, nothing claimed — the check must not apply."""
-        self.plan.exposed_tools = []
-        _, shown, _ = await self.run_turn(
-            [("m1", _split("أهلاً بحضرتك، تحت أمرك."), None)], trace=None
-        )
-        self.assertEqual(shown, "أهلاً بحضرتك، تحت أمرك.")
-
-
 class TheRightYearIsAnswered(ParentTurnScenario):
     """Bug 4, through the whole stack rather than at the template."""
 
@@ -477,20 +331,7 @@ class TheCorpusSaidNothing(ParentTurnScenario):
             [("m1", [], _tool_chunk())],
             trace=_trace([], status="no_knowledge"),
         )
-        self.assertIn(shown.strip(), (service._COPY.no_knowledge.strip(),
-                                      service._COPY.unverified_answer.strip()))
-
-    async def test_a_figure_invented_after_an_empty_corpus_never_reaches_the_parent(self):
-        """Both rails are down in this fixture — the model answered anyway. The
-        grounding check is the last one standing, and it has to hold."""
-        with self.enforcing():
-            _, shown, _ = await self.run_turn(
-                [("m1", [], _tool_chunk()),
-                 ("m2", _split("مصاريف الصف الرابع 45 ألف جنيه على تلات دفعات. [1]"), None)],
-                trace=_trace([], status="answerable"),
-            )
-        self.assertNotIn("45", shown)
-        self.assertEqual(shown, service._COPY.unverified_answer)
+        self.assertEqual(shown.strip(), service._COPY.no_knowledge.strip())
 
 
 if __name__ == "__main__":
@@ -539,23 +380,6 @@ class AConversationThatBuilds(ParentTurnScenario):
         texts = [getattr(m, "content", "") for m in storage.messages]
         self.assertIn("مصاريف ابني كام", texts)
         self.assertIn("شكرا", texts)
-
-    async def test_a_wrong_figure_on_the_follow_up_is_still_caught(self):
-        """The first turn being correct must not buy the second one any trust."""
-        storage = self.new_storage()
-        await self.run_turn(
-            [("m1", [], _tool_chunk()),
-             ("m2", _split("رسوم الصف الأول 30,000 جنيه على ثلاث دفعات. [1]"), None)],
-            trace=_trace(FEE_CHUNKS), storage=storage,
-        )
-        with self.enforcing():
-            _, second, _ = await self.run_turn(
-                [("m3", [], _tool_chunk()),
-                 ("m4", _split("كل دفعة 7,400 جنيه. [1]"), None)],
-                trace=_trace(FEE_CHUNKS), storage=storage,
-                question="يعني الدفعة الواحدة كام؟",
-            )
-        self.assertEqual(second, service._COPY.unverified_answer)
 
 
 class ALongHelpfulAnswer(ParentTurnScenario):

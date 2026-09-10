@@ -60,8 +60,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-import backend.chat.grounding as grounding
-from backend.chat.grounding import DEFAULT_FLOOR, GroundingReport
 from backend.chat.model_output import HarmonyFilter, strip_harmony
 
 logger = logging.getLogger(__name__)
@@ -106,7 +104,6 @@ class Finalizer:
         "_harmony_messages",
         "_tool_results",
         "_tool_texts",
-        "_grounding",
     )
 
     def __init__(self) -> None:
@@ -119,7 +116,6 @@ class Finalizer:
         self._harmony_messages = 0
         self._tool_results = 0
         self._tool_texts: list = []
-        self._grounding: Optional[GroundingReport] = None
 
     # -- streaming ---------------------------------------------------------------
 
@@ -226,40 +222,6 @@ class Finalizer:
     def tool_results(self) -> int:
         return self._tool_results
 
-    @property
-    def grounding(self) -> Optional[GroundingReport]:
-        """The verdict, once `verify` has run. None means it was never asked for."""
-        return self._grounding
-
-    def verify(
-        self,
-        evidence,
-        *,
-        floor: int = DEFAULT_FLOOR,
-        check_citations: bool = True,
-    ) -> GroundingReport:
-        """Check the assembled answer against the evidence the turn retrieved.
-
-        Runs on the finished answer rather than per chunk, because the unit being
-        checked is a claim and a claim is not complete until its sentence is. What the
-        caller does with a failing verdict is the profile's decision, not this object's
-        — see `agent.answer_grounding_mode`.
-
-        What the tools returned is added by this object rather than asked of the caller.
-        Both entry points into the check would otherwise have to remember to pass it, and
-        the one that forgot would silently stop checking a whole class of answer — which
-        is the exact shape of the bug this parameter exists to close.
-        """
-        report = grounding.verify(
-            self._answer,
-            evidence,
-            floor=floor,
-            check_citations=check_citations,
-            extra_evidence=self._tool_texts,
-        )
-        self._grounding = report
-        return report
-
     def replace_answer(self, replacement: str) -> str:
         """Discard what was assembled and stand `replacement` in its place.
 
@@ -283,8 +245,6 @@ class Finalizer:
             "finalize_harmony_messages": self._harmony_messages,
             "finalize_tool_results": self._tool_results,
         }
-        if self._grounding is not None:
-            trace.update(self._grounding.as_trace())
         return trace
 
     def log_summary(self) -> None:
@@ -296,12 +256,6 @@ class Finalizer:
                 self._dropped_chars,
                 self._harmony_messages,
             )
-        if self._grounding is not None and not self._grounding.ok:
-            # Warning, not info: every one of these is either an answer that was about
-            # to state an invented figure, or a corpus this check reads badly. Both need
-            # somebody to look.
-            logger.warning("finalize: answer failed grounding — %s", self._grounding.reason)
-
 
 def finalize_text(text: str, *, has_tool_calls: bool = False) -> str:
     """The same rules, for a response that arrived complete rather than streamed.

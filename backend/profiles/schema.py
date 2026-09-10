@@ -306,13 +306,10 @@ class AgentConfig(_Section):
     # What to do about an answer that tells a parent no record exists on a turn where
     # the records tool returned one.
     #
-    # This is a different fault from the one `answer_grounding_mode` catches, and it
-    # needs its own check because the numeric one cannot see it. Grounding asks whether a
-    # figure came from somewhere; a denial states no figure at all. And the marks are
-    # under `answer_grounding_number_floor` in any case — 87.5 and 91.0 are below the
-    # 100 that separates a fee from a formatting difference — so even a records answer
-    # full of figures is mostly beneath the numeric check. Measured: the tool returned
-    # both of those marks and the reply was "I couldn't find any records."
+    # A denial states no figure at all, so nothing that compares figures could ever have
+    # caught it — and the numeric grounding check that used to sit beside this has since
+    # been removed anyway. Measured: the tool returned 87.5% and 91.0% for a named child
+    # and the reply was "I couldn't find any records."
     #
     # `off` by default and `observe` where it is switched on, because the detector is a
     # phrase list and a phrase list is the one part of this that CAN be wrong about a
@@ -374,24 +371,6 @@ class AgentConfig(_Section):
                 f"tool_call_budgets."
             )
         return self
-
-    # Whether an answer's figures are checked against the evidence the turn retrieved,
-    # and what happens when one is not there. See backend/chat/grounding.py.
-    #
-    #   off      — no check, no trace field
-    #   observe  — check and record the verdict, serve the answer either way
-    #   enforce  — an answer stating a figure that is in no retrieved chunk is replaced
-    #              with `user_copy.unverified_answer`
-    #
-    # `observe` is the default because enforcement's cost is borne by whichever
-    # deployment has a corpus this check reads badly, and that has to be discovered from
-    # its own traces rather than assumed here. A deployment whose numbers are the thing
-    # users act on sets `enforce` — the school profile does.
-    answer_grounding_mode: Literal["off", "observe", "enforce"] = "observe"
-
-    # Figures below this are counts, not claims, and are not checked. See the module
-    # docstring for why chasing them produces false positives and buys no safety.
-    answer_grounding_number_floor: int = 100
 
     # Words that mean the question scoped itself to a year group. When one appears, the
     # child's year from the roster is NOT applied as a condition: the parent said which
@@ -846,7 +825,7 @@ class CopyConfig(_Section):
         "Please try again in a moment."
     )
     # Served in place of an answer whose figures are not in the retrieved evidence, when
-    # `agent.answer_grounding_mode` is `enforce`. Deliberately says nothing about what
+    # a check refused to let it stand. Deliberately says nothing about what
     # went wrong internally: the user needs to know the number was not verified, not
     # that a check fired.
     unverified_answer: str = (

@@ -386,8 +386,6 @@ agent:
 
   # A fee, an instalment, a deadline — the figures in this corpus are what a parent acts
   # on, so a figure that is in no retrieved chunk must not be served. Enforced rather
-  # than observed because the failure this closes actually reached a parent: an invented
-  # «45 ألف» for a grade the child is not in. See backend/chat/grounding.py.
   # An answer that tells a parent no record exists, on a turn where the records tool
   # returned one. Measured here: the tool came back with 87.5% and 91.0% for a named
   # child and the reply was "I couldn't find any records." The numeric check above cannot
@@ -412,7 +410,6 @@ agent:
     - "no records"
     - "not find any"
 
-  answer_grounding_mode: enforce
 
   # Six turns of conversation, which is TWELVE messages — this is counted in messages,
   # not exchanges, and setting it to 6 would give a parent three turns of memory.
