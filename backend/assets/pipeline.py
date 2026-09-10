@@ -360,8 +360,8 @@ class FigurePipeline:
             logger.exception("Failed to store blob for %s", asset_id)
 
         # Primed for the whole document by `process`. The per-image lookup stays as the
-        # fallback so a direct `_process_one` — the backfill job, and every test that
-        # calls it — still finds a cache entry.
+        # fallback so that calling `_process_one` on its own still finds a cache entry
+        # rather than silently paying for a re-extraction.
         cached = (
             cached_by_digest.get(digest)
             if cached_by_digest is not None

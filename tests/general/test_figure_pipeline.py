@@ -500,8 +500,9 @@ class FigurePipelineTests(PipelineTestCase):
         self.assertEqual(1, report.cached)
 
     def test_a_direct_call_still_finds_the_cache_on_its_own(self):
-        """`_process_one` is called without a primed batch by the backfill job and by
-        every test below, so the per-image lookup has to remain the fallback."""
+        """`_process_one` can be called without a primed batch, so the per-image lookup
+        has to remain the fallback — otherwise such a call silently pays for a
+        re-extraction it already had the answer to."""
         from backend.assets.dossier import ExtractionPayload, Provenance, TextSurface
         from backend.assets.pipeline import FigureReport
 
