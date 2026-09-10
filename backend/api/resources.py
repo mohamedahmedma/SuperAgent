@@ -23,7 +23,9 @@ milvus_manager = get_milvus_store()
 milvus_writer = MilvusWriter(embedding_service=embedding_service, milvus_manager=milvus_manager)
 
 
-def delete_document_transactionally(filename: str, job_manager=None, job_id=None) -> int:
+def delete_document_transactionally(
+    filename: str, job_manager=None, job_id=None, include_assets: bool = True
+) -> int:
     """
     Consistently and transactionally delete all data associated with a document
     (Milvus 2.5+ maintains BM25 index statistics automatically on the server side).
@@ -31,6 +33,17 @@ def delete_document_transactionally(filename: str, job_manager=None, job_id=None
     1. Initialize the Milvus collection.
     2. Delete the Milvus vector data.
     3. Delete the L1/L2 parent chunks in PostgreSQL and the corresponding Redis cache.
+
+    `include_assets=False` keeps step 3's asset occurrences. It exists for a caller that
+    replaces a document AFTER parsing it, because parsing is not side-effect-free: figure
+    enrichment runs inside `load_document` and commits this filename's `document_assets`
+    rows before the replace is reached, so a cleanup that ran afterwards would delete the
+    rows the parse had just written. Skipping the delete is safe rather than merely
+    convenient — `build_asset_id` is deterministic in (filename, page_number, index), so
+    re-ingesting a document regenerates the same ids and `record_many` upserts them in
+    place. The one residue is a replacement with FEWER images than the version it
+    replaces, whose surplus (page, index) rows linger; `delete_by_filename` keeps the
+    extraction cache regardless, so nothing expensive is at stake either way.
     """
     if job_manager and job_id:
         job_manager.update_step(job_id, "prepare", 50, "running", "Initializing Milvus collection")
@@ -71,7 +84,7 @@ def delete_document_transactionally(filename: str, job_manager=None, job_id=None
     # (DELETE_STEPS, rendered by the frontend) stays unchanged.
     asset_summary = ""
     profile = get_profile()
-    if profile.assets.enabled:
+    if include_assets and profile.assets.enabled:
         try:
             from backend.assets.store import get_asset_store
 

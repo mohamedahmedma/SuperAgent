@@ -161,6 +161,77 @@ class PairUploadJobTests(unittest.TestCase):
         self.assertIn("broken.docx", self._failure())
         self.assertEqual([], pair_store.list_pairs())
 
+    def test_the_cleanup_spares_the_asset_rows_the_parse_just_wrote(self):
+        """Parsing is NOT read-only, which is what makes the ordering above dangerous.
+
+        Figure enrichment runs inside `load_document` and commits this filename's
+        `document_assets` rows. The cleanup then runs afterwards, keyed on the same
+        filename, so an unqualified delete removed precisely what the parse had written:
+        every paired upload finished with an empty `document_assets` while the extraction
+        cache — which `delete_by_filename` keeps on purpose — still reported each image as
+        "from cache". Retrieval never noticed, because the vision surrogates live in the
+        chunks, but `_displayable_hashes` went empty and no figure could reach the user.
+        """
+        self.loader.load_document.side_effect = [_chunks(ARABIC_BODY), _chunks(ENGLISH_BODY)]
+
+        self._run([
+            (ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx"),
+            (ENGLISH, "/tmp/fees_en.docx", "fees_en.docx"),
+        ])
+
+        self.jobs.fail_job.assert_not_called()
+        self.assertEqual(2, self.cleanup.call_count)
+        for call in self.cleanup.call_args_list:
+            self.assertIs(
+                False, call.kwargs.get("include_assets"),
+                "the pair job must ask the cleanup to spare asset rows, since its own "
+                "parse step has already written them",
+            )
+
+
+class CleanupAssetGateTests(unittest.TestCase):
+    """`include_assets` on delete_document_transactionally, in both directions.
+
+    The pair job's correctness rests on this flag actually gating the delete, so the
+    flag is pinned here rather than only at the call site.
+    """
+
+    def setUp(self):
+        import backend.api.resources as resources
+
+        self.resources = resources
+        self.store = MagicMock()
+        self.store.delete_by_filename.return_value = MagicMock(
+            assets_deleted=0, blobs_deleted=0, blobs_retained=0
+        )
+        profile = MagicMock()
+        profile.assets.enabled = True
+        profile.assets.gc_orphan_blobs = True
+
+        doubles = (
+            ("milvus_manager", MagicMock()),
+            ("parent_chunk_store", MagicMock()),
+            ("get_profile", MagicMock(return_value=profile)),
+        )
+        for name, double in doubles:
+            p = patch.object(resources, name, double)
+            p.start()
+            self.addCleanup(p.stop)
+
+        # Imported inside the function under test, so it is patched at its source.
+        p = patch("backend.assets.store.get_asset_store", MagicMock(return_value=self.store))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_plain_delete_still_removes_the_asset_rows(self):
+        """The delete route and the single-file upload both depend on this default."""
+        self.resources.delete_document_transactionally("fees_ar.docx")
+        self.store.delete_by_filename.assert_called_once()
+
+    def test_include_assets_false_leaves_them_alone(self):
+        self.resources.delete_document_transactionally("fees_ar.docx", include_assets=False)
+        self.store.delete_by_filename.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

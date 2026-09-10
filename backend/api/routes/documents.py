@@ -160,10 +160,21 @@ def _process_pair_upload_job(job_id: str, pair_id: str, title: str, sides: list)
 
         # Only now does anything get written. Replacing a same-named document is part of
         # writing, not of validation, so it happens after both files are known good.
+        #
+        # `include_assets=False` because "parsing" above was not read-only: figure
+        # enrichment runs inside load_document and has already committed each
+        # filename's document_assets rows. Deleting them here — keyed on the same
+        # filename — wiped exactly what the parse had just written, so every paired
+        # upload finished with an empty document_assets while the extraction cache
+        # (which delete_by_filename keeps on purpose) still reported every image as
+        # "from cache". Retrieval was unaffected, since the vision surrogates live in
+        # the chunks, but nothing could be DISPLAYED: _displayable_hashes went empty
+        # and no figure could reach the user. The single-file path is unaffected — it
+        # cleans up BEFORE it parses.
         failed_step = "cleanup"
         upload_job_manager.update_step(job_id, "cleanup", 10, "running", "Cleaning up old versions")
         for _, filename, _ in parsed:
-            delete_document_transactionally(filename)
+            delete_document_transactionally(filename, include_assets=False)
         upload_job_manager.complete_step(job_id, "cleanup", "Old version cleanup complete")
 
         failed_step = "parent_store"
