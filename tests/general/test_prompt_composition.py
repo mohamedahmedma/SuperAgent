@@ -399,8 +399,7 @@ class ToolResultEnvelopeTests(unittest.TestCase):
     def test_the_figure_rule_is_not_hard_wrapped(self):
         out = self._chunks(figures=True)
         self.assertIn(
-            "Write the same marker into your answer at the point where the picture belongs",
-            out,
+            "Write the same marker into your answer where the picture belongs", out
         )
 
     def test_the_figure_rule_reaches_no_other_outcome(self):

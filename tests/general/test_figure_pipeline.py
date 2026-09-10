@@ -452,6 +452,79 @@ class FigurePipelineTests(PipelineTestCase):
         self.assertEqual(1, vision.extract.call_count)
         self.assertEqual(1, report.cached)
 
+    def test_a_shallower_tier_in_the_cache_does_not_block_a_tier_upgrade(self):
+        """The other way a cache entry can be weaker, and the one this used to miss.
+
+        `_cache_is_weaker` compared only model-free against model-backed, so an image
+        already extracted at SIMPLE was served from the cache however deep a tier triage
+        asked for now. Any tier-aware extraction would then have been a silent no-op on
+        every image already in the corpus — the same failure the model-free rule exists
+        to prevent, arriving by the other door.
+        """
+        from backend.assets.dossier import (
+            AssetTier, ExtractionPayload, Provenance, TextSurface, compute_sha256,
+        )
+
+        # 600x500 = 300,000 >= base's complex_min_area of 250,000, so triage asks COMPLEX.
+        shared = make_png(600, 500, seed=13)
+        self.store.save_extraction(
+            compute_sha256(shared),
+            self.profile.name,
+            ExtractionPayload(
+                text=TextSurface(caption="Fee table"),
+                provenance=Provenance(
+                    model_used="vl-test", tier=AssetTier.SIMPLE, confidence=0.9
+                ),
+            ),
+        )
+
+        vision = Mock()
+        vision.name = "vision"
+        vision.extract.return_value = ExtractionPayload(
+            text=TextSurface(caption="Fee table", transcription="Year 6 | 45,000"),
+            provenance=Provenance(
+                model_used="vl-test", tier=AssetTier.COMPLEX, confidence=0.9
+            ),
+        )
+        dossiers, report = self.pipeline(extractor=vision).process(
+            [ImageInput(data=shared, index=0)], filename="fees.pdf"
+        )
+
+        self.assertEqual(AssetTier.COMPLEX, dossiers[0].tier)
+        vision.extract.assert_called_once()
+        self.assertEqual(0, report.cached)
+        self.assertEqual(1, report.extracted)
+        self.assertIn("Year 6 | 45,000", dossiers[0].extraction.text.transcription)
+
+    def test_a_deeper_tier_in_the_cache_is_still_reused(self):
+        """Weaker, not merely different. An image cached at COMPLEX and triaged SIMPLE
+        now — the thresholds moved the other way — already holds the better answer, and
+        re-reading it would pay a vision call to get less."""
+        from backend.assets.dossier import (
+            AssetTier, ExtractionPayload, Provenance, TextSurface, compute_sha256,
+        )
+
+        shared = make_png(400, 300, seed=14)
+        self.store.save_extraction(
+            compute_sha256(shared),
+            self.profile.name,
+            ExtractionPayload(
+                text=TextSurface(caption="Fee table", transcription="Year 6 | 45,000"),
+                provenance=Provenance(
+                    model_used="vl-test", tier=AssetTier.COMPLEX, confidence=0.9
+                ),
+            ),
+        )
+
+        vision = Mock()
+        vision.name = "vision"
+        _, report = self.pipeline(extractor=vision).process(
+            [ImageInput(data=shared, index=0)], filename="fees.pdf"
+        )
+
+        vision.extract.assert_not_called()
+        self.assertEqual(1, report.cached)
+
     def test_extractor_failure_falls_back_instead_of_losing_the_asset(self):
         failing = Mock()
         failing.extract.side_effect = RuntimeError("vision endpoint down")
