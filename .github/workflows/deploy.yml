@@ -196,13 +196,32 @@ jobs:
       - cd-publish-records
       - cd-publish-sis
     runs-on: ubuntu-latest
-    if: always() && needs.changes.result == 'success'
+    # Each unchanged service is intentionally skipped. Opt out of GitHub's implicit
+    # success() check, but still reject a failed image build or a cancelled run.
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.changes.result == 'success' &&
+        (needs.cd-publish-backend.result == 'success' || needs.cd-publish-backend.result == 'skipped') &&
+        (needs.cd-publish-frontend.result == 'success' || needs.cd-publish-frontend.result == 'skipped') &&
+        (needs.cd-publish-identity.result == 'success' || needs.cd-publish-identity.result == 'skipped') &&
+        (needs.cd-publish-records.result == 'success' || needs.cd-publish-records.result == 'skipped') &&
+        (needs.cd-publish-sis.result == 'success' || needs.cd-publish-sis.result == 'skipped')
+      }}
     steps:
       - run: echo "All release images for ${{ github.sha }} were published successfully."
 
   deploy:
     name: Stage 3 - Deploy production (approval required)
     needs: [changes, cd-release-ready]
+    # A skipped service job in the transitive dependency chain otherwise causes this
+    # job to be skipped before GitHub can present the environment approval prompt.
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.changes.result == 'success' &&
+        needs.cd-release-ready.result == 'success'
+      }}
     runs-on: ubuntu-latest
     # Configure `production` in GitHub Settings with both maintainers as required
     # reviewers. GitHub pauses this job here; either one may approve it.
