@@ -25,9 +25,49 @@ jobs:
     permissions:
       contents: read
 
+  changes:
+    name: Stage 2 - Detect changed services
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.detect.outputs.backend }}
+      frontend: ${{ steps.detect.outputs.frontend }}
+      identity: ${{ steps.detect.outputs.identity }}
+      records: ${{ steps.detect.outputs.records }}
+      sis: ${{ steps.detect.outputs.sis }}
+      services: ${{ steps.detect.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 2}
+      - id: detect
+        shell: bash
+        run: |
+          changed="$(git diff --name-only '${{ github.event.before }}' "$GITHUB_SHA" 2>/dev/null || git ls-files)"
+          all=false; backend=false; frontend=false; identity=false; records=false; sis=false
+          while IFS= read -r file; do
+            case "$file" in
+              docker-compose*.yml|Dockerfile|pyproject.toml|uv.lock) all=true ;;
+              backend/*) backend=true ;;
+              frontend/*) frontend=true ;;
+              identity/*) identity=true ;;
+              records/*) records=true ;;
+              sis/*) sis=true ;;
+              schoolauth/*) backend=true; identity=true; records=true ;;
+            esac
+          done <<< "$changed"
+          if [ "$all" = true ]; then backend=true; frontend=true; identity=true; records=true; sis=true; fi
+          services=""
+          for service in backend frontend identity records sis; do
+            value="${!service}"
+            echo "$service=$value" >> "$GITHUB_OUTPUT"
+            [ "$value" = true ] && services="$services $service"
+          done
+          echo "services=${services# }" >> "$GITHUB_OUTPUT"
+
   cd-publish-backend:
     name: CD - Publish backend image
-    needs: ci
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +90,8 @@ jobs:
 
   cd-publish-frontend:
     name: CD - Publish frontend image
-    needs: ci
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +116,8 @@ jobs:
 
   cd-publish-identity:
     name: CD - Publish identity image
-    needs: ci
+    needs: changes
+    if: needs.changes.outputs.identity == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,7 +140,8 @@ jobs:
 
   cd-publish-records:
     name: CD - Publish records image
-    needs: ci
+    needs: changes
+    if: needs.changes.outputs.records == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -121,7 +164,8 @@ jobs:
 
   cd-publish-sis:
     name: CD - Publish sis image
-    needs: ci
+    needs: changes
+    if: needs.changes.outputs.sis == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,18 +189,20 @@ jobs:
   cd-release-ready:
     name: CD - All release images published
     needs:
+      - changes
       - cd-publish-backend
       - cd-publish-frontend
       - cd-publish-identity
       - cd-publish-records
       - cd-publish-sis
     runs-on: ubuntu-latest
+    if: always() && needs.changes.result == 'success'
     steps:
       - run: echo "All release images for ${{ github.sha }} were published successfully."
 
   deploy:
     name: Stage 3 - Deploy production (approval required)
-    needs: cd-release-ready
+    needs: [changes, cd-release-ready]
     runs-on: ubuntu-latest
     # Configure `production` in GitHub Settings with both maintainers as required
     # reviewers. GitHub pauses this job here; either one may approve it.
@@ -171,6 +217,7 @@ jobs:
       PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
       GHCR_USER: ${{ github.actor }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEPLOY_SERVICES: ${{ needs.changes.outputs.services }}
       IMAGE_TAG: ${{ github.sha }}
       # Only consulted when a certificate is missing. An estate whose certificates are
       # already issued deploys without it.
@@ -229,20 +276,29 @@ jobs:
           printf '%s' "$LETSENCRYPT_EMAIL" | sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "cat > '$DEPLOY_PATH/.letsencrypt-email' && chmod 600 '$DEPLOY_PATH/.letsencrypt-email'"
       - name: Deploy, verify, and roll back on failure
         run: |
-          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" "$IMAGE_TAG" "$IMAGE_PREFIX" <<'REMOTE'
+          sshpass -e ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" "$IMAGE_TAG" "$IMAGE_PREFIX" "$DEPLOY_SERVICES" <<'REMOTE'
           set -eu
           deploy_path="$1"
           image_tag="$2"
           image_prefix="$3"
+          services="$4"
           cd "$deploy_path"
-          compose="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
-          services="backend frontend identity records sis"
-          # Both are declared `:?required` on every service image, and compose
-          # interpolates the whole file even when a single service is named — so any
-          # compose call before the first release, not just the release itself, needs
-          # them. release() re-exports IMAGE_TAG to roll back to a different tag.
+          # A documentation-only change has no application image to release.
+          [ -n "$services" ] || exit 0
+          tags_file=".release-image-tags"
+          if [ ! -f "$tags_file" ]; then
+            printf '%s\n' BACKEND_IMAGE_TAG=stable FRONTEND_IMAGE_TAG=stable IDENTITY_IMAGE_TAG=stable RECORDS_IMAGE_TAG=stable SIS_IMAGE_TAG=stable > "$tags_file"
+          fi
+          cp "$tags_file" "${tags_file}.previous"
+          for service in $services; do
+            key="$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')_IMAGE_TAG"
+            sed -i "/^${key}=/d" "$tags_file"
+            printf '%s=%s\n' "$key" "$image_tag" >> "$tags_file"
+          done
+          compose="docker compose --env-file .env --env-file $tags_file -f docker-compose.yml -f docker-compose.prod.yml"
+          # Compose interpolates every service even when only one is named, so every
+          # service tag is persisted in the release manifest before it is invoked.
           export REGISTRY_IMAGE_PREFIX="$image_prefix"
-          export IMAGE_TAG="$image_tag"
 
           previous=""
           if [ -f .current-image-tag ]; then previous="$(cat .current-image-tag)"; fi
@@ -251,9 +307,8 @@ jobs:
           if [ -f .current-env-sha256 ]; then previous_env_hash="$(cat .current-env-sha256)"; fi
 
           release() {
-            export IMAGE_TAG="$1"
             $compose pull $services || return 1
-            $compose up -d || return 1
+            $compose up -d --no-deps $services || return 1
           }
 
           healthy() {
@@ -309,7 +364,7 @@ jobs:
           # is unhealthy" ended the run before the diagnosis below — which is exactly how a
           # failed deploy reported an unhealthy container and not one line of its log.
           attempt() {
-            release "$1" || return 1
+            release || return 1
             # A change to .env reaches nothing on its own: compose hashes a service's own
             # configuration to decide what to recreate, and the CONTENTS of an env_file are
             # not part of that hash, so an edited file sits unread behind containers that
@@ -345,9 +400,10 @@ jobs:
             echo "--- $service logs (last 100 lines) ---"
             $compose logs --no-color --tail 100 "$service" || true
           done
-          if [ -n "$previous" ]; then
-            echo "Rolling back to $previous"
-            release "$previous" || true
+          if [ -f "${tags_file}.previous" ]; then
+            echo "Rolling back the changed service tags"
+            mv -f "${tags_file}.previous" "$tags_file"
+            release || true
             healthy || true
           fi
           $compose ps

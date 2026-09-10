@@ -180,6 +180,12 @@ jobs:
           MINIO_ROOT_USER: ci
           MINIO_ROOT_PASSWORD: ci-password
           LOCAL_SERVICE_KEY: ci-service-key
+          REGISTRY_IMAGE_PREFIX: example.invalid/superagent
+          BACKEND_IMAGE_TAG: ci
+          FRONTEND_IMAGE_TAG: ci
+          IDENTITY_IMAGE_TAG: ci
+          RECORDS_IMAGE_TAG: ci
+          SIS_IMAGE_TAG: ci
         run: docker compose config --quiet
 
   image-build:
