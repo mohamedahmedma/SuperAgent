@@ -382,7 +382,10 @@ export function ErrorNote({ error, title, onRetry }) {
  * to the data, rather than buried in a stylesheet.
  *
  * The table is wrapped in `.table-responsive`, so anything that still does not fit scrolls
- * inside its own box instead of widening the page and pushing the nav off screen.
+ * inside its own box instead of widening the page and pushing the nav off screen. `responsive`
+ * names a Bootstrap breakpoint (`'md'` → `.table-responsive-md`) for a table that should stop
+ * carrying its own scrollbar once there is width for it, and let the page scroll instead — the
+ * breakpoint is Bootstrap's and it is in the markup, which is the only place breakpoints live.
  *
  * `onRowActivate` is the double-click gesture, and it is deliberately never the only way to
  * reach what it opens. A double-click does not exist on a phone — a double-tap is a zoom, or
@@ -399,13 +402,14 @@ export function Table({
   loading,
   empty,
   onRowActivate,
+  responsive,
   animate = true
 }) {
   if (loading && !rows.length) return <Skeleton rows={6} />;
   if (!rows.length) return empty || <Empty title={t('Nothing to show')} />;
 
   return (
-    <div className="table-responsive">
+    <div className={responsive ? `table-responsive-${responsive}` : 'table-responsive'}>
       <table className="table table-hover align-middle mb-0">
         <thead>
           <tr>

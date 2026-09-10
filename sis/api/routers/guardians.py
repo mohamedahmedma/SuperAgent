@@ -178,7 +178,10 @@ class LinkOut(BaseModel):
 class GuardianDetailsIn(BaseModel):
     """The editable contact and relationship facts for one guardian."""
 
-    phone: str = Field(min_length=1, max_length=32)
+    # Optional: omitted means "leave the identity alone". A registrar correcting a spelling
+    # is not restating the number she is correcting it against, and requiring her to would
+    # make every name fix a phone edit that can collide with another guardian.
+    phone: str | None = Field(default=None, min_length=1, max_length=32)
     full_name_ar: str = Field(default="", max_length=240)
     full_name_en: str = Field(default="", max_length=240)
     relationship_type: RelationshipType
@@ -393,8 +396,10 @@ def set_records_access(
     "/students/{student_number}/guardians/{phone}/details",
     response_model=GuardianOut,
     summary="Edit a guardian's contact details and this child's relationship",
-    description="Updates the guardian's displayed name and primary phone for all linked "
-    "children, and relationship/primary-contact facts only for this child.",
+    description="Updates the guardian's displayed name for all linked children, and the "
+    "relationship/primary-contact facts only for this child. `phone` is optional and moves "
+    "her primary number for every linked child when given; omitted, the number in the path "
+    "remains her identity.",
     responses=error_responses(401, 403, 404, 422),
 )
 def update_guardian_details(
@@ -414,8 +419,12 @@ def update_guardian_details(
             guardian = uow.guardians.get(parsed)
             if guardian is None:
                 raise UnknownReference(f"no guardian reachable on {parsed}", field="phone")
-            replacement_phone = Phone.parse(
-                body.phone, default_country_code=get_settings().default_country_code
+            replacement_phone = (
+                Phone.parse(
+                    body.phone, default_country_code=get_settings().default_country_code
+                )
+                if body.phone
+                else parsed
             )
             if replacement_phone != parsed:
                 occupied_by = uow.guardians.get(replacement_phone)

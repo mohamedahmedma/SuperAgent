@@ -507,6 +507,7 @@ function Register({ classCode, year, yearLevel }) {
   const [panel, setPanel] = useState(null); /* 'add' | 'place' | null */
   const [editing, setEditing] = useState('');
   const [moving, setMoving] = useState('');
+  const [dialog, ask] = useConfirm();
   /* Edit and Move open a panel under the table. On a register of thirty that panel is below the
      fold, so the click reads as a button that did nothing — the reason to scroll to it is that
      the effect is otherwise invisible, not decoration. */
@@ -532,22 +533,11 @@ function Register({ classCode, year, yearLevel }) {
     (row) => row.is_open
   );
 
-  const remove = useAction((student) => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const endsOn = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
-    return api.endPlacement(student.student_number, { ends_on: endsOn }).then(() => {
-      Store.invalidate('roster:');
-      Store.invalidate('placements:');
-      Store.invalidate('attendance:');
-      Store.toast('ok', t('{0} removed from {1}', [student.student_number, classCode]).join(''));
-      roster.reload();
-    });
-  });
-
+  /* Remove is destructive and irreversible from this screen — it closes a placement and files
+     an absence — so it asks first. The service files today's attendance as absent only when
+     `ends_on` is today, which is what the confirmation below promises; sending any other date
+     would leave that promise unkept. */
   function removeFromClass(student) {
-    remove.run(student).catch(() => {});
-    return;
     ask({
       title: `Remove ${student.student_number} from ${classCode}?`,
       tone: 'bad',
@@ -579,8 +569,9 @@ function Register({ classCode, year, yearLevel }) {
 
   return (
     <div className="vstack gap-4">
+      {dialog}
+
       <Card
-        className={isSchoolOwner ? 'sis-owner-register' : undefined}
         title={t('On the register')}
         subtitle={
           roster.value
@@ -640,6 +631,9 @@ function Register({ classCode, year, yearLevel }) {
         <ErrorNote error={roster.error} onRetry={roster.reload} />
 
         <Table
+          /* The owner works from the full school register. Above `md` its long list belongs on
+             the page's own scroll path rather than in a second scrollbar inside the card. */
+          responsive={isSchoolOwner ? 'md' : undefined}
           loading={roster.loading}
           rows={students}
           rowKey={(row) => row.student_number}
@@ -725,7 +719,7 @@ function Register({ classCode, year, yearLevel }) {
                   >
                     {t('Move')}
                   </Button>
-                  <Button size="sm" variant="danger" pending={remove.pending} disabled={remove.pending} onClick={() => removeFromClass(row)}>
+                  <Button size="sm" variant="danger" onClick={() => removeFromClass(row)}>
                     {t('Remove')}
                   </Button>
                 </div>
