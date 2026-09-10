@@ -502,6 +502,8 @@ function RenameClass({ section, year, onDone }) {
 
 function Register({ classCode, year, yearLevel }) {
   const state = useStore();
+  const isSchoolOwner = Store.roles().includes('school_owner');
+  const isSchoolLeadership = isSchoolOwner || Store.roles().includes('school_manager');
   const [panel, setPanel] = useState(null); /* 'add' | 'place' | null */
   const [editing, setEditing] = useState('');
   const [moving, setMoving] = useState('');
@@ -521,14 +523,20 @@ function Register({ classCode, year, yearLevel }) {
     [classCode, year],
     !!(classCode && year)
   );
-  const students = (roster.value && roster.value.students) || [];
-  /* A placement ends on the child's **last day**, not the day after, so a child removed this
-     morning is still on this morning's register — and must be: today's attendance is taken
-     against it. That is the correct record and it is also, on a screen that draws her exactly
-     like everybody else, indistinguishable from a Remove button that did nothing. So the row
-     says so. `is_open` is what the service already tells us; nothing new is asked for. */
-  const leaving = students.filter((row) => row.is_open === false);
+  /* A placement's `ends_on` is the child's last day, inclusive, so the service still answers
+     `covers(today)` for a child removed this morning — that is correct: it is the row
+     `Remove` just filed today's absence against. This screen is where she is placed and
+     moved, not where that history is read back, so once the click has closed her placement
+     there is nothing left for her to do here; a stale row on a screen that otherwise looks
+     unchanged reads as a button that failed. */
+  const students = ((roster.value && roster.value.students) || []).filter(
+    (row) => row.is_open
+  );
 
+  /* Remove is destructive and irreversible from this screen — it closes a placement and files
+     an absence — so it asks first. The service files today's attendance as absent only when
+     `ends_on` is today, which is what the confirmation below promises; sending any other date
+     would leave that promise unkept. */
   function removeFromClass(student) {
     ask({
       title: `Remove ${student.student_number} from ${classCode}?`,
@@ -537,10 +545,7 @@ function Register({ classCode, year, yearLevel }) {
       body: (
         <div className="vstack gap-2">
           <p className="mb-0">
-            {t('Today is her last day in {0}, so she stays on today’s register — this morning’s attendance is taken against it — and is off it from tomorrow.', [classCode])}
-          </p>
-          <p className="mb-0">
-            {t('It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class tomorrow.')}
+            {t('Today is recorded absent for her automatically, and she comes off this register now. It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class right away.')}
           </p>
           <p className="mb-0 small text-body-tertiary">
             {t('If she is moving to another class, use')} <strong>{t('Move')}</strong> {t('instead — it closes this placement and opens the next one together, so she is never in no class at all.')}
@@ -551,10 +556,11 @@ function Register({ classCode, year, yearLevel }) {
         api.endPlacement(student.student_number, { ends_on: today() }).then(() => {
           Store.invalidate('roster:');
           Store.invalidate('placements:');
+          Store.invalidate('attendance:');
           Store.toast(
             'ok',
             t('{0} removed from {1}', [student.student_number, classCode]).join(''),
-            t('Today is her last day, so she is on the register once more and off it tomorrow.')
+            t('Recorded absent for today and taken off the register.')
           );
           roster.reload();
         })
@@ -569,25 +575,20 @@ function Register({ classCode, year, yearLevel }) {
         title={t('On the register')}
         subtitle={
           roster.value
-            ? [
-                `${roster.value.count} child(ren) as of ${dateText(roster.value.as_of)}`,
-                leaving.length
-                  ? t('{0} on their last day', [leaving.length]).join('')
-                  : null
-              ]
-                .filter(Boolean)
-                .join(' · ')
+            ? `${students.length} child(ren) as of ${dateText(roster.value.as_of)}`
             : null
         }
         actions={
           <div className="d-flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant={panel === 'add' ? 'primary' : 'outline'}
-              onClick={() => setPanel(panel === 'add' ? null : 'add')}
-            >
-              {t('Add a child')}
-            </Button>
+            {!isSchoolLeadership ? (
+              <Button
+                size="sm"
+                variant={panel === 'add' ? 'primary' : 'outline'}
+                onClick={() => setPanel(panel === 'add' ? null : 'add')}
+              >
+                {t('Add a child')}
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant={panel === 'place' ? 'primary' : 'outline'}
@@ -630,10 +631,12 @@ function Register({ classCode, year, yearLevel }) {
         <ErrorNote error={roster.error} onRetry={roster.reload} />
 
         <Table
+          /* The owner works from the full school register. Above `md` its long list belongs on
+             the page's own scroll path rather than in a second scrollbar inside the card. */
+          responsive={isSchoolOwner ? 'md' : undefined}
           loading={roster.loading}
           rows={students}
           rowKey={(row) => row.student_number}
-          rowTone={(row) => (row.is_open === false ? 'warn' : null)}
           rowHref={(row) => Router.href('student', { number: row.student_number })}
           rowLabel={(row) => t('Open {0}', [pickName(row, state.lang) || row.student_number]).join('')}
           empty={
@@ -681,15 +684,6 @@ function Register({ classCode, year, yearLevel }) {
                   <div className="sis-code sis-xs text-body-tertiary d-md-none">
                     {row.student_number}
                   </div>
-                  {row.is_open === false ? (
-                    <div className="mt-1">
-                      <Badge tone="warn">
-                        {t('Last day {0} — off the register after it', [
-                          dateText(row.ends_on)
-                        ])}
-                      </Badge>
-                    </div>
-                  ) : null}
                 </>
               )
             },
@@ -705,10 +699,6 @@ function Register({ classCode, year, yearLevel }) {
             {
               key: 'actions',
               header: '',
-              /* Move and Remove both act on an *open* placement, and a child whose placement
-                 closed this morning has none — the service answers 404, which reads as a
-                 broken button rather than as "already done". Edit stays: her record is hers
-                 whichever class she is in. */
               cell: (row) => (
                 <div className="sis-row-actions d-flex flex-wrap gap-1 justify-content-end">
                   <Button
@@ -720,22 +710,18 @@ function Register({ classCode, year, yearLevel }) {
                   >
                     {t('Edit')}
                   </Button>
-                  {row.is_open === false ? null : (
-                    <>
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          setEditing('');
-                          setMoving(moving === row.student_number ? '' : row.student_number);
-                        }}
-                      >
-                        {t('Move')}
-                      </Button>
-                      <Button size="sm" variant="danger" onClick={() => removeFromClass(row)}>
-                        {t('Remove')}
-                      </Button>
-                    </>
-                  )}
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditing('');
+                      setMoving(moving === row.student_number ? '' : row.student_number);
+                    }}
+                  >
+                    {t('Move')}
+                  </Button>
+                  <Button size="sm" variant="danger" onClick={() => removeFromClass(row)}>
+                    {t('Remove')}
+                  </Button>
                 </div>
               )
             }

@@ -829,6 +829,7 @@ export const AR = {
     'هذا العام غير مسجَّل.',
   'Upload marks':
     'رفع الدرجات',
+  'Attendance recorded': 'تم تسجيل الحضور',
 
   '2. Committed':
     '٢. المعتمد',
@@ -1202,20 +1203,13 @@ export const AR = {
   'Sunday': 'الأحد', 'Monday': 'الاثنين', 'Tuesday': 'الثلاثاء',
   'Wednesday': 'الأربعاء', 'Thursday': 'الخميس', 'Friday': 'الجمعة', 'Saturday': 'السبت',
 
-  /* Removing a child from a class. The English says "last day" and so does the Arabic: the
-     whole point of these three sentences is that "تمت الإزالة" on its own is what made a
-     registrar think the button had done nothing, because the child is still on the register
-     she was removed from — correctly, for one more day. */
-  'Today is her last day in {0}, so she stays on today’s register — this morning’s attendance is taken against it — and is off it from tomorrow.':
-    'اليوم هو آخر يوم لها في {0}، لذلك تظل في كشف اليوم — لأن غياب اليوم يُسجَّل عليه — وتخرج منه اعتبارًا من الغد.',
-  'It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class tomorrow.':
-    'هذا لا يحذفها: يبقى ملفها ودرجاتها وحضورها كما هي، ويمكن إلحاقها بفصل آخر غدًا.',
-  'Today is her last day, so she is on the register once more and off it tomorrow.':
-    'اليوم آخر يوم لها، لذلك تظهر في الكشف مرة أخيرة وتخرج منه غدًا.',
-  '{0} on their last day':
-    '{0} في آخر يوم لهم',
-  'Last day {0} — off the register after it':
-    'آخر يوم {0} — تخرج من الكشف بعده',
+  /* Removing a child from a class. Ending her placement files today's absence in the same
+     call and takes her off this register immediately — there is no longer a day of overlap
+     for the Arabic to explain. */
+  'Today is recorded absent for her automatically, and she comes off this register now. It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class right away.':
+    'يُسجَّل غياب اليوم عنها تلقائيًا، وتخرج من هذا الكشف الآن. هذا لا يحذفها: يبقى ملفها ودرجاتها وحضورها كما هي، ويمكن إلحاقها بصف آخر فورًا.',
+  'Recorded absent for today and taken off the register.':
+    'سُجِّل غياب اليوم وخرجت من الكشف.',
 
   'No attendance data recorded yet': 'لم تُسجّل بيانات حضور لهذا الطالب بعد',
   'No attendance has been recorded for this student in the selected period yet.': 'لم يتم تسجيل حضور أو غياب لهذا الطالب خلال الفترة المحددة حتى الآن.',

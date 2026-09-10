@@ -38,10 +38,11 @@ Teachers = Annotated[TeacherManagementService, Depends(get_teacher_management_se
 
 
 def _may_manage_archived_staff(caller: Principal) -> bool:
-    """The permanent Admin and School Manager may perform staff lifecycle actions."""
+    """The permanent Admin, School Manager and School Owner may manage staff lifecycle."""
     return caller.profile is not None and (
         caller.profile.is_system_admin
         or caller.profile.has_role(RoleCode.SCHOOL_MANAGER.value)
+        or caller.profile.has_role(RoleCode.SCHOOL_OWNER.value)
     )
 
 

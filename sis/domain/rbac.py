@@ -236,12 +236,24 @@ _READS: Final[tuple[Permission, ...]] = (
     Permission.STUDENTS_READ,
     Permission.TEACHERS_READ,
     Permission.TIMETABLE_READ,
+    Permission.ATTENDANCE_READ,
     Permission.GUARDIANS_READ,
     Permission.GRADES_READ,
     Permission.TEACHER_ATTENDANCE_READ,
     Permission.USERS_READ,
     Permission.REPORTS_READ,
 )
+
+# School Owners normally remain read-only. The explicitly approved operational
+# exceptions let an owner maintain their school's academic structure and teaching
+# coverage, while student records, marks, school creation and system administration
+# remain outside their reach.
+_SCHOOL_OWNER_STAFFING_WRITES: Final[frozenset[Permission]] = frozenset({
+    Permission.STRUCTURE_WRITE,
+    Permission.TEACHERS_ASSIGN_SUBJECTS,
+    Permission.TEACHERS_ASSIGN_CLASSES,
+    Permission.ROLES_ASSIGN,
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,9 +286,9 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
         code=RoleCode.SCHOOL_OWNER,
         name_en="School Owner",
         name_ar="مالك المدرسة",
-        description_en="Sees everything in their own school. Changes nothing.",
+        description_en="Manages academic setup and teaching coverage in their own school.",
         default_scope=ScopeType.SCHOOL,
-        permissions=_READS,
+        permissions=(*_READS, *_SCHOOL_OWNER_STAFFING_WRITES),
     ),
     RoleDefinition(
         code=RoleCode.PRINCIPAL,
@@ -309,7 +321,11 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.GRADES_READ,
             Permission.TEACHERS_READ,
             Permission.TEACHERS_ASSIGN_SUBJECTS,
+            Permission.TEACHERS_ASSIGN_CLASSES,
             Permission.TIMETABLE_READ,
+            # Teacher attendance only. Stage 11 keeps the pupil register a separate grant,
+            # held by the supervisors and teachers who take it, so a school-wide role does
+            # not silently become school-wide visibility of every child's day.
             Permission.TEACHER_ATTENDANCE_READ,
             Permission.USERS_READ,
             Permission.ROLES_ASSIGN,
@@ -506,7 +522,9 @@ class AccessProfile:
         """The whole authorisation decision: any grant of this permission that covers it."""
         if self.is_system_admin:
             return True
-        if self.has_role(RoleCode.SCHOOL_OWNER.value) and not permission.value.endswith(".read"):
+        if self.has_role(RoleCode.SCHOOL_OWNER.value) and (
+            not permission.value.endswith(".read") and permission not in _SCHOOL_OWNER_STAFFING_WRITES
+        ):
             return False
         override = self.override_for(permission)
         if override is not None:
@@ -537,7 +555,9 @@ class AccessProfile:
         """
         if self.is_system_admin:
             return True
-        if self.has_role(RoleCode.SCHOOL_OWNER.value) and not permission.value.endswith(".read"):
+        if self.has_role(RoleCode.SCHOOL_OWNER.value) and (
+            not permission.value.endswith(".read") and permission not in _SCHOOL_OWNER_STAFFING_WRITES
+        ):
             return False
         override = self.override_for(permission)
         return override is OverrideEffect.ALLOW if override is not None else any(
@@ -559,7 +579,9 @@ class AccessProfile:
         """
         if self.is_system_admin:
             return ScopeType.GLOBAL
-        if self.has_role(RoleCode.SCHOOL_OWNER.value) and not permission.value.endswith(".read"):
+        if self.has_role(RoleCode.SCHOOL_OWNER.value) and (
+            not permission.value.endswith(".read") and permission not in _SCHOOL_OWNER_STAFFING_WRITES
+        ):
             return None
         if self.override_for(permission) is OverrideEffect.ALLOW:
             return ScopeType.GLOBAL
@@ -599,7 +621,9 @@ class AccessProfile:
 
     def scopes_for(self, permission: Permission) -> tuple[Scope, ...]:
         """Where this permission is held — how a screen knows which classes to list."""
-        if self.has_role(RoleCode.SCHOOL_OWNER.value) and not permission.value.endswith(".read"):
+        if self.has_role(RoleCode.SCHOOL_OWNER.value) and (
+            not permission.value.endswith(".read") and permission not in _SCHOOL_OWNER_STAFFING_WRITES
+        ):
             return ()
         if self.is_system_admin or self.override_for(permission) is OverrideEffect.ALLOW:
             return (Scope(ScopeType.GLOBAL),)

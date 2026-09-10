@@ -632,7 +632,20 @@ function RegistrarMarks({ params = {} }) {
 
 export function Marks({ params = {} }) {
   useStore();
-  if (Store.roles().indexOf('teacher') >= 0) return <TeacherMarks />;
+  const roles = Store.roles();
+  // Roles are additive. A floor supervisor who also teaches must still land on their
+  // scoped, read-only grade browser when opening the Marks nav; otherwise merely giving
+  // them a teaching assignment silently replaces the supervisory workflow with entry
+  // controls for their own subject.
+  const isFloorSupervisor = roles.indexOf('floor_supervisor') >= 0 &&
+    roles.indexOf('school_manager') < 0 &&
+    roles.indexOf('school_owner') < 0 &&
+    roles.indexOf('admin') < 0;
+  if (isFloorSupervisor) return <>
+    <PageHead title={t('Marks')} lede={t('Read-only class assessment browser.')} />
+    <ManagerMarksBrowser />
+  </>;
+  if (roles.indexOf('teacher') >= 0) return <TeacherMarks />;
   if (Store.can('grades.write')) return <RegistrarMarks params={params} />;
   if (Store.can('grades.read')) return <>
     <PageHead title={t('Marks')} lede={t('Read-only class assessment browser.')} />

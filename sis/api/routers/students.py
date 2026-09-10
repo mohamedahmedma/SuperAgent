@@ -721,8 +721,9 @@ def transfer_student(
     summary="End this child's current placement",
     description="`ends_on` is her **last day** in the class, not the day after. She then "
     "holds no open placement, which is the correct state for a child who has left mid-year "
-    "and is not the same as her never having been there. 404 when she has no open "
-    "placement to end.",
+    "and is not the same as her never having been there. When `ends_on` is today, today's "
+    "attendance for her is filed as absent in the same call unless something was already "
+    "recorded. 404 when she has no open placement to end.",
     responses=error_responses(401, 403, 404, 422),
 )
 def end_current_placement(
@@ -732,7 +733,9 @@ def end_current_placement(
     caller: Registrar,
 ) -> PlacementOut:
     with domain_errors():
-        closed = desk.end_placement(StudentNumber(student_number), ends_on=body.ends_on)
+        closed = desk.end_placement(
+            StudentNumber(student_number), ends_on=body.ends_on, actor=caller.prefix
+        )
     if closed is None:
         # A 404 rather than a no-op success. "She had no class to leave" is either a typo
         # in the number or a registrar looking at a stale screen, and both want telling.

@@ -9,8 +9,20 @@ export function GradeAssignments() {
   const grants = ((state.profile && state.profile.grants) || []).filter(
     (grant) => grant.permission === 'teachers.assign_classes' && grant.scope_type === 'year_level'
   );
-  const grades = [...new Set(grants.map((grant) => grant.scope_code).filter(Boolean))];
-  const [grade, setGrade] = useState(grades[0] || '');
+  const schoolWideAssignment = ((state.profile && state.profile.grants) || []).some(
+    (grant) => grant.permission === 'teachers.assign_classes' && grant.scope_type === 'school'
+  );
+  const classCatalog = useQuery(
+    () => api.classes(state.year), [state.year], !!state.year && schoolWideAssignment
+  );
+  const catalogGrades = (classCatalog.value || []).map((row) => ({
+    code: row.year_level_code, name_en: row.year_level_name_en, name_ar: row.year_level_name_ar
+  })).filter((row, index, rows) => row.code && rows.findIndex((item) => item.code === row.code) === index);
+  const grades = schoolWideAssignment
+    ? catalogGrades.map((row) => row.code)
+    : [...new Set(grants.map((grant) => grant.scope_code).filter(Boolean))];
+  const gradeLabels = new Map(catalogGrades.map((row) => [row.code, pickName(row, state.lang) || row.code]));
+  const [grade, setGrade] = useState('');
   const [subject, setSubject] = useState('');
   const [teacher, setTeacher] = useState('');
   const [classes, setClasses] = useState([]);
@@ -38,6 +50,9 @@ export function GradeAssignments() {
 
   useEffect(() => { setSubject(''); setTeacher(''); setClasses([]); }, [grade, state.year]);
   useEffect(() => {
+    if (!grades.includes(grade)) setGrade(grades[0] || '');
+  }, [grades.join('|'), grade]);
+  useEffect(() => {
     const row = value.eligible_teachers.find((item) => item.staff_number === teacher);
     setClasses(row ? row.assigned_class_codes : []);
   }, [teacher, options.value]);
@@ -53,11 +68,12 @@ export function GradeAssignments() {
   return <>
     <PageHead title={t('Class assignments')}
       lede={t('Choose a managed grade, subject, eligible teacher, and one or more classes.')} />
-    {!grades.length ? <Card>{t('No managed grades are assigned to this account.')}</Card> :
+    {classCatalog.loading && schoolWideAssignment ? <Card><Skeleton rows={2} /></Card> : null}
+    {!classCatalog.loading && !grades.length ? <Card>{t('No managed grades are assigned to this account.')}</Card> :
       <div className="vstack gap-3">
         <Card title={t('1. Grade')}>
           <Select value={grade} onChange={setGrade}
-            options={grades.map((code) => ({ value: code, label: code }))} />
+            options={grades.map((code) => ({ value: code, label: gradeLabels.get(code) || code }))} />
         </Card>
         {options.loading && !options.ready ? <Card><Skeleton rows={4} /></Card> : null}
         {options.error ? <ErrorNote error={options.error} onRetry={options.reload} /> : null}

@@ -291,6 +291,7 @@ function Identity({ student }) {
 
 function GuardianEditor({ studentNumber, guardian, onDone }) {
   const [form, setForm] = useState(() => ({
+    phone: guardian.phone || '',
     full_name_ar: guardian.full_name_ar || '',
     full_name_en: guardian.full_name_en || '',
     relationship_type: guardian.relationship_type || 'guardian',
@@ -324,6 +325,8 @@ function GuardianEditor({ studentNumber, guardian, onDone }) {
         onInput={(value) => setForm((old) => ({ ...old, full_name_ar: value }))} /></Field>
       <Field className="col-12 col-md-6" label={t('English name')}><Input value={form.full_name_en}
         onInput={(value) => setForm((old) => ({ ...old, full_name_en: value }))} /></Field>
+      <Field className="col-12 col-md-6" label={t('Guardian phone')}><Input inputMode="tel" value={form.phone}
+        onInput={(value) => setForm((old) => ({ ...old, phone: value }))} /></Field>
       <Field className="col-12 col-md-4" label={t('Relationship')}><select className="form-select" value={form.relationship_type}
         onChange={(event) => setForm((old) => ({ ...old, relationship_type: event.target.value }))}>
         {['father', 'mother', 'guardian', 'sibling', 'grandparent', 'other'].map((value) => <option key={value} value={value}>{t(value)}</option>)}

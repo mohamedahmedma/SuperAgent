@@ -463,19 +463,21 @@ async function main() {
   );
 
   /*
-   * And the other half of the same complaint: Remove said "removed" and left the child on the
-   * register. She is on it correctly — a placement ends on her LAST day, and today's attendance
-   * is taken against today's register — so the fix is that the row says so rather than drawing
-   * her exactly like a child who is staying. `10434` is closed in the fixture.
+   * And the other half of the same complaint: Remove used to say "removed" and leave the
+   * child on the register anyway, correctly — a placement ends on her LAST day, and that
+   * day's attendance is taken against that day's register. Ending a placement on today's
+   * date now files that attendance itself, in the same call, so there is nothing left for
+   * this screen to hold her for: `10434` is closed in the fixture and must not be drawn at
+   * all, not even with an explanation.
    */
   const registerText = window.document.body.textContent || '';
   assert.ok(
-    registerText.includes('off the register after it'),
-    'a child whose placement has closed is drawn exactly like one who is staying'
+    !registerText.includes('Nour Adel'),
+    'a child whose placement has closed is still drawn on the register'
   );
   assert.ok(
-    registerText.includes('on their last day'),
-    'the register header does not separate the leavers from the count'
+    !registerText.includes('off the register after it') && !registerText.includes('on their last day'),
+    'the retired "last day" copy is still on the register screen'
   );
   const removeButtons = [...window.document.querySelectorAll('.sis-row-actions button')].filter(
     (button) => button.textContent.trim() === 'Remove'
@@ -483,7 +485,7 @@ async function main() {
   assert.equal(
     removeButtons.length,
     2,
-    'Remove was offered on a placement that is already closed, which the service 404s'
+    'Remove must be offered on exactly the two open placements, and on no others'
   );
 
   /*
@@ -540,9 +542,11 @@ async function main() {
   assert.equal(moved.academic_year_code, YEAR, `the move left its year behind: ${transfer.body}`);
   assert.ok(moved.on_date, `a transfer must carry the day it happens on: ${transfer.body}`);
 
-  /* And Remove, which is the one that reported success and left the child on screen. It still
-     leaves her on screen — for one more day, correctly — so what is asserted here is that the
-     request carries her last day and that the console says which day that is. */
+  /* And Remove, which used to report success while leaving the child on screen "for one
+     more day, correctly" — a delay a registrar reads as a broken button. It closes her
+     placement and files today's absence in the same call now, so what is asserted here is
+     that the confirmation says so plainly rather than explaining a wait that no longer
+     happens. */
   const removeButton = [...window.document.querySelectorAll('.sis-row-actions button')].find(
     (button) => button.textContent.trim() === 'Remove'
   );
@@ -554,8 +558,8 @@ async function main() {
   );
   assert.ok(removeConfirm, 'Remove opened no confirmation');
   assert.ok(
-    (window.document.querySelector('.modal-body').textContent || '').includes('last day'),
-    'the confirmation does not say that today is her last day rather than her last minute'
+    (window.document.querySelector('.modal-body').textContent || '').includes('recorded absent'),
+    'the confirmation no longer says today is filed as an absence automatically'
   );
   removeConfirm.click();
   await settle(window, 150);

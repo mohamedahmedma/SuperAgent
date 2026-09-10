@@ -372,7 +372,9 @@ def list_registerable_classes(
         marked_by_class = dict(
             session.execute(
                 select(m.Attendance.class_section_id, func.count())
+                .join(m.Student, m.Attendance.student_id == m.Student.id)
                 .where(
+                    m.Student.is_active.is_(True),
                     m.Attendance.on_date == on_date,
                     m.Attendance.class_section_id.in_([row[0].id for row in rows] or [0]),
                 )
@@ -382,7 +384,9 @@ def list_registerable_classes(
         sizes = dict(
             session.execute(
                 select(m.ClassEnrolment.class_section_id, func.count())
+                .join(m.Student, m.ClassEnrolment.student_id == m.Student.id)
                 .where(
+                    m.Student.is_active.is_(True),
                     m.ClassEnrolment.class_section_id.in_([row[0].id for row in rows] or [0]),
                     m.ClassEnrolment.starts_on <= on_date,
                     or_(
