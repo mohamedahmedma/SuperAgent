@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import router
-from backend.infra.database import init_db
+from backend.infra.database import init_db, log_database_status, verify_connectivity
 from backend.profiles import get_profile
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
@@ -90,6 +90,14 @@ def create_app() -> FastAPI:
         from backend.llm_provider import log_provider_status
 
         log_provider_status()
+        # Which database, with whose credentials, and can we actually authenticate —
+        # before anything downstream depends on the answer. init_db() opens the same
+        # connection a line later, so this adds no work; it adds the diagnosis. A
+        # rotated POSTGRES_PASSWORD on an estate whose postgres_data volume predates it
+        # is refused here by name, rather than surfacing as SQLAlchemy pool internals
+        # from create_all() while pg_isready still calls the container healthy.
+        log_database_status()
+        verify_connectivity()
         init_db()
         # create_all() creates missing TABLES but never adds columns to existing ones,
         # so a model change ships silently and surfaces as UndefinedColumn partway

@@ -1,6 +1,14 @@
+import logging
 import os
-from sqlalchemy import create_engine, event
+import time
+from typing import Optional
+
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -119,3 +127,98 @@ def init_db() -> None:
     import backend.db.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+
+
+# Postgres SQLSTATEs for a credential the server rejected outright: 28P01 is
+# invalid_password, 28000 the wider invalid_authorization_specification (which also
+# covers a role that does not exist). Neither is transient, so neither is retried —
+# backing off from a wrong password only delays the diagnosis by the length of the wait.
+_AUTH_SQLSTATES = frozenset({"28P01", "28000"})
+
+
+def _is_auth_failure(exc: Exception) -> bool:
+    code = getattr(getattr(exc, "orig", None), "pgcode", None)
+    if code:
+        return code in _AUTH_SQLSTATES
+    # psycopg2 leaves pgcode unset when the failure happened during the connection
+    # handshake rather than in reply to a statement — which is exactly this case — so
+    # the message is the only signal left.
+    return "authentication failed" in str(exc).lower()
+
+
+def describe_database() -> str:
+    """The connection target with the password removed, for logs and error messages."""
+    try:
+        url = make_url(DATABASE_URL)
+    except Exception:
+        return "unparseable DATABASE_URL"
+    if url.get_backend_name() == "sqlite":
+        return f"sqlite file={url.database or ':memory:'}"
+    return (
+        f"{url.drivername} host={url.host or '-'}:{url.port or 5432} "
+        f"db={url.database or '-'} user={url.username or '-'} "
+        f"password={'set' if url.password else 'ABSENT'}"
+    )
+
+
+def log_database_status() -> None:
+    """One line at boot saying which database this process is about to use.
+
+    The sibling of `log_provider_status()`, for the same reason: the failure worth
+    catching at boot is a deployment that believes it is pointed somewhere it is not.
+    Without it, "which database is this, with whose credentials" is answered by reading
+    `.env` and reasoning about compose interpolation — which is the step that gets got
+    wrong in the first place.
+    """
+    source = "DATABASE_URL" if os.getenv("DATABASE_URL") else "the built-in default"
+    logger.info("Database: %s (from %s)", describe_database(), source)
+
+
+def verify_connectivity(attempts: int = 5, delay_seconds: float = 2.0) -> None:
+    """Open one connection before the app reports itself started, and fail legibly.
+
+    `init_db()` opens one immediately afterwards, so this costs nothing and buys a
+    diagnosis. A rejected password used to arrive as a hundred and fifty lines of
+    SQLAlchemy pool internals whose single informative line sat below the default
+    `--tail`, and it arrived in the same shape whether the cause was a credential, an
+    unresolvable host or a stopped container. Separating the permanent failure from the
+    transient one is the whole point: a wrong password is reported at once and named,
+    and a postgres still coming up is waited for.
+    """
+    last: Optional[Exception] = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            return
+        except OperationalError as exc:
+            last = exc
+            if _is_auth_failure(exc):
+                logger.error(
+                    "DATABASE CREDENTIALS REJECTED — %s. POSTGRES_PASSWORD applies only "
+                    "while postgres initialises an EMPTY data directory, so on an estate "
+                    "whose volume already exists a rotated .env changes what this service "
+                    "SENDS and never what the role ACCEPTS — while pg_isready reports the "
+                    "container healthy throughout. Reconcile the role with .env: "
+                    "bash deploy/scripts/apply-env.sh",
+                    describe_database(),
+                )
+                # `from None` deliberately: the psycopg2/SQLAlchemy chain is what buried
+                # the diagnosis, and the line above has already said everything it said.
+                raise RuntimeError("database credentials rejected") from None
+            if attempt < attempts:
+                logger.warning(
+                    "Database not reachable yet (attempt %d/%d): %s",
+                    attempt,
+                    attempts,
+                    getattr(exc, "orig", None) or exc,
+                )
+                time.sleep(delay_seconds)
+
+    logger.error(
+        "DATABASE UNREACHABLE after %d attempts — %s. Last error: %s",
+        attempts,
+        describe_database(),
+        getattr(last, "orig", None) or last,
+    )
+    raise RuntimeError("database unreachable") from None
