@@ -41,6 +41,13 @@ cd $DEPLOY_PATH && chmod 600 .env
 bash deploy/scripts/apply-env.sh backend records identity sis frontend
 ```
 
+`$DEPLOY_PATH` is `/opt/superagent`, the directory the pipeline refreshes on every
+release. Run nothing from any other checkout on the server. The compose project name is
+pinned to `superagent`, so compose run from a stale copy still recreates the live
+containers — with that copy's own `.env` and whatever `:stable` image is on disk, and
+without the `.release-image-tags` manifest that says which image each service should be
+running. That is how production went down on 2026-09-11.
+
 The pipeline calls the same script (`deploy.yml`, before its release), so the manual and
 automated routes cannot drift. It validates the file, reconciles Postgres, proves the
 credential authenticates, and only then recreates anything — a wrong value fails while

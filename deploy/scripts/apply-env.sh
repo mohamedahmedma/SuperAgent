@@ -20,8 +20,17 @@
 # with the previous containers still serving, instead of halfway through a restart.
 #
 #   ssh root@HOST
-#   cd /opt/SuperAgent-main
+#   cd /opt/superagent
 #   bash deploy/scripts/apply-env.sh backend records identity sis frontend
+#
+# /opt/superagent, and only there. It is DEPLOY_PATH in deploy.yml: the one directory the
+# pipeline refreshes on every release - this script, the compose files, and the
+# .release-image-tags manifest recording which image each service is actually serving.
+# Any other checkout on the server is never updated, yet docker-compose.yml pins the
+# project name to `superagent`, so compose run from one still recreates the LIVE
+# containers - with that checkout's stale compose files, its own .env, and whatever
+# `:stable` image happens to be on disk. That is the route that took production down on
+# 2026-09-11.
 #
 # With no services named it reconciles and verifies only, changing nothing else - which
 # is how .github/workflows/deploy.yml calls it, before running its own release.
