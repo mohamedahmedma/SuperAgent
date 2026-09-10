@@ -374,19 +374,20 @@ class ToolResultEnvelopeTests(unittest.TestCase):
         only true when retrieval returned a figure is billed only on those turns."""
         without = self._chunks(figures=False)
         with_rule = self._chunks(figures=True)
-        self.assertNotIn("[FIGURE]", without)
-        self.assertIn("[FIGURE]", with_rule)
+        self.assertNotIn("[FIGURE", without)
+        self.assertIn("[FIGURE", with_rule)
         self.assertLess(len(without), len(with_rule))
 
-    def test_the_figure_rule_makes_the_citation_the_selector(self):
+    def test_the_figure_rule_asks_the_model_to_reproduce_the_marker(self):
         """This is the whole image feature at query time: no tool to look at a picture
-        and no second call to choose one, just the `[n]` the agent already emits. That
-        only works if the model is told the marker SELECTS rather than labels — without
-        it, it cites the prose beside a figure as readily as the figure itself, and the
-        answer describes an image nobody attached."""
+        and no second call to choose one, just a numbered marker the model copies into
+        its own sentence. That only works if it is told the marker is something to
+        REPRODUCE rather than a label to read past — without it, it describes an image
+        nobody attached."""
         out = self._chunks(figures=True)
-        self.assertIn("whenever you cite that chunk", out)
-        self.assertIn("Cite the [FIGURE] chunk you actually described", out)
+        self.assertIn("[FIGURE 1]", out)
+        self.assertIn("Write the same marker into your answer", out)
+        self.assertIn("Never invent a number", out)
 
     def test_the_figure_rule_still_forbids_writing_the_picture(self):
         """The model has no id to write any more, but it can still invent a URL."""
@@ -397,7 +398,10 @@ class ToolResultEnvelopeTests(unittest.TestCase):
 
     def test_the_figure_rule_is_not_hard_wrapped(self):
         out = self._chunks(figures=True)
-        self.assertIn("the image itself is shown to the user whenever you cite", out)
+        self.assertIn(
+            "Write the same marker into your answer at the point where the picture belongs",
+            out,
+        )
 
     def test_the_figure_rule_reaches_no_other_outcome(self):
         """A refusal or a clarification shows the model no chunk headers at all, so it
@@ -434,19 +438,35 @@ class ToolResultEnvelopeTests(unittest.TestCase):
             render(self.TEMPLATE, outcome="needs_scope_selection", prompt="Which?", options=[]),
         )
 
-    def test_a_figure_bearing_chunk_is_marked_but_never_identified(self):
-        """WHETHER, not which. The marker is what lets the model choose a picture with
-        its citation; the id would only give it something to write into the answer."""
+    def test_a_figure_bearing_chunk_is_numbered_but_never_identified(self):
+        """A NUMBER, not an id. The number is what the model writes back to place the
+        picture; the id would only give it something to paste as a broken image link."""
         from backend.tools.knowledge import _format_chunk
 
-        entry = _format_chunk(1, {"filename": "kb.pdf", "page_number": 2,
-                                  "text": "t", "asset_ids": ["kb.pdf::p2::img0"]})
-        self.assertIn("[FIGURE]", entry)
+        entry = _format_chunk(
+            1,
+            {"filename": "kb.pdf", "page_number": 2, "text": "t",
+             "asset_ids": ["kb.pdf::p2::img0"]},
+            [1],
+        )
+        self.assertIn("[FIGURE 1]", entry)
         self.assertNotIn("kb.pdf::p2::img0", entry)
         self.assertNotIn(
-            "[FIGURE]",
+            "[FIGURE",
             _format_chunk(1, {"filename": "kb.pdf", "page_number": 2, "text": "t"}),
         )
+
+    def test_a_figure_chunk_with_no_asset_id_gets_no_number(self):
+        """There is no picture to render, so there is no number to give — but the model
+        is still told it is looking at an image, so it does not describe the prose
+        beside it as though that were the figure."""
+        from backend.tools.knowledge import _format_chunk
+
+        entry = _format_chunk(
+            1, {"filename": "kb.pdf", "page_number": 2, "text": "t", "modality": "figure"}
+        )
+        self.assertIn("[FIGURE]", entry)
+        self.assertNotIn("[FIGURE 1]", entry)
 
 
 class CachingContractTests(unittest.TestCase):

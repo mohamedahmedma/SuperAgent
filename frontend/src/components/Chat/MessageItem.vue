@@ -34,9 +34,10 @@
             :text="msg.text"
             :is-user="false"
             :msg-index="msgIndex"
+            :assets="msg.assets"
             @cite-click="onCiteClick"
           />
-          <MessageAssets :assets="msg.assets" />
+          <MessageAssets :assets="unanchoredAssets" />
           <References
             v-if="showAdvanced"
             ref="referencesRef"
@@ -53,19 +54,34 @@
 
 <script setup lang="ts">
 import BrandLogo from '@/components/BrandLogo.vue';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import MessageAssets from './MessageAssets.vue';
 import MessageContent from './MessageContent.vue';
 import ThinkingTrace from './ThinkingTrace.vue';
 import References from './References.vue';
 import RetrievalTraceDetails from './RetrievalTraceDetails.vue';
 import type { Message } from '@/types/chat';
+import { figureAnchorIds } from '@/utils/markdown';
 
-defineProps<{
+const props = defineProps<{
   msg: Message;
   msgIndex: number;
   showAdvanced?: boolean;
 }>();
+
+/**
+ * The pictures that were NOT placed in the prose.
+ *
+ * MessageContent renders an anchored figure where the answer anchored it, so showing it
+ * again down here would print the same image twice. Everything else still belongs in the
+ * block: a turn that surfaced a figure and never mentioned it by number must not lose
+ * the picture — the answer was written from its caption either way.
+ */
+const unanchoredAssets = computed(() => {
+  const anchored = figureAnchorIds(props.msg.text || '');
+  if (!anchored.length) return props.msg.assets;
+  return (props.msg.assets || []).filter((asset) => !anchored.includes(asset.asset_id));
+});
 
 const emit = defineEmits<{
   (e: 'cite-click', msgIndex: number, chunkIndex: number): void;

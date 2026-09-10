@@ -46,16 +46,22 @@ Answer the question itself. Do not close with a sentence about the material: whe
 
    This is the whole of the image feature at query time. There is no tool to look at a
    picture and no second model call to choose one: the figure was read into text at
-   ingest, so the chunk already answers the question, and the `[n]` the agent is
-   required to emit anyway is what selects which picture the user is shown.
+   ingest, so the chunk already answers the question, and the marker the model copies
+   into its own sentence is what puts the picture on screen — and now also WHERE.
 
-   That only works if the model knows which chunks are pictures, which is what the
-   [FIGURE] marker in the chunk header is for, and if it knows the marker is a
-   selector rather than a label — which is what this sentence is for. Without it the
-   model cites the prose beside a figure as readily as the figure itself, and the
-   answer arrives describing an image nobody attached. #}
+   Two things have to be true for that to work, and this sentence is both of them: the
+   model has to know which chunks are pictures (the numbered marker in the chunk
+   header), and it has to know the marker is something to REPRODUCE rather than a
+   label to read past. Without the second half the model describes an image nobody
+   attached.
 
-One or more chunks above are marked [FIGURE]: the image itself is shown to the user whenever you cite that chunk. Cite the [FIGURE] chunk you actually described — that, and nothing you write, is what puts the picture on screen. Do not write an image, a link or a file path into the answer; it cannot render.
+   Writing a marker is free to get wrong. An unknown number is deleted from the answer
+   in backend/chat/service.py and nothing else happens — no refusal, no correction, no
+   annotation. That is deliberate: the previous version of this feature withheld
+   answers whose citations it could not verify, and withdrawing a correct answer over
+   a marker is far worse than dropping a picture. #}
+
+One or more chunks above carry a numbered marker like [FIGURE 1]: that is a real image. Write the same marker into your answer where the picture belongs — on its own line, or straight after the sentence it illustrates, never inside a sentence — and the image is shown at that point. Use the marker from the chunk you actually described, and only for a figure you are genuinely talking about. Never invent a number, and never write an image, a link or a file path; those cannot render.
 {% endif %}
 {% if constraints %}
 {# Three states, because a carried condition and the material can stand in three

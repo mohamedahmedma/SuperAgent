@@ -38,6 +38,46 @@ renderer.image = () => '';
  */
 renderer.html = () => '';
 
+/**
+ * A figure anchor, and the answer split around them.
+ *
+ * `_resolve_figure_markers` in backend/chat/service.py turns each `[FIGURE n]` the model
+ * wrote into `<!--figure:{asset_id}-->` at that point in the prose, so the picture can be
+ * rendered where the answer put it rather than as a card underneath the whole message.
+ *
+ * The comment form is the reason this is safe: `renderer.html` above drops it, so a
+ * client that knows nothing about anchors shows clean prose and still gets the pictures
+ * from the trailing block. Nothing breaks; the placement is just lost.
+ *
+ * A capturing `split` rather than `matchAll`: with one group it alternates prose, id,
+ * prose, id, prose — every odd index is a capture — which needs no iterator support.
+ */
+export type AnswerPart =
+  | { kind: 'prose'; text: string }
+  | { kind: 'figure'; assetId: string };
+
+export function splitFigureAnchors(text: string): AnswerPart[] {
+  const parts: AnswerPart[] = [];
+  (text || '').split(/<!--figure:(.+?)-->/).forEach((piece, index) => {
+    if (index % 2 === 1) {
+      const assetId = (piece || '').trim();
+      if (assetId) parts.push({ kind: 'figure', assetId });
+    } else if (piece) {
+      parts.push({ kind: 'prose', text: piece });
+    }
+  });
+  return parts;
+}
+
+/** The asset ids this answer anchored, in order, deduped. */
+export function figureAnchorIds(text: string): string[] {
+  const ids: string[] = [];
+  splitFigureAnchors(text).forEach((part) => {
+    if (part.kind === 'figure' && !ids.includes(part.assetId)) ids.push(part.assetId);
+  });
+  return ids;
+}
+
 marked.use({
   renderer,
   breaks: true,
