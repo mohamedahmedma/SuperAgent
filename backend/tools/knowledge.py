@@ -9,10 +9,14 @@ each instruction is paid only on the turns where its condition is real.
 
 This module decides WHICH outcome occurred. The template renders it.
 """
+import logging
+
 from langchain_core.tools import tool
 
 from backend.chat.request_context import ChatRequestContext
 from backend.prompts import render as render_prompt
+
+logger = logging.getLogger(__name__)
 
 #: The name the model calls, the planner forces, and the turn records. One spelling,
 #: so the three cannot drift apart.
@@ -117,7 +121,21 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         # Delayed import keeps tests and lightweight imports away from RAG/embedding startup.
         from backend.rag.pipeline import run_rag_graph
 
-        rag_result = run_rag_graph(query, ctx)
+        try:
+            rag_result = run_rag_graph(query, ctx)
+        except Exception:
+            # A node's own guard is not the only thing standing between a provider
+            # outage and this tool's contract. retrieve_initial/retrieve_rewritten
+            # guard the embedding and Milvus calls themselves, and the evidence
+            # ladder (backend/rag/evidence.py) guards the grader's LLM call, but
+            # classify_complexity makes a raw LLM call with no guard of its own —
+            # and any future node could do the same. This is the one place that has
+            # to hold regardless of which node failed. Same outcome as the graceful
+            # retrieval_error path below: the model reads the same copy, and
+            # ctx.note_tool_outcome still fires so a forced-tool turn is never
+            # mistaken for one that didn't run.
+            logger.exception("run_rag_graph raised while searching the knowledge base")
+            return _result("retrieval_error")
 
         docs = rag_result.get("docs", []) if isinstance(rag_result, dict) else []
         rag_trace = rag_result.get("rag_trace", {}) if isinstance(rag_result, dict) else {}

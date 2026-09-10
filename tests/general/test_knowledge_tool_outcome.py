@@ -56,6 +56,16 @@ def _pipeline(result):
     return patch.dict(sys.modules, {"backend.rag.pipeline": module})
 
 
+def _pipeline_raises(exc):
+    """Same module boundary as `_pipeline`, but retrieval blows up instead of returning."""
+    def _raise(query, ctx):
+        raise exc
+
+    module = types.ModuleType("backend.rag.pipeline")
+    module.run_rag_graph = _raise
+    return patch.dict(sys.modules, {"backend.rag.pipeline": module})
+
+
 def _ctx():
     ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
     ctx.reset_knowledge_tool_budget()
@@ -126,6 +136,36 @@ def test_a_refused_repeat_call_is_still_reported():
         assert len(outcomes) >= 2
     finally:
         ctx.close()
+
+
+def test_a_raise_from_run_rag_graph_is_reported_as_retrieval_error():
+    """A node with no guard of its own (`classify_complexity`, today; any future node,
+    tomorrow) can raise straight out of `run_rag_graph`. The tool's own try/except is
+    the backstop: same outcome, same copy, as the graceful `retrieval_error` route
+    below — so the model never has to learn a second way retrieval can fail, and a
+    forced-tool turn still sees the search as having run.
+    """
+    ctx = _ctx()
+    try:
+        with _pipeline_raises(RuntimeError("Milvus unreachable")):
+            # (a) does not raise out to the caller.
+            shown = make_search_knowledge_base(ctx).invoke(
+                {"query": "مين الشركاء بتوع المدرسة"}
+            )
+        # (b) recorded exactly like the graceful retrieval_error branch.
+        assert ctx.tool_outcomes == [(KNOWLEDGE_TOOL, "retrieval_error")]
+    finally:
+        ctx.close()
+
+    ctx2 = _ctx()
+    try:
+        graceful = _search(ctx2, _rag("retrieval_error", docs=[], route="retrieval_error"))
+        assert ctx2.tool_outcomes == [(KNOWLEDGE_TOOL, "retrieval_error")]
+    finally:
+        ctx2.close()
+
+    # (c) the exception path and the graceful path converge on identical model-facing text.
+    assert shown == graceful
 
 
 class TheForcedToolCheckSeesARealSearch(unittest.TestCase):
