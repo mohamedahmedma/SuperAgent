@@ -25,19 +25,10 @@ jobs:
     permissions:
       contents: read
 
-  cd:
-    name: Stage 2 - CD - ${{ matrix.name }} image
+  cd-publish-backend:
+    name: CD - Publish backend image
     needs: ci
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - {name: backend, file: Dockerfile}
-          - {name: frontend, file: frontend/Dockerfile}
-          - {name: identity, file: identity/Dockerfile}
-          - {name: records, file: records/Dockerfile}
-          - {name: sis, file: sis/Dockerfile}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -49,19 +40,123 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.file }}
+          file: Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:stable
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+            ${{ env.IMAGE_PREFIX }}/backend:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/backend:stable
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  cd-publish-frontend:
+    name: CD - Publish frontend image
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/frontend:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/frontend:stable
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
           build-args: |
-            VITE_IDENTITY_BASE_URL=${{ matrix.name == 'frontend' && env.VITE_IDENTITY_BASE_URL || '' }}
+            VITE_IDENTITY_BASE_URL=${{ env.VITE_IDENTITY_BASE_URL }}
+
+  cd-publish-identity:
+    name: CD - Publish identity image
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: identity/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/identity:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/identity:stable
+          cache-from: type=gha,scope=identity
+          cache-to: type=gha,mode=max,scope=identity
+
+  cd-publish-records:
+    name: CD - Publish records image
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: records/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/records:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/records:stable
+          cache-from: type=gha,scope=records
+          cache-to: type=gha,mode=max,scope=records
+
+  cd-publish-sis:
+    name: CD - Publish sis image
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: sis/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/sis:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/sis:stable
+          cache-from: type=gha,scope=sis
+          cache-to: type=gha,mode=max,scope=sis
+
+  cd-release-ready:
+    name: CD - All release images published
+    needs:
+      - cd-publish-backend
+      - cd-publish-frontend
+      - cd-publish-identity
+      - cd-publish-records
+      - cd-publish-sis
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "All release images for ${{ github.sha }} were published successfully."
 
   deploy:
     name: Stage 3 - Deploy production (approval required)
-    needs: cd
+    needs: cd-release-ready
     runs-on: ubuntu-latest
     # Configure `production` in GitHub Settings with both maintainers as required
     # reviewers. GitHub pauses this job here; either one may approve it.
