@@ -272,6 +272,22 @@
   box-shadow: var(--shadow-sm);
 }
 
+/* Owners have the same academic controls as the school manager, but their school screen
+   deliberately uses the quiet selection treatment rather than bright blue blocks. */
+.sis-segmented > .btn.sis-segmented-selected {
+  color: var(--ink);
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* A selected class that is still awaiting its register stays neutral. Green is reserved
+   for the meaningful state on the attendance screen: every pupil has been recorded. */
+.btn-outline-secondary.sis-attendance-class-selected {
+  color: var(--ink);
+  background: var(--surface-hover);
+  border-color: var(--line-strong);
+}
+
 /* ===================================================================================
  * Surfaces — the grey slabs a screen is divided into
  * =================================================================================== */
@@ -466,6 +482,7 @@
 }
 
 .badge {
+  display: none !important;
   font-weight: var(--weight-medium);
 }
 

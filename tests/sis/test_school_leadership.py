@@ -27,19 +27,20 @@ def _role_headers(client: TestClient, role: RoleCode, school_id: int | None) -> 
     return _sign_in(client, username)
 
 
-def test_owner_can_read_the_school_but_cannot_change_normal_data(
+def test_owner_can_manage_own_school_structure_but_cannot_create_schools(
     client: TestClient, ids: dict[str, int]
 ) -> None:
     owner = _role_headers(client, RoleCode.SCHOOL_OWNER, ids["school"])
     assert client.get("/v1/schools", headers=owner).status_code == 200
-    refused = client.post(
-        "/v1/schools", headers=owner,
-        json={"code": "NOPE", "name_en": "Must not be created"},
-    )
-    assert refused.status_code == 403
+    permissions = client.get("/v1/auth/me", headers=owner).json()["profile"]["permissions"]
+    # The owner deliberately gets the same in-school academic setup surface as the
+    # school manager, never the ability to create or administer schools globally.
+    assert "structure.write" in permissions
+    assert "schools.write" not in permissions
+    assert "students.write" not in permissions
 
 
-def test_principal_is_general_read_only_and_never_a_system_admin(
+def test_principal_can_correct_student_and_guardian_records_but_never_becomes_system_admin(
     client: TestClient, ids: dict[str, int], principal: dict[str, str]
 ) -> None:
     profile = client.get("/v1/auth/me", headers=principal).json()["profile"]
@@ -52,10 +53,11 @@ def test_principal_is_general_read_only_and_never_a_system_admin(
     # rewrites the school itself or the system it runs on.
     assert "students.create" in profile["permissions"]
     assert "students.write" in profile["permissions"]
+    assert "guardians.write" in profile["permissions"]
     assert "grades.read" in profile["permissions"]
     forbidden = {
         "schools.write", "structure.write", "grades.write",
-        "guardians.write", "imports.run", "system.manage", "system.status.write",
+        "imports.run", "system.manage", "system.status.write",
     }
     assert forbidden.isdisjoint(profile["permissions"])
 

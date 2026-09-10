@@ -57,6 +57,7 @@ from sis.domain.value_objects import (
     ClassCode,
     SchoolCode,
     SubjectCode,
+    TermCode,
     YearCode,
 )
 from sis.infrastructure.db import models as m
@@ -117,26 +118,6 @@ def _year_if_present(catalogue: "StructureCatalogue", code: str) -> AcademicYear
     except UnknownReference:
         return None
     return detail["year"]
-
-
-def _ensure_year_structure_mutable(catalogue: "StructureCatalogue", code: str) -> None:
-    """Freeze the current academic year's structure from its first day onward."""
-    year = _year_if_present(catalogue, code)
-    if year is None:
-        return
-    if year.is_current and year.starts_on <= _school_today():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "academic_year_locked",
-                "message": (
-                    "The current academic year has already started. Its structure is locked: "
-                    "terms, subjects, grade assignments and classes cannot be added, removed or changed."
-                ),
-                "academic_year": str(year.code),
-                "starts_on": year.starts_on.isoformat(),
-            },
-        )
 
 
 def _ensure_new_current_year_starts_in_future(body: "AcademicYearIn") -> None:
@@ -431,6 +412,13 @@ class TermOut(BaseModel):
         )
 
 
+class TermDatesIn(BaseModel):
+    """The calendar window is editable independently of a locked year structure."""
+
+    starts_on: date | None = None
+    ends_on: date | None = None
+
+
 class TermPlanOut(BaseModel):
     """What creating or re-syncing a year did to its term sections."""
 
@@ -550,7 +538,6 @@ def generate_structure(
         caller, lambda scopes: scopes.for_year(body.academic_year_code)
     )
     with domain_errors():
-        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         result = structure.generate(
             body.to_command(), allow_new_convention=body.allow_new_convention
         )
@@ -660,7 +647,6 @@ def create_term(
         caller, lambda scopes: scopes.for_year(body.academic_year_code)
     )
     with domain_errors():
-        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         term = Term(
             code=body.code,
             academic_year_code=body.academic_year_code,
@@ -675,6 +661,37 @@ def create_term(
     if not created:
         response.status_code = status.HTTP_200_OK
     return TermOut.of(term)
+
+
+@router.patch(
+    "/terms/{term_code}/dates",
+    response_model=TermOut,
+    summary="Correct a term's dates, including during the current academic year",
+    responses=error_responses(401, 403, 404, 422),
+)
+def update_term_dates(
+    term_code: str,
+    body: TermDatesIn,
+    catalogue: Catalogue,
+    caller: PrincipalStructureWriter,
+    uow_factory: UowFactoryDep,
+) -> TermOut:
+    with domain_errors():
+        with uow_factory() as uow:
+            current = uow.terms.get(TermCode(term_code))
+        if current is None:
+            raise UnknownReference(f"no term {term_code}", field="term_code")
+        _allow_principal_structure_write(
+            caller, lambda scopes: scopes.for_year(str(current.academic_year_code))
+        )
+        updated = Term(
+            code=current.code, academic_year_code=current.academic_year_code,
+            name_ar=current.name_ar, name_en=current.name_en,
+            starts_on=body.starts_on, ends_on=body.ends_on,
+            sequence=current.sequence, is_closed=current.is_closed,
+        )
+        catalogue.create_term(updated)
+    return TermOut.of(updated)
 
 
 @router.post(
@@ -702,9 +719,7 @@ def create_academic_year(
     )
     status_value = body.resolved_status()
     existing = _year_if_present(catalogue, body.code)
-    if existing is not None:
-        _ensure_year_structure_mutable(catalogue, body.code)
-    else:
+    if existing is None:
         _ensure_new_current_year_starts_in_future(body)
     if (
         caller.profile is not None
@@ -755,7 +770,6 @@ def create_academic_year(
 def sync_year_terms(code: str, catalogue: Catalogue, caller: Registrar) -> TermPlanOut:
     caller.narrow(Permission.STRUCTURE_WRITE, lambda scopes: scopes.for_year(code))
     with domain_errors():
-        _ensure_year_structure_mutable(catalogue, code)
         return TermPlanOut.of(catalogue.sync_year_terms(AcademicYearCode(code)))
 
 
@@ -792,7 +806,6 @@ def create_subject(
         caller, lambda scopes: scopes.for_year(body.academic_year_code)
     )
     with domain_errors():
-        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         subject = Subject(
             code=body.code,
             academic_year_code=body.academic_year_code,
@@ -905,7 +918,6 @@ def set_subject_assignment(
         caller, lambda scopes: scopes.for_year(body.academic_year_code)
     )
     with domain_errors():
-        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         catalogue.set_subject_assignment(
             AcademicYearCode(body.academic_year_code),
             SubjectCode(body.subject_code),
@@ -976,7 +988,6 @@ def create_class_section(
         lambda scopes: scopes.for_year(body.academic_year_code),
     )
     with domain_errors():
-        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         section = ClassSection(
             code=body.code,
             academic_year_code=body.academic_year_code,
@@ -1007,7 +1018,6 @@ def rename_class_section(
     academic_year: Annotated[str, Query(examples=["2025-2026"])],
 ) -> ClassSectionOut:
     with domain_errors():
-        _ensure_year_structure_mutable(catalogue, academic_year)
         section = catalogue.rename_class_section(
             AcademicYearCode(academic_year),
             ClassCode(class_code),
@@ -1299,7 +1309,6 @@ def create_configured_classes(body: ConfiguredClassesIn, catalogue: Catalogue, c
         caller, lambda scopes: scopes.for_year(body.academic_year_code)
     )
     with domain_errors():
-        _ensure_year_structure_mutable(catalogue, body.academic_year_code)
         if body.mode == "same":
             if body.class_count is None:
                 raise ValidationError("class_count is required in same mode", field="class_count")

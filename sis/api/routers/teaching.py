@@ -298,23 +298,27 @@ def read_mark_sheet(
 
 
 @router.get("/classes/{class_code}/assessments", response_model=AssessmentListOut)
-def list_class_assessments(class_code: str, caller: Reader, uow_factory: UowFactoryDep,
+def list_class_assessments(class_code: str, caller: Reader, teaching: Teaching, uow_factory: UowFactoryDep,
     academic_year: Annotated[str, Query()], term: Annotated[str, Query()],
     subject: Annotated[str, Query()], assessment_type: Annotated[Literal["exam", "assignment"], Query()]) -> AssessmentListOut:
     caller.narrow(Permission.GRADES_READ, lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code))
+    if not _may_record(caller, teaching, academic_year, class_code, subject):
+        raise _assignment_forbidden(subject, class_code)
     with uow_factory() as uow:
         rows=uow._session.execute(text("SELECT id,assessment_type,name,max_points FROM assessments WHERE academic_year_code=:y AND class_code=:c AND subject_code=:s AND term_code=:t AND assessment_type=:a ORDER BY created_at DESC,id DESC"),
             {"y":academic_year,"c":class_code,"s":subject,"t":term,"a":assessment_type}).mappings().all()
     return AssessmentListOut(assessments=[AssessmentSummaryOut(**dict(x)) for x in rows])
 
 @router.get("/classes/{class_code}/assessments/{assessment_id}", response_model=AssessmentSheetOut)
-def read_class_assessment(class_code: str, assessment_id: int, caller: Reader, sheets: Sheets,
+def read_class_assessment(class_code: str, assessment_id: int, caller: Reader, teaching: Teaching, sheets: Sheets,
     uow_factory: UowFactoryDep, academic_year: Annotated[str, Query()]) -> AssessmentSheetOut:
     caller.narrow(Permission.GRADES_READ, lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code))
     with uow_factory() as uow:
         head=uow._session.execute(text("SELECT id,class_code,subject_code,term_code,assessment_type,name,max_points FROM assessments WHERE id=:id AND academic_year_code=:y AND class_code=:c"),
             {"id":assessment_id,"y":academic_year,"c":class_code}).mappings().first()
         if head is None: raise HTTPException(status_code=404, detail="Assessment not found.")
+        if not _may_record(caller, teaching, academic_year, class_code, head["subject_code"]):
+            raise _assignment_forbidden(head["subject_code"], class_code)
         saved={x["student_number"]:x for x in uow._session.execute(text("SELECT student_number,points,max_points,percentage,is_absent FROM assessment_marks WHERE assessment_id=:id"),{"id":assessment_id}).mappings().all()}
     with domain_errors():
         roster=sheets.sheet(AcademicYearCode(academic_year),ClassCode(class_code),SubjectCode(head["subject_code"]),TermCode(head["term_code"]))

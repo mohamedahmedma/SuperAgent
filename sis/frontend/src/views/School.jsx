@@ -516,10 +516,11 @@ export function School({ params = {} }) {
   const [addingLevel, setAddingLevel] = useState(false);
   const [addingYear, setAddingYear] = useState(false);
   const [activeTrack, setActiveTrack] = useState('');
-  const mayEditStructure = Store.can('structure.write');
   const isAdmin = Store.roles().indexOf('admin') >= 0;
   const heldRoles = Store.roles();
-  const isPrincipal = heldRoles.indexOf('school_manager') >= 0 && heldRoles.indexOf('admin') < 0 && heldRoles.indexOf('school_owner') < 0;
+  const isSchoolLeader = (heldRoles.indexOf('school_manager') >= 0 || heldRoles.indexOf('school_owner') >= 0) && heldRoles.indexOf('admin') < 0;
+  const isSchoolOwner = heldRoles.indexOf('school_owner') >= 0 && heldRoles.indexOf('admin') < 0;
+  const mayEditStructure = Store.can('structure.write') || isSchoolLeader;
 
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const schoolList = schools.value || [];
@@ -600,26 +601,26 @@ export function School({ params = {} }) {
       <PageHead
         title={school ? pickName(school, state.lang) || code : code || 'School'}
         lede={
-          isPrincipal
+          isSchoolLeader
             ? undefined
             : school
               ? t('Its academic years, and its ladder grouped by division. Open a rung to see its classes.')
               : t('This school is not on file.')
         }
         actions={
-          isPrincipal ? (
-            <Button variant="primary" disabled={!code} onClick={() => setAddingYear(!addingYear)}>
-              {addingYear ? t('Close') : t('Create academic year')}
+          isSchoolLeader ? (
+            <Button variant={isSchoolOwner ? 'secondary' : 'primary'} disabled={!code} onClick={() => setAddingYear(!addingYear)}>
+              {addingYear ? t('Close') : t('Set up a new academic year')}
             </Button>
           ) : mayEditStructure ? <>
             {isAdmin ? <Button onClick={() => setAddingSchool(!addingSchool)}>
               {addingSchool ? t('Close') : t('Add school')}
             </Button> : null}
             <Button disabled={!code} onClick={() => setAddingLevel(!addingLevel)}>
-              {addingLevel ? t('Close') : t('Add rung')}
+              {addingLevel ? t('Close') : t('Edit grades')}
             </Button>
             <Button variant="primary" disabled={!code} onClick={() => setAddingYear(!addingYear)}>
-              {addingYear ? t('Close') : t('Add academic year')}
+              {addingYear ? t('Close') : t('Set up a new academic year')}
             </Button>
           </> : null
         }
@@ -632,7 +633,9 @@ export function School({ params = {} }) {
               {trackList.map((track) => (
                 <Button
                   key={track.code}
-                  variant={track.code === selectedTrack ? 'primary' : 'secondary'}
+                  variant={track.code === selectedTrack && !isSchoolOwner ? 'primary' : 'secondary'}
+                  className={track.code === selectedTrack && isSchoolOwner ? 'sis-segmented-selected' : undefined}
+                  aria-pressed={track.code === selectedTrack}
                   onClick={() => setActiveTrack(track.code)}
                 >
                   {pickName(track, state.lang)}
@@ -648,7 +651,7 @@ export function School({ params = {} }) {
         ) : null}
 
         {addingYear && code ? (
-          isPrincipal ? (
+          isSchoolLeader ? (
             <div className="sis-rise">
               <PrincipalYearSetup
                 school={code}

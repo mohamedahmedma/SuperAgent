@@ -1037,6 +1037,67 @@ def test_a_mark_keeps_the_class_she_was_in_that_day(
     assert october["class_code"] == "3A", "a past register was rewritten by a transfer"
 
 
+def test_removing_a_child_today_files_todays_absence_automatically(
+    two_schools: TestClient, registrar: dict[str, str]
+) -> None:
+    """Remove is the manager's or owner's action, not the attendance-taker's.
+
+    Ending a placement on today's date used to leave today's mark blank — correct, but a
+    second chore for whoever takes the register, who now has to notice a name that no
+    longer belongs and mark her absent by hand. The removal itself is the one call that
+    knows "she has left" rather than "nobody has reached her yet", so it files the mark.
+    """
+    _add_child(two_schools, registrar, "L-1", "Child L1")
+    _place(two_schools, registrar, "L-1", NC_YEAR, "3A", "2026-09-01")
+
+    removed = two_schools.patch(
+        "/v1/students/L-1/placements/current",
+        json={"ends_on": "2026-09-01"},
+        headers=registrar,
+    )
+    assert removed.status_code == 200, removed.text
+
+    register = two_schools.get(
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01", headers=registrar
+    )
+    assert register.status_code == 200, register.text
+    body = register.json()
+    row = next(r for r in body["students"] if r["student_number"] == "L-1")
+    assert row["state"] == "absent"
+    assert row["is_marked"] is True
+    assert body["counts"]["absent"] == 1
+
+
+def test_removing_a_child_today_does_not_overwrite_a_mark_already_taken(
+    two_schools: TestClient, registrar: dict[str, str]
+) -> None:
+    """She was marked present before lunch; Remove at noon must not erase that fact.
+
+    The same rule `take_register` holds for its own partial saves: this fills a blank,
+    it does not restate something somebody already looked at and recorded.
+    """
+    _add_child(two_schools, registrar, "L-2", "Child L2")
+    _place(two_schools, registrar, "L-2", NC_YEAR, "3A", "2026-09-01")
+    two_schools.put(
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01",
+        json={"entries": [{"student_number": "L-2", "state": "present"}]},
+        headers=registrar,
+    )
+
+    removed = two_schools.patch(
+        "/v1/students/L-2/placements/current",
+        json={"ends_on": "2026-09-01"},
+        headers=registrar,
+    )
+    assert removed.status_code == 200, removed.text
+
+    register = two_schools.get(
+        f"/v1/classes/3A/attendance?academic_year={NC_YEAR}&on=2026-09-01", headers=registrar
+    )
+    row = next(r for r in register.json()["students"] if r["student_number"] == "L-2")
+    assert row["state"] == "present"
+
+
 # ---------------------------------------------------------------------------
 # The child's own details
 # ---------------------------------------------------------------------------

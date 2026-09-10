@@ -176,6 +176,10 @@ class AttendanceService:
                     mark=marks.get(str(placement.student_number)),
                 )
                 for placement in placements
+                if (
+                    student := students.get(str(placement.student_number))
+                ) is not None
+                and student.is_active
             )
 
         return ClassRegister(
@@ -310,11 +314,21 @@ class AttendanceService:
                     field="class_code",
                 )
 
+            placements = uow.enrolments.roster_on(
+                academic_year_code, class_code, on_date
+            )
+            students = uow.students.get_many(
+                [StudentNumber(str(p.student_number)) for p in placements]
+            ) if placements else {}
+            # Deactivation retains the placement as history, but removes the child from
+            # the working register and rejects stale browser submissions for that child.
             placed = {
-                str(p.student_number)
-                for p in uow.enrolments.roster_on(
-                    academic_year_code, class_code, on_date
-                )
+                str(placement.student_number)
+                for placement in placements
+                if (
+                    student := students.get(str(placement.student_number))
+                ) is not None
+                and student.is_active
             }
             if on_date < today:
                 existing = uow.attendance.marks_for_class(section_id, on_date)

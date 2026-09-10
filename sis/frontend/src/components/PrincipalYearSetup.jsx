@@ -57,10 +57,6 @@ function cairoTodayIso() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-function isLockedYear(row) {
-  return !!(row && row.is_current && row.starts_on && row.starts_on <= cairoTodayIso());
-}
-
 function TrackClassPlan({ track, grades, plan, onChange, lang }) {
   const rows = grades || [];
   const custom = plan.mode === 'custom';
@@ -169,6 +165,7 @@ export function PrincipalYearSetup({ school, schoolConfig, tracks = [], levels =
   const [subjects, setSubjects] = useState([]);
   const [subjectError, setSubjectError] = useState(null);
   const [subjectLoading, setSubjectLoading] = useState(false);
+  const [editingSubjects, setEditingSubjects] = useState(false);
 
   useEffect(() => {
     setDrafts([blankYear(school)]);
@@ -208,9 +205,6 @@ export function PrincipalYearSetup({ school, schoolConfig, tracks = [], levels =
       seen.add(row.code); return true;
     }).map((row) => ({ value: row.code, label: pickName(row, state.lang) || row.code }));
   }, [years, result, state.lang]);
-
-  const configureRow = [...years, ...result].find((row) => row && row.code === configureYear);
-  const configureLocked = isLockedYear(configureRow);
 
   useEffect(() => {
     if (!configureYear && yearOptions.length) setConfigureYear(yearOptions[yearOptions.length - 1].value);
@@ -382,15 +376,21 @@ export function PrincipalYearSetup({ school, schoolConfig, tracks = [], levels =
       <div className="d-flex flex-wrap gap-2">{result.map((row) => <Badge key={row.code}>{row.code}</Badge>)}</div>
     </Alert> : null}
 
-    <Card title={t('3. Subjects and grade assignment')} subtitle={t('Select a year, add subjects, then drag each subject onto the grades that teach it.') }>
+    <Card
+      title={t('3. Subjects and grade assignment')}
+      subtitle={t('Select a year, add subjects, then drag each subject onto the grades that teach it.')}
+      actions={yearOptions.length ? <Button size="sm" variant={editingSubjects ? 'quiet' : 'primary'} onClick={() => setEditingSubjects((value) => !value)}>
+        {editingSubjects ? t('Close') : t('Edit subject assignments')}
+      </Button> : null}
+    >
       {yearOptions.length ? <div className="vstack gap-3">
         <Field label={t('Academic year')}>
-          <Select value={configureYear} options={yearOptions} onChange={setConfigureYear} />
+          <Select value={configureYear} options={yearOptions} onChange={(value) => { setConfigureYear(value); setEditingSubjects(false); }} />
         </Field>
-        <SubjectCreator year={configureYear} onSaved={loadSubjects} disabled={configureLocked} />
+        {editingSubjects ? <SubjectCreator year={configureYear} onSaved={loadSubjects} /> : null}
         {subjectError ? <ErrorNote error={subjectError} onRetry={loadSubjects} /> : null}
         {subjectLoading ? <div className="small text-body-tertiary">{t('Loading…')}</div> : null}
-        {!subjectLoading && configureYear ? <SubjectBoard year={configureYear} school={school} levels={levels} subjects={subjects} lang={state.lang} hideInfo readOnly={configureLocked} /> : null}
+        {!subjectLoading && configureYear ? <SubjectBoard year={configureYear} school={school} levels={levels} subjects={subjects} lang={state.lang} hideInfo readOnly={!editingSubjects} /> : null}
       </div> : <Empty title={t('Create an academic year first')}>
         {t('Subject configuration becomes available as soon as an academic year exists.')}
       </Empty>}

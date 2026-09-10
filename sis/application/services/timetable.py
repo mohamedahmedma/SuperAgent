@@ -378,6 +378,69 @@ class TimetableService:
             uow.commit()
         return tuple(prepared)
 
+    def copy_term_week(
+        self,
+        academic_year_code: AcademicYearCode,
+        class_code: ClassCode,
+        source_term_code: TermCode,
+        target_term_code: TermCode,
+    ) -> Sequence[TimetableEntry]:
+        """Copy a class's saved week into an empty term, without ever overwriting it.
+
+        This is deliberately a write rather than a read-time fallback.  A Term 2 grid that
+        looks like Term 1 must be a real, reviewable plan and must remain independently
+        editable afterwards.  Refusing a non-empty target also prevents a late "copy
+        default" click from silently erasing work already made for the new term.
+        """
+        if str(source_term_code) == str(target_term_code):
+            raise ValidationError(
+                "the source and target terms must be different",
+                field="target_term_code",
+            )
+
+        with self._uow_factory() as uow:
+            self._require_year_and_school(uow, academic_year_code)
+            self._require_class(uow, academic_year_code, class_code)
+            self._require_term(uow, academic_year_code, source_term_code)
+            self._require_term(uow, academic_year_code, target_term_code)
+
+            existing = uow.timetable.list_entries(
+                academic_year_code,
+                class_code=class_code,
+                term_code=target_term_code,
+            )
+            if existing:
+                raise TimetableConflict(
+                    f"{class_code} already has a timetable in {target_term_code}; "
+                    "clear it explicitly before copying another term",
+                    field="target_term_code",
+                )
+
+            source = uow.timetable.list_entries(
+                academic_year_code,
+                class_code=class_code,
+                term_code=source_term_code,
+            )
+            copied = [
+                TimetableEntry(
+                    slot=TimetableSlot(
+                        class_code=str(class_code),
+                        term_code=str(target_term_code),
+                        day_of_week=entry.slot.day_of_week,
+                        period_number=entry.slot.period_number,
+                    ),
+                    academic_year_code=academic_year_code,
+                    subject_code=entry.subject_code,
+                    teacher_staff_number=entry.teacher_staff_number,
+                )
+                for entry in source
+            ]
+            prepared = self._prepare_entries(uow, academic_year_code, copied)
+            if prepared:
+                uow.timetable.upsert_entries(prepared)
+                uow.commit()
+            return tuple(prepared)
+
     def clear(
         self,
         academic_year_code: AcademicYearCode,

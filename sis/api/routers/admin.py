@@ -33,6 +33,20 @@ from sis.domain.auth import ApiKey, Scope
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 AuditReader = Annotated[object, Depends(require_user_permission(Permission.AUDIT_READ))]
 
+# The administrator's operational audit is a student-care timeline, not a technical
+# changelog of account syncs and system settings. Those rows remain preserved in the
+# append-only table for support work, but never crowd the school-facing screen.
+_STUDENT_AUDIT_ENTITIES = (
+    "Student",
+    "ClassEnrolment",
+    "Guardian",
+    "GuardianPhone",
+    "StudentGuardian",
+    "Attendance",
+    "SubjectGrade",
+    "StudentDocument",
+)
+
 
 class ApiKeyMinter(Protocol):
     """What this route needs from the composition root, stated by the route that needs it.
@@ -211,6 +225,9 @@ class AuditLogOut(BaseModel):
     old_values: dict | None
     new_values: dict | None
     created_at: datetime
+    actor_name: str
+    actor_role: str | None = None
+    academic_year: str | None = None
 
 
 @router.get("/audit-log", response_model=list[AuditLogOut])
@@ -219,17 +236,75 @@ def read_audit_log(
     uow_factory: UowFactoryDep,
     entity_type: Annotated[str | None, Query()] = None,
     action: Annotated[str | None, Query()] = None,
+    offset: Annotated[
+        int, Query(ge=0, description="Number of newest-first audit rows to skip.")
+    ] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[AuditLogOut]:
-    """Admin-only, newest-first audit history. There is intentionally no write route."""
+    """Admin-only, newest-first audit history. There is intentionally no write route.
+
+    ``offset`` and ``limit`` deliberately paginate the immutable list at the database rather
+    than loading every historical change into the browser.  The ordering includes ``id`` as a
+    tie-breaker, so two writes in the same timestamp retain a stable order while an operator
+    moves between pages.
+    """
     with uow_factory() as uow:
         from sqlalchemy import select
-        statement = select(m.AuditLog)
+        statement = select(m.AuditLog).where(m.AuditLog.entity_type.in_(_STUDENT_AUDIT_ENTITIES))
         if entity_type:
             statement = statement.where(m.AuditLog.entity_type == entity_type)
         if action:
             statement = statement.where(m.AuditLog.action == action)
         rows = uow._session.scalars(
-            statement.order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc()).limit(limit)
+            statement.order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc()).offset(offset).limit(limit)
         ).all()
-    return [AuditLogOut.model_validate(row, from_attributes=True) for row in rows]
+        actor_ids = {row.actor_user_id for row in rows if row.actor_user_id is not None}
+        people = {
+            row.id: row
+            for row in uow._session.scalars(select(m.User).where(m.User.id.in_(actor_ids))).all()
+        } if actor_ids else {}
+        roles_by_actor: dict[int, list[str]] = {}
+        if actor_ids:
+            for user_id, role_name in uow._session.execute(
+                select(m.UserRole.user_id, m.Role.name_ar)
+                .join(m.Role, m.Role.id == m.UserRole.role_id)
+                .where(m.UserRole.user_id.in_(actor_ids))
+            ).all():
+                roles_by_actor.setdefault(user_id, []).append(role_name)
+
+        def school_year(entry: m.AuditLog) -> str | None:
+            values = entry.new_values or entry.old_values or {}
+            direct = values.get("academic_year_code")
+            if direct:
+                return str(direct)
+            term = values.get("term_code")
+            if isinstance(term, str) and "-T" in term:
+                return term.rsplit("-T", 1)[0]
+            return None
+
+        def out(entry: m.AuditLog) -> AuditLogOut:
+            person = people.get(entry.actor_user_id)
+            actor_name = (
+                (person.full_name_ar or person.full_name_en or person.username)
+                if person is not None
+                else ("النظام" if entry.actor == "integration" else entry.actor)
+            )
+            role_names = roles_by_actor.get(entry.actor_user_id or -1, [])
+            return AuditLogOut(
+                id=entry.id,
+                actor_user_id=entry.actor_user_id,
+                actor=entry.actor,
+                action=entry.action,
+                entity_type=entry.entity_type,
+                entity_id=entry.entity_id,
+                old_values=entry.old_values,
+                new_values=entry.new_values,
+                created_at=entry.created_at,
+                actor_name=actor_name,
+                actor_role="، ".join(role_names) or None,
+                academic_year=school_year(entry),
+            )
+        # SQLAlchemy expires ORM fields when this unit of work closes. Serialize while
+        # the session is still open so an audit page with real rows cannot turn into a
+        # detached-instance 500 response.
+        return [out(row) for row in rows]

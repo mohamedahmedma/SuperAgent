@@ -294,6 +294,8 @@ def test_a_child_who_leaves_is_deactivated_and_keeps_her_record(
         json={"student_number": "10432", "full_name_en": "Sara", "full_name_ar": "سارة"},
         headers=registrar,
     )
+    placed = _place(seeded, registrar, "10432", "3A", date(2025, 9, 1))
+    assert placed.status_code == 201, placed.text
     left = seeded.patch("/v1/students/10432", json={"is_active": False}, headers=registrar)
     assert left.status_code == 200, left.text
     assert left.json()["is_active"] is False
@@ -307,6 +309,14 @@ def test_a_child_who_leaves_is_deactivated_and_keeps_her_record(
         "/v1/students?q=10432&include_inactive=true", headers=registrar
     )
     assert with_left.json()["count"] == 1
+
+    # The enrolment remains in the database for restore/audit purposes, but the normal
+    # classroom UI must not keep showing a child who has been soft-deleted.
+    roster = seeded.get(
+        f"/v1/classes/3A/students?academic_year={YEAR}&on=2025-10-01", headers=registrar
+    )
+    assert roster.status_code == 200, roster.text
+    assert roster.json()["students"] == []
 
 
 def test_a_blank_search_returns_nothing_rather_than_the_whole_school(

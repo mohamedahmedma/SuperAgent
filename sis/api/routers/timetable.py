@@ -206,6 +206,15 @@ class TimetableChangesIn(BaseModel):
     clear_slots: list[TimetableSlotIn] = Field(default_factory=list)
 
 
+class TimetableTermCopyIn(BaseModel):
+    """Copy one class's saved timetable into another term of the same year."""
+
+    academic_year_code: str = Field(examples=["2025-2026"])
+    class_code: str = Field(examples=["3A"])
+    source_term_code: str = Field(examples=["2025-2026-T1"])
+    target_term_code: str = Field(examples=["2025-2026-T2"])
+
+
 class TimetableEntryOut(BaseModel):
     academic_year_code: str
     class_code: str
@@ -703,6 +712,36 @@ def save_week_changes(
             ],
         )
     return [TimetableEntryOut.of(entry) for entry in stored]
+
+
+@router.post(
+    "/timetable/copy-term",
+    response_model=list[TimetableEntryOut],
+    summary="Copy a class timetable from one term to another",
+    description="Copies a saved weekly timetable into an empty target term. The target is "
+    "never overwritten: if it already has any entries the request is refused, so the two "
+    "terms remain independently editable after the initial default is applied.",
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+def copy_term_week(
+    body: TimetableTermCopyIn, timetables: Timetables, caller: Registrar
+) -> list[TimetableEntryOut]:
+    caller.narrow_all(
+        Permission.TIMETABLE_WRITE,
+        lambda scopes: [
+            scopes.for_class(
+                academic_year_code=body.academic_year_code, class_code=body.class_code
+            )
+        ],
+    )
+    with domain_errors():
+        copied = timetables.copy_term_week(
+            AcademicYearCode(body.academic_year_code),
+            ClassCode(body.class_code),
+            TermCode(body.source_term_code),
+            TermCode(body.target_term_code),
+        )
+    return [TimetableEntryOut.of(entry) for entry in copied]
 
 
 @router.post(

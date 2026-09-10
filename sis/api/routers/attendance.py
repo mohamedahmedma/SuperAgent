@@ -40,7 +40,7 @@ from sis.api.routers import domain_errors, error_responses
 from sis.application.services.attendance import ClassRegister, StudentAttendance
 from sis.domain.attendance import AttendanceState, AttendanceTally
 from sis.domain.errors import UnknownReference
-from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
+from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber, TermCode
 from sis.infrastructure.db import models as m
 
 router = APIRouter(prefix="/v1", tags=["attendance"])
@@ -226,6 +226,9 @@ class StudentAttendanceOut(BaseModel):
 
 class StudentAttendanceSummaryOut(BaseModel):
     academic_year: str
+    term_code: str | None = None
+    from_date: date | None = None
+    to_date: date | None = None
     applicable_days: int
     present: int
     absent: int
@@ -241,6 +244,7 @@ def read_student_attendance_summary(
     academic_year: Annotated[str, Query(description="Required academic-year code.")],
     caller: StudentReader,
     uow_factory: UowFactoryDep,
+    term: Annotated[str | None, Query(description="Optional term code; totals are then limited to its dated window.")] = None,
 ) -> StudentAttendanceSummaryOut:
     """Attendance totals from all recorded days in exactly one academic year."""
     caller.narrow(
@@ -256,18 +260,34 @@ def read_student_attendance_summary(
         student_id = uow._session.scalar(select(m.Student.id).where(m.Student.student_number == student_number))
         if student_id is None:
             raise UnknownReference(f"no student {student_number}", field="student_number")
-        rows = uow._session.execute(
+        statement = (
             select(m.Attendance.state, func.count())
             .join(m.ClassSection, m.Attendance.class_section_id == m.ClassSection.id)
             .where(m.Attendance.student_id == student_id, m.ClassSection.academic_year_id == year.id)
-            .group_by(m.Attendance.state)
-        ).all()
+        )
+        term_row = None
+        if term is not None:
+            term_row = uow.terms.get(TermCode(term))
+            if term_row is None:
+                raise UnknownReference(f"no term {term}", field="term")
+            if str(term_row.academic_year_code) != academic_year:
+                raise UnknownReference(f"term {term} is not in {academic_year}", field="term")
+            if term_row.starts_on is None or term_row.ends_on is None:
+                raise UnknownReference(f"term {term} has no complete date range", field="term")
+            statement = statement.where(
+                m.Attendance.on_date >= term_row.starts_on,
+                m.Attendance.on_date <= term_row.ends_on,
+            )
+        rows = uow._session.execute(statement.group_by(m.Attendance.state)).all()
     counts = {state: int(total) for state, total in rows}
     present, absent = counts.get("present", 0), counts.get("absent", 0)
     late, excused = counts.get("late", 0), counts.get("excused", 0)
     applicable = present + absent + late + excused
     return StudentAttendanceSummaryOut(
-        academic_year=academic_year, applicable_days=applicable, present=present,
+        academic_year=academic_year, term_code=None if term_row is None else str(term_row.code),
+        from_date=None if term_row is None else term_row.starts_on,
+        to_date=None if term_row is None else term_row.ends_on,
+        applicable_days=applicable, present=present,
         absent=absent, late=late, excused=excused,
         attendance_percent=None if not applicable else round((present + late) * 100 / applicable, 2),
         absence_percent=None if not applicable else round((absent + excused) * 100 / applicable, 2),
@@ -352,7 +372,9 @@ def list_registerable_classes(
         marked_by_class = dict(
             session.execute(
                 select(m.Attendance.class_section_id, func.count())
+                .join(m.Student, m.Attendance.student_id == m.Student.id)
                 .where(
+                    m.Student.is_active.is_(True),
                     m.Attendance.on_date == on_date,
                     m.Attendance.class_section_id.in_([row[0].id for row in rows] or [0]),
                 )
@@ -362,7 +384,9 @@ def list_registerable_classes(
         sizes = dict(
             session.execute(
                 select(m.ClassEnrolment.class_section_id, func.count())
+                .join(m.Student, m.ClassEnrolment.student_id == m.Student.id)
                 .where(
+                    m.Student.is_active.is_(True),
                     m.ClassEnrolment.class_section_id.in_([row[0].id for row in rows] or [0]),
                     m.ClassEnrolment.starts_on <= on_date,
                     or_(

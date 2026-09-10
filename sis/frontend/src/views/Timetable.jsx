@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Store } from '../store.js';
 import { pickName, useQuery, useStore } from '../hooks.js';
@@ -31,13 +31,16 @@ function changedSlots(before, after) {
 export function Timetable() {
   const state = useStore();
   const [klass, setKlass] = useState('');
+  const [grade, setGrade] = useState('');
   const [term, setTerm] = useState('');
   const [dragged, setDragged] = useState(null);
   const [savedEntries, setSavedEntries] = useState([]);
   const [draftEntries, setDraftEntries] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [saved, setSaved] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const automaticCopyAttempt = useRef('');
 
   const supervisedGrades = useMemo(() => [...new Set(
     ((state.profile && state.profile.grants) || [])
@@ -70,10 +73,24 @@ export function Timetable() {
 
   const classes = (options.value && options.value.classes) || [];
   const terms = (options.value && options.value.terms) || [];
+  const isSchoolLeader = (state.profile?.roles || []).some((role) =>
+    role.role_code === 'school_owner' || role.role_code === 'school_manager'
+  );
+  const grades = useMemo(() => [...new Map(classes.map((row) => [row.year_level_code, {
+    code: row.year_level_code,
+    name_en: row.year_level_name_en,
+    name_ar: row.year_level_name_ar
+  }])).values()].filter((row) => row.code), [classes]);
+  const visibleClasses = isSchoolLeader && grade
+    ? classes.filter((row) => row.year_level_code === grade)
+    : classes;
 
   useEffect(() => {
-    if (!classes.some((row) => row.code === klass)) setKlass(classes[0]?.code || '');
-  }, [options.value, state.year]);
+    if (isSchoolLeader && !grades.some((row) => row.code === grade)) setGrade(grades[0]?.code || '');
+  }, [grades, grade, isSchoolLeader]);
+  useEffect(() => {
+    if (!visibleClasses.some((row) => row.code === klass)) setKlass(visibleClasses[0]?.code || '');
+  }, [visibleClasses, klass]);
   useEffect(() => {
     if (!terms.some((row) => row.code === term)) setTerm(terms[0]?.code || '');
   }, [options.value, state.year]);
@@ -93,6 +110,14 @@ export function Timetable() {
     !!state.year && !!klass && !!term
   );
   const plan = week.value;
+  const sourceTerm = useMemo(() => terms
+    .filter((item) => item.code !== term && Number(item.sequence || 0) < Number(terms.find((row) => row.code === term)?.sequence || 0))
+    .sort((left, right) => Number(right.sequence || 0) - Number(left.sequence || 0))[0], [terms, term]);
+  const sourceWeek = useQuery(
+    () => api.timetableWeek(state.year, klass, sourceTerm.code),
+    [state.year, klass, sourceTerm?.code],
+    !!state.year && !!klass && !!sourceTerm && mayEdit
+  );
 
   useEffect(() => {
     if (!plan) return;
@@ -103,6 +128,25 @@ export function Timetable() {
     setSaved(false);
     setDragged(null);
   }, [plan]);
+
+  /* Term 2 starts as a real copy, not a read-time illusion. It is written only once, only
+     when a supervisor opens an empty later term, and never overwrites work already saved there. */
+  useEffect(() => {
+    const key = `${state.year}:${klass}:${sourceTerm?.code || ''}:${term}`;
+    if (!mayEdit || !plan || !sourceTerm || !term || plan.entries.length ||
+      !sourceWeek.value?.entries?.length || automaticCopyAttempt.current === key) return;
+    automaticCopyAttempt.current = key;
+    setCopying(true);
+    setActionError(null);
+    api.copyTimetableTerm(state.year, klass, sourceTerm.code, term)
+      .then(() => week.reload())
+      .catch((error) => {
+        // Another supervisor may have initialized it first; reload and show only real failures.
+        if (error?.status !== 409) setActionError(error);
+        return week.reload();
+      })
+      .finally(() => setCopying(false));
+  }, [state.year, klass, term, mayEdit, plan, sourceTerm?.code, sourceWeek.value, week]);
 
   const changed = useMemo(
     () => changedSlots(savedEntries, draftEntries),
@@ -224,21 +268,25 @@ export function Timetable() {
     <div className="vstack gap-3">
       <Card title={t('Class and term')}>
         <div className="row g-3">
-          <div className="col-12 col-md-6"><label className="form-label">{t('Class')}</label>
+          {isSchoolLeader ? <div className="col-12 col-md-4"><label className="form-label">{t('Grade')}</label>
+            <Select value={grade} onChange={setGrade} disabled={!grades.length || saving || hasChanges}
+              options={grades.map((row) => ({ value: row.code, label: pickName(row, state.lang) || row.code }))} />
+          </div> : null}
+          <div className={`col-12 ${isSchoolLeader ? 'col-md-4' : 'col-md-6'}`}><label className="form-label">{t('Class')}</label>
             <Select value={klass} onChange={setKlass}
-              disabled={!classes.length || saving || hasChanges}
-              options={classes.map((row) => ({ value: row.code,
+              disabled={!visibleClasses.length || saving || hasChanges}
+              options={visibleClasses.map((row) => ({ value: row.code,
                 label: `${pickName(row, state.lang) || row.code} · ${row.code}` }))} />
           </div>
-          <div className="col-12 col-md-6"><label className="form-label">{t('Term')}</label>
+          <div className={`col-12 ${isSchoolLeader ? 'col-md-4' : 'col-md-6'}`}><label className="form-label">{t('Term')}</label>
             <Select value={term} onChange={setTerm}
               disabled={!terms.length || saving || hasChanges}
               options={terms.map((row) => ({ value: row.code, label: pickName(row, state.lang) || row.code }))} />
           </div>
         </div>
-        {chosen ? <div className="mt-3"><Badge tone={mayEdit ? 'info' : undefined}>
+        {chosen ? <div className="mt-3 d-flex flex-wrap gap-2 align-items-center"><Badge tone={mayEdit ? 'info' : undefined}>
           {mayEdit ? t('Editable timetable') : t('View only')}
-        </Badge></div> : null}
+        </Badge>{copying ? <span className="small text-body-secondary">{t('Copying...')}</span> : null}</div> : null}
       </Card>
 
       {options.loading && !options.ready ? <Card><Skeleton rows={4} /></Card> : null}

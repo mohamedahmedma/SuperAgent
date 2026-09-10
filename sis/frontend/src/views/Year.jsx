@@ -232,6 +232,31 @@ function SubjectForm({ year, count, onSaved }) {
   );
 }
 
+function EditSubject({ year, subject, readOnly = false }) {
+  const [editing, setEditing] = useState(false);
+  const form = useForm({
+    name_en: subject.name_en || '', name_ar: subject.name_ar || '',
+    display_order: String(subject.display_order || 0)
+  });
+  const save = useAction(() => api.createSubject({
+    code: subject.code, academic_year_code: year,
+    name_en: form.values.name_en.trim(), name_ar: form.values.name_ar.trim(),
+    display_order: Number(form.values.display_order) || 0, is_active: subject.is_active
+  }));
+  if (readOnly) return null;
+  if (!editing) return <Button size="sm" variant="quiet" onClick={() => setEditing(true)}>{t('Edit')}</Button>;
+  return <div className="vstack gap-2" style={{ minWidth: '16rem' }}>
+    <Field label={t('English')}><Input value={form.values.name_en} onInput={form.set('name_en')} /></Field>
+    <Field label={t('Arabic')}><Input className="sis-name-ar" value={form.values.name_ar} onInput={form.set('name_ar')} /></Field>
+    <Field label={t('Report-card order')}><Input type="number" value={form.values.display_order} onInput={form.set('display_order')} /></Field>
+    <ErrorNote error={save.error} />
+    <div className="d-flex gap-2"><Button size="sm" variant="primary" pending={save.pending} onClick={() => save.run().then(() => {
+      Store.invalidate('subjects:'); Store.toast(t('Subject updated.'), 'success'); setEditing(false);
+    }).catch(() => {})}>{t('Save')}</Button>
+      <Button size="sm" variant="quiet" disabled={save.pending} onClick={() => setEditing(false)}>{t('Cancel')}</Button></div>
+  </div>;
+}
+
 /* -- Retire or restore one subject ------------------------------------------------
  *
  * Confirmed, because it is structural: retiring a subject takes it out of every picker in the
@@ -448,7 +473,7 @@ export function SubjectBoard({ year, school, levels, subjects, lang, hideInfo = 
   }
 
   return (
-    <div className="vstack gap-3">
+    <div className="vstack gap-3" id="year-connections">
       {!hideInfo ? (
         <Alert tone="info">
           {t('A subject appears only where it is assigned. Physics assigned to Secondary does not appear in Primary, and the two academic tracks are assigned separately.')}
@@ -645,6 +670,7 @@ export function SubjectBoard({ year, school, levels, subjects, lang, hideInfo = 
  * all claiming the whole year, which reads as a decision the school made.
  */
 function TermPanel({ year, term, lang, hideUploadMarks = false, readOnly = false }) {
+  const [editing, setEditing] = useState(false);
   const form = useForm({
     starts_on: term.starts_on || '',
     ends_on: term.ends_on || ''
@@ -661,18 +687,12 @@ function TermPanel({ year, term, lang, hideUploadMarks = false, readOnly = false
   }
 
   const save = useAction(() =>
-    api.createTerm({
-      code: term.code,
-      academic_year_code: year,
-      name_en: term.name_en,
-      name_ar: term.name_ar,
+    api.updateTermDates(term.code, {
       /* Empty box means "not stated", so it is sent as null and clears the column. An
          empty string would be a 422 about a date format, which is a confusing way to be
          told that leaving a field blank is allowed. */
       starts_on: form.values.starts_on || null,
       ends_on: form.values.ends_on || null,
-      sequence: term.sequence,
-      is_closed: term.is_closed
     })
   );
 
@@ -689,7 +709,12 @@ function TermPanel({ year, term, lang, hideUploadMarks = false, readOnly = false
       }
       subtitle={term.code}
       actions={
-        term.is_closed ? <Badge tone="warn">{t('closed')}</Badge> : <Badge tone="ok">{t('open')}</Badge>
+        <div className="d-flex align-items-center gap-2">
+          {term.is_closed ? <Badge tone="warn">{t('closed')}</Badge> : <Badge tone="ok">{t('open')}</Badge>}
+          {!readOnly ? <Button size="sm" variant={editing ? 'primary' : 'quiet'} onClick={() => setEditing((value) => !value)}>
+            {editing ? t('Close') : t('Edit')}
+          </Button> : null}
+        </div>
       }
     >
       <form
@@ -712,7 +737,7 @@ function TermPanel({ year, term, lang, hideUploadMarks = false, readOnly = false
             hint={t('Optional')}
             error={form.errorFor(save.error, 'starts_on')}
           >
-            <Input type="date" disabled={readOnly} value={form.values.starts_on} onInput={form.set('starts_on')} />
+            <Input type="date" disabled={readOnly || !editing} value={form.values.starts_on} onInput={form.set('starts_on')} />
           </Field>
           <Field
             className="col-12 col-sm-6"
@@ -720,7 +745,7 @@ function TermPanel({ year, term, lang, hideUploadMarks = false, readOnly = false
             hint={t('Optional')}
             error={form.errorFor(save.error, 'ends_on')}
           >
-            <Input type="date" disabled={readOnly} value={form.values.ends_on} onInput={form.set('ends_on')} />
+            <Input type="date" disabled={readOnly || !editing} value={form.values.ends_on} onInput={form.set('ends_on')} />
           </Field>
         </div>
 
@@ -731,7 +756,7 @@ function TermPanel({ year, term, lang, hideUploadMarks = false, readOnly = false
         )}
 
         <div className="d-grid d-sm-flex gap-2">
-          {!readOnly ? (
+          {!readOnly && editing ? (
             <Button type="submit" variant="primary" disabled={!dirty} pending={save.pending}>
               {t('Save dates')}
             </Button>
@@ -759,6 +784,8 @@ function TermPanel({ year, term, lang, hideUploadMarks = false, readOnly = false
  * require visiting three other screens to answer.
  */
 function YearConnections({ year, lang }) {
+  const canEdit = Store.can('structure.write') || Store.roles().includes('school_manager');
+  const editButton = (target) => canEdit ? <Button size="sm" variant="quiet" onClick={() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{t('Edit')}</Button> : null;
   const detail = useResource(
     Store.keys.yearDetail(year),
     () => api.academicYear(year),
@@ -781,7 +808,7 @@ function YearConnections({ year, lang }) {
         <div className="sis-tile-label">{t('School')}</div>
         <div className="d-flex flex-wrap align-items-center gap-2">
           <strong>{pickName(body.school, lang) || body.school.code}</strong>
-          <Badge>{body.school.code}</Badge>
+          <span className="sis-code text-body-secondary">{body.school.code}</span>
         </div>
       </div>
 
@@ -790,10 +817,11 @@ function YearConnections({ year, lang }) {
           label={t('Terms')}
           value={terms.length}
           note={t('{0} selected by the school', [body.school.term_count])}
+          action={editButton('year-terms')}
         />
-        <Tile label={t('Grades')} value={tracks.reduce((total, track) => total + (track.year_levels || []).length, 0)} />
-        <Tile label={lang === 'ar' ? 'فصل' : t('Classes')} value={body.class_count} />
-        <Tile label={t('Tracks')} value={tracks.filter((track) => track.track_code).length} />
+        <Tile label={t('Grades')} value={tracks.reduce((total, track) => total + (track.year_levels || []).length, 0)} action={editButton('year-subject-assignments')} />
+        <Tile label={lang === 'ar' ? 'فصل' : t('Classes')} value={body.class_count} action={editButton('year-connections')} />
+        <Tile label={t('Tracks')} value={tracks.filter((track) => track.track_code).length} action={editButton('year-connections')} />
       </div>
 
       <div className="row g-3">
@@ -802,16 +830,17 @@ function YearConnections({ year, lang }) {
             <div className="border rounded p-3 h-100">
               <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
                 <strong>{pickName(track, lang) || t('Not yet in a track')}</strong>
-                {track.track_code ? <Badge>{track.track_code}</Badge> : null}
+                {track.track_code ? <span className="sis-code text-body-secondary">{track.track_code}</span> : null}
               </div>
               <p className="small text-body-secondary mb-2">
                 {t('{0} grade(s), {1} class(es)', [(track.year_levels || []).length, track.class_count])}
               </p>
-              <div className="d-flex flex-wrap gap-2">
+              <div className="vstack gap-1">
                 {(track.year_levels || []).length ? (
-                  track.year_levels.map((level) => (
-                    <Badge key={level.code}>{pickName(level, lang) || level.code}</Badge>
-                  ))
+                  byStage(track.year_levels).map((group) => <div className="small" key={group.stage.key}>
+                    <span className="text-body-secondary">{t(group.stage.label)} — </span>
+                    {group.levels.map((level) => pickName(level, lang) || level.code).join(' — ')}
+                  </div>)
                 ) : (
                   <span className="small text-body-tertiary">{t('No grades on this track yet.')}</span>
                 )}
@@ -983,16 +1012,25 @@ function Section({ title, subtitle, action, form, children, locked = false }) {
   );
 }
 
-function cairoTodayIso() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function isStartedCurrentYear(year) {
-  return !!(year && year.is_current && year.starts_on && year.starts_on <= cairoTodayIso());
+function SubjectAssignmentsSection({ year, school, levels, subjects, lang, isPrincipal, canEdit }) {
+  const [editing, setEditing] = useState(false);
+  return <div id="year-subject-assignments"><Card
+    title={t('Which grades teach what')}
+    subtitle={t('A subject is taught only where it is placed')}
+    actions={canEdit ? <Button size="sm" variant={editing ? 'quiet' : 'primary'} onClick={() => setEditing((value) => !value)}>
+      {editing ? t('Close') : t('Edit subject assignments')}
+    </Button> : null}
+  >
+    <SubjectBoard
+      year={year}
+      school={school}
+      levels={levels}
+      subjects={subjects}
+      lang={lang}
+      hideInfo={isPrincipal}
+      readOnly={!editing}
+    />
+  </Card></div>;
 }
 
 /* -- Screen ---------------------------------------------------------------------- */
@@ -1023,8 +1061,15 @@ export function Year({ params = {} }) {
   const yearList = (years.value && years.value.academic_years) || [];
   const year = yearList.find((item) => item.code === code);
   const heldRoles = Store.roles();
-  const isPrincipal = heldRoles.indexOf('school_manager') >= 0 && heldRoles.indexOf('admin') < 0 && heldRoles.indexOf('school_owner') < 0;
-  const yearLocked = isStartedCurrentYear(year);
+  // The owner follows the school-manager academic view here: both can maintain the
+  // school structure, but neither needs registrar-only helpers such as ladder
+  // generation, marks-upload shortcuts, or implementation notes.
+  const isPrincipal = (heldRoles.indexOf('school_manager') >= 0 || heldRoles.indexOf('school_owner') >= 0) && heldRoles.indexOf('admin') < 0;
+  const canEditStructure = Store.can('structure.write') || isPrincipal;
+  // Cards stay closed by default, but an authorised manager may intentionally open an editor
+  // even for the active year. The API enforces that same permission server-side.
+  const structureLocked = !canEditStructure;
+  const subjectLocked = !canEditStructure;
 
   const termList = (terms.value || []).slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
   const subjectList = (subjects.value || [])
@@ -1065,23 +1110,23 @@ export function Year({ params = {} }) {
       ) : null}
 
       <div className="vstack gap-3">
-        <Card
+        <div id="year-connections"><Card
           title={t('This year is attached to')}
           subtitle={t('School, tracks, grades and classes — read together')}
         >
           <YearConnections year={code} lang={state.lang} />
-        </Card>
+        </Card></div>
 
-        <Section
+        <div id="year-terms"><Section
           title={t('Terms — {0}', [code])}
           subtitle={
             termList.length
               ? t('{0} term section(s), one panel each', [termList.length])
               : t('none yet')
           }
-          action="Add a term"
+          action={t('Edit terms')}
           form={<TermForm year={code} count={termList.length} />}
-          locked={yearLocked}
+          locked={structureLocked}
         >
           <div className="card-body">
             {termList.length ? (
@@ -1102,7 +1147,7 @@ export function Year({ params = {} }) {
                       }
                       key={term.code}
                     >
-                      <TermPanel year={code} term={term} lang={state.lang} hideUploadMarks={isPrincipal} readOnly={yearLocked} />
+                      <TermPanel year={code} term={term} lang={state.lang} hideUploadMarks={isPrincipal} readOnly={!canEditStructure} />
                     </div>
                   ))}
                 </div>
@@ -1113,14 +1158,14 @@ export function Year({ params = {} }) {
               </Empty>
             )}
           </div>
-        </Section>
+        </Section></div>
 
         <Section
           title={t('Subjects taught in {0}', [code])}
           subtitle={t('{0} in this year', [subjectList.length])}
-          action="Add subject"
+          action={t('Edit subjects')}
           form={<SubjectForm year={code} count={subjectList.length} />}
-          locked={yearLocked}
+          locked={subjectLocked}
         >
           {!isPrincipal ? (
             <div className="card-body pb-0">
@@ -1168,30 +1213,30 @@ export function Year({ params = {} }) {
                   row.is_active ? <Badge tone="ok">{t('active')}</Badge> : <Badge tone="warn">{t('retired')}</Badge>
               },
               {
+                key: 'edit',
+                header: '',
+                cell: (row) => <EditSubject year={code} subject={row} readOnly={subjectLocked} />
+              },
+              {
                 key: 'retire',
                 header: '',
-                cell: (row) => <RetireSubject year={code} subject={row} readOnly={yearLocked} />
+                cell: (row) => <RetireSubject year={code} subject={row} readOnly={subjectLocked} />
               }
             ]}
           />
         </Section>
 
-        <Card
-          title={t('Which grades teach what')}
-          subtitle={t('A subject is taught only where it is placed')}
-        >
-          <SubjectBoard
-            year={code}
-            school={state.school}
-            levels={(years.value && years.value.year_levels) || []}
-            subjects={subjectList}
-            lang={state.lang}
-            hideInfo={isPrincipal}
-            readOnly={yearLocked}
-          />
-        </Card>
+        <SubjectAssignmentsSection
+          year={code}
+          school={state.school}
+          levels={(years.value && years.value.year_levels) || []}
+          subjects={subjectList}
+          lang={state.lang}
+          isPrincipal={isPrincipal}
+          canEdit={!subjectLocked}
+        />
 
-        {!isPrincipal && !yearLocked ? (
+        {!isPrincipal && !structureLocked ? (
           <Card title={t('Generate the ladder')}>
             <Generator year={code} />
           </Card>

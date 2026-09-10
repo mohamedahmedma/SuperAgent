@@ -829,6 +829,7 @@ export const AR = {
     'هذا العام غير مسجَّل.',
   'Upload marks':
     'رفع الدرجات',
+  'Attendance recorded': 'تم تسجيل الحضور',
 
   '2. Committed':
     '٢. المعتمد',
@@ -1175,28 +1176,52 @@ export const AR = {
   'Discard changes': 'إلغاء التعديلات',
   'Save timetable': 'حفظ الجدول',
   'Timetable saved to the database.': 'تم حفظ الجدول في قاعدة البيانات.',
+  'Uploaded grades': 'الدرجات المرفوعة',
+  'Choose a saved assessment to review or edit its recorded marks.': 'اختر تقييمًا محفوظًا لمراجعة درجاته المسجلة أو تعديلها.',
+  'Choose an assessment type first': 'اختر نوع التقييم أولًا',
+  'Select Exam or Homework assignment above to see saved assessments for this class, subject and term.': 'اختر اختبارًا أو واجبًا بالأعلى لعرض التقييمات المحفوظة لهذا الفصل والمادة والترم.',
+  'No uploaded grades yet': 'لا توجد درجات مرفوعة بعد',
+  'Saved assessments for this selection will appear here.': 'ستظهر هنا التقييمات المحفوظة لهذا الاختيار.',
+  'Assessment loaded for editing.': 'تم تحميل التقييم للتعديل.',
+  'Guardian details updated.': 'تم تحديث بيانات ولي الأمر.',
+  'Arabic name': 'الاسم بالعربية',
+  'English name': 'الاسم بالإنجليزية',
+  'Relationship label': 'وصف الصلة',
+  'Primary contact': 'جهة الاتصال الأساسية',
+  'Edit terms': 'تعديل الترمات',
+  'Edit subjects': 'تعديل المواد',
+  'Edit subject assignments': 'تعديل توزيع المواد',
+  'Subject updated.': 'تم تحديث المادة.',
+  'Edit record': 'تعديل السجل',
+  'Edit guardian details': 'تعديل بيانات ولي الأمر',
+  'Update student and guardian details from one place.': 'حدّث بيانات الطالب وولي الأمر من مكان واحد.',
+  'Save': 'حفظ',
+  'Copy previous term timetable': 'نسخ جدول الترم السابق',
+  'Copying...': 'جارٍ النسخ…',
   'Break': 'فسحة',
   'All rights reserved.': 'جميع الحقوق محفوظة.',
   'Sunday': 'الأحد', 'Monday': 'الاثنين', 'Tuesday': 'الثلاثاء',
   'Wednesday': 'الأربعاء', 'Thursday': 'الخميس', 'Friday': 'الجمعة', 'Saturday': 'السبت',
 
-  /* Removing a child from a class. The English says "last day" and so does the Arabic: the
-     whole point of these three sentences is that "تمت الإزالة" on its own is what made a
-     registrar think the button had done nothing, because the child is still on the register
-     she was removed from — correctly, for one more day. */
-  'Today is her last day in {0}, so she stays on today’s register — this morning’s attendance is taken against it — and is off it from tomorrow.':
-    'اليوم هو آخر يوم لها في {0}، لذلك تظل في كشف اليوم — لأن غياب اليوم يُسجَّل عليه — وتخرج منه اعتبارًا من الغد.',
-  'It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class tomorrow.':
-    'هذا لا يحذفها: يبقى ملفها ودرجاتها وحضورها كما هي، ويمكن إلحاقها بفصل آخر غدًا.',
-  'Today is her last day, so she is on the register once more and off it tomorrow.':
-    'اليوم آخر يوم لها، لذلك تظهر في الكشف مرة أخيرة وتخرج منه غدًا.',
-  '{0} on their last day':
-    '{0} في آخر يوم لهم',
-  'Last day {0} — off the register after it':
-    'آخر يوم {0} — تخرج من الكشف بعده',
+  /* Removing a child from a class. Ending her placement files today's absence in the same
+     call and takes her off this register immediately — there is no longer a day of overlap
+     for the Arabic to explain. */
+  'Today is recorded absent for her automatically, and she comes off this register now. It does not delete her: her record, her marks and her attendance all stay exactly as they are, and she can be placed in another class right away.':
+    'يُسجَّل غياب اليوم عنها تلقائيًا، وتخرج من هذا الكشف الآن. هذا لا يحذفها: يبقى ملفها ودرجاتها وحضورها كما هي، ويمكن إلحاقها بصف آخر فورًا.',
+  'Recorded absent for today and taken off the register.':
+    'سُجِّل غياب اليوم وخرجت من الكشف.',
 
   'No attendance data recorded yet': 'لم تُسجّل بيانات حضور لهذا الطالب بعد',
   'No attendance has been recorded for this student in the selected period yet.': 'لم يتم تسجيل حضور أو غياب لهذا الطالب خلال الفترة المحددة حتى الآن.',
+  'From {0} to {1}, both included.': 'من {0} إلى {1} شاملًا اليومين.',
+  'No detailed attendance records in this period': 'لا توجد سجلات حضور تفصيلية خلال هذه الفترة',
+  'The academic-year summary above may include records outside the selected date range.': 'قد يتضمن ملخص السنة الدراسية بالأعلى سجلات خارج نطاق التاريخ المحدد.',
+  'Choose date range': 'اختيار فترة زمنية',
+  'Term total': 'إجمالي الترم',
+  'Term attendance total': 'إجمالي حضور الترم',
+  'Edit academic years': 'تعديل الأعوام الدراسية',
+  'Set up a new academic year': 'إعداد عام دراسي جديد',
+  'Edit grades': 'تعديل الصفوف',
   'No marks recorded yet': 'لم تُسجّل درجات لهذا الطالب بعد',
   'No marks have been recorded for this student in this term yet.': 'لم يتم تسجيل درجات لهذا الطالب في هذا الفصل الدراسي حتى الآن.',
   'No guardian data recorded yet': 'لم تُسجّل بيانات ولي أمر لهذا الطالب بعد',
@@ -1413,6 +1438,15 @@ export const AR = {
   'Action': 'الإجراء',
   'Resource': 'المورد',
   'Changes': 'التغييرات',
+  'A read-only, newest-first record.': 'سجل للعرض فقط، والأحدث يظهر أولًا.',
+  'Audit log pages': 'صفحات سجل التدقيق',
+  'Clear filters': 'مسح عوامل التصفية',
+  'Important changes will appear here as they are recorded.': 'ستظهر التغييرات المهمة هنا عند تسجيلها.',
+  'Page {0}': 'الصفحة {0}',
+  'Resource type': 'نوع المورد',
+  'Try clearing one or both filters.': 'جرّب مسح أحد عوامل التصفية أو كليهما.',
+  'e.g. student': 'مثال: طالب',
+  'e.g. updated': 'مثال: تم التعديل',
   'View': 'عرض',
   'Academic year attendance summary': 'ملخص الحضور للعام الدراسي',
   'Applicable days': 'أيام الدوام المطبقة',

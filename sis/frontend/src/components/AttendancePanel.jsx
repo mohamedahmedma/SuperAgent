@@ -34,10 +34,10 @@ import { t } from '../i18n.js';
 /* The four states, in the order a teacher reaches for them: present first because it is the
    overwhelming majority, excused last because it needs a reason typed. */
 const STATES = [
-  { key: 'present', label: 'Present', short: 'P', shortAr: 'ح' },
-  { key: 'absent', label: 'Absent', short: 'A', shortAr: 'غ' },
-  { key: 'late', label: 'Late', short: 'L', shortAr: 'م' },
-  { key: 'excused', label: 'Excused', short: 'E', shortAr: 'ع' }
+  { key: 'present', label: 'Present', labelAr: 'حاضر', short: 'P', shortAr: 'ح' },
+  { key: 'absent', label: 'Absent', labelAr: 'غائب', short: 'A', shortAr: 'غ' },
+  { key: 'late', label: 'Late', labelAr: 'متأخر', short: 'L', shortAr: 'م' },
+  { key: 'excused', label: 'Excused', labelAr: 'بعذر', short: 'E', shortAr: 'ع' }
 ];
 
 export function AttendancePanel({ classCode, year, on, scope }) {
@@ -311,7 +311,9 @@ export function AttendancePanel({ classCode, year, on, scope }) {
                   value === 'absent' ? 'bad' :
                   value === 'late' || value === 'excused' ? 'warn' : null;
                 return value ? (
-                  <Badge tone={tone}>{option ? t(option.label) : value}</Badge>
+                  <span className={cx('sis-attendance-mark', tone && `is-${tone}`)}>
+                    {option ? (state.lang === 'ar' ? option.labelAr : t(option.label)) : value}
+                  </span>
                 ) : (
                   <span className="sis-ungraded small text-nowrap">
                     {DASH} {t('not yet marked')}
