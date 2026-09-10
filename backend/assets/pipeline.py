@@ -259,11 +259,18 @@ class FigurePipeline:
              for digest, image in zip(digests, images)]
         )
 
+        # Every digest is already in hand, so the cache is one query rather than one per
+        # image. A 400-image catalogue used to ask 400 times before the first model call.
+        cached_by_digest = self.store.find_extractions(
+            digests, profile_name, DOSSIER_VERSION
+        )
+
         dossiers: List[AssetDossier] = []
         for image, digest in zip(images, digests):
             dossier = self._process_one(
                 image, digest, filename, file_path, profile_name,
                 assets_config, pages_by_digest, total_pages, report,
+                cached_by_digest,
             )
             dossiers.append(dossier)
 
@@ -284,6 +291,7 @@ class FigurePipeline:
         pages_by_digest: Dict[str, int],
         total_pages: int,
         report: FigureReport,
+        cached_by_digest: Optional[Dict[str, ExtractionPayload]] = None,
     ) -> AssetDossier:
         asset_id = build_asset_id(filename, image.page_number, image.index)
 
@@ -351,7 +359,14 @@ class FigurePipeline:
         except Exception:
             logger.exception("Failed to store blob for %s", asset_id)
 
-        cached = self.store.find_extraction(digest, profile_name, DOSSIER_VERSION)
+        # Primed for the whole document by `process`. The per-image lookup stays as the
+        # fallback so a direct `_process_one` — the backfill job, and every test that
+        # calls it — still finds a cache entry.
+        cached = (
+            cached_by_digest.get(digest)
+            if cached_by_digest is not None
+            else self.store.find_extraction(digest, profile_name, DOSSIER_VERSION)
+        )
         if cached is not None and self._cache_is_weaker(cached, role, verdict.tier):
             # Turning vision on, or raising an image's tier, must actually take effect.
             # Serving the older, shallower answer for the same bytes would make either
@@ -378,6 +393,11 @@ class FigurePipeline:
         dossier.extraction = payload
         dossier.status = ExtractionStatus.EXTRACTED
         report.extracted += 1
+        if cached_by_digest is not None:
+            # The batch was read before any extraction ran, so a SECOND copy of this
+            # image later in the same document would miss it and pay for the same pixels
+            # twice. The per-image lookup got this for free by asking again each time.
+            cached_by_digest[digest] = payload
         try:
             self.store.save_extraction(digest, profile_name, payload, DOSSIER_VERSION)
         except Exception:

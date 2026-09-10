@@ -452,6 +452,82 @@ class FigurePipelineTests(PipelineTestCase):
         self.assertEqual(1, vision.extract.call_count)
         self.assertEqual(1, report.cached)
 
+    def test_the_extraction_cache_is_read_once_for_the_whole_document(self):
+        """Every digest is in hand before any image is triaged, so the lookup is one
+        query rather than one per image. A 400-image catalogue asked 400 times."""
+        images = [self.image(index=i, page=i) for i in range(5)]
+        with patch.object(
+            self.store, "find_extractions", wraps=self.store.find_extractions
+        ) as batch, patch.object(
+            self.store, "find_extraction", wraps=self.store.find_extraction
+        ) as single:
+            self.pipeline().process(images, filename="doc.pdf")
+
+        self.assertEqual(1, batch.call_count)
+        single.assert_not_called()
+
+    def test_a_repeated_image_in_one_document_is_still_extracted_once(self):
+        """The batch is read BEFORE any extraction runs, so a second copy of the same
+        image later in the document would miss it and pay for the same pixels twice —
+        which the per-image lookup avoided for free by asking again each time.
+
+        Not page furniture: two pages of a ten-page document is well under
+        `repeat_page_fraction`, so triage keeps both occurrences.
+        """
+        from backend.assets.dossier import ExtractionPayload, Provenance, TextSurface
+
+        shared = make_png(400, 300, seed=15)
+        counting = Mock()
+        counting.name = "vision"
+        counting.extract.return_value = ExtractionPayload(
+            text=TextSurface(caption="Crest"),
+            provenance=Provenance(model_used="vl-test", confidence=0.9),
+        )
+        pipeline = self.pipeline(extractor=counting)
+        dossiers, report = pipeline.process(
+            [
+                ImageInput(data=shared, page_number=0, index=0),
+                ImageInput(data=shared, page_number=1, index=1),
+            ]
+            + [self.image(index=i + 2, page=i + 2) for i in range(8)],
+            filename="doc.pdf",
+        )
+
+        self.assertEqual("Crest", dossiers[0].extraction.text.caption)
+        self.assertEqual("Crest", dossiers[1].extraction.text.caption)
+        # Once for the shared image, then once per distinct filler image.
+        self.assertEqual(9, counting.extract.call_count)
+        self.assertEqual(1, report.cached)
+
+    def test_a_direct_call_still_finds_the_cache_on_its_own(self):
+        """`_process_one` is called without a primed batch by the backfill job and by
+        every test below, so the per-image lookup has to remain the fallback."""
+        from backend.assets.dossier import ExtractionPayload, Provenance, TextSurface
+        from backend.assets.pipeline import FigureReport
+
+        shared = make_png(400, 300, seed=16)
+        self.store.save_extraction(
+            compute_sha256(shared),
+            self.profile.name,
+            ExtractionPayload(
+                text=TextSurface(caption="From the cache"),
+                provenance=Provenance(model_used="vl-test", confidence=0.9),
+            ),
+        )
+        vision = Mock()
+        vision.name = "vision"
+        report = FigureReport()
+        dossier = self.pipeline(extractor=vision)._process_one(
+            ImageInput(data=shared, index=0),
+            compute_sha256(shared),
+            "doc.pdf", "", self.profile.name,
+            self.profile.assets, {}, 1, report,
+        )
+
+        vision.extract.assert_not_called()
+        self.assertEqual("From the cache", dossier.extraction.text.caption)
+        self.assertEqual(1, report.cached)
+
     def test_a_shallower_tier_in_the_cache_does_not_block_a_tier_upgrade(self):
         """The other way a cache entry can be weaker, and the one this used to miss.
 
