@@ -46,7 +46,7 @@ jobs:
           all=false; backend=false; frontend=false; identity=false; records=false; sis=false
           while IFS= read -r file; do
             case "$file" in
-              docker-compose*.yml|Dockerfile|pyproject.toml|uv.lock) all=true ;;
+              .github/workflows/deploy.yml|docker-compose*.yml|Dockerfile|pyproject.toml|uv.lock) all=true ;;
               backend/*) backend=true ;;
               frontend/*) frontend=true ;;
               identity/*) identity=true ;;
@@ -300,7 +300,9 @@ jobs:
           deploy_path="$1"
           image_tag="$2"
           image_prefix="$3"
-          services="$4"
+          # ssh rebuilds the remote command as a string, so a quoted empty final
+          # argument is not preserved. Accept a missing $4 for a no-service release.
+          services="${4-}"
           cd "$deploy_path"
           # A documentation-only change has no application image to release.
           [ -n "$services" ] || exit 0
