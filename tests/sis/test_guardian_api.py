@@ -72,17 +72,22 @@ def sis_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
     # Authentication accepts only stored, scoped keys.  Keep this HTTP fixture on
     # the same path as production rather than reviving the removed env-key bypass.
     with SqlAlchemyUnitOfWork() as uow:
-        uow.api_keys.add(
-            ApiKey(
-                prefix=key_prefix(BOOTSTRAP_KEY),
-                key_hash=hash_api_key(BOOTSTRAP_KEY),
-                label="guardian API test registrar",
-                scope=Scope.REGISTRAR,
-                is_active=True,
-                expires_at=None,
-                created_at=datetime.now(UTC),
+        # Migration 0026 seeds this same key from `SIS_BOOTSTRAP_REGISTRAR_KEY`, which the
+        # fixture sets above, so the row usually exists by the time `upgrade head` returns.
+        # Added only when absent: the contract this fixture owes its tests is "a registrar
+        # key exists", and that must hold whether or not a migration provides one.
+        if uow.api_keys.get_by_prefix(key_prefix(BOOTSTRAP_KEY)) is None:
+            uow.api_keys.add(
+                ApiKey(
+                    prefix=key_prefix(BOOTSTRAP_KEY),
+                    key_hash=hash_api_key(BOOTSTRAP_KEY),
+                    label="guardian API test registrar",
+                    scope=Scope.REGISTRAR,
+                    is_active=True,
+                    expires_at=None,
+                    created_at=datetime.now(UTC),
+                )
             )
-        )
         uow.commit()
     yield
 

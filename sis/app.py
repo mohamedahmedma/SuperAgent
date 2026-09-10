@@ -421,9 +421,94 @@ def warn_that_authentication_is_disabled() -> None:
     log.info("SIS authentication active: bearer sessions and scoped API keys are enforced.")
 
 
+#: The machine credentials this service expects to be reachable by, and the scope each
+#: needs. Kept in step with `sis/migrations/versions/0026_seed_integration_api_keys.py`
+#: — that seeds a database once, this reconciles one on every boot, and they must agree
+#: about which env var means which caller.
+#:
+#: Registrar first, for the reason that migration spells out: with one shared secret only
+#: the first entry can be inserted, and `registrar` is the scope that satisfies both read
+#: and write routes.
+_INTEGRATION_KEYS: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (("SIS_BOOTSTRAP_REGISTRAR_KEY", "LOCAL_SERVICE_KEY"), "bootstrap registrar", "registrar"),
+    (("SIS_IDENTITY_API_KEY", "IDENTITY_SIS_API_KEY", "LOCAL_SERVICE_KEY"),
+     "identity service", "reader"),
+    (("SIS_RECORDS_API_KEY", "RECORDS_API_KEY", "LOCAL_SERVICE_KEY"), "records facade", "reader"),
+)
+
+
+def ensure_integration_keys() -> None:
+    """Make the configured machine credentials usable, on every boot.
+
+    The migration seeds a database the first time it reaches head. This closes the two
+    holes that leaves, and both have happened:
+
+      * **A rotated secret.** `devops/ensure-runtime-env.ps1` mints a new
+        `LOCAL_SERVICE_KEY` whenever it cannot find one, so a deploy that missed the env
+        file hands every service a key the database has never seen. Nothing re-seeds it,
+        and every integration 401s at once — which reached parents as "we could not reach
+        the school's records" and stopped WhatsApp login.
+      * **A database that arrived already at head.** A restored backup, or a volume from
+        an estate whose keys were provisioned elsewhere, runs no migration at all.
+
+    Additive, never destructive. A new secret is inserted BESIDE the old row rather than
+    replacing it, so a rolling restart where old and new containers overlap keeps working
+    with either — and revoking the old one stays an operator's decision, made when the
+    rollout is done.
+
+    Never fatal. A service that refused to start because it could not write a credential
+    row would turn a recoverable misconfiguration into an outage, and the API-key door
+    already reports its own refusals clearly.
+    """
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from datetime import UTC, datetime
+
+    from sis.api.deps import hash_api_key, key_prefix
+    from sis.domain.auth import ApiKey, Scope
+    from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+
+    for names, label, scope in _INTEGRATION_KEYS:
+        secret = next((v for v in ((os.getenv(n) or "").strip() for n in names) if v), "")
+        if not secret:
+            continue
+        prefix = key_prefix(secret)
+        try:
+            with SqlAlchemyUnitOfWork() as uow:
+                if uow.api_keys.get_by_prefix(prefix) is not None:
+                    continue
+                uow.api_keys.add(
+                    ApiKey(
+                        prefix=prefix,
+                        key_hash=hash_api_key(secret),
+                        label=label,
+                        scope=Scope(scope),
+                        # No expiry: a service credential an operator never rotates is
+                        # safer than one that stops the estate at 3am because nobody was
+                        # watching a date. Revocation is the deliberate act instead.
+                        is_active=True,
+                        expires_at=None,
+                        created_at=datetime.now(UTC),
+                    )
+                )
+                uow.commit()
+            log.warning(
+                "provisioned the %s API key (%s…) with scope %s — it was configured but "
+                "not present in this database",
+                label,
+                prefix,
+                scope,
+            )
+        except SQLAlchemyError:
+            # Two replicas booting together race on the unique prefix, and the loser's
+            # insert failing is the correct outcome: the row it wanted now exists.
+            log.info("could not provision the %s API key; it may already exist", label)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     verify_database_is_migrated()
+    ensure_integration_keys()
     warn_that_authentication_is_disabled()
     yield
 
