@@ -183,13 +183,43 @@ class FigurePipeline:
     # the moment a vision-capable extractor becomes available.
     _MODEL_FREE = {"", "heuristic", "entity_heuristic"}
 
-    def _cache_is_weaker(self, cached: ExtractionPayload, role: AssetRole) -> bool:
+    # How much extraction each tier represents, so two of them can be compared. Ranked
+    # rather than ordered by enum declaration: the enum is a `str` enum and comparing its
+    # members would compare "complex" against "simple" alphabetically, which puts them in
+    # exactly the wrong order.
+    _TIER_DEPTH = {
+        AssetTier.DROP: 0,
+        AssetTier.SIMPLE: 1,
+        AssetTier.COMPLEX: 2,
+        AssetTier.LAYOUT: 3,
+    }
+
+    def _cache_is_weaker(
+        self, cached: ExtractionPayload, role: AssetRole, tier: AssetTier = AssetTier.SIMPLE
+    ) -> bool:
         """Whether a cached extraction was produced by a weaker extractor than the one
-        configured now — the condition under which the cache must be bypassed."""
+        configured now — the condition under which the cache must be bypassed.
+
+        Two ways to be weaker, and this used to know only the first:
+
+        NO MODEL AT ALL. A heuristic extraction is a legitimate cache entry while
+        heuristic is all that is available; once a vision extractor is configured it is a
+        strictly worse answer for the same bytes.
+
+        A SHALLOWER TIER. `Provenance.tier` records what the cached run was asked for, so
+        an image cached at SIMPLE and triaged COMPLEX now — because the thresholds moved,
+        or because tier finally decides anything — has to be re-read rather than served.
+        Without this the cache answers first and a tier upgrade is a silent no-op on every
+        image already in the corpus: precisely the failure the model-free rule above was
+        written to prevent, arriving by the other door.
+        """
         current = self._extractor_for(role)
         if current.name in self._MODEL_FREE:
             return False
-        return (cached.provenance.model_used or "") in self._MODEL_FREE
+        if (cached.provenance.model_used or "") in self._MODEL_FREE:
+            return True
+        cached_depth = self._TIER_DEPTH.get(cached.provenance.tier, 1)
+        return cached_depth < self._TIER_DEPTH.get(tier, 1)
 
     @property
     def fallback(self) -> FigureExtractor:
@@ -229,11 +259,18 @@ class FigurePipeline:
              for digest, image in zip(digests, images)]
         )
 
+        # Every digest is already in hand, so the cache is one query rather than one per
+        # image. A 400-image catalogue used to ask 400 times before the first model call.
+        cached_by_digest = self.store.find_extractions(
+            digests, profile_name, DOSSIER_VERSION
+        )
+
         dossiers: List[AssetDossier] = []
         for image, digest in zip(images, digests):
             dossier = self._process_one(
                 image, digest, filename, file_path, profile_name,
                 assets_config, pages_by_digest, total_pages, report,
+                cached_by_digest,
             )
             dossiers.append(dossier)
 
@@ -254,6 +291,7 @@ class FigurePipeline:
         pages_by_digest: Dict[str, int],
         total_pages: int,
         report: FigureReport,
+        cached_by_digest: Optional[Dict[str, ExtractionPayload]] = None,
     ) -> AssetDossier:
         asset_id = build_asset_id(filename, image.page_number, image.index)
 
@@ -321,15 +359,22 @@ class FigurePipeline:
         except Exception:
             logger.exception("Failed to store blob for %s", asset_id)
 
-        cached = self.store.find_extraction(digest, profile_name, DOSSIER_VERSION)
-        if cached is not None and self._cache_is_weaker(cached, role):
-            # Turning vision on must actually take effect. A heuristic extraction is a
-            # legitimate cache entry while heuristic is all that is available, but once
-            # a vision extractor is configured it is a strictly worse answer for the
-            # same bytes, and serving it would make the upgrade a silent no-op.
+        # Primed for the whole document by `process`. The per-image lookup stays as the
+        # fallback so that calling `_process_one` on its own still finds a cache entry
+        # rather than silently paying for a re-extraction.
+        cached = (
+            cached_by_digest.get(digest)
+            if cached_by_digest is not None
+            else self.store.find_extraction(digest, profile_name, DOSSIER_VERSION)
+        )
+        if cached is not None and self._cache_is_weaker(cached, role, verdict.tier):
+            # Turning vision on, or raising an image's tier, must actually take effect.
+            # Serving the older, shallower answer for the same bytes would make either
+            # upgrade a silent no-op across the whole corpus. See `_cache_is_weaker`.
             logger.info(
-                "Re-extracting %s: cached result came from %r, now running %r",
-                asset_id, cached.provenance.model_used, self._extractor_for(role).name,
+                "Re-extracting %s: cached result came from %r at tier %s, now running %r at %s",
+                asset_id, cached.provenance.model_used, cached.provenance.tier.value,
+                self._extractor_for(role).name, verdict.tier.value,
             )
             cached = None
         if cached is not None:
@@ -348,6 +393,11 @@ class FigurePipeline:
         dossier.extraction = payload
         dossier.status = ExtractionStatus.EXTRACTED
         report.extracted += 1
+        if cached_by_digest is not None:
+            # The batch was read before any extraction ran, so a SECOND copy of this
+            # image later in the same document would miss it and pay for the same pixels
+            # twice. The per-image lookup got this for free by asking again each time.
+            cached_by_digest[digest] = payload
         try:
             self.store.save_extraction(digest, profile_name, payload, DOSSIER_VERSION)
         except Exception:

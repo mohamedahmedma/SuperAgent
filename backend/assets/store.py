@@ -304,6 +304,51 @@ class AssetStore:
         finally:
             session.close()
 
+    def find_extractions(
+        self,
+        digests: Iterable[str],
+        profile: str,
+        dossier_version: int = DOSSIER_VERSION,
+    ) -> Dict[str, ExtractionPayload]:
+        """The same lookup for a whole document, in one query.
+
+        `find_extraction` is called once per image, and a document's digests are all in
+        hand before any of them is triaged — so the per-image version paid a round trip
+        each to answer a question one `IN` could. On a 400-image catalogue that is 400
+        queries before the first model call.
+
+        Digests missing from the result simply have no cache entry; the caller reads this
+        as a dict and falls through exactly as it did on a `None`. Corrupt payloads are
+        dropped individually rather than failing the batch, matching `find_extraction`:
+        one unreadable row must not send a whole document back through vision.
+        """
+        keys = {item for item in digests if item}
+        if not keys:
+            return {}
+        _, AssetExtraction = self._models()
+        session = self.session_factory()
+        try:
+            rows = (
+                session.query(AssetExtraction)
+                .filter(
+                    AssetExtraction.sha256.in_(keys),
+                    AssetExtraction.profile == profile,
+                    AssetExtraction.dossier_version == dossier_version,
+                )
+                .all()
+            )
+            found: Dict[str, ExtractionPayload] = {}
+            for row in rows:
+                try:
+                    found[row.sha256] = ExtractionPayload.model_validate(row.payload)
+                except Exception:
+                    logger.exception(
+                        "Corrupt extraction payload for sha256=%s — ignoring cache", row.sha256
+                    )
+            return found
+        finally:
+            session.close()
+
     def save_extraction(
         self,
         sha256: str,

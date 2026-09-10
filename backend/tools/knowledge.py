@@ -14,8 +14,40 @@ from langchain_core.tools import tool
 from backend.chat.request_context import ChatRequestContext
 from backend.prompts import render as render_prompt
 
+#: The name the model calls, the planner forces, and the turn records. One spelling,
+#: so the three cannot drift apart.
+KNOWLEDGE_TOOL = "search_knowledge_base"
 
-def _format_chunk(index: int, doc: dict) -> str:
+
+def _figure_markers(docs: list) -> tuple:
+    """`(numbers per chunk, {number: asset_id})`, assigned in retrieval order.
+
+    Numbers are per TURN, mirroring the `[n]` chunk numbering this same tool already
+    emits, so both id families read the same way in a trace. A document-global figure
+    number was the obvious alternative and is the wrong one: it would inherit
+    `build_asset_id`'s positional instability — one image added to a page shifts every
+    later id — and the model never needs to name anything this turn did not retrieve.
+
+    One number per ASSET, not per chunk. `auto_merge_figure_threshold: null` keeps
+    figure-bearing groups unmerged so this is almost always one apiece, but a chunk
+    that does carry two pictures has to let the answer point at one of them.
+    """
+    per_chunk = []
+    mapping = {}
+    number = 0
+    for doc in docs:
+        numbers = []
+        for asset_id in doc.get("asset_ids") or []:
+            if not asset_id:
+                continue
+            number += 1
+            mapping[number] = asset_id
+            numbers.append(number)
+        per_chunk.append(numbers)
+    return per_chunk, mapping
+
+
+def _format_chunk(index: int, doc: dict, figure_numbers=()) -> str:
     """One retrieved chunk, as the model sees it.
 
     Serialization rather than instruction, which is why it is here and not in the
@@ -26,24 +58,51 @@ def _format_chunk(index: int, doc: dict) -> str:
         f"[{index}] {doc.get('filename', 'Unknown')} "
         f"(Page {doc.get('page_number', 'N/A')}):\n{doc.get('text', '')}"
     )
-    # WHETHER this chunk is a figure, and nothing else — no id, no filename, no path.
+    # WHICH picture this chunk carries — by turn-local number, never by asset_id. An id
+    # in the prompt is an id in the answer: shown one and told markdown is supported, a
+    # small model writes it straight back as an image link no browser can load. A number
+    # cannot be mistaken for a URL, and it is what `note_figure_numbers` resolves.
     #
-    # The header used to name the asset_id, because view_figure could only be called
-    # with an id the model had seen. Nothing calls it now, and an id in the prompt is
-    # an id in the answer: shown one and told markdown is supported, a small model
-    # writes it straight back as an image link no browser can load.
+    # The marker used to be bare, because a `[n]` citation was the only way to select a
+    # picture and the model just had to know which chunks were pictures. Numbering it
+    # buys the placement too: the answer can say WHERE the figure belongs, and finalize
+    # substitutes the image at that point instead of appending a card underneath.
     #
-    # A bare marker costs ~3 tokens a chunk and buys the one thing that matters — the
-    # model knows which chunks carry a picture, so its `[n]` becomes a deliberate
-    # choice of which picture to show rather than a coincidence. What the marker MEANS
-    # is stated once in tools/knowledge_result.j2, not repeated on every chunk.
-    if doc.get("asset_ids") or doc.get("modality") == "figure":
+    # What the marker MEANS is stated once in tools/knowledge_result.j2, not repeated on
+    # every chunk.
+    if figure_numbers:
+        entry += "\n" + " ".join(f"[FIGURE {number}]" for number in figure_numbers)
+    elif doc.get("modality") == "figure":
+        # A figure chunk whose asset ids did not survive indexing. There is no picture
+        # to render and therefore no number to give, but the model is still told this is
+        # an image so it does not describe the surrounding prose as if it were one.
         entry += "\n[FIGURE]"
     return entry
 
 
 def make_search_knowledge_base(ctx: ChatRequestContext):
-    @tool("search_knowledge_base")
+    def _result(outcome: str, **context) -> str:
+        """Render one outcome, and tell the turn which one it was.
+
+        The same shape as `records._reporter`, for the same reason: every return below
+        goes through this, so what the model reads and what the turn records come from
+        one variable and cannot disagree.
+
+        The recorded half is load-bearing. A turn the planner REQUIRED this tool on is
+        checked afterwards by `service._enforce_forced_tool_ran`, which reads
+        `ctx.tool_outcomes` to see whether the required tool ran — and a tool that never
+        reported there was, to that check, a tool that never ran. That is how every
+        knowledge-base answer on a forced turn came to be replaced by the
+        could-not-verify copy, fee refusal included, for a question about the school's
+        partners: retrieval ran, the model answered, and nothing had said so.
+
+        Reported on EVERY branch, `call_limit` included. A refused second call is still
+        this tool having been reached this turn, and the first call already reported.
+        """
+        ctx.note_tool_outcome(KNOWLEDGE_TOOL, outcome)
+        return render_prompt("tools/knowledge_result.j2", outcome=outcome, **context)
+
+    @tool(KNOWLEDGE_TOOL)
     def search_knowledge_base(query: str) -> str:
         """Search the knowledge base for documents that answer the user's question.
 
@@ -53,7 +112,7 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         need in your own words.
         """
         if not ctx.acquire_knowledge_tool_slot():
-            return render_prompt("tools/knowledge_result.j2", outcome="call_limit")
+            return _result("call_limit")
 
         # Delayed import keeps tests and lightweight imports away from RAG/embedding startup.
         from backend.rag.pipeline import run_rag_graph
@@ -72,30 +131,28 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         status = rag_trace.get("retrieval_status") if isinstance(rag_trace, dict) else None
         route = rag_trace.get("route") if isinstance(rag_trace, dict) else None
         if status == "needs_clarification" or route == "clarify":
-            return render_prompt(
-                "tools/knowledge_result.j2",
-                outcome="needs_clarification",
+            return _result(
+                "needs_clarification",
                 prompt=rag_trace.get("hitl_prompt")
                 or "I found related knowledge, but need one more detail before answering.",
             )
 
         if status == "needs_scope_selection" or route == "scope_select":
-            return render_prompt(
-                "tools/knowledge_result.j2",
-                outcome="needs_scope_selection",
+            return _result(
+                "needs_scope_selection",
                 prompt=rag_trace.get("hitl_prompt")
                 or "I found multiple related knowledge-base directions. Ask the user to choose one.",
                 options=[str(item) for item in (rag_trace.get("hitl_options") or [])],
             )
 
         if status == "retrieval_error" or route == "retrieval_error":
-            return render_prompt("tools/knowledge_result.j2", outcome="retrieval_error")
+            return _result("retrieval_error")
 
         if status == "no_knowledge" or route == "no_knowledge":
-            return render_prompt("tools/knowledge_result.j2", outcome="no_knowledge")
+            return _result("no_knowledge")
 
         if not docs:
-            return render_prompt("tools/knowledge_result.j2", outcome="empty")
+            return _result("empty")
 
         # Pin every asset retrieval surfaced, whether or not the model goes on to look
         # at one. This is what lets a client attach the picture to a response that was
@@ -105,11 +162,17 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         surfaced_assets = collect_asset_ids(docs)
         ctx.note_surfaced_assets(surfaced_assets)
 
-        return render_prompt(
-            "tools/knowledge_result.j2",
-            outcome="chunks",
+        # The numbers the model is allowed to write, and what each one resolves to.
+        # Recorded before the chunks are rendered with them, so the map and the prompt
+        # can never disagree about which picture is figure 2.
+        figure_numbers, figure_map = _figure_markers(docs)
+        ctx.note_figure_numbers(figure_map)
+
+        return _result(
+            "chunks",
             chunks="\n\n---\n\n".join(
-                _format_chunk(i, doc) for i, doc in enumerate(docs, 1)
+                _format_chunk(i, doc, numbers)
+                for i, (doc, numbers) in enumerate(zip(docs, figure_numbers), 1)
             ),
             # Conditions the user set in an earlier turn. Retrieval widened the query
             # with them but cannot enforce them — a search for fees "up to Year 6"

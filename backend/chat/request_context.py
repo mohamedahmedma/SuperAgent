@@ -52,6 +52,8 @@ class ChatRequestContext:
     _records_tool_slots_used: int = 0
     _short_circuit_status: Optional[str] = None
     _surfaced_asset_ids: list = field(default_factory=list)
+    #: Figure number -> asset_id for this turn. See `note_figure_numbers`.
+    _figure_numbers: dict = field(default_factory=dict)
     _duplicate_tool_calls: int = 0
     _planned_dispatches: int = 0
     # `(tool, outcome)` per call this turn. See `note_tool_outcome`.
@@ -453,6 +455,37 @@ class ChatRequestContext:
     def surfaced_asset_ids(self) -> list:
         with self._lock:
             return list(self._surfaced_asset_ids)
+
+    def note_figure_numbers(self, mapping) -> None:
+        """Record the figure numbers this turn showed the model.
+
+        The number, not the asset_id, is what the model is given and what it writes
+        back — an id in the prompt is an id in the answer, and a small model shown one
+        writes it straight back as an image link no browser can load. So the answer
+        carries `[FIGURE 2]` and this map is what turns that into a picture
+        (backend/chat/service.py resolves it, assets_bridge.py selects on it).
+
+        Numbers are per TURN, in retrieval order. A document-global figure number
+        would inherit `build_asset_id`'s positional instability — one image added to a
+        page shifts every later id — and the model only ever needs to point at
+        something this turn retrieved.
+        """
+        with self._lock:
+            if not self._active:
+                return
+            for number, asset_id in (mapping or {}).items():
+                if asset_id:
+                    self._figure_numbers[int(number)] = asset_id
+
+    @property
+    def figure_numbers(self) -> dict:
+        """Figure number -> asset_id, as `_resolve_figure_markers` reads it.
+
+        A property rather than a method to match `answer_blocks`, which finalize reads
+        the same way one line above the call to this.
+        """
+        with self._lock:
+            return dict(self._figure_numbers)
 
     def note_duplicate_tool_calls(self, count: int) -> None:
         """Record calls the model asked for more than once. Diagnostic only."""

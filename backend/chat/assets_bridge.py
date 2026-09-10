@@ -43,6 +43,26 @@ def effective_capabilities(
 # "[1]", "[2][3]", "[1, 2]" — the citation markers the agent is instructed to emit.
 _CITATION_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
+# The anchors `backend/chat/service.py::_resolve_figure_markers` left behind, one per
+# figure marker the answer actually wrote. Non-greedy up to the closing `-->` rather than
+# `[^>]` — an asset_id carries a filename, and a filename may contain anything.
+_FIGURE_ANCHOR_RE = re.compile(r"<!--figure:(.+?)-->")
+
+
+def anchored_asset_ids(answer: str) -> List[str]:
+    """Asset ids the answer anchored, in the order they appear in the prose.
+
+    Stronger than a citation and read first because of it: a citation says which chunk
+    the answer leaned on, which is a guess about the picture. An anchor is the model
+    naming one figure and placing it in a sentence, so there is nothing left to infer.
+    """
+    ids: List[str] = []
+    for asset_id in _FIGURE_ANCHOR_RE.findall(answer or ""):
+        cleaned = asset_id.strip()
+        if cleaned and cleaned not in ids:
+            ids.append(cleaned)
+    return ids
+
 
 def cited_chunk_indices(answer: str) -> List[int]:
     """1-based chunk numbers the answer actually cited, in the order first cited.
@@ -77,10 +97,15 @@ def asset_ids_for_answer(
     them makes the reader do the filtering, and hands a parent asking about PE clothes
     two pictures of day wear they did not ask for.
 
-    The answer already says which chunk it used: the `[n]` markers the agent is required
-    to emit. The chunk header tells the model which chunks ARE figures, so citing one is
-    a deliberate choice rather than a coincidence, and no second model call is needed to
-    recover it — the selection rides along with a citation the turn was paying for anyway.
+    Three ways to decide, in descending order of how directly the answer said it, and no
+    model call in any of them:
+
+    An ANCHOR is the answer naming one figure by number and placing it in a sentence. It
+    is exact, so it is read first and it also fixes where the picture goes.
+
+    A CITATION is the `[n]` the agent must emit anyway. The chunk header marks which
+    chunks are figures, so citing one is a deliberate choice rather than a coincidence —
+    weaker than an anchor, because it names the chunk and not the picture.
 
     When the citations cannot select — none emitted, none landing on a figure, or no
     chunk list to map them against — the BEST-RANKED figure is shown, and only that one.
@@ -90,6 +115,18 @@ def asset_ids_for_answer(
     must not come back with three.
     """
     surfaced = asset_ids_for_turn(ctx, rag_trace)
+
+    # An anchor wins, and wins ahead of `attach_only_cited`: that setting exists to stop
+    # a turn attaching every figure retrieval touched, and an anchored figure is the
+    # opposite case — the answer asked for this one, by number, at a place in the prose.
+    #
+    # Still intersected with what the turn surfaced. An anchor is text in a message, and
+    # a message can be replayed; without this, an old answer could name an asset this
+    # turn never retrieved and the turn would go and fetch it.
+    anchored = [asset_id for asset_id in anchored_asset_ids(answer) if asset_id in surfaced]
+    if anchored:
+        return anchored
+
     if not surfaced or not getattr(delivery_config, "attach_only_cited", True):
         return surfaced
 

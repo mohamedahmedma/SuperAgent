@@ -17,7 +17,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { parseMarkdown } from './markdown';
+import { figureAnchorIds, parseMarkdown, splitFigureAnchors } from './markdown';
 
 /** The shape the deployed model actually produced, asset_id and all. */
 const REAL_ANSWER =
@@ -87,5 +87,53 @@ describe('everything else about an answer still renders', () => {
   it('marks citations up when a message index is given, and not otherwise', () => {
     expect(parseMarkdown('Navy blue. [1]', 3)).toContain('data-msg-index="3"');
     expect(parseMarkdown('Navy blue. [1]')).not.toContain('cite-ref');
+  });
+});
+
+/**
+ * Where an anchored figure lands.
+ *
+ * The backend turns each `[FIGURE n]` the model wrote into `<!--figure:{asset_id}-->` at
+ * that point in the prose, so the picture can be rendered inside the answer instead of as
+ * a card underneath all of it. `splitFigureAnchors` is what places it.
+ *
+ * The comment form is why this is safe to ship without the renderer knowing about it:
+ * `renderer.html` drops it, so a client that never splits shows clean prose and still
+ * gets the pictures from the trailing block.
+ */
+describe('figure anchors', () => {
+  it('splits the prose around an anchor, in order', () => {
+    const parts = splitFigureAnchors('قبل <!--figure:kb.docx::p0::img5--> بعد');
+    expect(parts).toEqual([
+      { kind: 'prose', text: 'قبل ' },
+      { kind: 'figure', assetId: 'kb.docx::p0::img5' },
+      { kind: 'prose', text: ' بعد' },
+    ]);
+  });
+
+  it('handles an anchor that opens or closes the answer', () => {
+    expect(splitFigureAnchors('<!--figure:a::p0::img0-->')).toEqual([
+      { kind: 'figure', assetId: 'a::p0::img0' },
+    ]);
+  });
+
+  it('leaves an answer with no anchor as one part', () => {
+    const parts = splitFigureAnchors('المصروفات 12,000 جنيه [1].');
+    expect(parts).toEqual([{ kind: 'prose', text: 'المصروفات 12,000 جنيه [1].' }]);
+  });
+
+  it('keeps an asset_id containing a filename intact', () => {
+    const id = 'BHCR Knowledge Base-Jan 2026 (4).docx::p0::img5';
+    expect(figureAnchorIds(`x <!--figure:${id}--> y`)).toEqual([id]);
+  });
+
+  it('reports each anchored id once, in order', () => {
+    expect(
+      figureAnchorIds('<!--figure:b::p0::img0--> ب <!--figure:a::p0::img0--> ج <!--figure:b::p0::img0-->'),
+    ).toEqual(['b::p0::img0', 'a::p0::img0']);
+  });
+
+  it('still drops the anchor when the client does not split on it', () => {
+    expect(parseMarkdown('قبل <!--figure:a::p0::img0--> بعد', 0)).not.toContain('figure:');
   });
 });

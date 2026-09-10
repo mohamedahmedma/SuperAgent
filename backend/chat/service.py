@@ -640,7 +640,87 @@ def strip_answer_blocks(text: str) -> str:
     """
     body = text or ""
     cut = body.find(BLOCK_MARKER)
-    return body[:cut].rstrip() if cut != -1 else body
+    prose = body[:cut].rstrip() if cut != -1 else body
+    # Figure anchors come out for the same reason the block does, and a sharper one: the
+    # anchor carries an asset_id, and an id in the model's history is an id in its next
+    # answer — shown one, a small model writes it back as an image link that cannot load.
+    # The reader keeps the picture; the model reads the sentence that surrounded it.
+    return _FIGURE_ANCHOR_RE.sub("", prose)
+
+
+#: What a resolved figure marker becomes in the stored answer.
+#:
+#: An HTML comment for the same reason `BLOCK_MARKER` is one: the frontend's markdown
+#: renderer drops raw HTML outright, so a reader never sees it. That also makes the
+#: feature degrade instead of breaking — a frontend that predates it renders clean prose
+#: and still shows the pictures in the trailing block, rather than printing an anchor.
+_FIGURE_ANCHOR = "<!--figure:%s-->"
+_FIGURE_ANCHOR_RE = re.compile(r"<!--figure:.+?-->")
+
+#: `[FIGURE 2]`, `[figure 2]`, `[الشكل ٢]`. The Arabic forms and the Arabic-Indic digits
+#: are here because this corpus is Arabic: a model writing Arabic prose writes «الشكل ٢»
+#: as readily as the English marker it was shown, and a parser that only knew ASCII would
+#: have silently dropped most real markers and shown no picture.
+_FIGURE_MARKER_RE = re.compile(
+    r"\[\s*(?:FIGURE|الشكل|شكل)\s*([0-9٠-٩۰-۹]+)\s*\]",
+    re.IGNORECASE,
+)
+
+#: Arabic-Indic and Extended Arabic-Indic digits to ASCII, so «٢» and "2" name the same
+#: figure.
+_FIGURE_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
+def _resolve_figure_markers(answer: str, ctx) -> str:
+    """The answer with each figure marker replaced by an anchor for that picture.
+
+    The model is shown `[FIGURE 1]` on a chunk header and asked to write the same marker
+    where the picture belongs. This turns the ones it wrote into anchors the frontend
+    renders the image at, so the figure lands inside the sentence that describes it
+    instead of as a card underneath the whole answer.
+
+    An unknown number is DELETED, and nothing else happens — no refusal, no correction,
+    no annotation. That rule is the entire lesson of the grounding layer this replaced:
+    it withheld answers whose citations it could not verify, and a correct answer
+    withdrawn over a marker is a far worse outcome than a missing picture. A model that
+    invents `[FIGURE 9]` costs the reader nothing.
+
+    Deleting is also what keeps the marker from ever being *seen*: the raw text streams
+    to the client in `content` deltas before this runs, so an unresolvable marker would
+    otherwise sit in the bubble. Both problems, one rule.
+    """
+    body = answer or ""
+    if "[" not in body:
+        return body
+    numbers = dict(getattr(ctx, "figure_numbers", None) or {})
+    dropped = False
+
+    def _anchor(match) -> str:
+        nonlocal dropped
+        try:
+            number = int(match.group(1).translate(_FIGURE_DIGITS))
+        except ValueError:  # pragma: no cover - the pattern only matches digits
+            dropped = True
+            return ""
+        asset_id = numbers.get(number)
+        if not asset_id:
+            logger.info(
+                "the answer named figure %s; this turn retrieved %s",
+                number, sorted(numbers) or "none",
+            )
+            dropped = True
+            return ""
+        # `-->` would close the comment early and leak the rest of the id as text. It
+        # cannot occur in a `build_asset_id` output, which is why this is a guard and
+        # not an encoding scheme.
+        return _FIGURE_ANCHOR % str(asset_id).replace("-->", "")
+
+    resolved = _FIGURE_MARKER_RE.sub(_anchor, body)
+    if dropped:
+        # A deletion mid-sentence leaves two spaces where the marker was. Runs of spaces
+        # and tabs only — collapsing newlines would join paragraphs.
+        resolved = re.sub(r"[ \t]{2,}", " ", resolved)
+    return resolved
 
 
 def _narrow_block(kind: str, block: str, answer: str) -> str:
@@ -1174,8 +1254,11 @@ def chat_with_agent(
                         response_content = replacement
                     else:
                         # Same rule as the streamed path: the record goes under the
-                        # sentence when the answer stands, and never under a refusal.
-                        response_content = _append_answer_blocks(response_content, ctx)
+                        # sentence when the answer stands, and never under a refusal —
+                        # and the figure markers resolve in the same order there.
+                        response_content = _append_answer_blocks(
+                            _resolve_figure_markers(response_content, ctx), ctx
+                        )
                     sync_finalizer.log_summary()
                     if rag_trace:
                         rag_trace.update(sync_finalizer.as_trace())
@@ -1557,10 +1640,16 @@ async def chat_with_agent_stream(
                 # `content_replace` rather than a `content` append, because the client
                 # ASSIGNS on replace — so what the bubble ends up holding is exactly what
                 # gets stored, with no chance of the two diverging.
-                with_blocks = _append_answer_blocks(full_response, ctx)
-                if with_blocks != full_response:
-                    full_response = finalizer.replace_answer(with_blocks)
-                    yield f"data: {json.dumps({'type': 'content_replace', 'content': with_blocks})}\n\n"
+                #
+                # Figure markers resolve first and on the same event: the raw `[FIGURE 1]`
+                # has already streamed into the bubble, and this is what takes it back out
+                # and puts the picture where it pointed.
+                settled = _append_answer_blocks(
+                    _resolve_figure_markers(full_response, ctx), ctx
+                )
+                if settled != full_response:
+                    full_response = finalizer.replace_answer(settled)
+                    yield f"data: {json.dumps({'type': 'content_replace', 'content': settled})}\n\n"
             finalizer.log_summary()
 
         asset_references = build_asset_references(

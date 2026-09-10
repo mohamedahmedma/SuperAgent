@@ -1166,12 +1166,12 @@ class AttachmentEdgeCaseTests(unittest.TestCase):
 class FigureMarkerTests(unittest.TestCase):
     """What the model is told about a figure, and what it is deliberately NOT told.
 
-    It gets a bare [FIGURE] marker: enough to know which chunks carry a picture, so its
-    `[n]` is a deliberate choice of which one to show, and nothing it could try to
-    render itself. The header used to name the asset_id — the argument view_figure
-    needed — and an id in the prompt became an id in the answer: shown one and told
-    markdown is supported, a 20B model wrote it straight back as an image link that no
-    browser could load.
+    It gets a NUMBER — `[FIGURE 1]` — which is enough to say which chunks carry a
+    picture and, because it can write the number back, where the picture belongs in its
+    answer. What it never gets is the asset_id. The header used to name it — the argument
+    view_figure needed — and an id in the prompt became an id in the answer: shown one
+    and told markdown is supported, a 20B model wrote it straight back as an image link
+    that no browser could load.
     """
 
     def _run_tool(self, docs):
@@ -1203,25 +1203,32 @@ class FigureMarkerTests(unittest.TestCase):
             "asset_ids": list(asset_ids),
         }
 
-    def test_a_figure_chunk_is_marked_and_its_id_is_never_shown(self):
+    def test_a_figure_chunk_is_numbered_and_its_id_is_never_shown(self):
         message, ctx = self._run_tool([self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"])])
-        self.assertIn("[FIGURE]", message)
+        self.assertIn("[FIGURE 1]", message)
         self.assertNotIn("kb.docx::p0::img5", message)
         self.assertNotIn("asset_id", message)
         # Surfaced on the context all the same — that is what a citation resolves
         # against when the turn decides which picture to attach.
         self.assertEqual(["kb.docx::p0::img5"], ctx.surfaced_asset_ids())
 
-    def test_the_marker_is_explained_as_a_selector_not_a_label(self):
-        """Without this the model cites the prose beside a figure as readily as the
-        figure itself, and the answer describes a picture nobody attached."""
+    def test_the_number_the_model_is_shown_is_resolvable_afterwards(self):
+        """The map has to reach finalize on the REAL context, read the same way
+        `answer_blocks` is one line above it. A number in the prompt with no entry here
+        is a marker the answer writes and finalize then deletes."""
+        _, ctx = self._run_tool([self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"])])
+        self.assertEqual({1: "kb.docx::p0::img5"}, ctx.figure_numbers)
+
+    def test_the_marker_is_explained_as_something_to_reproduce(self):
+        """Without this the model reads past the marker as a label, and the answer
+        describes a picture nobody placed."""
         message, _ = self._run_tool([self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"])])
-        self.assertIn("shown to the user whenever you cite that chunk", message)
-        self.assertIn("Cite the [FIGURE] chunk you actually described", message)
+        self.assertIn("Write the same marker into your answer", message)
+        self.assertIn("Never invent a number", message)
 
     def test_a_text_chunk_carries_no_marker(self):
         message, _ = self._run_tool([self._doc("Fees are 45,000 EGP.")])
-        self.assertNotIn("[FIGURE]", message)
+        self.assertNotIn("[FIGURE", message)
 
     def test_modality_alone_marks_a_chunk_whose_ids_did_not_survive(self):
         """A chunk stored before `asset_ids` existed still says what it is."""
@@ -1235,16 +1242,22 @@ class FigureMarkerTests(unittest.TestCase):
         retrieval returned a figure is billed only on those turns."""
         with_figure, _ = self._run_tool([self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"])])
         without, ctx = self._run_tool([self._doc("Fees are 45,000 EGP.")])
-        self.assertNotIn("marked [FIGURE]", without)
+        self.assertNotIn("Write the same marker", without)
         self.assertLess(len(without), len(with_figure))
         self.assertEqual([], ctx.surfaced_asset_ids())
+        self.assertEqual({}, ctx.figure_numbers)
 
     def test_one_figure_among_text_chunks_still_triggers_the_rule(self):
-        message, _ = self._run_tool([
+        """And it is figure ONE, not figure two: numbers count pictures, not chunks, so
+        the leading text chunk does not consume a number the model would then be unable
+        to write."""
+        message, ctx = self._run_tool([
             self._doc("Fees are 45,000 EGP."),
             self._doc("[Figure] Sports Wear", ["kb.docx::p0::img5"]),
         ])
-        self.assertIn("marked [FIGURE]", message)
+        self.assertIn("Write the same marker", message)
+        self.assertIn("[FIGURE 1]", message)
+        self.assertEqual({1: "kb.docx::p0::img5"}, ctx.figure_numbers)
 
 
 if __name__ == "__main__":
