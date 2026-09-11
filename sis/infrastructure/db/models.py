@@ -1029,6 +1029,58 @@ class SubjectGrade(Base):
     class_section: Mapped["ClassSection"] = relationship("ClassSection", lazy="raise")
 
 
+class Assessment(Base):
+    """A named exam or homework sheet recorded for one class and subject."""
+
+    __tablename__ = "assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "academic_year_code", "class_code", "subject_code", "term_code",
+            "assessment_type", "name", name="uq_assessments_identity",
+        ),
+        Index(
+            "ix_assessments_class_lookup", "academic_year_code", "class_code",
+            "subject_code", "term_code", "assessment_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    academic_year_code: Mapped[str] = mapped_column(String(_YEAR_CODE_LEN), nullable=False)
+    class_code: Mapped[str] = mapped_column(String(_CLASS_CODE_LEN), nullable=False)
+    subject_code: Mapped[str] = mapped_column(String(_SUBJECT_CODE_LEN), nullable=False)
+    term_code: Mapped[str] = mapped_column(String(_TERM_CODE_LEN), nullable=False)
+    assessment_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str] = mapped_column(String(_NAME_LEN), nullable=False)
+    max_points: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recorded_by: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
+class AssessmentMark(Base):
+    """One student's stated result or absence on an assessment sheet."""
+
+    __tablename__ = "assessment_marks"
+    __table_args__ = (
+        UniqueConstraint("assessment_id", "student_number", name="uq_assessment_marks_student"),
+        CheckConstraint(
+            "percentage IS NULL OR (percentage >= 0 AND percentage <= 100)",
+            name="ck_assessment_marks_percentage_range",
+        ),
+        Index("ix_assessment_marks_assessment", "assessment_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False)
+    student_number: Mapped[str] = mapped_column(ForeignKey("students.student_number", ondelete="RESTRICT"), nullable=False)
+    points: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_points: Mapped[float | None] = mapped_column(Float, nullable=True)
+    percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_absent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+
 class ImportBatch(Base):
     """One upload, previewed and then committed — the header of decision 4's two-step flow.
 
