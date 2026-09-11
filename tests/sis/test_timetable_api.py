@@ -290,35 +290,120 @@ def test_a_school_lays_out_its_day_and_periods_may_be_untimed(
     assert bad.status_code == 422, bad.text
 
 
-def test_shortening_the_day_is_refused_while_lessons_sit_in_the_period(
+def test_a_break_can_move_to_any_period_for_every_class(
+    client: TestClient, registrar: dict[str, str], school: None
+) -> None:
+    """The break is one school-wide bell slot, never a hard-coded fifth period."""
+    assert _periods(client, registrar, count=4).status_code == 200
+
+    moved = client.put(
+        f"/v1/schools/{SCHOOL}/timetable-periods",
+        json={"periods": [
+            {"period_number": number, "name_en": "Break" if number == 4 else f"Period {number}",
+             "name_ar": "فسحة" if number == 4 else f"حصة {number}",
+             "is_teaching": number != 4}
+            for number in range(1, 5)
+        ]},
+        headers=registrar,
+    )
+    assert moved.status_code == 200, moved.text
+
+    for class_code in ("P1A", "P1B"):
+        periods = _week(client, registrar, class_code)["periods"]
+        assert [period["period_number"] for period in periods if not period["is_teaching"]] == [4]
+
+
+def test_a_period_with_lessons_cannot_be_turned_into_a_break(
+    client: TestClient, registrar: dict[str, str], school: None
+) -> None:
+    """Moving the school-wide break must not hide already-planned lessons."""
+    assert _periods(client, registrar, count=4).status_code == 200
+    assert _place(client, registrar, [_lesson("P1A", "sunday", 4)]).status_code == 200
+
+    refused = client.put(
+        f"/v1/schools/{SCHOOL}/timetable-periods",
+        json={"periods": [
+            {"period_number": number, "is_teaching": number != 4}
+            for number in range(1, 5)
+        ]},
+        headers=registrar,
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"]["field"] == "periods"
+
+
+def test_moving_an_existing_break_shifts_lessons_for_every_class(
+    client: TestClient, registrar: dict[str, str], school: None
+) -> None:
+    """A supervisor can move the bell break without manually rebuilding every week."""
+    assert client.put(
+        f"/v1/schools/{SCHOOL}/timetable-periods",
+        json={"periods": [
+            {"period_number": number, "is_teaching": number != 5}
+            for number in range(1, 6)
+        ]},
+        headers=registrar,
+    ).status_code == 200
+    assert _place(client, registrar, [
+        _lesson("P1A", "sunday", 4), _lesson("P1B", "sunday", 4),
+    ]).status_code == 200
+
+    moved = client.put(
+        f"/v1/schools/{SCHOOL}/timetable-periods",
+        json={"periods": [
+            {"period_number": number, "is_teaching": number != 4}
+            for number in range(1, 6)
+        ]},
+        headers=registrar,
+    )
+    assert moved.status_code == 200, moved.text
+    for class_code in ("P1A", "P1B"):
+        plan = _week(client, registrar, class_code)
+        assert [entry["period_number"] for entry in plan["entries"]] == [5]
+        assert [period["period_number"] for period in plan["periods"] if not period["is_teaching"]] == [4]
+
+
+def test_break_can_move_for_one_grade_without_changing_other_grades(
+    client: TestClient, registrar: dict[str, str], school: None
+) -> None:
+    """A grade's recess moves only its own classes and lessons."""
+    assert client.put(
+        f"/v1/schools/{SCHOOL}/timetable-periods",
+        json={"periods": [
+            {"period_number": number, "is_teaching": number != 5}
+            for number in range(1, 6)
+        ]},
+        headers=registrar,
+    ).status_code == 200
+    assert _place(client, registrar, [
+        _lesson("P1A", "sunday", 4), _lesson("LGA", "monday", 4, None),
+    ]).status_code == 200
+
+    moved = client.put(
+        "/v1/timetable/break",
+        json={"academic_year_code": YEAR, "year_level_code": "AR-P1", "period_number": 4},
+        headers=registrar,
+    )
+    assert moved.status_code == 204, moved.text
+
+    primary = _week(client, registrar, "P1A")
+    languages = _week(client, registrar, "LGA")
+    assert [entry["period_number"] for entry in primary["entries"]] == [5]
+    assert [entry["period_number"] for entry in languages["entries"]] == [4]
+    assert [period["period_number"] for period in primary["periods"] if not period["is_teaching"]] == [4]
+    assert [period["period_number"] for period in languages["periods"] if not period["is_teaching"]] == [5]
+
+
+def test_shortening_the_day_removes_lessons_in_deleted_periods(
     client: TestClient, registrar: dict[str, str], school: None
 ) -> None:
     """Otherwise the lesson survives in a row the grid no longer draws — a silent orphan."""
     assert _periods(client, registrar, count=3).status_code == 200
     assert _place(client, registrar, [_lesson("P1A", "sunday", 3)]).status_code == 200
 
-    refused = _periods(client, registrar, count=2)
-    assert refused.status_code == 409, refused.text
-    assert "3" in refused.json()["detail"]["message"]
-
-    # Clear the lesson and the same call succeeds. The rule is about stranding data, not
-    # about forbidding a school from changing its mind.
-    assert client.post(
-        "/v1/timetable/clear",
-        json={
-            "academic_year_code": YEAR,
-            "slots": [
-                {
-                    "class_code": "P1A",
-                    "term_code": TERM,
-                    "day_of_week": "sunday",
-                    "period_number": 3,
-                }
-            ],
-        },
-        headers=registrar,
-    ).status_code == 200
-    assert _periods(client, registrar, count=2).status_code == 200
+    shortened = _periods(client, registrar, count=2)
+    assert shortened.status_code == 200, shortened.text
+    assert _week(client, registrar, "P1A")["entries"] == []
 
 
 # -- Every class has its own week -------------------------------------------

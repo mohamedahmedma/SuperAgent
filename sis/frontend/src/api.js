@@ -695,6 +695,15 @@ var api = {
       term: termCode
     });
   },
+  timetablePeriods: function (schoolCode) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/timetable-periods');
+  },
+  setTimetablePeriods: function (schoolCode, periods) {
+    return put('/schools/' + encodeURIComponent(schoolCode) + '/timetable-periods', { periods: periods });
+  },
+  setGradeBreak: function (academicYear, yearLevelCode, periodNumber, breakDurationMinutes) {
+    return put('/timetable/break', { academic_year_code: academicYear, year_level_code: yearLevelCode, period_number: periodNumber || null, break_duration_minutes: breakDurationMinutes || 0 });
+  },
   placeTimetableLessons: function (academicYear, entries) {
     return put('/timetable', { academic_year_code: academicYear, entries: entries });
   },

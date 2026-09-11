@@ -722,6 +722,7 @@ class TestCatalogue:
         assert "grades.write" in rows["teacher"]["permissions"]
         assert "grades.read" in rows["school_manager"]["permissions"]
         assert "students.write" in rows["school_manager"]["permissions"]
+        assert "timetable.write" in rows["school_manager"]["permissions"]
         assert "attendance.write" not in rows["school_manager"]["permissions"]
         assert "attendance.write" in rows["attendance_supervisor"]["permissions"]
         # The owner can maintain the approved in-school academic setup, but not records,
