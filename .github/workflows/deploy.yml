@@ -310,6 +310,13 @@ jobs:
           if [ ! -f "$tags_file" ]; then
             printf '%s\n' BACKEND_IMAGE_TAG=stable FRONTEND_IMAGE_TAG=stable IDENTITY_IMAGE_TAG=stable RECORDS_IMAGE_TAG=stable SIS_IMAGE_TAG=stable > "$tags_file"
           fi
+          # The registry path belongs in the manifest, not only in this shell. It used to be
+          # exported below and nowhere else, so apply-env.sh run by hand from an ssh session -
+          # the route its own header documents - stopped at interpolation on 2026-09-11: the
+          # one value only the pipeline knew lived in exactly one codepath. Written before the
+          # copy so that a rollback's manifest carries it too.
+          sed -i '/^REGISTRY_IMAGE_PREFIX=/d' "$tags_file"
+          printf 'REGISTRY_IMAGE_PREFIX=%s\n' "$image_prefix" >> "$tags_file"
           cp "$tags_file" "${tags_file}.previous"
           for service in $services; do
             key="$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')_IMAGE_TAG"
