@@ -323,7 +323,11 @@ function TeacherMarks() {
         }))
       });
       Store.toast(t('Marks saved.'), 'success');
-      sheet.reload();
+      // The uploaded-assessments query has the same selection dependencies as the sheet,
+      // so React does not rerun it after a save. Refresh both explicitly: otherwise the
+      // newly saved assessment exists in the database but remains invisible until the
+      // teacher changes a picker or reloads the page.
+      await Promise.all([sheet.reload(), uploaded.reload()]);
     } catch (error) {
       setSaveError(error);
     } finally {
@@ -360,7 +364,7 @@ function TeacherMarks() {
         })
       });
       Store.toast(t('Marks saved; blank students were marked absent.'), 'success');
-      sheet.reload();
+      await Promise.all([sheet.reload(), uploaded.reload()]);
     } catch (error) {
       setSaveError(error);
     } finally {
