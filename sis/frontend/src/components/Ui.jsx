@@ -349,7 +349,9 @@ const FRIENDLY_ERROR = {
 
 export function ErrorNote({ error, title, onRetry }) {
   if (!error) return null;
-  const message = FRIENDLY_ERROR[error.kind] || 'This information is not available yet.';
+  const message = error.kind === 'http' && error.message
+    ? error.message
+    : (FRIENDLY_ERROR[error.kind] || 'This information is not available yet.');
   return (
     <div className="sis-error-note p-3" role="status">
       <Icon name="info" size={18} />

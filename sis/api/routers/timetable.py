@@ -36,7 +36,7 @@ record of what happened, and connecting them is not this stage.
 from datetime import time
 from typing import Annotated, Protocol
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from sis.api.deps import (
@@ -46,7 +46,7 @@ from sis.api.deps import (
     get_timetable_service,
     require_permission,
 )
-from sis.domain.rbac import Permission
+from sis.domain.rbac import Permission, RoleCode
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services import (
     QueryService,
@@ -213,6 +213,12 @@ class TimetableTermCopyIn(BaseModel):
     class_code: str = Field(examples=["3A"])
     source_term_code: str = Field(examples=["2025-2026-T1"])
     target_term_code: str = Field(examples=["2025-2026-T2"])
+
+class GradeBreakIn(BaseModel):
+    academic_year_code: str
+    year_level_code: str
+    period_number: int | None = Field(default=None, ge=1, le=MAX_PERIODS_PER_DAY)
+    break_duration_minutes: int = Field(default=0, ge=0, le=180)
 
 
 class TimetableEntryOut(BaseModel):
@@ -448,6 +454,17 @@ def set_timetable_periods(
     timetables: Timetables,
     caller: Registrar,
 ) -> list[TimetablePeriodOut]:
+    if caller.profile is not None and not (
+        caller.profile.is_system_admin
+        or caller.profile.has_role(RoleCode.SCHOOL_MANAGER.value)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "manager_required", "message": "Only the school manager can change the number of periods."},
+        )
+    caller.narrow(
+        Permission.TIMETABLE_WRITE, lambda scopes: scopes.for_school(school_code)
+    )
     with domain_errors():
         stored = timetables.set_periods(
             SchoolCode(school_code),
@@ -468,6 +485,17 @@ def set_timetable_periods(
 
 
 # -- The lessons ------------------------------------------------------------
+
+@router.put("/timetable/break", status_code=204)
+def set_grade_break(body: GradeBreakIn, timetables: Timetables, caller: Registrar) -> None:
+    caller.narrow(
+        Permission.TIMETABLE_WRITE,
+        lambda scopes: scopes.for_year_level(
+            school_id=caller.school_id, year_level_code=body.year_level_code
+        ),
+    )
+    with domain_errors():
+        timetables.set_break_for_level(AcademicYearCode(body.academic_year_code), YearCode(body.year_level_code), body.period_number, body.break_duration_minutes)
 
 
 @router.get(

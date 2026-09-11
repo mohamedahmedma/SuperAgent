@@ -37,6 +37,12 @@ export function Timetable() {
   const [savedEntries, setSavedEntries] = useState([]);
   const [draftEntries, setDraftEntries] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [breakPeriod, setBreakPeriod] = useState('');
+  const [periodCount, setPeriodCount] = useState('');
+  const [dayStartsAt, setDayStartsAt] = useState('');
+  const [dayEndsAt, setDayEndsAt] = useState('');
+  const [breakDuration, setBreakDuration] = useState('20');
+  const [savingDayLayout, setSavingDayLayout] = useState(false);
   const [copying, setCopying] = useState(false);
   const [saved, setSaved] = useState(false);
   const [actionError, setActionError] = useState(null);
@@ -99,6 +105,14 @@ export function Timetable() {
   const mayEdit = !!chosen && Store.canIn('timetable.write', {
     school: state.school, yearLevel: chosen.year_level_code, classSection: chosen.code
   });
+  const mayConfigureSchoolDay = (state.profile?.roles || []).some(
+    (role) => role.role_code === 'school_manager'
+  );
+  const schoolPeriods = useQuery(
+    () => api.timetablePeriods(state.school),
+    [state.school],
+    !!state.school && mayConfigureSchoolDay
+  );
   const subjects = useQuery(
     () => api.subjects(state.year, false, chosen.year_level_code),
     [state.year, chosen?.year_level_code],
@@ -127,7 +141,22 @@ export function Timetable() {
     setActionError(null);
     setSaved(false);
     setDragged(null);
+    const breakSlot = plan.periods.find((period) => !period.is_teaching);
+    setBreakPeriod(String(breakSlot?.period_number || ''));
+    if (breakSlot?.starts_at && breakSlot?.ends_at) {
+      const [startHour, startMinute] = String(breakSlot.starts_at).slice(0, 5).split(':').map(Number);
+      const [endHour, endMinute] = String(breakSlot.ends_at).slice(0, 5).split(':').map(Number);
+      setBreakDuration(String(endHour * 60 + endMinute - startHour * 60 - startMinute));
+    }
   }, [plan]);
+  useEffect(() => {
+    if (schoolPeriods.value) {
+      const grid = schoolPeriods.value;
+      setPeriodCount(String(grid.length));
+      setDayStartsAt(grid[0]?.starts_at ? String(grid[0].starts_at).slice(0, 5) : '');
+      setDayEndsAt(grid.at(-1)?.ends_at ? String(grid.at(-1).ends_at).slice(0, 5) : '');
+    }
+  }, [schoolPeriods.value]);
 
   /* Term 2 starts as a real copy, not a read-time illusion. It is written only once, only
      when a supervisor opens an empty later term, and never overwrites work already saved there. */
@@ -262,6 +291,74 @@ export function Timetable() {
     }
   };
 
+  const saveDayLayout = async () => {
+    if (!mayEdit || !plan || savingDayLayout) return;
+    const requestedCount = Number(periodCount);
+    if (mayConfigureSchoolDay && (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 20)) {
+      setActionError(new Error(t('Enter a number from 1 to 20.')));
+      return;
+    }
+    if (mayConfigureSchoolDay && ((dayStartsAt && !dayEndsAt) || (!dayStartsAt && dayEndsAt) ||
+      (dayStartsAt && dayEndsAt && dayStartsAt >= dayEndsAt))) {
+      setActionError(new Error(t('Enter both day times, with the end after the start.')));
+      return;
+    }
+    const breakMinutes = Number(breakDuration || 0);
+    if (!Number.isInteger(breakMinutes) || breakMinutes < 0 || breakMinutes > 180) {
+      setActionError(new Error(t('Enter a break duration from 0 to 180 minutes.')));
+      return;
+    }
+    setSavingDayLayout(true);
+    setActionError(null);
+    try {
+      const grid = schoolPeriods.value || [];
+      const selectedBreak = breakPeriod && Number(breakPeriod) <= requestedCount
+        ? Number(breakPeriod) : null;
+      const timeChanged = dayStartsAt && dayEndsAt && (
+        String(grid[0]?.starts_at || '').slice(0, 5) !== dayStartsAt ||
+        String(grid.at(-1)?.ends_at || '').slice(0, 5) !== dayEndsAt
+      );
+      if (mayConfigureSchoolDay && (requestedCount !== grid.length || timeChanged)) {
+        const periods = Array.from({ length: requestedCount }, (_, index) => {
+          const existing = grid[index];
+          return existing || {
+            period_number: index + 1, name_en: '', name_ar: '',
+            starts_at: null, ends_at: null, is_teaching: true
+          };
+        });
+        if (dayStartsAt && dayEndsAt) {
+          const [startHour, startMinute] = dayStartsAt.split(':').map(Number);
+          const [endHour, endMinute] = dayEndsAt.split(':').map(Number);
+          const start = startHour * 60 + startMinute;
+          const end = endHour * 60 + endMinute;
+          const toTime = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}:00`;
+          const breakIndex = selectedBreak ? selectedBreak - 1 : -1;
+          const lessonCount = periods.length - (breakIndex >= 0 ? 1 : 0);
+          const lessonMinutes = (end - start - (breakIndex >= 0 ? breakMinutes : 0)) / lessonCount;
+          if (lessonMinutes < 1) throw new Error(t('The day is too short for this number of periods and break duration.'));
+          let cursor = start;
+          for (let index = 0; index < periods.length; index += 1) {
+            const duration = index === breakIndex ? breakMinutes : lessonMinutes;
+            periods[index] = {
+              ...periods[index],
+              starts_at: toTime(Math.round(cursor)),
+              ends_at: toTime(Math.round(cursor + duration))
+            };
+            cursor += duration;
+          }
+        }
+        await api.setTimetablePeriods(state.school, periods);
+        await schoolPeriods.reload();
+      }
+      await api.setGradeBreak(state.year, chosen.year_level_code, selectedBreak, breakMinutes);
+      await week.reload();
+    } catch (error) {
+      setActionError(error);
+    } finally {
+      setSavingDayLayout(false);
+    }
+  };
+
   return <>
     <PageHead title={t('Timetable')}
       lede={t('Choose a class to view its weekly timetable. Supervisors can drag subjects into lessons and swap existing lessons.')} />
@@ -295,6 +392,40 @@ export function Timetable() {
         {t('Teachers only see classes assigned to them. Supervisors see classes in their managed grade.')}
       </Empty></Card> : null}
 
+      {chosen && mayEdit && plan ? <Card title={t('Day layout')}
+        subtitle={t('Choose the break period once. It applies only to this grade’s classes; lessons move with it automatically.')}>
+        <div className="row g-3 align-items-start">
+          {mayConfigureSchoolDay ? <div className="col-12 col-lg"><label className="form-label" htmlFor="timetable-period-count">{t('Periods per day')}</label>
+            <input id="timetable-period-count" className="form-control" type="number" min="1" max="20" value={periodCount}
+              onChange={(event) => setPeriodCount(event.target.value)} disabled={savingDayLayout || saving || hasChanges}
+              aria-describedby="timetable-period-count-help" />
+          </div> : null}
+          <div className={`col-12 ${mayConfigureSchoolDay ? 'col-lg' : 'col-md-6'}`}><label className="form-label">{t('Break period')}</label>
+            <Select value={breakPeriod} onChange={setBreakPeriod} disabled={savingDayLayout || saving || hasChanges}
+              options={[{ value: '', label: t('No break') }, ...plan.periods.map((period) => ({
+                value: String(period.period_number),
+                label: `${t('Period')} ${period.period_number}`
+              }))]} />
+          </div>
+          <div className={`col-12 ${mayConfigureSchoolDay ? 'col-lg' : 'col-md-6'}`}><label className="form-label" htmlFor="timetable-break-duration">{t('Break duration (minutes)')}</label>
+            <input id="timetable-break-duration" className="form-control" type="number" min="0" max="180" value={breakDuration}
+              onChange={(event) => setBreakDuration(event.target.value)} disabled={savingDayLayout || saving || hasChanges || !breakPeriod} />
+          </div>
+          {mayConfigureSchoolDay ? <><div className="col-12 col-lg"><label className="form-label" htmlFor="timetable-day-start">{t('Day starts at')}</label>
+            <input id="timetable-day-start" className="form-control" type="time" value={dayStartsAt}
+              onChange={(event) => setDayStartsAt(event.target.value)} disabled={savingDayLayout || saving || hasChanges} />
+          </div>
+          <div className="col-12 col-lg"><label className="form-label" htmlFor="timetable-day-end">{t('Day ends at')}</label>
+            <input id="timetable-day-end" className="form-control" type="time" value={dayEndsAt}
+              onChange={(event) => setDayEndsAt(event.target.value)} disabled={savingDayLayout || saving || hasChanges} />
+          </div></> : null}
+          {mayConfigureSchoolDay ? <div className="col-12"><div id="timetable-period-count-help" className="form-text">{t('Reducing the number deletes lessons in the removed periods.')} {t('Times are divided equally across the day.')}</div></div> : null}
+          <div className="col-12"><Button variant="secondary" pending={savingDayLayout}
+            pendingLabel={t('Saving…')} disabled={saving || hasChanges || savingDayLayout}
+            onClick={saveDayLayout}>{t('Save day layout')}</Button></div>
+        </div>
+      </Card> : null}
+
       {chosen && mayEdit ? <Card title={t('Subjects')}
         subtitle={t('Drag a subject onto any lesson. Drag one lesson onto another to swap them.')}>
         {subjects.loading ? <Skeleton rows={2} /> : <div className="sis-subject-tray">
@@ -321,7 +452,9 @@ export function Timetable() {
       </> : null}>
         {week.loading && !week.ready ? <div className="p-3"><Skeleton rows={7} /></div> : null}
         {week.error ? <div className="p-3"><ErrorNote error={week.error} onRetry={week.reload} /></div> : null}
-        {actionError ? <div className="p-3 pb-0"><ErrorNote error={actionError} /></div> : null}
+        {actionError ? <div className="p-3 pb-0"><div className="alert alert-danger mb-0" role="alert">
+          {actionError.message || t('Could not save the timetable settings.')}
+        </div></div> : null}
         {plan ? <div className="sis-timetable-scroll"><table className="sis-timetable-grid">
           <thead><tr><th>{t('Period')}</th>{plan.days.map((day) => <th key={day}>{t(DAY_LABELS[day] || day)}</th>)}</tr></thead>
           <tbody>{plan.periods.map((period) => <tr key={period.period_number}>

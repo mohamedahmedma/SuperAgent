@@ -180,17 +180,16 @@ def load(session: Session) -> dict[str, int]:
             session.add(room); rooms.append(room)
         session.flush(); classes[spec.code] = rooms
 
-    # Nine lessons plus a real break between periods four and five.
+    # The bell grid starts with teaching periods only.  A floor supervisor chooses the
+    # break slot for the whole school through the timetable day-layout control.
     cursor = time(7, 45)
     for number in range(1, 11):
-        is_break = number == 5
-        minutes = 30 if is_break else 45
+        minutes = 45
         end_minutes = cursor.hour * 60 + cursor.minute + minutes
         end_at = time(end_minutes // 60, end_minutes % 60)
         session.add(m.TimetablePeriod(school_id=school.id, period_number=number,
-                    name_en="Break" if is_break else f"Period {number if number < 5 else number-1}",
-                    name_ar="الفسحة" if is_break else f"الحصة {number if number < 5 else number-1}",
-                    starts_at=cursor, ends_at=end_at, is_teaching=not is_break))
+                    name_en=f"Period {number}", name_ar=f"الحصة {number}",
+                    starts_at=cursor, ends_at=end_at, is_teaching=True))
         cursor = end_at
 
     roles = {row.code: row.id for row in session.scalars(select(m.Role)).all()}

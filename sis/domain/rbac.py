@@ -323,6 +323,9 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.TEACHERS_ASSIGN_SUBJECTS,
             Permission.TEACHERS_ASSIGN_CLASSES,
             Permission.TIMETABLE_READ,
+            # The manager owns the school-wide timetable. Floor supervisors retain the
+            # same write permission only within the year level assigned to them.
+            Permission.TIMETABLE_WRITE,
             # Teacher attendance only. Stage 11 keeps the pupil register a separate grant,
             # held by the supervisors and teachers who take it, so a school-wide role does
             # not silently become school-wide visibility of every child's day.
