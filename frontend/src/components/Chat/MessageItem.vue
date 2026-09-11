@@ -5,7 +5,7 @@
   >
     <div v-if="!msg.isUser" class="message-avatar" aria-hidden="true"><BrandLogo size="sm" /></div>
 
-    <div class="message-column">
+    <div class="message-column" :class="{ 'has-answer-block': hasAnswerBlocks }">
       <div v-if="!msg.isUser" class="message-author">
         <span>Aurexis School Assistant</span>
         <small v-if="showAdvanced && msg.ragTrace?.retrieved_chunks?.length">
@@ -35,6 +35,7 @@
             :is-user="false"
             :msg-index="msgIndex"
             :assets="msg.assets"
+            :answer-blocks="msg.answerBlocks"
             @cite-click="onCiteClick"
           />
           <MessageAssets :assets="unanchoredAssets" />
@@ -82,6 +83,12 @@ const unanchoredAssets = computed(() => {
   if (!anchored.length) return props.msg.assets;
   return (props.msg.assets || []).filter((asset) => !anchored.includes(asset.asset_id));
 });
+
+/**
+ * Whether this answer draws a record. Its column then takes its full width rather than
+ * the width of its prose — see `.has-answer-block` in blocks/answerBlock.css.
+ */
+const hasAnswerBlocks = computed(() => !props.msg.isUser && !!props.msg.answerBlocks?.length);
 
 const emit = defineEmits<{
   (e: 'cite-click', msgIndex: number, chunkIndex: number): void;

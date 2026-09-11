@@ -24,6 +24,18 @@ type PendingRead = {
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** A timetable answer as `_settle_answer_blocks` builds it: prose, marker, record. */
+const SETTLED_TIMETABLE = 'دي جدولها:\n\n<!--record-block-->\n**الأحد**\n1) الكيمياء · 07:45–08:30';
+const WEEK_BLOCK = {
+  kind: 'timetable',
+  index: 0,
+  language: 'ar',
+  data: {
+    periods: [{ number: 1, starts_at: '07:45', ends_at: '08:30' }],
+    days: [{ day: 'sunday', label: 'الأحد', slots: [{ period: 1, subject: 'الكيمياء' }] }],
+  },
+};
+
 const createLocalStorageMock = () => {
   const store = new Map<string, string>();
   return {
@@ -504,6 +516,32 @@ describe('chat store streaming sessions', () => {
     expect(bubble.isThinking).toBe(false);
   });
 
+  // A timetable reaches the bubble as text with a record marker in it, and — one event
+  // earlier — as data naming that marker. The data is what the bubble draws; a kind this
+  // client cannot draw is left out, and its marker prints as the markdown it came with.
+  it('holds the records the stream sends ahead of the text that places them', async () => {
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+
+    const { chatStore } = setupStores();
+    chatStore.userInput = 'جدول بنتي';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+
+    stream.pushEvent({ type: 'content', content: 'دي جدولها:' });
+    stream.pushEvent({
+      type: 'answer_blocks',
+      answer_blocks: [WEEK_BLOCK, { kind: 'attendance', index: 1, data: { rows: [] } }],
+    });
+    stream.pushEvent({ type: 'content_replace', content: SETTLED_TIMETABLE });
+    stream.close();
+    await sendPromise;
+
+    const bubble = chatStore.messagesBySession.session_current[1];
+    expect(bubble.text).toBe(SETTLED_TIMETABLE);
+    expect(bubble.answerBlocks).toMatchObject([{ kind: 'timetable', index: 0, language: 'ar' }]);
+  });
+
   it('leaves a clean answer alone when no retraction arrives', async () => {
     const stream = createControlledSseFetch();
     vi.stubGlobal('fetch', stream.fetchMock);
@@ -696,6 +734,17 @@ describe('chat store conversation paging', () => {
 
     stream.close();
     await sendPromise;
+  });
+
+  it('draws the tables of a reloaded conversation again', () => {
+    const { chatStore } = setupStores();
+    const [answer, older] = chatStore.mapServerMessages([
+      serverMessage(2, SETTLED_TIMETABLE, { rag_trace: { answer_blocks: [WEEK_BLOCK] } }),
+      // Stored before blocks existed: no data, so its record prints as markdown.
+      serverMessage(4, SETTLED_TIMETABLE),
+    ]);
+    expect(answer.answerBlocks).toMatchObject([{ kind: 'timetable', index: 0 }]);
+    expect(older.answerBlocks).toEqual([]);
   });
 
   it('forgets the scroll-back after the conversation is cleared', async () => {

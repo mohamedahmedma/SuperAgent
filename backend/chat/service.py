@@ -33,7 +33,11 @@ from backend.chat.runtime import create_agent_for_request, fast_model, model
 from backend.chat.storage import storage
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
-from backend.schemas.chat import PendingHitlState, normalize_rag_trace
+from backend.schemas.chat import (
+    PendingHitlState,
+    normalize_answer_blocks,
+    normalize_rag_trace,
+)
 from backend.text_matching import name_key
 
 logger = logging.getLogger(__name__)
@@ -578,8 +582,8 @@ def _drop_leaked_evidence(answer: str) -> str:
     return text[: found.start()].rstrip()
 
 
-def _append_answer_blocks(answer: str, ctx) -> str:
-    """The answer with each tool-rendered block underneath it, or unchanged.
+def _settle_answer_blocks(answer: str, ctx) -> tuple[str, list]:
+    """The answer with each tool-rendered block underneath it, and those blocks as data.
 
     The data a record tool returns is a table, and a table is the one thing a model
     should not be asked to retype. Every time it did, it was one paraphrase away from a
@@ -592,22 +596,68 @@ def _append_answer_blocks(answer: str, ctx) -> str:
 
     Narrowed to what was asked, and marked so it stays out of the model's history — see
     `_narrow_block` and `BLOCK_MARKER`.
+
+    Each block leaves here twice, from one narrowing decision. As TEXT, under the prose
+    after its marker: what is stored, what the model's history strips, and what any client
+    that knows nothing else shows. And as DATA, for a client that draws the table itself
+    (`AnswerBlock` in backend/schemas/chat.py), carrying the `index` of the marker it
+    draws. A block with no data, or data that fails the contract, simply leaves its
+    marker to be shown as text — so a drawn table is only ever an improvement on the text,
+    never a condition for seeing the record at all.
+
+    Returns `(answer, blocks)`, the blocks already validated.
     """
     blocks = [b for b in (getattr(ctx, "answer_blocks", None) or []) if b]
     if not blocks:
-        return answer
+        return answer, []
     prose = _drop_leaked_evidence(answer).rstrip()
-    rendered = [
-        f"{BLOCK_MARKER}\n{shown}"
-        for shown in (
-            _narrow_block(b.get("kind", ""), b.get("text", ""), prose)
-            if isinstance(b, dict)
-            else _narrow_block("", str(b), prose)
-            for b in blocks
-        )
-        if shown
-    ]
-    return "\n\n".join(([prose] if prose else []) + rendered)
+    language = getattr(ctx, "language", "")
+    language = language if isinstance(language, str) else ""
+    rendered: list[str] = []
+    structured: list[dict] = []
+    for block in blocks:
+        if isinstance(block, dict):
+            kind, text, data = block.get("kind", ""), block.get("text", ""), block.get("data")
+        else:
+            kind, text, data = "", str(block), None
+        shown = _narrow_block(kind, text, prose)
+        if not shown:
+            continue
+        if isinstance(data, dict) and data:
+            # Checked BEFORE it is narrowed, so the narrowing only ever walks a shape the
+            # contract vouches for — this runs inside the turn, and a tool's malformed
+            # data must cost the drawing, never the answer. Narrowing only removes rows,
+            # so what it returns still satisfies the contract it was checked against.
+            checked = normalize_answer_blocks(
+                [{"kind": kind, "index": len(rendered), "language": language, "data": data}]
+            )
+            if checked:
+                block_out = checked[0]
+                block_out["data"] = _narrow_block_data(kind, block_out["data"], prose)
+                structured.append(block_out)
+        rendered.append(f"{BLOCK_MARKER}\n{shown}")
+    settled = "\n\n".join(([prose] if prose else []) + rendered)
+    return settled, structured
+
+
+def _append_answer_blocks(answer: str, ctx) -> str:
+    """The answer with each tool-rendered block underneath it, or unchanged.
+
+    The text half of `_settle_answer_blocks`, for callers that store or show text only.
+    """
+    return _settle_answer_blocks(answer, ctx)[0]
+
+
+def _attach_answer_blocks(rag_trace: dict | None, blocks: list) -> dict | None:
+    """Record the turn's blocks on its trace, which is what persists them.
+
+    The reasoning is `attach_assets_to_trace`'s: the trace is the only place a stored
+    message keeps anything beside its text, so a turn with no trace yet gets one — rather
+    than drawing the table live and printing its markdown after the next reload.
+    """
+    if not blocks:
+        return rag_trace
+    return {**(rag_trace or {}), "answer_blocks": blocks}
 
 
 #: Put on the line before every rendered block. The frontend's markdown renderer drops
@@ -764,6 +814,41 @@ def _narrow_block(kind: str, block: str, answer: str) -> str:
         return "\n".join(kept) if kept else block
 
     return block
+
+
+def _narrow_block_data(kind: str, data: dict, answer: str) -> dict:
+    """`_narrow_block` for a block's DATA: the same rows kept, by the same rule.
+
+    Narrowed separately because one copy is lines of text and the other a structure, but
+    the decision has to be the same one — a phone drawing Sunday alone while the stored
+    text keeps the whole week would be two answers to one question. So each branch reads
+    the label its text branch reads (a day's heading, a mark's subject), folds it the same
+    way, and falls back to the whole record in the same cases. test_answer_blocks.py holds
+    the two in step.
+    """
+    if not (answer or "").strip():
+        return data
+    folded = name_key(answer)
+
+    if kind == "timetable":
+        # The text heading is `**{shows_as or name}**`, which is exactly what `label` holds.
+        kept = [
+            day
+            for day in data.get("days") or []
+            if day.get("slots") and name_key(day.get("label") or day.get("day") or "") in folded
+        ]
+        return {**data, "days": kept} if kept else data
+
+    if kind == "grades":
+        # The text row is `subject: 84.0% (B)` and its rule reads what precedes the colon.
+        kept = []
+        for course in data.get("courses") or []:
+            label = name_key(str(course.get("subject") or "").split(":")[0])
+            if label and label in folded:
+                kept.append(course)
+        return {**data, "courses": kept} if kept else data
+
+    return data
 
 
 #: Outcomes where `get_student_records` actually returned a child's record. Anything
@@ -1138,6 +1223,10 @@ def chat_with_agent(
     if entry.child_choice:
         _pin_the_child_the_parent_named(ctx, entry.child_choice)
 
+    # The records this answer shows as tables, as data. Empty on every path that does not
+    # reach an agent answer, which is most of the branches below.
+    answer_blocks: list = []
+
     try:
         messages.append(HumanMessage(content=user_text))
         storage.save(user_id, session_id, messages)
@@ -1256,9 +1345,10 @@ def chat_with_agent(
                         # Same rule as the streamed path: the record goes under the
                         # sentence when the answer stands, and never under a refusal —
                         # and the figure markers resolve in the same order there.
-                        response_content = _append_answer_blocks(
+                        response_content, answer_blocks = _settle_answer_blocks(
                             _resolve_figure_markers(response_content, ctx), ctx
                         )
+                        rag_trace = _attach_answer_blocks(rag_trace, answer_blocks)
                     sync_finalizer.log_summary()
                     if rag_trace:
                         rag_trace.update(sync_finalizer.as_trace())
@@ -1310,6 +1400,7 @@ def chat_with_agent(
                 reference.model_dump(mode="json", exclude_none=True)
                 for reference in asset_references
             ],
+            "answer_blocks": answer_blocks,
         }
     finally:
         ctx.close()
@@ -1644,12 +1735,18 @@ async def chat_with_agent_stream(
                 # Figure markers resolve first and on the same event: the raw `[FIGURE 1]`
                 # has already streamed into the bubble, and this is what takes it back out
                 # and puts the picture where it pointed.
-                settled = _append_answer_blocks(
+                settled, answer_blocks = _settle_answer_blocks(
                     _resolve_figure_markers(full_response, ctx), ctx
                 )
                 if settled != full_response:
                     full_response = finalizer.replace_answer(settled)
+                    # The data goes AHEAD of the text that carries its markers, so a client
+                    # that draws the tables already holds them when their places arrive,
+                    # rather than printing the markdown for one event and then swapping.
+                    if answer_blocks:
+                        yield f"data: {json.dumps({'type': 'answer_blocks', 'answer_blocks': answer_blocks})}\n\n"
                     yield f"data: {json.dumps({'type': 'content_replace', 'content': settled})}\n\n"
+                rag_trace = _attach_answer_blocks(rag_trace, answer_blocks)
             finalizer.log_summary()
 
         asset_references = build_asset_references(
