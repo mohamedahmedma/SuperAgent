@@ -310,6 +310,13 @@ jobs:
           if [ ! -f "$tags_file" ]; then
             printf '%s\n' BACKEND_IMAGE_TAG=stable FRONTEND_IMAGE_TAG=stable IDENTITY_IMAGE_TAG=stable RECORDS_IMAGE_TAG=stable SIS_IMAGE_TAG=stable > "$tags_file"
           fi
+          # The registry path belongs in the manifest, not only in this shell. It used to be
+          # exported below and nowhere else, so apply-env.sh run by hand from an ssh session -
+          # the route its own header documents - stopped at interpolation on 2026-09-11: the
+          # one value only the pipeline knew lived in exactly one codepath. Written before the
+          # copy so that a rollback's manifest carries it too.
+          sed -i '/^REGISTRY_IMAGE_PREFIX=/d' "$tags_file"
+          printf 'REGISTRY_IMAGE_PREFIX=%s\n' "$image_prefix" >> "$tags_file"
           cp "$tags_file" "${tags_file}.previous"
           for service in $services; do
             key="$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')_IMAGE_TAG"
@@ -327,9 +334,34 @@ jobs:
           previous_env_hash=""
           if [ -f .current-env-sha256 ]; then previous_env_hash="$(cat .current-env-sha256)"; fi
 
+          # The application services a release manages, and the subset that reads .env at
+          # runtime. The frontend is a static bundle: its settings are compiled in at image
+          # build time from this workflow, so recreating it cannot apply .env to it.
+          app_services="backend frontend identity records sis"
+          env_services="backend identity records sis"
+
+          # Every application service follows the server's .env, not only the ones this
+          # release rebuilt. This used to recreate only $services, so a backend-only release
+          # left records, identity and sis on whatever .env they were created with — LangSmith
+          # settings included — and a service that was not running stayed down, then failed
+          # the health gate of a release that never touched it (2026-09-11: a stopped
+          # frontend failed a backend release twice).
+          #
+          # An edited .env reaches nothing on its own: compose decides what to recreate from
+          # each service's configuration, and an edited env_file is not reliably treated as a
+          # change to it. So every service that reads the file is force-recreated whenever it
+          # differs from the one the last successful release applied.
+          #
+          # Pull first, recreate second, so a registry that fails cannot take a running
+          # container down with it. `--pull missing` then only reaches the registry for an
+          # image that is not on disk at all.
           release() {
             $compose pull $services || return 1
-            $compose up -d --no-deps $services || return 1
+            if [ "$current_env_hash" != "$previous_env_hash" ]; then
+              $compose up -d --no-deps --pull missing --force-recreate $env_services || return 1
+            fi
+            # Recreates whatever changed image, starts whatever is stopped, leaves the rest.
+            $compose up -d --no-deps --pull missing $app_services || return 1
           }
 
           healthy() {
@@ -360,15 +392,11 @@ jobs:
           # is unhealthy" ended the run before the diagnosis below — which is exactly how a
           # failed deploy reported an unhealthy container and not one line of its log.
           attempt() {
+            # Brings every application service onto this release's images and onto the
+            # server's .env. The health gate runs after it, so a release only counts once it
+            # is working WITH the .env applied: a bad value fails here and rolls back, instead
+            # of being applied after a green run where nothing would check it.
             release || return 1
-            # A change to .env reaches nothing on its own: compose hashes a service's own
-            # configuration to decide what to recreate, and the CONTENTS of an env_file are
-            # not part of that hash, so an edited file sits unread behind containers that
-            # compose considers up to date. --no-deps holds the recreate to the application
-            # services; the data services were brought up and waited on by the release.
-            if [ "$current_env_hash" != "$previous_env_hash" ]; then
-              $compose up -d --no-deps --force-recreate $services || return 1
-            fi
             healthy || return 1
             # sis runs `alembic upgrade head` in its own entrypoint, so a sis that is
             # healthy has already migrated. This covers the release where sis was not

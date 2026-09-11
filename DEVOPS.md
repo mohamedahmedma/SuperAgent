@@ -41,6 +41,13 @@ cd $DEPLOY_PATH && chmod 600 .env
 bash deploy/scripts/apply-env.sh backend records identity sis frontend
 ```
 
+`$DEPLOY_PATH` is `/opt/superagent`, the directory the pipeline refreshes on every
+release. Run nothing from any other checkout on the server. The compose project name is
+pinned to `superagent`, so compose run from a stale copy still recreates the live
+containers — with that copy's own `.env` and whatever `:stable` image is on disk, and
+without the `.release-image-tags` manifest that says which image each service should be
+running. That is how production went down on 2026-09-11.
+
 The pipeline calls the same script (`deploy.yml`, before its release), so the manual and
 automated routes cannot drift. It validates the file, reconciles Postgres, proves the
 credential authenticates, and only then recreates anything — a wrong value fails while
@@ -115,6 +122,15 @@ GitHub notification settings.
 `deploy.yml` builds every service image, tags it with both the commit SHA and
 `stable`, and pushes to GHCR. On the server it records the tag currently serving
 traffic before rolling out, then pulls and starts the new tag.
+
+Every release then brings **all** application services onto the server's `.env`, not
+only the ones it rebuilt. When `.env` has changed since the last successful release,
+every service that reads it is recreated; whether or not it has, any service that is not
+running is started. The health gate runs after that, so a release counts as healthy
+only with the `.env` actually applied — a bad value fails the release instead of
+surfacing after a green run. The file that is applied is `/opt/superagent/.env` on the
+server. The pipeline never overwrites it from the `PROD_ENV_FILE` secret, which is used
+only to create the file when it is missing.
 
 A release counts as healthy only when the backend `/health` endpoint and the frontend
 both answer within 300 seconds — the timeout covers Milvus's slow cold start. If that
