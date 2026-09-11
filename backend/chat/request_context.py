@@ -331,7 +331,12 @@ class ChatRequestContext:
             return self.child.label
 
     def remember_child(
-        self, student_id: str, *, label: str = "", gender: str = ""
+        self,
+        student_id: str,
+        *,
+        label: str = "",
+        gender: str = "",
+        chosen_by_parent: bool = False,
     ) -> None:
         """Pin this conversation to a child.
 
@@ -345,7 +350,12 @@ class ChatRequestContext:
         if not student_id:
             return
         with self._lock:
-            self.child.pin(student_id=student_id, label=label, gender=gender)
+            self.child.pin(
+                student_id=student_id,
+                label=label,
+                gender=gender,
+                chosen_by_parent=chosen_by_parent,
+            )
 
     def forget_child(self) -> None:
         """Drop the pin.

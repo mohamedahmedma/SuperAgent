@@ -177,14 +177,31 @@ def _pin_the_child_the_parent_named(ctx, chosen: str) -> bool:
         outcome, roster = load_roster(ctx)
         if outcome != OK or not roster:
             return False
-        found = resolve_child(reference="named", child_name=chosen, roster=roster)
-        if not found.resolved:
-            return False
-        picked = next((c for c in roster if c.student_id == found.student_id), None)
+        # The option was offered in the roster's own words, so a reply equal to one of
+        # them is that child and needs no matching at all. Tried first because the
+        # substring matcher below cannot settle it: where two children share a name,
+        # every offered label contains the other's, so a tapped option matches both and
+        # resolves to neither — which is the very question this reply is answering.
+        tapped = [c for c in roster if name_key(c.label) == name_key(chosen)]
+        picked = tapped[0] if len(tapped) == 1 else None
+
+        if picked is None:
+            # Typed rather than tapped, or spelled differently. The shared resolver reads
+            # it exactly as every other route does.
+            found = resolve_child(reference="named", child_name=chosen, roster=roster)
+            if not found.resolved:
+                return False
+            picked = next((c for c in roster if c.student_id == found.student_id), None)
+            if picked is None:
+                return False
+
         ctx.remember_child(
-            found.student_id,
-            label=found.label,
+            picked.student_id,
+            label=picked.label,
             gender=getattr(picked, "gender", "") or "",
+            # They were shown their own children and chose one. That is what lets this
+            # pin settle a name matching two children later in the conversation.
+            chosen_by_parent=True,
         )
         return True
     except Exception:  # pragma: no cover - a pin must never break a turn
@@ -246,6 +263,36 @@ class _TurnEntry:
     # question. A name as they typed or tapped it — resolved against the roster later,
     # by code holding a verified identity this dataclass deliberately does not.
     child_choice: str = ""
+
+    def spends_the_pending_question(self, *, agent_error: bool = False) -> bool:
+        """Whether the clarification that was waiting is finished with after this turn.
+
+        There are three ways a pending question ends, and every save path has to agree
+        on all three or the question outlives its answer. Asked here, once, rather than
+        re-derived at each site — which is how the third one came to be missing from two
+        of them.
+
+          * **Answered** — `is_hitl_resume`, the retrieval clarifications.
+          * **Replaced** — `superseded`, the user corrected the question instead.
+          * **Settled** — `child_choice`, this message named which child.
+
+        The third reached production. A `child_select` reply is deliberately neither a
+        resume nor a supersession (there is no search to continue, and the parent did
+        not change the subject), so a rule written as `is_hitl_resume or superseded`
+        left it stored — and every later message was then read as another child's name,
+        re-answering the ORIGINAL question. A father asking for Sunday's lessons, for
+        Monday's, and for the term dates was told his daughter's subjects each time.
+
+        `agent_error` keeps a RETRIEVAL clarification alive, because the answer never
+        got used and the parent should be able to retry it. A child choice is already
+        spent whatever happens afterwards: the pin is written before the agent runs, so
+        keeping the question would cost the parent their next message for nothing.
+        """
+        if self.child_choice:
+            return True
+        if agent_error:
+            return False
+        return bool(self.is_hitl_resume or self.superseded)
 
 
 def _enter_turn(user_text: str, messages: list, metadata: dict) -> _TurnEntry:
@@ -428,6 +475,7 @@ async def _stream_static_reply(
     persistent_note: str,
     is_first_message: bool,
     pending_hitl: dict | None = None,
+    child_state=None,
 ):
     """Emit a planned reply that no model composed, and persist the turn.
 
@@ -460,6 +508,14 @@ async def _stream_static_reply(
     # A turn the corpus never saw contributes nothing worth summarising, so the
     # persistent note is deliberately left alone — updating it would spend a model
     # call on the one path whose whole point is not making one.
+    #
+    # The pin is NOT in that category, and leaving it out was a bug. Both agent paths
+    # save it, and a turn that ends here can still have settled a child: the parent
+    # answers "which child?", `_pin_the_child_the_parent_named` writes the pin, and the
+    # re-planned turn then ends on static copy — a social reply, or the same question
+    # again. Without this the choice they just made is thrown away.
+    if child_state is not None:
+        save_child_state(save_meta, child_state)
     save_meta[PENDING_HITL_KEY] = pending_hitl or None
     if is_first_message:
         save_meta.setdefault("title", generate_session_title(user_text))
@@ -545,8 +601,9 @@ def _nothing_usable_reply(finalizer: Finalizer, turn_plan) -> str:
     return _COPY.retrieval_error
 
 
-#: How every branch of `tools/records_result.j2` opens. These headers address the MODEL —
-#: they name an outcome and carry instructions — and a parent must never see one.
+#: How every branch of `tools/records_result.j2` and `tools/knowledge_result.j2` opens.
+#: These headers address the MODEL — they name an outcome and carry instructions — and a
+#: parent must never see one.
 #:
 #: Uppercase ASCII on an Arabic-first deployment, so there is no wording a reply could
 #: legitimately contain that collides with them.
@@ -559,7 +616,13 @@ _EVIDENCE_MARKERS = re.compile(
     # The one-day timetable's three. `\b` does not split on an underscore, so
     # `TIMETABLE` above never covered `TIMETABLE_FOR_ONE_DAY` — each header is its own
     # alternative here, exactly as `TIMETABLE_NOT_PUBLISHED` already was.
-    r"|TIMETABLE_FOR_ONE_DAY|NOT_A_SCHOOL_DAY|NOTHING_TIMETABLED_THAT_DAY)\b",
+    r"|TIMETABLE_FOR_ONE_DAY|NOT_A_SCHOOL_DAY|NOTHING_TIMETABLED_THAT_DAY"
+    # The knowledge tool's own headers. Same kind of string and the same rule — they
+    # name an outcome to the model — and the records set was only ever listed first
+    # because a records header is what was caught reaching a parent. A model that
+    # pastes one of these pastes the other.
+    r"|NEEDS_CLARIFICATION|NEEDS_SCOPE_SELECTION|NO_KNOWLEDGE|PARTIAL_EVIDENCE"
+    r"|RETRIEVAL_ERROR)\b",
     re.MULTILINE,
 )
 
@@ -611,10 +674,27 @@ def _settle_answer_blocks(answer: str, ctx) -> tuple[str, list]:
 
     Returns `(answer, blocks)`, the blocks already validated.
     """
+    # Cut FIRST, above the block check rather than below it. This used to sit after the
+    # early return, so the guard ran only on a turn that produced a table — and
+    # `_PRESENTED` holds three outcomes out of the twenty-three the template can render.
+    # Every other record (subjects, the classroom, teachers, and every refusal) skipped
+    # the cut entirely, which is how «SUBJECTS for فاطمه محمد ابوالحسن — …» reached a
+    # parent verbatim, the model's own citation marker still on the end of it.
+    prose = _drop_leaked_evidence(answer).rstrip()
     blocks = [b for b in (getattr(ctx, "answer_blocks", None) or []) if b]
     if not blocks:
-        return answer, []
-    prose = _drop_leaked_evidence(answer).rstrip()
+        # An answer that was NOTHING but evidence leaves nothing to show, and an empty
+        # bubble is the one outcome worse than the leak. There is no table to fall back
+        # on here — that is what makes this case different from the one below — so the
+        # turn is reported as unverified, the same copy its sibling guards use.
+        #
+        # Only when the cut is what emptied it. A turn that legitimately said nothing
+        # (a short-circuit, a quiet success) must stay silent rather than be handed a
+        # failure message it did not earn.
+        if not prose and (answer or "").strip():
+            logger.warning("the whole answer was tool evidence; nothing left to show")
+            return _COPY.unverified_answer, []
+        return prose, []
     language = getattr(ctx, "language", "")
     language = language if isinstance(language, str) else ""
     rendered: list[str] = []
@@ -1381,9 +1461,9 @@ def chat_with_agent(
         if next_pending_hitl:
             save_meta[PENDING_HITL_KEY] = next_pending_hitl
         else:
-            # `superseded` clears it too: the user replaced the question rather than
-            # answering it, so the clarification is spent whichever path ran.
-            if is_hitl_resume or entry.superseded:
+            # Answered, replaced, or settled by naming a child — every way a
+            # clarification ends is decided in one place. See `_TurnEntry`.
+            if entry.spends_the_pending_question():
                 save_meta[PENDING_HITL_KEY] = None
             if _should_update_persistent_note(messages, persistent_note):
                 save_meta["persistent_note"] = _update_persistent_note_sync(
@@ -1609,6 +1689,7 @@ async def chat_with_agent_stream(
                 turn_plan, turn_signals, user_text, user_id, session_id,
                 messages, metadata, persistent_note, is_first_message,
                 _child_choice_pending(turn_plan, entry.original_question or user_text),
+                child_state,
             ):
                 yield chunk
             return
@@ -1797,9 +1878,9 @@ async def chat_with_agent_stream(
             save_meta[PENDING_HITL_KEY] = next_pending_hitl
             full_response = hitl_response_content
         else:
-            # `superseded` clears it too: the user replaced the question rather than
-            # answering it, so the clarification is spent whichever path ran.
-            if (is_hitl_resume or entry.superseded) and not agent_error:
+            # Answered, replaced, or settled by naming a child — every way a
+            # clarification ends is decided in one place. See `_TurnEntry`.
+            if entry.spends_the_pending_question(agent_error=bool(agent_error)):
                 save_meta[PENDING_HITL_KEY] = None
             if _should_update_persistent_note(messages, persistent_note):
                 try:
