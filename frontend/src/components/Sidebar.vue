@@ -94,6 +94,22 @@
     </template>
 
     <div class="sidebar-bottom">
+      <div class="settings-menu">
+        <button type="button" class="settings-trigger" aria-label="Settings" @click="settingsOpen = !settingsOpen"><i class="fa-solid fa-gear"></i><span>Settings</span></button>
+        <div v-if="settingsOpen" class="settings-popover">
+          <span class="settings-label">Appearance</span>
+          <div class="theme-control">
+            <span class="theme-control-label"><i :class="theme === 'light' ? 'fa-regular fa-sun' : 'fa-regular fa-moon'"></i><span>{{ theme === 'light' ? 'Light mode' : 'Dark mode' }}</span></span>
+            <ThemeToggle :theme="theme" @toggle="$emit('toggle-theme')" />
+          </div>
+          <span class="settings-label">Language</span>
+          <div class="language-control" aria-label="Language">
+            <button type="button" :class="{ active: language === 'en' }" @click="$emit('set-language', 'en'); settingsOpen = false">EN</button>
+            <button type="button" :class="{ active: language === 'ar' }" @click="$emit('set-language', 'ar'); settingsOpen = false">العربية</button>
+          </div>
+        </div>
+      </div>
+      <div class="legacy-settings-content">
       <div class="language-control" aria-label="Language">
         <button type="button" :class="{ active: language === 'en' }" :aria-pressed="language === 'en'" @click="$emit('set-language', 'en')">EN</button>
         <button type="button" :class="{ active: language === 'ar' }" :aria-pressed="language === 'ar'" @click="$emit('set-language', 'ar')">العربية</button>
@@ -105,6 +121,7 @@
           <span>{{ theme === 'light' ? 'Light mode' : 'Dark mode' }}</span>
         </span>
         <ThemeToggle :theme="theme" @toggle="$emit('toggle-theme')" />
+      </div>
       </div>
 
       <div v-if="authStore.isAuthenticated" class="user-panel">
@@ -123,17 +140,29 @@
           >
             <i class="fa-regular fa-trash-can"></i>
           </button>
+          <button type="button" title="Settings" aria-label="Settings" @click="settingsOpen = true">
+            <i class="fa-solid fa-gear"></i>
+          </button>
           <button type="button" title="Log out" aria-label="Log out" @click="onLogout">
             <i class="fa-solid fa-arrow-right-from-bracket"></i>
           </button>
         </span>
       </div>
     </div>
+    <Teleport to="body">
+    <div v-if="settingsOpen" class="settings-dialog-backdrop" @click.self="settingsOpen = false">
+      <section class="settings-dialog" :dir="language === 'ar' ? 'rtl' : 'ltr'" role="dialog" aria-modal="true" :aria-label="language === 'ar' ? 'الإعدادات' : 'Settings'">
+        <header><div><span>{{ language === 'ar' ? 'التفضيلات' : 'Preferences' }}</span><h2>{{ language === 'ar' ? 'الإعدادات' : 'Settings' }}</h2></div><button type="button" :aria-label="language === 'ar' ? 'إغلاق الإعدادات' : 'Close settings'" @click="settingsOpen = false"><i class="fa-solid fa-xmark"></i></button></header>
+        <div class="settings-dialog-row"><div><strong>{{ language === 'ar' ? 'المظهر' : 'Appearance' }}</strong><small>{{ theme === 'light' ? (language === 'ar' ? 'الوضع الفاتح' : 'Light mode') : (language === 'ar' ? 'الوضع الداكن' : 'Dark mode') }}</small></div><ThemeToggle :theme="theme" @toggle="$emit('toggle-theme')" /></div>
+        <div class="settings-dialog-row"><div><strong>{{ language === 'ar' ? 'اللغة' : 'Language' }}</strong><small>{{ language === 'ar' ? 'اختر لغة الواجهة' : 'Choose interface language' }}</small></div><div class="language-control"><button type="button" :class="{ active: language === 'en' }" :aria-pressed="language === 'en'" @click="$emit('set-language', 'en')">EN</button><button type="button" :class="{ active: language === 'ar' }" :aria-pressed="language === 'ar'" @click="$emit('set-language', 'ar')">العربية</button></div></div>
+      </section>
+    </div>
+    </Teleport>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import ThemeToggle from '@/components/ThemeToggle.vue';
 import BrandLogo from '@/components/BrandLogo.vue';
 import { useAuthStore } from '@/stores/auth';
@@ -146,6 +175,7 @@ defineEmits<{ (e: 'toggle-theme'): void; (e: 'set-language', language: 'en' | 'a
 const authStore = useAuthStore();
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();
+const settingsOpen = ref(false);
 
 const recentSessions = computed(() => sessionStore.sessions.slice(0, 4));
 

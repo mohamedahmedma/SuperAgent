@@ -27,7 +27,7 @@
       </div>
     </div>
 
-    <div :class="['input-area', { 'hitl-active': chatStore.currentPendingHitl }]">
+    <div :class="['input-area', { 'hitl-active': chatStore.currentPendingHitl, 'is-recording': isRecording }]">
       <button
         class="attach-btn"
         type="button"
@@ -38,17 +38,21 @@
         <i class="fa-solid fa-paperclip"></i>
       </button>
 
-      <button
-        class="voice-btn"
-        type="button"
-        title="Voice input is coming soon"
-        aria-label="Voice input unavailable"
-        disabled
-      >
+      <button v-if="!isRecording" class="voice-btn" type="button"
+        :title="isRecording ? 'Stop recording' : 'Record voice message'" :aria-label="isRecording ? 'Stop recording' : 'Record voice message'"
+        @click="toggleRecording">
         <i class="fa-solid fa-microphone"></i>
       </button>
 
-      <textarea data-gramm="false" data-gramm_editor="false" spellcheck="false"
+      <div v-if="isRecording" class="voice-recording" @pointermove="trackGesture" @pointerup="finishGesture">
+        <button type="button" class="voice-cancel" aria-label="Cancel recording" @click="cancelRecording"><i class="fa-solid fa-trash"></i></button>
+        <span class="record-dot"></span><strong>{{ recordingTime }}</strong>
+        <span class="voice-hint">← Slide to cancel · Slide up to lock</span>
+        <button type="button" class="voice-cancel" @click="cancelRecording"><i class="fa-solid fa-trash"></i></button>
+        <button type="button" class="voice-send" aria-label="Finish and send recording" @click="stopRecording()"><i class="fa-solid fa-paper-plane"></i></button>
+      </div>
+
+      <textarea v-if="!isRecording" data-gramm="false" data-gramm_editor="false" spellcheck="false"
         ref="textareaRef"
         v-model="chatStore.userInput"
         class="chat-input-textarea" :placeholder="language === 'ar' ? 'اكتب رسالتك إلى أوركسيس...' : 'Say something to Aurexis...'"
@@ -61,7 +65,7 @@
       ></textarea>
 
       <button
-        v-if="chatStore.isViewingStreamingSession"
+        v-if="!isRecording && chatStore.isViewingStreamingSession"
         type="button"
         class="send-btn stop-btn"
         title="Stop response"
@@ -72,7 +76,7 @@
       </button>
 
       <button
-        v-else
+        v-else-if="!isRecording"
         type="button"
         class="send-btn"
         :disabled="chatStore.isLoading"
@@ -87,13 +91,42 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { useChatStore } from '@/stores/chat';
 
 defineProps<{ language: 'en' | 'ar' }>();
 const chatStore = useChatStore();
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const isComposing = ref(false);
+const recorder = ref<MediaRecorder | null>(null);
+const audioChunks = ref<Blob[]>([]);
+const isRecording = ref(false);
+const startedAt = ref(0);
+const elapsed = ref(0);
+const locked = ref(false);
+const startPoint = ref<{ x: number; y: number } | null>(null);
+let timer: number | undefined;
+const recordingTime = computed(() => `00:${String(elapsed.value).padStart(2, '0')}`);
+const stopRecording = (discard = false) => {
+  window.clearInterval(timer); isRecording.value = false;
+  const active = recorder.value;
+  if (!active || active.state === 'inactive') return;
+  active.ondataavailable = (event) => { if (!discard && event.data.size) audioChunks.value.push(event.data); };
+  active.onstop = () => { if (!discard && audioChunks.value.length) chatStore.userInput += (chatStore.userInput ? ' ' : '') + '[Voice recording attached]'; audioChunks.value = []; };
+  active.stop();
+};
+const toggleRecording = async (event: PointerEvent) => {
+  if (isRecording.value) return stopRecording();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder.value = new MediaRecorder(stream); audioChunks.value = []; elapsed.value = 0; startedAt.value = Date.now(); startPoint.value = { x: event.clientX, y: event.clientY }; locked.value = false; isRecording.value = true; recorder.value.start();
+    timer = window.setInterval(() => { elapsed.value = Math.min(60, Math.floor((Date.now() - startedAt.value) / 1000)); if (elapsed.value >= 60) stopRecording(); }, 250);
+  } catch { alert('Please allow microphone access to record a voice message.'); }
+};
+const trackGesture = (event: PointerEvent) => { if (!startPoint.value || locked.value) return; if (startPoint.value.y - event.clientY > 60) locked.value = true; };
+const finishGesture = (event: PointerEvent) => { if (!startPoint.value || locked.value) return; if (startPoint.value.x - event.clientX > 100) cancelRecording(); };
+const cancelRecording = () => stopRecording(true);
+onBeforeUnmount(() => stopRecording(true));
 
 const handleCompositionStart = () => { isComposing.value = true; };
 const handleCompositionEnd = () => { isComposing.value = false; };

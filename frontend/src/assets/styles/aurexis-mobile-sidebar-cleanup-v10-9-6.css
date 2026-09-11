@@ -28,12 +28,10 @@
   }
 
   /* -------------------------------------------------
-     2) Keep exactly two clean separators:
-        - one above the whole bottom area
-        - one between theme row and account row
+     2) Keep one clean separator above the account row.
      ------------------------------------------------- */
   .mobile-sidebar-shell .sidebar .sidebar-bottom {
-    border-top: 1px solid rgba(111, 157, 190, .18) !important;
+    border-top: 0 !important;
   }
 
   .mobile-sidebar-shell .sidebar .theme-control {
