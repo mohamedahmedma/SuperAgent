@@ -147,6 +147,22 @@ def resolve_child(
         if len(matches) == 1:
             return _found(matches[0], "named", f"the message names {matches[0].label}")
         if len(matches) > 1:
+            # Unless the parent has already answered this exact question. Two children
+            # can share a name, and then EVERY message naming her matches both — so a
+            # father who was asked "which one?" and tapped his daughter was asked again
+            # on his next message, and his next, with no reply able to end it.
+            #
+            # Only a choice they made themselves counts (`chosen_by_parent`), and only
+            # among the children the name actually matched. A pin the records tool
+            # merely inferred does not settle a name the parent has just typed — that is
+            # the case `test_a_name_beats_the_pin` protects, and it still does.
+            chosen = (
+                next((c for c in matches if c.student_id == pin.student_id), None)
+                if pin.student_id and pin.chosen_by_parent
+                else None
+            )
+            if chosen is not None:
+                return _found(chosen, "pin", "the child the parent chose by name")
             # Ask between the ones that matched, not the whole family.
             return _ask(matches, f"{len(matches)} children match that name")
         # A name matching nobody falls through to asking rather than quietly using the

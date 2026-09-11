@@ -116,6 +116,16 @@ _PHRASES: dict[str, str] = {
     "الحد": "sunday",
     "الاثنين": "monday",
     "الاتنين": "monday",
+    # Measured, not guessed: «الاتنيني ابعتلي الحصص بالترتيب» is a message this
+    # deployment actually received. A slip of the keyboard rather than a dialect form,
+    # and it cost that parent their Monday — matching is whole-token and exact, so an
+    # unknown token is not a near miss, it is no day at all, and the planner drops the
+    # argument and asks for the whole week.
+    #
+    # Listed here rather than matched fuzzily, deliberately. A tolerance that forgave a
+    # trailing letter would also read «الحادي عشر» as «الحد», and a timetable narrowed
+    # to the wrong day is worse than one not narrowed at all.
+    "الاتنيني": "monday",
     "الثلاثاء": "tuesday",
     "الثلاثا": "tuesday",
     "التلاتاء": "tuesday",
