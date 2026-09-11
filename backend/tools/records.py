@@ -66,6 +66,7 @@ from backend.chat.child_roster import ChildOption, forget, load_roster
 from backend.chat.request_context import ChatRequestContext
 from backend.env import records_api_key, records_base_url
 from backend.prompts import render as render_prompt
+from backend.school_week import AskedDay, resolve_day
 from backend.text_matching import name_key
 
 logger = logging.getLogger(__name__)
@@ -222,7 +223,7 @@ def _reporter(ctx: ChatRequestContext, tool_name: str):
             try:
                 ctx.note_answer_block(
                     render_prompt("tools/records_block.j2", outcome=outcome, **context),
-                    kind=outcome,
+                    kind=_BLOCK_KINDS.get(outcome, outcome),
                     data=_block_data(outcome, context),
                 )
             except Exception:  # pragma: no cover - a block must never break a turn
@@ -388,14 +389,23 @@ def make_get_student_attendance(ctx: ChatRequestContext):
 
 def make_get_student_timetable(ctx: ChatRequestContext):
     @tool(TIMETABLE_TOOL)
-    def get_student_timetable(student_name: str = "") -> str:
-        """Read one child's weekly class timetable: which lessons fall on which day.
+    def get_student_timetable(student_name: str = "", day: str = "") -> str:
+        """Read one child's class timetable: which lessons fall on which day.
 
         Use this for their schedule, their timetable, what lessons they have on a given
         day, when a subject is taught, or what time the school day runs to. For marks use
         get_student_grades; for absences use get_student_attendance. Do not use it for term
         dates, holidays or exam schedules — those are school-wide and come from the
         knowledge base.
+
+        day: OPTIONAL, and the only argument that is yours to supply — it comes from the
+        message itself. Copy the parent's own words for the day, whatever they wrote:
+        «بكره», «النهاردة», «الأحد», "tomorrow", "Thursday". Do NOT work out which weekday
+        that is — you do not know today's date and this tool does; it resolves the words
+        against the school's calendar and answers for that one day. Leave it empty
+        whenever the question names no day, which asks for the whole week, and leave it
+        empty rather than guessing — a week is always a correct answer and a wrong day is
+        not.
         """
         result = _reporter(ctx, TIMETABLE_TOOL)
         refusal, student = _resolve_student(ctx, student_name, result)
@@ -408,13 +418,100 @@ def make_get_student_timetable(ctx: ChatRequestContext):
         outcome, data = _get(f"{_student_path(ctx, student.student_id)}/timetable", ctx)
         if outcome != "ok":
             return _refused(ctx, outcome, result)
-        return result(
-            "timetable",
-            **_timetable_context(student.label, data, getattr(ctx, "language", "")),
-        )
+
+        language = getattr(ctx, "language", "")
+        context = _timetable_context(student.label, data, language)
+
+        # The week is fetched either way. There is no per-day endpoint and there should
+        # not be one: the facade resolves the room once, and a second round trip to drop
+        # six rows would cost a parent latency to save nothing.
+        #
+        # The three-way status describes the RECORD, and outranks the narrowing for that
+        # reason. A week the school has not published has no days in it, so narrowing one
+        # out of it would answer "the school does not open then" about a school that does.
+        if context.get("status") not in ("", "ok"):
+            return result("timetable", **context)
+
+        asked = resolve_day(day) if (day or "").strip() else None
+        if asked is None:
+            # No day named, or a word this vocabulary does not know. Both are answered
+            # with the whole week rather than with a question. The subject tools ask, and
+            # this deliberately does not: a subject matching nothing means the parent
+            # named a subject their child does not take, which only they can settle,
+            # whereas a day matching nothing means the vocabulary missed a word the parent
+            # did use. Asking «which day?» of someone who just wrote «بكره» is the worse
+            # failure, and the week already contains their answer.
+            return result("timetable", **context)
+        return result("timetable_day", **_one_day_context(context, asked, language))
 
     get_student_timetable.description += _STUDENT_NAME_NOTE
     return get_student_timetable
+
+
+#: How a relative day reads to the parent it is being shown to. The model is told the
+#: canonical phrase and writes its own sentence; this is for the rendered block, which no
+#: model touches — see `note_answer_block`.
+_RELATIVE_AR = {
+    "today": "النهاردة",
+    "tomorrow": "بكرة",
+    "yesterday": "إمبارح",
+    "day after tomorrow": "بعد بكرة",
+}
+
+
+def _one_day_context(context: dict, asked: AskedDay, language: str) -> dict:
+    """The week's context narrowed to the one day the parent asked about.
+
+    Derived from the full context rather than built from the payload a second time, so
+    the day a parent is shown is the same object the week would have shown them — a
+    second pass over the rows is a second chance to disagree about a period's time.
+
+    Three outcomes, and they are three different sentences, which is why the day is
+    reported as a `day_status` rather than as an empty list the template has to interpret:
+
+    `lessons` — the day is a school day and has lessons on it.
+
+    `no_lessons` — the school opens that day and has timetabled nothing on it. Real, and
+    not a day off: the class may be on a trip, or the grid may be half written.
+
+    `not_a_school_day` — the school does not open that day at all. «بكره» on a Thursday
+    at a Sunday-to-Thursday school is Friday, and the honest answer is that there is no
+    school, not that no lessons are recorded. Conflating those two is the same failure
+    `status` exists to prevent one level up, one level further in.
+    """
+    days = context.get("days") or []
+    found = next((day for day in days if str(day.get("name") or "").lower() == asked.key), None)
+    if found is None:
+        status = "not_a_school_day"
+    elif found.get("slots"):
+        status = "lessons"
+    else:
+        status = "no_lessons"
+
+    shows_as = (found or {}).get("shows_as") or _day_label(asked.key, language)
+    relative = (
+        _RELATIVE_AR.get(asked.relative, asked.relative)
+        if str(language or "").startswith("ar")
+        else asked.relative
+    )
+    return {
+        **context,
+        # Narrowed here, so everything downstream — the model's render, the parent's
+        # block, the block's data — sees one day and none of them has to filter again.
+        "days": [found] if found is not None else [],
+        "day_status": status,
+        "day_key": asked.key,
+        "day_label": shows_as,
+        # The words the parent used, for an answer that replies to the question asked.
+        # Empty when they named the day outright, in which case `day_label` already is
+        # what they said.
+        "day_relative": relative,
+        # The school's week, for telling a parent which days their child does have when
+        # the day they asked about is not one of them.
+        "school_days": [
+            str(day.get("shows_as") or day.get("name") or "") for day in days
+        ],
+    }
 
 
 #: Week day names for the block a PARENT reads. The model used to translate these on its
@@ -872,8 +969,21 @@ def _grades_block(context: dict) -> dict | None:
 #: saying what its data is. See `ChatRequestContext.note_answer_block`.
 _PRESENTED = {
     "timetable": _timetable_block,
+    # One day of the same week, built by the same builder from the same context — which
+    # is the whole reason the narrowing happens to the context rather than to the payload.
+    "timetable_day": _timetable_block,
     "grades": _grades_block,
 }
+
+#: The block KIND a presented outcome draws as, where it differs from the outcome name.
+#:
+#: A day narrowed out of a week is still a timetable to a client: same fields, one day in
+#: `days`. Sending it as its own kind would make every client that already draws
+#: timetables fall back to the markdown for no reason — see `AnswerBlock` in
+#: backend/schemas/chat.py, where a kind a client does not know degrades to text. The
+#: OUTCOME stays its own name because the model needs different instructions for it, and
+#: those two facts are about different readers.
+_BLOCK_KINDS = {"timetable_day": "timetable"}
 
 
 def _block_data(outcome: str, context: dict) -> dict | None:

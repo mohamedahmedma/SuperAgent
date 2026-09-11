@@ -101,6 +101,50 @@ The days above are in the school's own week order — report them in that order 
 
 A day shown as "nothing timetabled" means the school has planned no lesson on that day — it does not mean the child is off school, so do not tell a parent their child has a day off. "Free" is a period the class deliberately has off within a normal school day. Do not add up lessons into a total or invent a subject for an empty slot. No teacher is named in a timetable — if the parent asks who takes a lesson, say you can look that up separately rather than guessing from this.
 {% endif %}
+{% elif outcome == "timetable_day" %}
+{# The parent named a day. Which weekday that is has already been worked out from the
+   school's own clock — see backend/school_week.py — so this branch never asks the model
+   to date anything, and says so, because the one thing it must not do here is second-guess
+   a resolution it has no clock to check.
+
+   The first two conditions are a NET, not a path: the tool routes a week with no class
+   and a week not yet published to the `timetable` outcome above, whichever day was asked
+   about, because those describe the record rather than the day. They are repeated here
+   because the failure if that routing ever changes is silent and specific — an
+   unpublished week has no days in it, every day asked about would therefore resolve to
+   "the school does not open then", and a parent would be told their child's school is
+   shut. A branch is cheaper than that. #}
+{% if status == "no_class" %}
+NO_CLASS_THIS_TERM: the school has no class placement on file for {{ student_label }} for this term, so there is no timetable to show. Tell the parent the school has not placed their child in a class for this term yet and that the office can confirm it. Do NOT say the child has no lessons, and do not show a timetable from any other term or child.
+{% elif status == "no_timetable" %}
+TIMETABLE_NOT_PUBLISHED: {{ student_label }} is in {{ class_label }}, and the school has not published that class's timetable for this term yet. Say exactly that — the timetable is not out yet — and suggest asking the office when it will be. Do NOT say the child has no lessons, and do not invent a schedule.
+{% elif day_status == "not_a_school_day" %}
+NOT_A_SCHOOL_DAY: the parent asked about {% if day_relative %}{{ day_relative }}, which is {{ day_label }}{% else %}{{ day_label }}{% endif %}, and {{ class_label }} does not open that day at all.{% if school_days %} The class's school days are: {{ school_days | join("، ") }}.{% endif %}
+
+Tell the parent there is no school that day. Do NOT say "no lessons are recorded" or "nothing is timetabled" — those describe a school day with an empty grid, and this is not one. Naming the day back to them is what makes the answer checkable, so say which day you mean.
+{% elif day_status == "no_lessons" %}
+NOTHING_TIMETABLED_THAT_DAY: {{ class_label }} opens on {% if day_relative %}{{ day_relative }} ({{ day_label }}){% else %}{{ day_label }}{% endif %}, and the school has timetabled no lesson on it.
+
+Say that the school has no lesson down for that day. Do NOT tell the parent their child has the day off — the school opens, and the reason the grid is empty is not something this shows. Offer to check another day.
+{% else %}
+TIMETABLE_FOR_ONE_DAY for {{ student_label }} — {{ class_label }}{% if term_label %}, {{ term_label }}{% endif %}. The parent asked about {% if day_relative %}{{ day_relative }}, and {{ day_relative }} is {{ day_label }}{% else %}{{ day_label }}{% endif %}:
+{% for day in days %}
+{% for slot in day.slots %}
+- {{ slot.period_number }}) {% if slot.is_free %}free{% else %}{{ slot.subject }}{% endif %}{% if slot.starts_at %} {{ slot.starts_at }}{% if slot.ends_at %}-{{ slot.ends_at }}{% endif %}{% endif %}
+
+{% endfor %}
+{% endfor %}
+{% if breaks %}
+
+Break periods in the school day: {% for item in breaks %}{{ item.name or "break" }}{% if item.starts_at %} {{ item.starts_at }}{% if item.ends_at %}-{{ item.ends_at }}{% endif %}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}.
+{% endif %}
+
+Answer for THAT DAY ONLY. The rest of the week was not asked for and is not above — do not list other days, and do not say what the child has on any day but this one.
+
+{% if day_relative %}Which weekday {{ day_relative }} falls on has already been worked out from the school's own calendar, and it is {{ day_label }}. State it as settled — "{{ day_relative }}, {{ day_label }}" — and do not recompute it, because you do not know today's date and this does. {% endif %}The numbers are period numbers, not times; state a time only where one is given above. "Free" is a period the class deliberately has off within a normal school day. Do not add the lessons up into a total or invent a subject for a slot that is not listed. No teacher is named in a timetable — if the parent asks who takes a lesson, say you can look that up separately rather than guessing from this.
+
+This is the class's STANDING plan for that weekday, not a promise about that date. A holiday, a trip or an exam day would override it and none of them is visible here — so do not tell a parent the school is open, and if they are asking whether it is, say the term calendar is a separate thing you can check.
+{% endif %}
 {% elif outcome == "class" %}
 {% if status == "no_class" %}
 NO_CLASS_THIS_TERM: the school has no class placement on file for {{ student_label }} for this term. Tell the parent the school has not placed their child in a class yet and that the office can confirm it. Do not guess a class from anything earlier in the conversation.

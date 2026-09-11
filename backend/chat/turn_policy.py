@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from backend.chat.child_resolution import ResolvedChild
+from backend.school_week import day_phrase
 from backend.text_matching import name_key
 from backend.chat.language import ARABIC, ENGLISH
 from backend.chat.signals import RequestSignals, Scope
@@ -111,6 +112,12 @@ class TurnPlan:
     # The child's year group, when the roster reported one. Rendered beside the name so
     # an answer about a general school matter can be given for the right year.
     child_year: str = ""
+    # The day the message asked about, canonicalised — "tomorrow", "sunday". Empty when
+    # it named none, which is most turns. Read off the message by a folded lookup with no
+    # model and no clock in it (`backend.school_week.day_phrase`), for the same reason
+    # `question_names_a_year` is: it decides an argument, and an argument decided by a
+    # model is one the model can get wrong on a question it has already answered.
+    day_hint: str = ""
     # Children to offer when the parent has to be asked which one. Mutually exclusive
     # with `child_hint`, and enforced as such in `_plan_child` rather than in Jinja —
     # a template deciding between them would be policy no test could see.
@@ -226,6 +233,11 @@ PLAN_PLACEHOLDERS = {
     "$child_id": lambda plan, question: plan.child_id,
     "$child_year": lambda plan, question: plan.child_year,
     "$language": lambda plan, question: plan.language,
+    # The day the message named, for a tool that answers per day. Qualifies on the same
+    # terms as the rest: settled before the model runs, by a lookup this file can point
+    # at, and empty on the turns that named no day — which drops the argument and asks
+    # for the whole record, exactly as omitting it always did.
+    "$day": lambda plan, question: plan.day_hint,
 }
 
 
@@ -268,6 +280,11 @@ def resolve_turn(
     # without the agent still has to be able to say what it thought was being asked,
     # or an out-of-domain refusal becomes impossible to argue with from the trace.
     plan.resolved_question = signals.resolved_question
+    # Read off the RESOLVED question, so «وبكره؟» after a question about one child is
+    # still a question about tomorrow. That is the same text `$resolved_question` sends,
+    # and reading a different one here would let a turn search for one question and
+    # answer a different one's day.
+    plan.day_hint = day_phrase(signals.resolved_question or signals.question)
     plan.carried_constraints = list(signals.carried_constraints)
     plan.is_followup = signals.followup_intent in ("followup", "correction")
 
