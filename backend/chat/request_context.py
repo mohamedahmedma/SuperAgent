@@ -380,7 +380,7 @@ class ChatRequestContext:
                 return
             self._tool_outcomes.append((str(tool), str(outcome)))
 
-    def note_answer_block(self, text: str, *, kind: str = "") -> None:
+    def note_answer_block(self, text: str, *, kind: str = "", data: dict | None = None) -> None:
         """Hand over text the PARENT will be shown exactly as rendered.
 
         The data a record tool returns is a table, and a table is the one thing a model
@@ -397,6 +397,12 @@ class ChatRequestContext:
         caller can narrow the block to what the parent actually asked about: a question
         about Arabic should not be answered with every subject's mark underneath it.
 
+        `data` is the same record as a structure, for a client that draws the table
+        rather than printing the text — see `AnswerBlock` in backend/schemas/chat.py.
+        Optional, and additive: a block without it is shown as its text everywhere,
+        exactly as before. The text stays required, because it is what gets stored and
+        what every other client shows.
+
         Held per turn and never persisted here — the answer it becomes part of is what
         gets stored.
         """
@@ -406,7 +412,13 @@ class ChatRequestContext:
         with self._lock:
             if not self._active:
                 return
-            self._answer_blocks.append({"kind": str(kind or ""), "text": text})
+            self._answer_blocks.append(
+                {
+                    "kind": str(kind or ""),
+                    "text": text,
+                    "data": data if isinstance(data, dict) and data else None,
+                }
+            )
 
     @property
     def answer_blocks(self) -> list:

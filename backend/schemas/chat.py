@@ -1,8 +1,11 @@
-from typing import List, Literal, Optional  # noqa: F401
+import logging
+from typing import Annotated, List, Literal, Optional, Union  # noqa: F401
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from backend.assets.delivery import AssetReference, ClientCapabilities
+
+logger = logging.getLogger(__name__)
 
 
 class StrictSchema(BaseModel):
@@ -30,6 +33,130 @@ class RetrievedChunk(StrictSchema):
     modality: Optional[str] = None
     # Images this chunk was derived from; resolve them via /media/resolve.
     asset_ids: Optional[List[str]] = None
+
+
+# --- rich answer blocks -----------------------------------------------------------------
+#
+# A record a tool rendered for the reader, as DATA rather than as text. The same record
+# still travels as markdown inside the answer, after `<!--record-block-->` (see
+# `backend/chat/service.py`), and that copy is what any client that has never heard of
+# blocks shows. A client that has draws this instead, however suits its screen.
+#
+# The same contract as `AssetReference`: the backend never sends markup. It sends a
+# descriptor and each client decides how to present it — which is how a phone can show the
+# week one day at a time while a wide screen shows it as a grid, from one payload.
+#
+# Adding a kind: a data model and a block class here, a line in `AnswerBlock`, `data=` on
+# the tool's `note_answer_block` call, and a renderer registered in the frontend. A client
+# that does not know the kind shows the markdown, so nothing has to ship in lockstep.
+
+
+class TimetableSlot(StrictSchema):
+    """One lesson on one day. Its times are its period's, which every day shares."""
+
+    period: int
+    subject: str = ""
+    # A period the class deliberately has off. Not the same as a period with no row at
+    # all, which the week simply does not show.
+    is_free: bool = False
+
+
+class TimetableDay(StrictSchema):
+    # The school's own key for the day ("sunday"): stable, and what a client matches
+    # against its own calendar to find today.
+    day: str
+    # The day as the reader says it ("الأحد").
+    label: str = ""
+    slots: List[TimetableSlot] = Field(default_factory=list)
+
+
+class TimetablePeriod(StrictSchema):
+    """One slot of the school day, breaks included."""
+
+    number: int
+    label: str = ""
+    # `HH:MM`, or empty where the school has not fixed the bell. Never a placeholder.
+    starts_at: str = ""
+    ends_at: str = ""
+    # False for a break, assembly or prayer: part of the day, never a lesson.
+    is_teaching: bool = True
+
+
+class TimetableBlockData(StrictSchema):
+    class_label: str = ""
+    term_label: str = ""
+    # The school's whole day, in its own order.
+    periods: List[TimetablePeriod] = Field(default_factory=list)
+    # Only days with a lesson on them, in the school's week order — never re-sorted.
+    days: List[TimetableDay] = Field(default_factory=list)
+
+
+class GradeRow(StrictSchema):
+    subject: str
+    # None means no grade is recorded yet. It is never zero, and must not be drawn as one.
+    percentage: Optional[float] = None
+    letter: str = ""
+    missing_count: int = 0
+    # The result so far rather than a final grade.
+    in_progress: bool = False
+
+
+class GradesBlockData(StrictSchema):
+    term_label: str = ""
+    courses: List[GradeRow] = Field(default_factory=list)
+
+
+class _AnswerBlockBase(StrictSchema):
+    # Which `<!--record-block-->` in the answer text this block draws, counted from 0.
+    # Explicit rather than positional, so a block dropped on the way cannot shift every
+    # later one onto the wrong table.
+    index: int = Field(ge=0)
+    # The language the turn was answered in, for the client's own labels ("Today",
+    # "Break"). Empty when the turn did not establish one.
+    language: str = ""
+
+
+class TimetableAnswerBlock(_AnswerBlockBase):
+    kind: Literal["timetable"]
+    data: TimetableBlockData
+
+
+class GradesAnswerBlock(_AnswerBlockBase):
+    kind: Literal["grades"]
+    data: GradesBlockData
+
+
+AnswerBlock = Annotated[
+    Union[TimetableAnswerBlock, GradesAnswerBlock], Field(discriminator="kind")
+]
+_ANSWER_BLOCK = TypeAdapter(AnswerBlock)
+
+
+def normalize_answer_blocks(value) -> list[dict]:
+    """The blocks that match the contract, each validated on its own.
+
+    One malformed block must cost the reader that one table — which then shows as the
+    markdown it also travels as — and never the trace around it. This runs on every save
+    and every history load, and one bad row raising here would take a turn's save, or a
+    whole conversation's reload, down with it.
+
+    What is logged is where the block failed and why, never the values: a block is a
+    child's marks or week, and a validation error quotes its input.
+    """
+    if not isinstance(value, list):
+        return []
+    kept = []
+    for item in value:
+        try:
+            block = _ANSWER_BLOCK.validate_python(item)
+        except ValidationError as exc:
+            logger.warning(
+                "dropped an answer block that does not match the contract: %s",
+                [(error.get("loc"), error.get("type")) for error in exc.errors()[:3]],
+            )
+            continue
+        kept.append(block.model_dump(mode="json", exclude_none=True))
+    return kept
 
 
 class RagTraceFields(StrictSchema):
@@ -187,6 +314,10 @@ class RagSubTrace(RagTraceFields):
 
 class RagTrace(RagTraceFields):
     sub_traces: Optional[List[RagSubTrace]] = None
+    # The records this answer showed as tables, as data. On the top-level trace only: a
+    # block belongs to the answer, not to any one retrieval. The trace is where a stored
+    # message keeps it, which is what lets a reloaded conversation draw its tables again.
+    answer_blocks: Optional[List[AnswerBlock]] = None
 
 
 class HitlResumeState(StrictSchema):
@@ -270,6 +401,12 @@ def normalize_rag_trace(trace: dict | None) -> Optional[dict]:
     if not isinstance(trace, dict) or not trace:
         return None
     normalized = _normalize_trace_fields(trace, RagTrace.model_fields)
+    if "answer_blocks" in normalized:
+        # Block by block, before the whole trace is validated: one bad block is dropped
+        # rather than failing the trace it sits on. See `normalize_answer_blocks`.
+        blocks = normalize_answer_blocks(normalized.pop("answer_blocks"))
+        if blocks:
+            normalized["answer_blocks"] = blocks
     if "sub_traces" in normalized:
         sub_traces = normalized["sub_traces"] if isinstance(normalized["sub_traces"], list) else []
         normalized["sub_traces"] = [
@@ -290,6 +427,8 @@ class ChatResponse(StrictSchema):
     # Duplicated out of the trace so a client can show images without depending on
     # the trace's shape, which is diagnostic and may change.
     assets: List[AssetReference] = Field(default_factory=list)
+    # Duplicated out of the trace for the same reason as `assets`.
+    answer_blocks: List[AnswerBlock] = Field(default_factory=list)
 
 
 class MessageInfo(StrictSchema):

@@ -17,7 +17,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { figureAnchorIds, parseMarkdown, splitFigureAnchors } from './markdown';
+import { figureAnchorIds, parseMarkdown, splitFigureAnchors, splitRecordBlocks } from './markdown';
 
 /** The shape the deployed model actually produced, asset_id and all. */
 const REAL_ANSWER =
@@ -135,5 +135,43 @@ describe('figure anchors', () => {
 
   it('still drops the anchor when the client does not split on it', () => {
     expect(parseMarkdown('قبل <!--figure:a::p0::img0--> بعد', 0)).not.toContain('figure:');
+  });
+});
+
+/**
+ * Where a tool-rendered record starts.
+ *
+ * The backend appends each record under the prose on the line after `<!--record-block-->`,
+ * exactly as `_settle_answer_blocks` builds it. A record that also arrived as data names its
+ * marker by position, so the index here is what has to line up.
+ */
+describe('record markers', () => {
+  const SETTLED =
+    'دي جدولها ودرجاتها:\n\n' +
+    '<!--record-block-->\n**الأحد**\n1) الكيمياء · 07:45–08:30\n\n' +
+    '<!--record-block-->\nاللغة العربية: 84.0% (B)';
+
+  it('splits the prose from each record, numbering the records in order', () => {
+    expect(splitRecordBlocks(SETTLED)).toEqual([
+      { kind: 'prose', text: 'دي جدولها ودرجاتها:\n\n' },
+      { kind: 'record', index: 0, text: '**الأحد**\n1) الكيمياء · 07:45–08:30\n\n' },
+      { kind: 'record', index: 1, text: 'اللغة العربية: 84.0% (B)' },
+    ]);
+  });
+
+  it('handles an answer that is a record and nothing else', () => {
+    expect(splitRecordBlocks('<!--record-block-->\nTABLE')).toEqual([
+      { kind: 'record', index: 0, text: 'TABLE' },
+    ]);
+  });
+
+  it('leaves an answer with no record as one stretch of prose', () => {
+    expect(splitRecordBlocks('أهلاً بحضرتك')).toEqual([{ kind: 'prose', text: 'أهلاً بحضرتك' }]);
+  });
+
+  it('still drops the marker when the client does not split on it', () => {
+    const html = parseMarkdown(SETTLED, 0);
+    expect(html).not.toContain('record-block');
+    expect(html).toContain('الكيمياء');
   });
 });

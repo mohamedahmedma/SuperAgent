@@ -75,13 +75,18 @@ class ScriptedAgent:
     cope with a Harmony token split across two deltas.
     """
 
-    def __init__(self, ctx, script, trace=None, tool_results=0):
+    def __init__(self, ctx, script, trace=None, tool_results=0, on_run=None):
         self.ctx = ctx
         self.script = script
         self.trace = trace
         self.tool_results = tool_results
+        # What a tool would have done to the context during the run — noting an answer
+        # block, say — for scenarios whose subject is what the turn does with it.
+        self.on_run = on_run
 
     async def astream(self, payload, stream_mode=None, config=None):
+        if self.on_run is not None:
+            self.on_run(self.ctx)
         if self.trace is not None:
             self.ctx.store_rag_trace(self.trace, None)
             # The real middleware ends the turn on a terminal verdict and records it on
@@ -168,14 +173,14 @@ class ParentTurnScenario(unittest.IsolatedAsyncioTestCase):
         return FakeStorage([])
 
     async def run_turn(self, script, trace=None, storage_messages=None, storage=None,
-                       question=None):
+                       question=None, on_run=None):
         from tests.general.test_chat_hitl_resume import FakeStorage
 
         captured = {}
 
         def make_agent(ctx, tool_names=None, language=None):
             captured["ctx"] = ctx
-            return ScriptedAgent(ctx, script, trace)
+            return ScriptedAgent(ctx, script, trace, on_run=on_run)
 
         if question is not None:
             self.question = question

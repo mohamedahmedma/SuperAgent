@@ -69,6 +69,33 @@ export function splitFigureAnchors(text: string): AnswerPart[] {
   return parts;
 }
 
+/**
+ * Where each tool-rendered record starts in an answer.
+ *
+ * `_settle_answer_blocks` in backend/chat/service.py appends every record under the prose,
+ * each on the line after `<!--record-block-->`. The same record may also have arrived as
+ * data (an `AnswerBlock`) naming its marker by `index` — the marker's position here,
+ * counted from 0 — in which case it is drawn in that place instead of printed.
+ *
+ * Like a figure anchor, the marker is an HTML comment that `renderer.html` drops, so a
+ * client that never splits on it shows the record as markdown and loses nothing.
+ */
+export const RECORD_BLOCK_MARKER = '<!--record-block-->';
+
+export type AnswerSegment =
+  | { kind: 'prose'; text: string }
+  | { kind: 'record'; index: number; text: string };
+
+export function splitRecordBlocks(text: string): AnswerSegment[] {
+  const [prose, ...recordTexts] = (text || '').split(RECORD_BLOCK_MARKER);
+  const segments: AnswerSegment[] = [];
+  if (prose.trim()) segments.push({ kind: 'prose', text: prose });
+  recordTexts.forEach((record, index) => {
+    segments.push({ kind: 'record', index, text: record.replace(/^\r?\n/, '') });
+  });
+  return segments;
+}
+
 /** The asset ids this answer anchored, in order, deduped. */
 export function figureAnchorIds(text: string): string[] {
   const ids: string[] = [];
