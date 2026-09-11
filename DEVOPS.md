@@ -123,6 +123,15 @@ GitHub notification settings.
 `stable`, and pushes to GHCR. On the server it records the tag currently serving
 traffic before rolling out, then pulls and starts the new tag.
 
+Every release then brings **all** application services onto the server's `.env`, not
+only the ones it rebuilt. When `.env` has changed since the last successful release,
+every service that reads it is recreated; whether or not it has, any service that is not
+running is started. The health gate runs after that, so a release counts as healthy
+only with the `.env` actually applied — a bad value fails the release instead of
+surfacing after a green run. The file that is applied is `/opt/superagent/.env` on the
+server. The pipeline never overwrites it from the `PROD_ENV_FILE` secret, which is used
+only to create the file when it is missing.
+
 A release counts as healthy only when the backend `/health` endpoint and the frontend
 both answer within 300 seconds — the timeout covers Milvus's slow cold start. If that
 check fails, the workflow automatically redeploys the previously recorded tag and
