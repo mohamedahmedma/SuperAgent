@@ -19,6 +19,11 @@
         </button>
       </div>
 
+      <label class="history-search">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input v-model="search" type="search" placeholder="Search conversations" aria-label="Search conversations" />
+      </label>
+
       <div class="history-list">
         <div v-if="sessionStore.sessions.length === 0" class="empty-history">
           <span class="empty-icon"><i class="fa-regular fa-comments"></i></span>
@@ -27,7 +32,7 @@
         </div>
 
         <article
-          v-for="session in sessionStore.sessions"
+          v-for="session in filteredSessions"
           :key="session.session_id"
           :class="['history-item', { active: session.session_id === chatStore.sessionId }]"
         >
@@ -58,13 +63,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useChatStore } from '@/stores/chat';
 import { useSessionStore } from '@/stores/sessions';
 
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();
 const refreshing = ref(false);
+const search = ref('');
+const filteredSessions = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase();
+  return query ? sessionStore.sessions.filter((session) =>
+    (session.title || '').toLocaleLowerCase().includes(query)
+  ) : sessionStore.sessions;
+});
 
 const closeHistory = () => {
   sessionStore.showHistorySidebar = false;

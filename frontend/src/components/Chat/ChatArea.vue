@@ -44,7 +44,6 @@
                 <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
               </button>
             </div>
-            <div class="parent-tip"><i class="fa-regular fa-lightbulb" aria-hidden="true"></i><span><strong>Helpful tip</strong> Ask in your own words—we’ll guide you.</span></div>
           </aside>
           </Transition>
         </div>
@@ -98,7 +97,6 @@ const localizedContent = {
   en: {
     assistantTitle: 'Your school assistant', assistantDescription: 'Answers and support, whenever you need them.', servicesTitle: 'Quick services',
     services: [
-      { icon: 'fa-solid fa-chart-column', label: 'Student progress', question: 'How can I check my child’s progress?' },
       { icon: 'fa-regular fa-calendar-check', label: 'Attendance', question: 'How can I check my child’s attendance?' },
       { icon: 'fa-solid fa-book-open', label: 'School timetable', question: 'Where can I find the school timetable?' },
       { icon: 'fa-regular fa-credit-card', label: 'School fees', question: 'How can I find information about school fees?' },
@@ -108,7 +106,6 @@ const localizedContent = {
   ar: {
     assistantTitle: 'مساعد مدرستك', assistantDescription: 'إجابات ودعم وقتما تحتاج إليهما.', servicesTitle: 'خدمات سريعة',
     services: [
-      { icon: 'fa-solid fa-chart-column', label: 'تقدم الطالب', question: 'كيف أتحقق من تقدم طفلي؟' },
       { icon: 'fa-regular fa-calendar-check', label: 'الحضور', question: 'كيف أتحقق من حضور طفلي؟' },
       { icon: 'fa-solid fa-book-open', label: 'جدول المدرسة', question: 'أين أجد جدول المدرسة؟' },
       { icon: 'fa-regular fa-credit-card', label: 'رسوم المدرسة', question: 'كيف أجد معلومات عن رسوم المدرسة؟' },
@@ -118,14 +115,6 @@ const localizedContent = {
 } as const;
 const ui = computed(() => localizedContent[props.language]);
 const localizedServices = computed(() => ui.value.services);
-
-const quickServices = [
-  { icon: 'fa-solid fa-chart-column', label: 'Student progress', question: 'How can I check my child’s progress?' },
-  { icon: 'fa-regular fa-calendar-check', label: 'Attendance', question: 'How can I check my child’s attendance?' },
-  { icon: 'fa-solid fa-book-open', label: 'School timetable', question: 'Where can I find the school timetable?' },
-  { icon: 'fa-regular fa-credit-card', label: 'School fees', question: 'How can I find information about school fees?' },
-  { icon: 'fa-solid fa-people-group', label: 'Contact the school', question: 'Who should I contact for school support?' },
-];
 
 const chatContainerRef = ref<HTMLDivElement | null>(null);
 const messageItemRefs = ref<any[]>([]);

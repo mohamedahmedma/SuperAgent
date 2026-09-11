@@ -40,10 +40,10 @@ const content = {
     description: 'Aurexis School Assistant searches your school knowledge base while answering, shows its working, and links key conclusions back to the original evidence.',
     questionsTitle: 'Popular parent questions', questionsHint: 'Choose one to get started',
     questions: [
-      { icon: 'fa-regular fa-calendar-days', text: 'What events are coming up this week?' },
+      { icon: 'fa-solid fa-graduation-cap', text: 'How can I check my child’s grades?' },
       { icon: 'fa-solid fa-clipboard-check', text: 'How can I check my child’s attendance?' },
-      { icon: 'fa-solid fa-graduation-cap', text: 'When will progress reports be available?' },
-      { icon: 'fa-regular fa-circle-question', text: 'Who should I contact for school support?' },
+      { icon: 'fa-solid fa-book-open', text: 'Where can I find the school timetable?' },
+      { icon: 'fa-solid fa-people-group', text: 'How can I contact the school?' },
     ],
   },
   ar: {
@@ -52,10 +52,10 @@ const content = {
     description: 'يبحث مساعد أوريكسيس المدرسي في قاعدة معارف مدرستك أثناء الإجابة، ويعرض طريقة عمله، ويربط الاستنتاجات الرئيسية بالأدلة الأصلية.',
     questionsTitle: 'أسئلة أولياء الأمور الشائعة', questionsHint: 'اختر سؤالًا للبدء',
     questions: [
-      { icon: 'fa-regular fa-calendar-days', text: 'ما الفعاليات القادمة هذا الأسبوع؟' },
+      { icon: 'fa-solid fa-graduation-cap', text: 'كيف أتحقق من درجات طفلي؟' },
       { icon: 'fa-solid fa-clipboard-check', text: 'كيف أتحقق من حضور طفلي؟' },
-      { icon: 'fa-solid fa-graduation-cap', text: 'متى ستكون تقارير التقدم متاحة؟' },
-      { icon: 'fa-regular fa-circle-question', text: 'بمن أتواصل للحصول على دعم المدرسة؟' },
+      { icon: 'fa-solid fa-book-open', text: 'أين أجد جدول الحصص؟' },
+      { icon: 'fa-solid fa-people-group', text: 'كيف أتواصل مع المدرسة؟' },
     ],
   },
 } as const;
