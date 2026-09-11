@@ -555,7 +555,11 @@ _EVIDENCE_MARKERS = re.compile(
     r"|CLASS|ATTENDANCE|NO_RECORDS|NO_STUDENTS_LINKED|NO_CLASS_THIS_TERM|NOT_AUTHORIZED"
     r"|NOT_A_PARENT_SESSION|RECORDS_UNAVAILABLE|TOOL_CALL_LIMIT_REACHED"
     r"|NEEDS_STUDENT_CHOICE|NEEDS_SUBJECT_CHOICE|TIMETABLE_NOT_PUBLISHED"
-    r"|SUBJECTS_NOT_PUBLISHED|TEACHERS_NOT_ASSIGNED)\b",
+    r"|SUBJECTS_NOT_PUBLISHED|TEACHERS_NOT_ASSIGNED"
+    # The one-day timetable's three. `\b` does not split on an underscore, so
+    # `TIMETABLE` above never covered `TIMETABLE_FOR_ONE_DAY` — each header is its own
+    # alternative here, exactly as `TIMETABLE_NOT_PUBLISHED` already was.
+    r"|TIMETABLE_FOR_ONE_DAY|NOT_A_SCHOOL_DAY|NOTHING_TIMETABLED_THAT_DAY)\b",
     re.MULTILINE,
 )
 
@@ -865,6 +869,12 @@ RECORDS_RETRIEVED = frozenset(
         "subject",
         "attendance",
         "timetable",
+        # One day of a week is a record that came back, exactly as the whole week is.
+        # Missing from here, an answer narrowed to tomorrow could tell a parent no
+        # timetable was found on a turn that read one — which is the failure this set
+        # exists to catch, and it would have been invisible on the commonest question
+        # this deployment gets.
+        "timetable_day",
         "class",
         "subjects",
         "teachers",

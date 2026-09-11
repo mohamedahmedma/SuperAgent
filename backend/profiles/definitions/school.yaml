@@ -316,18 +316,29 @@ agent:
       student_name: "$child_label"
     get_student_attendance:
       student_name: "$child_label"
-    # Plannable for the same reason attendance is: the only argument is the child, and
-    # the plan already holds her. Note there is no class here to fill in — the timetable
-    # is resolved from her placement behind the facade, which is what keeps a room code
-    # out of a plan that would still be holding it after she moved class.
+    # Note there is no class here to fill in — the timetable is resolved from the child's
+    # placement behind the facade, which is what keeps a room code out of a plan that
+    # would still be holding it after they moved class.
+    #
+    # `day` is the one planned argument that is not the child, and it is here rather than
+    # left to the model for the reason the rest of this block exists: «إيه حصص بكره؟» is
+    # the commonest question this deployment gets, and on the planned path the model never
+    # sees the question before the call is made. Without it the planner dispatched the
+    # whole week and the model — which has no clock and cannot know which weekday tomorrow
+    # is — had to pick a row. `$day` is read off the message by a folded lookup, so it is
+    # settled before either of them runs, and a message naming no day resolves to nothing,
+    # drops the argument and asks for the whole week exactly as it always did.
     get_student_timetable:
       student_name: "$child_label"
+      day: "$day"
     # The rest, whose planned argument is the child and nothing else. `get_student_grades`
     # and `get_student_teachers` also accept a `subject`, and it is deliberately not named
-    # here: `PLAN_PLACEHOLDERS` is a closed set with no `$subject` in it, so a planned call
-    # would have to invent one. Omitting it plans the whole record and lets the model read
-    # the row it was asked about out of what came back — which is why folding the subject
-    # variants in made every tool plannable instead of making two of them unplannable.
+    # here: `PLAN_PLACEHOLDERS` has no `$subject` in it, so a planned call would have to
+    # invent one. Omitting it plans the whole record and lets the model read the row it was
+    # asked about out of what came back — which is why folding the subject variants in made
+    # every tool plannable instead of making two of them unplannable. A day is the case
+    # that does NOT work that way, and hence `$day` above: a subject is written in the
+    # message for the model to find, while "tomorrow" is a weekday only a calendar knows.
     get_student_class:
       student_name: "$child_label"
     get_student_subjects:
@@ -361,11 +372,14 @@ agent:
     get_student_attendance: >-
       One child's own attendance: the days they were present, absent or late.
     get_student_timetable: >-
-      One child's own weekly class schedule — which lessons fall on which day, what the
-      child has on a particular day, when a subject is taught, and what their school day
-      looks like. This is the one to name when the message asks about a schedule or a timetable
-      rather than about marks or absences, including when it says so in dialect. It is not
-      for term dates, holidays or exam schedules, which are the same for every family.
+      One child's own class schedule — which lessons fall on which day, what the child
+      has on a particular day, when a subject is taught, and what their school day looks
+      like. This is the one to name when the message asks about a schedule or a timetable
+      rather than about marks or absences, including when it says so in dialect, and
+      equally when it asks about one day rather than the week: what they have tomorrow,
+      today, or on a named day — «إيه حصص بكره؟», «ابني هياخد إيه النهاردة؟», «عندها إيه
+      يوم الأحد؟». It is not for term dates, holidays or exam schedules, which are the
+      same for every family.
     get_student_class: >-
       Which class one child is in, and what that class is called. For a message asking
       about the child's class, section or which room they are in — not what happens in it.

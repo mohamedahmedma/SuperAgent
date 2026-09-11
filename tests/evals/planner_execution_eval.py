@@ -534,8 +534,11 @@ CASES = [
          expect_ran={T}, technique="EP"),
     Case("EP timetable — a named day", "بنتي عندها ايه يوم الأحد؟",
          expect_ran={T}, technique="EP",
-         note="asks about one day, which is still the whole week's read — the facade "
-              "serves the grid and the model picks the day out of it"),
+         note="asks about one day. Still the whole week's read — there is no per-day "
+              "endpoint and a second round trip to drop six rows would buy nothing — but "
+              "the DAY is now narrowed before the answer is written, by the planner "
+              "rather than by the model. Which day «الأحد» is needs no clock; «بكره» "
+              "does, and that is the case below"),
     Case("EP timetable — when a subject is taught", "الرياضيات بتيجي امتى في جدول ابني؟",
          expect_ran_includes={T}, technique="EP",
          note="names a subject AND asks about the schedule. The subject tool is a "
@@ -600,7 +603,16 @@ CASES = [
     Case("DT no child x school material", "المدرسة بتقفل امتى في رمضان؟",
          expect_ran={K}, technique="DT", model_args={K: {"query": "مواعيد رمضان"}}),
     Case("DT named x timetable", "ليلى أحمد عندها ايه بكرة؟",
-         expect_ran={T}, technique="DT"),
+         expect_ran={T}, technique="DT",
+         note="the commonest question this deployment gets, and the one the model cannot "
+              "answer unaided: it has no clock, so «بكره» is a weekday it would have to "
+              "guess. The day is resolved before the call is made — see the `$day` "
+              "placeholder — so what is under test here is only that the right tool ran"),
+    Case("DT dialect x timetable — 'what will he take tomorrow'", "ابني هياخد ايه بكره؟",
+         expect_ran={T}, technique="DT",
+         note="the same question with no name, no possessive and no word for a schedule "
+              "in it at all. It reaches the timetable on «حصص/هياخد ايه بكره» alone, "
+              "which is what the tool_selection entry's day wording is for"),
     Case("DT possessive x timetable", "جدول بنتي فيه ايه؟",
          expect_ran={T}, technique="DT",
          note="identification and record type are independent, so every way of naming "

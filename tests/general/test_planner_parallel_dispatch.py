@@ -55,6 +55,7 @@ from backend.chat.turn_policy import (
     GRADES_TOOL,
     KNOWLEDGE_TOOL,
     RECORDS_TOOLS,
+    TIMETABLE_TOOL,
     resolve_turn,
 )
 
@@ -919,6 +920,74 @@ class TheContextCarriesThePlanSafely(unittest.TestCase):
         ctx = ChatRequestContext(user_id="u", session_id="s")
         ctx.note_turn_plan([], [])
         self.assertEqual(ctx.planned_calls, [])
+
+
+class TheDayIsPlannedRatherThanAsked(unittest.TestCase):
+    """«إيه حصص بكره؟» — the one planned argument that is not the child.
+
+    On the dispatched path the model never sees the question before the call is made, so
+    an argument it would have supplied has to be settled here or not at all. That is the
+    whole case for `$day`: a subject is written in the message for the model to find,
+    while "tomorrow" is a weekday only a calendar knows, and the model has no calendar.
+
+    The resolution itself is `backend/school_week.py` and is tested in
+    `test_school_week.py`. What is asserted here is that the planner reads it, that it
+    reads it off the question the rest of the plan is built from, and that a message
+    naming no day still asks for the whole week.
+    """
+
+    class _WithTimetable(_Agent):
+        tools = [KNOWLEDGE_TOOL, TIMETABLE_TOOL]
+        planned_tool_arguments = {
+            KNOWLEDGE_TOOL: {"query": "$resolved_question"},
+            TIMETABLE_TOOL: {"student_name": "$child_label", "day": "$day"},
+        }
+
+    def _timetable_call(self, question, **kwargs):
+        plan = _plan(
+            _settled(),
+            agent=self._WithTimetable(),
+            question=question,
+            about_child=True,
+            needed_tools=[TIMETABLE_TOOL],
+            **kwargs,
+        )
+        return {call["name"]: call["args"] for call in plan.planned_calls}[TIMETABLE_TOOL]
+
+    def test_a_question_naming_tomorrow_plans_the_day_beside_the_child(self):
+        args = self._timetable_call("ابني هياخد ايه بكره؟")
+        self.assertEqual(args, {"student_name": "ليلى أحمد", "day": "tomorrow"})
+
+    def test_a_named_day_is_planned_as_that_day(self):
+        self.assertEqual(self._timetable_call("عندها ايه يوم الأحد؟")["day"], "sunday")
+
+    def test_a_question_naming_no_day_drops_the_argument_and_asks_for_the_week(self):
+        """The behaviour that existed before this argument did, reached by the same rule
+        every other placeholder uses: resolving to nothing drops it."""
+        args = self._timetable_call("إيه جدولها؟")
+        self.assertEqual(args, {"student_name": "ليلى أحمد"})
+        self.assertNotIn("day", args)
+
+    def test_the_day_is_read_off_the_resolved_question(self):
+        """«وبكره؟» carries no child and «جدول ليلى» carries no day; the resolved question
+        is the one text that holds both, and is what the search is built from too. Reading
+        a different one here would let a turn search for one question and answer another's
+        day."""
+        args = self._timetable_call("وبكره؟", resolved_question="إيه حصص ليلى بكره؟")
+        self.assertEqual(args["day"], "tomorrow")
+
+    def test_the_plan_carries_the_phrase_and_never_a_weekday_it_guessed(self):
+        """The planner canonicalises words; it does not date them. Turning "tomorrow"
+        into a weekday needs the school's clock, which is the tool's to read — and one
+        resolution in one place is what keeps the two paths agreeing."""
+        plan = _plan(
+            _settled(),
+            agent=self._WithTimetable(),
+            question="ابني هياخد ايه بكره؟",
+            about_child=True,
+            needed_tools=[TIMETABLE_TOOL],
+        )
+        self.assertEqual(plan.day_hint, "tomorrow")
 
 
 if __name__ == "__main__":
