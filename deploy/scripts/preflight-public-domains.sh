@@ -18,7 +18,7 @@
 
 set -uo pipefail
 
-DOMAINS=(auth.aurexis.cc api.aurexis.cc)
+DOMAINS=(auth.aurexis.cc api.aurexis.cc superagent.aurexis.cc)
 EXPECTED_IP="${1:-13.140.153.131}"
 
 PASS=0
@@ -62,7 +62,7 @@ for domain in "${DOMAINS[@]}"; do
       | tr -s '[:space:]' '\n' | grep -v '^$' | sort -u)"
     printf '%s\n' "$names" | grep -Fqx "$domain" || continue
     found=1
-    other="$(printf '%s\n' "$names" | grep -vE '^(auth|api)\.aurexis\.cc$' || true)"
+    other="$(printf '%s\n' "$names" | grep -vE '^(auth|api|superagent)\.aurexis\.cc$' || true)"
     if [ -n "$other" ]; then
       bad "$domain is served by $f, which ALSO serves: $(printf '%s' "$other" | tr '\n' ' ')"
       printf '        The deployment will stop here rather than disable a shared vhost.\n'

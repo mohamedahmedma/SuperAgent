@@ -11,13 +11,17 @@ but an ABSENT directive whose default is invisible. The config looked complete, 
 was never written down anywhere, and the 413 carried no clue about which of the three
 hops in front of the backend had produced it.
 
-It is easy to reintroduce, because which hop decides depends on how the frontend was
+It is easy to reintroduce, because which hops decide depends on how the frontend was
 built. `frontend/Dockerfile` takes only `VITE_IDENTITY_BASE_URL` as a build arg, so
 `VITE_API_BASE_URL` is empty in the image and `utils/api.ts` falls back to the page's own
-origin: uploads go through the frontend container. A build that did bake the API base URL
-in would send them to api.aurexis.cc instead. Both paths have to allow the same size, and
-whichever is lower is the one an admin meets — so this asserts the floor on every vhost
-that fronts the backend, found by reading the configs rather than by listing them.
+origin: uploads cross superagent.aurexis.cc and then the frontend container. A build that
+did bake the API base URL in would send them to api.aurexis.cc instead. Every one of those
+has to allow the same size, and the smallest is the one an admin meets — so this asserts
+the floor on every vhost on the path, found by reading the configs rather than listing them.
+
+Fixing only what the repository managed proved the point: the container and api.aurexis.cc
+were corrected and production still answered 413, from the one hop that was still
+hand-written. It is in `deploy/nginx/` now, and so is covered here.
 """
 import io
 import re
@@ -49,7 +53,11 @@ UPLOAD_UPSTREAMS = (
 
 #: Configs that must always be on that path. Named so a rename cannot quietly empty the
 #: discovery below and leave this file asserting nothing; new vhosts need no edit here.
-REQUIRED_ON_PATH = ("frontend/nginx.conf", "deploy/nginx/api.aurexis.cc.conf")
+REQUIRED_ON_PATH = (
+    "frontend/nginx.conf",
+    "deploy/nginx/api.aurexis.cc.conf",
+    "deploy/nginx/superagent.aurexis.cc.conf",
+)
 
 _SIZE = re.compile(r"client_max_body_size\s+(\d+)\s*([kmg]?)\s*;", re.IGNORECASE)
 _SUFFIX = {"": 1, "k": 1024, "m": 1024 * 1024, "g": 1024 * 1024 * 1024}
