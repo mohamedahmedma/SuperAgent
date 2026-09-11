@@ -117,6 +117,63 @@ either reviewer can select **Approve and deploy**. Reviewers are GitHub users or
 not arbitrary email addresses, and each account receives the request according to its
 GitHub notification settings.
 
+## Knowledge-base upload size
+
+An admin uploading a KB document crosses up to three proxies, and the SMALLEST ceiling
+among them is the one that answers. Two are in this repository; the third is not.
+
+| Hop | Where | Ceiling |
+| --- | --- | --- |
+| Host nginx, `superagent.aurexis.cc` -> `127.0.0.1:3000` | on the server, **not repo-managed** | nginx default `1m` unless set |
+| Frontend container nginx | `frontend/nginx.conf` | `512m` |
+| Host nginx, `api.aurexis.cc` -> `127.0.0.1:8000` | `deploy/nginx/api.aurexis.cc.conf` | `512m` |
+
+Which of the two lower rows applies depends on how the image was built.
+`frontend/Dockerfile` accepts only `VITE_IDENTITY_BASE_URL`, so `VITE_API_BASE_URL` is
+empty in the bundle and `utils/api.ts` posts to the page's own origin — through the
+frontend container. Set that build arg and uploads go to `api.aurexis.cc` instead. Both
+are kept at the same number so the route cannot change the outcome;
+`tests/general/test_upload_size_limits.py` fails if they drift or if either goes missing.
+
+Nothing behind nginx imposes a limit: `save_upload_file` streams the body a megabyte at a
+time, and Starlette's 1 MB `max_part_size` applies to form FIELDS, not to file parts.
+
+**The first row is the manual step.** That vhost predates this repo's nginx management and
+`configure-public-domains.sh` deliberately leaves every vhost but `auth` and `api` alone,
+so raising it is a one-time edit on the server:
+
+```bash
+# find the vhost that serves the UI
+grep -rl 'superagent.aurexis.cc' /etc/nginx/sites-available /etc/nginx/conf.d 2>/dev/null
+
+# add inside its `server { ... }` block, beside the other server-level directives:
+#     client_max_body_size 512m;
+#     client_body_timeout 300s;
+
+sudo nginx -t && sudo nginx -s reload
+```
+
+Verify against the RUNNING configuration rather than the file — an edit in a vhost that is
+not enabled changes nothing, and the symptom is identical to not having made it:
+
+```bash
+sudo nginx -T | grep -c 'client_max_body_size 512m'   # expect at least 2
+```
+
+Then prove the path end to end, because `nginx -T` still does not show which hop a real
+request meets:
+
+```bash
+head -c 5000000 /dev/urandom > /tmp/probe.pdf
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H "Authorization: Bearer $ADMIN_JWT" \
+  -F 'file=@/tmp/probe.pdf' https://superagent.aurexis.cc/documents/upload/async
+```
+
+A `413` means a hop above is still at its default. A `400` is the application refusing the
+extension, which means the size ceiling was cleared and the request reached the backend.
+
+
 ## Release and rollback
 
 `deploy.yml` builds every service image, tags it with both the commit SHA and
