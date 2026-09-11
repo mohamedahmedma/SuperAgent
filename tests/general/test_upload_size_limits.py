@@ -35,9 +35,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #: hundreds of megabytes; the number is the product decision, this file only enforces it.
 MINIMUM_UPLOAD_BYTES = 500 * 1024 * 1024
 
-#: The backend's port, in both forms the configs use to name it: a container address and a
-#: loopback address. A vhost that proxies here can carry `/documents`.
-BACKEND_UPSTREAMS = ("backend:8000", "127.0.0.1:8000")
+#: Every upstream that sits on an upload's path, in each form the configs name it. A vhost
+#: proxying to any of these can carry `/documents`, and therefore has to allow the size.
+#: The frontend container counts: a host vhost in front of it relays the upload onward, so
+#: its own ceiling applies first and a 1m default there refuses the body before the
+#: container's config is ever consulted — which is exactly what production did on
+#: 2026-09-12, answering 413 from nginx/1.24.0 while the container ran a corrected 1.27.3.
+UPLOAD_UPSTREAMS = (
+    "backend:8000",    # frontend container -> backend, over the compose network
+    "127.0.0.1:8000",  # host nginx -> backend
+    "127.0.0.1:3000",  # host nginx -> frontend container
+)
+
+#: Configs that must always be on that path. Named so a rename cannot quietly empty the
+#: discovery below and leave this file asserting nothing; new vhosts need no edit here.
+REQUIRED_ON_PATH = ("frontend/nginx.conf", "deploy/nginx/api.aurexis.cc.conf")
 
 _SIZE = re.compile(r"client_max_body_size\s+(\d+)\s*([kmg]?)\s*;", re.IGNORECASE)
 _SUFFIX = {"": 1, "k": 1024, "m": 1024 * 1024, "g": 1024 * 1024 * 1024}
@@ -77,11 +89,11 @@ def _declared_limit(path: Path) -> int | None:
 
 
 class UploadCeilingTests(unittest.TestCase):
-    def test_every_vhost_fronting_the_backend_allows_a_large_upload(self):
+    def test_every_vhost_on_the_upload_path_allows_a_large_upload(self):
         checked = []
         for path in _nginx_configs():
             body = _strip_comments(io.open(path, encoding="utf-8").read())
-            if not any(upstream in body for upstream in BACKEND_UPSTREAMS):
+            if not any(upstream in body for upstream in UPLOAD_UPSTREAMS):
                 continue  # identity only; sign-in payloads are kilobytes.
             checked.append(path)
             limit = _declared_limit(path)
@@ -89,7 +101,7 @@ class UploadCeilingTests(unittest.TestCase):
 
             self.assertIsNotNone(
                 limit,
-                f"{relative} proxies to the backend but declares no client_max_body_size, "
+                f"{relative} is on the upload path but declares no client_max_body_size, "
                 "so nginx applies its 1m default and a knowledge-base upload is refused "
                 "with a 413 no application log can explain.",
             )
@@ -101,29 +113,28 @@ class UploadCeilingTests(unittest.TestCase):
             )
 
         # Guards the discovery itself: a rename that matched nothing would otherwise let
-        # this test pass by checking no files at all.
-        self.assertEqual(
-            len(checked),
-            2,
-            "expected the frontend proxy and the public API vhost to front the backend, "
-            f"found {[p.relative_to(REPO_ROOT).as_posix() for p in checked]}",
-        )
+        # this test pass by checking no files at all. Stated as membership rather than a
+        # count so that adding a vhost needs no edit here, while losing one still fails.
+        names = [p.relative_to(REPO_ROOT).as_posix() for p in checked]
+        for required in REQUIRED_ON_PATH:
+            self.assertIn(required, names, f"{required} no longer reaches an upload upstream; found {names}")
 
-    def test_the_two_hops_agree(self):
-        """An admin traverses one hop or the other, never both, and cannot tell which.
+    def test_the_hops_agree(self):
+        """The smallest ceiling on the path is the one that answers, and it is invisible.
 
-        Letting them drift means an upload that succeeds from one build and 413s from
-        another, with nothing in the UI to distinguish the two.
+        An admin cannot tell which hops a request crossed, and the 413 nginx returns names
+        none of them. Letting the values drift means an upload that succeeds by one route
+        and fails by another, with nothing in the UI to tell the two apart.
         """
         limits = {
             path.relative_to(REPO_ROOT).as_posix(): _declared_limit(path)
             for path in _nginx_configs()
-            if any(u in _strip_comments(io.open(path, encoding="utf-8").read()) for u in BACKEND_UPSTREAMS)
+            if any(u in _strip_comments(io.open(path, encoding="utf-8").read()) for u in UPLOAD_UPSTREAMS)
         }
         self.assertEqual(
             len(set(limits.values())),
             1,
-            f"the hops in front of the backend disagree on the upload ceiling: {limits}",
+            f"the hops on the upload path disagree on the ceiling: {limits}",
         )
 
 
