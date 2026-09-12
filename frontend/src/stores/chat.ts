@@ -3,7 +3,7 @@ import { useAuthStore } from './auth';
 import { useSessionStore } from './sessions';
 import api, { apiUrl } from '@/utils/api';
 import { readAnswerBlocks } from '@/utils/answerBlocks';
-import type { Message, RagStep, GroupedRagStep, HitlRequest, RagTrace, SessionPaging } from '@/types/chat';
+import type { Message, RagStep, GroupedRagStep, HitlRequest, RagTrace, SessionPaging, VoiceMessage } from '@/types/chat';
 
 // One scroll-back. Opening a chat loads the last screenful; older batches arrive as the
 // user scrolls up to them, so a conversation with a thousand messages opens as fast as
@@ -15,6 +15,7 @@ export const useChatStore = defineStore('chat', {
     messages: [] as Message[],
     messagesBySession: {} as Record<string, Message[]>,
     userInput: '',
+    pendingVoice: null as VoiceMessage | null,
     isLoading: false,
     activeNav: 'newChat' as 'newChat' | 'history' | 'settings',
     sessionId: 'session_' + Date.now(),
@@ -70,6 +71,10 @@ export const useChatStore = defineStore('chat', {
         this.messagesBySession[sessionId] = [];
       }
       return this.messagesBySession[sessionId];
+    },
+
+    queueVoiceMessage(voice: VoiceMessage) {
+      this.pendingVoice = voice;
     },
 
     isHitlTrace(trace?: RagTrace | null): boolean {
@@ -422,6 +427,7 @@ export const useChatStore = defineStore('chat', {
       }
 
       const requestSessionId = this.sessionId;
+      const voice = this.pendingVoice;
       const requestMessages = this.ensureSessionMessages(requestSessionId);
       const pendingHitlAtSend = this.pendingHitlBySession[requestSessionId] || null;
       if (this.sessionId === requestSessionId) {
@@ -431,6 +437,7 @@ export const useChatStore = defineStore('chat', {
       requestMessages.push({
         text: text,
         isUser: true,
+        voice: voice || undefined,
         isHitlAnswer: !!pendingHitlAtSend,
       });
       if (pendingHitlAtSend) {
@@ -457,6 +464,7 @@ export const useChatStore = defineStore('chat', {
       }
 
       this.userInput = '';
+      this.pendingVoice = null;
       this.isLoading = true;
       this.streamingSessionId = requestSessionId;
 

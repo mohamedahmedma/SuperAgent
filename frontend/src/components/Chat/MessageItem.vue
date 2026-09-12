@@ -14,7 +14,8 @@
       </div>
 
       <template v-if="msg.isUser">
-        <MessageContent :text="msg.text" :is-user="true" :msg-index="msgIndex" />
+        <VoiceMessage v-if="msg.voice" :voice="msg.voice" />
+        <MessageContent v-else :text="msg.text" :is-user="true" :msg-index="msgIndex" />
       </template>
 
       <template v-else>
@@ -57,6 +58,7 @@
 import BrandLogo from '@/components/BrandLogo.vue';
 import { computed, ref } from 'vue';
 import MessageAssets from './MessageAssets.vue';
+import VoiceMessage from './VoiceMessage.vue';
 import MessageContent from './MessageContent.vue';
 import ThinkingTrace from './ThinkingTrace.vue';
 import References from './References.vue';

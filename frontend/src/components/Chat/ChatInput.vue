@@ -27,7 +27,7 @@
       </div>
     </div>
 
-    <div :class="['input-area', { 'hitl-active': chatStore.currentPendingHitl, 'is-recording': isRecording }]">
+    <div :class="['input-area', { 'hitl-active': chatStore.currentPendingHitl, 'is-recording': isRecording, 'is-paused': isPaused }]">
       <button
         class="attach-btn"
         type="button"
@@ -47,9 +47,10 @@
       <div v-if="isRecording" class="voice-recording" @pointermove="trackGesture" @pointerup="finishGesture">
         <button type="button" class="voice-cancel" aria-label="Cancel recording" @click="cancelRecording"><i class="fa-solid fa-trash"></i></button>
         <span class="record-dot"></span><strong>{{ recordingTime }}</strong>
-        <span class="voice-hint">← Slide to cancel · Slide up to lock</span>
+        <span class="voice-hint">{{ recordingLimitReached ? '1 minute reached — send or delete' : isPaused ? 'Recording paused' : 'Recording voice message' }}</span>
+        <button v-if="!recordingLimitReached" type="button" class="voice-pause" :aria-label="isPaused ? 'Resume recording' : 'Pause recording'" @click="toggleRecordingPause"><i :class="isPaused ? 'fa-solid fa-play' : 'fa-solid fa-pause'"></i></button>
         <button type="button" class="voice-cancel" @click="cancelRecording"><i class="fa-solid fa-trash"></i></button>
-        <button type="button" class="voice-send" aria-label="Finish and send recording" @click="stopRecording()"><i class="fa-solid fa-paper-plane"></i></button>
+        <button type="button" class="voice-send" aria-label="Finish and send recording" @click="stopRecording(false, true)"><i class="fa-solid fa-paper-plane"></i></button>
       </div>
 
       <textarea v-if="!isRecording" data-gramm="false" data-gramm_editor="false" spellcheck="false"
@@ -103,25 +104,58 @@ const audioChunks = ref<Blob[]>([]);
 const isRecording = ref(false);
 const startedAt = ref(0);
 const elapsed = ref(0);
+const isPaused = ref(false);
+const recordingLimitReached = ref(false);
 const locked = ref(false);
 const startPoint = ref<{ x: number; y: number } | null>(null);
 let timer: number | undefined;
 const recordingTime = computed(() => `00:${String(elapsed.value).padStart(2, '0')}`);
-const stopRecording = (discard = false) => {
-  window.clearInterval(timer); isRecording.value = false;
+const voiceAttachmentLabel = '[Voice recording attached]';
+
+const stopRecording = (discard = false, sendImmediately = false) => {
+  window.clearInterval(timer); isRecording.value = false; isPaused.value = false; recordingLimitReached.value = false;
   const active = recorder.value;
   if (!active || active.state === 'inactive') return;
   active.ondataavailable = (event) => { if (!discard && event.data.size) audioChunks.value.push(event.data); };
-  active.onstop = () => { if (!discard && audioChunks.value.length) chatStore.userInput += (chatStore.userInput ? ' ' : '') + '[Voice recording attached]'; audioChunks.value = []; };
+  active.onstop = async () => {
+    active.stream.getTracks().forEach((track) => track.stop());
+    if (!discard && audioChunks.value.length) {
+      const blob = new Blob(audioChunks.value, { type: active.mimeType || 'audio/webm' });
+      chatStore.queueVoiceMessage({
+        url: URL.createObjectURL(blob),
+        duration: elapsed.value,
+        mimeType: blob.type,
+      });
+      chatStore.userInput += (chatStore.userInput ? ' ' : '') + voiceAttachmentLabel;
+      if (sendImmediately) await onSend();
+    }
+    audioChunks.value = [];
+    recorder.value = null;
+  };
   active.stop();
 };
 const toggleRecording = async (event: PointerEvent) => {
   if (isRecording.value) return stopRecording();
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder.value = new MediaRecorder(stream); audioChunks.value = []; elapsed.value = 0; startedAt.value = Date.now(); startPoint.value = { x: event.clientX, y: event.clientY }; locked.value = false; isRecording.value = true; recorder.value.start();
-    timer = window.setInterval(() => { elapsed.value = Math.min(60, Math.floor((Date.now() - startedAt.value) / 1000)); if (elapsed.value >= 60) stopRecording(); }, 250);
+    recorder.value = new MediaRecorder(stream); audioChunks.value = []; elapsed.value = 0; isPaused.value = false; recordingLimitReached.value = false; startedAt.value = Date.now(); startPoint.value = { x: event.clientX, y: event.clientY }; locked.value = false; isRecording.value = true; recorder.value.start();
+    timer = window.setInterval(() => {
+      if (!isPaused.value) elapsed.value = Math.min(60, elapsed.value + 1);
+      if (elapsed.value >= 60) {
+        const active = recorder.value;
+        if (active?.state === 'recording') active.pause();
+        isPaused.value = true;
+        recordingLimitReached.value = true;
+        window.clearInterval(timer);
+      }
+    }, 1000);
   } catch { alert('Please allow microphone access to record a voice message.'); }
+};
+const toggleRecordingPause = () => {
+  const active = recorder.value;
+  if (!active || recordingLimitReached.value) return;
+  if (active.state === 'recording') { active.pause(); isPaused.value = true; }
+  else if (active.state === 'paused') { active.resume(); isPaused.value = false; }
 };
 const trackGesture = (event: PointerEvent) => { if (!startPoint.value || locked.value) return; if (startPoint.value.y - event.clientY > 60) locked.value = true; };
 const finishGesture = (event: PointerEvent) => { if (!startPoint.value || locked.value) return; if (startPoint.value.x - event.clientX > 100) cancelRecording(); };

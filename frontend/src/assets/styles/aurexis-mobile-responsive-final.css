@@ -1,0 +1,661 @@
+/*
+ * Mobile responsive baseline
+ * This is deliberately loaded after the legacy precision sheets.  It gives
+ * phones one predictable layout while leaving tablet and desktop untouched.
+ */
+
+@media (max-width: 900px) {
+  :root {
+    --mobile-safe-top: max(12px, env(safe-area-inset-top));
+    --mobile-safe-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  html,
+  body,
+  #app,
+  .app-page,
+  .app-wrapper,
+  .main-content,
+  .chat-workspace,
+  .chat-area {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .app-page,
+  .app-wrapper,
+  .main-content,
+  .chat-workspace,
+  .chat-area {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  .chat-workspace,
+  .chat-area {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .chat-header {
+    min-height: 60px !important;
+    padding: var(--mobile-safe-top) 64px 10px !important;
+  }
+
+  .mobile-menu-button {
+    top: var(--mobile-safe-top) !important;
+    left: 12px !important;
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 13px !important;
+  }
+
+  .mobile-sidebar-shell {
+    width: min(88vw, 360px) !important;
+  }
+
+  .mobile-sidebar-shell .sidebar {
+    padding-bottom: var(--mobile-safe-bottom) !important;
+  }
+
+  .chat-container {
+    min-height: 0 !important;
+    flex: 1 1 auto !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding-bottom: 16px !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .input-area-wrapper {
+    /* The composer must participate in the flex layout.  An absolute composer
+       overlays the final item in a short viewport, which was the cause of the
+       clipped fourth suggestion on iPhone SE. */
+    position: relative !important;
+    inset: auto !important;
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    margin-top: auto !important;
+    padding-bottom: var(--mobile-safe-bottom) !important;
+  }
+
+  .input-area,
+  .send-btn,
+  .voice-btn,
+  .mobile-menu-button,
+  .question-card,
+  .quick-service,
+  .history-close {
+    touch-action: manipulation;
+  }
+
+  /* Never force an empty screen to crop on short phones or enlarged text. */
+  .chat-container:has(.parent-dashboard) {
+    overflow-y: auto !important;
+    overscroll-behavior-y: contain;
+  }
+
+  .parent-dashboard,
+  .parent-dashboard .superagent-welcome {
+    height: auto !important;
+    min-height: 100% !important;
+  }
+
+  .parent-dashboard .superagent-welcome {
+    justify-content: flex-start !important;
+    padding: clamp(18px, 5vh, 34px) clamp(16px, 5vw, 24px) 128px !important;
+    overflow: visible !important;
+  }
+
+  .superagent-welcome .suggested-questions {
+    max-width: 520px !important;
+  }
+
+  .superagent-welcome .question-card {
+    min-height: 48px !important;
+  }
+
+  /* A user message and long links must never make the page wider than phone. */
+  .message,
+  .message-column,
+  .message-content,
+  .message-content pre,
+  .message-content table {
+    max-width: 100%;
+  }
+
+  .message-content,
+  .message-content a,
+  .message-content code {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .message-content pre,
+  .message-content table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-header {
+    padding-right: 58px !important;
+    padding-left: 58px !important;
+  }
+
+  .header-info h1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .input-area-wrapper {
+    padding-right: 8px !important;
+    padding-left: 8px !important;
+  }
+
+  .input-area {
+    gap: 5px !important;
+  }
+}
+
+/* iPhone SE-sized viewports: fit the useful welcome actions above the composer.
+   Scrolling remains available when a visitor uses a larger system font. */
+@media (max-width: 480px) and (max-height: 700px) and (orientation: portrait) {
+  .parent-dashboard .superagent-welcome {
+    padding-top: 14px !important;
+    padding-bottom: 104px !important;
+  }
+
+  .superagent-welcome .welcome-avatar {
+    width: 48px !important;
+    height: 48px !important;
+    margin-bottom: 5px !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome .welcome-eyebrow {
+    display: none !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome h2 {
+    margin: 0 0 3px !important;
+    font-size: 24px !important;
+    line-height: 1.08 !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome > p {
+    display: none !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome .suggested-questions {
+    margin-top: 10px !important;
+    padding: 9px !important;
+    border-radius: 15px !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome .suggested-questions-heading {
+    margin-bottom: 6px !important;
+    padding-bottom: 6px !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome .suggested-questions h3 {
+    font-size: 13px !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome .suggested-questions-heading p {
+    display: none !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome .question-grid {
+    gap: 5px !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome .question-card {
+    grid-template-columns: 18px minmax(0, 1fr) 16px !important;
+    min-height: 44px !important;
+    padding: 7px 8px !important;
+    font-size: 10.5px !important;
+    line-height: 1.25 !important;
+  }
+
+  html[data-theme] .parent-dashboard .superagent-welcome .question-card > i:first-child {
+    font-size: 11px !important;
+  }
+}
+
+/* 320px-wide phones need controls that remain comfortably tappable. */
+@media (max-width: 359px) {
+  .mobile-menu-button {
+    left: 8px !important;
+  }
+
+  .chat-header {
+    padding-right: 52px !important;
+    padding-left: 52px !important;
+  }
+
+  .input-area-wrapper {
+    padding-right: 5px !important;
+    padding-left: 5px !important;
+  }
+
+  .input-area .voice-btn,
+  .input-area button:has(.fa-microphone) {
+    flex-basis: 32px !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+  }
+
+  .send-btn {
+    flex-basis: 42px !important;
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+  }
+}
+
+/* Landscape phones have little vertical room: preserve chat and composer first. */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 520px) {
+  .chat-header {
+    min-height: 52px !important;
+    padding-top: max(6px, env(safe-area-inset-top)) !important;
+    padding-bottom: 6px !important;
+  }
+
+  .mobile-menu-button {
+    top: max(5px, env(safe-area-inset-top)) !important;
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .parent-dashboard .superagent-welcome {
+    padding-top: 12px !important;
+    padding-bottom: 94px !important;
+  }
+
+  .superagent-welcome .welcome-avatar,
+  .superagent-welcome .welcome-capabilities,
+  .superagent-welcome > p {
+    display: none !important;
+  }
+
+  .superagent-welcome h2 {
+    font-size: 25px !important;
+  }
+}
+
+@media (max-width: 900px) and (prefers-reduced-motion: reduce) {
+  .mobile-sidebar-shell,
+  .services-pop-enter-active,
+  .services-pop-leave-active {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Voice note bubble — compact, touch-friendly, and visually aligned with Aurexis. */
+.voice-message {
+  display: flex;
+  width: min(300px, 100%);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(74, 202, 233, .3);
+  border-radius: 18px 18px 5px 18px;
+  color: #e8f8ff;
+  background: linear-gradient(135deg, #0a4967, #123b6f);
+  box-shadow: 0 8px 22px rgba(4, 22, 43, .2);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.voice-message.is-playing {
+  border-color: rgba(107, 232, 249, .7);
+  box-shadow: 0 10px 28px rgba(19, 185, 221, .22), 0 0 0 3px rgba(70, 213, 237, .08);
+}
+
+.voice-message-play {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border-radius: 50%;
+  color: #062036;
+  background: #35cbe9;
+  cursor: pointer;
+  transition: transform 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.voice-message-play:hover { background: #7ae5f5; box-shadow: 0 0 0 5px rgba(90, 220, 240, .14); }
+.voice-message-play:active { transform: scale(.92); }
+.voice-message.is-playing .voice-message-play { animation: voice-play-pulse 1.7s ease-in-out infinite; }
+
+.voice-message-track { min-width: 0; flex: 1; }
+.voice-message-track input { width: 100%; accent-color: #72e7f7; cursor: pointer; }
+.voice-message-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 2px; color: rgba(232, 248, 255, .76); font-size: 10px; }
+.voice-message-meta time { color: #fff; font-variant-numeric: tabular-nums; }
+
+.voice-message-wave {
+  display: flex;
+  height: 16px;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.voice-message-wave span {
+  width: 3px;
+  height: calc(3px + var(--bar-index) * 1px);
+  border-radius: 999px;
+  background: rgba(194, 247, 255, .5);
+  transform-origin: center;
+}
+
+.voice-message.is-playing .voice-message-wave span {
+  background: #a7f5ff;
+  animation: voice-wave 780ms ease-in-out infinite alternate;
+  animation-delay: calc(var(--bar-index) * -70ms);
+}
+
+@keyframes voice-play-pulse {
+  50% { transform: scale(1.06); box-shadow: 0 0 0 7px rgba(90, 220, 240, 0); }
+}
+
+@keyframes voice-wave {
+  from { transform: scaleY(.55); opacity: .62; }
+  to { transform: scaleY(1.35); opacity: 1; }
+}
+
+@media (max-width: 480px) {
+  .voice-message { width: min(286px, 100%); padding: 9px 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-message,
+  .voice-message-play,
+  .voice-message.is-playing .voice-message-play,
+  .voice-message.is-playing .voice-message-wave span {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Refined voice-note controls: waveform bars replace the generic slider. */
+.voice-message {
+  width: min(330px, 100%);
+  gap: 9px;
+  padding: 11px;
+  border-radius: 20px 20px 6px 20px;
+  background: linear-gradient(145deg, #0d5272, #173866);
+}
+
+.voice-message-track { display: grid; gap: 5px; }
+.voice-message-wave {
+  display: flex;
+  width: 100%;
+  height: 25px;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.voice-message-wave span {
+  width: 3px;
+  height: 8px;
+  flex: 1 1 0;
+  border-radius: 999px;
+  background: rgba(211, 243, 255, .33);
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.voice-message-wave span:nth-child(3n) { height: 18px; }
+.voice-message-wave span:nth-child(4n) { height: 12px; }
+.voice-message-wave span:nth-child(5n) { height: 22px; }
+.voice-message-wave span:nth-child(7n) { height: 15px; }
+.voice-message-wave span.is-heard { background: #a7f5ff; }
+.voice-message.is-playing .voice-message-wave span.is-heard { animation: voice-wave 680ms ease-in-out infinite alternate; }
+
+.voice-message-meta { margin-top: 0; font-size: 10px; }
+.voice-message-label { display: inline-flex; align-items: center; gap: 5px; }
+.voice-message-label i { color: #92efff; font-size: 9px; }
+
+.voice-message-speed {
+  min-width: 38px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border: 1px solid rgba(173, 243, 255, .24);
+  border-radius: 9px;
+  color: #e8fbff;
+  background: rgba(1, 23, 47, .28);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+}
+.voice-message-speed:active { transform: scale(.94); }
+
+.is-recording .voice-recording { gap: 8px; }
+.is-recording .voice-pause,
+.is-recording .voice-cancel,
+.is-recording .voice-send {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.is-recording .voice-pause { color: #dffaff; background: rgba(120, 211, 238, .2); }
+.is-recording .voice-cancel { color: #ffd9df; background: rgba(255, 105, 122, .18); }
+.is-recording .voice-send { color: #062235; background: #35cbe9; }
+.is-recording.is-paused .record-dot { animation-play-state: paused; background: #f4c76d; }
+.is-recording.is-paused .voice-hint { color: #f7d78c; }
+
+@media (max-width: 390px) {
+  .voice-message { width: min(292px, 100%); }
+  .voice-message-wave { gap: 1px; }
+  .voice-message-speed { min-width: 34px; padding: 0 4px; }
+}
+
+/* One continuous chat surface — the header must not read as a separate shadowed bar. */
+html[data-theme='dark'] .chat-workspace,
+html[data-theme='dark'] .chat-area,
+html[data-theme='dark'] .chat-header,
+html[data-theme='dark'] .chat-container,
+html[data-theme='dark'] .input-area-wrapper {
+  background: var(--chat-canvas) !important;
+  background-image: none !important;
+}
+
+html[data-theme='light'] .chat-workspace,
+html[data-theme='light'] .chat-area,
+html[data-theme='light'] .chat-header,
+html[data-theme='light'] .chat-container,
+html[data-theme='light'] .input-area-wrapper {
+  background: var(--chat-canvas) !important;
+  background-image: none !important;
+}
+
+.chat-header { box-shadow: none !important; }
+
+/* WhatsApp handoff is an external brand action, so use its recognisable green. */
+.wa-login a.wa-primary,
+.wa-login button.wa-primary {
+  color: #fff !important;
+  border-color: #00a03c !important;
+  background: #00a03c !important;
+  background-image: none !important;
+  box-shadow: 0 10px 24px rgba(0, 160, 60, .2) !important;
+}
+
+.wa-login a.wa-primary:hover,
+.wa-login button.wa-primary:hover { background: #008f36 !important; border-color: #008f36 !important; }
+.wa-login a.wa-primary:active,
+.wa-login button.wa-primary:active { background: #007f30 !important; border-color: #007f30 !important; transform: translateY(1px); }
+.wa-login .wa-primary .fa-whatsapp { color: #fff !important; }
+
+/* OTP: the wrapper owns the outline; the input stays transparent inside it.
+   This prevents the legacy field styles from drawing a second nested box. */
+.wa-login .wa-code-form .field-input {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-height: 58px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(104, 194, 224, .26) !important;
+  border-radius: 16px !important;
+  background: rgba(4, 29, 49, .78) !important;
+  box-shadow: inset 0 1px 0 rgba(204, 246, 255, .04) !important;
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease !important;
+}
+
+.wa-login .wa-code-form .field-input:focus-within {
+  border-color: #28c3e2 !important;
+  background: rgba(5, 37, 60, .92) !important;
+  box-shadow: 0 0 0 3px rgba(40, 195, 226, .14), inset 0 1px 0 rgba(204, 246, 255, .06) !important;
+}
+
+.wa-login .wa-code-form .field-input .wa-otp-input {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  height: 56px !important;
+  min-height: 56px !important;
+  margin: 0 !important;
+  padding: 0 50px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #effcff !important;
+  font-size: clamp(1.12rem, 5vw, 1.35rem) !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  letter-spacing: .34em !important;
+  text-align: center !important;
+}
+
+.wa-login .wa-code-form .field-input .wa-otp-input::placeholder {
+  color: rgba(156, 208, 226, .56) !important;
+  opacity: 1 !important;
+}
+
+.wa-login .wa-code-form .field-input > i {
+  z-index: 1 !important;
+  right: 17px !important;
+  left: auto !important;
+  color: #74dced !important;
+  font-size: 1rem !important;
+  pointer-events: none !important;
+}
+
+@media (max-width: 390px) {
+  .wa-login .wa-code-form .field-input { min-height: 54px !important; border-radius: 14px !important; }
+  .wa-login .wa-code-form .field-input .wa-otp-input { height: 52px !important; min-height: 52px !important; padding-inline: 44px !important; letter-spacing: .28em !important; }
+  .wa-login .wa-code-form .field-input > i { right: 15px !important; }
+}
+
+/* Keyboard-safe chat layout.
+   The old rules positioned the composer against the layout viewport. On mobile
+   browsers that viewport stays tall while the keyboard is visible, so the bar
+   could sit in the middle of the screen and cover the conversation. Keep one
+   scroll region and size the whole chat to the real VisualViewport instead. */
+@media (max-width: 900px) {
+  html.aurexis-keyboard-open,
+  html.aurexis-keyboard-open body,
+  html.aurexis-keyboard-open #app {
+    height: var(--aurexis-visual-height, 100dvh) !important;
+    min-height: var(--aurexis-visual-height, 100dvh) !important;
+    max-height: var(--aurexis-visual-height, 100dvh) !important;
+    overflow: hidden !important;
+  }
+
+  html.aurexis-keyboard-open .app-page,
+  html.aurexis-keyboard-open .app-wrapper,
+  html.aurexis-keyboard-open .main-content,
+  html.aurexis-keyboard-open .chat-workspace,
+  html.aurexis-keyboard-open .chat-area {
+    height: var(--aurexis-visual-height, 100dvh) !important;
+    min-height: 0 !important;
+    max-height: var(--aurexis-visual-height, 100dvh) !important;
+    overflow: hidden !important;
+  }
+
+  html.aurexis-keyboard-open .chat-workspace,
+  html.aurexis-keyboard-open .chat-area {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  html.aurexis-keyboard-open .chat-container {
+    position: relative !important;
+    z-index: 0 !important;
+    min-height: 0 !important;
+    flex: 1 1 auto !important;
+    padding-bottom: 12px !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain !important;
+    scroll-padding-top: 12px !important;
+    scroll-padding-bottom: 16px !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  html.aurexis-keyboard-open .input-area-wrapper {
+    position: relative !important;
+    inset: auto !important;
+    z-index: 10 !important;
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin-top: auto !important;
+    padding: 8px 8px max(8px, env(safe-area-inset-bottom)) !important;
+    transform: none !important;
+    background: var(--chat-canvas) !important;
+    box-shadow: 0 -10px 22px rgba(2, 16, 31, .12) !important;
+  }
+
+  html.aurexis-keyboard-open .input-area {
+    width: 100% !important;
+    min-height: 56px !important;
+    margin: 0 !important;
+    padding: 6px 8px !important;
+  }
+
+  html.aurexis-keyboard-open .chat-input-textarea {
+    min-height: 44px !important;
+    height: 44px !important;
+    margin: 0 !important;
+    padding-block: 11px !important;
+    font-size: 16px !important;
+    line-height: 22px !important;
+  }
+
+  /* Welcome stays in the normal scrolling document too; it must never become
+     a fixed layer above the composer when the keyboard opens. */
+  html.aurexis-keyboard-open .welcome-screen {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100% !important;
+    margin: 0 !important;
+    padding: 18px 16px 24px !important;
+    overflow: visible !important;
+    pointer-events: auto !important;
+    transform: none !important;
+  }
+}
