@@ -48,11 +48,36 @@ class SamplingShapeTests(SamplingTestCase):
 
     def test_max_tokens_is_omitted_when_zero(self):
         """0 means 'no ceiling'. Passed through literally it would cap the response at
-        zero tokens, which is the difference between a knob being off and being lethal."""
+        zero tokens, which is the difference between a knob being off and being lethal.
+
+        Read off the CONFIGURED value rather than assuming base leaves every role at 0.
+        It no longer does — `grade_max_tokens` is floored there on purpose, because 0
+        does not mean "unlimited" either: it means the provider's default, which a
+        reasoning model can spend entirely on its scratchpad before emitting any JSON.
+        The guard below keeps this from quietly becoming a test of nothing if the rest
+        of the roles are ever floored too."""
         set_profile(load_profile("base"))
-        for role in ROLES:
+        models = load_profile("base").models
+        unset = [role for role in ROLES if not getattr(models, f"{role}_max_tokens")]
+        self.assertTrue(unset, "no role is left at 0, so this no longer exercises the rule")
+        for role in unset:
             with self.subTest(role=role):
                 self.assertNotIn("max_tokens", sampling(role))
+
+    def test_max_tokens_is_omitted_when_a_deployment_turns_it_off(self):
+        """The same rule pinned directly, so it survives every role gaining a ceiling —
+        and so a deployment on a NON-reasoning model, which needs none of the headroom
+        the grade floor exists for, can still switch it off and get an absent field."""
+        with patch.dict(os.environ, {"GRADE_MAX_TOKENS": "0"}):
+            set_profile(load_profile("base"))
+            self.assertNotIn("max_tokens", sampling("grade"))
+
+    def test_grading_carries_a_ceiling_by_default(self):
+        """The other half of that decision, stated where it can be found. A grade is a
+        structured object under 200 tokens; the ceiling is sized for the reasoning in
+        front of it, not for the JSON. See base.yaml for the measurement behind 1536."""
+        set_profile(load_profile("base"))
+        self.assertGreaterEqual(sampling("grade")["max_tokens"], 1024)
 
     def test_max_tokens_is_passed_through_when_positive(self):
         with patch.dict(os.environ, {"PLANNER_MAX_TOKENS": "128"}):

@@ -52,6 +52,23 @@ models:
   # Output ceilings stay off (0) by default. A ceiling that truncates a structured
   # response converts a paid call into a parse failure, so it is worth setting only
   # from an observed p99 output length — per deployment, via <ROLE>_MAX_TOKENS.
+  #
+  # `grade` is the exception, and it is set the other way round: not to cap the call but
+  # to FLOOR it. Sending no ceiling does not mean "unlimited" — it means the provider's
+  # own default applies, and on a reasoning model that default is easily spent on the
+  # scratchpad alone, because reasoning is billed against the same completion budget as
+  # the answer and is produced first. The call then ends at `finish_reason: length`
+  # having emitted no JSON, which the client raises rather than returning: grading is the
+  # HIGH rung, so the turn routes to `retrieval_error` and the user is told the knowledge
+  # base is broken while its answer sits in the chunks already retrieved.
+  #
+  # 1536 rather than a round number pulled upward: the grade itself is a handful of enums
+  # and a short reason, under 200 tokens, and `low` effort on this model reasons in the
+  # hundreds — so this clears both with room to spare and without quietly licensing a
+  # model to think for a page. `_GRADE_RETRY_MAX_TOKENS` doubles it for the one call that
+  # has already been cut off, which is the rare case and the only one worth paying more
+  # for. A deployment on a non-reasoning model can set GRADE_MAX_TOKENS back to 0.
+  grade_max_tokens: 1536
 
 agent:
   tools:
