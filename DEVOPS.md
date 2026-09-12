@@ -110,6 +110,19 @@ rejects are otherwise indistinguishable — the runs just never arrive. The key 
 be matched against the file a deployment believes it is using without either being read
 aloud.
 
+Comparing that fingerprint against `.env` takes the newline off first, or a key that is
+correct fingerprints two different ways and reads as a mismatch that is not there:
+
+```
+cd /opt/superagent
+printf %s "$(grep '^LANGSMITH_API_KEY=' .env | cut -d= -f2- | tr -d '\r"')" | sha256sum | cut -c1-8
+docker exec superagent-backend sh -c 'printf %s "$LANGSMITH_API_KEY" | sha256sum | cut -c1-8'
+```
+
+`sha256sum` reading a pipeline hashes the trailing newline `grep` emits; `$( )` strips it,
+and `printf %s` adds none. Both sides then agree, and the boot line's fingerprint — taken
+from the value in memory — agrees with them.
+
 ## Pipeline order
 
 `deploy.yml` runs `ci.yml` as its first job and everything else depends on it, so a push
