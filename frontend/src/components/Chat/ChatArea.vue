@@ -79,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUpdate, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUpdate, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import WelcomeScreen from './WelcomeScreen.vue';
 import MessageItem from './MessageItem.vue';
 import ChatInput from './ChatInput.vue';
@@ -136,10 +136,18 @@ onBeforeUpdate(() => {
 const hasPaged = computed(() => !!chatStore.pagingBySession[chatStore.sessionId]);
 const isPrepending = ref(false);
 const LOAD_OLDER_THRESHOLD_PX = 120;
+let followLatest = true;
+let previousScrollTop = 0;
+let scrollResizeObserver: ResizeObserver | undefined;
+
+const followBottom = () => {
+  if (followLatest && !isPrepending.value) scrollToBottom();
+};
 
 const scrollToBottom = () => {
   if (chatContainerRef.value) {
     chatContainerRef.value.scrollTop = chatContainerRef.value.scrollHeight;
+    previousScrollTop = chatContainerRef.value.scrollTop;
   }
 };
 
@@ -152,6 +160,11 @@ const useSuggestedQuestion = async (question: string) => {
 const onScroll = async () => {
   const container = chatContainerRef.value;
   if (!container || isPrepending.value) return;
+  const distanceToBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+  // Reading older messages must win over streaming and keyboard resizing.
+  if (container.scrollTop < previousScrollTop - 2) followLatest = false;
+  if (distanceToBottom <= 4) followLatest = true;
+  previousScrollTop = container.scrollTop;
   if (container.scrollTop > LOAD_OLDER_THRESHOLD_PX) return;
   if (!chatStore.canLoadOlderMessages) return;
 
@@ -171,6 +184,7 @@ const onScroll = async () => {
   } finally {
     await nextTick();
     isPrepending.value = false;
+    previousScrollTop = chatContainerRef.value?.scrollTop ?? 0;
   }
 };
 
@@ -193,17 +207,40 @@ watch(
   () => chatStore.messages,
   () => {
     if (isPrepending.value) return;
-    nextTick(scrollToBottom);
+    nextTick(followBottom);
   },
   { deep: true }
 );
 
 watch(
   () => chatStore.sessionId,
-  () => nextTick(scrollToBottom)
+  () => { followLatest = true; nextTick(scrollToBottom); }
 );
 
-onMounted(scrollToBottom);
+// Sending a new message intentionally returns to the conversation end.
+watch(
+  () => chatStore.messages.filter(message => message.isUser).length,
+  (count, previous) => {
+    if (count > previous && !isPrepending.value) {
+      followLatest = true;
+      nextTick(scrollToBottom);
+    }
+  },
+);
+
+onMounted(() => {
+  scrollToBottom();
+  scrollResizeObserver = new ResizeObserver(followBottom);
+  if (chatContainerRef.value) {
+    scrollResizeObserver.observe(chatContainerRef.value);
+    // Late-loading images should only move readers who were already at the end.
+    chatContainerRef.value.addEventListener('load', followBottom, true);
+  }
+});
+onBeforeUnmount(() => {
+  scrollResizeObserver?.disconnect();
+  chatContainerRef.value?.removeEventListener('load', followBottom, true);
+});
 </script>
 
 <style scoped>

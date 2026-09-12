@@ -568,94 +568,136 @@ html[data-theme='light'] .input-area-wrapper {
   .wa-login .wa-code-form .field-input > i { right: 15px !important; }
 }
 
-/* Keyboard-safe chat layout.
-   The old rules positioned the composer against the layout viewport. On mobile
-   browsers that viewport stays tall while the keyboard is visible, so the bar
-   could sit in the middle of the screen and cover the conversation. Keep one
-   scroll region and size the whole chat to the real VisualViewport instead. */
+/* One viewport shell, one scrolling conversation, one in-flow composer.
+   All heights below are inherited from the shell, never repeated vh heights. */
 @media (max-width: 900px) {
-  html.aurexis-keyboard-open,
-  html.aurexis-keyboard-open body,
-  html.aurexis-keyboard-open #app {
-    height: var(--aurexis-visual-height, 100dvh) !important;
-    min-height: var(--aurexis-visual-height, 100dvh) !important;
-    max-height: var(--aurexis-visual-height, 100dvh) !important;
+  html.aurexis-chat-viewport,
+  html.aurexis-chat-viewport body,
+  html.aurexis-chat-viewport #app {
+    height: 100% !important;
+    min-height: 0 !important;
     overflow: hidden !important;
+    overscroll-behavior: none;
   }
 
-  html.aurexis-keyboard-open .app-page,
-  html.aurexis-keyboard-open .app-wrapper,
-  html.aurexis-keyboard-open .main-content,
-  html.aurexis-keyboard-open .chat-workspace,
-  html.aurexis-keyboard-open .chat-area {
+  html.aurexis-chat-viewport .app-page {
+    position: fixed !important;
+    inset: 0 0 auto !important;
+    width: 100% !important;
     height: var(--aurexis-visual-height, 100dvh) !important;
     min-height: 0 !important;
-    max-height: var(--aurexis-visual-height, 100dvh) !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    transform: translateY(var(--aurexis-visual-top, 0px)) !important;
+    transition: none !important;
     overflow: hidden !important;
   }
 
-  html.aurexis-keyboard-open .chat-workspace,
-  html.aurexis-keyboard-open .chat-area {
-    display: flex !important;
-    flex-direction: column !important;
-  }
-
-  html.aurexis-keyboard-open .chat-container {
+  html.aurexis-chat-viewport .app-wrapper,
+  html.aurexis-chat-viewport .main-content,
+  html.aurexis-chat-viewport .chat-workspace,
+  html.aurexis-chat-viewport .chat-area {
+    box-sizing: border-box !important;
     position: relative !important;
-    z-index: 0 !important;
+    height: 100% !important;
     min-height: 0 !important;
-    flex: 1 1 auto !important;
-    padding-bottom: 12px !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-    overscroll-behavior: contain !important;
-    scroll-padding-top: 12px !important;
-    scroll-padding-bottom: 16px !important;
-    -webkit-overflow-scrolling: touch !important;
+    max-height: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
   }
 
-  html.aurexis-keyboard-open .input-area-wrapper {
+  html.aurexis-chat-viewport .chat-workspace { display: block !important; }
+  html.aurexis-chat-viewport .chat-area {
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  html.aurexis-chat-viewport .chat-header {
     position: relative !important;
     inset: auto !important;
-    z-index: 10 !important;
-    flex: 0 0 auto !important;
+    min-height: 60px !important;
+    z-index: 2 !important;
+  }
+  html.aurexis-chat-viewport .mobile-menu-button { position: absolute !important; }
+
+  html.aurexis-chat-viewport .chat-workspace .chat-container {
+    position: relative !important;
+    inset: auto !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    box-sizing: border-box !important;
+    overflow: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior-y: contain !important;
+    scroll-behavior: auto !important;
+    overflow-anchor: none;
+    scroll-padding-block: 16px 24px !important;
+    padding-bottom: 24px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  html.aurexis-chat-viewport .chat-container > * { flex-shrink: 0 !important; }
+  html.aurexis-chat-viewport .chat-workspace .input-area-wrapper {
+    position: relative !important;
+    inset: auto !important;
     width: 100% !important;
-    max-width: none !important;
-    margin-top: auto !important;
-    padding: 8px 8px max(8px, env(safe-area-inset-bottom)) !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 8px 10px max(10px, env(safe-area-inset-bottom)) !important;
+    max-height: calc(var(--aurexis-visual-height, 100dvh) * .45) !important;
+    overflow-y: auto !important;
+    z-index: 2 !important;
     transform: none !important;
     background: var(--chat-canvas) !important;
-    box-shadow: 0 -10px 22px rgba(2, 16, 31, .12) !important;
+    box-shadow: none !important;
   }
-
-  html.aurexis-keyboard-open .input-area {
+  html.aurexis-chat-viewport.aurexis-keyboard-open .input-area-wrapper {
+    padding-bottom: 8px !important;
+  }
+  html.aurexis-chat-viewport .chat-workspace .input-area {
+    position: relative !important;
+    inset: auto !important;
+    margin: 0 !important;
+    transform: none !important;
     width: 100% !important;
     min-height: 56px !important;
-    margin: 0 !important;
-    padding: 6px 8px !important;
+    padding: 5px 6px !important;
+    gap: 6px !important;
+    border: 1px solid var(--line-strong) !important;
+    border-radius: 18px !important;
+    box-shadow: none !important;
   }
-
-  html.aurexis-keyboard-open .chat-input-textarea {
-    min-height: 44px !important;
-    height: 44px !important;
-    margin: 0 !important;
-    padding-block: 11px !important;
+  html.aurexis-chat-viewport .input-area:focus-within {
+    border-color: var(--mint-strong) !important;
+  }
+  html.aurexis-chat-viewport .chat-input-textarea {
     font-size: 16px !important;
     line-height: 22px !important;
+    min-height: 44px !important;
+    max-height: min(132px, 24dvh) !important;
+    padding: 11px 4px !important;
+  }
+  html.aurexis-chat-viewport .input-area .voice-btn,
+  html.aurexis-chat-viewport .input-area .send-btn {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    flex: 0 0 44px !important;
   }
 
-  /* Welcome stays in the normal scrolling document too; it must never become
-     a fixed layer above the composer when the keyboard opens. */
-  html.aurexis-keyboard-open .welcome-screen {
-    position: static !important;
+  html.aurexis-chat-viewport .chat-container .parent-dashboard,
+  html.aurexis-chat-viewport .parent-dashboard .superagent-welcome {
+    position: relative !important;
     inset: auto !important;
-    width: 100% !important;
     height: auto !important;
     min-height: 100% !important;
-    margin: 0 !important;
-    padding: 18px 16px 24px !important;
     overflow: visible !important;
-    pointer-events: auto !important;
-    transform: none !important;
+  }
+  html.aurexis-chat-viewport .parent-dashboard .superagent-welcome {
+    justify-content: flex-start !important;
+    padding-bottom: 16px !important;
   }
 }

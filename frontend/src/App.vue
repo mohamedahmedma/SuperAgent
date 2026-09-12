@@ -60,10 +60,25 @@ import DocumentSettings from '@/components/Documents/DocumentSettings.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useChatStore } from '@/stores/chat';
 import { useSessionStore } from '@/stores/sessions';
+import { installMobileChatViewport } from '@/aurexis-mobile-keyboard';
 
 const authStore = useAuthStore();
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();
+
+// Keep auth forms and document settings on their normal scrolling layout.
+let releaseChatViewport: (() => void) | undefined;
+onMounted(() => {
+  watch(
+    () => authStore.isAuthenticated && chatStore.activeNav !== 'settings',
+    (enabled) => {
+      releaseChatViewport?.();
+      releaseChatViewport = enabled ? installMobileChatViewport() : undefined;
+    },
+    { immediate: true, flush: 'post' },
+  );
+});
+onUnmounted(() => releaseChatViewport?.());
 
 type Theme = 'dark' | 'light';
 const themeStorageKey = 'superagent-theme-v2';
