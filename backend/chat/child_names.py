@@ -86,6 +86,11 @@ _TOKEN = re.compile(r"\w+", re.UNICODE)
 #: whichever it is set to and one message often carries both.
 _SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([؟،؛?!,.:;])")
 
+#: The conjunction, which Arabic writes as a letter on the front of the word it joins.
+#: The one clitic `occurs_as_written` looks past — see its docstring for why the others
+#: are left alone.
+_WAW = "و"
+
 #: Given names in this deployment's population that are ALSO ordinary Arabic words, or
 #: that fold onto one. Written in natural spelling and folded at import, exactly as
 #: `text_matching.arabic_stop_words_for_analyzer` is, because the comparison happens on
@@ -191,7 +196,19 @@ def occurs_as_written(text: str, name: str) -> bool:
 
     The strict half of the pair `name_key` forms: it compares on `_exact_key`, which
     repairs PDF damage but keeps the hamza, the teh marbuta and the alef maksura — the
-    three marks that tell على from علي. Whole tokens only, so «فعلي» is not «علي».
+    three marks that tell على from علي. Whole tokens, so «فعلي» (actual) is not «علي».
+
+    Whole tokens with ONE allowance, and it is not a nicety: Arabic writes "and" as a
+    letter on the front of the next word, so «وعمر عامل ايه؟» — the ordinary way a parent
+    moves the conversation to another child — contains no token «عمر» at all. Rejecting
+    it left the turn on the sibling the parent had just stopped asking about, which
+    `test_child_selection_conversations` catches and is right to.
+
+    Only the waw. ف, ب, ل and ك are the prefixes that also build real words out of these
+    names — «فعلي» is one — and a name written behind one of those simply goes
+    unconfirmed, which falls back to the pin rather than to the wrong child. The definite
+    article needs no rule of its own: «العمر» is not «عمر» under an exact comparison, so
+    the word for an age is already excluded by the test above.
     """
     tokens = _TOKEN.findall(name or "")
     width = len(tokens)
@@ -200,8 +217,8 @@ def occurs_as_written(text: str, name: str) -> bool:
     spans = _spans(text or "")
     key = _exact_key(name)
     for start in range(0, len(spans) - width + 1):
-        window = text[spans[start][0]:spans[start + width - 1][1]]
-        if _exact_key(window) == key:
+        window = _exact_key(text[spans[start][0]:spans[start + width - 1][1]])
+        if window == key or (window.startswith(_WAW) and window[1:] == key):
             return True
     return False
 
