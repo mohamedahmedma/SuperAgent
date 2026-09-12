@@ -12,6 +12,11 @@
         <div v-if="msg.ragTrace.retrieval_status" class="trace-line">
           Retrieval status: {{ formatRetrievalStatus(msg.ragTrace.retrieval_status) }}
         </div>
+        <!-- Rendered because a query that lost a word is otherwise an invisible change:
+             the search query shown below is what was searched for, never what was not. -->
+        <div v-if="msg.ragTrace.child_name_removed" class="trace-line">
+          Searched without the child's name
+        </div>
         <div v-if="msg.ragTrace.hitl_resumed" class="trace-line">
           HITL resumed: Yes
           <span v-if="msg.ragTrace.hitl_answer">(Follow-up: {{ msg.ragTrace.hitl_answer }})</span>

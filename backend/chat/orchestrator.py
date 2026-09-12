@@ -157,6 +157,7 @@ def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
         "child_label": plan.child_hint,
         "forced_tool": plan.forced_tool,
         "planned_calls": plan.planned_calls,
+        "child_names": plan.child_names,
     }
     try:
         ctx.note_turn_plan(plan.retrieval_sections, plan.scope_options, **hints)
@@ -181,8 +182,8 @@ def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
     # dropped, so the retry re-sends the argument that caused the TypeError and the
     # ladder walks all the way down handing over nothing at all.
     for dropped in (
-        "planned_calls", "forced_tool", "child_label", "child_id", "child_year",
-        "language", "is_followup", "carried_constraints",
+        "child_names", "planned_calls", "forced_tool", "child_label", "child_id",
+        "child_year", "language", "is_followup", "carried_constraints",
     ):
         hints.pop(dropped, None)
         try:

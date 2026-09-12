@@ -96,6 +96,15 @@ class ChatRequestContext:
     # in a chain whose other end is the school's own roster.
     planned_child_id: str = ""
     planned_child_label: str = ""
+    # The spellings of a child's name that THIS MESSAGE used. Read by the RAG graph, and
+    # by nothing else, to take the name back out of the text it searches for — the corpus
+    # is the school's material and holds no pupil's name, so every term spent on one is a
+    # term spent against the answer. See `backend/chat/child_names.py`.
+    #
+    # Empty on every turn that did not name a child, which is most of them, and empty for
+    # a profile with no roster behind it at all — both of which make the strip a no-op
+    # rather than a special case anybody downstream has to check for.
+    child_names: list = field(default_factory=list)
     # A tool this turn must call rather than merely be offered, when the planner narrowed
     # to exactly one. Read by the middleware that sets `tool_choice` on the turn's first
     # model call; empty on every turn that did not narrow, which is most of them.
@@ -184,6 +193,7 @@ class ChatRequestContext:
         child_label: str = "",
         forced_tool: str = "",
         planned_calls=(),
+        child_names=(),
     ) -> None:
         """Hand the planner's findings to the RAG graph.
 
@@ -219,6 +229,10 @@ class ChatRequestContext:
             self.planned_child_id = child_id if child_id and child_label else ""
             self.planned_child_label = child_label if child_id and child_label else ""
             self.forced_tool = (forced_tool or "").strip()
+            # Kept even when the child could not be settled to an id: this list says what
+            # the MESSAGE called a child, which is a fact about the words, and a roster
+            # that timed out does not make those words any less a name.
+            self.child_names = [str(name) for name in (child_names or []) if name]
             # Copied, not aliased, and DEEPLY — the arguments are a nested dict, so a
             # shallow copy still shares them. The plan outlives this call and the
             # middleware reads this list on another thread; sharing either level would let
