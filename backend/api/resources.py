@@ -39,11 +39,16 @@ def delete_document_transactionally(
     enrichment runs inside `load_document` and commits this filename's `document_assets`
     rows before the replace is reached, so a cleanup that ran afterwards would delete the
     rows the parse had just written. Skipping the delete is safe rather than merely
-    convenient — `build_asset_id` is deterministic in (filename, page_number, index), so
-    re-ingesting a document regenerates the same ids and `record_many` upserts them in
-    place. The one residue is a replacement with FEWER images than the version it
-    replaces, whose surplus (page, index) rows linger; `delete_by_filename` keeps the
+    convenient — `build_asset_id` is deterministic in (filename, page_number, image
+    bytes), so re-ingesting a document regenerates the same ids and `record_many` upserts
+    them in place. The one residue is a replacement that DROPS an image, whose row
+    lingers addressed by a digest no chunk now references; `delete_by_filename` keeps the
     extraction cache regardless, so nothing expensive is at stake either way.
+
+    That residue used to be worse than lingering. While the id was the image's ordinal, a
+    replacement that added or removed a figure renumbered every later one, so a surplus
+    row was not merely unreferenced — its id was handed to a DIFFERENT image, and an
+    anchor stored in an older answer resolved to the wrong picture.
     """
     if job_manager and job_id:
         job_manager.update_step(job_id, "prepare", 50, "running", "Initializing Milvus collection")

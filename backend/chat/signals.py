@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence
 
 from backend.chat.language import detect_language
 from backend.rag.evidence import Certainty
+from backend.chat.child_names import is_also_an_ordinary_word, occurs_as_written
 from backend.text_matching import name_key
 from backend.text_normalization import normalize_query
 
@@ -552,12 +553,31 @@ def _names_the_child(text: str, name: str) -> bool:
     and teh marbuta, so it would still read «أحمد» reported by the classifier and «احمد»
     typed by the parent as two different names — which is exactly the mismatch this
     check exists to survive.
+
+    With ONE exception, because that folding has a hole this check was falling through.
+    `name_key` maps ى onto ي, so the preposition على and the given name علي are the same
+    string here — and this check is the only thing standing between a classifier that
+    invents a name and a child being selected by it. Asked to classify «فيه خصم على الأخ
+    التاني؟» in a conversation where علي was discussed earlier, the classifier returns
+    `named` with «علي»; folded, the preposition satisfies the containment test, and the
+    turn then selects that child BY NAME — which outranks a pin pointing at a sibling,
+    so the parent is shown the wrong child's records. The same hole reaches آية against
+    the Egyptian «إيه», and عمر against the word for an age.
+
+    So a name that is also an everyday word has to have been written the way it is
+    spelled, not merely folded onto something in the message. Names that are not
+    everyday words — أحمد, ليلى, فاطمة — keep the forgiving comparison, which is the one
+    that makes «ليلي» find «ليلى» and is the whole reason folding is here.
     """
     if not name:
         return False
     haystack = name_key(text)
     needle = name_key(name)
-    return bool(needle) and needle in haystack
+    if not needle or needle not in haystack:
+        return False
+    if is_also_an_ordinary_word(name) and not occurs_as_written(text, name):
+        return False
+    return True
 
 
 def _default_envelope_invoke(question, history, config):  # pragma: no cover - needs a model

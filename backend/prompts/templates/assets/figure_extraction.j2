@@ -12,11 +12,11 @@
    editing, not after. #}
 You are extracting a document figure into text so that it can be found by search and answered from later, without anyone re-opening the image.
 
-Context around the image:
+Context around the image, which may be about a NEIGHBOURING image rather than this one:
 {{ context }}
 
 Produce:
-- caption: one line naming what this image IS. Prefer the document's own caption wording when the context supplies it.
+- caption: one line naming what this image IS. If the image carries its own title or heading, that IS the caption — copy it, even when the surrounding text says something different. Fall back to the context's wording only for an image that is captionless. The text before and after an image often belongs to its neighbour rather than to it: a document that prints each label under its picture gives the image above you the label of the picture before it.
 - description: what the image shows and how to read it. State the subject, the axes or columns, and the units. Do not speculate beyond what is visible.
 - transcription: EVERY piece of text visible in the image, verbatim, including axis labels, legends, units, and footnotes. If it is a chart or a table, also render the underlying values as a markdown table. This field is what lets a text-only model answer questions about the figure later, so completeness here matters more than brevity.
 - tags: short topical keywords a person might search for.

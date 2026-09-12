@@ -80,10 +80,46 @@ def make_dossier(
 
 class DossierModelTests(unittest.TestCase):
     def test_asset_id_is_deterministic_and_mirrors_chunk_id_shape(self):
-        self.assertEqual("doc.pdf::p3::img2", build_asset_id("doc.pdf", 3, 2))
-        self.assertEqual(build_asset_id("doc.pdf", 3, 2), build_asset_id("doc.pdf", 3, 2))
+        self.assertRegex(
+            build_asset_id("doc.pdf", 3, b"png bytes"), r"^doc\.pdf::p3::img[0-9a-f]{12}$"
+        )
+        self.assertEqual(
+            build_asset_id("doc.pdf", 3, b"png bytes"),
+            build_asset_id("doc.pdf", 3, b"png bytes"),
+        )
         # Whitespace in a filename must not produce two ids for one asset.
-        self.assertEqual("a b.pdf::p0::img0", build_asset_id("a  \n b.pdf", 0, 0))
+        self.assertTrue(build_asset_id("a  \n b.pdf", 0, b"x").startswith("a b.pdf::p0::img"))
+
+    def test_asset_id_follows_the_image_rather_than_its_position(self):
+        """The id's last segment is a digest of the image, not its ordinal on the page.
+
+        As an ordinal it was positional, and ids outlive the ingest that minted them — an
+        answer stores a `<!--figure:id-->` anchor, `document_assets` rows survive a
+        replace that passes `include_assets=False`, a browser caches `/media/<id>`. So
+        inserting one figure renumbered every later one and re-pointed those references
+        at a different picture: a sports-wear diagram's id came back naming the school
+        calendar.
+        """
+        before = [build_asset_id("kb.docx", 0, data) for data in (b"first", b"second", b"third")]
+        after = [
+            build_asset_id("kb.docx", 0, data)
+            for data in (b"first", b"INSERTED", b"second", b"third")
+        ]
+        self.assertEqual(before[1], after[2])
+        self.assertEqual(before[2], after[3])
+        self.assertNotIn(after[1], before)
+
+    def test_one_image_used_twice_is_one_asset(self):
+        """Correct, and the extraction cache already said so — it is keyed on this same
+        digest, so both occurrences were always going to share a dossier."""
+        self.assertEqual(
+            build_asset_id("kb.docx", 0, b"same picture"),
+            build_asset_id("kb.docx", 0, b"same picture"),
+        )
+        self.assertNotEqual(
+            build_asset_id("kb.docx", 0, b"same picture"),
+            build_asset_id("kb.docx", 1, b"same picture"),
+        )
 
     def test_render_surrogate_orders_most_specific_first(self):
         text = make_dossier().render_surrogate()

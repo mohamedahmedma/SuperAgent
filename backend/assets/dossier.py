@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # once and every image goes back through a vision call. A bump to 2 was reverted for
 # exactly that reason. Change it only alongside a prompt change you have measured, and
 # expect a full re-extraction pass to follow.
-DOSSIER_VERSION = 1
+DOSSIER_VERSION = 2
 
 
 class AssetRole(str, Enum):
@@ -250,12 +250,30 @@ class AssetDossier(_Model):
 _ASSET_ID_UNSAFE = re.compile(r"\s+")
 
 
-def build_asset_id(filename: str, page_number: int, index: int) -> str:
+def build_asset_id(filename: str, page_number: int, data: bytes) -> str:
     """Deterministic occurrence id, mirroring the chunk-id convention in
     document_loader (`{filename}::p{page}::l{level}::{index}`) so both id families
-    read the same way in traces and citations."""
+    read the same way in traces and citations.
+
+    The last segment is a digest of the image's own bytes, NOT its ordinal on the page.
+    It used to be the ordinal, and that made the id positional: every image after an
+    inserted one was renumbered, so `kb.docx::p0::img6` named the sports-wear diagram in
+    one ingest and the school calendar in the next. Ids leak out of the ingest that
+    minted them — `document_assets` rows survive a replace that passes
+    `include_assets=False`, a stored answer keeps the `<!--figure:id-->` anchor that was
+    resolvable when it was written, and a browser caches `/media/<id>` — so a renumbering
+    does not merely churn, it re-points an existing reference at a different picture.
+
+    Content-addressed, the id follows the image instead of its position. Adding a figure
+    to the middle of a document leaves every other id untouched, re-ingesting is
+    genuinely idempotent, and the surplus rows a shrinking document used to strand are no
+    longer addressable by a later image at all. Two copies of one image in a document do
+    now share an id, which is correct: they are the same picture, they extract to the
+    same dossier, and the extraction cache was already keyed on this same digest.
+    """
     clean = _ASSET_ID_UNSAFE.sub(" ", (filename or "").strip())
-    return f"{clean}::p{int(page_number)}::img{int(index)}"
+    digest = hashlib.sha256(data or b"").hexdigest()[:12]
+    return f"{clean}::p{int(page_number)}::img{digest}"
 
 
 def compute_sha256(data: bytes) -> str:
@@ -299,7 +317,27 @@ class Migration:
 
 # from_version -> Migration. Register one entry per DOSSIER_VERSION bump; the chain
 # must be contiguous, which `validate_migration_chain` enforces at import time.
-MIGRATIONS: Dict[int, Migration] = {}
+MIGRATIONS: Dict[int, Migration] = {
+    1: Migration(
+        from_version=1,
+        description=(
+            "The caption rule changed: a title printed IN the image now wins over the "
+            "wording of the text around it, which may belong to a neighbouring figure. "
+            "Version 1 captions were taken from the surrounding text by preference, so "
+            "every image in a document that labels its pictures UNDERNEATH carries the "
+            "label of the picture before it — an entire uniform section was indexed one "
+            "group out of step, and the secondary-school figures were captioned and "
+            "tagged as the primary ones."
+        ),
+        # No transform can repair this: the correct caption is printed inside the image
+        # and only a vision call can read it. Every stored extraction is therefore marked
+        # STALE and re-extracted, which is the expensive half of this change and the
+        # reason it ships in one commit with the prompt rather than after it — the cache
+        # is keyed on (sha256, profile, dossier_version), so without the bump a corrected
+        # prompt would keep serving the captions the old one produced.
+        requires_reextraction=True,
+    ),
+}
 
 
 def validate_migration_chain() -> None:

@@ -69,10 +69,16 @@ One or more chunks above carry a numbered marker like [FIGURE 1]: that is a real
    model to answer within the conditions or else say nothing covered them — which is
    right for a per-year fee table and catastrophic for a document list written once for
    everybody: the answer was sitting in chunk 1 and the turn refused. `discriminate` is
-   the grader's verdict, taken on the same call that graded the evidence. #}
+   the grader's verdict, taken on the same call that graded the evidence.
+
+   The `no` and `unknown` branches each end by forbidding a refusal. `yes` did not, and
+   it is the only one that can narrow to NOTHING: told to answer for Year 12 out of
+   material written for Reception and Years 1-6, a model has been left an empty set and
+   the one move still open to it is to deny. So `yes` now says what to do when their case
+   is the one missing — report the coverage rather than report nothing. #}
 {% if discriminate == "yes" %}
 
-SCOPE OF THE ANSWER: the user set these conditions earlier and has not withdrawn them — {{ constraints | join("; ") }}. The material above gives different answers depending on them, so answer only for what they cover and leave the other cases out rather than listing them as extra detail.
+SCOPE OF THE ANSWER: the user set these conditions earlier and has not withdrawn them — {{ constraints | join("; ") }}. The material above gives different answers depending on them, so answer only for what they cover and leave the other cases out rather than listing them as extra detail. If the material turns out to cover OTHER cases and not theirs, do not refuse: say which cases it does cover, and that theirs is not among them. Narrowing is how to answer this question, never a reason to withhold everything.
 {% elif discriminate == "no" %}
 
 SCOPE OF THE ANSWER: the user set these conditions earlier — {{ constraints | join("; ") }} — but the material above does not vary by them: it is one answer that applies to everyone. Give it in full, and say plainly that it is the same regardless of {{ constraints | join(" or ") }}. Do NOT withhold it, hedge it, or claim the knowledge base lacks a version for their case — a general rule IS the answer to a specific question, and the user asked because they need the rule.
@@ -93,13 +99,15 @@ SCOPE OF THE ANSWER: the user set these conditions earlier — {{ constraints | 
    1. `discriminate` is the grader's verdict on whether this material varies by year. #}
 {% if discriminate == "yes" %}
 
-THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}. The material above gives different answers by year group, so state the figures and rules for {{ child_year }} and leave the other year groups out — do not list them as extra detail, and do not answer for a year the student is not in.
+THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}. The material above gives different answers by year group, so state the figures and rules for {{ child_year }} and leave the other year groups out — do not list them as extra detail, and never state a figure for a different year group as though it were theirs.
+
+If the material covers other year groups and NOT {{ child_year }}, say exactly that: name the year groups it does cover, give any rule above that applies to every year, and tell the user the school's material here does not cover {{ child_year }}. Do not reply as though nothing was found — the chunks above are real, the user cannot see them, and "I have Reception to Year 6, not yours" is a true and useful answer where "I have nothing on this" is neither.
 {% elif discriminate == "no" %}
 
 THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}, but the material above does not vary by year group — it is one answer that applies to every year. Give it in full and say plainly that it is the same for every year. Do NOT withhold it or claim the knowledge base lacks a version for their year.
 {% else %}
 
-THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}. Where the material above distinguishes by year group, answer for {{ child_year }}; where it states one rule for every year, give that rule and say it applies generally. Never state a figure for a different year group as though it were theirs.
+THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}. Where the material above distinguishes by year group, answer for {{ child_year }}; where it states one rule for every year, give that rule and say it applies generally. Never state a figure for a different year group as though it were theirs, and never refuse because {{ child_year }} is not among the year groups above — name the ones that are.
 {% endif %}
 {% endif %}
 {% if partial %}

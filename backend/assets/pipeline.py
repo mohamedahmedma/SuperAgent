@@ -293,7 +293,7 @@ class FigurePipeline:
         report: FigureReport,
         cached_by_digest: Optional[Dict[str, ExtractionPayload]] = None,
     ) -> AssetDossier:
-        asset_id = build_asset_id(filename, image.page_number, image.index)
+        asset_id = build_asset_id(filename, image.page_number, image.data)
 
         dimensions = probe_dimensions(image.data) or (0, 0)
         facts = ImageFacts(
