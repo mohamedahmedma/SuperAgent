@@ -184,7 +184,7 @@ const resetTextareaHeight = () => {
 
 const focusTextarea = async () => {
   await nextTick();
-  textareaRef.value?.focus();
+  textareaRef.value?.focus({ preventScroll: true });
   autoResize();
 };
 

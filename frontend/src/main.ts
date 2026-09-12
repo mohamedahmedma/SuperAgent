@@ -43,6 +43,5 @@ import './assets/styles/aurexis-auth-field-border-v11-14.css';
 import './assets/styles/aurexis-auth-exact-ring-v11-14-1.css';
 import './assets/styles/aurexis-auth-ring-match-composer-v11-14-2.css';
 import './assets/styles/aurexis-desktop-history-precision-v11-15.css';
-import './aurexis-mobile-keyboard.ts';
 import './assets/styles/superagent-redesign.css';
 import './assets/styles/aurexis-mobile-responsive-final.css';
