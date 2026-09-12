@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { useAuthStore } from './auth';
 import { useSessionStore } from './sessions';
 import api, { apiUrl } from '@/utils/api';
+import { readAnswerBlocks } from '@/utils/answerBlocks';
 import type { Message, RagStep, GroupedRagStep, HitlRequest, RagTrace, SessionPaging, VoiceMessage } from '@/types/chat';
 
 // One scroll-back. Opening a chat loads the last screenful; older batches arrive as the
@@ -194,6 +195,9 @@ export const useChatStore = defineStore('chat', {
           // Reloading a past session restores its images too: the backend persists
           // them on the trace, so they survive a page refresh.
           assets: ragTrace?.assets || [],
+          // And its tables, kept on the same trace. A message stored before blocks
+          // existed has none, and shows its records as the markdown it always did.
+          answerBlocks: readAnswerBlocks(ragTrace?.answer_blocks),
         };
       });
     },
@@ -472,6 +476,7 @@ export const useChatStore = defineStore('chat', {
         hitlResumeText: pendingHitlAtSend ? text : undefined,
         ragTrace: null,
         assets: [],
+        answerBlocks: [],
         ragSteps: [],
         _groupedSteps: [],
       });
@@ -585,6 +590,16 @@ export const useChatStore = defineStore('chat', {
                   const botMsg = requestMessages[botMsgIdx];
                   if (botMsg) {
                     botMsg.assets = data.assets || [];
+                  }
+                } else if (data.type === 'answer_blocks') {
+                  // The records this answer shows as tables, as data. Sent AHEAD of the
+                  // `content_replace` that carries their markers, so each is drawn the
+                  // moment its place arrives rather than flashing as markdown first. Read
+                  // through the checker: a kind this client cannot draw is left out, and
+                  // its marker then prints as the markdown it also travels as.
+                  const botMsg = requestMessages[botMsgIdx];
+                  if (botMsg) {
+                    botMsg.answerBlocks = readAnswerBlocks(data.answer_blocks);
                   }
                 } else if (data.type === 'trace') {
                   const botMsg = requestMessages[botMsgIdx];

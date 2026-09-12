@@ -6,14 +6,16 @@
         class="message-content"
         v-html="part.html"
       ></div>
-      <MessageAssets v-else-if="part.asset" :assets="[part.asset]" />
+      <AnswerBlockView v-else-if="part.kind === 'block'" :block="part.block" />
+      <MessageAssets v-else-if="part.kind === 'figure' && part.asset" :assets="[part.asset]" />
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * The answer's prose, with each anchored figure rendered at the point it was anchored.
+ * The answer's prose, with each anchored figure rendered at the point it was anchored, and
+ * each record a tool rendered drawn in the place it was appended.
  *
  * The backend leaves `<!--figure:{asset_id}-->` where the model wrote `[FIGURE n]`, so
  * the picture belongs inside the flow of the answer rather than in a block underneath
@@ -26,18 +28,27 @@
  * covers the gap during streaming, where the resolved text arrives on `content_replace`
  * one event before `assets` does: for that moment the anchor has no asset, and the
  * reader sees prose rather than a placeholder that flashes.
+ *
+ * A record — a timetable, a term's marks — follows the same idea from the other side. The
+ * backend appends each one under the prose after `<!--record-block-->`, and may send the
+ * same record as data naming that marker's index. With the data, the record is DRAWN
+ * there; without it — an older server, a kind this client does not draw, a block that
+ * failed its check — the text after the marker is printed as markdown, exactly as before.
+ * Either way the reader has the record; the data only changes how it looks.
  */
 import { computed } from 'vue';
 
+import AnswerBlockView from './blocks/AnswerBlock.vue';
 import MessageAssets from './MessageAssets.vue';
-import type { AssetReference } from '@/types/chat';
-import { parseMarkdown, escapeHtml, splitFigureAnchors } from '@/utils/markdown';
+import type { AnswerBlock, AssetReference } from '@/types/chat';
+import { parseMarkdown, escapeHtml, splitFigureAnchors, splitRecordBlocks } from '@/utils/markdown';
 
 const props = defineProps<{
   text: string;
   isUser: boolean;
   msgIndex?: number | null;
   assets?: AssetReference[];
+  answerBlocks?: AnswerBlock[];
 }>();
 
 const emit = defineEmits<{
@@ -46,19 +57,30 @@ const emit = defineEmits<{
 
 type RenderedPart =
   | { kind: 'prose'; html: string }
-  | { kind: 'figure'; asset: AssetReference | null };
+  | { kind: 'figure'; asset: AssetReference | null }
+  | { kind: 'block'; block: AnswerBlock };
 
 const parts = computed<RenderedPart[]>(() => {
   // A user's own message is escaped, never parsed, and cannot carry an anchor.
   if (props.isUser) {
     return [{ kind: 'prose', html: escapeHtml(props.text) }];
   }
-  const byId = new Map((props.assets || []).map((asset) => [asset.asset_id, asset]));
-  return splitFigureAnchors(props.text).map((part) =>
-    part.kind === 'prose'
-      ? { kind: 'prose' as const, html: parseMarkdown(part.text, props.msgIndex) }
-      : { kind: 'figure' as const, asset: byId.get(part.assetId) || null },
-  );
+  const assetsById = new Map((props.assets || []).map((asset) => [asset.asset_id, asset]));
+  const blocksByIndex = new Map((props.answerBlocks || []).map((block) => [block.index, block]));
+  return splitRecordBlocks(props.text).flatMap((segment): RenderedPart[] => {
+    if (segment.kind === 'record') {
+      const block = blocksByIndex.get(segment.index);
+      return block
+        ? [{ kind: 'block', block }]
+        : [{ kind: 'prose', html: parseMarkdown(segment.text, props.msgIndex) }];
+    }
+    return splitFigureAnchors(segment.text).map(
+      (part): RenderedPart =>
+        part.kind === 'prose'
+          ? { kind: 'prose', html: parseMarkdown(part.text, props.msgIndex) }
+          : { kind: 'figure', asset: assetsById.get(part.assetId) || null },
+    );
+  });
 });
 
 const onContentClick = (e: MouseEvent) => {

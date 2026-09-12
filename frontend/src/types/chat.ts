@@ -38,6 +38,80 @@ export interface AssetReference {
   source?: { filename?: string; page_number?: number; bbox?: number[] | null };
 }
 
+/**
+ * A record a tool rendered for the reader, as data. Mirrors backend `AnswerBlock`
+ * (backend/schemas/chat.py).
+ *
+ * The same record also travels as markdown inside the answer, after a `<!--record-block-->`
+ * marker; `index` says which marker this block draws. The backend sends no markup, so
+ * each client decides how to present it — a phone one day at a time, a wide screen as a
+ * grid — and a client that knows none of this prints the markdown instead.
+ */
+export interface TimetableSlot {
+  period: number;
+  subject?: string;
+  /** A period the class deliberately has off. */
+  is_free?: boolean;
+}
+
+export interface TimetableDay {
+  /** The school's own key ("sunday") — what today is matched against. */
+  day: string;
+  /** The day as the reader says it ("الأحد"). */
+  label?: string;
+  slots: TimetableSlot[];
+}
+
+export interface TimetablePeriod {
+  number: number;
+  label?: string;
+  /** `HH:MM`, or empty where the school has not fixed the bell. */
+  starts_at?: string;
+  ends_at?: string;
+  /** False for a break, assembly or prayer. */
+  is_teaching?: boolean;
+}
+
+export interface TimetableBlockData {
+  class_label?: string;
+  term_label?: string;
+  periods: TimetablePeriod[];
+  /** Only days with a lesson, in the school's week order. */
+  days: TimetableDay[];
+}
+
+export interface GradeRow {
+  subject: string;
+  /** Absent or null: no grade recorded yet. Never zero. */
+  percentage?: number | null;
+  letter?: string;
+  missing_count?: number;
+  in_progress?: boolean;
+}
+
+export interface GradesBlockData {
+  term_label?: string;
+  courses: GradeRow[];
+}
+
+interface AnswerBlockBase {
+  index: number;
+  language?: string;
+}
+
+export interface TimetableAnswerBlock extends AnswerBlockBase {
+  kind: 'timetable';
+  data: TimetableBlockData;
+}
+
+export interface GradesAnswerBlock extends AnswerBlockBase {
+  kind: 'grades';
+  data: GradesBlockData;
+}
+
+export type AnswerBlock = TimetableAnswerBlock | GradesAnswerBlock;
+export type AnswerBlockKind = AnswerBlock['kind'];
+
 export interface RagTraceFields {
   tool_used?: boolean;
   tool_name?: string;
@@ -103,6 +177,8 @@ export interface RagSubTrace extends RagTraceFields {}
 
 export interface RagTrace extends RagTraceFields {
   sub_traces?: RagSubTrace[];
+  /** Untrusted until read through `readAnswerBlocks` (utils/answerBlocks.ts). */
+  answer_blocks?: unknown[];
 }
 
 export interface RagStep {
@@ -148,6 +224,8 @@ export interface Message {
   hitlResumeText?: string;
   ragTrace?: RagTrace | null;
   assets?: AssetReference[];
+  /** The records this answer shows as tables, already read and checked. */
+  answerBlocks?: AnswerBlock[];
   ragSteps?: RagStep[];
   _groupedSteps?: GroupedRagStep[];
 }

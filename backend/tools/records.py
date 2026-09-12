@@ -213,20 +213,17 @@ def _reporter(ctx: ChatRequestContext, tool_name: str):
     know how many tools can produce one.
     """
 
-    #: Outcomes whose payload is a TABLE, and which therefore go to the reader as a
-    #: rendered block instead of being retyped by the model. See
-    #: `ChatRequestContext.note_answer_block`.
-    presented = {"timetable", "grades"}
-
     def _result(outcome: str, **context) -> str:
         ctx.note_tool_outcome(tool_name, outcome)
-        if outcome in presented:
+        if outcome in _PRESENTED:
             # Rendered from the SAME context the model's copy is rendered from, so the
-            # grid the parent reads and the grid the model was shown cannot drift.
+            # grid the parent reads and the grid the model was shown cannot drift. The
+            # data beside it is built from that context too, for the same reason.
             try:
                 ctx.note_answer_block(
                     render_prompt("tools/records_block.j2", outcome=outcome, **context),
                     kind=outcome,
+                    data=_block_data(outcome, context),
                 )
             except Exception:  # pragma: no cover - a block must never break a turn
                 logger.warning("could not render the %s block", outcome, exc_info=True)
@@ -446,6 +443,13 @@ def _day_label(day: str, language: str) -> str:
     return str(day or "").capitalize()
 
 
+def _period_label(row: dict, language: str) -> str:
+    """A period's name ("فسحة", "Break") in the reader's language, by `_day_label`'s rule."""
+    if str(language or "").startswith("ar"):
+        return _label(row, "name_ar", "name_en")
+    return _label(row, "name_en", "name_ar")
+
+
 def _timetable_context(student_label: str, data: dict, language: str = "") -> dict:
     """Flatten a week into the day-by-day shape the template renders.
 
@@ -514,6 +518,22 @@ def _timetable_context(student_label: str, data: dict, language: str = "") -> di
             }
             for row in data.get("periods") or []
             if not row.get("is_teaching", True)
+        ],
+        # The school's whole day, breaks included, in its own order — for a client that
+        # draws the week rather than reading it out. The facade is explicit that a client
+        # drawing the day must show a break, so they stay in place here rather than being
+        # set aside the way the model's copy above sets them aside.
+        "periods": [
+            {
+                "number": int(row.get("period_number") or 0),
+                "label": _period_label(row, language),
+                "shows_from": _clock(row.get("starts_at") or ""),
+                "shows_to": _clock(row.get("ends_at") or ""),
+                "is_teaching": bool(row.get("is_teaching", True)),
+            }
+            for row in sorted(
+                data.get("periods") or [], key=lambda row: int(row.get("period_number") or 0)
+            )
         ],
         "data": data,
     }
@@ -771,3 +791,100 @@ def _render_context(student_label: str, data: dict) -> dict:
         "assignments": data.get("assignments") or [],
         "data": data,
     }
+
+
+# --- the same tables, as data ---------------------------------------------------------
+#
+# A table outcome reaches the reader twice: as the markdown `records_block.j2` renders,
+# which is what gets stored and what any client shows, and as the structure below, which
+# a client that draws tables uses instead — see `AnswerBlock` in backend/schemas/chat.py.
+# Both are built from the one context the tool produced, so they cannot disagree about a
+# figure; each builder returns None exactly when the markdown block renders empty.
+
+
+def _timetable_block(context: dict) -> dict | None:
+    """The week, for a client that draws it rather than printing it.
+
+    The same days the markdown block shows, and only those: a day with no lesson is left
+    out of both, because drawn empty it reads to a parent as a day off, and the school has
+    said it is not one. None when there is no week at all — `no_class` and `no_timetable`
+    arrive through this same outcome, and an empty grid is not a table.
+    """
+    days = [
+        {
+            "day": str(day.get("name") or ""),
+            "label": str(day.get("shows_as") or day.get("name") or ""),
+            "slots": [
+                {
+                    "period": int(slot.get("period_number") or 0),
+                    "subject": "" if slot.get("is_free") else str(slot.get("subject") or ""),
+                    "is_free": bool(slot.get("is_free")),
+                }
+                for slot in day.get("slots") or []
+            ],
+        }
+        for day in context.get("days") or []
+        if day.get("slots")
+    ]
+    if not days:
+        return None
+    return {
+        "class_label": str(context.get("class_label") or ""),
+        "term_label": str(context.get("term_label") or ""),
+        "periods": [
+            {
+                "number": period["number"],
+                "label": period["label"],
+                "starts_at": period["shows_from"],
+                "ends_at": period["shows_to"],
+                "is_teaching": period["is_teaching"],
+            }
+            for period in context.get("periods") or []
+        ],
+        "days": days,
+    }
+
+
+def _grades_block(context: dict) -> dict | None:
+    """The term's marks, for a client that draws them.
+
+    The rows the markdown block prints, carrying the same two facts it states: a blank
+    grade stays None rather than becoming a zero, and a mark still in progress says so.
+    """
+    courses = [
+        {
+            "subject": _label(course, "subject_name_ar", "subject_name_en"),
+            "percentage": course.get("computed_percentage"),
+            "letter": str(course.get("letter_grade") or ""),
+            "missing_count": int(course.get("missing_count") or 0),
+            "in_progress": not course.get("is_complete"),
+        }
+        for course in context.get("courses") or []
+    ]
+    if not courses:
+        return None
+    return {"term_label": str(context.get("term_label") or ""), "courses": courses}
+
+
+#: Outcomes whose payload is a TABLE, and which therefore go to the reader as a rendered
+#: block instead of being retyped by the model — each with the builder for its data. One
+#: map rather than a set and a dispatch, so a table outcome cannot be presented without
+#: saying what its data is. See `ChatRequestContext.note_answer_block`.
+_PRESENTED = {
+    "timetable": _timetable_block,
+    "grades": _grades_block,
+}
+
+
+def _block_data(outcome: str, context: dict) -> dict | None:
+    """The data for one presented outcome, or None — never an exception.
+
+    Guarded separately from the markdown render: a structure that fails to build costs
+    the reader the drawn table and nothing else, because the text block still goes out
+    and every client can show that.
+    """
+    try:
+        return _PRESENTED[outcome](context)
+    except Exception:
+        logger.warning("could not build the %s block's data", outcome, exc_info=True)
+        return None

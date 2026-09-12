@@ -46,7 +46,7 @@ jobs:
           all=false; backend=false; frontend=false; identity=false; records=false; sis=false
           while IFS= read -r file; do
             case "$file" in
-              docker-compose*.yml|Dockerfile|pyproject.toml|uv.lock) all=true ;;
+              .github/workflows/deploy.yml|docker-compose*.yml|Dockerfile|pyproject.toml|uv.lock) all=true ;;
               backend/*) backend=true ;;
               frontend/*) frontend=true ;;
               identity/*) identity=true ;;
@@ -196,13 +196,32 @@ jobs:
       - cd-publish-records
       - cd-publish-sis
     runs-on: ubuntu-latest
-    if: always() && needs.changes.result == 'success'
+    # Each unchanged service is intentionally skipped. Opt out of GitHub's implicit
+    # success() check, but still reject a failed image build or a cancelled run.
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.changes.result == 'success' &&
+        (needs.cd-publish-backend.result == 'success' || needs.cd-publish-backend.result == 'skipped') &&
+        (needs.cd-publish-frontend.result == 'success' || needs.cd-publish-frontend.result == 'skipped') &&
+        (needs.cd-publish-identity.result == 'success' || needs.cd-publish-identity.result == 'skipped') &&
+        (needs.cd-publish-records.result == 'success' || needs.cd-publish-records.result == 'skipped') &&
+        (needs.cd-publish-sis.result == 'success' || needs.cd-publish-sis.result == 'skipped')
+      }}
     steps:
       - run: echo "All release images for ${{ github.sha }} were published successfully."
 
   deploy:
     name: Stage 3 - Deploy production (approval required)
     needs: [changes, cd-release-ready]
+    # A skipped service job in the transitive dependency chain otherwise causes this
+    # job to be skipped before GitHub can present the environment approval prompt.
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.changes.result == 'success' &&
+        needs.cd-release-ready.result == 'success'
+      }}
     runs-on: ubuntu-latest
     # Configure `production` in GitHub Settings with both maintainers as required
     # reviewers. GitHub pauses this job here; either one may approve it.
@@ -281,7 +300,9 @@ jobs:
           deploy_path="$1"
           image_tag="$2"
           image_prefix="$3"
-          services="$4"
+          # ssh rebuilds the remote command as a string, so a quoted empty final
+          # argument is not preserved. Accept a missing $4 for a no-service release.
+          services="${4-}"
           cd "$deploy_path"
           # A documentation-only change has no application image to release.
           [ -n "$services" ] || exit 0
@@ -289,6 +310,13 @@ jobs:
           if [ ! -f "$tags_file" ]; then
             printf '%s\n' BACKEND_IMAGE_TAG=stable FRONTEND_IMAGE_TAG=stable IDENTITY_IMAGE_TAG=stable RECORDS_IMAGE_TAG=stable SIS_IMAGE_TAG=stable > "$tags_file"
           fi
+          # The registry path belongs in the manifest, not only in this shell. It used to be
+          # exported below and nowhere else, so apply-env.sh run by hand from an ssh session -
+          # the route its own header documents - stopped at interpolation on 2026-09-11: the
+          # one value only the pipeline knew lived in exactly one codepath. Written before the
+          # copy so that a rollback's manifest carries it too.
+          sed -i '/^REGISTRY_IMAGE_PREFIX=/d' "$tags_file"
+          printf 'REGISTRY_IMAGE_PREFIX=%s\n' "$image_prefix" >> "$tags_file"
           cp "$tags_file" "${tags_file}.previous"
           for service in $services; do
             key="$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')_IMAGE_TAG"
@@ -306,56 +334,56 @@ jobs:
           previous_env_hash=""
           if [ -f .current-env-sha256 ]; then previous_env_hash="$(cat .current-env-sha256)"; fi
 
+          # The application services a release manages, and the subset that reads .env at
+          # runtime. The frontend is a static bundle: its settings are compiled in at image
+          # build time from this workflow, so recreating it cannot apply .env to it.
+          app_services="backend frontend identity records sis"
+          env_services="backend identity records sis"
+
+          # Every application service follows the server's .env, not only the ones this
+          # release rebuilt. This used to recreate only $services, so a backend-only release
+          # left records, identity and sis on whatever .env they were created with — LangSmith
+          # settings included — and a service that was not running stayed down, then failed
+          # the health gate of a release that never touched it (2026-09-11: a stopped
+          # frontend failed a backend release twice).
+          #
+          # An edited .env reaches nothing on its own: compose decides what to recreate from
+          # each service's configuration, and an edited env_file is not reliably treated as a
+          # change to it. So every service that reads the file is force-recreated whenever it
+          # differs from the one the last successful release applied.
+          #
+          # Pull first, recreate second, so a registry that fails cannot take a running
+          # container down with it. `--pull missing` then only reaches the registry for an
+          # image that is not on disk at all.
           release() {
             $compose pull $services || return 1
-            $compose up -d --no-deps $services || return 1
+            if [ "$current_env_hash" != "$previous_env_hash" ]; then
+              $compose up -d --no-deps --pull missing --force-recreate $env_services || return 1
+            fi
+            # Recreates whatever changed image, starts whatever is stopped, leaves the rest.
+            $compose up -d --no-deps --pull missing $app_services || return 1
           }
 
           healthy() {
             timeout 300 sh -c 'until wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1 && wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1; do sleep 5; done'
           }
 
-          # Postgres applies POSTGRES_PASSWORD only while initialising an empty data
-          # directory. On an estate whose postgres_data volume already exists, a rotated
-          # password in .env is silently ignored: the role keeps the one it was created
-          # with. The backend is the only service that speaks to postgres, so it is the
-          # only one that fails — and it fails authenticating at boot while pg_isready
-          # still reports the container healthy, which reads like a broken image rather
-          # than a credential. Reconcile the role with what .env now says, so the file is
-          # the single source of truth it is already rewritten as on every deploy.
-          # PROD_ENV_FILE is commonly authored on Windows, and compose strips the CR it
-          # leaves on each value. Reading the file directly does not, so without `tr` the
-          # role would be set to the password plus a carriage return — matching nothing
-          # the backend ever sends, and failing exactly like the mismatch this repairs.
-          pg_user="$(sed -n 's/^POSTGRES_USER=//p' .env | head -1 | tr -d '\r')"
-          pg_pass="$(sed -n 's/^POSTGRES_PASSWORD=//p' .env | head -1 | tr -d '\r')"
-          : "${pg_user:=postgres}"
-          if [ -n "$pg_pass" ]; then
-            $compose up -d postgres
-            waited=0
-            # `</dev/null` is load-bearing on every exec below. This script reaches the
-            # server on ssh's stdin, via `bash -s`, and `compose exec -T` attaches stdin
-            # and drains it — so an exec that inherits it swallows the unread remainder
-            # of the script. Bash then runs only what it had buffered and exits 0 at the
-            # early EOF: the release never happens and the job still reports success.
-            until $compose exec -T postgres pg_isready -U "$pg_user" -q </dev/null; do
-              waited=$((waited + 2))
-              if [ "$waited" -gt 120 ]; then
-                echo "postgres did not become ready in ${waited}s"
-                exit 1
-              fi
-              sleep 2
-            done
-            # psql quotes :'pw' itself, so a password containing shell or SQL syntax is
-            # carried through as data rather than parsed. It interpolates only input it
-            # lexes, though — never -c, which goes to the server verbatim and fails on
-            # the colon — so the statement has to arrive on stdin. Output is discarded
-            # rather than logged.
-            echo "ALTER USER CURRENT_USER WITH PASSWORD :'pw';" \
-              | $compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$pg_user" \
-                  -d postgres -v pw="$pg_pass" >/dev/null
-            echo "postgres role '$pg_user' reconciled with .env"
-          fi
+          # Reconcile the postgres role with .env, and prove the credential authenticates
+          # over TCP, before the release recreates anything.
+          #
+          # This used to be forty lines inline here, and that placement was the bug. A
+          # heredoc delivered on ssh's stdin is unreachable from an ssh session, so the
+          # only path that knew POSTGRES_PASSWORD needs reconciling was the pipeline —
+          # and on 2026-09-10 the estate was taken down by a manual `scp .env` followed
+          # by `compose up`, a route with no reconcile step at all. One committed script,
+          # both callers, so the manual route cannot skip what this one does.
+          #
+          # `</dev/null` is load-bearing. This script reaches the server on ssh's stdin
+          # via `bash -s`, and `compose exec -T` inside the callee attaches stdin and
+          # drains it — so a call that inherits it swallows the unread remainder of this
+          # script. Bash then runs only what it had buffered and exits 0 at the early
+          # EOF: the release never happens and the job still reports success.
+          bash deploy/scripts/apply-env.sh --path "$deploy_path" </dev/null || exit 1
 
           # Everything that has to hold for a release to count, behind one status. It is
           # called as an `if` condition, which is the point: `set -e` is suspended for the
@@ -364,15 +392,11 @@ jobs:
           # is unhealthy" ended the run before the diagnosis below — which is exactly how a
           # failed deploy reported an unhealthy container and not one line of its log.
           attempt() {
+            # Brings every application service onto this release's images and onto the
+            # server's .env. The health gate runs after it, so a release only counts once it
+            # is working WITH the .env applied: a bad value fails here and rolls back, instead
+            # of being applied after a green run where nothing would check it.
             release || return 1
-            # A change to .env reaches nothing on its own: compose hashes a service's own
-            # configuration to decide what to recreate, and the CONTENTS of an env_file are
-            # not part of that hash, so an edited file sits unread behind containers that
-            # compose considers up to date. --no-deps holds the recreate to the application
-            # services; the data services were brought up and waited on by the release.
-            if [ "$current_env_hash" != "$previous_env_hash" ]; then
-              $compose up -d --no-deps --force-recreate $services || return 1
-            fi
             healthy || return 1
             # sis runs `alembic upgrade head` in its own entrypoint, so a sis that is
             # healthy has already migrated. This covers the release where sis was not
