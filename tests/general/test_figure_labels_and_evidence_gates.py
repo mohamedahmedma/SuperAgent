@@ -226,6 +226,18 @@ class ANameThatIsAlsoAnOrdinaryWord(unittest.TestCase):
     def test_an_age_does_not_confirm_a_child_called_omar(self):
         self.assertFalse(_names_the_child("ما هو العمر المطلوب للتقديم؟", "عمر"))
 
+    def test_the_conjunction_attached_to_the_name_still_confirms_it(self):
+        """Arabic writes "and" onto the front of the next word, so «وعمر عامل ايه؟» — how
+        a parent actually moves the conversation to another child — holds no token «عمر».
+        Rejecting it left the turn on the sibling they had stopped asking about."""
+        self.assertTrue(_names_the_child("وعمر عامل ايه؟", "عمر"))
+        self.assertTrue(_names_the_child("وعلي عنده امتحان؟", "علي"))
+
+    def test_the_other_clitics_are_not_looked_past(self):
+        """ف, ب, ل and ك build real words out of these names — «فعلي» is "actual". A name
+        behind one goes unconfirmed, which falls back to the pin, not to a wrong child."""
+        self.assertFalse(_names_the_child("ده اجراء فعلي في المدرسة", "علي"))
+
     def test_a_name_the_message_does_not_contain_at_all_is_still_refused(self):
         self.assertFalse(_names_the_child("ايه مصاريف المدرسه؟", "ليلى"))
         self.assertFalse(_names_the_child("ايه مصاريف المدرسه؟", ""))
