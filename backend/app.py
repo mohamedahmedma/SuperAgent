@@ -90,6 +90,12 @@ def create_app() -> FastAPI:
         from backend.llm_provider import log_provider_status
 
         log_provider_status()
+        # Whether the traces anyone goes looking for are actually being sent, and to
+        # which project. Nothing here turns tracing on — the SDK reads the environment —
+        # so a deployment that believes it is tracing and is not has no symptom at all.
+        from backend.infra.tracing import log_tracing_status
+
+        log_tracing_status()
         # Which database, with whose credentials, and can we actually authenticate —
         # before anything downstream depends on the answer. init_db() opens the same
         # connection a line later, so this adds no work; it adds the diagnosis. A

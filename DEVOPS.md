@@ -88,6 +88,28 @@ five services under different names.
 `docker compose config` renders **every** secret in plaintext. Use `config --quiet`, which
 prints nothing and still fails on an unresolvable variable.
 
+## What the backend says at boot
+
+One line each for the things a deployment can silently believe wrongly. After a release:
+
+```
+docker logs superagent-backend 2>&1 | grep -E "LLM provider:|LangSmith:|Database:|Vision"
+```
+
+| Line | Answers |
+| --- | --- |
+| `LLM provider: …` | which provider and model every call in the request path goes to |
+| `LangSmith: …` | whether runs are traced, to which project and endpoint, under which key |
+| `Database: …` | which database and user — never the password |
+| `Vision: …` | whether figure extraction has usable credentials |
+
+Tracing is worth the line because nothing in the codebase turns it on; the SDK reads the
+environment. A switch that is off, a project nobody is watching and a key the endpoint
+rejects are otherwise indistinguishable — the runs just never arrive. The key is shown as
+`sha256 | cut -c1-8`, the same shorthand the `.env` comparison above uses, so the line can
+be matched against the file a deployment believes it is using without either being read
+aloud.
+
 ## Pipeline order
 
 `deploy.yml` runs `ci.yml` as its first job and everything else depends on it, so a push
