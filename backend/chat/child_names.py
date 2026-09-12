@@ -175,6 +175,37 @@ def _exact_key(text: str) -> str:
     return " ".join(sanitize_text(text or "").casefold().split())
 
 
+def is_also_an_ordinary_word(name: str) -> bool:
+    """Whether this name stops being distinguishable from vocabulary once folded.
+
+    One token only. A name of two or more words is not a phrase a sentence produces by
+    accident, whatever its parts fold onto.
+    """
+    if len(_TOKEN.findall(name or "")) != 1:
+        return False
+    return name_key(name) in _also_ordinary_words()
+
+
+def occurs_as_written(text: str, name: str) -> bool:
+    """Whether `name` appears in `text` spelled the way it is spelled here.
+
+    The strict half of the pair `name_key` forms: it compares on `_exact_key`, which
+    repairs PDF damage but keeps the hamza, the teh marbuta and the alef maksura — the
+    three marks that tell على from علي. Whole tokens only, so «فعلي» is not «علي».
+    """
+    tokens = _TOKEN.findall(name or "")
+    width = len(tokens)
+    if not width:
+        return False
+    spans = _spans(text or "")
+    key = _exact_key(name)
+    for start in range(0, len(spans) - width + 1):
+        window = text[spans[start][0]:spans[start + width - 1][1]]
+        if _exact_key(window) == key:
+            return True
+    return False
+
+
 def name_surfaces(*, reference: str, child_name: str = "", label: str = "") -> Tuple[str, ...]:
     """The strings this turn has proven are the child's name, longest first.
 
@@ -314,4 +345,9 @@ def strip_child_names(text: str, surfaces: Sequence[str]) -> Tuple[str, int]:
     return stripped, cuts
 
 
-__all__ = ["name_surfaces", "strip_child_names"]
+__all__ = [
+    "is_also_an_ordinary_word",
+    "name_surfaces",
+    "occurs_as_written",
+    "strip_child_names",
+]
