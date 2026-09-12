@@ -23,6 +23,7 @@ from backend.rag.rerank_assessor import CrossEncoderAssessor
 from backend.assets.vision import call_with_rate_limit_retry
 from backend.profiles import get_profile
 from backend.schemas.chat import HitlResumeState, normalize_rag_sub_trace
+from backend.chat.child_names import strip_child_names
 from backend.text_normalization import normalize_query
 from backend.rag.utils import (
     RETRIEVAL_TOP_K,
@@ -433,13 +434,50 @@ def _search_query(state: RAGState) -> str:
     Constraints now travel to the two stages that can act on them without costing
     recall: the grader, which reports whether the material varies by them, and the
     answer prompt, which narrows or does not on that verdict.
+
+    The child's NAME goes the other way: out. It is the same argument as the paragraph
+    above, only stronger, because a name is not merely absent from the target passage —
+    it is absent from the whole corpus, which is the school's own material and is written
+    once for every family. On the sparse half that is worse than dilution: a name is a
+    rare term, so its IDF is high, and any chunk that happens to carry it outranks the
+    one that answers the question.
+
+    Cut HERE rather than from `state["question"]` itself, and that distinction is the
+    feature. This function is what every retrieval reads; the question is what the
+    grader, the HITL prompts and `service._resume_answer` read, and that last one hands
+    it to a model that has to write the parent a sentence naming their child. Which one
+    of a parent's children a turn is about still reaches records, the prompt and the
+    answer — it just stops reaching the search box.
     """
-    return state["question"]
+    question = state["question"]
+    stripped, _cuts = strip_child_names(question, _child_names(state))
+    return stripped
+
+
+def _child_names(state: RAGState) -> list:
+    """The name spellings this turn's message used, as the planner settled them.
+
+    Off the request context, like every other hint the graph reads, and defaulted to
+    nothing — a sub-agent state, a direct `run_rag_graph` in a test, or a profile with no
+    roster behind it has no child and needs no special case.
+    """
+    ctx = state.get("request_context")
+    return list(getattr(ctx, "child_names", None) or [])
 
 
 def retrieve_initial(state: RAGState) -> RAGState:
     query = _search_query(state)
     _emit(state, "🔍", "Searching the knowledge base...", "Initial retrieval")
+    if query != state["question"]:
+        # Said once, here, rather than inside `_search_query` — which also runs for the
+        # rewriter and would report the same cut twice on one turn. The DETAIL names no
+        # child: this trace is persisted per message and streamed to a browser, and the
+        # rule `turn_policy.as_trace` states holds here too — report that a decision was
+        # made, never what it was.
+        _emit(
+            state, "🙈", "Searching without the child's name",
+            "the corpus is the school's own material and names no pupil",
+        )
     if state.get("carried_constraints"):
         _emit(
             state, "🧷", "Conditions carried from earlier turns",
@@ -490,6 +528,7 @@ def retrieve_initial(state: RAGState) -> RAGState:
         "retrieved_chunks": results,
         "initial_retrieved_chunks": results,
         "retrieval_stage": "initial",
+        "child_name_removed": query != state["question"],
         "complexity": state.get("complexity"),
         "complexity_reason": state.get("complexity_reason"),
         **retrieval_trace_fields(retrieve_meta),
@@ -879,6 +918,10 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
     rewritten_query = (state.get("rewritten_query") or "").strip()
     if not rewritten_query:
         raise ValueError("rewritten_query is required for rewritten retrieval")
+    # The rewriter was handed the stripped question, so this is normally a no-op. It is
+    # here because the rewrite is written by a MODEL, and a step-back question composed
+    # from a turn about one child is exactly the place one would reappear.
+    rewritten_query, _cuts = strip_child_names(rewritten_query, _child_names(state))
     method_label = "Step-back" if rewrite_method == "step_back" else "HyDE"
     _emit(state, "🔄", f"Re-retrieving with the {method_label} query...")
     retrieved = retrieve_documents(

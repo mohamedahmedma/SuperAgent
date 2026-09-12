@@ -168,6 +168,13 @@ class RagTraceFields(StrictSchema):
     step_back_question: Optional[str] = None
     hyde_document: Optional[str] = None
     retrieval_stage: Optional[str] = None
+    # Whether the search text dropped this turn's child name before it was searched for.
+    # Declared here or dropped, as the comment on `route_reason` below records the hard
+    # way — and worth declaring, because a query that lost a word is otherwise a change
+    # nobody can see: `query` above shows what was searched for and never what was not.
+    #
+    # The FLAG, never the name, for the same reason `turn_child_resolved` is a boolean.
+    child_name_removed: Optional[bool] = None
     route: Optional[str] = None
     retrieval_status: Optional[str] = None
     retrieval_error: Optional[str] = None

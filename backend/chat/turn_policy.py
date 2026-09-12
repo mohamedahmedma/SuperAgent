@@ -36,6 +36,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from backend.chat.child_names import name_surfaces
 from backend.chat.child_resolution import ResolvedChild
 from backend.school_week import day_phrase
 from backend.text_matching import name_key
@@ -112,6 +113,14 @@ class TurnPlan:
     # The child's year group, when the roster reported one. Rendered beside the name so
     # an answer about a general school matter can be given for the right year.
     child_year: str = ""
+    # The spellings of that child's name this MESSAGE used, for retrieval to take back
+    # out of the search text. Empty on every turn that did not name a child, which is
+    # most of them — see `backend/chat/child_names.py` for what qualifies.
+    #
+    # Like `child_id` above, it travels on the plan and reaches neither a prompt nor a
+    # trace: `as_trace` reports that a turn settled on a child, never which one, and a
+    # list of a real child's name spellings is the same disclosure as the name.
+    child_names: List[str] = field(default_factory=list)
     # The day the message asked about, canonicalised — "tomorrow", "sunday". Empty when
     # it named none, which is most turns. Read off the message by a folded lookup with no
     # model and no clock in it (`backend.school_week.day_phrase`), for the same reason
@@ -307,6 +316,19 @@ def resolve_turn(
         child,
         signals.question,
         getattr(agent_config, "year_reference_markers", ()),
+    )
+    # After `_plan_child`, because the roster's spelling of the name is one of the
+    # surfaces and it is `child_hint` that holds it. Computed for every turn that named
+    # a child, whether or not this one goes on to search anything: the knowledge tool
+    # may be called on a records turn too, and a hint that exists only on the turns the
+    # planner predicted would need it is a hint that is missing when the model surprises
+    # it.
+    plan.child_names = list(
+        name_surfaces(
+            reference=signals.child_reference,
+            child_name=signals.child_name,
+            label=plan.child_hint,
+        )
     )
     if plan.child_options:
         return _plan_child_choice(plan, signals, copy_config)
