@@ -5,8 +5,8 @@ and adds the one thing image ingest cannot do without — a content-addressed ex
 cache, so the expensive half of ingest is paid per distinct image rather than per
 occurrence.
 
-The session factory and blob store are injected rather than imported, so the whole
-repository is exercisable against in-memory SQLite in tests without touching Postgres.
+The session factory and blob store are injected rather than imported, so tests run the
+whole repository against a throwaway Postgres schema and a temporary blob directory.
 """
 from __future__ import annotations
 

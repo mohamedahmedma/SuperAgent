@@ -1,18 +1,14 @@
 """AssetDossier schema, content-addressed blob storage, and the asset store.
 
-The store is exercised against in-memory SQLite through an injected session factory,
-so the whole persistence layer — including delete cascades, the extraction cache, and
-the version backfill — is covered without a Postgres instance.
+The store is exercised against real Postgres through an injected session factory, one
+throwaway schema per test, so the whole persistence layer — including delete cascades,
+the extraction cache, and the version backfill — runs the SQL production runs.
 """
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 import backend.assets.dossier as dossier_module
 from backend.assets.blobs import LocalBlobStore, extension_for
@@ -32,6 +28,7 @@ from backend.assets.dossier import (
     migrate_payload,
 )
 from backend.assets.store import AssetStore
+from tests.general.postgres_support import postgres_schema
 
 
 def make_dossier(
@@ -263,19 +260,12 @@ class LocalBlobStoreTests(unittest.TestCase):
 
 
 class AssetStoreTestCase(unittest.TestCase):
-    """In-memory SQLite via StaticPool so every session shares one database."""
+    """A throwaway Postgres schema per test, shared by every session the store opens."""
 
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        DocumentAsset.__table__.create(self.engine)
-        AssetExtraction.__table__.create(self.engine)
-        self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+        self.session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
@@ -288,7 +278,6 @@ class AssetStoreTestCase(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
-        self.engine.dispose()
 
     def _store_blob(self, data: bytes) -> tuple[str, str]:
         digest = compute_sha256(data)

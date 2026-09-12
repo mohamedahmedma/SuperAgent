@@ -10,28 +10,20 @@ changed, not the test.
 import unittest
 from unittest.mock import patch
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from backend.chat.language import ARABIC, ENGLISH
 from backend.db.models import DocumentPair
 from backend.indexing import language_check, pair_store
-
-
-def _memory_sessionmaker():
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    DocumentPair.__table__.create(engine)
-    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+from tests.general.postgres_support import postgres_schema
 
 
 class PairStoreTestCase(unittest.TestCase):
-    """Each test gets its own empty in-memory table."""
+    """Each test gets its own empty table, in its own Postgres schema."""
 
     def setUp(self):
-        self._patch = patch.object(pair_store, "SessionLocal", _memory_sessionmaker())
+        self._patch = patch.object(
+            pair_store, "SessionLocal",
+            postgres_schema(self, DocumentPair).sessionmaker(autoflush=False),
+        )
         self._patch.start()
         self.addCleanup(self._patch.stop)
 
@@ -180,7 +172,7 @@ class FigureAwareRoutingTests(PairStoreTestCase):
     question then drops every picture the corpus has, and the parent is told about the
     uniform in words with no image of it and nothing saying why.
 
-    Real AssetStore over SQLite rather than a stub, because the predicate under test is
+    Real AssetStore over Postgres rather than a stub, because the predicate under test is
     the query — hashes compared as content, and a figure whose bytes were never stored
     not counting as a picture at all.
     """
@@ -190,12 +182,9 @@ class FigureAwareRoutingTests(PairStoreTestCase):
         from backend.assets.store import AssetStore, set_asset_store
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        engine = create_engine(
-            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+        self.assets = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker(
+            autoflush=False
         )
-        DocumentAsset.__table__.create(engine)
-        AssetExtraction.__table__.create(engine)
-        self.assets = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
         set_asset_store(AssetStore(session_factory=self.assets, cache_enabled=False))
         self.addCleanup(set_asset_store, None)
 
