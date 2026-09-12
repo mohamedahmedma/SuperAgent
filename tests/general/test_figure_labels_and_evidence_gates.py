@@ -89,8 +89,11 @@ class AFigureSurrogateIsNeverCutInHalf(unittest.TestCase):
     def test_a_surrogate_enters_the_unit_stream_whole(self):
         """The other half of the invariant. `_refine_units` carries a figure through
         untouched, which is worth nothing if the unit it was handed had already been cut
-        — and the level-1 splitter would cut one whose transcription is long enough."""
-        long_surrogate = self._surrogate() + ("\nNavy Blue Trousers " * 400)
+        — and the level-1 splitter would cut one whose transcription is long enough.
+
+        Sized under the figure cap, because that is the case this asserts: a surrogate
+        over it is trimmed rather than divided, which the cap tests below cover."""
+        long_surrogate = self._surrogate() + ("\nNavy Blue Trousers " * 40)
         blocks = [
             {"type": "heading", "content": "School uniform", "level": 3, "page_number": 0},
             {"type": "text", "content": long_surrogate, "page_number": 0,
@@ -100,6 +103,45 @@ class AFigureSurrogateIsNeverCutInHalf(unittest.TestCase):
                    if unit["kind"] == "figure"]
         self.assertEqual(1, len(figures))
         self.assertEqual(long_surrogate.strip(), figures[0]["text"])
+
+    def test_a_figure_is_bounded_even_though_it_is_never_split(self):
+        """Atomic is not the same as unlimited, and conflating them cost a production
+        turn. Removing the splitter left `_MILVUS_TEXT_CAP_BYTES` — 60 KB, seventy-five
+        times the leaf budget — as the only bound. `pipeline._format_docs` hands the
+        grader every retrieved chunk in full, so a handful of figures that size is a
+        prompt the grading model cannot answer inside its output window, and the call
+        returns `finish_reason: length`: a priced call turned into a parse failure."""
+        cap = self.loader._level_3_size * self.loader._FIGURE_LEAF_SIZE_MULTIPLIER
+        huge = "[Figure] Day Wear: Secondary School - Girls\n" + "\n".join(
+            f"Row {i} | White Shirt | Navy Blue Blazer | Navy Blue Pleated Skirt"
+            for i in range(400)
+        )
+        blocks = [
+            {"type": "heading", "content": "School uniform", "level": 3, "page_number": 0},
+            {"type": "text", "content": huge, "page_number": 0,
+             "asset_ids": ["kb.docx::p0::imgdeadbeef1234"]},
+        ]
+        figures = [unit for unit in self.loader._blocks_to_units(blocks)
+                   if unit["kind"] == "figure"]
+
+        self.assertEqual(1, len(figures), "still one chunk per image")
+        self.assertLessEqual(len(figures[0]["text"]), cap)
+        self.assertLess(cap, self.loader._MILVUS_TEXT_CAP_BYTES)
+
+    def test_the_cap_keeps_the_caption_and_cuts_whole_lines(self):
+        """`render_surrogate` orders its fields so a truncation drops the least valuable
+        content first. Cutting mid-line would end a transcribed table mid-row."""
+        huge = "[Figure] Day Wear: Secondary School - Girls\n" + "\n".join(
+            f"Row {i} | White Shirt | Navy Blue Blazer" for i in range(400)
+        )
+        capped = self.loader._cap_figure_text(huge)
+
+        self.assertTrue(capped.startswith("[Figure] Day Wear: Secondary School - Girls"))
+        self.assertIn(capped.splitlines()[-1], huge.splitlines())
+
+    def test_a_figure_within_the_cap_is_untouched(self):
+        surrogate = self._surrogate()
+        self.assertEqual(surrogate, self.loader._cap_figure_text(surrogate))
 
     def test_ordinary_prose_is_still_split(self):
         """The exemption is for figures, not a quiet end to leaf chunking."""

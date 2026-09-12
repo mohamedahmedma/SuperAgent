@@ -342,6 +342,29 @@ class DocumentLoader:
                 })
         return units
 
+    def _cap_figure_text(self, text: str) -> str:
+        """A figure surrogate, bounded, cut at a line boundary.
+
+        `AssetDossier.render_surrogate` writes caption, description, transcription, tags
+        and answerable questions in that order and says why: "so that a truncation at any
+        downstream byte cap drops the least valuable content first". This is that
+        truncation, applied where the size is decided rather than left to the byte cap,
+        and cutting whole lines so a transcription never ends mid-row.
+        """
+        cap = self._level_3_size * self._FIGURE_LEAF_SIZE_MULTIPLIER
+        if len(text) <= cap:
+            return text
+        kept: List[str] = []
+        used = 0
+        for line in text.splitlines():
+            if kept and used + len(line) + 1 > cap:
+                break
+            kept.append(line)
+            used += len(line) + 1
+        # A single line longer than the whole budget still has to give: a transcription
+        # rendered as one enormous row is the case, and half of it beats none of it.
+        return "\n".join(kept) if kept else text[:cap]
+
     def _refine_units(
         self,
         units: List[Dict],
@@ -396,6 +419,23 @@ class DocumentLoader:
     # a pure grid, and a figure surrogate stays attached to exactly its own image
     # rather than diluting an unrelated paragraph's embedding.
     _ATOMIC_LEAF_KINDS = ("table", "figure")
+
+    # How much text one figure may bring into a leaf, as a multiple of the leaf size.
+    #
+    # Making a figure atomic removed the splitter, and with it the only size bound a
+    # figure leaf had: until this constant existed the sole remaining limit was
+    # `_MILVUS_TEXT_CAP_BYTES`, which is 60 KB — seventy-five times the leaf budget. That
+    # matters beyond storage, because `rag/pipeline._format_docs` hands the grader every
+    # retrieved chunk in full and nothing trims them: eight figures at that size is a
+    # prompt no grading model can answer inside its output window, and the call comes
+    # back `finish_reason: length` — a priced call turned into a parse failure, which is
+    # the failure `backend/llm.py` warns about from the other end.
+    #
+    # Generous rather than tight, because the whole point of keeping a figure together is
+    # that its transcription IS the evidence — a fee table read out of an image is only
+    # useful entire. Four leaves is roomy for a real infographic and still twenty times
+    # under the byte cap.
+    _FIGURE_LEAF_SIZE_MULTIPLIER = 4
 
     @staticmethod
     def _pack_units(
@@ -634,6 +674,7 @@ class DocumentLoader:
                     # (an image's text surrogate); it packs as an atomic leaf.
                     asset_ids = tuple(block.get("asset_ids") or ())
                     if asset_ids:
+                        content = self._cap_figure_text(content)
                         # Entered whole, and `_refine_units` then carries it through
                         # every level untouched — so one image is one chunk, from here
                         # to Milvus. Splitting even at this level would reintroduce the
