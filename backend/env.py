@@ -12,8 +12,10 @@ overlaying env onto a profile.
 """
 import logging
 import os
+from datetime import timezone, tzinfo
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -132,6 +134,39 @@ def records_base_url() -> str:
     request go to a bare path and fail. Falling back to the default cannot be worse.
     """
     return (env_value("RECORDS_BASE_URL") or RECORDS_BASE_URL_DEFAULT).rstrip("/")
+
+
+#: Where the school is, when nothing says otherwise. This deployment's parents write
+#: Egyptian Arabic and its schools keep Cairo time; a deployment elsewhere sets
+#: `SCHOOL_TIMEZONE` to its own zone.
+SCHOOL_TIMEZONE_DEFAULT = "Africa/Cairo"
+
+
+def school_timezone() -> tzinfo:
+    """The zone the school day happens in.
+
+    Deliberately not the server's clock and not the parent's. A guardian reading this
+    from another country still asks about tomorrow at their child's school, and a
+    container set to UTC is an accident of deployment rather than a fact about anyone —
+    both answer «إيه حصص بكره؟» with the wrong weekday for the hours around midnight,
+    which is exactly when a parent asks it.
+
+    An unknown zone falls back to the default rather than raising. A timetable is not
+    worth a failed turn over a typo in a variable, and the failure is logged loudly
+    enough to find. If the default itself is unavailable — a system with no tz database
+    at all — UTC is the last resort, and its being wrong by an hour or two is still a
+    better answer than no answer.
+    """
+    name = env_value("SCHOOL_TIMEZONE") or SCHOOL_TIMEZONE_DEFAULT
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        logger.warning("unknown SCHOOL_TIMEZONE %r — falling back to %s", name, SCHOOL_TIMEZONE_DEFAULT)
+    try:
+        return ZoneInfo(SCHOOL_TIMEZONE_DEFAULT)
+    except Exception:  # pragma: no cover - a system with no tz database
+        logger.error("no timezone database available — school days will be worked out in UTC")
+        return timezone.utc
 
 
 def records_api_key() -> str:

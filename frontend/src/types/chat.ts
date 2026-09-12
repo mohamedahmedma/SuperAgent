@@ -117,6 +117,9 @@ export interface RagTraceFields {
   tool_name?: string;
   query?: string;
   retrieval_stage?: string;
+  /** Whether the search text dropped this turn's child name. The flag only — never the
+   *  name: this trace is persisted per message and rendered in the browser. */
+  child_name_removed?: boolean;
   route?: string;
   retrieval_status?: string;
   evidence_relevance?: string;

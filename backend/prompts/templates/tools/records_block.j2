@@ -23,6 +23,21 @@
 {% endfor %}
 {% endif %}
 {% endfor %}
+{% elif outcome == "timetable_day" %}
+{# One day, with the parent's own word for it in the heading — «بكرة · الأحد» rather than
+   «الأحد», so the block answers the question that was asked without the parent counting
+   forward to check. A day with no lessons renders nothing at all, which is what stops a
+   block being shown for a day the school is shut: the caller drops an empty render, and
+   the sentence around it is where that answer belongs. #}
+{% for day in days %}
+{% if day.slots %}
+**{% if day_relative %}{{ day_relative }} · {% endif %}{{ day.shows_as or day.name }}**
+{% for slot in day.slots %}
+{{ slot.period_number }}) {% if slot.is_free %}—{% else %}{{ slot.subject }}{% endif %}{% if slot.shows_from %} · {{ slot.shows_from }}{% if slot.shows_to %}–{{ slot.shows_to }}{% endif %}{% endif %}
+
+{% endfor %}
+{% endif %}
+{% endfor %}
 {% elif outcome == "grades" %}
 {% for course in courses %}
 {{ course.get('subject_name_ar') or course.get('subject_name_en') }}: {% if course.get('computed_percentage') is not none %}{{ course.get('computed_percentage') }}%{% if course.get('letter_grade') %} ({{ course.get('letter_grade') }}){% endif %}{% else %}—{% endif %}{% if course.get('missing_count') %} · {{ course.get('missing_count') }} غير مسلّم{% endif %}{% if not course.get('is_complete') %} · لسه جاري{% endif %}

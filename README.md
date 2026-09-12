@@ -337,6 +337,7 @@ npm run build
   - Obviously short, single-fact questions are classified `simple` directly by local rules, without a model call.
   - Everything else has FAST_MODEL make the simple/complex determination in a single call; a `complex` result also returns 2-4 sub-questions in that same call, with no extra decomposition call needed.
 2. **Retrieval execution**
+  - The text searched for is `_search_query(state)`, not the question itself. Conditions carried from earlier turns, the child's year group and the child's NAME all travel beside the question rather than inside it: the knowledge base is the school's material, written once for every family, so a pupil's name is a rare high-IDF term the corpus cannot match. `backend/chat/child_names.py` decides what is safe to remove — folding makes the preposition على and the name علي one string, so an ambiguous name is only cut where the spelling or a word like «ابني» settles it.
   - simple: goes to `retrieve_initial` and runs a single standard retrieval.
   - complex: each sub-question's "retrieve -> grade evidence" step runs in parallel via LangGraph's `Send`, then `synthesis` deduplicates and merges the results.
   - Calls `retrieve_documents`.
@@ -355,6 +356,7 @@ npm run build
 6. **Answer generation**: the Agent combines the context to produce the final answer.
 7. **Observable tracing**: returns a `rag_trace`, including
   - Grading results and routing decisions
+  - `child_name_removed`: whether the search text dropped a name. The flag only, never the name — this trace is persisted per message and streamed to the browser.
   - `rewrite_method`, `step_back_question` / `hyde_document`, and `rewritten_query`
   - Initial/secondary retrieval results
   - Three-tier retrieval and merge info (`leaf_retrieve_level`, `auto_merge_*`)

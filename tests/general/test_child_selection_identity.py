@@ -596,12 +596,18 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
         for bound in build_tools(list(RECORDS_TOOLS), _parent_ctx()):
             with self.subTest(tool=bound.name):
                 args = set(bound.args.keys())
-                # `subject` names a school subject; nothing here names a person.
-                self.assertTrue(args <= {"student_name", "subject"}, args)
-        for forbidden in ("guardian", "token", "student_id", "user"):
-            self.assertFalse(
-                [name for name in args if forbidden in name], f"{forbidden} is addressable"
-            )
+                # `subject` names a school subject and `day` a weekday; nothing here
+                # names a person. Both are narrowings of one record, and neither can
+                # widen WHICH record — that is settled from the session's own identity
+                # before either is read.
+                self.assertTrue(args <= {"student_name", "subject", "day"}, args)
+                # Checked per tool rather than once after the loop, where `args` held
+                # whichever tool happened to be last and the other seven went unexamined.
+                for forbidden in ("guardian", "token", "student_id", "user"):
+                    self.assertFalse(
+                        [name for name in args if forbidden in name],
+                        f"{forbidden} is addressable on {bound.name}",
+                    )
 
     def test_a_planned_child_missing_from_this_calls_roster_is_not_read(self):
         """A child withdrawn mid-conversation, or two reads either side of a change.

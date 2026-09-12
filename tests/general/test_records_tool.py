@@ -397,6 +397,223 @@ def test_a_break_is_not_reported_as_a_lesson(monkeypatch):
     assert "free" in result
 
 
+# --- one day of that week ----------------------------------------------------------
+#
+# «إيه حصص بكره؟» is the commonest question this deployment gets, and it is the one a
+# model cannot answer on its own: it has no clock, so "tomorrow" is a weekday it would
+# have to guess. The narrowing is therefore arithmetic (backend/school_week.py, tested on
+# its own in test_school_week.py) and what follows is what the TOOL does with it.
+#
+# The fixture week opens Saturday, Sunday and Monday — so Friday is a day the school does
+# not open, Monday is a school day with nothing on it, and the two must never be reported
+# the same way. That distinction is the whole reason `day_status` exists.
+
+
+@pytest.fixture()
+def a_thursday(monkeypatch):
+    """Freeze the school's clock on a Thursday, so "tomorrow" is Friday every run.
+
+    Patched on `school_week`, which is where `resolve_day` reads it — a test that froze
+    a clock the resolver does not consult would pass on six days in seven.
+    """
+    from datetime import date
+
+    from backend import school_week
+
+    monkeypatch.setattr(school_week, "today_at_school", lambda: date(2026, 9, 10))
+
+
+def test_a_named_day_is_answered_with_that_day_alone(monkeypatch):
+    """The narrowing this feature is: one day back, not a week to read through."""
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    result = make_get_student_timetable(_ctx()).invoke({"day": "السبت"})
+
+    assert "TIMETABLE_FOR_ONE_DAY" in result
+    assert "الرياضيات" in result
+    # The rest of the week was not asked for and is not in the evidence, so the model
+    # cannot volunteer it.
+    assert "sunday" not in result.lower()
+    assert "monday" not in result.lower()
+    assert "Answer for THAT DAY ONLY" in result
+
+
+def test_tomorrow_is_resolved_from_the_school_s_clock_and_stated_as_settled(
+    monkeypatch, a_thursday
+):
+    """The point of the whole feature: «بكره» is a weekday before the model sees it.
+
+    Thursday's tomorrow is Friday, which this school does not open — so the same call
+    also proves the resolution is real arithmetic and not a passthrough.
+    """
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    result = make_get_student_timetable(_ctx()).invoke({"day": "بكره"})
+
+    assert "NOT_A_SCHOOL_DAY" in result
+    assert "tomorrow" in result
+
+
+def test_a_day_the_school_does_not_open_is_not_reported_as_having_no_lessons(monkeypatch):
+    """"There is no school on Friday" and "no lessons are recorded" are different facts.
+
+    The second is the plausible sentence and the false one — it describes a school day
+    with an empty grid. This school's week is Saturday to Monday, so Friday is not one.
+    """
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    result = make_get_student_timetable(_ctx()).invoke({"day": "الجمعة"})
+
+    assert "NOT_A_SCHOOL_DAY" in result
+    assert "does not open that day" in result
+    assert 'Do NOT say "no lessons are recorded"' in result
+    # The days the child does have, so the answer can offer them.
+    assert "السبت" in result or "saturday" in result.lower()
+
+
+def test_a_school_day_with_nothing_timetabled_is_not_a_day_off(monkeypatch):
+    """Monday is in the school's week and carries no lesson. That is the third answer.
+
+    Reported as "no school that day" it would tell a parent to keep their child home.
+    """
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    result = make_get_student_timetable(_ctx()).invoke({"day": "monday"})
+
+    assert "NOTHING_TIMETABLED_THAT_DAY" in result
+    assert "Do NOT tell the parent their child has the day off" in result
+
+
+def test_a_narrowed_day_says_the_week_is_a_plan_and_not_a_calendar(monkeypatch):
+    """A timetable knows nothing about holidays, and "tomorrow" is when that bites.
+
+    The standing plan for a Saturday is still the standing plan on the Saturday of a
+    public holiday, and "he has maths first thing" is then a sentence a parent acts on.
+    """
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    result = make_get_student_timetable(_ctx()).invoke({"day": "saturday"})
+
+    assert "STANDING plan" in result
+    assert "holiday" in result
+
+
+def test_a_day_that_matches_nothing_falls_back_to_the_whole_week(monkeypatch):
+    """A word this vocabulary missed is answered with the week, never with a question.
+
+    The subject tools ask «which subject?» because a subject matching nothing is a fact
+    only the parent can settle. A day matching nothing is this module missing a word the
+    parent did use, and asking them to say it again is the worse failure — the week
+    contains their answer.
+    """
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    result = make_get_student_timetable(_ctx()).invoke({"day": "عيد ميلاده"})
+
+    assert "TIMETABLE for" in result
+    assert "saturday" in result.lower()
+    assert "monday" in result.lower()
+
+
+def test_an_unpublished_week_stays_unpublished_when_a_day_is_asked_for(monkeypatch):
+    """The three-way status outranks the narrowing, because it describes the record.
+
+    Narrowed first, a class with no published timetable would report "nothing on Sunday"
+    — which says the school planned an empty day rather than that it has published none.
+    """
+    monkeypatch.setattr(
+        requests,
+        "get",
+        _route(
+            {"/students": ONE_CHILD, "/timetable": _week(status="no_timetable", lessons=[])}
+        ),
+    )
+    result = make_get_student_timetable(_ctx()).invoke({"day": "بكره"})
+
+    assert "TIMETABLE_NOT_PUBLISHED" in result
+    assert "Do NOT say the child has no lessons" in result
+
+
+def test_the_narrowed_day_is_drawn_as_an_ordinary_timetable_block(monkeypatch):
+    """One day is still a timetable to a client: same kind, same contract, one day in it.
+
+    Sending it as its own kind would make every client that already draws timetables fall
+    back to the markdown, for a payload identical in shape to the one it draws.
+    """
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    ctx = _ctx()
+    make_get_student_timetable(ctx).invoke({"day": "السبت"})
+    block = _the_block(ctx)
+
+    assert block["kind"] == "timetable"
+    data = block["data"]
+    assert _passes_the_contract("timetable", data)
+    assert [day["day"] for day in data["days"]] == ["saturday"]
+    assert data["days"][0]["slots"] == [
+        {"period": 1, "subject": "الرياضيات", "is_free": False}
+    ]
+    # The whole school day still travels, breaks included: a client draws the day around
+    # the lessons, and that does not change because only one day is in the payload.
+    assert [(p["number"], p["is_teaching"]) for p in data["periods"]] == [(1, True), (2, False)]
+
+
+def test_a_day_with_no_lessons_draws_no_block_at_all(monkeypatch):
+    """An empty grid is not a table, and a blank block reads as a missing answer.
+
+    The sentence is where that answer belongs, and `records_result.j2` supplies it.
+    """
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    ctx = _ctx()
+    make_get_student_timetable(ctx).invoke({"day": "monday"})
+
+    assert ctx.answer_blocks == []
+
+
+def test_the_block_names_the_day_in_the_parent_s_own_words(monkeypatch, a_thursday):
+    """«بعد بكرة · السبت» — the question answered, and the day it landed on.
+
+    The parent asked in relative terms; showing only «السبت» makes them count forward to
+    check, which is the work this feature removes.
+    """
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    ctx = _ctx()
+    ctx.note_turn_plan([], [], language="ar")
+    make_get_student_timetable(ctx).invoke({"day": "بعد بكرة"})
+
+    assert "بعد بكرة" in _the_block(ctx)["text"]
+    assert "السبت" in _the_block(ctx)["text"]
+
+
+def test_the_narrowed_outcome_counts_as_a_record_that_came_back(monkeypatch):
+    """An outcome missing from `RECORDS_RETRIEVED` cannot trip the denial check at all.
+
+    A turn that read tomorrow's lessons and then told the parent nothing was found would
+    pass unnoticed — on the commonest question this deployment gets.
+    """
+    from backend.chat.service import RECORDS_RETRIEVED
+
+    monkeypatch.setattr(
+        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+    )
+    ctx = _ctx()
+    make_get_student_timetable(ctx).invoke({"day": "السبت"})
+
+    assert ("get_student_timetable", "timetable_day") in ctx.tool_outcomes
+    assert "timetable_day" in RECORDS_RETRIEVED
+
+
 # --- the tables, as data -----------------------------------------------------------
 #
 # A timetable or a full set of marks reaches the reader as markdown AND as a structure a

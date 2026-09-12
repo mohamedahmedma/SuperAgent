@@ -51,6 +51,14 @@ class SessionChild(BaseModel):
     gender: str = "unknown"
     #: The guardian this pin was resolved under. See the module docstring.
     guardian_id: str = ""
+    #: Whether the PARENT chose this child themselves, by answering "which child?".
+    #:
+    #: A pin written by the records tool is an inference — the turn resolved somebody and
+    #: recorded it. This one is a statement: they were shown their own children and
+    #: tapped one. Only the second is allowed to settle a name that matches two children
+    #: (`child_resolution.resolve_child`, route 1), because only the second is evidence
+    #: about the very ambiguity being resolved.
+    chosen_by_parent: bool = False
 
     @property
     def is_set(self) -> bool:
@@ -91,7 +99,14 @@ class SessionChild(BaseModel):
     def to_metadata(self) -> dict:
         return self.model_dump()
 
-    def pin(self, *, student_id: str, label: str = "", gender: str = "") -> None:
+    def pin(
+        self,
+        *,
+        student_id: str,
+        label: str = "",
+        gender: str = "",
+        chosen_by_parent: bool = False,
+    ) -> None:
         """Settle this conversation on a child.
 
         Mutates in place because the object is threaded by reference from the turn's
@@ -106,14 +121,20 @@ class SessionChild(BaseModel):
         if not student_id:
             return
         if student_id != self.student_id:
-            # A different child: nothing about the old one carries over.
+            # A different child: nothing about the old one carries over, the parent's
+            # choice least of all — it was a statement about a different question.
             self.label = ""
             self.gender = "unknown"
+            self.chosen_by_parent = False
         self.student_id = str(student_id)
         if label:
             self.label = str(label)
         if gender:
             self.gender = str(gender)
+        # Only ever set, never cleared for the same child: a later turn that re-resolves
+        # her from a thinner source has not un-chosen her.
+        if chosen_by_parent:
+            self.chosen_by_parent = True
 
     def clear(self) -> None:
         self.student_id = ""

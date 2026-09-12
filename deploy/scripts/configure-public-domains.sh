@@ -6,9 +6,15 @@
 # up. It is deliberately re-runnable: every step checks the state it wants before acting,
 # so a second run installs nothing, requests no certificate, and reloads nothing.
 #
-# The two services listen on loopback only. Host nginx is the sole public surface, and
-# this script owns exactly two virtual hosts — auth.aurexis.cc and api.aurexis.cc. Any
-# other vhost on the box, the SIS and Super Agent hosts included, is left alone.
+# The services listen on loopback only. Host nginx is the sole public surface, and this
+# script owns three virtual hosts — auth.aurexis.cc, api.aurexis.cc and
+# superagent.aurexis.cc. Any other vhost on the box is left alone.
+#
+# superagent.aurexis.cc joined them on 2026-09-12, because it is the hop a knowledge-base
+# upload actually crosses and, being hand-written, it still carried nginx's 1m default and
+# answered 413. Note that it fronts SIS as well as the chat UI, so this script now owns the
+# registrar console's public routing too — deploy/nginx/superagent.aurexis.cc.conf
+# reproduces those locations and must keep them.
 #
 # Order matters, and the reason is that nginx refuses to load a server block naming a
 # certificate file that does not exist. So a domain without a certificate is first
@@ -32,7 +38,7 @@ DEPLOY_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # user with sudo rights.
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 
-DOMAINS=(auth.aurexis.cc api.aurexis.cc)
+DOMAINS=(auth.aurexis.cc api.aurexis.cc superagent.aurexis.cc)
 
 LAYOUT=""
 BACKUP_DIR=""
@@ -282,7 +288,7 @@ disable_conflicts() {
       | sed 's/^[[:space:]]*server_name[[:space:]]*//' \
       | tr -s '[:space:]' '\n' | grep -v '^$' | sort -u)"
     printf '%s\n' "$names" | grep -Fqx "$domain" || continue
-    if printf '%s\n' "$names" | grep -qvE '^(auth|api)\.aurexis\.cc$'; then
+    if printf '%s\n' "$names" | grep -qvE '^(auth|api|superagent)\.aurexis\.cc$'; then
       fail "$f also serves [$(printf '%s' "$names" | tr '\n' ' ')] and claims $domain; resolve this by hand rather than have a deployment disable someone else's vhost"
     fi
     log "disabling conflicting vhost $f (backed up)"
@@ -375,6 +381,10 @@ verify_public() {
   check_public "https://api.aurexis.cc/docs" 200   || fail "https://api.aurexis.cc/docs is not serving 200"
   check_public "https://api.aurexis.cc/health" 200 || fail "https://api.aurexis.cc/health is not serving 200"
   check_public "https://api.aurexis.cc/ready" 200  || fail "https://api.aurexis.cc/ready is not serving 200"
+  # The UI's own origin, and the SIS health endpoint this vhost also publishes — the two
+  # halves of what it serves, so a rewrite that dropped either is caught before the run ends.
+  check_public "https://superagent.aurexis.cc/" 200 || fail "https://superagent.aurexis.cc/ is not serving the UI"
+  check_public "https://superagent.aurexis.cc/health" 200 || fail "https://superagent.aurexis.cc/health is not serving SIS health"
 }
 
 # --------------------------------------------------------------------------------------

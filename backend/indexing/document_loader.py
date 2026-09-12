@@ -321,9 +321,14 @@ class DocumentLoader:
         asset_ids: tuple = (),
         kind: str = "text",
     ) -> List[Dict]:
-        """`kind="figure"` marks a unit built from an image's text surrogate. Every
-        piece of a split surrogate keeps the asset reference, so a figure that had to
-        be divided still points at the image it describes."""
+        """`kind="figure"` marks a unit built from an image's text surrogate.
+
+        Figures reach here once, from `_blocks_to_units`, and are never re-split
+        afterwards — `_refine_units` hands them through untouched. The asset reference is
+        still copied onto every piece, because the level-1 pass can divide a surrogate
+        longer than a whole section window and a figure that HAS been divided must still
+        point at the image it describes.
+        """
         units: List[Dict] = []
         for piece in splitter.split_text(text):
             piece = (piece or "").strip()
@@ -352,6 +357,28 @@ class DocumentLoader:
             page = unit.get("page", 0)
             if unit["kind"] == "table":
                 refined.extend(self._table_units(unit["rows"], table_budget, sections, page))
+            elif unit["kind"] == "figure":
+                # A figure surrogate is refined by NOBODY. `_ATOMIC_LEAF_KINDS` already
+                # keeps it from sharing a leaf with a neighbouring paragraph, but being
+                # isolated is not the same as being whole: put through the splitter it
+                # came apart, and because `AssetDossier.render_surrogate` writes the
+                # caption first and the tags and answerable questions last, the tail
+                # piece was a chunk with no picture, no caption and no description —
+                # nothing but `Tags:` and `Answers: <four questions>`.
+                #
+                # Those tails retrieved BETTER than the figures they came from, on both
+                # halves: they are made of question phrasings, so a question matches them
+                # closely, and having lost the description they carry no other subject to
+                # dilute the match. One uniform question came back with two of its five
+                # snippets being tails of figures whose actual content never made it into
+                # the same result.
+                #
+                # Whole is also what the surrogate was designed for: its docstring orders
+                # the fields most- to least-specific precisely "so that a truncation at
+                # any downstream byte cap drops the least valuable content first". Let
+                # `fit_utf8_bytes` do that at the cap, rather than a splitter doing it in
+                # the middle and keeping both halves.
+                refined.append(dict(unit))
             else:
                 refined.extend(
                     self._text_units(
@@ -606,16 +633,34 @@ class DocumentLoader:
                     # A block carrying asset references came from the enrichment stage
                     # (an image's text surrogate); it packs as an atomic leaf.
                     asset_ids = tuple(block.get("asset_ids") or ())
-                    units.extend(
-                        self._text_units(
-                            content,
-                            self._splitter_level_1,
-                            sections,
-                            page_number,
-                            asset_ids=asset_ids,
-                            kind="figure" if asset_ids else "text",
+                    if asset_ids:
+                        # Entered whole, and `_refine_units` then carries it through
+                        # every level untouched — so one image is one chunk, from here
+                        # to Milvus. Splitting even at this level would reintroduce the
+                        # orphan tail for a figure whose transcription is long enough:
+                        # the piece holding `Tags:` and `Answers:` retrieves better than
+                        # the figure itself, being made of question phrasings, so the
+                        # bug does not announce itself by losing recall.
+                        #
+                        # Over-length is handled where the surrogate was built for it —
+                        # `fit_utf8_bytes` at the Milvus cap, dropping the tail that
+                        # `render_surrogate` deliberately ordered last.
+                        units.append({
+                            "kind": "figure",
+                            "text": content,
+                            "sections": sections,
+                            "page": page_number,
+                            "asset_ids": asset_ids,
+                        })
+                    else:
+                        units.extend(
+                            self._text_units(
+                                content,
+                                self._splitter_level_1,
+                                sections,
+                                page_number,
+                            )
                         )
-                    )
         return units
 
     def _hierarchy_chunks(self, units: List[Dict], doc_info: Dict) -> List[Dict]:

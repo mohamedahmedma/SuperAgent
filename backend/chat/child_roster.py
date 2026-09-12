@@ -37,7 +37,8 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
 from typing import Callable, List, Optional, Sequence, Tuple
 from urllib.parse import quote
 
@@ -159,12 +160,66 @@ def _fetch(guardian_id: str, token: str, request_id: str) -> Tuple[str, list]:
         return UNAVAILABLE, []
 
 
+def _told_apart(options: List[ChildOption]) -> List[ChildOption]:
+    """The same children, with any shared display name made tellable apart.
+
+    Two DIFFERENT children can carry one name: a school stores what a family
+    registered, and this deployment has a father with two rows reading «فاطمه محمد
+    ابوالحسن». Offering that name twice asks a question with no answer — whichever he
+    taps, the reply matches both rows and settles neither, so he is asked again on his
+    next message, and his next.
+
+    The name therefore carries one distinguishing detail: the year group first, because
+    that is how a parent tells their own children apart, then the school's Latin
+    spelling, and only if it has neither a bare counter. Never the student number — an
+    id must not reach a prompt, and this label does.
+
+    It replaces the child's ONE label rather than adding a second "choice" name, which
+    is what keeps this module's promise that nothing can name the same child two ways in
+    one turn: the option tapped, the name the answer uses, and the name the records tool
+    matches are all this string. Every member of a colliding group is suffixed, so no
+    bare name is left for a reply to match ambiguously.
+    """
+    shared = {label for label, count in Counter(c.label for c in options).items() if count > 1}
+    if not shared:
+        return options
+
+    logger.info("%d display name(s) shared by more than one child; telling them apart", len(shared))
+    told: List[ChildOption] = []
+    taken = {c.label for c in options if c.label not in shared}
+    counted: Counter = Counter()
+    for child in options:
+        if child.label not in shared:
+            told.append(child)
+            continue
+        counted[child.label] += 1
+        label = child.label
+        for detail in (child.year_level, child.label_en, str(counted[child.label])):
+            candidate = f"{child.label} — {detail}".strip()
+            if detail and candidate not in taken:
+                label = candidate
+                break
+        taken.add(label)
+        told.append(child if label == child.label else replace(child, label=label))
+    return told
+
+
 def _as_options(rows: Sequence[dict]) -> List[ChildOption]:
     options: List[ChildOption] = []
+    seen: set = set()
     for row in rows or []:
         student_id = str((row or {}).get("student_id") or "")
         if not student_id:
             continue
+        # One child, once. Production served «فاطمه محمد ابوالحسن» twice and her father
+        # was offered a choice between two identical names. Whatever put the row in
+        # twice — a directory join, a re-import, the token's claim — the same child is
+        # never two choices, and a roster of length two that is really one child would
+        # also cost her an "only child" resolution she is entitled to.
+        if student_id in seen:
+            logger.info("the roster listed one child twice; keeping the first row")
+            continue
+        seen.add(student_id)
         name_ar = str(row.get("full_name_ar") or "").strip()
         name_en = str(row.get("full_name_en") or "").strip()
         label = name_ar or name_en or student_id
@@ -179,7 +234,7 @@ def _as_options(rows: Sequence[dict]) -> List[ChildOption]:
                 year_level=str(row.get("year_level") or row.get("grade_level") or "").strip(),
             )
         )
-    return options
+    return _told_apart(options)
 
 
 def load_roster(
