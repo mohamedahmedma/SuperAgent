@@ -138,6 +138,7 @@ export interface HitlRequest {
 export interface Message {
   text: string;
   isUser: boolean;
+  voice?: VoiceMessage;
   isThinking?: boolean;
   thinkingStartedAt?: number;
   isHitlRequest?: boolean;
@@ -149,6 +150,13 @@ export interface Message {
   assets?: AssetReference[];
   ragSteps?: RagStep[];
   _groupedSteps?: GroupedRagStep[];
+}
+
+/** A locally recorded voice note attached to a user turn. */
+export interface VoiceMessage {
+  url: string;
+  duration: number;
+  mimeType: string;
 }
 
 /** How far back through a conversation the client has read. */
