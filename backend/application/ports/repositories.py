@@ -393,3 +393,54 @@ class EntityAttributeRepository(Protocol):
 
     def stats(self) -> dict:
         ...
+
+
+# -- ingest jobs ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class JobStep:
+    key: str
+    label: str
+    percent: int = 0
+    status: str = "pending"
+    message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class IngestJobRecord:
+    """One upload or delete job and the steps its progress is reported in."""
+
+    job_id: str
+    kind: str
+    filename: str
+    status: str
+    current_step: str
+    completion_step: str
+    message: str
+    steps: tuple[JobStep, ...]
+    created_at: datetime
+    updated_at: datetime
+    error: str | None = None
+    total_chunks: int = 0
+    processed_chunks: int = 0
+
+
+class IngestJobRepository(Protocol):
+    def add(self, job: IngestJobRecord) -> None:
+        ...
+
+    def get(self, kind: str, job_id: str, *, for_update: bool = False) -> IngestJobRecord | None:
+        """The job, optionally row-locked until the transaction ends."""
+        ...
+
+    def save(self, job: IngestJobRecord) -> None:
+        """Overwrite the stored job's state with `job`'s."""
+        ...
+
+    def recent(self, kind: str, limit: int) -> Sequence[IngestJobRecord]:
+        """The newest jobs of `kind`, newest first."""
+        ...
+
+    def delete_older_than(self, kind: str, cutoff: datetime) -> int:
+        ...

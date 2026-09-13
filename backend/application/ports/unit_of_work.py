@@ -23,6 +23,7 @@ from backend.application.ports.repositories import (
     DocumentAssetRepository,
     DocumentPairRepository,
     EntityAttributeRepository,
+    IngestJobRepository,
     ParentChunkRepository,
     SectionSummaryRepository,
 )
@@ -39,6 +40,7 @@ class UnitOfWork(Protocol):
     document_assets: DocumentAssetRepository
     asset_extractions: AssetExtractionRepository
     entity_attributes: EntityAttributeRepository
+    ingest_jobs: IngestJobRepository
 
     def __enter__(self) -> "UnitOfWork":
         """Begin the transaction. Use the returned object inside the `with` block."""

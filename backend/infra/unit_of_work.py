@@ -25,6 +25,7 @@ if TYPE_CHECKING:
         DocumentAssetRepository,
         DocumentPairRepository,
         EntityAttributeRepository,
+        IngestJobRepository,
         ParentChunkRepository,
         SectionSummaryRepository,
     )
@@ -41,6 +42,7 @@ _REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset(
         "document_assets",
         "asset_extractions",
         "entity_attributes",
+        "ingest_jobs",
     }
 )
 
@@ -61,6 +63,7 @@ class SqlAlchemyUnitOfWork:
     document_assets: DocumentAssetRepository
     asset_extractions: AssetExtractionRepository
     entity_attributes: EntityAttributeRepository
+    ingest_jobs: IngestJobRepository
 
     def __init__(self, session_factory: Callable[[], Session] | None = None) -> None:
         self._session_factory = session_factory
@@ -122,6 +125,7 @@ class SqlAlchemyUnitOfWork:
         self.document_assets = repositories.SqlAlchemyDocumentAssetRepository(session)
         self.asset_extractions = repositories.SqlAlchemyAssetExtractionRepository(session)
         self.entity_attributes = repositories.SqlAlchemyEntityAttributeRepository(session)
+        self.ingest_jobs = repositories.SqlAlchemyIngestJobRepository(session)
 
     def _require_session(self) -> Session:
         if self._session is None:
