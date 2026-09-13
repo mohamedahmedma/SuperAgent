@@ -17,7 +17,8 @@ THREAD_HEADER = "X-Thread-ID"
 # is survivable only because storage keys on (user_id, session_id) — see `_thread_id`.
 DEFAULT_THREAD = "default_session"
 # Long enough for a UUID and then some; short enough that the storage column
-# (String(120), backend/db/models.py:38) cannot be overrun by a header.
+# (`ChatSession.session_id`, String(120), in backend/db/models/conversations.py) cannot be
+# overrun by a header.
 _MAX_THREAD_ID = 120
 _THREAD_ID_SAFE = re.compile(r"[^A-Za-z0-9._:-]")
 
