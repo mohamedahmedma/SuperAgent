@@ -223,7 +223,7 @@ class AssetStore:
         """Content hashes of the images each of `filenames` can actually SHOW.
 
         Two scalar columns, no dossiers: this runs on the retrieval path (see
-        `pair_store.superseded_filenames`, which uses it to avoid excluding a
+        `DocumentPairService.superseded_filenames`, which uses it to avoid excluding a
         translation that is the only side carrying a picture), so it must stay one
         indexed query and must not pay to rebuild an AssetDossier per row.
 

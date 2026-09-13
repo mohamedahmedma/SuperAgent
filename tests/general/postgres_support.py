@@ -79,7 +79,9 @@ class PostgresSchema:
         from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 
         if self._sessions is None:
-            self._sessions = self.sessionmaker()
+            # autoflush off, as `SessionLocal` has it: a repository that forgets to flush
+            # before querying its own writes must fail here, not only in production.
+            self._sessions = self.sessionmaker(autoflush=False)
         return SqlAlchemyUnitOfWork(self._sessions)
 
     def drop(self) -> None:

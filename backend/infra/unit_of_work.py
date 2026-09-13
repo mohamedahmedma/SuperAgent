@@ -18,11 +18,14 @@ from typing import TYPE_CHECKING, Final
 from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
-    from backend.application.ports.repositories import ConversationRepository
+    from backend.application.ports.repositories import (
+        ConversationRepository,
+        DocumentPairRepository,
+    )
 
 # The attribute names the port promises, kept as data so `__getattr__` can tell "you
 # forgot the `with`" apart from "you misspelled the repository".
-_REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset({"conversations"})
+_REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset({"conversations", "document_pairs"})
 
 
 class SqlAlchemyUnitOfWork:
@@ -34,6 +37,7 @@ class SqlAlchemyUnitOfWork:
 
     # Annotations only: the attributes exist between `__enter__` and `__exit__`.
     conversations: ConversationRepository
+    document_pairs: DocumentPairRepository
 
     def __init__(self, session_factory: Callable[[], Session] | None = None) -> None:
         self._session_factory = session_factory
@@ -85,9 +89,13 @@ class SqlAlchemyUnitOfWork:
     def _bind(self, session: Session) -> None:
         # Imported here so importing this module does not pull in every repository and
         # model — alembic's env.py and the app's startup gate only need the database.
-        from backend.infra.repositories import SqlAlchemyConversationRepository
+        from backend.infra.repositories import (
+            SqlAlchemyConversationRepository,
+            SqlAlchemyDocumentPairRepository,
+        )
 
         self.conversations = SqlAlchemyConversationRepository(session)
+        self.document_pairs = SqlAlchemyDocumentPairRepository(session)
 
     def _require_session(self) -> Session:
         if self._session is None:

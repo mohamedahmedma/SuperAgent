@@ -115,3 +115,51 @@ class ConversationRepository(Protocol):
     def delete_session(self, username: str, session_id: str) -> bool:
         """Remove the conversation and its messages. False when there was nothing to remove."""
         ...
+
+
+# -- document pairs -------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentPairRecord:
+    """One knowledge-base entry and the file on each language's side ("" when empty)."""
+
+    pair_id: str
+    title: str
+    filename_ar: str = ""
+    filename_en: str = ""
+
+    @property
+    def paired(self) -> bool:
+        # Derived rather than stored: a stored flag is one more thing that can disagree
+        # with the two fields beside it.
+        return bool(self.filename_ar and self.filename_en)
+
+    @property
+    def empty(self) -> bool:
+        return not (self.filename_ar or self.filename_en)
+
+
+class DocumentPairRepository(Protocol):
+    def list_all(self) -> Sequence[DocumentPairRecord]:
+        """Every entry, newest first."""
+        ...
+
+    def get(self, pair_id: str) -> DocumentPairRecord | None:
+        ...
+
+    def holding(self, filename: str) -> Sequence[DocumentPairRecord]:
+        """The entries naming `filename` on either side, oldest first."""
+        ...
+
+    def paired(self) -> Sequence[DocumentPairRecord]:
+        """The entries with a file on both sides."""
+        ...
+
+    def save(self, pair: DocumentPairRecord) -> None:
+        """Insert or update the entry, visibly to later reads in the same transaction."""
+        ...
+
+    def delete_empty(self) -> None:
+        """Remove every entry with neither side filled."""
+        ...

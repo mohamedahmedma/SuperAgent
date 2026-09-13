@@ -16,13 +16,14 @@ from collections.abc import Callable
 from types import TracebackType
 from typing import Protocol
 
-from backend.application.ports.repositories import ConversationRepository
+from backend.application.ports.repositories import ConversationRepository, DocumentPairRepository
 
 
 class UnitOfWork(Protocol):
     """One transaction, entered as a context manager, exposing every repository."""
 
     conversations: ConversationRepository
+    document_pairs: DocumentPairRepository
 
     def __enter__(self) -> "UnitOfWork":
         """Begin the transaction. Use the returned object inside the `with` block."""

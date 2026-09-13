@@ -220,7 +220,7 @@ class DocumentPair(Base):
     ## What retrieval reads
 
     Only `filename_ar` and `filename_en`, and only to answer "does this document have a
-    twin in the language being asked in" — see `pair_store.superseded_filenames`. A row
+    twin in the language being asked in" — see `DocumentPairService.superseded_filenames`. A row
     with one side filled is UNPAIRED and stays eligible for every question whatever its
     language, which is what keeps an English-only document answerable in Arabic.
     """

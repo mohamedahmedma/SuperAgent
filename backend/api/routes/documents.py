@@ -17,7 +17,7 @@ from backend.api.resources import (
 from backend.chat.language import ARABIC, ENGLISH
 from backend.db.models import User
 import backend.indexing.language_check as language_check
-import backend.indexing.pair_store as pair_store
+from backend.indexing.pair_store import document_pairs
 from backend.infra.auth import require_admin
 from backend.profiles import get_profile
 from backend.jobs import DELETE_STEPS, delete_job_manager, upload_job_manager
@@ -129,7 +129,7 @@ def _process_pair_upload_job(job_id: str, pair_id: str, title: str, sides: list)
 
     `sides` is a list of (language, file_path, filename). One entry is a single-language
     row, which is a normal and permanent state — a document that exists only in English
-    still answers Arabic questions (see pair_store.superseded_filenames).
+    still answers Arabic questions (see document_pairs.superseded_filenames).
 
     Ordered so that everything which can REJECT the upload happens before anything that
     writes: both files are parsed and language-checked first, and only then is either
@@ -213,7 +213,7 @@ def _process_pair_upload_job(job_id: str, pair_id: str, title: str, sides: list)
         # this entry's Arabic or English half, or routing would exclude the twin in
         # favour of a document that is not in the corpus.
         for language, filename, _ in parsed:
-            pair_id = pair_store.attach(pair_id, language, filename, title=title)["pair_id"]
+            pair_id = document_pairs.attach(pair_id, language, filename, title=title).pair_id
 
         names = ", ".join(filename for _, filename, _ in parsed)
         upload_job_manager.complete_job(job_id, f"Successfully uploaded and processed {names}")
@@ -231,7 +231,7 @@ def _detach_from_pair(filename: str) -> None:
     twin, so a stale row can hide a document but never invent one.
     """
     try:
-        pair_store.detach(filename)
+        document_pairs.detach(filename)
     except Exception:  # pragma: no cover - a bookkeeping failure must not fail a delete
         logger.exception("could not detach %s from its document pair", filename)
 
@@ -330,7 +330,7 @@ async def upload_document_pair(
     if not provided:
         raise HTTPException(status_code=400, detail="Upload an Arabic file, an English file, or both")
 
-    if pair_id and not pair_store.get_pair(pair_id):
+    if pair_id and not document_pairs.get_pair(pair_id):
         raise HTTPException(status_code=404, detail=f"No document pair {pair_id}")
 
     for _language, upload in provided:
@@ -389,21 +389,24 @@ async def list_document_pairs(_: User = Depends(require_admin)):
             name = item.get("filename", "")
             counts[name] = counts.get(name, 0) + 1
 
+        pairs = document_pairs.list_pairs()
         rows = [
             DocumentPairInfo(
-                **row,
-                chunk_count_ar=counts.get(row["filename_ar"], 0) if row["filename_ar"] else 0,
-                chunk_count_en=counts.get(row["filename_en"], 0) if row["filename_en"] else 0,
+                pair_id=pair.pair_id,
+                title=pair.title,
+                filename_ar=pair.filename_ar,
+                filename_en=pair.filename_en,
+                paired=pair.paired,
+                chunk_count_ar=counts.get(pair.filename_ar, 0) if pair.filename_ar else 0,
+                chunk_count_en=counts.get(pair.filename_en, 0) if pair.filename_en else 0,
             )
-            for row in pair_store.list_pairs()
+            for pair in pairs
         ]
         # Files indexed before this feature existed, or uploaded through the
         # single-file route, belong to no row. They are still part of the corpus and
         # still answer questions, so the list has to show them rather than pretend the
         # corpus is only what has been paired.
-        claimed = {row["filename_ar"] for row in pair_store.list_pairs()} | {
-            row["filename_en"] for row in pair_store.list_pairs()
-        }
+        claimed = {pair.filename_ar for pair in pairs} | {pair.filename_en for pair in pairs}
         unpaired = [
             DocumentPairInfo(
                 pair_id="", title=name, filename_ar="", filename_en=name,

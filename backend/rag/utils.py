@@ -509,8 +509,8 @@ def language_filter_clause(language: str) -> str:
     Excludes the redundant half of a PAIRED document — the one whose twin is in the
     language being asked in. Everything else stays eligible, so a document that exists
     in one language only still answers questions asked in the other. See
-    `pair_store.superseded_filenames` for why this is an exclusion and not a filter down
-    to the asked language.
+    `DocumentPairService.superseded_filenames` for why this is an exclusion and not a
+    filter down to the asked language.
 
     Returns "" whenever there is nothing to exclude, which is the common case and also
     every case before an admin has paired anything — so this costs an empty list lookup
@@ -524,7 +524,7 @@ def language_filter_clause(language: str) -> str:
         # never routes should not pay for the database layer at import.
         import backend.indexing.pair_store as pair_store
 
-        superseded = pair_store.superseded_filenames(language)
+        superseded = pair_store.document_pairs.superseded_filenames(language)
     except Exception:
         # A pairing lookup is an optimisation, not a gate. If the table cannot be read
         # the right outcome is to search the whole corpus and possibly answer from the
