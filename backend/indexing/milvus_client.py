@@ -432,12 +432,3 @@ class MilvusStore:
 
         self._run(_drop)
 
-
-_store: MilvusStore | None = None
-
-
-def get_milvus_store() -> MilvusStore:
-    global _store
-    if _store is None:
-        _store = MilvusStore()
-    return _store

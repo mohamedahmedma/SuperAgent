@@ -79,7 +79,6 @@ def _default_builder() -> ScopeIndex:
     import os
 
     from backend.composition import default_services
-    from backend.indexing.embedding import embedding_service
     from backend.indexing.section_summary import corpus_catalogue
     from backend.profiles import get_profile
 
@@ -98,7 +97,7 @@ def _default_builder() -> ScopeIndex:
 
     return build_index(
         records,
-        embed=embedding_service.get_embeddings,
+        embed=default_services().embedder.get_embeddings,
         floor_percentile=float(getattr(profile.rag, "scope_floor_percentile", 10.0)),
         catalogue=catalogue,
         embedding_model=os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3"),

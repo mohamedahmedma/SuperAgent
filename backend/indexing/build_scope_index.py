@@ -372,14 +372,14 @@ def _embed_questions(records: List[SectionRecord]) -> None:
     if not pending:
         return
 
-    from backend.indexing.embedding import embedding_service
+    from backend.composition import default_services
 
     flat: List[str] = []
     for record in pending:
         flat.extend(record.answers)
 
     logger.info("embedding %d question(s) for %d section(s)", len(flat), len(pending))
-    vectors = embedding_service.get_embeddings(flat)
+    vectors = default_services().embedder.get_embeddings(flat)
     if len(vectors) != len(flat):
         # Leaving the vectors empty is safe: the index falls back to embedding at boot,
         # which is slow but correct. Storing a misaligned list would not be.

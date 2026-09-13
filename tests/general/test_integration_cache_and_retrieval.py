@@ -12,7 +12,7 @@ import threading
 import time
 import unittest
 
-from backend.indexing.embedding import embed_query, embedding_service
+from backend.indexing.embedding import embed_query
 from backend.indexing.milvus_client import MilvusStore
 from tests.general.integration_support import (
     TEST_PREFIX,
@@ -44,6 +44,13 @@ def _cache():
     from backend.composition import default_services
 
     return default_services().cache
+
+
+def _embedder():
+    """The shared embedding model, from the process container."""
+    from backend.composition import default_services
+
+    return default_services().embedder
 
 
 @requires_redis
@@ -297,9 +304,9 @@ class EmbedderTests(unittest.TestCase):
     def test_batch_and_single_embedding_agree(self):
         """Coalescing turns singles into batches, so the two paths must not diverge."""
         texts = EN_QUERIES[:3]
-        batched = embedding_service.get_embeddings(texts)
+        batched = _embedder().get_embeddings(texts)
         for text, vector in zip(texts, batched):
-            single = embedding_service.get_embeddings([text])[0]
+            single = _embedder().get_embeddings([text])[0]
             for a, b in zip(vector, single):
                 self.assertAlmostEqual(a, b, places=5)
 
@@ -315,14 +322,14 @@ class EmbedderTests(unittest.TestCase):
         else" is what actually catches a caller being handed someone else's vector.
         """
         texts = [f"{q} number {i}" for i, q in enumerate(EN_QUERIES + AR_QUERIES)]
-        expected = {text: embedding_service.get_embeddings([text])[0] for text in texts}
+        expected = {text: _embedder().get_embeddings([text])[0] for text in texts}
 
         results = {}
         barrier = threading.Barrier(len(texts))
 
         def call(text):
             barrier.wait(timeout=60)
-            results[text] = embedding_service.get_embeddings([text])[0]
+            results[text] = _embedder().get_embeddings([text])[0]
 
         threads = [threading.Thread(target=call, args=(t,)) for t in texts]
         for thread in threads:
@@ -345,14 +352,14 @@ class EmbedderTests(unittest.TestCase):
             self.assertGreater(own, 0.999, f"{text!r} drifted further than batching explains")
 
     def test_empty_input_returns_nothing(self):
-        self.assertEqual([], embedding_service.get_embeddings([]))
+        self.assertEqual([], _embedder().get_embeddings([]))
 
     def test_whitespace_only_text_still_embeds(self):
         self.assertEqual(len(embed_query("a")), len(embed_query("   ")))
 
     def test_a_long_document_embeds_without_error(self):
         long_text = "The school covers admissions, fees and transport. " * 200
-        vectors = embedding_service.get_embeddings([long_text])
+        vectors = _embedder().get_embeddings([long_text])
         self.assertEqual(1, len(vectors))
 
 

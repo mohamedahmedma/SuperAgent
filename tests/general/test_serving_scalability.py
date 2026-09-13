@@ -12,6 +12,8 @@ import time
 import unittest
 from unittest.mock import patch
 
+from backend.composition import Services, set_default_services
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -201,8 +203,8 @@ class ReadinessTests(unittest.TestCase):
         perfectly and can serve nobody."""
         service = EmbeddingService()
         self.assertFalse(service.is_ready)
-        with patch.object(embedding_module, "embedding_service", service):
-            response = self.client().get("/ready")
+        set_default_services(Services(embedder=service))
+        response = self.client().get("/ready")
         self.assertEqual(503, response.status_code)
         self.assertEqual("not_ready", response.json()["status"])
         self.assertFalse(response.json()["checks"]["embedder"]["ok"])
@@ -212,16 +214,16 @@ class ReadinessTests(unittest.TestCase):
         path is contending for."""
         with patch.object(embedding_module, "_create_dense_embedder") as create:
             service = EmbeddingService()
-            with patch.object(embedding_module, "embedding_service", service):
-                self.client().get("/ready")
+            set_default_services(Services(embedder=service))
+            self.client().get("/ready")
             create.assert_not_called()
 
     def test_ready_reports_which_dependency_failed(self):
         service = EmbeddingService(embedder=RecordingEmbedder())
-        with patch.object(embedding_module, "embedding_service", service):
-            with patch("backend.infra.database.engine") as engine:
-                engine.connect.side_effect = RuntimeError("no route to host")
-                response = self.client().get("/ready")
+        set_default_services(Services(embedder=service))
+        with patch("backend.infra.database.engine") as engine:
+            engine.connect.side_effect = RuntimeError("no route to host")
+            response = self.client().get("/ready")
 
         body = response.json()
         self.assertEqual(503, response.status_code)

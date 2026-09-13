@@ -122,9 +122,9 @@ def corpus_indexed() -> int:
 @lru_cache(maxsize=1)
 def embedder_available() -> bool:
     try:
-        from backend.indexing.embedding import embedding_service
+        from backend.composition import default_services
 
-        vector = embedding_service.get_embeddings(["readiness probe"])
+        vector = default_services().embedder.get_embeddings(["readiness probe"])
         return bool(vector) and len(vector[0]) > 0
     except Exception:
         return False

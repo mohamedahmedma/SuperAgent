@@ -6,8 +6,7 @@ import json
 import requests
 from langsmith import traceable
 
-from backend.indexing.milvus_client import get_milvus_store
-from backend.indexing.embedding import embed_query, embedding_service as _embedding_service
+from backend.indexing.embedding import embed_query
 from backend.env import env_bool, env_float, env_int, env_value
 from backend.llm import sampling
 from backend.profiles import get_profile
@@ -113,8 +112,19 @@ RETRIEVAL_TRACE_FIELDS = (
     "retrieval_empty",
 )
 
-# Initialize retrieval dependencies globally (shares embedding_service with the API to keep BM25 state consistent)
-_milvus_manager = get_milvus_store()
+def _milvus():
+    """The vector store, from the process container.
+
+    It used to be opened at import, so a process that only wanted
+    `language_filter_clause` connected to Milvus to get it. The container builds one on
+    first real use and shares it with ingest, which is what keeps the BM25 state and the
+    embedder consistent between the two.
+    """
+    from backend.composition import default_services
+
+    return default_services().milvus
+
+
 def _parent_chunks():
     """The parent-chunk store, from the process container.
 
@@ -595,7 +605,7 @@ def retrieve_documents(
         }
 
     try:
-        retrieved = _milvus_manager.hybrid_retrieve(
+        retrieved = _milvus().hybrid_retrieve(
             dense_embedding=dense_embedding,
             # The SPARSE half only. `bm25_text` was folded and light-stemmed by
             # search_key on the way into the index, so the query has to be put through
@@ -617,7 +627,7 @@ def retrieve_documents(
         )
     except Exception:
         try:
-            retrieved = _milvus_manager.dense_retrieve(
+            retrieved = _milvus().dense_retrieve(
                 dense_embedding=dense_embedding,
                 top_k=candidate_k,
                 filter_expr=filter_expr,

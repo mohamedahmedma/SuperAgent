@@ -18,8 +18,8 @@ import logging
 import os
 
 from backend.env import env_bool, env_float
-from backend.indexing.embedding import EmbeddingService, embedding_service as _default_embedding_service
-from backend.indexing.milvus_client import MilvusStore, get_milvus_store
+from backend.indexing.embedding import EmbeddingService
+from backend.indexing.milvus_client import MilvusStore
 from backend.profiles import get_profile
 from backend.text_matching import search_key
 
@@ -52,8 +52,14 @@ class MilvusWriter:
     """Service that embeds documents and writes them to Milvus - supports hybrid retrieval"""
 
     def __init__(self, embedding_service: EmbeddingService = None, milvus_manager: MilvusStore = None):
-        self.embedding_service = embedding_service or _default_embedding_service
-        self.milvus_manager = milvus_manager or get_milvus_store()
+        if embedding_service is None or milvus_manager is None:
+            from backend.composition import default_services
+
+            services = default_services()
+            embedding_service = embedding_service or services.embedder
+            milvus_manager = milvus_manager or services.milvus
+        self.embedding_service = embedding_service
+        self.milvus_manager = milvus_manager
         chunking = get_profile().chunking
         self.semantic_dedup_enabled = env_bool("SEMANTIC_DEDUP_ENABLED", chunking.semantic_dedup_enabled)
         self.semantic_dedup_threshold = env_float(

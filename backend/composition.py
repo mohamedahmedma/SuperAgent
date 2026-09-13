@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from backend.assets.store import AssetStore
     from backend.chat.storage import ConversationStorage
     from backend.indexing.document_loader import DocumentLoader
+    from backend.indexing.embedding import EmbeddingService
     from backend.indexing.milvus_client import MilvusStore
     from backend.indexing.milvus_writer import MilvusWriter
     from backend.indexing.pair_store import DocumentPairService
@@ -80,6 +81,7 @@ class Services:
         upload_jobs: IngestJobTracker | None = None,
         delete_jobs: IngestJobTracker | None = None,
         milvus: MilvusStore | None = None,
+        embedder: EmbeddingService | None = None,
         document_loader: DocumentLoader | None = None,
         milvus_writer: MilvusWriter | None = None,
         document_remover: DocumentRemover | None = None,
@@ -114,6 +116,7 @@ class Services:
                 ("upload_jobs", upload_jobs),
                 ("delete_jobs", delete_jobs),
                 ("milvus", milvus),
+                ("embedder", embedder),
                 ("document_loader", document_loader),
                 ("milvus_writer", milvus_writer),
                 ("document_remover", document_remover),
@@ -220,20 +223,35 @@ class Services:
 
     @property
     def milvus(self) -> MilvusStore:
-        """The vector collection.
+        """The vector collection, and the only client for it in this process.
 
-        Still fetched through `get_milvus_store()`, which owns the client's own lazy
-        instance: the retrieval path has not been converted yet, and two stores would mean
-        two connection pools loading the same collection. What has changed is that the
-        ingest path asks the container for it instead of importing one built at import.
+        `rag/utils.py` used to open one at import — so importing the retrieval helpers,
+        in any process, for any reason, connected to Milvus.
         """
 
         def build() -> MilvusStore:
-            from backend.indexing.milvus_client import get_milvus_store
+            from backend.indexing.milvus_client import MilvusStore
 
-            return get_milvus_store()
+            return MilvusStore()
 
         return self._singleton("milvus", build)
+
+    @property
+    def embedder(self) -> EmbeddingService:
+        """The embedding model, shared by ingest and retrieval.
+
+        One instance per process, deliberately: bge-m3 is hundreds of megabytes and takes
+        roughly 110 seconds to load, so a second one is not a duplicate object but a
+        duplicate model. Construction is cheap — the model loads on `warm_up()` or on
+        first use — which is what lets this be built lazily like everything else here.
+        """
+
+        def build() -> EmbeddingService:
+            from backend.indexing.embedding import EmbeddingService
+
+            return EmbeddingService()
+
+        return self._singleton("embedder", build)
 
     @property
     def document_loader(self) -> DocumentLoader:
@@ -248,15 +266,18 @@ class Services:
     def milvus_writer(self) -> MilvusWriter:
         """Embeds leaf chunks and writes them.
 
-        The embedding service is left to the writer's own default, which is the shared
-        instance: the model behind it is hundreds of megabytes, and a second one would be
-        loaded, not shared. It joins this container when the retrieval path does.
+        Both collaborators come from this container, so the writer embeds with the same
+        model the retrieval path queries with — which is what keeps their vectors
+        comparable.
         """
 
         def build() -> MilvusWriter:
             from backend.indexing.milvus_writer import MilvusWriter
 
-            return MilvusWriter(milvus_manager=self.milvus)
+            return MilvusWriter(
+                embedding_service=self.embedder,
+                milvus_manager=self.milvus,
+            )
 
         return self._singleton("milvus_writer", build)
 

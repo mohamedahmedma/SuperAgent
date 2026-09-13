@@ -305,9 +305,6 @@ class EmbeddingService:
             raise Exception(f"Local dense embedding model call failed: {str(e)}") from e
 
 
-# Process-wide singleton instance
-embedding_service = EmbeddingService()
-
 # A turn can need the query vector more than once — the domain gate classifies with it
 # before retrieval searches with it. A bge-m3 forward pass on CPU is the most expensive
 # non-network step in a turn, so the second caller must not pay for it again.
@@ -320,7 +317,9 @@ _QUERY_VECTOR_CACHE_SIZE = 64
 
 @lru_cache(maxsize=_QUERY_VECTOR_CACHE_SIZE)
 def _embed_query_cached(text: str) -> tuple:
-    return tuple(embedding_service.get_embeddings([text])[0])
+    from backend.composition import default_services
+
+    return tuple(default_services().embedder.get_embeddings([text])[0])
 
 
 def embed_query(text: str) -> list[float]:

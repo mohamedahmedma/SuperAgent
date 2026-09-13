@@ -127,14 +127,12 @@ def create_app(services: Services | None = None) -> FastAPI:
         # one configured to embed remotely. Construction is lazy now, so this is where
         # a serving process pays it: at boot, before traffic, and visibly in the log
         # rather than inside whichever request happened to be first.
-        from backend.indexing.embedding import embedding_service
-
         # Do not hold FastAPI's startup gate while a cold bge-m3 cache downloads and
         # loads. Uvicorn only accepts connections after this lifespan yields, so an
         # inline warm-up makes even /health unreachable. /ready remains the traffic
         # gate and reports "loading" until this daemon thread finishes.
         threading.Thread(
-            target=embedding_service.warm_up,
+            target=services.embedder.warm_up,
             name="embedding-warmup",
             daemon=True,
         ).start()
