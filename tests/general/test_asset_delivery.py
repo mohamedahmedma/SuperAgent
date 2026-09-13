@@ -458,11 +458,11 @@ class StoredConversationAssetTests(unittest.TestCase):
     """
 
     def setUp(self):
-        import backend.chat.storage as storage_module
-
+        from backend.chat.storage import ConversationStorage
         from backend.db.models import ChatMessage, ChatSession, User
 
-        factory = postgres_schema(self, User, ChatSession, ChatMessage).sessionmaker()
+        schema = postgres_schema(self, User, ChatSession, ChatMessage)
+        factory = schema.sessionmaker()
 
         db = factory()
         db.add(User(username="u", password_hash="x"))
@@ -471,17 +471,8 @@ class StoredConversationAssetTests(unittest.TestCase):
 
         self.factory = factory
         self.cache = DictCache()
-        self.storage = storage_module.ConversationStorage()
-        self._patches = [
-            patch.object(storage_module, "SessionLocal", factory),
-            patch.object(storage_module, "cache", self.cache),
-        ]
-        for item in self._patches:
-            item.start()
+        self.storage = ConversationStorage(unit_of_work=schema.unit_of_work, cache=self.cache)
 
-    def tearDown(self):
-        for item in self._patches:
-            item.stop()
     def _trace(self, asset_id, inline=False):
         """A trace as it goes on the WIRE: renditions in full, inline bytes and all."""
         reference = AssetReference(
