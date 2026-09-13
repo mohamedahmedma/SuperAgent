@@ -127,9 +127,9 @@ def enrich_image_blocks(
         return [block for block in blocks if block.get("type") != "image"], FigureReport()
 
     if pipeline is None:
-        from backend.assets.pipeline import get_figure_pipeline
+        from backend.composition import default_services
 
-        pipeline = get_figure_pipeline()
+        pipeline = default_services().figure_pipeline
 
     try:
         dossiers, report = pipeline.process(inputs, filename=filename, file_path=file_path)

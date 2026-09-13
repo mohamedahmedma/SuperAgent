@@ -28,6 +28,18 @@ class PairStoreTestCase(unittest.TestCase):
         set_default_services(Services(document_pairs=self.pairs))
         self.addCleanup(set_default_services, None)
 
+    def _asset_store_that(self, error):
+        """Install an asset store whose lookup raises.
+
+        The query is what the figure-aware rule must be able to do without, so the
+        failure is put on the lookup rather than on reaching the store.
+        """
+        from unittest.mock import Mock
+
+        store = Mock()
+        store.displayable_hashes_by_filename.side_effect = error
+        set_default_services(Services(document_pairs=self.pairs, asset_store=store))
+
 
 class RowLifecycleTests(PairStoreTestCase):
     def test_attaching_one_side_creates_an_unpaired_row(self):
@@ -180,13 +192,17 @@ class FigureAwareRoutingTests(PairStoreTestCase):
 
     def setUp(self):
         super().setUp()
-        from backend.assets.store import AssetStore, set_asset_store
+        from backend.assets.store import AssetStore
         from backend.db.models import AssetExtraction, DocumentAsset
 
         schema = postgres_schema(self, DocumentAsset, AssetExtraction)
         self.assets = schema.sessionmaker(autoflush=False)
-        set_asset_store(AssetStore(unit_of_work=schema.unit_of_work, cache_enabled=False))
-        self.addCleanup(set_asset_store, None)
+        # Replaces the container the base class installed, adding the asset store the
+        # figure-aware rule reads.
+        set_default_services(Services(
+            document_pairs=self.pairs,
+            asset_store=AssetStore(unit_of_work=schema.unit_of_work, cache_enabled=False),
+        ))
 
     def _figures(self, filename, *hashes, stored=True):
         """Give `filename` one image per hash. `stored=False` writes a row whose bytes
@@ -313,19 +329,15 @@ class FigureAwarenessDegradationTests(PairStoreTestCase):
 
     def test_an_unreadable_asset_table_uses_the_plain_rule(self):
         self._pair()
-        with patch(
-            "backend.assets.store.get_asset_store", side_effect=RuntimeError("db down")
-        ):
-            self.assertEqual(["uniform_en.docx"], self.pairs.superseded_filenames(ARABIC))
+        self._asset_store_that(RuntimeError("db down"))
+        self.assertEqual(["uniform_en.docx"], self.pairs.superseded_filenames(ARABIC))
 
     def test_the_asset_table_is_not_touched_when_nothing_is_paired(self):
         """A deployment that never pairs must not pay for figure awareness — the
         property the original rule advertised and this refinement has to preserve."""
         self.pairs.attach("", ENGLISH, "bus_en.docx")
-        with patch(
-            "backend.assets.store.get_asset_store", side_effect=AssertionError("looked up assets")
-        ):
-            self.assertEqual([], self.pairs.superseded_filenames(ARABIC))
+        self._asset_store_that(AssertionError("looked up assets"))
+        self.assertEqual([], self.pairs.superseded_filenames(ARABIC))
 
 
 class FilterExpressionTests(PairStoreTestCase):

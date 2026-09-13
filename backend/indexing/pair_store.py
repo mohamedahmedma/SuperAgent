@@ -226,9 +226,9 @@ class DocumentPairService:
 
             if not get_profile().assets.enabled:
                 return None
-            from backend.assets.store import get_asset_store
+            from backend.composition import default_services
 
-            return get_asset_store().displayable_hashes_by_filename(filenames)
+            return default_services().asset_store.displayable_hashes_by_filename(filenames)
         except Exception:
             logger.exception("could not read document assets; pairing without figure awareness")
             return None

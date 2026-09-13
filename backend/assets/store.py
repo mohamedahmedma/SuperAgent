@@ -74,17 +74,17 @@ class AssetStore:
     @property
     def blob_store(self):
         if self._blob_store is None:
-            from backend.assets.blobs import get_blob_store
+            from backend.composition import default_services
 
-            self._blob_store = get_blob_store()
+            self._blob_store = default_services().blob_store
         return self._blob_store
 
     @property
     def cache(self):
         if self._cache is None and self._cache_enabled:
-            from backend.infra.cache import cache
+            from backend.composition import default_services
 
-            self._cache = cache
+            self._cache = default_services().cache
         return self._cache
 
     @staticmethod
@@ -292,9 +292,9 @@ class AssetStore:
         # The attribute index is derived from these assets; leaving rows behind would
         # let a deleted product keep matching catalogue filters.
         try:
-            from backend.assets.entity_store import get_entity_index
+            from backend.composition import default_services
 
-            get_entity_index().delete_assets(asset_ids)
+            default_services().entity_index.delete_assets(asset_ids)
         except Exception:
             logger.exception("Failed to clear the attribute index for %s", filename)
 
@@ -403,27 +403,10 @@ class AssetStore:
         }
 
 
-_store: Optional[AssetStore] = None
-
-
-def get_asset_store() -> AssetStore:
-    global _store
-    if _store is None:
-        _store = AssetStore()
-    return _store
-
-
-def set_asset_store(store: Optional[AssetStore]) -> None:
-    global _store
-    _store = store
-
-
 __all__ = [
     "AssetStore",
     "BackfillReport",
     "DeleteResult",
-    "get_asset_store",
-    "set_asset_store",
     "AssetRole",
     "AssetTier",
     "ExtractionStatus",

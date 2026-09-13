@@ -26,7 +26,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.assets.delivery import AssetReference, ClientCapabilities, get_asset_presenter
+from backend.api.deps import get_services
+from backend.assets.delivery import AssetReference, ClientCapabilities
+from backend.composition import Services
 from backend.db.models import User
 from backend.infra.auth import get_current_user
 from backend.profiles import get_profile
@@ -58,39 +60,40 @@ def _require_assets_enabled() -> None:
         raise HTTPException(status_code=404, detail="Asset support is disabled for this deployment.")
 
 
-def _load(asset_id: str):
-    from backend.assets.store import get_asset_store
-
-    dossier = get_asset_store().get(asset_id)
+def _load(services: Services, asset_id: str):
+    dossier = services.asset_store.get(asset_id)
     if dossier is None:
         raise HTTPException(status_code=404, detail="Asset not found")
     return dossier
 
 
 @router.get("/media/{asset_id:path}/metadata", response_model=AssetReference)
-async def get_asset_metadata(asset_id: str, _: User = Depends(get_current_user)) -> AssetReference:
+async def get_asset_metadata(
+    asset_id: str,
+    _: User = Depends(get_current_user),
+    services: Services = Depends(get_services),
+) -> AssetReference:
     """Caption, dimensions, and source for one asset — no bytes."""
     _require_assets_enabled()
-    return get_asset_presenter().present(_load(asset_id), ClientCapabilities())
+    return services.asset_presenter.present(_load(services, asset_id), ClientCapabilities())
 
 
 @router.post("/media/resolve", response_model=AssetResolveResponse)
 async def resolve_assets(
     request: AssetResolveRequest,
     _: User = Depends(get_current_user),
+    services: Services = Depends(get_services),
 ) -> AssetResolveResponse:
     """Batch-resolve asset ids into renditions the calling client can actually use."""
     _require_assets_enabled()
-    from backend.assets.store import get_asset_store
-
     ids = [item.strip() for item in request.asset_ids if item and item.strip()]
     if not ids:
         return AssetResolveResponse()
 
-    dossiers = get_asset_store().get_many(ids)
+    dossiers = services.asset_store.get_many(ids)
     found = {dossier.asset_id for dossier in dossiers}
     capabilities = request.capabilities or ClientCapabilities()
-    references = get_asset_presenter().present_many(dossiers, capabilities)
+    references = services.asset_presenter.present_many(dossiers, capabilities)
     return AssetResolveResponse(
         assets=references,
         missing=[item for item in ids if item not in found],
@@ -102,6 +105,7 @@ async def get_asset_bytes(
     asset_id: str,
     request: Request,
     _: User = Depends(get_current_user),
+    services: Services = Depends(get_services),
 ) -> Response:
     """The asset's bytes.
 
@@ -110,7 +114,7 @@ async def get_asset_bytes(
     the bytes gets a 304 and transfers nothing.
     """
     _require_assets_enabled()
-    dossier = _load(asset_id)
+    dossier = _load(services, asset_id)
     if not dossier.blob.uri:
         raise HTTPException(status_code=404, detail="Asset has no stored bytes")
 
@@ -118,10 +122,8 @@ async def get_asset_bytes(
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag})
 
-    from backend.assets.blobs import get_blob_store
-
     try:
-        data = get_blob_store().get(dossier.blob.uri)
+        data = services.blob_store.get(dossier.blob.uri)
     except FileNotFoundError:
         # The row survived but the blob did not — a real inconsistency worth logging
         # loudly, and a 404 rather than a 500 because the resource genuinely is gone.

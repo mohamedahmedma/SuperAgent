@@ -198,18 +198,3 @@ class EntityAttributeIndex:
     def stats(self) -> dict:
         with self._unit_of_work() as uow:
             return uow.entity_attributes.stats()
-
-
-_index: Optional[EntityAttributeIndex] = None
-
-
-def get_entity_index() -> EntityAttributeIndex:
-    global _index
-    if _index is None:
-        _index = EntityAttributeIndex()
-    return _index
-
-
-def set_entity_index(index: Optional[EntityAttributeIndex]) -> None:
-    global _index
-    _index = index

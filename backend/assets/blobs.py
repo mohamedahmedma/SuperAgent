@@ -214,9 +214,6 @@ class S3BlobStore(BlobStore):
             return False
 
 
-_store: Optional[BlobStore] = None
-
-
 def build_blob_store(assets_config, project_root: Optional[Path] = None) -> BlobStore:
     """Construct the adapter the profile selects. Credentials come from the
     environment, never from the profile — profiles are committed to the repository."""
@@ -239,22 +236,6 @@ def build_blob_store(assets_config, project_root: Optional[Path] = None) -> Blob
         )
 
     raise ValueError(f"Unknown assets.blob_backend: {backend!r} (expected 'local' or 's3')")
-
-
-def get_blob_store() -> BlobStore:
-    global _store
-    if _store is None:
-        from backend.profiles import get_profile
-
-        _store = build_blob_store(get_profile().assets)
-    return _store
-
-
-def set_blob_store(store: Optional[BlobStore]) -> None:
-    """Swap the process-wide store. For tests and for the backfill CLI."""
-    global _store
-    _store = store
-
 
 def purge_local_store(root: Path | str) -> None:
     """Remove an entire local blob tree. Destructive; used only by test teardown."""

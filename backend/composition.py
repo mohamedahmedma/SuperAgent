@@ -40,6 +40,10 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from backend.application.ports import UnitOfWorkFactory
+    from backend.assets.blobs import BlobStore
+    from backend.assets.delivery import AssetPresenter
+    from backend.assets.entity_store import EntityAttributeIndex
+    from backend.assets.pipeline import FigurePipeline
     from backend.assets.store import AssetStore
     from backend.chat.storage import ConversationStorage
     from backend.indexing.document_loader import DocumentLoader
@@ -51,6 +55,7 @@ if TYPE_CHECKING:
     from backend.indexing.summary_store import SectionCatalogueStore
     from backend.infra.cache import RedisCache
     from backend.jobs.upload_jobs import IngestJobTracker
+    from backend.rag.entity_retrieval import EntityRetriever
 
 T = TypeVar("T")
 
@@ -79,6 +84,11 @@ class Services:
         milvus_writer: MilvusWriter | None = None,
         document_remover: DocumentRemover | None = None,
         asset_store: AssetStore | None = None,
+        blob_store: BlobStore | None = None,
+        asset_presenter: AssetPresenter | None = None,
+        entity_index: EntityAttributeIndex | None = None,
+        figure_pipeline: FigurePipeline | None = None,
+        entity_retriever: EntityRetriever | None = None,
     ) -> None:
         """Every service is nameable here, and anything named is used as given.
 
@@ -108,6 +118,11 @@ class Services:
                 ("milvus_writer", milvus_writer),
                 ("document_remover", document_remover),
                 ("asset_store", asset_store),
+                ("blob_store", blob_store),
+                ("asset_presenter", asset_presenter),
+                ("entity_index", entity_index),
+                ("figure_pipeline", figure_pipeline),
+                ("entity_retriever", entity_retriever),
             )
             if value is not None
         }
@@ -245,21 +260,83 @@ class Services:
 
         return self._singleton("milvus_writer", build)
 
+    # -- assets -----------------------------------------------------------------
+
+    @property
+    def blob_store(self) -> BlobStore:
+        """Where image bytes live: a local tree or S3, as the profile selects."""
+
+        def build() -> BlobStore:
+            from backend.assets.blobs import build_blob_store
+            from backend.profiles import get_profile
+
+            return build_blob_store(get_profile().assets)
+
+        return self._singleton("blob_store", build)
+
     @property
     def asset_store(self) -> AssetStore:
-        """Asset occurrences and the extraction cache.
-
-        As with `milvus`, the accessor in `backend/assets/store.py` still owns the
-        instance, so a caller that has not been converted yet shares this one rather than
-        opening a second blob backend.
-        """
+        """Asset occurrences and the content-addressed extraction cache."""
 
         def build() -> AssetStore:
-            from backend.assets.store import get_asset_store
+            from backend.assets.store import AssetStore
 
-            return get_asset_store()
+            return AssetStore(
+                unit_of_work=self.unit_of_work,
+                blob_store=self.blob_store,
+                cache=self.cache,
+            )
 
         return self._singleton("asset_store", build)
+
+    @property
+    def asset_presenter(self) -> AssetPresenter:
+        """Turns stored assets into what a given client can actually display."""
+
+        def build() -> AssetPresenter:
+            from backend.assets.delivery import AssetPresenter
+
+            return AssetPresenter()
+
+        return self._singleton("asset_presenter", build)
+
+    @property
+    def entity_index(self) -> EntityAttributeIndex:
+        def build() -> EntityAttributeIndex:
+            from backend.assets.entity_store import EntityAttributeIndex
+
+            return EntityAttributeIndex(unit_of_work=self.unit_of_work)
+
+        return self._singleton("entity_index", build)
+
+    @property
+    def figure_pipeline(self) -> FigurePipeline:
+        """Extraction for the images found during ingest."""
+
+        def build() -> FigurePipeline:
+            from backend.assets.pipeline import FigurePipeline
+
+            return FigurePipeline(
+                store=self.asset_store,
+                blob_store=self.blob_store,
+                entity_index=self.entity_index,
+            )
+
+        return self._singleton("figure_pipeline", build)
+
+    @property
+    def entity_retriever(self) -> EntityRetriever:
+        """Retrieval over entity assets by their indexed attributes."""
+
+        def build() -> EntityRetriever:
+            from backend.rag.entity_retrieval import EntityRetriever
+
+            return EntityRetriever(
+                asset_store=self.asset_store,
+                entity_index=self.entity_index,
+            )
+
+        return self._singleton("entity_retriever", build)
 
     @property
     def document_remover(self) -> DocumentRemover:
