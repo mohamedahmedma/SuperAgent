@@ -115,17 +115,27 @@ class SqlAlchemyUnitOfWork:
     def _bind(self, session: Session) -> None:
         # Imported here so importing this module does not pull in every repository and
         # model — alembic's env.py and the app's startup gate only need the database.
-        from backend.infra import repositories
+        from backend.infra.repositories import (
+            SqlAlchemyAssetExtractionRepository,
+            SqlAlchemyConversationRepository,
+            SqlAlchemyCorpusDigestRepository,
+            SqlAlchemyDocumentAssetRepository,
+            SqlAlchemyDocumentPairRepository,
+            SqlAlchemyEntityAttributeRepository,
+            SqlAlchemyIngestJobRepository,
+            SqlAlchemyParentChunkRepository,
+            SqlAlchemySectionSummaryRepository,
+        )
 
-        self.conversations = repositories.SqlAlchemyConversationRepository(session)
-        self.document_pairs = repositories.SqlAlchemyDocumentPairRepository(session)
-        self.parent_chunks = repositories.SqlAlchemyParentChunkRepository(session)
-        self.section_summaries = repositories.SqlAlchemySectionSummaryRepository(session)
-        self.corpus_digests = repositories.SqlAlchemyCorpusDigestRepository(session)
-        self.document_assets = repositories.SqlAlchemyDocumentAssetRepository(session)
-        self.asset_extractions = repositories.SqlAlchemyAssetExtractionRepository(session)
-        self.entity_attributes = repositories.SqlAlchemyEntityAttributeRepository(session)
-        self.ingest_jobs = repositories.SqlAlchemyIngestJobRepository(session)
+        self.conversations = SqlAlchemyConversationRepository(session)
+        self.document_pairs = SqlAlchemyDocumentPairRepository(session)
+        self.parent_chunks = SqlAlchemyParentChunkRepository(session)
+        self.section_summaries = SqlAlchemySectionSummaryRepository(session)
+        self.corpus_digests = SqlAlchemyCorpusDigestRepository(session)
+        self.document_assets = SqlAlchemyDocumentAssetRepository(session)
+        self.asset_extractions = SqlAlchemyAssetExtractionRepository(session)
+        self.entity_attributes = SqlAlchemyEntityAttributeRepository(session)
+        self.ingest_jobs = SqlAlchemyIngestJobRepository(session)
 
     def _require_session(self) -> Session:
         if self._session is None:
