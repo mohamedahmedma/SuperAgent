@@ -33,11 +33,22 @@ _RECORD_COLUMNS = (
     ParentChunk.asset_ids,
 )
 
+#: The columns a write sets; everything but the id is overwritten on conflict.
+_WRITTEN_COLUMNS = (*(column.key for column in _RECORD_COLUMNS), "updated_at")
+
+
+def _upsert_chunk():
+    statement = insert(ParentChunk)
+    return statement.on_conflict_do_update(
+        index_elements=[ParentChunk.chunk_id],
+        set_={name: statement.excluded[name] for name in _WRITTEN_COLUMNS if name != "chunk_id"},
+    )
+
+
+_UPSERT_CHUNK = _upsert_chunk()
+
 
 class SqlAlchemyParentChunkRepository:
-    #: Rows per INSERT: comfortably under Postgres's limit on bind parameters per statement.
-    BATCH_SIZE = 500
-
     def __init__(self, session: Session) -> None:
         self._session = session
 
@@ -49,14 +60,10 @@ class SqlAlchemyParentChunkRepository:
             return
         now = datetime.now(UTC)
         rows = [_values(chunk, now) for chunk in latest.values()]
-        for start in range(0, len(rows), self.BATCH_SIZE):
-            statement = insert(ParentChunk).values(rows[start:start + self.BATCH_SIZE])
-            self._session.execute(
-                statement.on_conflict_do_update(
-                    index_elements=[ParentChunk.chunk_id],
-                    set_={name: statement.excluded[name] for name in rows[0] if name != "chunk_id"},
-                )
-            )
+        # Rows go as parameters, not baked into the statement: SQLAlchemy compiles the
+        # one-row upsert once, caches it, and batches the rows into multi-row VALUES on
+        # the wire, splitting where Postgres's bind-parameter limit requires.
+        self._session.execute(_UPSERT_CHUNK, rows)
 
     def get_many(self, chunk_ids: Sequence[str]) -> Sequence[ParentChunkRecord]:
         if not chunk_ids:

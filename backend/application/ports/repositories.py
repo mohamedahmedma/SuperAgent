@@ -157,8 +157,8 @@ class DocumentPairRepository(Protocol):
         """The entries naming `filename` on either side, oldest first."""
         ...
 
-    def paired(self) -> Sequence[DocumentPairRecord]:
-        """The entries with a file on both sides."""
+    def paired_filenames(self) -> Sequence[tuple[str, str]]:
+        """(filename_ar, filename_en) of every entry with a file on both sides, oldest first."""
         ...
 
     def save(self, pair: DocumentPairRecord) -> None:

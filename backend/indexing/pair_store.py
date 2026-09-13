@@ -159,11 +159,11 @@ class DocumentPairService:
         other = _TWIN.get(language or "")
         if not other:
             return []
-        keep_side, drop_side = _SIDES[language], _SIDES[other]
         with self._unit_of_work() as uow:
-            rows = uow.document_pairs.paired()
+            rows = uow.document_pairs.paired_filenames()
 
-        candidates = [(getattr(row, keep_side), getattr(row, drop_side)) for row in rows]
+        keeps_arabic = language == ARABIC
+        candidates = [(ar, en) if keeps_arabic else (en, ar) for ar, en in rows]
         # Deployments that never pair anything return here, having touched one table and
         # asked nothing about assets — the feature still costs a single lookup until it
         # is actually used.

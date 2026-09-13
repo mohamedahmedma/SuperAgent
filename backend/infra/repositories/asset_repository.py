@@ -14,7 +14,7 @@ from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete, distinct, func, select
+from sqlalchemy import Text, cast, delete, distinct, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -28,10 +28,26 @@ if TYPE_CHECKING:
 _EXTRACTED = "extracted"
 
 
-class SqlAlchemyDocumentAssetRepository:
-    #: Rows per INSERT: comfortably under Postgres's limit on bind parameters per statement.
-    BATCH_SIZE = 500
+def _upsert_occurrence():
+    statement = insert(DocumentAsset)
+    return statement.on_conflict_do_update(
+        index_elements=[DocumentAsset.asset_id],
+        set_={
+            column.name: statement.excluded[column.name]
+            for column in DocumentAsset.__table__.columns
+            if column.name not in ("asset_id", "created_at")
+        },
+    )
 
+
+#: Insert an occurrence, or overwrite everything but its id and creation time.
+_UPSERT_OCCURRENCE = _upsert_occurrence()
+
+#: The dossier as JSON text rather than parsed by the driver; see `_dossier`.
+_DOSSIER_JSON = cast(DocumentAsset.dossier, Text)
+
+
+class SqlAlchemyDocumentAssetRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
@@ -43,25 +59,19 @@ class SqlAlchemyDocumentAssetRepository:
             return
         now = datetime.now(UTC)
         rows = [_occurrence_values(dossier, now) for dossier in latest.values()]
-        for start in range(0, len(rows), self.BATCH_SIZE):
-            statement = insert(DocumentAsset).values(rows[start:start + self.BATCH_SIZE])
-            self._session.execute(
-                statement.on_conflict_do_update(
-                    index_elements=[DocumentAsset.asset_id],
-                    set_={
-                        name: statement.excluded[name]
-                        for name in rows[0]
-                        if name not in ("asset_id", "created_at")
-                    },
-                )
-            )
+        # Rows go as parameters, not baked into the statement: SQLAlchemy compiles the
+        # one-row upsert once, caches it, and batches the rows into multi-row VALUES on
+        # the wire, splitting where Postgres's bind-parameter limit requires.
+        self._session.execute(_UPSERT_OCCURRENCE, rows)
 
-    # Reads select the dossier column alone. It is the record; the scalar columns beside
-    # it exist to be filtered on, not to be loaded into an ORM object and discarded.
+    # Reads select the dossier column alone, as JSON text. It is the record; the scalar
+    # columns beside it exist to be filtered on, not to be loaded and discarded. As text,
+    # pydantic parses and validates it in one pass instead of json.loads building dicts
+    # for pydantic to walk a second time.
 
     def get(self, asset_id: str) -> AssetDossier | None:
         payload = self._session.scalar(
-            select(DocumentAsset.dossier).where(DocumentAsset.asset_id == asset_id)
+            select(_DOSSIER_JSON).where(DocumentAsset.asset_id == asset_id)
         )
         return None if payload is None else _dossier(payload)
 
@@ -69,12 +79,12 @@ class SqlAlchemyDocumentAssetRepository:
         if not asset_ids:
             return []
         payloads = self._session.scalars(
-            select(DocumentAsset.dossier).where(DocumentAsset.asset_id.in_(list(asset_ids)))
+            select(_DOSSIER_JSON).where(DocumentAsset.asset_id.in_(list(asset_ids)))
         )
         return [_dossier(payload) for payload in payloads]
 
     def list_by_filename(self, filename: str, *, extracted_only: bool) -> Sequence[AssetDossier]:
-        statement = select(DocumentAsset.dossier).where(DocumentAsset.filename == filename)
+        statement = select(_DOSSIER_JSON).where(DocumentAsset.filename == filename)
         if extracted_only:
             statement = statement.where(DocumentAsset.status == _EXTRACTED)
         payloads = self._session.scalars(statement.order_by(DocumentAsset.page_number, DocumentAsset.asset_id))
@@ -110,7 +120,7 @@ class SqlAlchemyDocumentAssetRepository:
 
     def older_than(self, dossier_version: int, *, after_asset_id: str, limit: int) -> Sequence[AssetDossier]:
         payloads = self._session.scalars(
-            select(DocumentAsset.dossier)
+            select(_DOSSIER_JSON)
             .where(DocumentAsset.dossier_version < dossier_version, DocumentAsset.asset_id > after_asset_id)
             .order_by(DocumentAsset.asset_id)
             .limit(limit)
@@ -209,10 +219,10 @@ def _occurrence_values(dossier: AssetDossier, now: datetime) -> dict:
     }
 
 
-def _dossier(payload: dict) -> AssetDossier:
+def _dossier(document: str) -> AssetDossier:
     from backend.assets.dossier import AssetDossier
 
-    return AssetDossier.model_validate(payload)
+    return AssetDossier.model_validate_json(document)
 
 
 __all__ = ["SqlAlchemyAssetExtractionRepository", "SqlAlchemyDocumentAssetRepository"]

@@ -52,12 +52,15 @@ class SqlAlchemyDocumentPairRepository:
             .order_by(DocumentPair.created_at, DocumentPair.pair_id)
         )
 
-    def paired(self) -> Sequence[DocumentPairRecord]:
-        return self._records(
-            select(*_RECORD_COLUMNS)
+    def paired_filenames(self) -> Sequence[tuple[str, str]]:
+        # Two columns as plain tuples: routing asks this on every question and needs
+        # nothing else from the row.
+        rows = self._session.execute(
+            select(DocumentPair.filename_ar, DocumentPair.filename_en)
             .where(DocumentPair.filename_ar != "", DocumentPair.filename_en != "")
             .order_by(DocumentPair.created_at, DocumentPair.pair_id)
         )
+        return [(filename_ar, filename_en) for filename_ar, filename_en in rows]
 
     def save(self, pair: DocumentPairRecord) -> None:
         now = datetime.now(UTC)
