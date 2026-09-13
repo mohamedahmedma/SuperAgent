@@ -4,8 +4,8 @@
       <p class="wa-lead">
         {{
           language === 'ar'
-            ? 'سجّل الدخول برقم هاتفك المسجّل لدى المدرسة. لا حاجة لكلمة مرور.'
-            : 'Sign in with the number the school has on file. No password needed.'
+            ? 'أنشئ أو فعّل حساب ولي الأمر باستخدام رقم واتساب المسجّل لدى المدرسة.'
+            : 'Create or activate your parent account with the WhatsApp number registered at school.'
         }}
       </p>
 
@@ -18,8 +18,8 @@
                 ? 'جارٍ التحضير…'
                 : 'Preparing…'
               : language === 'ar'
-                ? 'المتابعة عبر واتساب'
-                : 'Continue with WhatsApp'
+                ? 'إنشاء الحساب عبر واتساب'
+                : 'Register with WhatsApp'
           }}
         </span>
       </button>
@@ -151,6 +151,7 @@ import { useAuthStore } from '@/stores/auth';
 
 const props = defineProps<{
   language: 'ar' | 'en';
+  flow?: 'register';
 }>();
 
 const authStore = useAuthStore();
