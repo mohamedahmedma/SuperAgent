@@ -58,11 +58,6 @@ class DescribeTests(unittest.TestCase):
         with patch.object(database, "DATABASE_URL", "postgresql+psycopg2://postgres@postgres:5432/app"):
             self.assertIn("password=ABSENT", database.describe_database())
 
-    def test_sqlite_describes_its_file(self):
-        """Pointing DATABASE_URL at SQLite is a normal thing to do while developing."""
-        with patch.object(database, "DATABASE_URL", "sqlite:////app/data/dev.db"):
-            self.assertEqual("sqlite file=/app/data/dev.db", database.describe_database())
-
     def test_the_boot_line_says_where_the_url_came_from(self):
         with patch.object(database, "DATABASE_URL", PROD_URL):
             with patch.dict("os.environ", {"DATABASE_URL": PROD_URL}):

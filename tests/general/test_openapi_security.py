@@ -88,13 +88,17 @@ class SchemeShapeTests(unittest.TestCase):
         ):
             import importlib
 
+            shared = dict(vars(backend_auth))
             importlib.reload(backend_auth)
             try:
                 rendered = repr(_protected_app().openapi())
                 self.assertNotIn("should-not-appear", rendered)
             finally:
-                # Restore the module every other test in the process shares.
-                importlib.reload(backend_auth)
+                # Put back the very objects every other test in the process holds. A
+                # second reload would not: it binds `get_current_user` to a new function,
+                # while a router imported earlier still depends on the old one, so a
+                # test overriding the dependency by name overrides nothing and gets 401.
+                vars(backend_auth).update(shared)
 
 
 class RefusalTests(unittest.TestCase):

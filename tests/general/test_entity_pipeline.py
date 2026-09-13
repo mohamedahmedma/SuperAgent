@@ -13,10 +13,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from backend.assets.attributes import (
     AttributeSchema,
     AttributeSpec,
@@ -39,6 +35,7 @@ from backend.assets.pipeline import FigurePipeline, ImageInput
 from backend.assets.store import AssetStore
 from backend.profiles.registry import load_profile
 from backend.rag.entity_retrieval import EntityRetriever
+from tests.general.postgres_support import postgres_schema
 
 
 def make_png(width=400, height=300, seed=1) -> bytes:
@@ -356,17 +353,11 @@ class IndexTestCase(unittest.TestCase):
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset, EntityAttribute
 
-        self.engine = create_engine(
-            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-        )
-        for table in (DocumentAsset, AssetExtraction, EntityAttribute):
-            table.__table__.create(self.engine)
-        self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+        self.session_factory = postgres_schema(
+            self, DocumentAsset, AssetExtraction, EntityAttribute
+        ).sessionmaker()
         self.index = EntityAttributeIndex(session_factory=self.session_factory)
         self.schema = shop_schema()
-
-    def tearDown(self):
-        self.engine.dispose()
 
     def _seed(self):
         catalogue = {

@@ -15,10 +15,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from backend.assets.blobs import LocalBlobStore
 from backend.assets.delivery import (
     AssetPresenter,
@@ -51,6 +47,7 @@ from backend.chat.assets_bridge import (
 )
 from backend.chat.request_context import ChatRequestContext
 from backend.profiles.registry import load_profile
+from tests.general.postgres_support import postgres_schema
 
 
 def make_png(width=200, height=200, seed=1) -> bytes:
@@ -313,18 +310,13 @@ class RequestContextAssetTests(unittest.TestCase):
 
 
 class AssetStoreTestCase(unittest.TestCase):
-    """A real AssetStore over SQLite with one dossier and its blob in it, so the tests
+    """A real AssetStore over Postgres with one dossier and its blob in it, so the tests
     below exercise the actual lookup rather than a stub."""
 
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        self.engine = create_engine(
-            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-        )
-        DocumentAsset.__table__.create(self.engine)
-        AssetExtraction.__table__.create(self.engine)
-        session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
@@ -350,8 +342,6 @@ class AssetStoreTestCase(unittest.TestCase):
         set_asset_store(None)
         set_blob_store(None)
         self._tmp.cleanup()
-        self.engine.dispose()
-
 
 class AssetsBridgeTests(unittest.TestCase):
     def setUp(self):
@@ -472,12 +462,7 @@ class StoredConversationAssetTests(unittest.TestCase):
 
         from backend.db.models import ChatMessage, ChatSession, User
 
-        self.engine = create_engine(
-            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-        )
-        for model in (User, ChatSession, ChatMessage):
-            model.__table__.create(self.engine)
-        factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+        factory = postgres_schema(self, User, ChatSession, ChatMessage).sessionmaker()
 
         db = factory()
         db.add(User(username="u", password_hash="x"))
@@ -497,8 +482,6 @@ class StoredConversationAssetTests(unittest.TestCase):
     def tearDown(self):
         for item in self._patches:
             item.stop()
-        self.engine.dispose()
-
     def _trace(self, asset_id, inline=False):
         """A trace as it goes on the WIRE: renditions in full, inline bytes and all."""
         reference = AssetReference(
@@ -851,12 +834,7 @@ class AssetRouteTests(unittest.TestCase):
         from backend.db.models import AssetExtraction, DocumentAsset, User
         from backend.infra.auth import get_current_user
 
-        self.engine = create_engine(
-            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-        )
-        DocumentAsset.__table__.create(self.engine)
-        AssetExtraction.__table__.create(self.engine)
-        session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
@@ -883,8 +861,6 @@ class AssetRouteTests(unittest.TestCase):
         set_asset_store(None)
         set_blob_store(None)
         self._tmp.cleanup()
-        self.engine.dispose()
-
     def _url(self, suffix=""):
         return asset_url_path(self.dossier.asset_id) + suffix
 

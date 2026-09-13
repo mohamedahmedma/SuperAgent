@@ -36,13 +36,6 @@ _POOL_OPTIONS = {
     "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT_SECONDS") or 30),
 }
 
-# SQLite is a normal thing to point DATABASE_URL at while developing, and its pools
-# (SingletonThreadPool, NullPool) reject these arguments outright rather than ignoring
-# them — so sizing a pool it does not have would turn a convenience into an import
-# error. The sizing is for the server dialects that actually pool connections.
-if DATABASE_URL.startswith("sqlite"):
-    _POOL_OPTIONS = {}
-
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
@@ -152,8 +145,6 @@ def describe_database() -> str:
         url = make_url(DATABASE_URL)
     except Exception:
         return "unparseable DATABASE_URL"
-    if url.get_backend_name() == "sqlite":
-        return f"sqlite file={url.database or ':memory:'}"
     return (
         f"{url.drivername} host={url.host or '-'}:{url.port or 5432} "
         f"db={url.database or '-'} user={url.username or '-'} "

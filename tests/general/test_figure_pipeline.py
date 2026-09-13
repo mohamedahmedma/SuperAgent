@@ -12,10 +12,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from backend.assets.blobs import LocalBlobStore
 from backend.assets.dossier import AssetRole, AssetTier, ExtractionStatus, compute_sha256
 from backend.assets.extractors import (
@@ -32,6 +28,7 @@ from backend.assets.store import AssetStore
 from backend.assets.triage import ImageFacts, count_digest_pages, probe_dimensions, triage_image
 from backend.indexing.asset_enrichment import enrich_image_blocks
 from backend.profiles.registry import load_profile
+from tests.general.postgres_support import postgres_schema
 
 
 def make_png(width=200, height=200, seed=1) -> bytes:
@@ -317,12 +314,7 @@ class PipelineTestCase(unittest.TestCase):
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        self.engine = create_engine(
-            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-        )
-        DocumentAsset.__table__.create(self.engine)
-        AssetExtraction.__table__.create(self.engine)
-        session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
@@ -331,7 +323,6 @@ class PipelineTestCase(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
-        self.engine.dispose()
 
     def pipeline(self, extractor=None, fallback=None):
         return FigurePipeline(
