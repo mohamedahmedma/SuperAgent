@@ -20,12 +20,17 @@ from sqlalchemy.orm import Session
 if TYPE_CHECKING:
     from backend.application.ports.repositories import (
         ConversationRepository,
+        CorpusDigestRepository,
         DocumentPairRepository,
+        ParentChunkRepository,
+        SectionSummaryRepository,
     )
 
 # The attribute names the port promises, kept as data so `__getattr__` can tell "you
 # forgot the `with`" apart from "you misspelled the repository".
-_REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset({"conversations", "document_pairs"})
+_REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset(
+    {"conversations", "document_pairs", "parent_chunks", "section_summaries", "corpus_digests"}
+)
 
 
 class SqlAlchemyUnitOfWork:
@@ -38,6 +43,9 @@ class SqlAlchemyUnitOfWork:
     # Annotations only: the attributes exist between `__enter__` and `__exit__`.
     conversations: ConversationRepository
     document_pairs: DocumentPairRepository
+    parent_chunks: ParentChunkRepository
+    section_summaries: SectionSummaryRepository
+    corpus_digests: CorpusDigestRepository
 
     def __init__(self, session_factory: Callable[[], Session] | None = None) -> None:
         self._session_factory = session_factory
@@ -89,13 +97,13 @@ class SqlAlchemyUnitOfWork:
     def _bind(self, session: Session) -> None:
         # Imported here so importing this module does not pull in every repository and
         # model — alembic's env.py and the app's startup gate only need the database.
-        from backend.infra.repositories import (
-            SqlAlchemyConversationRepository,
-            SqlAlchemyDocumentPairRepository,
-        )
+        from backend.infra import repositories
 
-        self.conversations = SqlAlchemyConversationRepository(session)
-        self.document_pairs = SqlAlchemyDocumentPairRepository(session)
+        self.conversations = repositories.SqlAlchemyConversationRepository(session)
+        self.document_pairs = repositories.SqlAlchemyDocumentPairRepository(session)
+        self.parent_chunks = repositories.SqlAlchemyParentChunkRepository(session)
+        self.section_summaries = repositories.SqlAlchemySectionSummaryRepository(session)
+        self.corpus_digests = repositories.SqlAlchemyCorpusDigestRepository(session)
 
     def _require_session(self) -> Session:
         if self._session is None:

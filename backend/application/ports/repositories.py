@@ -14,10 +14,15 @@ record is only data.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    # Named only in annotations. Importing from `backend.indexing` at runtime runs its
+    # package `__init__`, which loads the document loader, Milvus and the embedder.
+    from backend.indexing.section_summary import SectionRecord
 
 
 # -- conversations --------------------------------------------------------------------
@@ -162,4 +167,84 @@ class DocumentPairRepository(Protocol):
 
     def delete_empty(self) -> None:
         """Remove every entry with neither side filled."""
+        ...
+
+
+# -- parent chunks --------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ParentChunkRecord:
+    """A level-1 or level-2 chunk: the text a retrieved leaf is merged up into."""
+
+    chunk_id: str
+    text: str
+    filename: str
+    file_type: str = ""
+    file_path: str = ""
+    page_number: int = 0
+    parent_chunk_id: str = ""
+    root_chunk_id: str = ""
+    chunk_level: int = 0
+    chunk_idx: int = 0
+    modality: str = "text"
+    asset_ids: tuple[str, ...] = ()
+
+
+class ParentChunkRepository(Protocol):
+    def upsert_many(self, chunks: Sequence[ParentChunkRecord]) -> None:
+        """Insert each chunk, or replace the stored chunk with the same id."""
+        ...
+
+    def get_many(self, chunk_ids: Sequence[str]) -> Sequence[ParentChunkRecord]:
+        """The stored chunks among `chunk_ids`, in no particular order."""
+        ...
+
+    def delete_by_filename(self, filename: str) -> Sequence[str]:
+        """Remove a document's chunks and return the ids that were removed."""
+        ...
+
+    def sections(self, level: int) -> Sequence[ParentChunkRecord]:
+        """Every chunk at `level`, in file and position order."""
+        ...
+
+
+# -- the scope catalogue --------------------------------------------------------------
+
+
+@dataclass
+class DigestRecord:
+    """The corpus-level description and the floor derived from the same corpus."""
+
+    paragraph: str = ""
+    sections_sha256: str = ""
+    section_count: int = 0
+    floor: float = 0.0
+    floor_sha256: str = ""
+    question_count: int = 0
+    model_used: str = ""
+
+
+class SectionSummaryRepository(Protocol):
+    def for_profile(self, profile: str) -> Sequence[SectionRecord]:
+        ...
+
+    def hashes(self, profile: str) -> dict[str, str]:
+        """chunk_id -> content hash, for deciding what needs re-summarising."""
+        ...
+
+    def upsert_many(self, profile: str, records: Sequence[SectionRecord]) -> int:
+        """Insert or update each record under `profile`; returns how many were written."""
+        ...
+
+    def delete_except(self, profile: str, live_chunk_ids: Collection[str]) -> int:
+        """Remove the profile's entries for sections not in `live_chunk_ids`; returns how many."""
+        ...
+
+
+class CorpusDigestRepository(Protocol):
+    def get(self, profile: str) -> DigestRecord | None:
+        ...
+
+    def save(self, profile: str, digest: DigestRecord) -> None:
         ...

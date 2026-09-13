@@ -15,17 +15,13 @@ import uuid
 from sqlalchemy import text
 
 from backend.indexing.section_summary import SectionRecord, sections_fingerprint
-from backend.indexing.summary_store import (
-    DigestRecord,
-    delete_missing,
-    existing_hashes,
-    load_digest,
-    load_records,
-    save_digest,
-    save_records,
-)
+from backend.application.ports.repositories import DigestRecord
+from backend.indexing.summary_store import SectionCatalogueStore
 from backend.infra.database import engine
 from tests.general.integration_support import TEST_PREFIX, requires_postgres, temporary_profile
+
+# The real store over the live database's default unit of work.
+catalogue = SectionCatalogueStore()
 
 
 def record(chunk_id, answers=("what is it?",), vectors=None, summary="A section.", sha="h1"):
@@ -50,8 +46,8 @@ class SectionSummaryRoundTripTests(unittest.TestCase):
     def test_a_record_survives_a_round_trip_unchanged(self):
         with temporary_profile() as profile:
             vectors = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
-            save_records(profile, [record("s1", ("q one?", "q two?"), vectors)])
-            loaded = load_records(profile)
+            catalogue.save_records(profile, [record("s1", ("q one?", "q two?"), vectors)])
+            loaded = catalogue.load_records(profile)
 
             self.assertEqual(1, len(loaded))
             got = loaded[0]
@@ -65,8 +61,8 @@ class SectionSummaryRoundTripTests(unittest.TestCase):
         moves every score computed from it."""
         with temporary_profile() as profile:
             precise = [0.1234567890123456, -0.9876543210987654, 1e-8, -1e-8]
-            save_records(profile, [record("s1", ("q?",), [precise])])
-            got = load_records(profile)[0].question_vectors[0]
+            catalogue.save_records(profile, [record("s1", ("q?",), [precise])])
+            got = catalogue.load_records(profile)[0].question_vectors[0]
             for original, returned in zip(precise, got):
                 self.assertEqual(original, returned)
 
@@ -74,29 +70,29 @@ class SectionSummaryRoundTripTests(unittest.TestCase):
         """The real width. Small vectors can hide a column-size problem."""
         with temporary_profile() as profile:
             vector = [i / 1024 for i in range(1024)]
-            save_records(profile, [record("s1", ("q?",), [vector])])
-            got = load_records(profile)[0].question_vectors[0]
+            catalogue.save_records(profile, [record("s1", ("q?",), [vector])])
+            got = catalogue.load_records(profile)[0].question_vectors[0]
             self.assertEqual(1024, len(got))
             self.assertEqual(vector, got)
 
     def test_arabic_and_emoji_survive(self):
         with temporary_profile() as profile:
             questions = ["متى يبدأ الفصل الدراسي الثاني؟", "Fees 💰 for grade 5?"]
-            save_records(profile, [record("s1", questions, [[0.1], [0.2]])])
-            self.assertEqual(questions, load_records(profile)[0].answers)
+            catalogue.save_records(profile, [record("s1", questions, [[0.1], [0.2]])])
+            self.assertEqual(questions, catalogue.load_records(profile)[0].answers)
 
     def test_a_nul_byte_does_not_break_the_write(self):
         """Postgres rejects NUL in text columns outright, so the engine's
         before_cursor_execute listener strips it. SQLite accepts NUL happily and would
         hide this failure entirely — which is why it is tested here and not there."""
         with temporary_profile() as profile:
-            save_records(profile, [record("s1", ("clean\x00question?",), [[0.1]], summary="a\x00b")])
-            self.assertEqual(1, len(load_records(profile)))
+            catalogue.save_records(profile, [record("s1", ("clean\x00question?",), [[0.1]], summary="a\x00b")])
+            self.assertEqual(1, len(catalogue.load_records(profile)))
 
     def test_text_columns_are_stripped_of_nul(self):
         with temporary_profile() as profile:
-            save_records(profile, [record("s1", summary="a\x00b")])
-            self.assertEqual("ab", load_records(profile)[0].summary)
+            catalogue.save_records(profile, [record("s1", summary="a\x00b")])
+            self.assertEqual("ab", catalogue.load_records(profile)[0].summary)
 
     def test_json_columns_strip_nul_like_text_columns(self):
         """`jsonb` refuses the escape sequence a NUL serialises to, so the engine cleans
@@ -105,48 +101,48 @@ class SectionSummaryRoundTripTests(unittest.TestCase):
         which a catalogued question could carry all the way to the embedder.
         """
         with temporary_profile() as profile:
-            save_records(profile, [record("s1", ("clean\x00question?",), [[0.1]])])
-            self.assertEqual("cleanquestion?", load_records(profile)[0].answers[0])
+            catalogue.save_records(profile, [record("s1", ("clean\x00question?",), [[0.1]])])
+            self.assertEqual("cleanquestion?", catalogue.load_records(profile)[0].answers[0])
 
     def test_saving_the_same_chunk_twice_updates_rather_than_duplicates(self):
         with temporary_profile() as profile:
-            save_records(profile, [record("s1", ("first?",), [[0.1]])])
-            save_records(profile, [record("s1", ("second?",), [[0.2]], sha="h2")])
-            loaded = load_records(profile)
+            catalogue.save_records(profile, [record("s1", ("first?",), [[0.1]])])
+            catalogue.save_records(profile, [record("s1", ("second?",), [[0.2]], sha="h2")])
+            loaded = catalogue.load_records(profile)
             self.assertEqual(1, len(loaded))
             self.assertEqual(["second?"], loaded[0].answers)
             self.assertEqual("h2", loaded[0].content_sha256)
 
     def test_profiles_do_not_see_each_others_rows(self):
         with temporary_profile() as first, temporary_profile() as second:
-            save_records(first, [record("shared-id", ("from first?",), [[0.1]])])
-            save_records(second, [record("shared-id", ("from second?",), [[0.2]])])
-            self.assertEqual(["from first?"], load_records(first)[0].answers)
-            self.assertEqual(["from second?"], load_records(second)[0].answers)
+            catalogue.save_records(first, [record("shared-id", ("from first?",), [[0.1]])])
+            catalogue.save_records(second, [record("shared-id", ("from second?",), [[0.2]])])
+            self.assertEqual(["from first?"], catalogue.load_records(first)[0].answers)
+            self.assertEqual(["from second?"], catalogue.load_records(second)[0].answers)
 
     def test_existing_hashes_reports_what_is_stored(self):
         with temporary_profile() as profile:
-            save_records(profile, [record("s1", sha="aaa"), record("s2", sha="bbb")])
-            self.assertEqual({"s1": "aaa", "s2": "bbb"}, existing_hashes(profile))
+            catalogue.save_records(profile, [record("s1", sha="aaa"), record("s2", sha="bbb")])
+            self.assertEqual({"s1": "aaa", "s2": "bbb"}, catalogue.existing_hashes(profile))
 
     def test_delete_missing_removes_only_absent_sections(self):
         with temporary_profile() as profile:
-            save_records(profile, [record("s1"), record("s2"), record("s3")])
-            removed = delete_missing(profile, ["s1", "s3"])
+            catalogue.save_records(profile, [record("s1"), record("s2"), record("s3")])
+            removed = catalogue.delete_missing(profile, ["s1", "s3"])
             self.assertEqual(1, removed)
-            self.assertEqual({"s1", "s3"}, {r.chunk_id for r in load_records(profile)})
+            self.assertEqual({"s1", "s3"}, {r.chunk_id for r in catalogue.load_records(profile)})
 
     def test_an_empty_save_is_a_no_op(self):
         with temporary_profile() as profile:
-            self.assertEqual(0, save_records(profile, []))
-            self.assertEqual([], load_records(profile))
+            self.assertEqual(0, catalogue.save_records(profile, []))
+            self.assertEqual([], catalogue.load_records(profile))
 
     def test_a_long_chunk_id_is_accepted(self):
         """chunk_id is String(512); ids are built from file paths and can get long."""
         with temporary_profile() as profile:
             long_id = "d/" + ("x" * 480)
-            save_records(profile, [record(long_id)])
-            self.assertEqual([long_id], [r.chunk_id for r in load_records(profile)])
+            catalogue.save_records(profile, [record(long_id)])
+            self.assertEqual([long_id], [r.chunk_id for r in catalogue.load_records(profile)])
 
 
 @requires_postgres
@@ -162,8 +158,8 @@ class CorpusDigestTests(unittest.TestCase):
                 question_count=226,
                 model_used="test-model",
             )
-            self.assertTrue(save_digest(profile, digest))
-            got = load_digest(profile)
+            self.assertTrue(catalogue.save_digest(profile, digest))
+            got = catalogue.load_digest(profile)
 
             self.assertEqual(digest.paragraph, got.paragraph)
             self.assertEqual(digest.sections_sha256, got.sections_sha256)
@@ -173,60 +169,60 @@ class CorpusDigestTests(unittest.TestCase):
 
     def test_an_absent_digest_reads_as_empty_not_an_error(self):
         with temporary_profile() as profile:
-            got = load_digest(profile)
+            got = catalogue.load_digest(profile)
             self.assertEqual("", got.paragraph)
             self.assertEqual(0.0, got.floor)
 
     def test_saving_twice_updates_the_same_row(self):
         with temporary_profile() as profile:
-            save_digest(profile, DigestRecord(paragraph="first", floor=0.1))
-            save_digest(profile, DigestRecord(paragraph="second", floor=0.2))
+            catalogue.save_digest(profile, DigestRecord(paragraph="first", floor=0.1))
+            catalogue.save_digest(profile, DigestRecord(paragraph="second", floor=0.2))
             with engine.connect() as connection:
                 count = connection.execute(
                     text("SELECT count(*) FROM corpus_digests WHERE profile = :p"),
                     {"p": profile},
                 ).scalar()
             self.assertEqual(1, count)
-            self.assertEqual("second", load_digest(profile).paragraph)
+            self.assertEqual("second", catalogue.load_digest(profile).paragraph)
 
     def test_a_long_paragraph_is_not_truncated(self):
         """`paragraph` is Text, not String(n). A truncated corpus description would
         silently narrow the scope gate."""
         with temporary_profile() as profile:
             paragraph = ("The school covers admissions, fees, uniform and transport. " * 300).strip()
-            save_digest(profile, DigestRecord(paragraph=paragraph))
-            self.assertEqual(paragraph, load_digest(profile).paragraph)
+            catalogue.save_digest(profile, DigestRecord(paragraph=paragraph))
+            self.assertEqual(paragraph, catalogue.load_digest(profile).paragraph)
             self.assertGreater(len(paragraph), 15000)
 
     def test_an_arabic_paragraph_round_trips(self):
         with temporary_profile() as profile:
             paragraph = "تغطي قاعدة المعرفة القبول والرسوم الدراسية ومواعيد الفصول الدراسية."
-            save_digest(profile, DigestRecord(paragraph=paragraph))
-            self.assertEqual(paragraph, load_digest(profile).paragraph)
+            catalogue.save_digest(profile, DigestRecord(paragraph=paragraph))
+            self.assertEqual(paragraph, catalogue.load_digest(profile).paragraph)
 
     def test_the_fingerprint_detects_a_changed_corpus_through_the_database(self):
         with temporary_profile() as profile:
             first = [record("s1", sha="a"), record("s2", sha="b")]
-            save_records(profile, first)
-            stored = load_records(profile)
-            save_digest(profile, DigestRecord(
+            catalogue.save_records(profile, first)
+            stored = catalogue.load_records(profile)
+            catalogue.save_digest(profile, DigestRecord(
                 paragraph="p", sections_sha256=sections_fingerprint(stored)))
 
             self.assertEqual(
-                load_digest(profile).sections_sha256, sections_fingerprint(load_records(profile))
+                catalogue.load_digest(profile).sections_sha256, sections_fingerprint(catalogue.load_records(profile))
             )
 
-            save_records(profile, [record("s2", sha="EDITED")])
+            catalogue.save_records(profile, [record("s2", sha="EDITED")])
             self.assertNotEqual(
-                load_digest(profile).sections_sha256, sections_fingerprint(load_records(profile))
+                catalogue.load_digest(profile).sections_sha256, sections_fingerprint(catalogue.load_records(profile))
             )
 
     def test_digests_are_per_profile(self):
         with temporary_profile() as first, temporary_profile() as second:
-            save_digest(first, DigestRecord(paragraph="first corpus"))
-            save_digest(second, DigestRecord(paragraph="second corpus"))
-            self.assertEqual("first corpus", load_digest(first).paragraph)
-            self.assertEqual("second corpus", load_digest(second).paragraph)
+            catalogue.save_digest(first, DigestRecord(paragraph="first corpus"))
+            catalogue.save_digest(second, DigestRecord(paragraph="second corpus"))
+            self.assertEqual("first corpus", catalogue.load_digest(first).paragraph)
+            self.assertEqual("second corpus", catalogue.load_digest(second).paragraph)
 
 
 @requires_postgres
@@ -266,7 +262,7 @@ class ConnectionPoolTests(unittest.TestCase):
 
         def write(profile):
             try:
-                save_records(profile, [record(f"s-{profile}", ("q?",), [[0.5]])])
+                catalogue.save_records(profile, [record(f"s-{profile}", ("q?",), [[0.5]])])
             except Exception as exc:
                 errors.append(exc)
 
@@ -278,7 +274,7 @@ class ConnectionPoolTests(unittest.TestCase):
                 thread.join(timeout=60)
             self.assertEqual([], errors)
             for profile in profiles:
-                self.assertEqual(1, len(load_records(profile)))
+                self.assertEqual(1, len(catalogue.load_records(profile)))
         finally:
             with engine.begin() as connection:
                 for profile in profiles:
