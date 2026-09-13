@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import router
-from backend.infra.database import init_db, log_database_status, verify_connectivity
+from backend.infra.database import log_database_status, verify_connectivity
 from backend.profiles import get_profile
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
@@ -62,8 +62,8 @@ def create_app() -> FastAPI:
     # reasoning about precedence, which is exactly the thing that was got wrong in the
     # first place.
     #
-    # Guarded, so a process that has already set up logging — the CLI entry points in
-    # `backend/db/migrate.py` and `backend/assets/backfill.py`, a test harness, or a
+    # Guarded, so a process that has already set up logging — the CLI entry point in
+    # `backend/assets/backfill.py`, alembic's env.py, a test harness, or a
     # deployment with its own dictConfig — keeps its own configuration untouched.
     if not logging.getLogger().handlers:
         logging.basicConfig(
@@ -91,20 +91,18 @@ def create_app() -> FastAPI:
 
         log_provider_status()
         # Which database, with whose credentials, and can we actually authenticate —
-        # before anything downstream depends on the answer. init_db() opens the same
-        # connection a line later, so this adds no work; it adds the diagnosis. A
-        # rotated POSTGRES_PASSWORD on an estate whose postgres_data volume predates it
-        # is refused here by name, rather than surfacing as SQLAlchemy pool internals
-        # from create_all() while pg_isready still calls the container healthy.
+        # before anything downstream depends on the answer. A rotated POSTGRES_PASSWORD
+        # on an estate whose postgres_data volume predates it is refused here by name,
+        # rather than surfacing as SQLAlchemy pool internals while pg_isready still
+        # calls the container healthy.
         log_database_status()
         verify_connectivity()
-        init_db()
-        # create_all() creates missing TABLES but never adds columns to existing ones,
-        # so a model change ships silently and surfaces as UndefinedColumn partway
-        # through a user's upload. Report it at boot instead.
-        from backend.db.migrate import check_and_report
+        # Alembic owns the schema. A database this build was not written for would fail
+        # later, on the first query that meets a missing column, so it is refused here.
+        # The container applies `alembic upgrade head` before uvicorn starts.
+        from backend.db.schema_version import verify_database_is_migrated
 
-        check_and_report()
+        verify_database_is_migrated()
         # Vision misconfiguration is otherwise silent: a profile can ask for it, the
         # credentials can be missing, and extraction quietly degrades forever. One
         # line at boot makes the state visible.

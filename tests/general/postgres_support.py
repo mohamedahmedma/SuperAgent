@@ -49,6 +49,8 @@ class PostgresSchema:
         self.name = f"test_{uuid.uuid4().hex[:12]}"
         self._url = database_url()
         self._admin(f'CREATE SCHEMA "{self.name}"')
+        from backend.infra.database import serialize_json
+
         self.engine: Engine = create_engine(
             self._url,
             connect_args={
@@ -56,6 +58,8 @@ class PostgresSchema:
                 # How `drop` finds the connections a test left open.
                 "application_name": self.name,
             },
+            # The application's serialiser, so JSON columns behave as they do in production.
+            json_serializer=serialize_json,
         )
         try:
             # Models or tables; created parents first so foreign keys resolve.

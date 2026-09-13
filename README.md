@@ -126,8 +126,10 @@ None of them takes an environment variable on the command line — every service
 `.env` for itself, so there is one place a setting can be wrong:
 
 ```bash
-# Database migrations for the SIS, once per schema change
+# Database migrations, once per schema change. The SIS and the backend each refuse to
+# start on a database behind their own migrations.
 uv run alembic -c sis/alembic.ini upgrade head
+uv run alembic -c backend/alembic.ini upgrade head
 
 uv run uvicorn identity.app:app --port 8200
 uv run uvicorn records.app:app  --port 8100

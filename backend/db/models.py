@@ -1,7 +1,6 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     DateTime,
     Float,
@@ -12,9 +11,28 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.infra.database import Base
+
+# The schema is Alembic's (backend/alembic.ini). A change to a model here is half a
+# change: the revision that makes the database match it is the other half, and the
+# backend refuses to start against a database that has not applied it.
+
+
+def _utcnow() -> datetime:
+    """Every timestamp column is timestamptz, so every value written says it is UTC."""
+    return datetime.now(UTC)
+
+
+def _timestamp(*, updates: bool = False) -> Mapped[datetime]:
+    return mapped_column(
+        DateTime(timezone=True),
+        default=_utcnow,
+        onupdate=_utcnow if updates else None,
+        nullable=False,
+    )
 
 
 class User(Base):
@@ -24,7 +42,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), default="user", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = _timestamp()
 
     sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
 
@@ -36,9 +54,9 @@ class ChatSession(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     session_id: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
-    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    updated_at: Mapped[datetime] = _timestamp(updates=True)
+    created_at: Mapped[datetime] = _timestamp()
 
     user = relationship("User", back_populates="sessions")
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -51,8 +69,8 @@ class ChatMessage(Base):
     session_ref_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     message_type: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    rag_trace: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    timestamp: Mapped[datetime] = _timestamp()
+    rag_trace: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     session = relationship("ChatSession", back_populates="messages")
 
@@ -79,13 +97,13 @@ class AssetExtraction(Base):
     profile: Mapped[str] = mapped_column(String(64), primary_key=True)
     dossier_version: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     model_used: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     needs_review: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = _timestamp()
+    updated_at: Mapped[datetime] = _timestamp(updates=True)
 
 
 class DocumentAsset(Base):
@@ -121,10 +139,10 @@ class DocumentAsset(Base):
     width: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     height: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    dossier: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    dossier: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = _timestamp()
+    updated_at: Mapped[datetime] = _timestamp(updates=True)
 
 
 class EntityAttribute(Base):
@@ -159,7 +177,7 @@ class EntityAttribute(Base):
     value_number: Mapped[float | None] = mapped_column(Float, nullable=True)
     value_bool: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = _timestamp(updates=True)
 
 
 class ParentChunk(Base):
@@ -179,8 +197,8 @@ class ParentChunk(Base):
     # keeps the reference to the image, instead of returning text about a picture the
     # caller can no longer show.
     modality: Mapped[str] = mapped_column(String(20), default="text", nullable=False)
-    asset_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    asset_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    updated_at: Mapped[datetime] = _timestamp(updates=True)
 
 
 class DocumentPair(Base):
@@ -210,8 +228,8 @@ class DocumentPair(Base):
     __tablename__ = "document_pairs"
     __table_args__ = (
         # Both sides are looked up by filename on every upload and delete, to find the
-        # row a file belongs to. Not unique: enforcing that is `pair_store`'s job, and
-        # a UNIQUE over a nullable column behaves differently across backends.
+        # row a file belongs to. Not unique: a side is "" when empty, so every half-filled
+        # row shares the same value there. `pair_store` enforces one row per filename.
         Index("ix_document_pairs_ar", "filename_ar"),
         Index("ix_document_pairs_en", "filename_en"),
     )
@@ -222,12 +240,12 @@ class DocumentPair(Base):
     #: being replaced.
     title: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     #: "" rather than NULL for an empty side. Every read is a truthiness test, and
-    #: three-valued logic in a filter expression is how a half-filled row starts
-    #: behaving differently on SQLite and Postgres.
+    #: three-valued logic in a filter expression is how a half-filled row quietly drops
+    #: out of a `!=` comparison.
     filename_ar: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     filename_en: Mapped[str] = mapped_column(String(255), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = _timestamp()
+    updated_at: Mapped[datetime] = _timestamp(updates=True)
 
 
 class CorpusDigest(Base):
@@ -271,7 +289,7 @@ class CorpusDigest(Base):
     question_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     model_used: Mapped[str] = mapped_column(String(120), default="", nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = _timestamp(updates=True)
 
 
 class SectionSummary(Base):
@@ -314,7 +332,7 @@ class SectionSummary(Base):
     # deliberately NOT the embedded field.
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
     # The questions this section can answer. Embedded one vector each.
-    answers: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    answers: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     # Those questions' vectors, positionally parallel to `answers`.
     #
     # Persisted rather than embedded at boot for a measured reason: re-embedding 222
@@ -323,12 +341,12 @@ class SectionSummary(Base):
     # function of the questions and the embedding model, so storing them costs a few
     # megabytes and removes the wait entirely. A model change invalidates them, which is
     # what `embedding_model` records.
-    question_vectors: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    question_vectors: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     embedding_model: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     # Chosen from the profile's frozen vocabulary rather than invented, so the corpus
     # catalogue cannot drift between re-indexes.
-    topics: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    topics: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
 
     model_used: Mapped[str] = mapped_column(String(120), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = _timestamp()
+    updated_at: Mapped[datetime] = _timestamp(updates=True)

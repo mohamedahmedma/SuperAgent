@@ -211,6 +211,13 @@ fails the run, so a bad release does not stay live.
 database. Keep each migration backwards-compatible with the release before it, or an
 image rollback will meet a schema it cannot read.
 
+The backend and sis each own their schema through Alembic (`backend/alembic.ini`,
+`sis/alembic.ini`). Each container runs `alembic upgrade head` before its server starts,
+the release runs it once more after the health gate, and each service refuses to start
+on a database that is not at its own head revision. The backend records its revision in
+`backend_alembic_version` rather than the default table, so both histories can live in
+one Postgres database without reading each other's.
+
 ## Kubernetes evaluation — not adopted, and why
 
 Kubernetes was evaluated and deliberately **not** adopted. Docker Compose is the

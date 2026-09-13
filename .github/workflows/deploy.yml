@@ -403,6 +403,10 @@ jobs:
             # recreated at all, and it runs after the health gate rather than before it so
             # it cannot race a container that is still coming up.
             $compose exec -T sis alembic -c sis/alembic.ini upgrade head </dev/null || return 1
+            # The backend likewise upgrades before uvicorn and will not start on a database
+            # behind its build, so a healthy backend has migrated too; this covers the
+            # release that did not recreate it.
+            $compose exec -T backend alembic -c backend/alembic.ini upgrade head </dev/null || return 1
           }
 
           if attempt "$image_tag"; then

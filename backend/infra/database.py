@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -36,9 +37,40 @@ _POOL_OPTIONS = {
     "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT_SECONDS") or 30),
 }
 
+def _without_nul(value):
+    """`value` with NUL removed from every string inside it, dictionary keys included."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {_without_nul(key): _without_nul(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_without_nul(item) for item in value]
+    return value
+
+
+def serialize_json(value) -> str:
+    """How every JSON and JSONB value is written: NUL removed, then serialised.
+
+    `jsonb` refuses the escape sequence a NUL serialises to ("unsupported Unicode escape
+    sequence"), so a NUL anywhere in a trace, a dossier or a catalogued question would
+    fail the whole write. The old `json` columns stored that escape.
+
+    Only NUL is removed. The wider cleaning the cursor listener below gives text columns —
+    Unicode normalisation, zero-width and private-use characters — never reached JSON,
+    because a serialised value arrives with those characters escaped, and it still does
+    not: a zero-width joiner inside a trace is part of an emoji the answer showed.
+    """
+    return json.dumps(_without_nul(value))
+
+
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
+    # Every timestamp column is timestamptz. Pinning the session to UTC makes the values
+    # that come back UTC as well, whatever TimeZone the server was initialised with, so
+    # an ISO string built from one always ends in +00:00.
+    connect_args={"options": "-c timezone=UTC"},
+    json_serializer=serialize_json,
     **_POOL_OPTIONS,
 )
 
@@ -115,13 +147,6 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expi
 Base = declarative_base()
 
 
-def init_db() -> None:
-    # Delayed import to avoid circular dependency.
-    import backend.db.models  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
-
-
 # Postgres SQLSTATEs for a credential the server rejected outright: 28P01 is
 # invalid_password, 28000 the wider invalid_authorization_specification (which also
 # covers a role that does not exist). Neither is transient, so neither is retried —
@@ -168,8 +193,8 @@ def log_database_status() -> None:
 def verify_connectivity(attempts: int = 5, delay_seconds: float = 2.0) -> None:
     """Open one connection before the app reports itself started, and fail legibly.
 
-    `init_db()` opens one immediately afterwards, so this costs nothing and buys a
-    diagnosis. A rejected password used to arrive as a hundred and fifty lines of
+    The schema-revision check opens one immediately afterwards, so this costs nothing and
+    buys a diagnosis. A rejected password used to arrive as a hundred and fifty lines of
     SQLAlchemy pool internals whose single informative line sat below the default
     `--tail`, and it arrived in the same shape whether the cause was a credential, an
     unresolvable host or a stopped container. Separating the permanent failure from the

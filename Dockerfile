@@ -32,4 +32,7 @@ EXPOSE 8000
 # Leave room for cold-start database/schema checks and slow container hosts. The model
 # itself warms in the background, so /health normally becomes reachable within seconds.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=300s --retries=5 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
-CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# The schema is Alembic's. The upgrade runs here, before the server, not inside the app's
+# startup: the app only checks the revision and refuses a database it was not built for.
+# `exec` hands PID 1 to uvicorn, so the stop signal reaches the server.
+CMD ["sh", "-c", "alembic -c backend/alembic.ini upgrade head && exec uvicorn backend.app:app --host 0.0.0.0 --port 8000"]
