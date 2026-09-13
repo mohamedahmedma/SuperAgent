@@ -25,10 +25,21 @@ from backend.indexing.section_summary import (
     sections_fingerprint,
     summarise_section,
 )
-from backend.indexing.summary_store import section_catalogue
 from backend.profiles import get_profile
 
 logger = logging.getLogger(__name__)
+
+
+def _catalogue():
+    """The section catalogue, from the process container.
+
+    This is a CLI entry point, so there is nobody to inject from; the container is what
+    makes it the SAME store the serving process uses rather than a second one built at
+    import.
+    """
+    from backend.composition import default_services
+
+    return default_services().section_catalogue
 
 
 def load_sections(level: int) -> List[dict]:
@@ -98,7 +109,7 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
         )
         return {"sections": 0, "summarised": 0, "reused": 0, "removed": 0}
 
-    known = {} if force else section_catalogue.existing_hashes(profile.name)
+    known = {} if force else _catalogue().existing_hashes(profile.name)
     plan = plan_sections(sections, known)
     logger.info(
         "%d section(s): %d to summarise, %d reused",
@@ -141,8 +152,8 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
         logger.info("catalogued %s: %d question(s)", section["chunk_id"], len(result["answers"]))
 
     _embed_questions(records)
-    written = section_catalogue.save_records(profile.name, records)
-    removed = section_catalogue.delete_missing(profile.name, [item["chunk_id"] for item in sections])
+    written = _catalogue().save_records(profile.name, records)
+    removed = _catalogue().delete_missing(profile.name, [item["chunk_id"] for item in sections])
 
     # Over EVERY stored record, not just the ones summarised this run. A section can be
     # current by content hash and still have no vectors — a transient failure on one run
@@ -150,7 +161,7 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
     # Vector coverage is its own precondition and has to be checked on its own terms.
     repaired = _repair_missing_vectors(profile.name)
 
-    stored = section_catalogue.load_records(profile.name)
+    stored = _catalogue().load_records(profile.name)
     report = verify(stored, expected=len(sections))
     logger.info(
         "catalogue: %d/%d section(s), %d question(s); topics: %s",
@@ -192,7 +203,7 @@ def _refresh_digest(profile, records: List[SectionRecord], *, force: bool = Fals
         return "skipped"
 
     fingerprint = sections_fingerprint(usable)
-    existing = section_catalogue.load_digest(profile.name)
+    existing = _catalogue().load_digest(profile.name)
     if not force and existing.paragraph and existing.sections_sha256 == fingerprint:
         logger.info("corpus digest current (%d section(s)); not rewriting", existing.section_count)
         paragraph, outcome = existing.paragraph, "reused"
@@ -215,7 +226,7 @@ def _refresh_digest(profile, records: List[SectionRecord], *, force: bool = Fals
             outcome = "written"
 
     floor, floor_key, questions = _derive_floor_for(profile, usable)
-    section_catalogue.save_digest(
+    _catalogue().save_digest(
         profile.name,
         DigestRecord(
             paragraph=paragraph,
@@ -328,7 +339,7 @@ def _repair_missing_vectors(profile_name: str) -> int:
     """Embed and store vectors for any catalogued section that lacks them."""
     import os
 
-    stored = section_catalogue.load_records(profile_name)
+    stored = _catalogue().load_records(profile_name)
     model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
     stale = [
         record for record in stored
@@ -340,7 +351,7 @@ def _repair_missing_vectors(profile_name: str) -> int:
         return 0
     logger.info("repairing vectors for %d section(s)", len(stale))
     _embed_questions(stale)
-    section_catalogue.save_records(profile_name, stale)
+    _catalogue().save_records(profile_name, stale)
     return len(stale)
 
 
@@ -405,7 +416,7 @@ def main(argv=None) -> int:
         format="%(levelname)s %(message)s",
     )
     if args.check:
-        stored = section_catalogue.load_records(get_profile().name)
+        stored = _catalogue().load_records(get_profile().name)
         expected = len(load_sections(int(getattr(get_profile().rag, "scope_section_level", 1))))
         report = verify(stored, expected)
         print(f"sections={report['with_questions']}/{expected} questions={report['questions']}")

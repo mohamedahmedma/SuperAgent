@@ -40,9 +40,14 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from backend.application.ports import UnitOfWorkFactory
+    from backend.assets.store import AssetStore
     from backend.chat.storage import ConversationStorage
+    from backend.indexing.document_loader import DocumentLoader
+    from backend.indexing.milvus_client import MilvusStore
+    from backend.indexing.milvus_writer import MilvusWriter
     from backend.indexing.pair_store import DocumentPairService
     from backend.indexing.parent_chunk_store import ParentChunkStore
+    from backend.indexing.removal import DocumentRemover
     from backend.indexing.summary_store import SectionCatalogueStore
     from backend.infra.cache import RedisCache
     from backend.jobs.upload_jobs import IngestJobTracker
@@ -69,6 +74,11 @@ class Services:
         section_catalogue: SectionCatalogueStore | None = None,
         upload_jobs: IngestJobTracker | None = None,
         delete_jobs: IngestJobTracker | None = None,
+        milvus: MilvusStore | None = None,
+        document_loader: DocumentLoader | None = None,
+        milvus_writer: MilvusWriter | None = None,
+        document_remover: DocumentRemover | None = None,
+        asset_store: AssetStore | None = None,
     ) -> None:
         """Every service is nameable here, and anything named is used as given.
 
@@ -93,6 +103,11 @@ class Services:
                 ("section_catalogue", section_catalogue),
                 ("upload_jobs", upload_jobs),
                 ("delete_jobs", delete_jobs),
+                ("milvus", milvus),
+                ("document_loader", document_loader),
+                ("milvus_writer", milvus_writer),
+                ("document_remover", document_remover),
+                ("asset_store", asset_store),
             )
             if value is not None
         }
@@ -185,6 +200,83 @@ class Services:
             return SectionCatalogueStore(unit_of_work=self.unit_of_work)
 
         return self._singleton("section_catalogue", build)
+
+    # -- the vector side of the corpus ------------------------------------------
+
+    @property
+    def milvus(self) -> MilvusStore:
+        """The vector collection.
+
+        Still fetched through `get_milvus_store()`, which owns the client's own lazy
+        instance: the retrieval path has not been converted yet, and two stores would mean
+        two connection pools loading the same collection. What has changed is that the
+        ingest path asks the container for it instead of importing one built at import.
+        """
+
+        def build() -> MilvusStore:
+            from backend.indexing.milvus_client import get_milvus_store
+
+            return get_milvus_store()
+
+        return self._singleton("milvus", build)
+
+    @property
+    def document_loader(self) -> DocumentLoader:
+        def build() -> DocumentLoader:
+            from backend.indexing.document_loader import DocumentLoader
+
+            return DocumentLoader()
+
+        return self._singleton("document_loader", build)
+
+    @property
+    def milvus_writer(self) -> MilvusWriter:
+        """Embeds leaf chunks and writes them.
+
+        The embedding service is left to the writer's own default, which is the shared
+        instance: the model behind it is hundreds of megabytes, and a second one would be
+        loaded, not shared. It joins this container when the retrieval path does.
+        """
+
+        def build() -> MilvusWriter:
+            from backend.indexing.milvus_writer import MilvusWriter
+
+            return MilvusWriter(milvus_manager=self.milvus)
+
+        return self._singleton("milvus_writer", build)
+
+    @property
+    def asset_store(self) -> AssetStore:
+        """Asset occurrences and the extraction cache.
+
+        As with `milvus`, the accessor in `backend/assets/store.py` still owns the
+        instance, so a caller that has not been converted yet shares this one rather than
+        opening a second blob backend.
+        """
+
+        def build() -> AssetStore:
+            from backend.assets.store import get_asset_store
+
+            return get_asset_store()
+
+        return self._singleton("asset_store", build)
+
+    @property
+    def document_remover(self) -> DocumentRemover:
+        """Deletes a document from every store that holds part of it."""
+
+        def build() -> DocumentRemover:
+            from backend.indexing.removal import DocumentRemover
+
+            return DocumentRemover(
+                milvus=self.milvus,
+                parent_chunks=self.parent_chunks,
+                # Deferred: a profile with images disabled must not open a blob backend
+                # merely because a document was deleted.
+                asset_store=lambda: self.asset_store,
+            )
+
+        return self._singleton("document_remover", build)
 
     # -- ingest jobs ------------------------------------------------------------
     # Two trackers over one table, distinguished by the kind of job they own. Separate

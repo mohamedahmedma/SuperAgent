@@ -11,8 +11,9 @@ import unittest
 from unittest.mock import patch
 
 from backend.chat.language import ARABIC, ENGLISH
+from backend.composition import Services, set_default_services
 from backend.db.models import DocumentPair
-from backend.indexing import language_check, pair_store
+from backend.indexing import language_check
 from backend.indexing.pair_store import DocumentPairService
 from tests.general.postgres_support import postgres_schema
 
@@ -22,10 +23,10 @@ class PairStoreTestCase(unittest.TestCase):
 
     def setUp(self):
         self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
-        # `language_filter_clause` reaches the process-wide service; point it at this one.
-        patcher = patch.object(pair_store, "document_pairs", self.pairs)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # `language_filter_clause` resolves its service from the process container;
+        # point that at this test's own.
+        set_default_services(Services(document_pairs=self.pairs))
+        self.addCleanup(set_default_services, None)
 
 
 class RowLifecycleTests(PairStoreTestCase):

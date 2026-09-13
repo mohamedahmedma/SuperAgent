@@ -10,8 +10,10 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from backend.chat.language import ARABIC, ENGLISH
+from backend.composition import Services
 from backend.db.models import DocumentPair
 from backend.indexing.pair_store import DocumentPairService
+from backend.indexing.removal import DocumentRemover
 from tests.general.postgres_support import postgres_schema
 
 ARABIC_BODY = "الرسوم الدراسية للصف الرابع الابتدائي تشمل الكتب والأنشطة والنقل المدرسي بالكامل"
@@ -36,23 +38,23 @@ class PairUploadJobTests(unittest.TestCase):
         self.loader = MagicMock()
         self.writer = MagicMock()
         self.parents = MagicMock()
-        self.cleanup = MagicMock(return_value=0)
+        self.remover = MagicMock()
+        self.remover.remove.return_value = 0
         self.jobs = MagicMock()
 
-        for name, double in (
-            ("loader", self.loader),
-            ("milvus_writer", self.writer),
-            ("parent_chunk_store", self.parents),
-            ("delete_document_transactionally", self.cleanup),
-            ("upload_job_manager", self.jobs),
-            ("document_pairs", self.pairs),
-        ):
-            p = patch.object(documents, name, double)
-            p.start()
-            self.addCleanup(p.stop)
+        # Every collaborator the job uses, named. Nothing is patched: the job is handed
+        # this container and can reach nothing else.
+        self.services = Services(
+            document_loader=self.loader,
+            milvus_writer=self.writer,
+            parent_chunks=self.parents,
+            document_remover=self.remover,
+            upload_jobs=self.jobs,
+            document_pairs=self.pairs,
+        )
 
     def _run(self, sides, pair_id="", title="Fees"):
-        self.documents._process_pair_upload_job("job1", pair_id, title, sides)
+        self.documents._process_pair_upload_job(self.services, "job1", pair_id, title, sides)
 
     def _failure(self):
         self.assertTrue(self.jobs.fail_job.called, "the job was expected to fail")
@@ -114,7 +116,7 @@ class PairUploadJobTests(unittest.TestCase):
         self._failure()
         self.writer.write_documents.assert_not_called()
         self.parents.upsert_documents.assert_not_called()
-        self.cleanup.assert_not_called()
+        self.remover.remove.assert_not_called()
         self.assertEqual([], self.pairs.list_pairs(), "a rejected upload left a row behind")
 
     def test_the_second_language_joins_the_existing_entry(self):
@@ -169,8 +171,8 @@ class PairUploadJobTests(unittest.TestCase):
         ])
 
         self.jobs.fail_job.assert_not_called()
-        self.assertEqual(2, self.cleanup.call_count)
-        for call in self.cleanup.call_args_list:
+        self.assertEqual(2, self.remover.remove.call_count)
+        for call in self.remover.remove.call_args_list:
             self.assertIs(
                 False, call.kwargs.get("include_assets"),
                 "the pair job must ask the cleanup to spare asset rows, since its own "
@@ -179,16 +181,13 @@ class PairUploadJobTests(unittest.TestCase):
 
 
 class CleanupAssetGateTests(unittest.TestCase):
-    """`include_assets` on delete_document_transactionally, in both directions.
+    """`include_assets` on `DocumentRemover.remove`, in both directions.
 
     The pair job's correctness rests on this flag actually gating the delete, so the
     flag is pinned here rather than only at the call site.
     """
 
     def setUp(self):
-        import backend.api.resources as resources
-
-        self.resources = resources
         self.store = MagicMock()
         self.store.delete_by_filename.return_value = MagicMock(
             assets_deleted=0, blobs_deleted=0, blobs_retained=0
@@ -197,28 +196,20 @@ class CleanupAssetGateTests(unittest.TestCase):
         profile.assets.enabled = True
         profile.assets.gc_orphan_blobs = True
 
-        doubles = (
-            ("milvus_manager", MagicMock()),
-            ("parent_chunk_store", MagicMock()),
-            ("get_profile", MagicMock(return_value=profile)),
+        self.remover = DocumentRemover(
+            milvus=MagicMock(),
+            parent_chunks=MagicMock(),
+            asset_store=lambda: self.store,
+            profile=lambda: profile,
         )
-        for name, double in doubles:
-            p = patch.object(resources, name, double)
-            p.start()
-            self.addCleanup(p.stop)
-
-        # Imported inside the function under test, so it is patched at its source.
-        p = patch("backend.assets.store.get_asset_store", MagicMock(return_value=self.store))
-        p.start()
-        self.addCleanup(p.stop)
 
     def test_a_plain_delete_still_removes_the_asset_rows(self):
         """The delete route and the single-file upload both depend on this default."""
-        self.resources.delete_document_transactionally("fees_ar.docx")
+        self.remover.remove("fees_ar.docx")
         self.store.delete_by_filename.assert_called_once()
 
     def test_include_assets_false_leaves_them_alone(self):
-        self.resources.delete_document_transactionally("fees_ar.docx", include_assets=False)
+        self.remover.remove("fees_ar.docx", include_assets=False)
         self.store.delete_by_filename.assert_not_called()
 
 

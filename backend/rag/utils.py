@@ -10,7 +10,6 @@ from backend.indexing.milvus_client import get_milvus_store
 from backend.indexing.embedding import embed_query, embedding_service as _embedding_service
 from backend.env import env_bool, env_float, env_int, env_value
 from backend.llm import sampling
-from backend.indexing.parent_chunk_store import ParentChunkStore
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
 from backend.text_matching import search_key
@@ -116,7 +115,16 @@ RETRIEVAL_TRACE_FIELDS = (
 
 # Initialize retrieval dependencies globally (shares embedding_service with the API to keep BM25 state consistent)
 _milvus_manager = get_milvus_store()
-_parent_chunk_store = ParentChunkStore()
+def _parent_chunks():
+    """The parent-chunk store, from the process container.
+
+    Resolved per call rather than held here: a module-level instance is built at import,
+    which is what step 4 removed. The container caches it, so this costs a dictionary
+    lookup.
+    """
+    from backend.composition import default_services
+
+    return default_services().parent_chunks
 
 _rewrite_model = None
 
@@ -224,7 +232,7 @@ def _merge_to_parent_level(
     if not merge_parent_ids:
         return docs, 0
 
-    parent_docs = _parent_chunk_store.get_documents_by_ids(merge_parent_ids)
+    parent_docs = _parent_chunks().get_documents_by_ids(merge_parent_ids)
     parent_map = {item.get("chunk_id", ""): item for item in parent_docs if item.get("chunk_id")}
 
     merged_docs: List[dict] = []
@@ -519,12 +527,12 @@ def language_filter_clause(language: str) -> str:
     if not language:
         return ""
     try:
-        # Imported per call, not at module scope: this module is re-executed with
+        # Resolved per call, not at module scope: this module is re-executed with
         # `backend.indexing` stubbed by the retrieval symmetry tests, and a caller that
         # never routes should not pay for the database layer at import.
-        import backend.indexing.pair_store as pair_store
+        from backend.composition import default_services
 
-        superseded = pair_store.document_pairs.superseded_filenames(language)
+        superseded = default_services().document_pairs.superseded_filenames(language)
     except Exception:
         # A pairing lookup is an optimisation, not a gate. If the table cannot be read
         # the right outcome is to search the whole corpus and possibly answer from the

@@ -12,11 +12,10 @@ wrong.
 """
 import re
 import unittest
-from unittest.mock import patch
 
 from backend.chat.language import ARABIC, ENGLISH, detect_language
+from backend.composition import Services, set_default_services
 from backend.db.models import DocumentPair
-from backend.indexing import pair_store
 from backend.indexing.pair_store import DocumentPairService
 from backend.text_matching import search_key
 from tests.general.postgres_support import postgres_schema
@@ -222,10 +221,10 @@ class RetrievalFilterShapeTests(unittest.TestCase):
 
     def setUp(self):
         self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
-        # `language_filter_clause` reaches the process-wide service; point it at this one.
-        patcher = patch.object(pair_store, "document_pairs", self.pairs)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # `language_filter_clause` resolves its service from the process container;
+        # point that at this test's own.
+        set_default_services(Services(document_pairs=self.pairs))
+        self.addCleanup(set_default_services, None)
 
     def _clause(self, question):
         from backend.rag.utils import language_filter_clause

@@ -227,6 +227,3 @@ class IngestJobTracker:
             "steps": [asdict(step) for step in job.steps],
         }
 
-
-upload_job_manager = IngestJobTracker("upload")
-delete_job_manager = IngestJobTracker("delete")

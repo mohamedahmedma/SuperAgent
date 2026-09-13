@@ -92,6 +92,3 @@ class SectionCatalogueStore:
                 uow.commit()
         return removed
 
-
-#: The process-wide store, until the composition root builds and injects it.
-section_catalogue = SectionCatalogueStore()

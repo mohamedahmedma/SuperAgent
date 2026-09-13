@@ -238,6 +238,3 @@ def _default_title(filename: str) -> str:
     stem = (filename or "").rsplit(".", 1)[0].strip()
     return stem[:255] or filename[:255]
 
-
-#: The process-wide service, until the composition root builds and injects it.
-document_pairs = DocumentPairService()
