@@ -18,12 +18,12 @@ having emitted no JSON at all. Three things were true at once and each is fixed 
 import unittest
 from unittest.mock import patch
 
+from backend.llm_models import GRADE_RETRY_MAX_TOKENS
 from backend.profiles import get_profile
 from backend.rag.evidence import AssessmentContext, Certainty
 from backend.rag.pipeline import (
     _GRADER_CHUNK_CHARS,
     _GRADER_FIGURE_BODY_CHARS,
-    _GRADE_RETRY_MAX_TOKENS,
     _grading_view,
     EvidenceGrade,
     LLMGraderAssessor,
@@ -113,7 +113,7 @@ class TheGraderSeesLessThanTheAnswerDoes(unittest.TestCase):
         self.assertEqual(prose, _grading_view(prose))
 
     def test_the_retry_ceiling_is_a_doubling_not_a_leap(self):
-        self.assertLessEqual(_GRADE_RETRY_MAX_TOKENS, 2 * get_profile().models.grade_max_tokens)
+        self.assertLessEqual(GRADE_RETRY_MAX_TOKENS, 2 * get_profile().models.grade_max_tokens)
 
     def test_the_head_helper_cuts_whole_lines(self):
         text = "\n".join(f"line {i}" for i in range(200))

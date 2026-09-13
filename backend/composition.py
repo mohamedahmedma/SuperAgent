@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from backend.indexing.summary_store import SectionCatalogueStore
     from backend.infra.cache import RedisCache
     from backend.jobs.upload_jobs import IngestJobTracker
+    from backend.llm_models import ChatModelFactory
     from backend.rag.entity_retrieval import EntityRetriever
 
 T = TypeVar("T")
@@ -91,6 +92,7 @@ class Services:
         entity_index: EntityAttributeIndex | None = None,
         figure_pipeline: FigurePipeline | None = None,
         entity_retriever: EntityRetriever | None = None,
+        models: ChatModelFactory | None = None,
     ) -> None:
         """Every service is nameable here, and anything named is used as given.
 
@@ -126,6 +128,7 @@ class Services:
                 ("entity_index", entity_index),
                 ("figure_pipeline", figure_pipeline),
                 ("entity_retriever", entity_retriever),
+                ("models", models),
             )
             if value is not None
         }
@@ -375,6 +378,23 @@ class Services:
             )
 
         return self._singleton("document_remover", build)
+
+    # -- models -------------------------------------------------------------------
+
+    @property
+    def models(self) -> ChatModelFactory:
+        """The chat models the retrieval path calls, by role.
+
+        One factory rather than three module globals, so which model id and whose
+        credentials each role reaches for is stated once.
+        """
+
+        def build() -> ChatModelFactory:
+            from backend.llm_models import ChatModelFactory
+
+            return ChatModelFactory()
+
+        return self._singleton("models", build)
 
     # -- ingest jobs ------------------------------------------------------------
     # Two trackers over one table, distinguished by the kind of job they own. Separate

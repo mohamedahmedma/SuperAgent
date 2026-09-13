@@ -8,12 +8,10 @@ from langsmith import traceable
 
 from backend.indexing.embedding import embed_query
 from backend.env import env_bool, env_float, env_int, env_value
-from backend.llm import sampling
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
 from backend.text_matching import search_key
 from backend.text_normalization import normalize_query
-from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -33,9 +31,6 @@ def _optional_env(name: str) -> Optional[str]:
     return value
 
 
-ARK_API_KEY = os.getenv("ARK_API_KEY")
-FAST_MODEL = os.getenv("FAST_MODEL")
-BASE_URL = os.getenv("BASE_URL")
 
 # Retrieval tuning defaults come from the active domain profile; the environment
 # readers below still take precedence, so the effective order is
@@ -136,7 +131,6 @@ def _parent_chunks():
 
     return default_services().parent_chunks
 
-_rewrite_model = None
 
 
 def resolve_candidate_k(top_k: int) -> Tuple[int, Dict[str, Any]]:
@@ -415,19 +409,14 @@ REWRITE_PROMPT = _PROFILE.rag.rewrite_prompt
 
 
 def _get_rewrite_model():
-    global _rewrite_model
-    if not ARK_API_KEY or not FAST_MODEL:
-        return None
-    if _rewrite_model is None:
-        _rewrite_model = init_chat_model(
-            model=FAST_MODEL,
-            model_provider="openai",
-            api_key=ARK_API_KEY,
-            base_url=BASE_URL,
-            stream_usage=True,
-            **sampling("rewrite"),
-        )
-    return _rewrite_model
+    """The query-planning model, or None when this deployment has not configured one.
+
+    A function rather than a direct container call at the one call site: it is the seam
+    the rewrite tests substitute.
+    """
+    from backend.composition import default_services
+
+    return default_services().models.rewriter()
 
 
 def rewrite_query_once(query: str) -> Optional[dict]:

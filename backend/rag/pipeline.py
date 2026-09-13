@@ -1,15 +1,12 @@
 from typing import Annotated, Any, Literal, TypedDict, List, Optional
 import logging
 import operator
-import os
 import re
-from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, END
 from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from backend.chat.request_context import ChatRequestContext
-from backend.llm import sampling
 from backend.rag.evidence import (
     AssessmentContext,
     Certainty,
@@ -35,19 +32,11 @@ from backend.rag.utils import (
 
 logger = logging.getLogger(__name__)
 
-API_KEY = os.getenv("ARK_API_KEY")
-BASE_URL = os.getenv("BASE_URL")
-FAST_MODEL = os.getenv("FAST_MODEL")
-GRADE_MODEL = os.getenv("GRADE_MODEL")
 
 # Prompts, routing budgets, and the fast-path vocabulary are all profile data.
 _PROFILE = get_profile()
 _RAG = _PROFILE.rag
 _COPY = _PROFILE.user_copy
-
-_grader_model = None
-_grader_model_headroom = None
-_complexity_model = None
 
 
 class _RetryBudget:
@@ -72,75 +61,26 @@ except Exception:  # pragma: no cover - older or absent client
     _TRUNCATED_RESPONSE = ()
 
 
-#: Output ceiling for the second attempt at a grade, when the first was cut off.
-#:
-#: Generous on purpose. The grade itself is a handful of enums and a short reason —
-#: under 200 tokens — so a ceiling this size is not for the JSON. It is for the
-#: scratchpad in front of it: GRADE_MODEL on this deployment is a reasoning model, and
-#: its reasoning is billed against the SAME completion budget as the answer, produced
-#: first. Run out there and the call ends at `finish_reason: length` having emitted no
-#: JSON at all, which the OpenAI client raises as `LengthFinishReasonError`.
-_GRADE_RETRY_MAX_TOKENS = 3072
-
-
 def _get_grader_model(*, headroom: bool = False):
     """The grading model, or the same model with room to finish.
 
     Two instances rather than one, because sampling is fixed when the model is built and
     the retry has to change it. `headroom` is only ever reached from the truncation
     handler in `LLMGraderAssessor.assess`.
+
+    A function rather than a direct container call at each site: it is the seam the
+    grading tests substitute, and it keeps "which model grades" one name in this module.
     """
-    global _grader_model, _grader_model_headroom
-    if not API_KEY or not GRADE_MODEL:
-        return None
-    if headroom:
-        if _grader_model_headroom is None:
-            settings = sampling("grade")
-            # Minimum effort the parameter offers, NOT absent. An absent
-            # `reasoning_effort` is not "no reasoning": `ModelConfig._validate_effort`
-            # maps none/off onto "" so the field is omitted, and a reasoning model then
-            # applies its OWN default — which is higher than `low`, so switching it
-            # "off" here would buy more reasoning and less room, the opposite of the fix.
-            settings["reasoning_effort"] = "low"
-            settings["max_tokens"] = max(
-                int(settings.get("max_tokens") or 0), _GRADE_RETRY_MAX_TOKENS
-            )
-            _grader_model_headroom = init_chat_model(
-                model=GRADE_MODEL,
-                model_provider="openai",
-                api_key=API_KEY,
-                base_url=BASE_URL,
-                stream_usage=True,
-                **settings,
-            )
-        return _grader_model_headroom
-    if _grader_model is None:
-        _grader_model = init_chat_model(
-            model=GRADE_MODEL,
-            model_provider="openai",
-            api_key=API_KEY,
-            base_url=BASE_URL,
-            stream_usage=True,
-            **sampling("grade"),
-        )
-    return _grader_model
+    from backend.composition import default_services
+
+    return default_services().models.grader(headroom=headroom)
 
 
 def _get_complexity_model():
     """FAST_MODEL is used for question-complexity classification and sub-question decomposition."""
-    global _complexity_model
-    if not API_KEY or not FAST_MODEL:
-        return None
-    if _complexity_model is None:
-        _complexity_model = init_chat_model(
-            model=FAST_MODEL,
-            model_provider="openai",
-            api_key=API_KEY,
-            base_url=BASE_URL,
-            stream_usage=True,
-            **sampling("planner"),
-        )
-    return _complexity_model
+    from backend.composition import default_services
+
+    return default_services().models.planner()
 
 
 EVIDENCE_GRADE_PROMPT = _RAG.evidence_grade_prompt

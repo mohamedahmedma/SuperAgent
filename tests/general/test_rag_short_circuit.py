@@ -129,20 +129,28 @@ class RagShortCircuitTests(unittest.TestCase):
         return ChatRequestContext.for_sync(user_id="u", session_id="s")
 
     def test_grader_uses_only_grade_model(self):
-        pipeline = load_pipeline(
-            retrieve_documents=lambda query, top_k=5, language="": {"docs": [], "meta": _meta(0)}
-        )
+        """Asked for a grader, the factory reaches for GRADE_MODEL and nothing else.
+
+        Against the factory directly rather than through a re-executed pipeline: the
+        question is which model id and whose credentials the grade role resolves to,
+        and that is the factory's whole job.
+        """
+        from backend.llm_models import ChatModelFactory
+
         initialized = Mock()
         grader = object()
         initialized.return_value = grader
-        pipeline.API_KEY = "test-key"
-        pipeline.BASE_URL = "https://example.test/v1"
-        pipeline.FAST_MODEL = "fast-model"
-        pipeline.GRADE_MODEL = "grade-model"
-        pipeline._grader_model = None
-        pipeline.init_chat_model = initialized
+        factory = ChatModelFactory(
+            environ={
+                "ARK_API_KEY": "test-key",
+                "BASE_URL": "https://example.test/v1",
+                "FAST_MODEL": "fast-model",
+                "GRADE_MODEL": "grade-model",
+            },
+            build=initialized,
+        )
 
-        self.assertIs(grader, pipeline._get_grader_model())
+        self.assertIs(grader, factory.grader())
         # Asserted field by field rather than with a full assert_called_once_with: this
         # test is about WHICH model and credentials the grader reaches for, and pinning
         # the whole kwargs dict also froze the sampling settings, so every retune of the
@@ -157,17 +165,17 @@ class RagShortCircuitTests(unittest.TestCase):
         self.assertTrue(kwargs["stream_usage"])
 
     def test_grader_does_not_use_other_models_when_grade_model_is_missing(self):
-        pipeline = load_pipeline(
-            retrieve_documents=lambda query, top_k=5, language="": {"docs": [], "meta": _meta(0)}
-        )
-        pipeline.API_KEY = "test-key"
-        pipeline.FAST_MODEL = "fast-model"
-        pipeline.GRADE_MODEL = None
-        pipeline._grader_model = None
-        pipeline.init_chat_model = Mock()
+        """An unconfigured grade role yields nothing — never FAST_MODEL standing in."""
+        from backend.llm_models import ChatModelFactory
 
-        self.assertIsNone(pipeline._get_grader_model())
-        pipeline.init_chat_model.assert_not_called()
+        build = Mock()
+        factory = ChatModelFactory(
+            environ={"ARK_API_KEY": "test-key", "FAST_MODEL": "fast-model"},
+            build=build,
+        )
+
+        self.assertIsNone(factory.grader())
+        build.assert_not_called()
 
     def test_simple_no_retrieval_short_circuits_without_rewrite(self):
         calls = {"retrieve": 0, "step_back": 0}
