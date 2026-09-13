@@ -316,11 +316,11 @@ class AssetStoreTestCase(unittest.TestCase):
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
+        unit_of_work = postgres_schema(self, DocumentAsset, AssetExtraction).unit_of_work
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(session_factory=session_factory, blob_store=self.blobs,
+        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs,
                                 cache_enabled=False)
 
         data = make_png(60, 60)
@@ -825,11 +825,11 @@ class AssetRouteTests(unittest.TestCase):
         from backend.db.models import AssetExtraction, DocumentAsset, User
         from backend.infra.auth import get_current_user
 
-        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
+        unit_of_work = postgres_schema(self, DocumentAsset, AssetExtraction).unit_of_work
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(session_factory=session_factory, blob_store=self.blobs,
+        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs,
                                 cache_enabled=False)
         set_asset_store(self.store)
         set_blob_store(self.blobs)

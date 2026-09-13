@@ -314,11 +314,11 @@ class PipelineTestCase(unittest.TestCase):
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
+        unit_of_work = postgres_schema(self, DocumentAsset, AssetExtraction).unit_of_work
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(session_factory=session_factory, blob_store=self.blobs, cache_enabled=False)
+        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs, cache_enabled=False)
         self.profile = load_profile("base")
 
     def tearDown(self):

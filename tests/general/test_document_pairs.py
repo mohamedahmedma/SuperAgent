@@ -182,10 +182,9 @@ class FigureAwareRoutingTests(PairStoreTestCase):
         from backend.assets.store import AssetStore, set_asset_store
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        self.assets = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker(
-            autoflush=False
-        )
-        set_asset_store(AssetStore(session_factory=self.assets, cache_enabled=False))
+        schema = postgres_schema(self, DocumentAsset, AssetExtraction)
+        self.assets = schema.sessionmaker(autoflush=False)
+        set_asset_store(AssetStore(unit_of_work=schema.unit_of_work, cache_enabled=False))
         self.addCleanup(set_asset_store, None)
 
     def _figures(self, filename, *hashes, stored=True):

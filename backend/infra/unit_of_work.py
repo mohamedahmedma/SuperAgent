@@ -19,9 +19,12 @@ from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
     from backend.application.ports.repositories import (
+        AssetExtractionRepository,
         ConversationRepository,
         CorpusDigestRepository,
+        DocumentAssetRepository,
         DocumentPairRepository,
+        EntityAttributeRepository,
         ParentChunkRepository,
         SectionSummaryRepository,
     )
@@ -29,7 +32,16 @@ if TYPE_CHECKING:
 # The attribute names the port promises, kept as data so `__getattr__` can tell "you
 # forgot the `with`" apart from "you misspelled the repository".
 _REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset(
-    {"conversations", "document_pairs", "parent_chunks", "section_summaries", "corpus_digests"}
+    {
+        "conversations",
+        "document_pairs",
+        "parent_chunks",
+        "section_summaries",
+        "corpus_digests",
+        "document_assets",
+        "asset_extractions",
+        "entity_attributes",
+    }
 )
 
 
@@ -46,6 +58,9 @@ class SqlAlchemyUnitOfWork:
     parent_chunks: ParentChunkRepository
     section_summaries: SectionSummaryRepository
     corpus_digests: CorpusDigestRepository
+    document_assets: DocumentAssetRepository
+    asset_extractions: AssetExtractionRepository
+    entity_attributes: EntityAttributeRepository
 
     def __init__(self, session_factory: Callable[[], Session] | None = None) -> None:
         self._session_factory = session_factory
@@ -104,6 +119,9 @@ class SqlAlchemyUnitOfWork:
         self.parent_chunks = repositories.SqlAlchemyParentChunkRepository(session)
         self.section_summaries = repositories.SqlAlchemySectionSummaryRepository(session)
         self.corpus_digests = repositories.SqlAlchemyCorpusDigestRepository(session)
+        self.document_assets = repositories.SqlAlchemyDocumentAssetRepository(session)
+        self.asset_extractions = repositories.SqlAlchemyAssetExtractionRepository(session)
+        self.entity_attributes = repositories.SqlAlchemyEntityAttributeRepository(session)
 
     def _require_session(self) -> Session:
         if self._session is None:

@@ -248,3 +248,148 @@ class CorpusDigestRepository(Protocol):
 
     def save(self, profile: str, digest: DigestRecord) -> None:
         ...
+
+
+# -- assets ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class StoredAssetRef:
+    """What removing an occurrence leaves the caller to clean up."""
+
+    asset_id: str
+    sha256: str
+    storage_uri: str
+
+
+@dataclass(frozen=True, slots=True)
+class StoredExtraction:
+    """A cached extraction as stored. The payload stays raw JSON: whether an unreadable
+    one is skipped or fatal is the asset store's decision, not the repository's."""
+
+    sha256: str
+    payload: dict
+
+
+class DocumentAssetRepository(Protocol):
+    """Occurrences of images in documents, one dossier per row."""
+
+    def upsert_many(self, dossiers: Sequence[AssetDossier]) -> None:
+        """Insert each dossier, or replace the stored one with the same asset id."""
+        ...
+
+    def get(self, asset_id: str) -> AssetDossier | None:
+        ...
+
+    def get_many(self, asset_ids: Sequence[str]) -> Sequence[AssetDossier]:
+        """The stored dossiers among `asset_ids`, in no particular order."""
+        ...
+
+    def list_by_filename(self, filename: str, *, extracted_only: bool) -> Sequence[AssetDossier]:
+        """A document's occurrences by page, optionally only those already extracted."""
+        ...
+
+    def displayable_hashes(self, filenames: Sequence[str]) -> Sequence[tuple[str, str]]:
+        """(filename, sha256) for every occurrence among `filenames` whose bytes are stored."""
+        ...
+
+    def delete_by_filename(self, filename: str) -> Sequence[StoredAssetRef]:
+        """Remove a document's occurrences and describe what was removed."""
+        ...
+
+    def referenced_digests(self, digests: Collection[str]) -> set[str]:
+        """The digests among `digests` that some remaining occurrence still uses."""
+        ...
+
+    def older_than(self, dossier_version: int, *, after_asset_id: str, limit: int) -> Sequence[AssetDossier]:
+        """The next page of occurrences below `dossier_version`, keyset-paginated by id."""
+        ...
+
+    def status_counts(self) -> dict[str, int]:
+        ...
+
+    def occurrence_count(self) -> int:
+        ...
+
+    def distinct_image_count(self) -> int:
+        ...
+
+
+class AssetExtractionRepository(Protocol):
+    """The content-addressed extraction cache."""
+
+    def find_many(
+        self, digests: Collection[str], profile: str, dossier_version: int
+    ) -> Sequence[StoredExtraction]:
+        ...
+
+    def save(
+        self,
+        sha256: str,
+        profile: str,
+        dossier_version: int,
+        payload: dict,
+        *,
+        model_used: str,
+        confidence: float,
+        needs_review: bool,
+    ) -> None:
+        """Insert the extraction, or replace the stored one for the same key."""
+        ...
+
+    def count(self) -> int:
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class EntityAttributeRecord:
+    """One value of one attribute of one entity asset; a multi-valued attribute has several."""
+
+    asset_id: str
+    profile: str
+    name: str
+    value_key: str
+    value_text: str | None = None
+    value_number: float | None = None
+    value_bool: bool | None = None
+
+
+class EntityAttributeRepository(Protocol):
+    def replace_for_asset(self, asset_id: str, rows: Sequence[EntityAttributeRecord]) -> None:
+        """Make `rows` the asset's entire attribute set."""
+        ...
+
+    def delete_for_assets(self, asset_ids: Sequence[str]) -> int:
+        ...
+
+    def matching_asset_ids(
+        self,
+        name: str,
+        *,
+        profile: str | None,
+        restrict_to: Collection[str] | None,
+        minimum: float | None = None,
+        maximum: float | None = None,
+        boolean: bool | None = None,
+        keys: Collection[str] | None = None,
+    ) -> set[str]:
+        """Assets with a value of `name` satisfying every criterion given."""
+        ...
+
+    def facet_counts(
+        self,
+        name: str,
+        *,
+        kind: str,
+        profile: str | None,
+        restrict_to: Collection[str] | None,
+        limit: int,
+    ) -> list[tuple[object, int]]:
+        """(value, how many assets) for one attribute, most common first.
+
+        `kind` is "number", "boolean" or "text" — which typed column holds the values.
+        """
+        ...
+
+    def stats(self) -> dict:
+        ...
