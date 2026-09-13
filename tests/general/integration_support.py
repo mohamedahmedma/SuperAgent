@@ -83,8 +83,9 @@ def redis_available() -> bool:
     if not _reachable(host, port):
         return False
     try:
-        from backend.infra.cache import cache
+        from backend.composition import default_services
 
+        cache = default_services().cache
         cache.set_json(f"{TEST_PREFIX}:probe", {"ok": True}, ttl=5)
         return cache.get_json(f"{TEST_PREFIX}:probe") == {"ok": True}
     except Exception:

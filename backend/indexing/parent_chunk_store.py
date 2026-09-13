@@ -6,7 +6,6 @@ from typing import List
 from backend.application.ports.repositories import ParentChunkRecord
 from backend.application.ports.unit_of_work import UnitOfWorkFactory
 from backend.infra.cache import RedisCache
-from backend.infra.cache import cache as shared_cache
 from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 
 
@@ -19,7 +18,11 @@ class ParentChunkStore:
         cache: RedisCache | None = None,
     ) -> None:
         self._unit_of_work = unit_of_work
-        self._cache = cache if cache is not None else shared_cache
+        if cache is None:
+            from backend.composition import default_services
+
+            cache = default_services().cache
+        self._cache = cache
 
     @staticmethod
     def _cache_key(chunk_id: str) -> str:

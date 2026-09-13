@@ -5,7 +5,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from backend.application.ports.repositories import NewMessage, StoredMessage
 from backend.application.ports.unit_of_work import UnitOfWorkFactory
 from backend.infra.cache import RedisCache
-from backend.infra.cache import cache as shared_cache
 from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 from backend.schemas.chat import normalize_rag_trace
 
@@ -32,7 +31,11 @@ class ConversationStorage:
         cache: RedisCache | None = None,
     ) -> None:
         self._unit_of_work = unit_of_work
-        self._cache = cache if cache is not None else shared_cache
+        if cache is None:
+            from backend.composition import default_services
+
+            cache = default_services().cache
+        self._cache = cache
 
     @staticmethod
     def _messages_cache_key(user_id: str, session_id: str) -> str:
