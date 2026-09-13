@@ -37,17 +37,30 @@ _POOL_OPTIONS = {
     "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT_SECONDS") or 30),
 }
 
-def serialize_json(value) -> str:
-    """How every JSON and JSONB value is written: cleaned like text, then serialised.
+def _without_nul(value):
+    """`value` with NUL removed from every string inside it, dictionary keys included."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {_without_nul(key): _without_nul(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_without_nul(item) for item in value]
+    return value
 
-    The `before_cursor_execute` listener below cleans bound parameters, but a JSON value
-    reaches it already serialised, with any NUL turned into the escape sequence for code
-    point zero — which the character filter does not match. The old `json` columns stored
-    that escape; `jsonb` refuses it ("unsupported Unicode escape sequence"), so a NUL
-    anywhere in a trace, a dossier or a catalogued question would fail the whole write.
-    Cleaning the Python value before it is serialised gives JSON the rules text has.
+
+def serialize_json(value) -> str:
+    """How every JSON and JSONB value is written: NUL removed, then serialised.
+
+    `jsonb` refuses the escape sequence a NUL serialises to ("unsupported Unicode escape
+    sequence"), so a NUL anywhere in a trace, a dossier or a catalogued question would
+    fail the whole write. The old `json` columns stored that escape.
+
+    Only NUL is removed. The wider cleaning the cursor listener below gives text columns —
+    Unicode normalisation, zero-width and private-use characters — never reached JSON,
+    because a serialised value arrives with those characters escaped, and it still does
+    not: a zero-width joiner inside a trace is part of an emoji the answer showed.
     """
-    return json.dumps(_clean_nul_chars(value))
+    return json.dumps(_without_nul(value))
 
 
 engine = create_engine(
