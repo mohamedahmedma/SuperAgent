@@ -28,6 +28,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from backend.chat.request_context import ChatRequestContext
+from backend.composition import Services
 from backend.tools import KNOWLEDGE_TOOL
 from backend.tools.knowledge import make_search_knowledge_base
 
@@ -250,12 +251,14 @@ class AKnowledgeBaseTurnKeepsItsAnswer(unittest.IsolatedAsyncioTestCase):
             _pipeline(_rag("answerable")),
             patch.object(runtime, "model", _ObedientModel(ANSWER)),
             patch.object(service, "plan_turn", fake_plan_turn),
-            patch.object(service, "storage", FakeStorage()),
             patch.object(service, "generate_session_title", Mock(return_value="t")),
             patch.object(service, "update_persistent_note", AsyncMock(return_value="")),
         ):
             async for chunk in service.chat_with_agent_stream(
-                "مين الشركاء بتوع المدرسة", "parent-1", "session-1"
+                "مين الشركاء بتوع المدرسة",
+                "parent-1",
+                "session-1",
+                services=Services(conversations=FakeStorage()),
             ):
                 chunks.append(chunk)
         return _text_shown(_parse_sse(chunks))

@@ -32,6 +32,7 @@ from backend.chat.child_roster import ChildOption, _as_options
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.signals import RequestSignals
 from backend.chat.turn_policy import TurnPlan
+from backend.composition import Services
 from backend.school_week import day_phrase
 from tests.general.test_chat_hitl_resume import FakeStorage
 
@@ -164,13 +165,18 @@ class _Session(unittest.IsolatedAsyncioTestCase):
         chunks = []
         with (
             patch("backend.chat.child_roster.requests.get", _roster(self.roster)),
-            patch.object(service, "storage", self.storage),
             patch.object(service, "plan_turn", self._plan),
             patch.object(service, "create_agent_for_request", self._agent),
             patch.object(service, "generate_session_title", Mock(return_value="س")),
             patch.object(service, "update_persistent_note", AsyncMock(return_value="")),
         ):
-            async for chunk in service.chat_with_agent_stream(text, USER, SESSION, caller=caller):
+            async for chunk in service.chat_with_agent_stream(
+                text,
+                USER,
+                SESSION,
+                caller=caller,
+                services=Services(conversations=self.storage),
+            ):
                 chunks.append(chunk)
         return _events(chunks)
 
@@ -304,13 +310,18 @@ class TheSyncPathSpendsItToo(unittest.TestCase):
         caller = CallerIdentity(user_id=USER, guardian_id=GUARDIAN, guardian_token=TOKEN)
         with (
             patch("backend.chat.child_roster.requests.get", _roster([DAUGHTER, NAMESAKE])),
-            patch.object(service, "storage", storage),
             patch.object(service, "plan_turn", plan),
             patch.object(service, "create_agent_for_request", lambda ctx, *a, **k: _SyncAgent("بتاخد العربي.")),
             patch.object(service, "generate_session_title", Mock(return_value="س")),
             patch.object(service, "_update_persistent_note_sync", Mock(return_value="")),
         ):
-            service.chat_with_agent(f"{FATMA} — Year 11", USER, SESSION, caller=caller)
+            service.chat_with_agent(
+                f"{FATMA} — Year 11",
+                USER,
+                SESSION,
+                caller=caller,
+                services=Services(conversations=storage),
+            )
 
         self.assertEqual(planned, [ORIGINAL])
         self.assertIsNone(storage.metadata.get("pending_hitl"))

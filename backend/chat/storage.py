@@ -286,5 +286,3 @@ class ConversationStorage:
         self._cache.delete(self._sessions_cache_key(user_id))
         return True
 
-
-storage = ConversationStorage()

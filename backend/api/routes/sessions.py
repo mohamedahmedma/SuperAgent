@@ -2,8 +2,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from backend.api.deps import conversation_storage
 from backend.chat.assets_bridge import restore_session_assets
-from backend.chat.storage import ConversationStorage, storage
+from backend.chat.storage import ConversationStorage
 from backend.db.models import User
 from backend.infra.auth import get_current_user
 from backend.schemas import (
@@ -32,6 +33,7 @@ async def get_session_messages(
         description="Return the batch immediately older than this message id.",
     ),
     current_user: User = Depends(get_current_user),
+    conversations: ConversationStorage = Depends(conversation_storage),
 ):
     """One batch of a stored conversation, with its images made displayable again.
 
@@ -45,7 +47,7 @@ async def get_session_messages(
     constraints reads the ids off the trace and calls POST /media/resolve with its own.
     """
     try:
-        page = storage.get_session_page(
+        page = conversations.get_session_page(
             current_user.username, session_id, limit=limit, before_id=before
         )
         messages = [
@@ -64,9 +66,12 @@ async def get_session_messages(
 
 
 @router.get("/sessions", response_model=SessionListResponse)
-async def list_sessions(current_user: User = Depends(get_current_user)):
+async def list_sessions(
+    current_user: User = Depends(get_current_user),
+    conversations: ConversationStorage = Depends(conversation_storage),
+):
     try:
-        sessions = [SessionInfo(**item) for item in storage.list_session_infos(current_user.username)]
+        sessions = [SessionInfo(**item) for item in conversations.list_session_infos(current_user.username)]
         sessions.sort(key=lambda x: x.updated_at, reverse=True)
         return SessionListResponse(sessions=sessions)
     except Exception as e:
@@ -74,9 +79,13 @@ async def list_sessions(current_user: User = Depends(get_current_user)):
 
 
 @router.delete("/sessions/{session_id}", response_model=SessionDeleteResponse)
-async def delete_session(session_id: str, current_user: User = Depends(get_current_user)):
+async def delete_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    conversations: ConversationStorage = Depends(conversation_storage),
+):
     try:
-        deleted = storage.delete_session(current_user.username, session_id)
+        deleted = conversations.delete_session(current_user.username, session_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="Session does not exist")
         return SessionDeleteResponse(session_id=session_id, message="Session deleted successfully")

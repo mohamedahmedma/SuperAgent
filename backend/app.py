@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import router
+from backend.composition import Services, set_default_services
 from backend.infra.database import log_database_status, verify_connectivity
 from backend.profiles import get_profile
 
@@ -51,7 +52,7 @@ def _cors_origins() -> list[str]:
     return origins or ["*"]
 
 
-def create_app() -> FastAPI:
+def create_app(services: Services | None = None) -> FastAPI:
     # Give this application's own loggers somewhere to go.
     #
     # uvicorn configures `uvicorn.*` and leaves the root logger bare, so every
@@ -72,6 +73,15 @@ def create_app() -> FastAPI:
         )
 
     profile = get_profile()
+
+    # The composition root for this application: every service this process serves
+    # requests with, built on first use. Accepted as an argument so a test can assemble
+    # the real application over its own database, and published as the process default so
+    # the paths that have no injection seam yet — a background job, a chat turn served
+    # without one — reach the SAME instances as the routes rather than building a second
+    # set of their own.
+    services = services if services is not None else Services()
+    set_default_services(services)
 
     # LangSmith reads LANGSMITH_PROJECT from the environment itself, so the profile
     # can only supply it as a default — an explicit env var still wins.
@@ -136,6 +146,10 @@ def create_app() -> FastAPI:
         description=profile.identity.description,
         lifespan=lifespan,
     )
+
+    # Where `backend/api/deps.py` reads it from, so a route declares the service it needs
+    # in its signature instead of importing an instance of it.
+    app.state.services = services
 
     # This API authenticates with a bearer token in the Authorization header
     # (backend/infra/auth.py), never with a cookie. That is what settles the

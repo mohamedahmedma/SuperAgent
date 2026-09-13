@@ -14,10 +14,30 @@ from unittest.mock import patch
 from backend.chat.orchestrator import plan_turn
 from backend.chat.signals import RequestSignals, Scope
 from backend.chat.turn_policy import TurnPlan
+from backend.composition import Services
 from backend.profiles import get_profile
 from backend.profiles.registry import load_profile, set_profile
 from backend.rag.evidence import Certainty
 from backend.tools import KNOWLEDGE_TOOL
+
+
+class ForgetfulStorage:
+    """A conversation store that loads nothing and keeps nothing.
+
+    These tests assert on what a turn EMITS, so what it persists is noise: an empty
+    history goes in and every save is discarded.
+    """
+
+    def load_with_meta(self, user_id, session_id):
+        return [], {}
+
+    def save(self, *args, **kwargs):
+        return None
+
+
+def _forgetful() -> Services:
+    """A container whose only stated service is a store that remembers nothing."""
+    return Services(conversations=ForgetfulStorage())
 
 
 class RecordingContext:
@@ -163,10 +183,10 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
         chunks = []
         with patch.object(service, "plan_turn", lambda *a, **k: (plan, signals or RequestSignals())), \
              patch.object(service, "create_agent_for_request", spy_create_agent), \
-             patch.object(service.storage, "load_with_meta", lambda *a: ([], {})), \
-             patch.object(service.storage, "save", lambda *a, **k: None), \
              patch.object(service, "generate_session_title", lambda _t: "T"):
-            async for chunk in service.chat_with_agent_stream("what is the weather", "u", "s"):
+            async for chunk in service.chat_with_agent_stream(
+                "what is the weather", "u", "s", services=_forgetful()
+            ):
                 chunks.append(chunk)
         return chunks, built
 
@@ -224,10 +244,10 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
         plan = TurnPlan(exposed_tools=["search_knowledge_base"])
         with patch.object(service, "plan_turn", lambda *a, **k: (plan, RequestSignals())), \
              patch.object(service, "create_agent_for_request", spy_create_agent), \
-             patch.object(service.storage, "load_with_meta", lambda *a: ([], {})), \
-             patch.object(service.storage, "save", lambda *a, **k: None), \
              patch.object(service, "generate_session_title", lambda _t: "T"):
-            async for _ in service.chat_with_agent_stream("q", "u", "s"):
+            async for _ in service.chat_with_agent_stream(
+                "q", "u", "s", services=_forgetful()
+            ):
                 pass
 
         self.assertEqual(["search_knowledge_base"], captured["tools"])
@@ -311,10 +331,10 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
                           lambda *a, **k: (plan or TurnPlan(), RequestSignals())), \
              patch.object(service, "create_agent_for_request", lambda ctx, tools=None: FakeAgent()), \
              patch.object(service, "ChatRequestContext", Ctx), \
-             patch.object(service.storage, "load_with_meta", lambda *a: ([], {})), \
-             patch.object(service.storage, "save", lambda *a, **k: None), \
              patch.object(service, "generate_session_title", lambda _t: "T"):
-            async for chunk in service.chat_with_agent_stream("what is partner", "u", "s"):
+            async for chunk in service.chat_with_agent_stream(
+                "what is partner", "u", "s", services=_forgetful()
+            ):
                 chunks.append(chunk)
         return chunks, generated
 
