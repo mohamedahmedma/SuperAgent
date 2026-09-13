@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from backend.chat.language import ARABIC, ENGLISH
 from backend.db.models import DocumentPair
-from backend.indexing import pair_store
+from backend.indexing.pair_store import DocumentPairService
 from tests.general.postgres_support import postgres_schema
 
 ARABIC_BODY = "الرسوم الدراسية للصف الرابع الابتدائي تشمل الكتب والأنشطة والنقل المدرسي بالكامل"
@@ -28,12 +28,7 @@ def _chunks(text):
 
 class PairUploadJobTests(unittest.TestCase):
     def setUp(self):
-        patcher = patch.object(
-            pair_store, "SessionLocal",
-            postgres_schema(self, DocumentPair).sessionmaker(autoflush=False),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
 
         import backend.api.routes.documents as documents
 
@@ -50,6 +45,7 @@ class PairUploadJobTests(unittest.TestCase):
             ("parent_chunk_store", self.parents),
             ("delete_document_transactionally", self.cleanup),
             ("upload_job_manager", self.jobs),
+            ("document_pairs", self.pairs),
         ):
             p = patch.object(documents, name, double)
             p.start()
@@ -73,12 +69,12 @@ class PairUploadJobTests(unittest.TestCase):
         self.jobs.fail_job.assert_not_called()
         self.assertEqual(2, self.writer.write_documents.call_count)
 
-        rows = pair_store.list_pairs()
+        rows = self.pairs.list_pairs()
         self.assertEqual(1, len(rows), "the two files should be ONE entry")
-        self.assertEqual("fees_ar.docx", rows[0]["filename_ar"])
-        self.assertEqual("fees_en.docx", rows[0]["filename_en"])
-        self.assertTrue(rows[0]["paired"])
-        self.assertEqual("Fees", rows[0]["title"])
+        self.assertEqual("fees_ar.docx", rows[0].filename_ar)
+        self.assertEqual("fees_en.docx", rows[0].filename_en)
+        self.assertTrue(rows[0].paired)
+        self.assertEqual("Fees", rows[0].title)
 
     def test_one_side_alone_is_a_complete_entry(self):
         self.loader.load_document.side_effect = [_chunks(ENGLISH_BODY)]
@@ -86,10 +82,10 @@ class PairUploadJobTests(unittest.TestCase):
         self._run([(ENGLISH, "/tmp/bus_en.docx", "bus_en.docx")])
 
         self.jobs.fail_job.assert_not_called()
-        rows = pair_store.list_pairs()
-        self.assertEqual("bus_en.docx", rows[0]["filename_en"])
-        self.assertEqual("", rows[0]["filename_ar"])
-        self.assertFalse(rows[0]["paired"], "one side is not a pair")
+        rows = self.pairs.list_pairs()
+        self.assertEqual("bus_en.docx", rows[0].filename_en)
+        self.assertEqual("", rows[0].filename_ar)
+        self.assertFalse(rows[0].paired, "one side is not a pair")
 
     def test_a_file_in_the_wrong_column_is_rejected(self):
         self.loader.load_document.side_effect = [_chunks(ENGLISH_BODY)]
@@ -119,22 +115,22 @@ class PairUploadJobTests(unittest.TestCase):
         self.writer.write_documents.assert_not_called()
         self.parents.upsert_documents.assert_not_called()
         self.cleanup.assert_not_called()
-        self.assertEqual([], pair_store.list_pairs(), "a rejected upload left a row behind")
+        self.assertEqual([], self.pairs.list_pairs(), "a rejected upload left a row behind")
 
     def test_the_second_language_joins_the_existing_entry(self):
         """Uploading the Arabic half months later must fill the SAME row, which is the
         reason pairs are a table rather than a value on a chunk."""
         self.loader.load_document.side_effect = [_chunks(ENGLISH_BODY)]
         self._run([(ENGLISH, "/tmp/fees_en.docx", "fees_en.docx")], title="Fees policy")
-        pair_id = pair_store.list_pairs()[0]["pair_id"]
+        pair_id = self.pairs.list_pairs()[0].pair_id
 
         self.loader.load_document.side_effect = [_chunks(ARABIC_BODY)]
         self._run([(ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx")], pair_id=pair_id, title="Fees policy")
 
-        rows = pair_store.list_pairs()
+        rows = self.pairs.list_pairs()
         self.assertEqual(1, len(rows), "a second entry was created instead of filling the first")
-        self.assertTrue(rows[0]["paired"])
-        self.assertEqual(["fees_en.docx"], pair_store.superseded_filenames(ARABIC))
+        self.assertTrue(rows[0].paired)
+        self.assertEqual(["fees_en.docx"], self.pairs.superseded_filenames(ARABIC))
 
     def test_a_document_that_yields_no_leaf_chunks_is_rejected(self):
         self.loader.load_document.side_effect = [
@@ -144,7 +140,7 @@ class PairUploadJobTests(unittest.TestCase):
         self._run([(ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx")])
 
         self.assertIn("leaf chunks", self._failure())
-        self.assertEqual([], pair_store.list_pairs())
+        self.assertEqual([], self.pairs.list_pairs())
 
     def test_an_unreadable_file_is_rejected_by_name(self):
         self.loader.load_document.side_effect = [[]]
@@ -152,7 +148,7 @@ class PairUploadJobTests(unittest.TestCase):
         self._run([(ARABIC, "/tmp/broken.docx", "broken.docx")])
 
         self.assertIn("broken.docx", self._failure())
-        self.assertEqual([], pair_store.list_pairs())
+        self.assertEqual([], self.pairs.list_pairs())
 
     def test_the_cleanup_spares_the_asset_rows_the_parse_just_wrote(self):
         """Parsing is NOT read-only, which is what makes the ordering above dangerous.

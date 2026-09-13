@@ -285,7 +285,7 @@ npm run build
     tools are bound, which RAG rungs run, and what the assistant is called. `school` is
     the profile this deployment runs; see [registry.py](backend/profiles/registry.py).
   - `infra/`: [database.py](backend/infra/database.py), [cache.py](backend/infra/cache.py), [auth.py](backend/infra/auth.py).
-  - `db/`: [models.py](backend/db/models.py): ORM models.
+  - `db/`: [models/](backend/db/models/__init__.py): ORM models, one module per aggregate, imported from the package.
   - `schemas/`: Pydantic request/response schemas (chat / documents).
   - `jobs/`: [upload_jobs.py](backend/jobs/upload_jobs.py): async upload/delete job progress.
 - The other three services, each deployable on its own and documented in its own README:

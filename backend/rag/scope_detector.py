@@ -80,12 +80,12 @@ def _default_builder() -> ScopeIndex:
 
     from backend.indexing.embedding import embedding_service
     from backend.indexing.section_summary import corpus_catalogue
-    from backend.indexing.summary_store import load_digest, load_records
+    from backend.indexing.summary_store import section_catalogue
     from backend.profiles import get_profile
 
     profile = get_profile()
-    records = [record for record in load_records(profile.name) if record.usable]
-    digest = load_digest(profile.name)
+    records = [record for record in section_catalogue.load_records(profile.name) if record.usable]
+    digest = section_catalogue.load_digest(profile.name)
 
     # The paragraph when ingest wrote one, the topic list when it did not. The fallback
     # is deliberately not an error: a deployment that has not re-run the catalogue build

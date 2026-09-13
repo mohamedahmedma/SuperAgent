@@ -20,7 +20,7 @@ that true is what lets this be cached at all — see `backend/chat/child_roster.
 
 ## Why the guardian id is stamped on it
 
-`chat_sessions` is keyed by username (`backend/db/models.py:37`), while the right to read
+`chat_sessions` is keyed by username (`User` in `backend/db/models/users.py`), while the right to read
 a child's records is keyed by the guardian handle. Those two can come apart: an
 administrator can rebind an account to a different guardian (`identity/routes.py:342`) or
 unbind it entirely (`:363`) — the custody-transfer path. Without the stamp, a rebind

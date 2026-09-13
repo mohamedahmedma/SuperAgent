@@ -316,11 +316,11 @@ class AssetStoreTestCase(unittest.TestCase):
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
+        unit_of_work = postgres_schema(self, DocumentAsset, AssetExtraction).unit_of_work
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(session_factory=session_factory, blob_store=self.blobs,
+        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs,
                                 cache_enabled=False)
 
         data = make_png(60, 60)
@@ -458,11 +458,11 @@ class StoredConversationAssetTests(unittest.TestCase):
     """
 
     def setUp(self):
-        import backend.chat.storage as storage_module
-
+        from backend.chat.storage import ConversationStorage
         from backend.db.models import ChatMessage, ChatSession, User
 
-        factory = postgres_schema(self, User, ChatSession, ChatMessage).sessionmaker()
+        schema = postgres_schema(self, User, ChatSession, ChatMessage)
+        factory = schema.sessionmaker()
 
         db = factory()
         db.add(User(username="u", password_hash="x"))
@@ -471,17 +471,8 @@ class StoredConversationAssetTests(unittest.TestCase):
 
         self.factory = factory
         self.cache = DictCache()
-        self.storage = storage_module.ConversationStorage()
-        self._patches = [
-            patch.object(storage_module, "SessionLocal", factory),
-            patch.object(storage_module, "cache", self.cache),
-        ]
-        for item in self._patches:
-            item.start()
+        self.storage = ConversationStorage(unit_of_work=schema.unit_of_work, cache=self.cache)
 
-    def tearDown(self):
-        for item in self._patches:
-            item.stop()
     def _trace(self, asset_id, inline=False):
         """A trace as it goes on the WIRE: renditions in full, inline bytes and all."""
         reference = AssetReference(
@@ -834,11 +825,11 @@ class AssetRouteTests(unittest.TestCase):
         from backend.db.models import AssetExtraction, DocumentAsset, User
         from backend.infra.auth import get_current_user
 
-        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
+        unit_of_work = postgres_schema(self, DocumentAsset, AssetExtraction).unit_of_work
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(session_factory=session_factory, blob_store=self.blobs,
+        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs,
                                 cache_enabled=False)
         set_asset_store(self.store)
         set_blob_store(self.blobs)

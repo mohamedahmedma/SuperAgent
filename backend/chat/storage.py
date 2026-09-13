@@ -2,14 +2,21 @@ from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from backend.db.models import ChatMessage, ChatSession, User
-from backend.infra.cache import cache
-from backend.infra.database import SessionLocal
+from backend.application.ports.repositories import NewMessage, StoredMessage
+from backend.application.ports.unit_of_work import UnitOfWorkFactory
+from backend.infra.cache import RedisCache
+from backend.infra.cache import cache as shared_cache
+from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 from backend.schemas.chat import normalize_rag_trace
 
 
 class ConversationStorage:
-    """Conversation storage (PostgreSQL + Redis)."""
+    """Conversation history: Postgres through a unit of work, with Redis in front of it.
+
+    Both collaborators are constructor arguments. The defaults are the process-wide unit
+    of work and cache, which is what the module-level `storage` below uses; a test passes
+    its own, and so will the composition root once the singletons are gone.
+    """
 
     # What one scroll-back fetches. A conversation is read in batches because opening a
     # year-old chat should not cost the whole of it — neither the query, nor the JSON on
@@ -18,6 +25,14 @@ class ConversationStorage:
     # A ceiling on what a caller may ask for, so `?limit=` cannot be used to pull an
     # unbounded conversation into memory.
     MAX_PAGE_SIZE = 200
+
+    def __init__(
+        self,
+        unit_of_work: UnitOfWorkFactory = SqlAlchemyUnitOfWork,
+        cache: RedisCache | None = None,
+    ) -> None:
+        self._unit_of_work = unit_of_work
+        self._cache = cache if cache is not None else shared_cache
 
     @staticmethod
     def _messages_cache_key(user_id: str, session_id: str) -> str:
@@ -73,24 +88,13 @@ class ConversationStorage:
         metadata: dict = None,
         extra_message_data: list = None,
     ):
-        db = SessionLocal()
-        try:
-            user = db.query(User).filter(User.username == user_id).first()
-            if not user:
+        now = datetime.now(UTC)
+        with self._unit_of_work() as uow:
+            conversations = uow.conversations
+            session = conversations.open_session(user_id, session_id, metadata or {})
+            if session is None:
                 return
-
-            session = (
-                db.query(ChatSession)
-                .filter(ChatSession.user_id == user.id, ChatSession.session_id == session_id)
-                .first()
-            )
-            if not session:
-                session = ChatSession(user_id=user.id, session_id=session_id, metadata_json=metadata or {})
-                db.add(session)
-                db.flush()
-            elif metadata is not None:
-                existing_meta = session.metadata_json or {}
-                session.metadata_json = {**existing_meta, **metadata}
+            merged = {**session.metadata, **metadata} if metadata is not None else None
 
             # A turn adds one or two messages to a conversation that is otherwise
             # unchanged, so it is written as an append: the rows already stored stay
@@ -102,191 +106,124 @@ class ConversationStorage:
             # not re-supply. `assets` lives on the trace, so an answer's images survived
             # only until the next message was saved.
             #
-            # Four columns rather than whole rows: the message bodies are not needed to
-            # decide any of this, and re-reading them on every save is a cost that grows
-            # with the conversation.
-            stored = (
-                db.query(
-                    ChatMessage.id,
-                    ChatMessage.message_type,
-                    ChatMessage.rag_trace,
-                    ChatMessage.timestamp,
-                )
-                .filter(ChatMessage.session_ref_id == session.id)
-                .order_by(ChatMessage.id.asc())
-                .all()
-            )
+            # Heads rather than whole messages: the bodies are not needed to decide any of
+            # this, and re-reading them on every save is a cost that grows with the
+            # conversation.
+            stored = list(conversations.message_heads(session))
             if not self._continues(stored, messages):
                 # The conversation was rewritten rather than continued. Rare enough to
                 # be worth handling simply: replace the lot.
-                db.query(ChatMessage).filter(ChatMessage.session_ref_id == session.id).delete(
-                    synchronize_session=False
-                )
+                conversations.delete_messages(session)
                 stored = []
 
             serialized = []
-            inserted = []
-            now = datetime.now(UTC)
+            appended_records = []
+            appended = []
             for idx, msg in enumerate(messages):
                 supplied = None
                 if extra_message_data and idx < len(extra_message_data):
                     extra = extra_message_data[idx] or {}
                     supplied = normalize_rag_trace(extra.get("rag_trace"))
 
-                record = {
-                    "type": msg.type,
-                    "content": str(msg.content),
-                    "rag_trace": None,
-                    "id": None,
-                }
+                record = {"type": msg.type, "content": str(msg.content), "rag_trace": None, "id": None}
                 if idx < len(stored):
-                    row = stored[idx]
-                    record["id"] = row.id
-                    record["timestamp"] = row.timestamp.isoformat()
+                    head = stored[idx]
+                    record["id"] = head.id
+                    record["timestamp"] = head.timestamp.isoformat()
                     record["rag_trace"] = (
-                        supplied if supplied is not None else normalize_rag_trace(row.rag_trace)
+                        supplied if supplied is not None else normalize_rag_trace(head.rag_trace)
                     )
                     # Only when this save actually brought one: a turn supplies a trace
                     # for the answer it just wrote, and nothing for the history behind it.
                     if supplied is not None:
-                        db.query(ChatMessage).filter(ChatMessage.id == row.id).update(
-                            {"rag_trace": supplied}, synchronize_session=False
-                        )
+                        conversations.replace_trace(head.id, supplied)
                 else:
                     record["timestamp"] = now.isoformat()
                     record["rag_trace"] = supplied
-                    new_row = ChatMessage(
-                        session_ref_id=session.id,
-                        message_type=msg.type,
-                        content=str(msg.content),
-                        timestamp=now,
-                        rag_trace=supplied,
+                    appended.append(
+                        NewMessage(
+                            message_type=msg.type,
+                            content=str(msg.content),
+                            timestamp=now,
+                            rag_trace=supplied,
+                        )
                     )
-                    db.add(new_row)
-                    inserted.append((record, new_row))
-
+                    appended_records.append(record)
                 serialized.append(record)
 
-            session.updated_at = now
             # Before the commit, so the cached records carry the same row ids the
             # paginated read uses as its cursor. A cached page without them could not be
             # scrolled back from.
-            db.flush()
-            for record, row in inserted:
-                record["id"] = row.id
-            db.commit()
+            for record, message_id in zip(appended_records, conversations.add_messages(session, appended)):
+                record["id"] = message_id
+            conversations.update_session(session, metadata=merged, updated_at=now)
+            uow.commit()
 
-            cache.set_json(self._messages_cache_key(user_id, session_id), serialized)
-            cache.delete(self._sessions_cache_key(user_id))
-        finally:
-            db.close()
+        self._cache.set_json(self._messages_cache_key(user_id, session_id), serialized)
+        self._cache.delete(self._sessions_cache_key(user_id))
 
     def load(self, user_id: str, session_id: str) -> list:
-        cached = cache.get_json(self._messages_cache_key(user_id, session_id))
+        cached = self._cache.get_json(self._messages_cache_key(user_id, session_id))
         if cached is not None:
             return self._to_langchain_messages(cached)
 
         records = self.get_session_messages(user_id, session_id)
-        cache.set_json(self._messages_cache_key(user_id, session_id), records)
+        self._cache.set_json(self._messages_cache_key(user_id, session_id), records)
         return self._to_langchain_messages(records)
 
     def load_with_meta(self, user_id: str, session_id: str) -> tuple[list, dict]:
         """Load conversation messages and session metadata (title, persistent note, etc.)."""
         messages = self.load(user_id, session_id)
-        db = SessionLocal()
-        try:
-            user = db.query(User).filter(User.username == user_id).first()
-            if not user:
-                return messages, {}
-            session = (
-                db.query(ChatSession)
-                .filter(ChatSession.user_id == user.id, ChatSession.session_id == session_id)
-                .first()
-            )
-            if not session:
-                return messages, {}
-            return messages, dict(session.metadata_json or {})
-        finally:
-            db.close()
+        with self._unit_of_work() as uow:
+            session = uow.conversations.find_session(user_id, session_id)
+        return messages, dict(session.metadata) if session is not None else {}
 
     def list_sessions(self, user_id: str) -> list:
         return [item["session_id"] for item in self.list_session_infos(user_id)]
 
     def list_session_infos(self, user_id: str) -> list[dict]:
-        cached = cache.get_json(self._sessions_cache_key(user_id))
+        cached = self._cache.get_json(self._sessions_cache_key(user_id))
         if cached is not None:
             return cached
 
-        db = SessionLocal()
-        try:
-            user = db.query(User).filter(User.username == user_id).first()
-            if not user:
-                return []
-
-            sessions = (
-                db.query(ChatSession)
-                .filter(ChatSession.user_id == user.id)
-                .order_by(ChatSession.updated_at.desc())
-                .all()
-            )
-            result = []
-            for s in sessions:
-                count = db.query(ChatMessage).filter(ChatMessage.session_ref_id == s.id).count()
-                meta = s.metadata_json or {}
-                result.append(
-                    {
-                        "session_id": s.session_id,
-                        "title": meta.get("title") or s.session_id,
-                        "updated_at": s.updated_at.isoformat(),
-                        "message_count": count,
-                    }
-                )
-            cache.set_json(self._sessions_cache_key(user_id), result)
-            return result
-        finally:
-            db.close()
+        with self._unit_of_work() as uow:
+            summaries = uow.conversations.summaries(user_id)
+        result = [
+            {
+                "session_id": summary.session_id,
+                "title": summary.metadata.get("title") or summary.session_id,
+                "updated_at": summary.updated_at.isoformat(),
+                "message_count": summary.message_count,
+            }
+            for summary in summaries
+        ]
+        self._cache.set_json(self._sessions_cache_key(user_id), result)
+        return result
 
     def get_session_messages(self, user_id: str, session_id: str) -> list[dict]:
-        cached = cache.get_json(self._messages_cache_key(user_id, session_id))
+        cached = self._cache.get_json(self._messages_cache_key(user_id, session_id))
         if cached is not None:
             normalized = self._normalize_message_records(cached)
             if normalized != cached:
-                cache.set_json(self._messages_cache_key(user_id, session_id), normalized)
+                self._cache.set_json(self._messages_cache_key(user_id, session_id), normalized)
             return normalized
 
-        db = SessionLocal()
-        try:
-            user = db.query(User).filter(User.username == user_id).first()
-            if not user:
+        with self._unit_of_work() as uow:
+            session = uow.conversations.find_session(user_id, session_id)
+            if session is None:
                 return []
-            session = (
-                db.query(ChatSession)
-                .filter(ChatSession.user_id == user.id, ChatSession.session_id == session_id)
-                .first()
-            )
-            if not session:
-                return []
-
-            rows = (
-                db.query(ChatMessage)
-                .filter(ChatMessage.session_ref_id == session.id)
-                .order_by(ChatMessage.id.asc())
-                .all()
-            )
-            result = [self._record(row) for row in rows]
-            cache.set_json(self._messages_cache_key(user_id, session_id), result)
-            return result
-        finally:
-            db.close()
+            result = [self._record(message) for message in uow.conversations.messages(session)]
+        self._cache.set_json(self._messages_cache_key(user_id, session_id), result)
+        return result
 
     @staticmethod
-    def _record(row) -> dict:
+    def _record(message: StoredMessage) -> dict:
         return {
-            "id": row.id,
-            "type": row.message_type,
-            "content": row.content,
-            "timestamp": row.timestamp.isoformat(),
-            "rag_trace": normalize_rag_trace(row.rag_trace),
+            "id": message.id,
+            "type": message.message_type,
+            "content": message.content,
+            "timestamp": message.timestamp.isoformat(),
+            "rag_trace": normalize_rag_trace(message.rag_trace),
         }
 
     def get_session_page(
@@ -311,40 +248,26 @@ class ConversationStorage:
         """
         limit = max(1, min(int(limit or self.DEFAULT_PAGE_SIZE), self.MAX_PAGE_SIZE))
 
-        cached = cache.get_json(self._messages_cache_key(user_id, session_id))
+        cached = self._cache.get_json(self._messages_cache_key(user_id, session_id))
         # Entries written before ids were cached carry no cursor, so they cannot be paged
         # from; the database answers instead, and the next save refreshes them.
         if cached is not None and all(item.get("id") is not None for item in cached):
             return self._page_from_records(self._normalize_message_records(cached), limit, before_id)
 
-        db = SessionLocal()
-        try:
-            user = db.query(User).filter(User.username == user_id).first()
-            if not user:
+        with self._unit_of_work() as uow:
+            session = uow.conversations.find_session(user_id, session_id)
+            if session is None:
                 return {"messages": [], "has_more": False}
-            session = (
-                db.query(ChatSession)
-                .filter(ChatSession.user_id == user.id, ChatSession.session_id == session_id)
-                .first()
-            )
-            if not session:
-                return {"messages": [], "has_more": False}
+            # One row of headroom: the newest `limit` messages, plus the single row that
+            # answers "is there more" without a second COUNT query.
+            rows = list(uow.conversations.latest_messages(session, limit=limit + 1, before_id=before_id))
 
-            query = db.query(ChatMessage).filter(ChatMessage.session_ref_id == session.id)
-            if before_id is not None:
-                query = query.filter(ChatMessage.id < before_id)
-            # Descending with one row of headroom: the newest `limit` messages, plus the
-            # single row that answers "is there more" without a second COUNT query.
-            rows = query.order_by(ChatMessage.id.desc()).limit(limit + 1).all()
-
-            has_more = len(rows) > limit
-            window = list(reversed(rows[:limit]))
-            # Deliberately not cached: this is a slice, and writing it under the
-            # whole-conversation key would leave `load` believing the chat is 15 messages
-            # long — the agent would lose the rest of its history.
-            return {"messages": [self._record(row) for row in window], "has_more": has_more}
-        finally:
-            db.close()
+        has_more = len(rows) > limit
+        window = list(reversed(rows[:limit]))
+        # Deliberately not cached: this is a slice, and writing it under the
+        # whole-conversation key would leave `load` believing the chat is 15 messages
+        # long — the agent would lose the rest of its history.
+        return {"messages": [self._record(message) for message in window], "has_more": has_more}
 
     @staticmethod
     def _page_from_records(records: list[dict], limit: int, before_id: int | None) -> dict:
@@ -355,26 +278,13 @@ class ConversationStorage:
         return {"messages": window, "has_more": len(records) > len(window)}
 
     def delete_session(self, user_id: str, session_id: str) -> bool:
-        db = SessionLocal()
-        try:
-            user = db.query(User).filter(User.username == user_id).first()
-            if not user:
+        with self._unit_of_work() as uow:
+            if not uow.conversations.delete_session(user_id, session_id):
                 return False
-            session = (
-                db.query(ChatSession)
-                .filter(ChatSession.user_id == user.id, ChatSession.session_id == session_id)
-                .first()
-            )
-            if not session:
-                return False
-
-            db.delete(session)
-            db.commit()
-            cache.delete(self._messages_cache_key(user_id, session_id))
-            cache.delete(self._sessions_cache_key(user_id))
-            return True
-        finally:
-            db.close()
+            uow.commit()
+        self._cache.delete(self._messages_cache_key(user_id, session_id))
+        self._cache.delete(self._sessions_cache_key(user_id))
+        return True
 
 
 storage = ConversationStorage()

@@ -48,6 +48,7 @@ class PostgresSchema:
     def __init__(self, *tables):
         self.name = f"test_{uuid.uuid4().hex[:12]}"
         self._url = database_url()
+        self._sessions = None
         self._admin(f'CREATE SCHEMA "{self.name}"')
         from backend.infra.database import serialize_json
 
@@ -72,6 +73,16 @@ class PostgresSchema:
     def sessionmaker(self, **options) -> sessionmaker:
         options.setdefault("expire_on_commit", False)
         return sessionmaker(bind=self.engine, **options)
+
+    def unit_of_work(self):
+        """A fresh unit of work over this schema — what a service takes as its factory."""
+        from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
+
+        if self._sessions is None:
+            # autoflush off, as `SessionLocal` has it: a repository that forgets to flush
+            # before querying its own writes must fail here, not only in production.
+            self._sessions = self.sessionmaker(autoflush=False)
+        return SqlAlchemyUnitOfWork(self._sessions)
 
     def drop(self) -> None:
         self.engine.dispose()

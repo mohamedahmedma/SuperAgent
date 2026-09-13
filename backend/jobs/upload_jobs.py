@@ -1,18 +1,27 @@
-"""Upload job progress management.
+"""Progress of document uploads and deletes, kept in Postgres.
 
-The lightweight version currently stores job state in process memory, which is
-suitable for the current single-process development deployment.
-If multi-process support or recovery after a service restart is needed later,
-the same data structure can be migrated to Redis/PostgreSQL.
+An upload or a delete runs as a background task while the admin UI polls for its
+progress. That progress used to live in the memory of the process that started the job,
+which held only while that process answered every poll: any other worker answered 404,
+and a restart turned every job, finished or not, into "does not exist or has expired".
+In the database, any worker can answer, and a job outlives the process that ran it.
+
+A process that dies cannot report that it died, so a job still pending or running that
+has reported nothing for `STALLED_AFTER` is presented as failed when read. The stored row
+is left as it is: the job may be alive on another worker and merely slow, and if it
+reports again its next update is simply shown.
 """
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import UTC, datetime
-from threading import Lock
+from collections.abc import Callable
+from dataclasses import asdict, replace
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import uuid4
 
+from backend.application.ports.repositories import IngestJobRecord, JobStep
+from backend.application.ports.unit_of_work import UnitOfWorkFactory
+from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 
 StepStatus = Literal["pending", "running", "completed", "failed"]
 JobStatus = Literal["pending", "running", "completed", "failed"]
@@ -33,17 +42,41 @@ DELETE_STEPS = [
     ("parent_store", "Deleting parent chunks"),
 ]
 
+#: How long a job may report nothing before it is presumed dead. Generous on purpose:
+#: parsing a large illustrated document through a vision model reports nothing until it
+#: finishes, and calling that failed would be a false alarm.
+STALLED_AFTER = timedelta(hours=1)
+#: How long jobs are kept. Creating a job prunes its kind's jobs older than this.
+RETAINED_FOR = timedelta(days=30)
+#: How many jobs the list endpoint returns.
+LIST_LIMIT = 100
 
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+_UNFINISHED = frozenset({"pending", "running"})
 
 
-class UploadJobManager:
-    """Thread-safe container for upload job state."""
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
-    def __init__(self):
-        self._jobs: dict[str, dict] = {}
-        self._lock = Lock()
+
+class IngestJobTracker:
+    """The progress of one kind of ingest job ("upload" or "delete"), as the UI reads it.
+
+    Every method returns the job as the API serialises it — a plain dict — or None when
+    the job does not exist. Every change is made under a row lock: the vectoriser's
+    progress callback and the job's own step transitions run on different threads, and
+    without the lock one overwrites the other's step.
+    """
+
+    def __init__(
+        self,
+        kind: str,
+        unit_of_work: UnitOfWorkFactory = SqlAlchemyUnitOfWork,
+        *,
+        clock: Callable[[], datetime] = _utc_now,
+    ) -> None:
+        self._kind = kind
+        self._unit_of_work = unit_of_work
+        self._clock = clock
 
     def create_job(
         self,
@@ -54,41 +87,37 @@ class UploadJobManager:
         message: str = "Waiting to upload",
         completion_step: str = "vector_store",
     ) -> dict:
-        steps = steps or DEFAULT_STEPS
-        job_id = uuid4().hex
-        now = _now_iso()
-        job = {
-            "job_id": job_id,
-            "filename": filename,
-            "status": "pending",
-            "current_step": current_step,
-            "message": message,
-            # The completion step distinguishes upload from delete jobs, avoiding a hardcoded final step in complete_job.
-            "completion_step": completion_step,
-            "total_chunks": 0,
-            "processed_chunks": 0,
-            "error": None,
-            "created_at": now,
-            "updated_at": now,
-            "steps": [
-                {
-                    "key": key,
-                    "label": label,
-                    "percent": 0,
-                    "status": "pending",
-                    "message": "",
-                }
-                for key, label in steps
-            ],
-        }
-        with self._lock:
-            self._jobs[job_id] = job
-            return deepcopy(job)
+        now = self._clock()
+        job = IngestJobRecord(
+            job_id=uuid4().hex,
+            kind=self._kind,
+            filename=filename,
+            status="pending",
+            current_step=current_step,
+            # Distinguishes upload from delete jobs, so complete_job needs no hardcoded
+            # final step.
+            completion_step=completion_step,
+            message=message,
+            steps=tuple(JobStep(key=key, label=label) for key, label in (steps or DEFAULT_STEPS)),
+            created_at=now,
+            updated_at=now,
+        )
+        with self._unit_of_work() as uow:
+            uow.ingest_jobs.delete_older_than(self._kind, now - RETAINED_FOR)
+            uow.ingest_jobs.add(job)
+            uow.commit()
+        return self._present(job, now)
 
     def get_job(self, job_id: str) -> dict | None:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            return deepcopy(job) if job else None
+        with self._unit_of_work() as uow:
+            job = uow.ingest_jobs.get(self._kind, job_id)
+        return None if job is None else self._present(job, self._clock())
+
+    def list_jobs(self) -> list[dict]:
+        now = self._clock()
+        with self._unit_of_work() as uow:
+            jobs = uow.ingest_jobs.recent(self._kind, LIST_LIMIT)
+        return [self._present(job, now) for job in jobs]
 
     def update_step(
         self,
@@ -102,76 +131,102 @@ class UploadJobManager:
         processed_chunks: int | None = None,
     ) -> dict | None:
         percent = max(0, min(100, int(percent)))
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if not job:
+
+        def change(job: IngestJobRecord) -> IngestJobRecord | None:
+            if not any(step.key == step_key for step in job.steps):
                 return None
+            return replace(
+                job,
+                steps=tuple(
+                    replace(step, percent=percent, status=status, message=message)
+                    if step.key == step_key
+                    else step
+                    for step in job.steps
+                ),
+                status="failed" if status == "failed" else "running",
+                current_step=step_key,
+                message=message,
+                total_chunks=job.total_chunks if total_chunks is None else int(total_chunks),
+                processed_chunks=job.processed_chunks if processed_chunks is None else int(processed_chunks),
+            )
 
-            step = self._find_step(job, step_key)
-            if not step:
-                return None
-
-            step["percent"] = percent
-            step["status"] = status
-            step["message"] = message
-            job["status"] = "failed" if status == "failed" else "running"
-            job["current_step"] = step_key
-            job["message"] = message
-            job["updated_at"] = _now_iso()
-
-            if total_chunks is not None:
-                job["total_chunks"] = int(total_chunks)
-            if processed_chunks is not None:
-                job["processed_chunks"] = int(processed_chunks)
-
-            return deepcopy(job)
+        return self._change(job_id, change)
 
     def complete_step(self, job_id: str, step_key: str, message: str = "") -> dict | None:
         return self.update_step(job_id, step_key, 100, "completed", message)
 
     def complete_job(self, job_id: str, message: str = "Document ingestion complete") -> dict | None:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if not job:
-                return None
-            for step in job["steps"]:
-                if step["status"] != "failed":
-                    step["percent"] = 100
-                    step["status"] = "completed"
-            job["status"] = "completed"
-            job["current_step"] = job.get("completion_step") or job["current_step"]
-            job["message"] = message
-            job["error"] = None
-            job["updated_at"] = _now_iso()
-            return deepcopy(job)
+        def change(job: IngestJobRecord) -> IngestJobRecord:
+            return replace(
+                job,
+                steps=tuple(
+                    step if step.status == "failed" else replace(step, percent=100, status="completed")
+                    for step in job.steps
+                ),
+                status="completed",
+                current_step=job.completion_step or job.current_step,
+                message=message,
+                error=None,
+            )
+
+        return self._change(job_id, change)
 
     def fail_job(self, job_id: str, step_key: str, error: str) -> dict | None:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if not job:
-                return None
-            step = self._find_step(job, step_key)
-            if step:
-                step["status"] = "failed"
-                step["message"] = error
-            job["status"] = "failed"
-            job["current_step"] = step_key
-            job["message"] = error
-            job["error"] = error
-            job["updated_at"] = _now_iso()
-            return deepcopy(job)
+        def change(job: IngestJobRecord) -> IngestJobRecord:
+            return replace(
+                job,
+                steps=tuple(
+                    replace(step, status="failed", message=error) if step.key == step_key else step
+                    for step in job.steps
+                ),
+                status="failed",
+                current_step=step_key,
+                message=error,
+                error=error,
+            )
 
-    def list_jobs(self) -> list[dict]:
-        with self._lock:
-            return [deepcopy(job) for job in self._jobs.values()]
+        return self._change(job_id, change)
+
+    def _change(
+        self, job_id: str, change: Callable[[IngestJobRecord], IngestJobRecord | None]
+    ) -> dict | None:
+        now = self._clock()
+        with self._unit_of_work() as uow:
+            job = uow.ingest_jobs.get(self._kind, job_id, for_update=True)
+            if job is None:
+                return None
+            changed = change(job)
+            if changed is None:
+                return None
+            changed = replace(changed, updated_at=now)
+            uow.ingest_jobs.save(changed)
+            uow.commit()
+        return self._present(changed, now)
 
     @staticmethod
-    def _find_step(job: dict, step_key: str) -> dict | None:
-        for step in job["steps"]:
-            if step["key"] == step_key:
-                return step
-        return None
+    def _present(job: IngestJobRecord, now: datetime) -> dict:
+        status, message, error = job.status, job.message, job.error
+        if status in _UNFINISHED and now - job.updated_at > STALLED_AFTER:
+            status = "failed"
+            message = error = (
+                f"No progress for over {int(STALLED_AFTER.total_seconds() // 60)} minutes; the "
+                "process running this job has most likely stopped. Start it again."
+            )
+        return {
+            "job_id": job.job_id,
+            "filename": job.filename,
+            "status": status,
+            "current_step": job.current_step,
+            "message": message,
+            "completion_step": job.completion_step,
+            "total_chunks": job.total_chunks,
+            "processed_chunks": job.processed_chunks,
+            "error": error,
+            "created_at": job.created_at.isoformat(),
+            "updated_at": job.updated_at.isoformat(),
+            "steps": [asdict(step) for step in job.steps],
+        }
 
 
-upload_job_manager = UploadJobManager()
-delete_job_manager = UploadJobManager()
+upload_job_manager = IngestJobTracker("upload")
+delete_job_manager = IngestJobTracker("delete")

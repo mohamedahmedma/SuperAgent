@@ -353,10 +353,10 @@ class IndexTestCase(unittest.TestCase):
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset, EntityAttribute
 
-        self.session_factory = postgres_schema(
+        self.unit_of_work = postgres_schema(
             self, DocumentAsset, AssetExtraction, EntityAttribute
-        ).sessionmaker()
-        self.index = EntityAttributeIndex(session_factory=self.session_factory)
+        ).unit_of_work
+        self.index = EntityAttributeIndex(unit_of_work=self.unit_of_work)
         self.schema = shop_schema()
 
     def _seed(self):
@@ -481,7 +481,7 @@ class EntityIngestTests(IndexTestCase):
         super().setUp()
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(session_factory=self.session_factory, blob_store=self.blobs,
+        self.store = AssetStore(unit_of_work=self.unit_of_work, blob_store=self.blobs,
                                 cache_enabled=False)
         self.profile = load_profile("ecommerce")
 
@@ -579,7 +579,7 @@ class EntityRetrievalTests(IndexTestCase):
     def setUp(self):
         super().setUp()
         self._tmp = TemporaryDirectory()
-        self.store = AssetStore(session_factory=self.session_factory,
+        self.store = AssetStore(unit_of_work=self.unit_of_work,
                                 blob_store=LocalBlobStore(Path(self._tmp.name)),
                                 cache_enabled=False)
         self.profile = load_profile("ecommerce")

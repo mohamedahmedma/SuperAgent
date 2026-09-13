@@ -59,7 +59,14 @@ def serialize_json(value) -> str:
     Unicode normalisation, zero-width and private-use characters — never reached JSON,
     because a serialised value arrives with those characters escaped, and it still does
     not: a zero-width joiner inside a trace is part of an emoji the answer showed.
+
+    Almost no value contains a NUL, so the value is serialised first, in C, and walked in
+    Python only when the result holds the escape a NUL becomes. Walking every value was
+    most of the cost of writing a batch of dossiers. The output is the same either way.
     """
+    text = json.dumps(value)
+    if "\\u0000" not in text:
+        return text
     return json.dumps(_without_nul(value))
 
 
