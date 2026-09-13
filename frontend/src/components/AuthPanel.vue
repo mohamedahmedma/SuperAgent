@@ -58,14 +58,14 @@
           <BrandLogo size="md" />
           <div>
             <span class="ax-eyebrow">
-              {{ audience === 'parent'
-                ? (language === 'ar' ? 'أهلًا بك في AUREXIS' : 'WELCOME TO AUREXIS')
-                : (language === 'ar' ? 'دخول فريق المدرسة' : 'STAFF ACCESS') }}
+              {{ authMode === 'register'
+                ? (language === 'ar' ? 'ابدأ مع AUREXIS' : 'GET STARTED WITH AUREXIS')
+                : (language === 'ar' ? 'مرحبًا بعودتك' : 'WELCOME BACK') }}
             </span>
             <h2>
-              {{ audience === 'parent'
-                ? (language === 'ar' ? 'الدخول لأولياء الأمور' : 'Parent sign in')
-                : (language === 'ar' ? 'تسجيل دخول الموظفين' : 'Staff sign in') }}
+              {{ authMode === 'register'
+                ? (language === 'ar' ? 'إنشاء حساب' : 'Create your account')
+                : (language === 'ar' ? 'تسجيل الدخول' : 'Sign in') }}
             </h2>
           </div>
         </div>
@@ -73,32 +73,36 @@
         <div class="ax-tabs" role="tablist">
           <button
             type="button"
-            :class="{ active: audience === 'parent' }"
-            @click="showParent"
+            role="tab"
+            :class="{ active: authMode === 'register' }"
+            :aria-selected="authMode === 'register'"
+            @click="showRegister"
           >
             <i class="fa-solid fa-user-group"></i>
-            <span>{{ language === 'ar' ? 'ولي أمر' : 'Parent' }}</span>
+            <span>{{ language === 'ar' ? 'إنشاء حساب' : 'Register' }}</span>
           </button>
 
           <button
             type="button"
-            :class="{ active: audience === 'staff' }"
-            @click="showStaff"
+            role="tab"
+            :class="{ active: authMode === 'login' }"
+            :aria-selected="authMode === 'login'"
+            @click="showLogin"
           >
             <i class="fa-solid fa-briefcase"></i>
-            <span>{{ language === 'ar' ? 'الموظفون' : 'Staff' }}</span>
+            <span>{{ language === 'ar' ? 'تسجيل الدخول' : 'Log in' }}</span>
           </button>
         </div>
 
-        <div v-if="audience === 'parent'" class="ax-parent-wrap">
-          <WhatsAppLogin :language="language" />
+        <div v-if="authMode === 'register'" class="ax-parent-wrap">
+          <WhatsAppLogin :language="language" flow="register" />
         </div>
 
         <template v-else>
           <p class="ax-description">
             {{ language === 'ar'
-              ? 'استخدم بيانات حساب المدرسة للوصول إلى مساحة العمل الخاصة بك.'
-              : 'Use your school account credentials to access your private workspace.' }}
+              ? 'استخدم اسم المستخدم وكلمة المرور للدخول إلى حسابك.'
+              : 'Use your username and password to access your account.' }}
           </p>
 
           <form class="ax-form" @submit.prevent="onSubmit">
@@ -193,7 +197,7 @@ const authStore = useAuthStore();
 
 const storedLanguage = localStorage.getItem('superagent-language');
 const language = ref<'ar' | 'en'>(storedLanguage === 'en' ? 'en' : 'ar');
-const audience = ref<'parent' | 'staff'>('parent');
+const authMode = ref<'register' | 'login'>('register');
 const showPassword = ref(false);
 
 const toggleLanguage = () => {
@@ -201,13 +205,13 @@ const toggleLanguage = () => {
   localStorage.setItem('superagent-language', language.value);
 };
 
-const showParent = () => {
-  audience.value = 'parent';
+const showRegister = () => {
+  authMode.value = 'register';
 };
 
-const showStaff = () => {
+const showLogin = () => {
   authStore.resetWhatsApp();
-  audience.value = 'staff';
+  authMode.value = 'login';
 };
 
 const notifyRobotPasswordState = (mode: 'idle' | 'away' | 'peek') => {
