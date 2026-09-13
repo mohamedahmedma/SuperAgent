@@ -152,7 +152,7 @@
               <span>
                 {{ authStore.authLoading
                   ? (language === 'ar' ? 'جارٍ الاتصال...' : 'Connecting...')
-                  : (language === 'ar' ? 'دخول مساحة العمل' : 'Enter workspace') }}
+                  : (language === 'ar' ? 'دخول مساحة العمل' : 'Enter') }}
               </span>
               <i
                 :class="authStore.authLoading
