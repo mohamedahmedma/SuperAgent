@@ -56,22 +56,29 @@ class SqlAlchemyDocumentAssetRepository:
                 )
             )
 
+    # Reads select the dossier column alone. It is the record; the scalar columns beside
+    # it exist to be filtered on, not to be loaded into an ORM object and discarded.
+
     def get(self, asset_id: str) -> AssetDossier | None:
-        row = self._session.get(DocumentAsset, asset_id)
-        return None if row is None else _dossier(row)
+        payload = self._session.scalar(
+            select(DocumentAsset.dossier).where(DocumentAsset.asset_id == asset_id)
+        )
+        return None if payload is None else _dossier(payload)
 
     def get_many(self, asset_ids: Sequence[str]) -> Sequence[AssetDossier]:
         if not asset_ids:
             return []
-        rows = self._session.scalars(select(DocumentAsset).where(DocumentAsset.asset_id.in_(list(asset_ids))))
-        return [_dossier(row) for row in rows]
+        payloads = self._session.scalars(
+            select(DocumentAsset.dossier).where(DocumentAsset.asset_id.in_(list(asset_ids)))
+        )
+        return [_dossier(payload) for payload in payloads]
 
     def list_by_filename(self, filename: str, *, extracted_only: bool) -> Sequence[AssetDossier]:
-        statement = select(DocumentAsset).where(DocumentAsset.filename == filename)
+        statement = select(DocumentAsset.dossier).where(DocumentAsset.filename == filename)
         if extracted_only:
             statement = statement.where(DocumentAsset.status == _EXTRACTED)
-        rows = self._session.scalars(statement.order_by(DocumentAsset.page_number, DocumentAsset.asset_id))
-        return [_dossier(row) for row in rows]
+        payloads = self._session.scalars(statement.order_by(DocumentAsset.page_number, DocumentAsset.asset_id))
+        return [_dossier(payload) for payload in payloads]
 
     def displayable_hashes(self, filenames: Sequence[str]) -> Sequence[tuple[str, str]]:
         if not filenames:
@@ -102,13 +109,13 @@ class SqlAlchemyDocumentAssetRepository:
         )
 
     def older_than(self, dossier_version: int, *, after_asset_id: str, limit: int) -> Sequence[AssetDossier]:
-        rows = self._session.scalars(
-            select(DocumentAsset)
+        payloads = self._session.scalars(
+            select(DocumentAsset.dossier)
             .where(DocumentAsset.dossier_version < dossier_version, DocumentAsset.asset_id > after_asset_id)
             .order_by(DocumentAsset.asset_id)
             .limit(limit)
         )
-        return [_dossier(row) for row in rows]
+        return [_dossier(payload) for payload in payloads]
 
     def status_counts(self) -> dict[str, int]:
         rows = self._session.execute(
@@ -202,10 +209,10 @@ def _occurrence_values(dossier: AssetDossier, now: datetime) -> dict:
     }
 
 
-def _dossier(row: DocumentAsset) -> AssetDossier:
+def _dossier(payload: dict) -> AssetDossier:
     from backend.assets.dossier import AssetDossier
 
-    return AssetDossier.model_validate(row.dossier)
+    return AssetDossier.model_validate(payload)
 
 
 __all__ = ["SqlAlchemyAssetExtractionRepository", "SqlAlchemyDocumentAssetRepository"]

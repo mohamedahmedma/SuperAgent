@@ -17,6 +17,22 @@ from sqlalchemy.orm import Session
 from backend.application.ports.repositories import ParentChunkRecord
 from backend.db.models import ParentChunk
 
+#: The columns a record carries, selected directly rather than through ORM entities.
+_RECORD_COLUMNS = (
+    ParentChunk.chunk_id,
+    ParentChunk.text,
+    ParentChunk.filename,
+    ParentChunk.file_type,
+    ParentChunk.file_path,
+    ParentChunk.page_number,
+    ParentChunk.parent_chunk_id,
+    ParentChunk.root_chunk_id,
+    ParentChunk.chunk_level,
+    ParentChunk.chunk_idx,
+    ParentChunk.modality,
+    ParentChunk.asset_ids,
+)
+
 
 class SqlAlchemyParentChunkRepository:
     #: Rows per INSERT: comfortably under Postgres's limit on bind parameters per statement.
@@ -45,7 +61,7 @@ class SqlAlchemyParentChunkRepository:
     def get_many(self, chunk_ids: Sequence[str]) -> Sequence[ParentChunkRecord]:
         if not chunk_ids:
             return []
-        rows = self._session.scalars(select(ParentChunk).where(ParentChunk.chunk_id.in_(list(chunk_ids))))
+        rows = self._session.execute(select(*_RECORD_COLUMNS).where(ParentChunk.chunk_id.in_(list(chunk_ids))))
         return [_record(row) for row in rows]
 
     def delete_by_filename(self, filename: str) -> Sequence[str]:
@@ -58,8 +74,8 @@ class SqlAlchemyParentChunkRepository:
         return list(removed)
 
     def sections(self, level: int) -> Sequence[ParentChunkRecord]:
-        rows = self._session.scalars(
-            select(ParentChunk)
+        rows = self._session.execute(
+            select(*_RECORD_COLUMNS)
             .where(ParentChunk.chunk_level == level)
             .order_by(ParentChunk.filename, ParentChunk.chunk_idx)
         )
@@ -84,7 +100,7 @@ def _values(chunk: ParentChunkRecord, updated_at: datetime) -> dict:
     }
 
 
-def _record(row: ParentChunk) -> ParentChunkRecord:
+def _record(row) -> ParentChunkRecord:
     return ParentChunkRecord(
         chunk_id=row.chunk_id,
         text=row.text,

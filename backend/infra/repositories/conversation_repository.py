@@ -3,7 +3,8 @@
 Nothing here commits; the unit of work that built the repository decides. Every lookup
 by (username, session_id) is one join rather than a user query followed by a session
 query, and the session list counts messages in the same statement that reads the
-sessions — it used to issue one COUNT per conversation.
+sessions — it used to issue one COUNT per conversation. Reads select the columns a
+record needs rather than loading ORM entities only to copy fields out of them.
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from collections.abc import Sequence
 from datetime import datetime
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 from backend.application.ports.repositories import (
@@ -21,6 +23,14 @@ from backend.application.ports.repositories import (
     StoredSession,
 )
 from backend.db.models import ChatMessage, ChatSession, User
+
+_MESSAGE_COLUMNS = (
+    ChatMessage.id,
+    ChatMessage.message_type,
+    ChatMessage.content,
+    ChatMessage.timestamp,
+    ChatMessage.rag_trace,
+)
 
 
 class SqlAlchemyConversationRepository:
@@ -89,8 +99,8 @@ class SqlAlchemyConversationRepository:
         self._session.execute(delete(ChatMessage).where(ChatMessage.session_ref_id == session.id))
 
     def messages(self, session: StoredSession) -> Sequence[StoredMessage]:
-        rows = self._session.scalars(
-            select(ChatMessage)
+        rows = self._session.execute(
+            select(*_MESSAGE_COLUMNS)
             .where(ChatMessage.session_ref_id == session.id)
             .order_by(ChatMessage.id.asc())
         )
@@ -99,10 +109,10 @@ class SqlAlchemyConversationRepository:
     def latest_messages(
         self, session: StoredSession, *, limit: int, before_id: int | None
     ) -> Sequence[StoredMessage]:
-        statement = select(ChatMessage).where(ChatMessage.session_ref_id == session.id)
+        statement = select(*_MESSAGE_COLUMNS).where(ChatMessage.session_ref_id == session.id)
         if before_id is not None:
             statement = statement.where(ChatMessage.id < before_id)
-        rows = self._session.scalars(statement.order_by(ChatMessage.id.desc()).limit(limit))
+        rows = self._session.execute(statement.order_by(ChatMessage.id.desc()).limit(limit))
         return [_message(row) for row in rows]
 
     def summaries(self, username: str) -> Sequence[SessionSummary]:
@@ -138,19 +148,19 @@ class SqlAlchemyConversationRepository:
         self._session.execute(delete(ChatSession).where(ChatSession.id == ref))
         return True
 
-    def _find_row(self, username: str, session_id: str) -> ChatSession | None:
-        return self._session.scalars(
-            select(ChatSession)
+    def _find_row(self, username: str, session_id: str) -> Row | None:
+        return self._session.execute(
+            select(ChatSession.id, ChatSession.session_id, ChatSession.metadata_json)
             .join(User, User.id == ChatSession.user_id)
             .where(User.username == username, ChatSession.session_id == session_id)
         ).first()
 
 
-def _session(row: ChatSession) -> StoredSession:
+def _session(row) -> StoredSession:
     return StoredSession(id=row.id, session_id=row.session_id, metadata=dict(row.metadata_json or {}))
 
 
-def _message(row: ChatMessage) -> StoredMessage:
+def _message(row) -> StoredMessage:
     return StoredMessage(
         id=row.id,
         message_type=row.message_type,
