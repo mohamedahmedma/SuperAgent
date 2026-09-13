@@ -32,6 +32,9 @@ dependencies = [
     "msoffcrypto-tool",
     "sqlalchemy>=2.0.36",
     "psycopg2-binary>=2.9.10",
+    # Runtime, not dev: the backend image runs `alembic upgrade head` before uvicorn, and
+    # the app reads the migration directory's head revision at startup.
+    "alembic>=1.13.0",
     "redis>=5.2.1",
     "passlib[bcrypt]>=1.7.4",
     "python-jose[cryptography]>=3.3.0",
@@ -85,10 +88,11 @@ exclude = ["frontend*", "tests*"]
 [tool.setuptools.package-data]
 "backend.prompts" = ["templates/**/*.j2"]
 "backend.profiles" = ["definitions/*.yaml"]
+# The migration directory is not a package either, and the app reads its head at startup.
+"backend" = ["alembic.ini", "migrations/*.py", "migrations/*.mako", "migrations/versions/*.py"]
 
 [dependency-groups]
 dev = [
-    "alembic>=1.13.0",
     "graphviz>=0.21",
     "pytest>=8.3.0",
 ]

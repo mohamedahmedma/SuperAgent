@@ -126,9 +126,7 @@ class ConversationStorage:
 
             serialized = []
             inserted = []
-            # Naive UTC, matching the timezone-less DateTime columns these rows write to.
-            # `datetime.utcnow()` produced the same value but is deprecated.
-            now = datetime.now(UTC).replace(tzinfo=None)
+            now = datetime.now(UTC)
             for idx, msg in enumerate(messages):
                 supplied = None
                 if extra_message_data and idx < len(extra_message_data):

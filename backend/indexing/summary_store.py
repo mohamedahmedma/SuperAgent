@@ -73,8 +73,7 @@ def save_digest(profile: str, record: DigestRecord, session_factory=SessionLocal
             row.floor_sha256 = record.floor_sha256
             row.question_count = record.question_count
             row.model_used = record.model_used
-            # Naive UTC, matching the timezone-less column. `utcnow()` is deprecated.
-            row.updated_at = datetime.now(UTC).replace(tzinfo=None)
+            row.updated_at = datetime.now(UTC)
             session.commit()
         return True
     except Exception:
@@ -153,8 +152,7 @@ def save_records(
             row.question_vectors = [list(v) for v in record.question_vectors]
             row.embedding_model = record.embedding_model
             row.model_used = record.model_used
-            # Naive UTC, matching the timezone-less column. `utcnow()` is deprecated.
-            row.updated_at = datetime.now(UTC).replace(tzinfo=None)
+            row.updated_at = datetime.now(UTC)
             written += 1
         session.commit()
     return written

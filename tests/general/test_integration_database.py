@@ -305,10 +305,27 @@ class ConnectionPoolTests(unittest.TestCase):
 class SchemaTests(unittest.TestCase):
     def test_the_live_schema_matches_the_models(self):
         """Drift is otherwise found by a user, mid-upload, as an UndefinedColumn."""
-        from backend.db.migrate import detect_drift
+        from alembic.autogenerate import compare_metadata
+        from alembic.runtime.migration import MigrationContext
 
-        drift = detect_drift()
-        self.assertFalse(drift.has_drift, drift.summary())
+        import backend.db.models  # noqa: F401 — registers every table
+        from backend.db.schema_version import verify_database_is_migrated
+        from backend.infra.database import Base
+
+        verify_database_is_migrated(engine)
+        with engine.connect() as connection:
+            context = MigrationContext.configure(
+                connection,
+                opts={
+                    "compare_type": True,
+                    # Only this service's tables: the database may hold other things.
+                    "include_name": lambda name, kind, _parent: (
+                        kind != "table" or name in Base.metadata.tables
+                    ),
+                },
+            )
+            drift = compare_metadata(context, Base.metadata)
+        self.assertEqual([], drift)
 
     def test_corpus_digests_table_exists_with_its_columns(self):
         from sqlalchemy import inspect

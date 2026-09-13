@@ -4186,6 +4186,7 @@ name = "superagent"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "alembic" },
     { name = "beautifulsoup4" },
     { name = "camel-tools" },
     { name = "docx2txt" },
@@ -4234,13 +4235,13 @@ study = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "alembic" },
     { name = "graphviz" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "alembic", specifier = ">=1.13.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "bilibili-api-python", marker = "extra == 'study'", specifier = ">=17.0.0" },
     { name = "camel-tools", specifier = ">=1.5" },
@@ -4286,7 +4287,6 @@ provides-extras = ["study"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "alembic", specifier = ">=1.13.0" },
     { name = "graphviz", specifier = ">=0.21" },
     { name = "pytest", specifier = ">=8.3.0" },
 ]

@@ -39,6 +39,10 @@ _POOL_OPTIONS = {
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
+    # Every timestamp column is timestamptz. Pinning the session to UTC makes the values
+    # that come back UTC as well, whatever TimeZone the server was initialised with, so
+    # an ISO string built from one always ends in +00:00.
+    connect_args={"options": "-c timezone=UTC"},
     **_POOL_OPTIONS,
 )
 
@@ -115,13 +119,6 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expi
 Base = declarative_base()
 
 
-def init_db() -> None:
-    # Delayed import to avoid circular dependency.
-    import backend.db.models  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
-
-
 # Postgres SQLSTATEs for a credential the server rejected outright: 28P01 is
 # invalid_password, 28000 the wider invalid_authorization_specification (which also
 # covers a role that does not exist). Neither is transient, so neither is retried —
@@ -168,8 +165,8 @@ def log_database_status() -> None:
 def verify_connectivity(attempts: int = 5, delay_seconds: float = 2.0) -> None:
     """Open one connection before the app reports itself started, and fail legibly.
 
-    `init_db()` opens one immediately afterwards, so this costs nothing and buys a
-    diagnosis. A rejected password used to arrive as a hundred and fifty lines of
+    The schema-revision check opens one immediately afterwards, so this costs nothing and
+    buys a diagnosis. A rejected password used to arrive as a hundred and fifty lines of
     SQLAlchemy pool internals whose single informative line sat below the default
     `--tail`, and it arrived in the same shape whether the cause was a credential, an
     unresolvable host or a stopped container. Separating the permanent failure from the

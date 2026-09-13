@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import List, Optional
 
 from backend.chat.language import ARABIC, ENGLISH
@@ -124,7 +124,7 @@ def attach(pair_id: str, language: str, filename: str, title: str = "") -> dict:
                 row.filename_ar = ""
             if row.filename_en == name and not (row.pair_id == pair_id and column == "filename_en"):
                 row.filename_en = ""
-            row.updated_at = datetime.utcnow()
+            row.updated_at = datetime.now(UTC)
 
         row = db.get(DocumentPair, pair_id)
         if row is None:
@@ -133,7 +133,7 @@ def attach(pair_id: str, language: str, filename: str, title: str = "") -> dict:
         elif title:
             row.title = title
         setattr(row, column, name)
-        row.updated_at = datetime.utcnow()
+        row.updated_at = datetime.now(UTC)
         db.flush()
         result = _as_dict(row)
 
@@ -166,7 +166,7 @@ def detach(filename: str) -> Optional[dict]:
             row.filename_ar = ""
         if row.filename_en == name:
             row.filename_en = ""
-        row.updated_at = datetime.utcnow()
+        row.updated_at = datetime.now(UTC)
         db.flush()
 
         survived = bool(row.filename_ar or row.filename_en)

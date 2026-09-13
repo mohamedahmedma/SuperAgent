@@ -31,9 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
-    """Naive UTC, matching the timezone-less DateTime columns these rows write to.
-    `datetime.utcnow()` would do the same but is deprecated."""
-    return datetime.now(UTC).replace(tzinfo=None)
+    return datetime.now(UTC)
 
 
 @dataclass
