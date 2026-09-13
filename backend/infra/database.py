@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -36,6 +37,19 @@ _POOL_OPTIONS = {
     "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT_SECONDS") or 30),
 }
 
+def serialize_json(value) -> str:
+    """How every JSON and JSONB value is written: cleaned like text, then serialised.
+
+    The `before_cursor_execute` listener below cleans bound parameters, but a JSON value
+    reaches it already serialised, with any NUL turned into the escape sequence for code
+    point zero — which the character filter does not match. The old `json` columns stored
+    that escape; `jsonb` refuses it ("unsupported Unicode escape sequence"), so a NUL
+    anywhere in a trace, a dossier or a catalogued question would fail the whole write.
+    Cleaning the Python value before it is serialised gives JSON the rules text has.
+    """
+    return json.dumps(_clean_nul_chars(value))
+
+
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
@@ -43,6 +57,7 @@ engine = create_engine(
     # that come back UTC as well, whatever TimeZone the server was initialised with, so
     # an ISO string built from one always ends in +00:00.
     connect_args={"options": "-c timezone=UTC"},
+    json_serializer=serialize_json,
     **_POOL_OPTIONS,
 )
 

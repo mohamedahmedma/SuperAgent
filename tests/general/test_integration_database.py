@@ -98,29 +98,15 @@ class SectionSummaryRoundTripTests(unittest.TestCase):
             save_records(profile, [record("s1", summary="a\x00b")])
             self.assertEqual("ab", load_records(profile)[0].summary)
 
-    def test_json_columns_escape_nul_rather_than_stripping_it(self):
-        """Documents a real asymmetry rather than asserting a tidier one.
-
-        The sanitiser runs over bound parameters, but by then a JSON column's value is
-        already a serialised string in which NUL has become the six characters \\u0000
-        — which the regex does not match and Postgres's `json` type accepts happily.
-        (`jsonb` would have rejected it.) Decoding on read turns it back into a real
-        NUL, so a catalogued question can carry one all the way to the embedder.
-
-        Harmless in practice and not worth a fix nobody asked for, but it is the kind
-        of thing that should be written down where the next person will find it rather
-        than rediscovered.
+    def test_json_columns_strip_nul_like_text_columns(self):
+        """`jsonb` refuses the escape sequence a NUL serialises to, so the engine cleans
+        JSON values before serialising them — the rule text columns already had. Under
+        the old `json` columns the escape was stored and decoded back into a real NUL,
+        which a catalogued question could carry all the way to the embedder.
         """
         with temporary_profile() as profile:
             save_records(profile, [record("s1", ("clean\x00question?",), [[0.1]])])
-            self.assertIn("\x00", load_records(profile)[0].answers[0])
-
-            with engine.connect() as connection:
-                raw = connection.execute(
-                    text("SELECT answers::text FROM section_summaries WHERE profile = :p"),
-                    {"p": profile},
-                ).scalar()
-            self.assertIn("u0000", raw)
+            self.assertEqual("cleanquestion?", load_records(profile)[0].answers[0])
 
     def test_saving_the_same_chunk_twice_updates_rather_than_duplicates(self):
         with temporary_profile() as profile:
