@@ -276,7 +276,7 @@ const SCREENS = [
      panel underneath, driven by the classes fixture rather than by navigating a structure
      an attendance supervisor cannot read. */
   { hash: '#/attendance', expect: ['Take attendance', 'Year 3', '3A'] },
-  { hash: '#/chat', expect: ['Messages', 'All school staff', 'Ahmed Hassan is typing', 'Grade groups', 'Class groups'] },
+  { hash: '#/chat', expect: ['Chats', 'All school staff', 'Ahmed Hassan', 'Grade groups', 'Class groups'] },
   { hash: '#/timetable', expect: ['Timetable', 'Weekly timetable', 'Mathematics'] }
 ];
 
@@ -321,10 +321,55 @@ async function main() {
     }
   }
 
+  window.location.hash = '#/school';
+  await settle(window, 140);
+  const schoolRungs = [...window.document.querySelectorAll('.sis-rung')];
+  assert.ok(schoolRungs.length > 0, 'the school ladder rendered no grade rows');
+  schoolRungs.forEach((rung) => {
+    assert.ok(!rung.querySelector('.sis-row-actions'), 'an existing grade still exposes structure-changing actions');
+    assert.ok(!rung.textContent.includes('Remove'), 'an existing grade still offers the unsupported remove action');
+  });
+
+  const settingsButton = window.document.querySelector('button[title="Settings — appearance and language"]');
+  assert.ok(settingsButton, 'the shell has no settings trigger');
+  settingsButton.click();
+  await settle(window, 60);
+  const settingsCard = window.document.querySelector('.sis-settings-card');
+  assert.ok(settingsCard, 'the settings trigger did not open the preferences card');
+  assert.ok(settingsCard.textContent.includes('Preferences'), 'the mobile settings card has no preferences heading');
+  assert.equal(window.document.body.style.overflow, 'hidden', 'the page can scroll behind the settings dialog');
+  settingsCard.querySelector('.sis-settings-close').click();
+  await settle(window, 40);
+  assert.ok(!window.document.querySelector('.sis-settings-modal'), 'closing settings left the dialog open');
+  assert.equal(window.document.body.style.overflow, '', 'closing settings left page scrolling locked');
+
+  assert.ok(!window.document.querySelector('.sis-mobile-dock'), 'the removed mobile bottom bar is still rendered');
+  assert.ok(
+    !window.document.querySelector('.sis-nav-categories'),
+    'the category strip is shown to an admin instead of only the school manager'
+  );
+  const menuButton = window.document.querySelector('.sis-header button[title="Menu"]');
+  assert.ok(menuButton, 'the mobile menu trigger is missing from the header');
+  menuButton.click();
+  await settle(window, 60);
+  const mobileIdentity = window.document.querySelector('.sis-mobile-drawer-identity');
+  assert.ok(mobileIdentity, 'the mobile navigation drawer did not open');
+  assert.ok(mobileIdentity.querySelector('small').textContent.includes('Admin'), 'the drawer does not show the account role below the name');
+  assert.ok(!mobileIdentity.querySelector('small').textContent.includes('Student Information Service'), 'the drawer still shows product copy below the account name');
+  assert.ok(!window.document.querySelector('.sis-mobile-message-item'), 'the drawer still duplicates the floating chats trigger');
+  assert.ok(!window.document.querySelector('.sis-mobile-section-title'), 'a non-manager still sees category sections in the mobile menu');
+  assert.ok(window.document.querySelector('.sis-mobile-nav-list-flat'), 'a non-manager is missing the direct mobile navigation list');
+  window.document.querySelector('.sis-mobile-drawer-close').click();
+  await settle(window, 40);
+
   window.location.hash = '#/chat';
   await settle(window, 140);
   assert.ok(window.document.querySelector('.sis-app-chat'), 'chat did not activate its viewport-bound app shell');
   assert.ok(window.document.querySelector('.sis-main-chat'), 'chat main region is not internally constrained');
+  assert.ok(!window.document.querySelector('.sis-chat-shell.has-active-chat'), 'opening chats selected a conversation without user input');
+  assert.ok(!window.document.querySelector('.sis-chat-compose textarea'), 'opening chats jumped straight into a conversation');
+  window.document.querySelector('.sis-chat-conversation').click();
+  await settle(window, 100);
   assert.ok(window.document.querySelector('.sis-chat-compose textarea'), 'the active chat has no visible message composer');
   assert.ok(window.document.querySelector('.sis-chat-messages'), 'the active chat has no internal message scroller');
   const attachedFile = window.document.querySelector('.sis-chat-file');
@@ -390,6 +435,10 @@ async function main() {
   const managerChat = newWindow(script, 'ar', 'smoke-manager-chat');
   managerChat.window.location.hash = '#/chat';
   await settle(managerChat.window, 180);
+  assert.ok(
+    managerChat.window.document.querySelector('.sis-nav-categories'),
+    'the school manager is missing the category strip'
+  );
   assert.ok(managerChat.window.document.querySelector('.sis-chat-conversations'), 'the manager has no group list scroller');
   const managerConversations = [...managerChat.window.document.querySelectorAll('.sis-chat-conversation')];
   assert.equal(managerConversations.length, 6, 'the manager did not receive every chat category');
@@ -406,6 +455,25 @@ async function main() {
   window.location.hash = '#/timetable';
   await settle(window, 140);
 
+  const timetableDayNav = window.document.querySelector('.sis-timetable-day-nav');
+  assert.ok(timetableDayNav, 'the timetable has no mobile day navigation');
+  const initialMobileDay = window.document.querySelector('.sis-timetable-grid thead .is-mobile-day-active')?.dataset.day;
+  assert.ok(initialMobileDay, 'the timetable did not select an initial mobile day');
+  const nextDayButton = timetableDayNav.querySelector('button[aria-label="Next day"]');
+  const previousDayButton = timetableDayNav.querySelector('button[aria-label="Previous day"]');
+  assert.ok(nextDayButton && previousDayButton, 'the mobile timetable is missing previous/next day buttons');
+  nextDayButton.click();
+  await settle(window, 40);
+  const advancedMobileDay = window.document.querySelector('.sis-timetable-grid thead .is-mobile-day-active')?.dataset.day;
+  assert.notEqual(advancedMobileDay, initialMobileDay, 'the next-day button did not advance the mobile timetable');
+  previousDayButton.click();
+  await settle(window, 40);
+  assert.equal(
+    window.document.querySelector('.sis-timetable-grid thead .is-mobile-day-active')?.dataset.day,
+    initialMobileDay,
+    'the previous-day button did not return to the prior mobile timetable day'
+  );
+
   /* Timetable edits stay in the browser until the authorised user presses Save. The save
      then sends additions and removals together to the transactional endpoint. */
   const saveTimetable = [...window.document.querySelectorAll('button')].find(
@@ -420,6 +488,26 @@ async function main() {
     (cell) => cell.querySelector('.sis-empty-slot')
   );
   assert.ok(subjectChip && emptySlot, 'the timetable fixture has no editable empty slot');
+  const originalLesson = window.document.querySelector('.sis-timetable-slot .sis-lesson');
+  const originalSlot = originalLesson?.closest('.sis-timetable-slot');
+  assert.ok(originalLesson && originalSlot, 'the timetable fixture has no lesson to swap');
+  originalLesson.click();
+  await settle(window, 30);
+  assert.ok(
+    emptySlot.classList.contains('is-drop-ready'),
+    'tapping an existing lesson did not select it for a touch-friendly swap'
+  );
+  emptySlot.click();
+  await settle(window, 40);
+  assert.ok(originalSlot.querySelector('.sis-empty-slot'), 'moving a lesson did not clear its old slot');
+  assert.ok(emptySlot.querySelector('.sis-lesson'), 'moving a lesson did not fill its target slot');
+  emptySlot.querySelector('.sis-lesson').click();
+  await settle(window, 30);
+  originalSlot.click();
+  await settle(window, 40);
+  assert.ok(originalSlot.querySelector('.sis-lesson'), 'swapping the lesson back did not restore its original slot');
+  assert.ok(emptySlot.querySelector('.sis-empty-slot'), 'swapping the lesson back did not clear the temporary slot');
+  assert.ok(saveTimetable.disabled, 'a round-trip lesson swap left a false unsaved change');
   const writesBeforeEdit = requests.filter((line) => line.startsWith('PUT /v1/timetable')).length;
   subjectChip.click();
   await settle(window, 40);
@@ -758,6 +846,45 @@ async function main() {
     chrome.includes('Teacher') && chrome.includes('Attendance Supervisor'),
     `both held roles must be shown. Header read: ${chrome.slice(0, 200).replace(/\s+/g, ' ')}`
   );
+  const scopedBrand = scoped.window.document.querySelector('.sis-header .sis-brand');
+  assert.equal(
+    scopedBrand?.getAttribute('href'),
+    '#/attendance',
+    'the attendance supervisor brand link does not lead to their permitted home screen'
+  );
+  scopedBrand.click();
+  await settle(scoped.window, 150);
+  assert.equal(scoped.window.location.hash, '#/attendance');
+  assert.ok(
+    !(scoped.window.document.body.textContent || '').includes('Not your screen'),
+    'the role-aware brand shortcut still opened an unauthorized screen'
+  );
+  const class3A = [...scoped.window.document.querySelectorAll('button')].find(
+    (button) => button.textContent.trim().startsWith('3A —')
+  );
+  assert.ok(class3A, 'the attendance supervisor cannot open the 3A register from their home screen');
+  class3A.click();
+  await settle(scoped.window, 150);
+  const unmarkedAttendanceRow = [...scoped.window.document.querySelectorAll('.sis-attendance-register tbody tr')]
+    .find((row) => row.textContent.includes('10433'));
+  assert.ok(unmarkedAttendanceRow, 'the writable attendance row did not render');
+  const excusedButton = unmarkedAttendanceRow.querySelector('button[title="Excused"]');
+  assert.ok(excusedButton && !excusedButton.disabled, 'the excused attendance control is not writable');
+  for (const stateName of ['present', 'absent', 'late', 'excused']) {
+    assert.ok(
+      unmarkedAttendanceRow.querySelector(`.sis-attendance-choice.is-${stateName}`),
+      `the ${stateName} attendance choice lost its semantic colour class`
+    );
+  }
+  excusedButton.click();
+  await settle(scoped.window, 60);
+  assert.ok(excusedButton.classList.contains('is-selected'), 'the selected attendance colour is not activated');
+  const reasonField = unmarkedAttendanceRow.querySelector('.sis-attendance-note-cell input');
+  assert.ok(reasonField, 'choosing Excused did not reveal the full-width reason field');
+  reasonField.value = 'Medical appointment';
+  reasonField.dispatchEvent(new scoped.window.Event('input', { bubbles: true }));
+  await settle(scoped.window, 40);
+  assert.equal(reasonField.value, 'Medical appointment', 'the attendance reason field loses typed text');
 
   const navLabels = [...scoped.window.document.querySelectorAll('nav[aria-label] .nav-link')]
     .map((node) => node.textContent);

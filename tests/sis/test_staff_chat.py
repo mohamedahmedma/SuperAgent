@@ -50,7 +50,7 @@ def _seed() -> dict[str, int]:
         session.add_all([class3, class4])
         session.flush()
 
-        def user(username: str, name: str, school_id: int) -> m.User:
+        def user(username: str, name: str, school_id: int | None) -> m.User:
             row = m.User(
                 username=username, password_hash=hash_password(PASSWORD),
                 full_name_en=name, full_name_ar=name, school_id=school_id,
@@ -66,13 +66,15 @@ def _seed() -> dict[str, int]:
         supervisor = user("supervisor.chat", "Supervisor", school.id)
         manager = user("manager.chat", "Manager", school.id)
         attendance_supervisor = user("attendance.chat", "Attendance Supervisor", school.id)
+        admin = user("admin.chat", "System Administrator", school.id)
         outsider = user("outside.chat", "Outside", other_school.id)
 
         teacher_role = session.scalar(select(m.Role).where(m.Role.code == "teacher"))
         supervisor_role = session.scalar(select(m.Role).where(m.Role.code == "floor_supervisor"))
         manager_role = session.scalar(select(m.Role).where(m.Role.code == "school_manager"))
         attendance_role = session.scalar(select(m.Role).where(m.Role.code == "attendance_supervisor"))
-        assert all((teacher_role, supervisor_role, manager_role, attendance_role))
+        admin_role = session.scalar(select(m.Role).where(m.Role.code == "admin"))
+        assert all((teacher_role, supervisor_role, manager_role, attendance_role, admin_role))
 
         teachers = []
         for index, account in enumerate((alice, bob, carol), start=1):
@@ -116,11 +118,16 @@ def _seed() -> dict[str, int]:
             user_id=attendance_supervisor.id, role_id=attendance_role.id,
             scope_type="class_section", scope_id=class3.id, granted_by="test",
         ))
+        session.add(m.UserRole(
+            user_id=admin.id, role_id=admin_role.id,
+            scope_type="global", scope_id=None, granted_by="test",
+        ))
         uow.commit()
         return {
             "alice": alice.id, "bob": bob.id, "carol": carol.id,
             "supervisor": supervisor.id, "manager": manager.id,
-            "attendance_supervisor": attendance_supervisor.id, "outsider": outsider.id,
+            "attendance_supervisor": attendance_supervisor.id, "admin": admin.id,
+            "outsider": outsider.id,
             "alice_teacher": alice_teacher.id,
         }
 
@@ -243,6 +250,108 @@ def test_private_chat_search_and_messages_are_school_isolated(client):
     ).status_code == 403
 
 
+def test_admin_is_invisible_to_staff_but_can_see_everyone(client):
+    ids = _seed()
+    alice = _headers(client, "alice.chat")
+    bob = _headers(client, "bob.chat")
+    admin = _headers(client, "admin.chat")
+
+    hidden_search = client.get(
+        f"/v1/schools/{SCHOOL}/chat/people",
+        params={"q": "System Administrator"},
+        headers=alice,
+    )
+    assert hidden_search.status_code == 200
+    assert hidden_search.json() == []
+    hidden_direct = client.post(
+        f"/v1/schools/{SCHOOL}/chat/direct",
+        headers=alice,
+        json={"user_id": ids["admin"]},
+    )
+    assert hidden_direct.status_code == 404
+
+    visible_to_admin = client.get(
+        f"/v1/schools/{SCHOOL}/chat/people", params={"q": "Alice"}, headers=admin
+    )
+    assert visible_to_admin.status_code == 200
+    assert [person["user_id"] for person in visible_to_admin.json()] == [ids["alice"]]
+
+    private_chat = client.post(
+        f"/v1/schools/{SCHOOL}/chat/direct",
+        headers=alice,
+        json={"user_id": ids["bob"]},
+    ).json()
+    private_message = client.post(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{private_chat['id']}/messages",
+        headers=bob,
+        json={"body": "Private staff discussion"},
+    ).json()
+    ordinary_delivery = client.post(
+        f"/v1/schools/{SCHOOL}/chat/presence", headers=alice, json={}
+    )
+    assert ordinary_delivery.status_code == 200
+    assert ordinary_delivery.json()["delivered_messages"] == 1
+    observed = next(
+        row for row in _conversations(client, admin) if row["id"] == private_chat["id"]
+    )
+    assert observed["observer_view"] is True
+    assert "Alice" in observed["title_en"] and "Bob" in observed["title_en"]
+    observed_messages = client.get(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{private_chat['id']}/messages",
+        headers=admin,
+    )
+    assert observed_messages.status_code == 200
+    assert observed_messages.json()[0]["body"] == "Private staff discussion"
+    assert client.post(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{private_chat['id']}/read",
+        headers=admin,
+    ).status_code == 204
+    sender_receipts = client.get(
+        f"/v1/schools/{SCHOOL}/chat/messages/{private_message['id']}/receipts",
+        headers=bob,
+    ).json()
+    assert [row["user_id"] for row in sender_receipts] == [ids["alice"]]
+    assert sender_receipts[0]["read_at"] is None
+
+    opened = client.post(
+        f"/v1/schools/{SCHOOL}/chat/direct",
+        headers=admin,
+        json={"user_id": ids["alice"]},
+    )
+    assert opened.status_code == 201, opened.text
+    conversation_id = opened.json()["id"]
+    assert opened.json()["observer_view"] is False
+    assert any(row["id"] == conversation_id for row in _conversations(client, admin))
+    assert all(row["id"] != conversation_id for row in _conversations(client, alice))
+    assert client.get(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
+        headers=alice,
+    ).status_code == 404
+
+    school_group = next(row for row in _conversations(client, admin) if row["category"] == "school")
+    sent = client.post(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{school_group['id']}/messages",
+        headers=admin,
+        json={"body": "Administrator-only audit note"},
+    )
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["receipts"] == {"total": 0, "delivered": 0, "read": 0}
+    heartbeat = client.post(
+        f"/v1/schools/{SCHOOL}/chat/presence", headers=alice, json={}
+    )
+    assert heartbeat.status_code == 200
+    assert heartbeat.json()["delivered_messages"] == 0
+    staff_messages = client.get(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{school_group['id']}/messages",
+        headers=alice,
+    )
+    assert staff_messages.status_code == 200
+    assert staff_messages.json() == []
+    staff_group = next(row for row in _conversations(client, alice) if row["id"] == school_group["id"])
+    assert staff_group["last_message"] is None
+    assert staff_group["unread_count"] == 0
+
+
 def test_read_marker_clears_unread_count(client):
     ids = _seed()
     alice = _headers(client, "alice.chat")
@@ -261,6 +370,42 @@ def test_read_marker_clears_unread_count(client):
     ).status_code == 204
     direct = next(item for item in _conversations(client, alice) if item["id"] == opened["id"])
     assert direct["unread_count"] == 0
+
+
+def test_conversation_mute_is_private_persistent_and_keeps_unread_count(client):
+    ids = _seed()
+    alice = _headers(client, "alice.chat")
+    bob = _headers(client, "bob.chat")
+    opened = client.post(
+        f"/v1/schools/{SCHOOL}/chat/direct", headers=alice, json={"user_id": ids["bob"]}
+    ).json()
+    muted = client.put(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{opened['id']}/mute",
+        headers=alice,
+        json={"duration": "one_week"},
+    )
+    assert muted.status_code == 200, muted.text
+    assert muted.json()["is_muted"] is True
+    assert muted.json()["muted_until"] is not None
+    assert next(row for row in _conversations(client, alice) if row["id"] == opened["id"])["is_muted"] is True
+    assert next(row for row in _conversations(client, bob) if row["id"] == opened["id"])["is_muted"] is False
+
+    client.post(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{opened['id']}/messages",
+        headers=bob,
+        json={"body": "Muted but still unread"},
+    )
+    conversation = next(row for row in _conversations(client, alice) if row["id"] == opened["id"])
+    assert conversation["is_muted"] is True
+    assert conversation["unread_count"] == 1
+
+    unmuted = client.put(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{opened['id']}/mute",
+        headers=alice,
+        json={"duration": "off"},
+    )
+    assert unmuted.status_code == 200, unmuted.text
+    assert unmuted.json() == {"is_muted": False, "muted_until": None}
 
 
 def test_delivery_and_read_receipts_follow_recipient_activity(client):
@@ -383,3 +528,115 @@ def test_image_attachment_is_persisted_and_protected_by_conversation_membership(
     assert client.get(
         f"/v1/schools/{SCHOOL}/chat/attachments/{attachment['id']}/file", headers=carol
     ).status_code == 403
+
+
+def test_message_edit_workflow_and_audit(client, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    ids = _seed()
+    alice = _headers(client, "alice.chat")
+    bob = _headers(client, "bob.chat")
+    admin = _headers(client, "admin.chat")
+
+    conversation_id = client.post(
+        f"/v1/schools/{SCHOOL}/chat/direct", headers=alice, json={"user_id": ids["bob"]}
+    ).json()["id"]
+
+    sent = client.post(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
+        headers=alice,
+        json={"body": "First draft of lesson plan"},
+    )
+    assert sent.status_code == 201, sent.text
+    msg = sent.json()
+    msg_id = msg["id"]
+    assert msg["edited"] is False
+    assert msg["edited_at"] is None
+    assert msg["original_body"] is None
+
+    # Bob cannot edit Alice's message
+    forbidden = client.put(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages/{msg_id}",
+        headers=bob,
+        json={"body": "Hacked message"},
+    )
+    assert forbidden.status_code == 403
+
+    # Blank message edit refused
+    blank = client.put(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages/{msg_id}",
+        headers=alice,
+        json={"body": "   "},
+    )
+    assert blank.status_code == 422
+
+    # Alice successfully edits her own message
+    edited = client.put(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages/{msg_id}",
+        headers=alice,
+        json={"body": "Updated lesson plan for Grade 3"},
+    )
+    assert edited.status_code == 200, edited.text
+    edited_data = edited.json()
+    assert edited_data["body"] == "Updated lesson plan for Grade 3"
+    assert edited_data["edited"] is True
+    assert edited_data["edited_at"] is not None
+
+    # Bob fetches messages: sees updated body, edited flag, but NO original_body
+    bob_messages = client.get(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
+        headers=bob,
+    ).json()
+    bob_msg = next(m for m in bob_messages if m["id"] == msg_id)
+    assert bob_msg["body"] == "Updated lesson plan for Grade 3"
+    assert bob_msg["edited"] is True
+    assert bob_msg["original_body"] is None
+
+    # Admin fetches messages: sees updated body, edited flag, AND original_body preserved
+    admin_messages = client.get(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
+        headers=admin,
+    ).json()
+    admin_msg = next(m for m in admin_messages if m["id"] == msg_id)
+    assert admin_msg["body"] == "Updated lesson plan for Grade 3"
+    assert admin_msg["edited"] is True
+    assert admin_msg["original_body"] == "First draft of lesson plan"
+
+    # Second edit preserves first original_body
+    second_edit = client.put(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages/{msg_id}",
+        headers=alice,
+        json={"body": "Final lesson plan for Grade 3"},
+    )
+    assert second_edit.status_code == 200
+    admin_messages2 = client.get(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages",
+        headers=admin,
+    ).json()
+    admin_msg2 = next(m for m in admin_messages2 if m["id"] == msg_id)
+    assert admin_msg2["body"] == "Final lesson plan for Grade 3"
+    assert admin_msg2["original_body"] == "First draft of lesson plan"
+
+    # Cannot edit after 1 hour
+    future_now = datetime.now(UTC) + timedelta(hours=2)
+    import sis.api.routers.chat as chat_module
+    old_datetime = chat_module.datetime
+
+    class MockDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            return future_now
+
+        @classmethod
+        def fromisoformat(cls, date_string):
+            return old_datetime.fromisoformat(date_string)
+
+    monkeypatch.setattr(chat_module, "datetime", MockDatetime)
+
+    expired = client.put(
+        f"/v1/schools/{SCHOOL}/chat/conversations/{conversation_id}/messages/{msg_id}",
+        headers=alice,
+        json={"body": "Too late to edit"},
+    )
+    assert expired.status_code == 403
+    assert "one hour" in expired.text.lower()

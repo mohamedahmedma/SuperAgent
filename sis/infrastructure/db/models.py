@@ -1633,6 +1633,7 @@ class Teacher(Base):
     )
     full_name_en: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     full_name_ar: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    gender: Mapped[str] = mapped_column(String(16), default="unspecified", nullable=False)
     email: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     phone: Mapped[str] = mapped_column(String(_PHONE_LEN), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -1817,7 +1818,7 @@ class ChatConversation(Base):
 
 
 class ChatMessage(Base):
-    """An immutable message. Membership changes visibility, never message history."""
+    """An audit-retained message that may be hidden from ordinary conversation views."""
 
     __tablename__ = "chat_messages"
     __table_args__ = (
@@ -1834,6 +1835,9 @@ class ChatMessage(Base):
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    original_body: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ChatAttachment(Base):
@@ -1894,6 +1898,24 @@ class ChatRead(Base):
     read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
+class ChatConversationPreference(Base):
+    """Per-person notification choices for one conversation."""
+
+    __tablename__ = "chat_conversation_preferences"
+
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    muted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
 class ChatPresence(Base):
     """Ephemeral staff availability persisted just long enough to span web workers."""
 
@@ -1949,6 +1971,7 @@ __all__ = [
     "ApiKey",
     "ClassEnrolment",
     "ClassSection",
+    "ChatConversationPreference",
     "EducationalSystem",
     "SecondaryEducationSystem",
     "SecondaryTrack",

@@ -1,5 +1,5 @@
 /* Roster — enrol children into classes, and read the register back. */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Store } from '../store.js';
 import { labelOf, pickName, useResource, useStore } from '../hooks.js';
@@ -12,8 +12,73 @@ const TEMPLATE = {
   header: t('student_number,full_name_ar,full_name_en,class_code,guardian_name_ar,guardian_name_en,guardian_phone,relationship_type,is_primary_contact,can_view_records')
 };
 
+const FINAL_MARKS_TEMPLATE = {
+  name: 'end-term-marks-template.csv',
+  header: t('student_number,subject_code,percentage')
+};
+
+function EndTermGrades() {
+  const state = useStore();
+  const [selectedYear, setSelectedYear] = useState(state.year || '');
+  const [selectedGrade, setSelectedGrade] = useState('');
+  const [term, setTerm] = useState('');
+  const years = useResource(Store.keys.years(state.school), () => api.years(state.school), !!state.school);
+  const terms = useResource(Store.keys.terms(selectedYear), () => api.terms(selectedYear), !!selectedYear);
+  const classes = useResource(Store.keys.classes(selectedYear), () => api.classes(selectedYear), !!selectedYear);
+  const yearList = (years.value && years.value.academic_years) || [];
+  const termList = (terms.value || []).slice().sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+  const gradeList = [...new Map((classes.value || []).map((row) => [row.year_level_code, {
+    code: row.year_level_code,
+    name_en: row.year_level_name_en,
+    name_ar: row.year_level_name_ar
+  }])).values()].filter((row) => row.code);
+
+  useEffect(() => {
+    if (!selectedYear && state.year) setSelectedYear(state.year);
+  }, [state.year, selectedYear]);
+  useEffect(() => {
+    if (termList.length && !termList.some((row) => row.code === term)) setTerm(termList[0].code);
+    if (!termList.length && term) setTerm('');
+  }, [selectedYear, termList.length]);
+  useEffect(() => {
+    if (selectedGrade && !gradeList.some((row) => row.code === selectedGrade)) setSelectedGrade('');
+  }, [selectedYear, gradeList.length, selectedGrade]);
+
+  const fields = <div className="row g-3">
+    <Field className="col-12 col-md-4" label={t('Grades academic year')} required hint={t('Choose the year the marks belong to.') }>
+      <Select value={selectedYear} strict options={yearList.map((row) => ({ value: row.code, label: labelOf(row, state.lang) || row.code }))}
+        onChange={(value) => { setSelectedYear(value); setSelectedGrade(''); setTerm(''); }} />
+    </Field>
+    <Field className="col-12 col-md-4" label={t('Grade for uploaded marks')} required hint={t('Only students enrolled in this grade will be accepted.') }>
+      <Select value={selectedGrade} strict disabled={!selectedYear} placeholder={t('Choose grade')}
+        options={gradeList.map((row) => ({ value: row.code, label: pickName(row, state.lang) || row.code }))} onChange={setSelectedGrade} />
+    </Field>
+    <Field className="col-12 col-md-4" label={t('School term')} required hint={t('Choose first or second term before selecting the file.') }>
+      <Select value={term} strict disabled={!selectedYear} placeholder={t('— choose a term —')}
+        options={termList.map((row) => ({ value: row.code, label: labelOf(row, state.lang) || row.code }))} onChange={setTerm} />
+    </Field>
+  </div>;
+
+  return <ImportFlow
+    kind="grades"
+    template={FINAL_MARKS_TEMPLATE}
+    label={t('Upload end-of-term marks file')}
+    hint={t('One row per student and subject. Use percentage, or points with max_points.')}
+    ready={!!term && !!selectedGrade}
+    fields={fields}
+    onPreview={(file) => {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('term_code', term);
+      form.append('year_level_code', selectedGrade);
+      return api.previewGrades(form);
+    }}
+    onCommit={(batchId) => api.commitGrades(batchId)}
+  />;
+}
+
 const emptyAdmission = () => ({
-  full_name_ar: '', full_name_en: '', gender: '',
+  full_name_ar: '', full_name_en: '', gender: 'male',
   date_of_birth: '', contact_email: '', address: '',
   guardian_full_name_ar: '', guardian_full_name_en: '', guardian_phone: '',
   relationship_type: '', grade_code: '', class_code: ''
@@ -61,7 +126,7 @@ function NewAdmission({ year, classes, onCreated }) {
         </Field>
         <Field className="col-12 col-md-3" label={t('Gender')} required>
           <Select value={form.gender} onChange={set('gender')} options={[
-            { value: '', label: t('Choose…') }, { value: 'male', label: t('Male') },
+            { value: 'male', label: t('Male') },
             { value: 'female', label: t('Female') }
           ]} />
         </Field>
@@ -414,6 +479,8 @@ export function Roster() {
           }}
           onCommit={(batchId) => api.commitRoster(batchId)}
         />
+
+        {Store.roles().includes('school_manager') ? <EndTermGrades /> : null}
 
       </div>
     </>

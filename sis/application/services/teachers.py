@@ -5,6 +5,7 @@ from sis.application.ports.repositories import TeacherRecord
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.domain.errors import UnknownReference, ValidationError
 from sis.domain.staff import PASSWORD_MIN_LENGTH
+from sis.domain.people import Gender
 from sis.domain.value_objects import AcademicYearCode, ClassCode, SchoolCode, SubjectCode, YearCode
 from sis.infrastructure.crypto import hash_password
 
@@ -57,6 +58,7 @@ class TeacherManagementService:
         full_name_ar: str, email: str, phone: str, is_active: bool,
         username: str | None, password: str | None,
         assignments: Sequence[tuple[str, str, str, Sequence[str]]], assigned_by: str,
+        gender: Gender = Gender.UNSPECIFIED,
     ) -> TeacherRecord:
         if not full_name_en.strip() and not full_name_ar.strip():
             raise ValidationError("a teacher name is required", field="full_name_en")
@@ -68,6 +70,7 @@ class TeacherManagementService:
             record = uow.teachers.save(
                 school_code=school_code, staff_number=staff_number,
                 full_name_en=full_name_en, full_name_ar=full_name_ar,
+                gender=gender,
                 email=email, phone=phone, is_active=is_active, username=username,
                 password_hash=None if password is None else hash_password(password),
                 assignments=[

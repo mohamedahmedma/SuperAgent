@@ -335,6 +335,15 @@ class RolePermissionMatrixOut(BaseModel):
     resources: list[PermissionMatrixRow]
 
 
+class ExactRolePermissionsIn(BaseModel):
+    permissions: list[Permission]
+
+
+class ExactRolePermissionsOut(BaseModel):
+    role_code: str
+    permissions: list[str]
+
+
 PermissionManager = Annotated[AccessProfile, Depends(require_user_permission(Permission.SYSTEM_MANAGE))]
 _CONFIGURABLE_ROLE_CODES = {
     RoleCode.SCHOOL_OWNER.value,
@@ -530,6 +539,62 @@ def set_role_permission_matrix(
         session.flush()
         uow.commit()
     return RolePermissionMatrixOut(role_code=role_code.value, resources=_permission_matrix(wanted_codes))
+
+
+@router.get("/rbac/roles/{role_code}/permissions", response_model=ExactRolePermissionsOut)
+def get_exact_role_permissions(
+    role_code: RoleCode, manager: PermissionManager, uow_factory: UowFactoryDep
+) -> ExactRolePermissionsOut:
+    if not manager.is_system_admin:
+        raise _refuse(403, "not_authorized", "Only Admin may manage role permissions.")
+    if role_code.value not in _CONFIGURABLE_ROLE_CODES:
+        raise _refuse(403, "protected_role", "Admin permissions are permanent and cannot be edited.")
+    with uow_factory() as uow:
+        ensure_catalogue(uow._session)
+        role = uow._session.scalar(select(m.Role).where(m.Role.code == role_code.value))
+        if role is None:
+            raise _refuse(404, "unknown_reference", "That role is not configured.")
+        codes = sorted(uow._session.scalars(
+            select(m.PermissionRow.code).join(m.RolePermission).where(m.RolePermission.role_id == role.id)
+        ))
+        uow.commit()
+    return ExactRolePermissionsOut(role_code=role_code.value, permissions=codes)
+
+
+@router.put("/rbac/roles/{role_code}/permissions", response_model=ExactRolePermissionsOut)
+def set_exact_role_permissions(
+    role_code: RoleCode, body: ExactRolePermissionsIn, manager: PermissionManager,
+    uow_factory: UowFactoryDep,
+) -> ExactRolePermissionsOut:
+    if not manager.is_system_admin:
+        raise _refuse(403, "not_authorized", "Only Admin may manage role permissions.")
+    if role_code.value not in _CONFIGURABLE_ROLE_CODES:
+        raise _refuse(403, "protected_role", "Admin permissions are permanent and cannot be edited.")
+    wanted_codes = {permission.value for permission in body.permissions}
+    if role_code is RoleCode.SCHOOL_OWNER:
+        forbidden = sorted(code for code in wanted_codes if not code.endswith(".read"))
+        if forbidden:
+            raise _refuse(422, "owner_read_only", "School Owner is permanently read-only.")
+    with uow_factory() as uow:
+        session = uow._session
+        ensure_catalogue(session)
+        role = session.scalar(select(m.Role).where(m.Role.code == role_code.value))
+        if role is None:
+            raise _refuse(404, "unknown_reference", "That role is not configured.")
+        ids = set(session.scalars(select(m.PermissionRow.id).where(m.PermissionRow.code.in_(wanted_codes))))
+        session.execute(delete(m.RolePermission).where(m.RolePermission.role_id == role.id))
+        session.add_all(m.RolePermission(role_id=role.id, permission_id=permission_id) for permission_id in ids)
+        policy_key = f"{ROLE_POLICY_KEY_PREFIX}{role_code.value}"
+        policy = session.scalars(select(m.SystemSetting).where(m.SystemSetting.key == policy_key)).one_or_none()
+        if policy is None:
+            policy = m.SystemSetting(key=policy_key)
+            session.add(policy)
+        policy.value = "custom"
+        policy.note = "Exact role permissions configured by an Admin."
+        policy.updated_by = manager.username
+        session.flush()
+        uow.commit()
+    return ExactRolePermissionsOut(role_code=role_code.value, permissions=sorted(wanted_codes))
 
 
 # ---------------------------------------------------------------------------

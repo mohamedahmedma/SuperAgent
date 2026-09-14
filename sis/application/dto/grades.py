@@ -13,7 +13,7 @@ writes `percentage or 0.0` and the rule dies quietly.
 """
 from dataclasses import dataclass
 
-from sis.domain.value_objects import ClassCode, Percentage, StudentNumber, SubjectCode, TermCode
+from sis.domain.value_objects import ClassCode, Percentage, StudentNumber, SubjectCode, TermCode, YearCode
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +63,8 @@ class GradePreviewCommand:
     #: Narrows validation to one class, so a file uploaded against the wrong class is
     #: rejected loudly instead of silently matching students across the whole school.
     class_code: ClassCode | None = None
+    #: Target grade when one file covers all of its class sections.
+    year_level_code: YearCode | None = None
 
 
 @dataclass(frozen=True, slots=True)

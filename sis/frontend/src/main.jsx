@@ -28,6 +28,7 @@ import './styles/aurexis-sis-student-detail-footer-v3.css';
 import './styles/aurexis-sis-header-nav-footer-v2.css';
 import './styles/aurexis-sis-header-nav-student-setup-v1.css';
 import './styles/chat.css';
+import './styles/modern-ui.css';
 
 import { Router } from './router.js';
 import { App } from './App.jsx';
@@ -49,6 +50,7 @@ import { Attendance } from './views/Attendance.jsx';
 import { Timetable } from './views/Timetable.jsx';
 import { AuditLog } from './views/AuditLog.jsx';
 import { Chat } from './views/Chat.jsx';
+import { Promotions } from './views/Promotions.jsx';
 
 /*
  * Schools -> School -> Rung -> Class -> Child is a containment hierarchy, and the first five
@@ -66,6 +68,7 @@ const ROUTES = [
   { name: 'class', view: Klass, title: 'Class' },
   { name: 'student', view: Student, title: 'Student' },
   { name: 'roster', view: Roster, title: 'Roster' },
+  { name: 'promotions', view: Promotions, title: 'Student promotion' },
   { name: 'studentSetup', view: StudentSetup, title: 'Create student' },
   { name: 'guardians', view: Guardians, title: 'Guardians' },
   { name: 'homework', view: Homework, title: 'Homework' },
@@ -78,7 +81,7 @@ const ROUTES = [
   { name: 'attendance', view: Attendance, title: 'Take attendance' },
   { name: 'timetable', view: Timetable, title: 'Timetable' }
   ,{ name: 'auditLog', view: AuditLog, title: 'Audit Log' }
-  ,{ name: 'chat', view: Chat, title: 'Messages' }
+  ,{ name: 'chat', view: Chat, title: 'Chats' }
 ];
 
 /* The document title follows the route: browser history and a taskbar full of tabs are both
