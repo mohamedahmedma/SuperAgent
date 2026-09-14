@@ -34,6 +34,14 @@ vi.mock('@/utils/identityApi', () => ({
 }));
 
 const post = identityApi.post as unknown as ReturnType<typeof vi.fn>;
+const get = identityApi.get as unknown as ReturnType<typeof vi.fn>;
+
+/** An unsigned JWT expiring `secondsFromNow` from now. The store reads `exp`; it never verifies. */
+function jwtExpiringIn(secondsFromNow: number): string {
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const exp = Math.floor(Date.now() / 1000) + secondsFromNow;
+  return `${encode({ alg: 'RS256' })}.${encode({ sub: 'guardian:abc', exp })}.sig`;
+}
 
 const STARTED = {
   poll_secret: 'the-browsers-half',
@@ -259,5 +267,166 @@ describe('signing in through WhatsApp', () => {
     await vi.advanceTimersByTimeAsync(10000);
 
     expect(post.mock.calls.length).toBe(callsSoFar);
+  });
+});
+
+/**
+ * Staying signed in.
+ *
+ * Access tokens live thirty minutes. The store renews one before it expires and hands
+ * every caller — axios, the chat stream, an image — a token that will still be valid when
+ * the request lands; identity rotates the refresh token on each renewal and the session
+ * runs on until the parent signs out. The failures these pin were all real: pictures
+ * reading "Image unavailable" half an hour in, and the next message signing the parent out.
+ */
+describe('staying signed in', () => {
+  const windowEvents: Event[] = [];
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    localStorage.clear();
+    windowEvents.length = 0;
+    // The store announces an ended session on `window`; node has none.
+    vi.stubGlobal('window', {
+      dispatchEvent: (event: Event) => {
+        windowEvents.push(event);
+        return true;
+      },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+  });
+
+  const signedIn = (accessToken: string, refreshToken = 'r1') => {
+    const auth = useAuthStore();
+    auth.applyTokens({ accessToken, refreshToken });
+    auth.currentUser = { username: 'guardian:abc', role: 'parent' };
+    return auth;
+  };
+
+  it('hands out a token that is still good without asking identity', async () => {
+    const token = jwtExpiringIn(25 * 60);
+    const auth = signedIn(token);
+
+    expect(await auth.ensureFreshToken()).toBe(token);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('renews a token about to expire before handing it out, and keeps the rotated pair', async () => {
+    const auth = signedIn(jwtExpiringIn(30));
+    const fresh = jwtExpiringIn(30 * 60);
+    post.mockResolvedValueOnce({ data: { access_token: fresh, refresh_token: 'r2' } });
+
+    expect(await auth.ensureFreshToken()).toBe(fresh);
+
+    expect(post).toHaveBeenCalledWith('/v1/auth/refresh', { refresh_token: 'r1' });
+    expect(auth.refreshToken).toBe('r2');
+    // Both tokens land in storage, so a reload — and the other tabs — carry on with them.
+    expect(localStorage.getItem('accessToken')).toBe(fresh);
+    expect(localStorage.getItem('refreshToken')).toBe('r2');
+    expect(auth.isAuthenticated).toBe(true);
+  });
+
+  it('shares one exchange between callers that find the token stale at the same moment', async () => {
+    const auth = signedIn(jwtExpiringIn(10));
+    post.mockResolvedValue({ data: { access_token: jwtExpiringIn(1800), refresh_token: 'r2' } });
+
+    await Promise.all([auth.ensureFreshToken(), auth.ensureFreshToken(), auth.ensureFreshToken()]);
+
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a token that does not say when it expires alone', async () => {
+    // Not a JWT: nothing to judge it by, and the server will say. This is also what every
+    // other spec's `auth.token = 'test-token'` relies on.
+    const auth = signedIn('test-token');
+    expect(await auth.ensureFreshToken()).toBe('test-token');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('ends the session when identity refuses the refresh token', async () => {
+    const auth = signedIn(jwtExpiringIn(10));
+    // A 401 with identity's envelope: the verdict is in the status, and it is final.
+    post.mockRejectedValueOnce({
+      response: { status: 401, data: { detail: { code: 'not_authorized', message: 'Invalid or expired refresh token.' } } },
+    });
+
+    expect(await auth.ensureFreshToken()).toBe('');
+
+    expect(auth.token).toBe('');
+    expect(auth.refreshToken).toBe('');
+    expect(auth.isAuthenticated).toBe(false);
+    expect(localStorage.getItem('refreshToken')).toBeNull();
+    expect(windowEvents.map((event) => event.type)).toEqual(['unauthorized']);
+    // Nothing to revoke: identity has already said the token is dead.
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the parent signed in when identity cannot be reached', async () => {
+    const token = jwtExpiringIn(10);
+    const auth = signedIn(token);
+    post.mockRejectedValueOnce(new Error('Network Error'));
+
+    expect(await auth.ensureFreshToken()).toBe(token);
+    expect(auth.isAuthenticated).toBe(true);
+    expect(windowEvents).toEqual([]);
+  });
+
+  it('adopts tokens another tab renewed instead of spending the refresh token again', async () => {
+    const auth = signedIn(jwtExpiringIn(10));
+    const theirs = jwtExpiringIn(1800);
+    localStorage.setItem('accessToken', theirs);
+    localStorage.setItem('refreshToken', 'r-theirs');
+
+    expect(await auth.ensureFreshToken()).toBe(theirs);
+    expect(auth.refreshToken).toBe('r-theirs');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('authorizedFetch sends a fresh token, and renews once when the server refuses it anyway', async () => {
+    const auth = signedIn(jwtExpiringIn(1800));
+    const renewed = jwtExpiringIn(1800 + 60);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 401, ok: false })
+      .mockResolvedValueOnce({ status: 200, ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    post.mockResolvedValueOnce({ data: { access_token: renewed, refresh_token: 'r2' } });
+
+    const response = await auth.authorizedFetch('/media/x', { headers: { 'X-Thread-ID': 's1' } });
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, firstInit] = fetchMock.mock.calls[0];
+    const [, secondInit] = fetchMock.mock.calls[1];
+    expect(firstInit.headers['X-Thread-ID']).toBe('s1');
+    expect(secondInit.headers.Authorization).toBe(`Bearer ${renewed}`);
+  });
+
+  it('restores a session from storage, renewing a stale token before asking who the parent is', async () => {
+    // Written before the store exists: this is a page load, not a sign-in.
+    localStorage.setItem('accessToken', jwtExpiringIn(-600));
+    localStorage.setItem('refreshToken', 'r1');
+    const fresh = jwtExpiringIn(1800);
+    post.mockResolvedValueOnce({ data: { access_token: fresh, refresh_token: 'r2' } });
+    get.mockResolvedValueOnce({
+      data: { username: 'guardian:abc', role: 'parent', guardian_id: 'abc', display_name: 'فاطمة علي' },
+    });
+
+    const auth = useAuthStore();
+    await auth.restoreSession();
+
+    expect(auth.isAuthenticated).toBe(true);
+    expect(auth.currentUser?.guardianId).toBe('abc');
+    expect(get).toHaveBeenCalledWith('/v1/auth/me', { headers: { Authorization: `Bearer ${fresh}` } });
+  });
+
+  it('does nothing on a page load with no session stored', async () => {
+    const auth = useAuthStore();
+    await auth.restoreSession();
+    expect(post).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+    expect(auth.isAuthenticated).toBe(false);
   });
 });

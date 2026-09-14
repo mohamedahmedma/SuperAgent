@@ -499,11 +499,15 @@ export const useChatStore = defineStore('chat', {
         // `apiUrl`, not a bare path: this is the one call in the store that bypasses
         // axios — it needs the response body as a stream — and so it is also the one
         // that silently ignored VITE_API_BASE_URL and posted to the UI's own origin.
-        const response = await fetch(apiUrl('/chat/stream'), {
+        //
+        // Through the auth store, so the bearer token is one that will still be valid
+        // when the request lands. Read off `authStore.token` directly, this sent the token
+        // the page had started with, and thirty minutes into a session the next message
+        // signed the parent out.
+        const response = await authStore.authorizedFetch(apiUrl('/chat/stream'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${authStore.token}`,
             // The conversation this message belongs to. The server keys everything it
             // remembers about a thread on this — including which child a parent's
             // questions are about — so it has to be the same value for every message

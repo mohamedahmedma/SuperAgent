@@ -39,6 +39,10 @@
  * and a plain `<img src>` cannot carry a header — it would 401. So each image is
  * fetched with the token and turned into an object URL. Those URLs hold memory until
  * revoked, which is why they are released on unmount.
+ *
+ * The fetch goes through the auth store, which sends a token that will still be valid
+ * when the request lands. Reading `authStore.token` here sent the token the page had
+ * started with, and thirty minutes into a session every picture read "Image unavailable".
  */
 import { onBeforeUnmount, ref, watch } from 'vue';
 
@@ -80,9 +84,7 @@ const load = async (asset: AssetReference) => {
        and every image renders as "Image unavailable" while the answer's text arrives
        perfectly. `apiUrl` sends it where the rest of the API goes, and passes an absolute
        URL through untouched should the backend ever emit one. */
-    const response = await fetch(apiUrl(asset.url), {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    });
+    const response = await authStore.authorizedFetch(apiUrl(asset.url));
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const url = URL.createObjectURL(await response.blob());
     objectUrls.push(url);

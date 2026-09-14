@@ -11,6 +11,9 @@ import axios from 'axios';
  *
  * `VITE_IDENTITY_BASE_URL` is empty in development, where vite proxies `/v1` to
  * localhost:8200. In production it is the identity service's origin.
+ *
+ * Renewing the session lives in `utils/session.ts`, and the live session in
+ * `stores/auth.ts`; this module only knows where identity is.
  */
 const identityApi = axios.create({
   baseURL: import.meta.env.VITE_IDENTITY_BASE_URL || '',
@@ -19,29 +22,5 @@ const identityApi = axios.create({
 
 export const ACCESS_TOKEN_KEY = 'accessToken';
 export const REFRESH_TOKEN_KEY = 'refreshToken';
-
-/**
- * Exchange the stored refresh token for a fresh access token.
- *
- * Returns the new access token, or null when there is nothing to refresh with or the
- * refresh itself was rejected. Callers treat null as "sign in again".
- */
-export async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-  if (!refreshToken) return null;
-
-  try {
-    const response = await identityApi.post('/v1/auth/refresh', { refresh_token: refreshToken });
-    const accessToken = response.data.access_token as string;
-    localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-    return accessToken;
-  } catch {
-    // The refresh token is expired, revoked, or its binding was removed — all of which
-    // mean the session is genuinely over. Clear both so the app cannot loop retrying.
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-    return null;
-  }
-}
 
 export default identityApi;
