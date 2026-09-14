@@ -61,7 +61,19 @@ _DEFAULT_LOCKOUT_MINUTES: Final[int] = 15
 #: Bounds the revocation window. Access tokens cannot be revoked — verification elsewhere
 #: is offline — so keeping them short is the only control over a binding that changed.
 _DEFAULT_ACCESS_TTL_MINUTES: Final[int] = 30
-_DEFAULT_REFRESH_TTL_DAYS: Final[int] = 30
+
+#: How long a session survives WITHOUT being used. A refresh token is exchanged for a new
+#: one on every use (`SessionService.refresh`) and the new one lives this long again, so a
+#: parent who opens the app inside the window stays signed in until they sign out — which
+#: is the requirement — while a phone nobody has opened in a year is no longer a session.
+_DEFAULT_REFRESH_TTL_DAYS: Final[int] = 365
+
+#: How long an exchanged refresh token may be presented again before that counts as a
+#: replay. A browser that lost the response to its refresh retries it; a second tab that
+#: read the old token from storage a moment before the first tab replaced it presents it
+#: too. Both arrive within seconds. Outside this window the token is a copy in somebody
+#: else's hands, and presenting it ends the whole session.
+_DEFAULT_REFRESH_REUSE_GRACE_SECONDS: Final[int] = 60
 
 #: Long enough for a parent to find the WhatsApp message, short enough that a
 #: screenshotted link shared later is worthless.
@@ -103,6 +115,7 @@ class Settings:
     audience: str
     access_ttl_minutes: int
     refresh_ttl_days: int
+    refresh_reuse_grace_seconds: int
 
     # -- passwords and lockout ----------------------------------------------
     pbkdf2_rounds: int
@@ -255,6 +268,9 @@ def settings() -> Settings:
         audience=env_value("IDENTITY_AUDIENCE") or DEFAULT_AUDIENCE,
         access_ttl_minutes=_int_env("IDENTITY_ACCESS_TTL_MINUTES", _DEFAULT_ACCESS_TTL_MINUTES),
         refresh_ttl_days=_int_env("IDENTITY_REFRESH_TTL_DAYS", _DEFAULT_REFRESH_TTL_DAYS),
+        refresh_reuse_grace_seconds=_int_env(
+            "IDENTITY_REFRESH_REUSE_GRACE_SECONDS", _DEFAULT_REFRESH_REUSE_GRACE_SECONDS
+        ),
         pbkdf2_rounds=_int_env("IDENTITY_PBKDF2_ROUNDS", _DEFAULT_PBKDF2_ROUNDS),
         max_failed_attempts=_int_env(
             "IDENTITY_MAX_FAILED_ATTEMPTS", _DEFAULT_MAX_FAILED_ATTEMPTS

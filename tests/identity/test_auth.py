@@ -67,6 +67,62 @@ def test_refresh_returns_a_fresh_access_token(client, parent):
     assert decode_own_token(response.json()["access_token"])["guardian_id"] == "G-1"
 
 
+def test_refresh_rotates_the_refresh_token(client, parent):
+    """The token presented is spent; the one returned carries the session on."""
+    tokens = client.post("/v1/auth/login", json=parent).json()
+    refreshed = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}).json()
+
+    assert refreshed["refresh_token"] and refreshed["refresh_token"] != tokens["refresh_token"]
+    assert refreshed["refresh_expires_at"]
+    again = client.post("/v1/auth/refresh", json={"refresh_token": refreshed["refresh_token"]})
+    assert again.status_code == 200
+
+
+def _spend_long_ago(db, client, refresh_token: str, seconds: int) -> None:
+    """Move a token's exchange back in time, past the grace window."""
+    from datetime import datetime, timedelta, timezone
+
+    from identity.infrastructure.db.models import RefreshToken
+
+    token_hash = client.app.state.token_issuer.hash_refresh_token(refresh_token)
+    db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).update(
+        {"rotated_at": datetime.now(timezone.utc) - timedelta(seconds=seconds)}
+    )
+    db.commit()
+
+
+def test_a_spent_token_presented_again_soon_is_a_retry_and_is_honoured(client, parent):
+    tokens = client.post("/v1/auth/login", json=parent).json()
+    client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+
+    retried = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert retried.status_code == 200
+
+
+def test_a_spent_token_replayed_later_ends_the_whole_session(client, parent, db):
+    """The stolen-copy case. Both the copy and the parent's live token are refused; the
+    parent signs in again and the thief cannot."""
+    tokens = client.post("/v1/auth/login", json=parent).json()
+    refreshed = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}).json()
+    _spend_long_ago(db, client, tokens["refresh_token"], seconds=120)
+
+    replay = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert replay.status_code == 401
+
+    live = client.post("/v1/auth/refresh", json={"refresh_token": refreshed["refresh_token"]})
+    assert live.status_code == 401
+
+
+def test_logout_revokes_every_token_of_the_session(client, parent):
+    tokens = client.post("/v1/auth/login", json=parent).json()
+    refreshed = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}).json()
+
+    client.post("/v1/auth/logout", json={"refresh_token": refreshed["refresh_token"]})
+
+    for token in (tokens["refresh_token"], refreshed["refresh_token"]):
+        assert client.post("/v1/auth/refresh", json={"refresh_token": token}).status_code == 401
+
+
 def test_refresh_re_reads_the_binding_rather_than_copying_it(client, parent, admin_headers):
     """A custody change must take effect without waiting for the parent to log out."""
     tokens = client.post("/v1/auth/login", json=parent).json()

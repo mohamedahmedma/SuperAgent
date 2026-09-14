@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from identity.application.ports.repositories import RefreshTokenRecord
 from identity.domain.accounts import LockoutPolicy, as_aware
 from identity.infrastructure.db.models import Account, AuthAudit, RefreshToken
 
@@ -141,38 +142,68 @@ class SqlAccountRepository:
 
 
 class SqlRefreshTokenRepository:
-    """`RefreshTokenRepository` over SQLAlchemy."""
+    """`RefreshTokenRepository` over SQLAlchemy.
+
+    Datetimes are compared in Python, never in SQL: SQLite stores these naive, and a
+    `WHERE expires_at > :now` against an aware parameter raises there and nowhere else.
+    `as_aware` is the same fix `LockoutPolicy` applies, at the one place a value crosses
+    out of storage. An account's tokens are few — the family is pruned on every refresh —
+    so reading them to compare costs nothing worth a dialect-specific query.
+    """
 
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def issue(self, *, account_id: int, token_hash: str, expires_at: datetime) -> None:
+    def issue(
+        self, *, account_id: int, token_hash: str, expires_at: datetime, family_id: str
+    ) -> None:
         self._db.add(
             RefreshToken(
-                account_id=account_id, token_hash=token_hash, expires_at=expires_at
+                account_id=account_id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+                family_id=family_id,
             )
         )
         self._db.commit()
 
-    def find_active(self, token_hash: str) -> tuple[int, datetime] | None:
-        """`(account_id, expires_at)` for a token that is neither revoked nor expired.
-
-        Expiry is compared in Python rather than in SQL, because SQLite stores these
-        naive and a `WHERE expires_at > :now` against an aware parameter raises there and
-        nowhere else. `as_aware` is the same fix `LockoutPolicy` applies, in the one place
-        the value crosses out of storage.
-        """
+    def find(self, token_hash: str) -> RefreshTokenRecord | None:
         record = (
             self._db.query(RefreshToken)
             .filter(RefreshToken.token_hash == token_hash)
             .first()
         )
-        if record is None or record.revoked_at is not None:
-            return None
-        expires_at = as_aware(record.expires_at)
-        if expires_at <= datetime.now(timezone.utc):
-            return None
-        return record.account_id, expires_at
+        return None if record is None else _record(record)
+
+    def mark_rotated(self, token_hash: str, *, replaced_by_hash: str, at: datetime) -> None:
+        (
+            self._db.query(RefreshToken)
+            .filter(RefreshToken.token_hash == token_hash)
+            .update(
+                {"rotated_at": at, "replaced_by_hash": replaced_by_hash},
+                synchronize_session=False,
+            )
+        )
+        self._db.commit()
+
+    def revoke_family(self, account_id: int, family_id: str) -> int:
+        revoked = 0
+        now = datetime.now(timezone.utc)
+        for row in self._db.query(RefreshToken).filter(RefreshToken.account_id == account_id):
+            if row.revoked_at is None and (row.family_id or row.token_hash) == family_id:
+                row.revoked_at = now
+                revoked += 1
+        self._db.commit()
+        return revoked
+
+    def prune(self, account_id: int, *, dead_before: datetime, now: datetime) -> int:
+        deleted = 0
+        for row in self._db.query(RefreshToken).filter(RefreshToken.account_id == account_id):
+            if _is_dead(row, dead_before=dead_before, now=now):
+                self._db.delete(row)
+                deleted += 1
+        self._db.commit()
+        return deleted
 
     def revoke(self, token_hash: str) -> bool:
         record = (
@@ -198,6 +229,37 @@ class SqlRefreshTokenRepository:
         )
         self._db.commit()
         return int(revoked or 0)
+
+
+def _aware(moment: datetime | None) -> datetime | None:
+    return None if moment is None else as_aware(moment)
+
+
+def _record(row: RefreshToken) -> RefreshTokenRecord:
+    return RefreshTokenRecord(
+        account_id=row.account_id,
+        token_hash=row.token_hash,
+        # A row from before rotation existed names no family: it is a family of one.
+        family_id=row.family_id or row.token_hash,
+        expires_at=as_aware(row.expires_at),
+        revoked_at=_aware(row.revoked_at),
+        rotated_at=_aware(row.rotated_at),
+    )
+
+
+def _is_dead(row: RefreshToken, *, dead_before: datetime, now: datetime) -> bool:
+    """Whether presenting this token could ever again mean anything.
+
+    Expired: no. Revoked or rotated long enough ago: no — the grace window has passed and
+    so has the time a replay would still be worth recognising. A rotated token inside that
+    time is kept, because it is the row a replay is detected against.
+    """
+    if as_aware(row.expires_at) <= now:
+        return True
+    revoked_at, rotated_at = _aware(row.revoked_at), _aware(row.rotated_at)
+    if revoked_at is not None and revoked_at < dead_before:
+        return True
+    return rotated_at is not None and rotated_at < dead_before
 
 
 class SqlAuditSink:

@@ -89,6 +89,12 @@ class RefreshToken(Base):
     token's lifetime rather than immediately.
 
     Stored hashed. A leaked database must not yield usable sessions.
+
+    **One row per exchange, not per sign-in.** Each refresh spends the token presented and
+    issues a new one (`SessionService.refresh`), so a session is a *family* of rows sharing
+    `family_id`, each `rotated_at` the moment its successor was issued. That is what makes a
+    stolen token detectable: a token presented again after its grace window was copied, and
+    the whole family is revoked. `prune` keeps the family from growing without bound.
     """
 
     __tablename__ = "refresh_tokens"
@@ -98,6 +104,14 @@ class RefreshToken(Base):
         ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True
     )
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+
+    #: The hash of the first token issued at sign-in, inherited by every token rotated from
+    #: it. Null on rows written before rotation existed; those are each a family of one.
+    family_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    #: When this token was exchanged for its successor. Set once. Presented again after
+    #: the grace window, a rotated token is a replay.
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    replaced_by_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
