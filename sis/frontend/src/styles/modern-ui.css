@@ -3121,6 +3121,10 @@ html[dir="rtl"] .sis-permission-option input:checked::after { transform: transla
 
 .sis-audit-bell-host { position: fixed; z-index: 1036; bottom: 6rem; }
 .sis-mobile-header-controls { display: contents; }
+.sis-audit-bell-mobile { display: none; }
+.sis-audit-bell-desktop { position: relative; inset: auto !important; }
+.sis-audit-bell-desktop .sis-fab-audit { width: 2.75rem; height: 2.75rem; border-radius: 0.72rem; box-shadow: none; }
+.sis-audit-bell-desktop .sis-audit-popover { top: calc(100% + 0.75rem); bottom: auto; }
 html[dir="rtl"] .sis-audit-bell-host { left: 2rem; }
 html[dir="ltr"] .sis-audit-bell-host { right: 2rem; }
 .sis-fab-audit { position: relative; display: grid; width: 3.15rem; height: 3.15rem; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-lg); cursor: pointer; }
@@ -3150,6 +3154,10 @@ html[dir="ltr"] .sis-audit-bell-host { right: 2rem; }
 .sis-audit-mobile-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; padding: 0.55rem 0.85rem; border-top: 1px solid var(--line); }
 .sis-audit-mobile-meta b { max-width: 68%; font-size: 0.78rem; text-align: end; overflow-wrap: anywhere; }
 .sis-audit-mobile-card .sis-audit-details { padding: 0.7rem 0.85rem; border-top: 1px solid var(--line); }
+
+@media (max-width: 991.98px) {
+  .sis-audit-bell-mobile { display: block; }
+}
 
 @media (max-width: 767.98px) {
   .sis-permission-toolbar { align-items: stretch; flex-direction: column; }

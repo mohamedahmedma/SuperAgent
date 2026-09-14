@@ -276,7 +276,7 @@ const SCREENS = [
      panel underneath, driven by the classes fixture rather than by navigating a structure
      an attendance supervisor cannot read. */
   { hash: '#/attendance', expect: ['Take attendance', 'Year 3', '3A'] },
-  { hash: '#/chat', expect: ['Chats', 'All school staff', 'Ahmed Hassan', 'Grade groups', 'Class groups'] },
+  { hash: '#/chat', expect: ['Messages', 'All school staff', 'Ahmed Hassan', 'Grade groups', 'Class groups'] },
   { hash: '#/timetable', expect: ['Timetable', 'Weekly timetable', 'Mathematics'] }
 ];
 

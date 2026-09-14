@@ -423,9 +423,9 @@ function Account({ onSignIn }) {
 
 /* -- Header ---------------------------------------------------------------------- */
 
-function Header({ onOpenSettings, onSignIn, onToggleChat, unreadChatCount, onToggleMenu }) {
+function Header({ onOpenSettings, onSignIn, onToggleMenu }) {
   const state = useStore();
-  const canChat = (state.profile?.permissions || []).includes('chat.read');
+  const auditNotifications = useAuditNotifications();
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
   const currentSchool = (schools.value || []).find((school) => school.code === state.school);
   const schoolName = pickName(currentSchool, state.lang) || state.school || '';
@@ -446,7 +446,7 @@ function Header({ onOpenSettings, onSignIn, onToggleChat, unreadChatCount, onTog
             >
               <Icon name="menu" size={20} />
             </button>
-            <AuditBell />
+            <AuditBell notifications={auditNotifications} placement="mobile" />
           </div>
           <a
             className="sis-brand text-decoration-none text-body"
@@ -478,23 +478,7 @@ function Header({ onOpenSettings, onSignIn, onToggleChat, unreadChatCount, onTog
         <div className="sis-header-actions-group d-flex align-items-center sis-push">
           <YearPicker />
 
-          {canChat ? (
-            <button
-              type="button"
-              className={cx('sis-header-chat-btn', unreadChatCount > 0 && 'has-unread')}
-              onClick={onToggleChat}
-              title={t('Open chat')}
-              aria-label={unreadChatCount ? t('{0} unread messages', [unreadChatCount]) : t('Open chat')}
-            >
-              <Icon name="chat" size={17} />
-              <span className="d-none d-sm-inline">{t('Chats')}</span>
-              {unreadChatCount > 0 ? (
-                <span className="sis-header-chat-badge pulse">
-                  {unreadChatCount > 99 ? '99+' : unreadChatCount}
-                </span>
-              ) : null}
-            </button>
-          ) : null}
+          <AuditBell notifications={auditNotifications} placement="desktop" />
 
           <Account onSignIn={onSignIn} />
 
@@ -816,7 +800,7 @@ const AUDIT_EVENT_LABELS = {
   create: 'إضافة سجل', update: 'تعديل سجل', delete: 'حذف سجل', soft_delete: 'إلغاء سجل', restore: 'استعادة سجل'
 };
 
-function AuditBell() {
+function useAuditNotifications() {
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState([]);
   const userId = Store.state.profile?.user_id || 'anonymous';
@@ -834,13 +818,18 @@ function AuditBell() {
     const timer = window.setInterval(refresh, 15000);
     return () => { alive = false; window.clearInterval(timer); };
   }, [canAudit]);
-  if (!canAudit) return null;
   const unread = events.filter((entry) => entry.id > lastSeen).length;
   const toggle = () => {
     const next = !open; setOpen(next);
     if (next && events.length) { setLastSeen(events[0].id); localStorage.setItem(storageKey, String(events[0].id)); }
   };
-  return <div className="sis-audit-bell-host">
+  return { canAudit, events, open, unread, setOpen, toggle };
+}
+
+function AuditBell({ notifications, placement }) {
+  const { canAudit, events, open, unread, setOpen, toggle } = notifications;
+  if (!canAudit) return null;
+  return <div className={`sis-audit-bell-host sis-audit-bell-${placement}`}>
     {open ? <section className="sis-audit-popover" aria-label="آخر أحداث النظام"><header><div><strong>آخر أحداث النظام</strong><small>تحديث تلقائي كل 15 ثانية</small></div><button type="button" onClick={() => setOpen(false)} aria-label="إغلاق"><Icon name="close" /></button></header>
       <div className="sis-audit-popover-list">{events.length ? events.slice(0, 8).map((entry) => <div className="sis-audit-popover-item" key={entry.id}><strong>{AUDIT_EVENT_LABELS[entry.action] || 'تحديث في النظام'}</strong><span>{entry.actor_name}{entry.actor_role ? ` · ${entry.actor_role}` : ''}</span>{entry.context?.title ? <small>{entry.context.title}</small> : null}</div>) : <p className="m-0 p-3 text-body-tertiary">لا توجد أحداث حديثة.</p>}</div>
       <a className="sis-audit-popover-more" href={Router.href('auditLog')}>عرض سجل التدقيق بالكامل</a></section> : null}
@@ -1008,8 +997,6 @@ export function App() {
       <Header
         onOpenSettings={() => setSettingsOpen(true)}
         onSignIn={() => {}}
-        onToggleChat={() => setChatDrawerOpen((prev) => !prev)}
-        unreadChatCount={unreadChatCount}
         onToggleMenu={() => setMobileMenuOpen((prev) => !prev)}
       />
       <SchoolTabs />
