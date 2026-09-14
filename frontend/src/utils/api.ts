@@ -1,5 +1,7 @@
 import axios from 'axios';
-import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, refreshAccessToken } from '@/utils/identityApi';
+import { getActivePinia } from 'pinia';
+import { useAuthStore } from '@/stores/auth';
+import { readStoredTokens } from '@/utils/session';
 
 /**
  * The chat backend's origin.
@@ -45,10 +47,23 @@ export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
 
-// Request interceptor to attach Bearer token
+/**
+ * The auth store, which owns the live session — or nothing, for a module imported on its
+ * own with no application around it (a spec re-importing this file to read its base URL).
+ */
+function sessionStore() {
+  return getActivePinia() ? useAuthStore() : null;
+}
+
+// Request interceptor: attach a bearer token that will still be valid when it arrives.
+//
+// The store renews the token BEFORE it expires (see `utils/session.ts`), so a request is
+// never sent with one that is about to be refused. Without a store the request carries
+// whatever storage holds, which is what this did before the store learned to renew.
 api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+  async (config) => {
+    const store = sessionStore();
+    const token = store ? await store.ensureFreshToken() : readStoredTokens().accessToken;
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -59,45 +74,36 @@ api.interceptors.request.use(
   }
 );
 
-// Serialises concurrent refreshes. Without it, a page that fires four requests at once
-// after the token expires performs four refreshes, and three of them race to overwrite
-// the token with an older value.
-let inFlightRefresh: Promise<string | null> | null = null;
-
-function refreshOnce(): Promise<string | null> {
-  if (!inFlightRefresh) {
-    inFlightRefresh = refreshAccessToken().finally(() => {
-      inFlightRefresh = null;
-    });
-  }
-  return inFlightRefresh;
-}
-
-// Response interceptor: a 401 now means "try refreshing once", not "log out".
+// Response interceptor: a 401 means "renew once and retry", not "log out".
 //
-// Access tokens are short-lived by design — that is what bounds the window in which a
-// revoked session keeps working. Without this, a parent would be thrown back to the
-// login screen every thirty minutes, which is a worse experience than the old
-// twenty-four-hour token and would get the TTL raised back up for the wrong reason.
+// A token the clock still called fresh can be refused — the signing key rotated, or the
+// session was revoked from the admin side — so the store is asked to renew regardless of
+// what it thinks of the token. A renewal identity refuses ends the session inside the
+// store, which is what tells the app; a retry that still fails ends it here.
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config;
+    const store = sessionStore();
 
-    if (error.response?.status === 401 && original && !original._retriedAfterRefresh) {
+    if (error.response?.status === 401 && original && !original._retriedAfterRefresh && store) {
       original._retriedAfterRefresh = true;
 
-      const token = await refreshOnce();
+      const token = await store.refreshSession();
       if (token) {
         original.headers.Authorization = `Bearer ${token}`;
         return api(original);
       }
+      // The store has already ended the session and said so.
+      return Promise.reject(error);
     }
 
     if (error.response?.status === 401) {
-      localStorage.removeItem(ACCESS_TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
-      window.dispatchEvent(new CustomEvent('unauthorized'));
+      if (store) {
+        store.endSession();
+      } else {
+        window.dispatchEvent(new CustomEvent('unauthorized'));
+      }
     }
 
     return Promise.reject(error);

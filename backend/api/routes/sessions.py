@@ -2,9 +2,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from backend.api.deps import conversation_storage
+from backend.api.deps import conversation_storage, get_services
+from backend.api.routes.attachments import attachment_info
 from backend.chat.assets_bridge import restore_session_assets
 from backend.chat.storage import ConversationStorage
+from backend.composition import Services
 from backend.db.models import User
 from backend.infra.auth import get_current_user
 from backend.schemas import (
@@ -34,8 +36,9 @@ async def get_session_messages(
     ),
     current_user: User = Depends(get_current_user),
     conversations: ConversationStorage = Depends(conversation_storage),
+    services: Services = Depends(get_services),
 ):
-    """One batch of a stored conversation, with its images made displayable again.
+    """One batch of a stored conversation, with its images and voice notes made displayable again.
 
     Batched rather than whole: opening a chat costs the last screenful of it, and
     scrolling back asks for the batch before the oldest message on screen by passing its
@@ -45,10 +48,16 @@ async def get_session_messages(
     once per batch, in a single lookup, not once per message. Capabilities are the
     browser defaults because this endpoint serves the web app; a client with other
     constraints reads the ids off the trace and calls POST /media/resolve with its own.
+    A message spoken as a voice note carries the note the same way: one lookup per
+    batch, owner-scoped, so the player comes back with the conversation.
     """
     try:
         page = conversations.get_session_page(
             current_user.username, session_id, limit=limit, before_id=before
+        )
+        records = restore_session_assets(page["messages"])
+        attachments = services.attachments.get_many(
+            current_user.username, [record.get("attachment_id") or "" for record in records]
         )
         messages = [
             MessageInfo(
@@ -57,8 +66,13 @@ async def get_session_messages(
                 content=msg["content"],
                 timestamp=msg["timestamp"],
                 rag_trace=msg.get("rag_trace"),
+                attachment=(
+                    attachment_info(attachments[msg["attachment_id"]])
+                    if msg.get("attachment_id") in attachments
+                    else None
+                ),
             )
-            for msg in restore_session_assets(page["messages"])
+            for msg in records
         ]
         return SessionMessagesResponse(messages=messages, has_more=page["has_more"])
     except Exception as e:

@@ -90,8 +90,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     # Defined before the app rather than registered onto it: `lifespan=` is the supported
     # replacement for the deprecated `@app.on_event("startup")`, and it has to be handed to
     # the constructor. Everything before the `yield` is what the startup handler used to
-    # run, in the same order; there is nothing after it because this app has never had
-    # shutdown work to do.
+    # run, in the same order.
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         # Which provider every model call in the request path is about to go to. With
@@ -137,7 +136,16 @@ def create_app(services: Services | None = None) -> FastAPI:
             daemon=True,
         ).start()
 
-        yield
+        try:
+            yield
+        finally:
+            # A turn hands its save and its note update to background threads so the
+            # parent is not kept waiting for them (backend/chat/background.py). A stop
+            # signal arriving seconds after an answer must not lose that save, so the
+            # queue is drained before the process goes. Bounded below the container's
+            # stop grace period (docker-compose.yml), or the drain itself would be what
+            # gets killed.
+            services.background_jobs.shutdown(timeout=20.0)
 
     app = FastAPI(
         title=profile.identity.api_title,

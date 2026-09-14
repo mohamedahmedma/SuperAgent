@@ -45,7 +45,10 @@ if TYPE_CHECKING:
     from backend.assets.entity_store import EntityAttributeIndex
     from backend.assets.pipeline import FigurePipeline
     from backend.assets.store import AssetStore
+    from backend.chat.attachments import ChatAttachments
+    from backend.chat.background import BackgroundJobs
     from backend.chat.storage import ConversationStorage
+    from backend.chat.transcription import Transcriber
     from backend.indexing.document_loader import DocumentLoader
     from backend.indexing.embedding import EmbeddingService
     from backend.indexing.milvus_client import MilvusStore
@@ -76,6 +79,9 @@ class Services:
         unit_of_work: UnitOfWorkFactory | None = None,
         cache: RedisCache | None = None,
         conversations: ConversationStorage | None = None,
+        background_jobs: BackgroundJobs | None = None,
+        attachments: ChatAttachments | None = None,
+        transcriber: Transcriber | None = None,
         document_pairs: DocumentPairService | None = None,
         parent_chunks: ParentChunkStore | None = None,
         section_catalogue: SectionCatalogueStore | None = None,
@@ -112,6 +118,9 @@ class Services:
                 ("unit_of_work", unit_of_work),
                 ("cache", cache),
                 ("conversations", conversations),
+                ("background_jobs", background_jobs),
+                ("attachments", attachments),
+                ("transcriber", transcriber),
                 ("document_pairs", document_pairs),
                 ("parent_chunks", parent_chunks),
                 ("section_catalogue", section_catalogue),
@@ -192,6 +201,49 @@ class Services:
             return ConversationStorage(unit_of_work=self.unit_of_work, cache=self.cache)
 
         return self._singleton("conversations", build)
+
+    @property
+    def background_jobs(self) -> BackgroundJobs:
+        """The threads a turn hands its save and its note update to.
+
+        One per process: the ordering it promises — a conversation's writes land in the
+        order they were queued — holds only among jobs that share an instance. Drained by
+        `create_app()`'s lifespan on the way down, so a stop cannot lose a queued save.
+        """
+
+        def build() -> BackgroundJobs:
+            from backend.chat.background import BackgroundJobs
+
+            return BackgroundJobs()
+
+        return self._singleton("background_jobs", build)
+
+    @property
+    def transcriber(self) -> Transcriber:
+        """Speech to text for voice notes: the configured model, or a stand-in that says
+        there is none. Built from the environment once, like the chat models."""
+
+        def build() -> Transcriber:
+            from backend.chat.transcription import build_transcriber
+
+            return build_transcriber()
+
+        return self._singleton("transcriber", build)
+
+    @property
+    def attachments(self) -> ChatAttachments:
+        """Voice notes: kept in the same blob store as the images, recorded in Postgres."""
+
+        def build() -> ChatAttachments:
+            from backend.chat.attachments import ChatAttachments
+
+            return ChatAttachments(
+                unit_of_work=self.unit_of_work,
+                blob_store=self.blob_store,
+                transcriber=self.transcriber,
+            )
+
+        return self._singleton("attachments", build)
 
     # -- the corpus -------------------------------------------------------------
 

@@ -5,18 +5,23 @@ by (username, session_id) is one join rather than a user query followed by a ses
 query, and the session list counts messages in the same statement that reads the
 sessions — it used to issue one COUNT per conversation. Reads select the columns a
 record needs rather than loading ORM entities only to copy fields out of them.
+
+Messages are only ever added. There is no method that deletes or rewrites a stored
+message, because the one caller that did — a save that replaced the conversation whenever
+its copy of it disagreed with the database — is how answers, and the images on them, went
+missing from conversations that were merely being continued.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import bindparam, delete, func, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 from backend.application.ports.repositories import (
-    MessageHead,
     NewMessage,
     SessionSummary,
     StoredMessage,
@@ -30,6 +35,7 @@ _MESSAGE_COLUMNS = (
     ChatMessage.content,
     ChatMessage.timestamp,
     ChatMessage.rag_trace,
+    ChatMessage.attachment_id,
 )
 
 
@@ -53,23 +59,18 @@ class SqlAlchemyConversationRepository:
         self._session.flush()
         return _session(row)
 
-    def update_session(
+    def patch_session(
         self, session: StoredSession, *, metadata: dict | None, updated_at: datetime
     ) -> None:
         values: dict = {"updated_at": updated_at}
-        if metadata is not None:
-            values["metadata_json"] = metadata
-        self._session.execute(update(ChatSession).where(ChatSession.id == session.id).values(**values))
-
-    def message_heads(self, session: StoredSession) -> Sequence[MessageHead]:
-        rows = self._session.execute(
-            select(
-                ChatMessage.id, ChatMessage.message_type, ChatMessage.timestamp, ChatMessage.rag_trace
+        if metadata:
+            # Postgres merges the two objects itself, right-hand keys winning, so the row
+            # never round-trips through this process and a concurrent patch to another
+            # key cannot be overwritten with a stale copy.
+            values["metadata_json"] = ChatSession.metadata_json.op("||", return_type=JSONB)(
+                bindparam("metadata_patch", value=dict(metadata), type_=JSONB)
             )
-            .where(ChatMessage.session_ref_id == session.id)
-            .order_by(ChatMessage.id.asc())
-        ).all()
-        return [MessageHead(row.id, row.message_type, row.timestamp, row.rag_trace) for row in rows]
+        self._session.execute(update(ChatSession).where(ChatSession.id == session.id).values(**values))
 
     def add_messages(self, session: StoredSession, messages: Sequence[NewMessage]) -> Sequence[int]:
         if not messages:
@@ -81,6 +82,7 @@ class SqlAlchemyConversationRepository:
                 content=message.content,
                 timestamp=message.timestamp,
                 rag_trace=message.rag_trace,
+                attachment_id=message.attachment_id,
             )
             for message in messages
         ]
@@ -89,14 +91,6 @@ class SqlAlchemyConversationRepository:
         # which is the order the conversation is read back in.
         self._session.flush()
         return [row.id for row in rows]
-
-    def replace_trace(self, message_id: int, rag_trace: dict) -> None:
-        self._session.execute(
-            update(ChatMessage).where(ChatMessage.id == message_id).values(rag_trace=rag_trace)
-        )
-
-    def delete_messages(self, session: StoredSession) -> None:
-        self._session.execute(delete(ChatMessage).where(ChatMessage.session_ref_id == session.id))
 
     def messages(self, session: StoredSession) -> Sequence[StoredMessage]:
         rows = self._session.execute(
@@ -167,6 +161,7 @@ def _message(row) -> StoredMessage:
         content=row.content,
         timestamp=row.timestamp,
         rag_trace=row.rag_trace,
+        attachment_id=row.attachment_id,
     )
 
 

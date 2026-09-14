@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 if TYPE_CHECKING:
     from backend.application.ports.repositories import (
         AssetExtractionRepository,
+        ChatAttachmentRepository,
         ConversationRepository,
         CorpusDigestRepository,
         DocumentAssetRepository,
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
 _REPOSITORY_ATTRIBUTES: Final[frozenset[str]] = frozenset(
     {
         "conversations",
+        "attachments",
         "document_pairs",
         "parent_chunks",
         "section_summaries",
@@ -56,6 +58,7 @@ class SqlAlchemyUnitOfWork:
 
     # Annotations only: the attributes exist between `__enter__` and `__exit__`.
     conversations: ConversationRepository
+    attachments: ChatAttachmentRepository
     document_pairs: DocumentPairRepository
     parent_chunks: ParentChunkRepository
     section_summaries: SectionSummaryRepository
@@ -117,6 +120,7 @@ class SqlAlchemyUnitOfWork:
         # model — alembic's env.py and the app's startup gate only need the database.
         from backend.infra.repositories import (
             SqlAlchemyAssetExtractionRepository,
+            SqlAlchemyChatAttachmentRepository,
             SqlAlchemyConversationRepository,
             SqlAlchemyCorpusDigestRepository,
             SqlAlchemyDocumentAssetRepository,
@@ -128,6 +132,7 @@ class SqlAlchemyUnitOfWork:
         )
 
         self.conversations = SqlAlchemyConversationRepository(session)
+        self.attachments = SqlAlchemyChatAttachmentRepository(session)
         self.document_pairs = SqlAlchemyDocumentPairRepository(session)
         self.parent_chunks = SqlAlchemyParentChunkRepository(session)
         self.section_summaries = SqlAlchemySectionSummaryRepository(session)

@@ -38,22 +38,14 @@ class StoredSession:
 
 
 @dataclass(frozen=True, slots=True)
-class MessageHead:
-    """A stored message without its body — what deciding how to save a turn needs."""
-
-    id: int
-    message_type: str
-    timestamp: datetime
-    rag_trace: dict | None
-
-
-@dataclass(frozen=True, slots=True)
 class StoredMessage:
     id: int
     message_type: str
     content: str
     timestamp: datetime
     rag_trace: dict | None
+    #: The recording this message was spoken as, when it was one. See `ChatAttachment`.
+    attachment_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +54,7 @@ class NewMessage:
     content: str
     timestamp: datetime
     rag_trace: dict | None
+    attachment_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,24 +76,21 @@ class ConversationRepository(Protocol):
         """The conversation, created with `metadata` if absent; None only for an unknown user."""
         ...
 
-    def update_session(
+    def patch_session(
         self, session: StoredSession, *, metadata: dict | None, updated_at: datetime
     ) -> None:
-        """Replace the metadata when given, and always move `updated_at`."""
-        ...
+        """Merge `metadata` into the stored metadata, key by key, and move `updated_at`.
 
-    def message_heads(self, session: StoredSession) -> Sequence[MessageHead]:
-        """Every message, oldest first, without reading a single body."""
+        A merge in the database rather than a replacement from memory: two writers holding
+        the metadata as it was when their turn began — a turn's save and a note update
+        running behind it — each land only the keys they changed, and neither puts the
+        other's back the way it found them. A key mapped to None is stored as null, which
+        is how a pending question is cleared.
+        """
         ...
 
     def add_messages(self, session: StoredSession, messages: Sequence[NewMessage]) -> Sequence[int]:
         """Stage the messages in order and return the ids they were given, in that order."""
-        ...
-
-    def replace_trace(self, message_id: int, rag_trace: dict) -> None:
-        ...
-
-    def delete_messages(self, session: StoredSession) -> None:
         ...
 
     def messages(self, session: StoredSession) -> Sequence[StoredMessage]:
@@ -119,6 +109,57 @@ class ConversationRepository(Protocol):
 
     def delete_session(self, username: str, session_id: str) -> bool:
         """Remove the conversation and its messages. False when there was nothing to remove."""
+        ...
+
+
+# -- attachments ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class NewAttachment:
+    """A recording to store: everything but the owner, who is named at the call."""
+
+    id: str
+    kind: str
+    sha256: str
+    storage_uri: str
+    content_type: str
+    byte_size: int
+    duration_ms: int
+    transcript: str | None
+    transcript_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentRecord:
+    id: str
+    kind: str
+    sha256: str
+    storage_uri: str
+    content_type: str
+    byte_size: int
+    duration_ms: int
+    transcript: str | None
+    transcript_status: str
+    created_at: datetime
+
+
+class ChatAttachmentRepository(Protocol):
+    """Recordings parents sent, addressed by owner and id.
+
+    Every read names the owner, so a URL that carries a note's id resolves only for the
+    account that sent it. There is no read by id alone.
+    """
+
+    def add(self, username: str, attachment: NewAttachment) -> AttachmentRecord | None:
+        """Stage the attachment for `username`; None only for an unknown user."""
+        ...
+
+    def get(self, username: str, attachment_id: str) -> AttachmentRecord | None:
+        ...
+
+    def get_many(self, username: str, attachment_ids: Sequence[str]) -> Sequence[AttachmentRecord]:
+        """The owner's attachments among `attachment_ids`, in no particular order."""
         ...
 
 

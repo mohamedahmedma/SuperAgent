@@ -39,9 +39,19 @@ class RefreshIn(BaseModel):
 
 
 class AccessTokenOut(BaseModel):
+    """What a refresh returns.
+
+    The refresh token presented is spent by the exchange; `refresh_token` is the one to
+    keep. A client that ignores it keeps working for as long as the grace window allows
+    and no longer — see `SessionService.refresh`.
+    """
+
     access_token: str
     token_type: str = "Bearer"
     expires_at: datetime
+    refresh_token: str
+    # The new end of the session's inactivity window, moved forward by this refresh.
+    refresh_expires_at: datetime
 
 
 class MeOut(BaseModel):

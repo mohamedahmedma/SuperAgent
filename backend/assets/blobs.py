@@ -36,6 +36,12 @@ _EXTENSIONS = {
     "image/tiff": ".tiff",
     "image/bmp": ".bmp",
     "application/pdf": ".pdf",
+    # Voice notes (backend/chat/attachments.py) share this store with the images.
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/mp4": ".m4a",
+    "audio/mpeg": ".mp3",
+    "audio/wav": ".wav",
 }
 _DEFAULT_EXTENSION = ".bin"
 

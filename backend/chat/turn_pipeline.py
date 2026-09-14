@@ -13,6 +13,15 @@ can decide something differently from the other, because neither decides anythin
 The collaborators a turn reaches for — the planner, the agent factory, the models, the
 note writer — arrive as `TurnCollaborators` rather than being imported here, so a turn can
 be assembled from stand-ins without patching a module.
+
+## What the parent waits for, and what they do not
+
+Storing the turn and updating the persistent note change nothing the parent is shown, so
+neither runs on the request. Both are queued on `TurnCollaborators.background`
+(`backend/chat/background.py`) — the save before the stream's last event is sent, the
+note behind it — and the request is free to end. The next turn on the same conversation
+waits for that queue before it reads the conversation, which is what keeps "queued" and
+"stored" indistinguishable from where the parent sits.
 """
 import logging
 from collections.abc import Callable
@@ -49,7 +58,9 @@ from backend.chat.clarification import (
     pin_the_child_the_parent_named,
 )
 from backend.chat.context_messages import build_context_messages, build_resume_answer_messages
+from backend.chat.background import MODELS, JobRunner
 from backend.chat.finalize import Finalizer, finalize_text, message_text
+from backend.chat.storage import MessageToStore
 from backend.schemas.chat import normalize_rag_trace
 
 logger = logging.getLogger(__name__)
@@ -65,6 +76,9 @@ class TurnCollaborators:
     """
 
     conversations: Any
+    #: Where the save and the note update run: `BackgroundJobs`, or `InlineJobs` for a
+    #: caller that wants both to have happened when the turn returns.
+    background: JobRunner
     profile: Any
     plan: Callable[..., tuple]
     resolve_question: Callable[..., Any]
@@ -73,7 +87,6 @@ class TurnCollaborators:
     answer_model: Any
     session_title: Callable[[str], str]
     update_note: Callable[..., str]
-    update_note_async: Callable[..., Any]
     context_type: Any
 
 
@@ -92,6 +105,9 @@ class Turn:
     is_first_message: bool
     #: The conversation before this message, for the direct answer a resumed search gets.
     history: list
+    #: The voice note this message was spoken as, already stored and checked to be the
+    #: caller's own. `user_text` is its transcript. Stored on the question, not read here.
+    attachment_id: str | None = None
     entry: TurnEntry | None = None
     ctx: Any = None
     plan: Any = None
@@ -103,6 +119,12 @@ class Turn:
     answer_blocks: list = field(default_factory=list)
     asset_references: list = field(default_factory=list)
     agent_error: str | None = None
+    #: Whether the answer has been handed to storage. An interrupted turn stores what had
+    #: reached the parent — unless the turn had already stored its answer.
+    committed: bool = False
+    #: The writes this turn queued, in order. Their results are the row ids the messages
+    #: were stored under, which the client is told so it can tell its copy from the server's.
+    writes: list = field(default_factory=list)
 
     def asset_payload(self) -> list:
         return [
@@ -161,6 +183,11 @@ class AnswerSettlement:
 class TurnPipeline:
     """The decisions of one turn, in the order a turn makes them."""
 
+    #: How long a turn waits at its start for the previous turn's save to land. Past it
+    #: the turn goes on with what is stored — the alternative is a parent whose message
+    #: hangs behind a database that has stopped answering — and says so in the log.
+    SAVE_WAIT_SECONDS = 10.0
+
     def __init__(self, collaborators: TurnCollaborators) -> None:
         self._c = collaborators
 
@@ -168,10 +195,39 @@ class TurnPipeline:
     def collaborators(self) -> TurnCollaborators:
         return self._c
 
+    @staticmethod
+    def conversation_key(user_id: str, session_id: str) -> str:
+        """The background queue a conversation's writes share, so they land in order."""
+        return f"conversation:{user_id}:{session_id}"
+
+    @staticmethod
+    def note_key(user_id: str, session_id: str) -> str:
+        """A queue of its own for the note: waiting for a save must never mean waiting
+        for the model call behind it."""
+        return f"note:{user_id}:{session_id}"
+
     # -- opening -----------------------------------------------------------------------
 
-    def open(self, user_text: str, user_id: str, session_id: str, caller: CallerIdentity) -> Turn:
-        """Load the conversation this message belongs to."""
+    def open(
+        self,
+        user_text: str,
+        user_id: str,
+        session_id: str,
+        caller: CallerIdentity,
+        *,
+        attachment_id: str | None = None,
+    ) -> Turn:
+        """Load the conversation this message belongs to.
+
+        After the previous turn's writes: its save was queued rather than waited for, and a
+        parent's next message can arrive before a queued save has run.
+        """
+        if not self._c.background.flush(self.conversation_key(user_id, session_id), timeout=self.SAVE_WAIT_SECONDS):
+            logger.warning(
+                "the previous turn's save for %s/%s is still running after %.0fs; "
+                "continuing with what is stored",
+                user_id, session_id, self.SAVE_WAIT_SECONDS,
+            )
         messages, metadata = self._c.conversations.load_with_meta(user_id, session_id)
         return Turn(
             user_text=user_text,
@@ -186,6 +242,7 @@ class TurnPipeline:
             persistent_note=metadata.get("persistent_note", ""),
             is_first_message=len(messages) == 0,
             history=list(messages),
+            attachment_id=attachment_id or None,
         )
 
     def enter(self, turn: Turn) -> None:
@@ -226,7 +283,23 @@ class TurnPipeline:
 
     def record_question(self, turn: Turn) -> None:
         turn.messages.append(HumanMessage(content=turn.user_text))
-        self._c.conversations.save(turn.user_id, turn.session_id, turn.messages)
+        self._store(
+            turn,
+            [MessageToStore("human", turn.user_text, attachment_id=turn.attachment_id)],
+            describe="store the question",
+        )
+
+    def _store(self, turn: Turn, messages: list, *, metadata: dict | None = None, describe: str) -> None:
+        """Queue an append to this conversation, behind whatever it already has queued."""
+        conversations = self._c.conversations
+        user_id, session_id = turn.user_id, turn.session_id
+
+        def work():
+            return conversations.append(user_id, session_id, messages, metadata=metadata)
+
+        turn.writes.append(self._c.background.submit(
+            self.conversation_key(user_id, session_id), work, describe=f"{describe} ({user_id}/{session_id})"
+        ))
 
     # -- a resumed search --------------------------------------------------------------
 
@@ -419,20 +492,28 @@ class TurnPipeline:
         )
         turn.rag_trace = attach_assets_to_trace(turn.rag_trace, turn.asset_references)
 
-    def save_metadata(self, turn: Turn) -> dict:
-        save_meta = dict(turn.metadata)
-        save_child_state(save_meta, turn.child_state)
+    def save_metadata(self, turn: Turn, *, interrupted: bool = False) -> dict:
+        """The session metadata this turn changed — a patch, never the whole record.
+
+        Only the keys the turn decided are written, and they are merged in the database
+        (`ConversationStorage.append`). A copy of the metadata as it stood when the turn
+        began used to be written back whole, which put every key a concurrent writer had
+        changed in between — the note, another turn's pending question — back the way this
+        turn had found it.
+        """
+        patch: dict = {}
+        save_child_state(patch, turn.child_state)
         if turn.entry.invalid_pending_hitl:
-            save_meta[PENDING_HITL_KEY] = None
+            patch[PENDING_HITL_KEY] = None
         if turn.title:
-            save_meta["title"] = turn.title
+            patch["title"] = turn.title
         if turn.next_pending:
-            save_meta[PENDING_HITL_KEY] = turn.next_pending
-        elif turn.entry.spends_the_pending_question(agent_error=bool(turn.agent_error)):
+            patch[PENDING_HITL_KEY] = turn.next_pending
+        elif turn.entry.spends_the_pending_question(agent_error=bool(turn.agent_error) or interrupted):
             # Answered, replaced, or settled by naming a child — every way a clarification
             # ends is decided in one place. See `TurnEntry`.
-            save_meta[PENDING_HITL_KEY] = None
-        return save_meta
+            patch[PENDING_HITL_KEY] = None
+        return patch
 
     def note_is_due(self, turn: Turn) -> bool:
         """Whether this turn pays for persistent-note maintenance.
@@ -447,23 +528,99 @@ class TurnPipeline:
         window = self._c.profile.agent.context_window_messages
         return bool(turn.persistent_note) or len(turn.messages) > window
 
-    @staticmethod
-    def note_request(turn: Turn) -> tuple[tuple, dict]:
-        """The arguments the note writer is called with, shared by its sync and async forms."""
-        return (
-            (turn.persistent_note, turn.entry.effective_user_text, turn.answer),
-            {"history_messages": turn.messages[:-1] if not turn.persistent_note else None},
+    def schedule_note(self, turn: Turn) -> bool:
+        """Queue the persistent-note update, when this turn is due one.
+
+        A model call, so it runs behind the turn rather than in it — the parent has their
+        answer, and the note is for the turns after this one. Queued before `commit` so
+        the history it summarises is the conversation up to this message, which is what
+        the note writer has always been shown.
+
+        The note it builds on is read when the job RUNS, not copied from when the turn
+        began: another turn may have finished in between and folded itself in, and a
+        summary written over its work would drop it. Jobs for one conversation's note run
+        in order, so two turns cannot race each other to the write either.
+        """
+        if not self.note_is_due(turn):
+            return False
+        conversations, update_note = self._c.conversations, self._c.update_note
+        user_id, session_id = turn.user_id, turn.session_id
+        user_text, answer = turn.entry.effective_user_text, turn.answer
+        # The whole conversation only when there is no note yet to build on — a note is
+        # bootstrapped from the history the window has already trimmed.
+        history = list(turn.messages[:-1]) if not turn.persistent_note else None
+
+        def work():
+            current = str(conversations.session_metadata(user_id, session_id).get("persistent_note") or "")
+            note = update_note(current, user_text, answer, history_messages=history)
+            if note and note != current:
+                conversations.patch_metadata(user_id, session_id, {"persistent_note": note})
+
+        self._c.background.submit(
+            self.note_key(user_id, session_id),
+            work,
+            # A model call: on the lane for them, so a run of note updates cannot hold the
+            # threads the saves need.
+            lane=MODELS,
+            describe=f"update the persistent note ({user_id}/{session_id})",
         )
+        return True
 
     def commit(self, turn: Turn, save_meta: dict) -> None:
+        """Queue the answer and this turn's metadata for storage.
+
+        The stored copy keeps its assets as ids rather than renditions — the renditions on
+        the wire were built for the client that asked, and rebuilding them on load is a
+        keyed lookup (`trace_for_storage`).
+        """
         turn.messages.append(AIMessage(content=turn.answer))
-        self._c.conversations.save(
-            turn.user_id,
-            turn.session_id,
-            turn.messages,
+        turn.committed = True
+        self._store(
+            turn,
+            [MessageToStore("ai", turn.answer, rag_trace=trace_for_storage(turn.rag_trace))],
             metadata=save_meta,
-            extra_message_data=message_data_for_save(turn.messages, turn.rag_trace),
+            describe="store the answer",
         )
+
+    def commit_interrupted(self, turn: Turn, shown: str) -> None:
+        """Store what the parent saw of an answer whose stream was cut off.
+
+        Stop was pressed, or the connection dropped. The question was already stored, and
+        a conversation that ends on a question with no answer reads as one the assistant
+        never answered — so what had reached the parent is stored as the answer, marked as
+        interrupted on its trace. A turn that had already stored its answer is left alone.
+        The pending clarification, if there was one, is kept: the answer never got used,
+        and the parent should be able to try it again.
+        """
+        if turn.committed:
+            return
+        stored = turn.ctx.peek_rag_trace() if turn.ctx is not None else None
+        trace = dict((stored or {}).get("rag_trace") or {})
+        trace["turn_interrupted"] = True
+        turn.answer = shown
+        turn.rag_trace = normalize_rag_trace(trace)
+        self.commit(turn, self.save_metadata(turn, interrupted=True))
+
+    def wait_for_save(self, turn: Turn, timeout: float | None = None) -> bool:
+        """Block until this conversation's queued writes have run. False on timeout."""
+        return self._c.background.flush(
+            self.conversation_key(turn.user_id, turn.session_id),
+            timeout=self.SAVE_WAIT_SECONDS if timeout is None else timeout,
+        )
+
+    @staticmethod
+    def stored_message_ids(turn: Turn) -> list[int]:
+        """The row ids this turn's messages were stored under, in conversation order.
+
+        Only the writes that have finished and succeeded; a write still running or failed
+        contributes nothing, and the client then simply holds copies without ids. Meant
+        to be read after `wait_for_save`.
+        """
+        ids: list[int] = []
+        for write in turn.writes:
+            if write.done() and write.exception() is None:
+                ids.extend(int(item) for item in (write.result() or []))
+        return ids
 
     @staticmethod
     def response(turn: Turn) -> dict:
@@ -486,16 +643,6 @@ def resolve_caller(caller: CallerIdentity | None, user_id: str) -> tuple[CallerI
     if caller is not None:
         return caller, caller.user_id
     return CallerIdentity.for_user(user_id), user_id
-
-
-def message_data_for_save(messages: list, rag_trace: dict | None) -> list:
-    """Per-message extras for the save: the finished turn's trace, on its answer.
-
-    The stored copy keeps its assets as ids rather than renditions — the renditions on the
-    wire were built for the client that asked, and rebuilding them on load is a keyed
-    lookup. Every save path goes through here so the two cannot drift.
-    """
-    return [None] * (len(messages) - 1) + [{"rag_trace": trace_for_storage(rag_trace)}]
 
 
 def _text_of(result) -> str:
@@ -534,6 +681,5 @@ __all__ = [
     "Turn",
     "TurnCollaborators",
     "TurnPipeline",
-    "message_data_for_save",
     "resolve_caller",
 ]

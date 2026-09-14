@@ -21,6 +21,12 @@ _ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # were separated, which is exactly right: those challenges were single-school, and
     # `""` is what a single-school challenge stores today.
     ("verification_challenges", "school_code", "VARCHAR(16) NOT NULL DEFAULT ''"),
+    # Refresh-token rotation (2026-09). Null on every token issued before it, and the
+    # repository reads a null family as "a family of one", so those sessions keep working
+    # and are rotated into families on their next refresh.
+    ("refresh_tokens", "family_id", "VARCHAR(128)"),
+    ("refresh_tokens", "rotated_at", "TIMESTAMP WITH TIME ZONE"),
+    ("refresh_tokens", "replaced_by_hash", "VARCHAR(128)"),
 )
 
 

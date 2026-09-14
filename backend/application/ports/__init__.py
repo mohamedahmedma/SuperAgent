@@ -1,6 +1,8 @@
 """Ports: the persistence interfaces the backend's services depend on."""
 from backend.application.ports.repositories import (
     AssetExtractionRepository,
+    AttachmentRecord,
+    ChatAttachmentRepository,
     ConversationRepository,
     CorpusDigestRepository,
     DigestRecord,
@@ -12,7 +14,7 @@ from backend.application.ports.repositories import (
     IngestJobRecord,
     IngestJobRepository,
     JobStep,
-    MessageHead,
+    NewAttachment,
     NewMessage,
     ParentChunkRecord,
     ParentChunkRepository,
@@ -27,6 +29,8 @@ from backend.application.ports.unit_of_work import UnitOfWork, UnitOfWorkFactory
 
 __all__ = [
     "AssetExtractionRepository",
+    "AttachmentRecord",
+    "ChatAttachmentRepository",
     "ConversationRepository",
     "CorpusDigestRepository",
     "DigestRecord",
@@ -38,7 +42,7 @@ __all__ = [
     "IngestJobRecord",
     "IngestJobRepository",
     "JobStep",
-    "MessageHead",
+    "NewAttachment",
     "NewMessage",
     "ParentChunkRecord",
     "ParentChunkRepository",

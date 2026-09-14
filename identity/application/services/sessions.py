@@ -17,18 +17,34 @@ the CPU cost.
 token. A custody change then takes effect within one access-token lifetime instead of
 persisting until the parent happens to log out. The case that matters is a court order,
 and it must not wait a month.
+
+## Staying signed in, and how a stolen token is caught
+
+A parent stays signed in until they sign out. The mechanism is the one the OAuth 2.0
+Security Best Current Practice (RFC 9700, §4.14) describes as refresh token rotation:
+
+* Every refresh **spends** the token presented and issues a new one, valid for a full
+  inactivity window from now. Using the app is what keeps the session alive; a phone that
+  has not opened it for the whole window is no longer signed in.
+* Every token issued from one sign-in shares a **family**. Signing out revokes the family,
+  and so does the one thing a spent token can still tell us: that somebody presented it
+  again. A browser that lost the response to its refresh, or a second tab holding the
+  token a moment longer than the first, does that within seconds, so a short **grace
+  window** honours the retry. Outside it the token was copied, and revoking the family
+  signs out the thief and the parent alike — the parent signs in again; the thief cannot.
 """
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from identity.application.dto import IssuedAccessToken, IssuedSession, TokenSubject
 from identity.application.ports.repositories import (
     Account,
     AccountRepository,
     AuditSink,
+    RefreshTokenRecord,
     RefreshTokenRepository,
 )
 from identity.application.ports.security import PasswordHasher, TokenIssuer
@@ -50,6 +66,13 @@ class SessionService:
     one request's transaction. Building one per request is a few attribute assignments.
     """
 
+    #: How long a spent refresh token is kept past its grace window, so that presenting it
+    #: is still recognised as a replay and ends the family. Beyond this an old token is
+    #: merely unknown: refused, but without the detection. A week catches a token copied
+    #: from a device days before it is used; keeping every spent token for the whole
+    #: inactivity window would grow the table by one row per half hour per parent.
+    REPLAY_MEMORY = timedelta(days=7)
+
     def __init__(
         self,
         *,
@@ -59,6 +82,7 @@ class SessionService:
         hasher: PasswordHasher,
         issuer: TokenIssuer,
         lockout: LockoutPolicy,
+        refresh_reuse_grace_seconds: int = 60,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         self._accounts = accounts
@@ -67,6 +91,7 @@ class SessionService:
         self._hasher = hasher
         self._issuer = issuer
         self._lockout = lockout
+        self._reuse_grace = timedelta(seconds=refresh_reuse_grace_seconds)
         self._clock = clock
 
     # -- signing in ---------------------------------------------------------
@@ -150,22 +175,40 @@ class SessionService:
     # -- staying signed in --------------------------------------------------
 
     def refresh(self, *, refresh_token: str, client_ip: str = "") -> IssuedAccessToken:
-        """Exchange a refresh token for a fresh access token.
+        """Exchange a refresh token for a fresh access token and a fresh refresh token.
 
         The guardian binding is re-read from the account here, not carried over from the
         old token — see the module docstring for why that is the point of the endpoint
         rather than a detail of it.
+
+        The token presented is spent by this call; the one returned lives a full
+        inactivity window from now. A spent token presented again inside the grace window
+        is a retry and is honoured, in the same family. Outside it, it is a replay: the
+        whole family is revoked and the caller is refused — with the same message every
+        other refusal here uses, because which of them applied is not for the caller to
+        learn.
         """
-        found = self._refresh.find_active(self._issuer.hash_refresh_token(refresh_token))
-        if found is None:
+        now = self._clock()
+        presented = self._issuer.hash_refresh_token(refresh_token)
+        found = self._refresh.find(presented)
+        if found is None or found.revoked_at is not None or found.expires_at <= now:
             self._audit.write(
                 username="", event="refresh", reason="expired_refresh", succeeded=False, client_ip=client_ip
             )
             raise NotAuthorized("Invalid or expired refresh token.")
 
-        account_id, _ = found
-        account = self._accounts.by_id(account_id)
+        account = self._accounts.by_id(found.account_id)
         if account is None or not account.is_active:
+            raise NotAuthorized("Invalid or expired refresh token.")
+
+        if self._is_replay(found, now):
+            self._refresh.revoke_family(found.account_id, found.family_id)
+            self._audit.write(
+                username=account.username, event="refresh", reason="refresh_reuse", succeeded=False, client_ip=client_ip
+            )
+            logger.warning(
+                "Refresh token replayed for %s; the session family was revoked", account.username
+            )
             raise NotAuthorized("Invalid or expired refresh token.")
 
         access_token, expires_at = self._issuer.mint_access_token(
@@ -174,23 +217,50 @@ class SessionService:
             guardian_external_id=account.guardian_external_id,
             display_name=account.display_name,
         )
+        raw_refresh, refresh_hash, refresh_expires = self._issuer.mint_refresh_token()
+        self._refresh.issue(
+            account_id=account.id,
+            token_hash=refresh_hash,
+            expires_at=refresh_expires,
+            family_id=found.family_id,
+        )
+        if found.rotated_at is None:
+            # A retry inside the grace window leaves the first rotation on record: the
+            # window is measured from the FIRST exchange, or a thief could keep a copy
+            # alive by presenting it every fifty seconds.
+            self._refresh.mark_rotated(presented, replaced_by_hash=refresh_hash, at=now)
+        self._refresh.prune(account.id, dead_before=now - self.REPLAY_MEMORY, now=now)
         self._audit.write(
             username=account.username, event="refresh", reason="ok", succeeded=True, client_ip=client_ip
         )
-        return IssuedAccessToken(access_token=access_token, expires_at=expires_at)
+        return IssuedAccessToken(
+            access_token=access_token,
+            expires_at=expires_at,
+            refresh_token=raw_refresh,
+            refresh_expires_at=refresh_expires,
+        )
+
+    def _is_replay(self, token: RefreshTokenRecord, now: datetime) -> bool:
+        """A spent token presented again after its grace window was copied."""
+        return token.rotated_at is not None and now - token.rotated_at > self._reuse_grace
 
     def logout(self, *, refresh_token: str) -> bool:
-        """Revoke a refresh token.
+        """Sign out: revoke every refresh token of the session this one belongs to.
 
-        The access token already issued stays valid until it expires — offline
-        verification is the trade made for not calling this service on every request, and
-        keeping access tokens short is what bounds that window.
+        The family and not the one token, because the browser may hold a token whose
+        predecessor is still inside its grace window — revoking only what it presented
+        would leave that predecessor able to mint. The access token already issued stays
+        valid until it expires: offline verification is the trade made for not calling
+        this service on every request, and keeping access tokens short is what bounds that
+        window.
 
         Always reports success. Whether that particular token existed is not something a
         caller holding it needs told, and not something a caller *not* holding it should
         be able to find out.
         """
-        self._refresh.revoke(self._issuer.hash_refresh_token(refresh_token))
+        found = self._refresh.find(self._issuer.hash_refresh_token(refresh_token))
+        if found is not None:
+            self._refresh.revoke_family(found.account_id, found.family_id)
         return True
 
     def describe_token(self, token: str) -> TokenSubject:
@@ -224,8 +294,12 @@ class SessionService:
             **claims,
         )
         raw_refresh, refresh_hash, refresh_expires = self._issuer.mint_refresh_token()
+        # The first token names the family every later rotation of this sign-in joins.
         self._refresh.issue(
-            account_id=account.id, token_hash=refresh_hash, expires_at=refresh_expires
+            account_id=account.id,
+            token_hash=refresh_hash,
+            expires_at=refresh_expires,
+            family_id=refresh_hash,
         )
         return IssuedSession(
             access_token=access_token,

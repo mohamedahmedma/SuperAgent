@@ -192,6 +192,9 @@ services:
       # volume makes that a one-time cost.
       HF_HOME: /app/hf-cache
     ports: ["127.0.0.1:${BACKEND_HOST_PORT:-8000}:8000"]
+    # The backend finishes queued conversation saves on the way down (its lifespan
+    # drains them for up to 20s). Docker's default of 10s would SIGKILL that drain.
+    stop_grace_period: 30s
     volumes:
       - backend_data:/app/data
       - uploads_data:/app/uploads
