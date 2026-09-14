@@ -99,6 +99,17 @@ class SessionChild(BaseModel):
     def to_metadata(self) -> dict:
         return self.model_dump()
 
+    def is_stored_as(self, stored: object) -> bool:
+        """Whether `stored` — the pin as the session has it — already says exactly this.
+
+        Nothing stored and nothing pinned agree too: an empty pin is not worth a write.
+        Anything else is compared field by field, so a pin adopted under a guardian stamp
+        it lacked, or one this turn cleared, reads as changed and gets written once.
+        """
+        if stored is None:
+            return not self.is_set
+        return stored == self.to_metadata()
+
     def pin(
         self,
         *,
@@ -148,7 +159,17 @@ def load_child_state(
     return SessionChild.from_metadata(metadata, guardian_id=guardian_id)
 
 
-def save_child_state(save_meta: dict, child: SessionChild) -> dict:
+def save_child_state(save_meta: dict, child: SessionChild, *, stored: object = None) -> dict:
+    """Put the pin on the patch — unless the session already stores exactly this.
+
+    `stored` is the pin as the turn found it in the metadata. Every turn used to write
+    its copy back regardless, and the copy was a snapshot from the turn's start: with two
+    messages in flight on one conversation, the later save put back the pin the earlier
+    one had just replaced. A pin the turn did not change is left out of the patch, and
+    the key-level merge in the database keeps whatever the other turn wrote.
+    """
+    if child.is_stored_as(stored):
+        return save_meta
     save_meta[SESSION_CHILD_KEY] = child.to_metadata()
     return save_meta
 

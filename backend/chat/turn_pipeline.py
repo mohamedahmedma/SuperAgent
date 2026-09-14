@@ -46,7 +46,7 @@ from backend.chat.assets_bridge import (
     trace_for_storage,
 )
 from backend.chat.caller_identity import CallerIdentity
-from backend.chat.child_context import load_child_state, save_child_state
+from backend.chat.child_context import SESSION_CHILD_KEY, load_child_state, save_child_state
 from backend.chat.clarification import (
     PENDING_HITL_KEY,
     TurnEntry,
@@ -539,10 +539,12 @@ class TurnPipeline:
         (`ConversationStorage.append`). A copy of the metadata as it stood when the turn
         began used to be written back whole, which put every key a concurrent writer had
         changed in between — the note, another turn's pending question — back the way this
-        turn had found it.
+        turn had found it. The child pin was the last key still written that way: a turn
+        that pinned nobody wrote its snapshot of the pin back over the child a turn in
+        flight beside it had just settled.
         """
         patch: dict = {}
-        save_child_state(patch, turn.child_state)
+        save_child_state(patch, turn.child_state, stored=turn.metadata.get(SESSION_CHILD_KEY))
         if turn.entry.invalid_pending_hitl:
             patch[PENDING_HITL_KEY] = None
         if turn.title:
