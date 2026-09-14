@@ -111,8 +111,10 @@ def test_grade_supervisor_only_writes_the_timetable_in_their_scope(
 ) -> None:
     permissions = set(client.get("/v1/auth/me", headers=grade_supervisor).json()["profile"]["permissions"])
     assert "teachers.assign_classes" in permissions
+    # Staff chat is communication, not school data: every staff role can send messages.
+    # The set stays exact so any other write permission granted to the role still fails here.
     assert {permission for permission in permissions if permission.endswith(".write")} == {
-        "timetable.write"
+        "timetable.write", "chat.write"
     }
     assert "system.manage" not in permissions
 
