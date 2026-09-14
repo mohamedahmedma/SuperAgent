@@ -16,7 +16,7 @@ correctly — and never cleared, which is the one step no test took. So this fil
 test a component. It drives the real `chat_with_agent_stream` through the whole
 conversation, in order, over one stored session, and asserts on what the parent saw.
 
-What is real: `_enter_turn` and the pending-question lifecycle, the planner (`plan_turn`,
+What is real: `enter_turn` and the pending-question lifecycle, the planner (`plan_turn`,
 the ladder, child resolution against the roster, tool narrowing, planned calls and the
 `$day` argument), every records tool and the knowledge tool with their templates and
 outcome reporting, the finalizer, the evidence cut, answer blocks, and the save.
@@ -52,6 +52,7 @@ from backend.chat.runtime import planned_tool_calls
 from backend.profiles.registry import load_profile, set_profile
 from backend.tools import build_tools
 from tests.general.test_chat_hitl_resume import FakeStorage
+from backend.chat.answer_blocks import _EVIDENCE_MARKERS
 
 service = importlib.import_module("backend.chat.service")
 
@@ -660,7 +661,7 @@ class TheConversationFromProduction(unittest.TestCase):
 
     def test_no_tool_evidence_header_reaches_the_parent(self):
         for turn in self.turns:
-            self.assertIsNone(service._EVIDENCE_MARKERS.search(turn.shown), turn.says)
+            self.assertIsNone(_EVIDENCE_MARKERS.search(turn.shown), turn.says)
             self.assertNotIn("SUBJECTS for", turn.shown, turn.says)
 
     def test_the_sentence_around_the_evidence_survives_the_cut(self):

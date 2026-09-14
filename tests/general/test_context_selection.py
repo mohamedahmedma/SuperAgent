@@ -12,6 +12,7 @@ from backend.rag.context_selection import (
     select_context,
     wants_exhaustive_answer,
 )
+from backend.rag.grading_view import format_docs
 
 
 def rag_config(**overrides):
@@ -202,7 +203,7 @@ class PipelineIntegrationTests(unittest.TestCase):
         state = {
             "question": "what are the school partners",
             "docs": docs,
-            "context": pipeline._format_docs(docs),
+            "context": format_docs(docs),
             "rag_trace": {"retrieved_chunks": docs, "initial_retrieved_chunks": docs},
             "request_context": SilentContext(),
         }

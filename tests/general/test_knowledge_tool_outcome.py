@@ -7,7 +7,7 @@ copy — «معلش، مقدرتش أتأكد من الأرقام دي من مس
 answered, and the answer was replaced afterwards.
 
 The mechanism: the planner REQUIRES the one tool it narrowed the turn to, and
-`service._enforce_forced_tool_ran` then reads `ctx.tool_outcomes` to check that the
+`enforce_forced_tool_ran` then reads `ctx.tool_outcomes` to check that the
 required tool ran. Only the record tools reported there (`records._reporter`). The
 knowledge tool never had, so to that check it had never run — on every turn it was
 required on, which is every knowledge-base turn.
@@ -31,6 +31,7 @@ from backend.chat.request_context import ChatRequestContext
 from backend.composition import Services
 from backend.tools import KNOWLEDGE_TOOL
 from backend.tools.knowledge import make_search_knowledge_base
+from backend.chat.answer_checks import enforce_forced_tool_ran
 
 CHUNKS = [
     {
@@ -141,7 +142,7 @@ class TheForcedToolCheckSeesARealSearch(unittest.TestCase):
     def _verdict(self, ctx):
         from backend.chat import service
 
-        return service._enforce_forced_tool_ran(self._Finalizer(), ctx, self._Plan())
+        return enforce_forced_tool_ran(self._Finalizer(), ctx, self._Plan())
 
     def test_a_required_search_that_ran_is_left_alone(self):
         ctx = _ctx()

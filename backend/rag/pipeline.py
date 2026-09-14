@@ -1,9 +1,6 @@
-from typing import Annotated, Any, Literal, TypedDict, List, Optional
+from typing import Literal, List, Optional
 import logging
-import operator
-import re
 from langgraph.graph import StateGraph, END
-from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from backend.chat.request_context import ChatRequestContext
@@ -12,15 +9,30 @@ from backend.rag.evidence import (
     Certainty,
     ChunkAssessment,
     EvidenceReport,
-    build_ladder,
 )
 from backend.prompts import resolve as resolve_prompt
-from backend.rag.policy import decide_route, offerable_directions, select_context_indices
+from backend.rag.grading_view import format_docs_for_grading
+from backend.rag.graph_nodes import (
+    ClassifyComplexity,
+    FanOutSubQuestions,
+    GradeDocuments,
+    PrepareSubQuestions,
+    RAGState,
+    RagSubAgent,
+    ResumeRetrieval,
+    RetrieveInitial,
+    RetrieveRewritten,
+    RewriteQuestion,
+    Synthesis,
+    emit,
+    route_after_complexity,
+    route_after_grade,
+    route_after_rewrite,
+)
+from backend.rag.hitl_resume import build_hitl_resume_state, is_hitl_result, refined_question_for_hitl
 from backend.rag.rerank_assessor import CrossEncoderAssessor
-from backend.assets.vision import call_with_rate_limit_retry
 from backend.profiles import get_profile
-from backend.schemas.chat import HitlResumeState, normalize_rag_sub_trace
-from backend.chat.child_names import strip_child_names
+from backend.schemas.chat import HitlResumeState
 from backend.text_normalization import normalize_query
 from backend.rag.utils import (
     RETRIEVAL_TOP_K,
@@ -38,17 +50,6 @@ _PROFILE = get_profile()
 _RAG = _PROFILE.rag
 _COPY = _PROFILE.user_copy
 
-
-class _RetryBudget:
-    """Adapts the rag section to the retry helper's attribute names, which were coined
-    for the vision path. One helper, two callers, no duplicated backoff logic."""
-
-    vision_retry_attempts = _RAG.model_retry_attempts
-    vision_retry_base_seconds = _RAG.model_retry_base_seconds
-    vision_retry_max_seconds = _RAG.model_retry_max_seconds
-
-
-_RETRY = _RetryBudget()
 
 #: What a response cut off at the output ceiling raises. Imported defensively: the
 #: concrete class lives in the OpenAI client, which is a transitive dependency here, and
@@ -84,6 +85,7 @@ def _get_complexity_model():
 
 
 EVIDENCE_GRADE_PROMPT = _RAG.evidence_grade_prompt
+COMPLEXITY_PROMPT = _RAG.complexity_prompt
 
 # Whether the complexity planner and the decomposition branch exist at all this
 # process. Read once here rather than at each call site so the graph shape and the
@@ -170,277 +172,6 @@ class ComplexityResult(BaseModel):
     )
 
 
-class RAGState(TypedDict):
-    question: str
-    query: str
-    context: str
-    docs: List[dict]
-    route: Optional[str]
-    retrieval_status: Optional[str]
-    retrieval_failed: Optional[bool]
-    evidence_relevance: Optional[str]
-    evidence_answerability: Optional[str]
-    evidence_ambiguity: Optional[str]
-    evidence_confidence: Optional[float]
-    missing_slots: Optional[List[str]]
-    hitl_prompt: Optional[str]
-    hitl_options: Optional[List[str]]
-    rewrite_count: int
-    # HITL turns already spent on this question, surviving the resume boundary.
-    hitl_rounds: int
-    rewrite_method: Optional[str]
-    rewritten_query: Optional[str]
-    step_back_question: Optional[str]
-    hyde_document: Optional[str]
-    rag_trace: Optional[dict]
-    # Fields added for complexity routing
-    complexity: Optional[str]
-    complexity_reason: Optional[str]
-    sub_questions: Optional[List[str]]
-    is_sub_agent: bool
-    sub_results: Annotated[List[dict], operator.add]
-    request_context: ChatRequestContext
-    rag_step_group: Optional[str]
-    rag_step_group_label: Optional[str]
-    # Corpus sections the turn planner matched, forwarded as a retrieval hint. None
-    # means no planner ran or it abstained. Never a filter — see chat/turn_policy.
-    retrieval_sections: Optional[List[str]]
-    # Catalogued questions the planner matched, one per section. Routing offers these
-    # as a scope_select rather than guessing with a rewrite — see policy.decide_route.
-    scope_options: Optional[List[str]]
-    # Conditions carried over from earlier turns ("grades up to Year 6"). Appended to
-    # the retrieval query and stated to the answering model, because narrowing the
-    # search is only half of it — the right fee tables still yield an answer covering
-    # every year group unless something tells the model which years were asked about.
-    carried_constraints: Optional[List[str]]
-    # Whether this turn inherited its subject from the conversation. Routing reads it to
-    # decide whether a choice of corpus directions could possibly narrow anything.
-    is_followup: Optional[bool]
-    # The turn's language, for document-pair routing: where the same document was
-    # uploaded in both Arabic and English, retrieval answers from the half that matches
-    # the question rather than letting both compete. Empty searches everything, which is
-    # also what an unpaired corpus does — see rag/utils.language_filter_clause.
-    # The year group the school's records put this turn's child in. Beside the question,
-    # never appended to it: a year group is absent from every passage the corpus wrote
-    # once for everybody, so stapling it to the query dilutes recall exactly as carried
-    # conditions did. It reaches the grader and the answer prompt instead.
-    child_year: Optional[str]
-
-
-def _format_docs(docs: List[dict]) -> str:
-    if not docs:
-        return ""
-    chunks = []
-    for i, doc in enumerate(docs, 1):
-        source = doc.get("filename", "Unknown")
-        page = doc.get("page_number", "N/A")
-        text = doc.get("text", "")
-        chunks.append(f"[{i}] {source} (Page {page}):\n{text}")
-    return "\n\n---\n\n".join(chunks)
-
-
-#: How much of one chunk the GRADER sees. The answer model still gets all of it.
-#:
-#: A grade is a judgement about subject and sufficiency, and the top of a chunk settles
-#: both: `AssetDossier.render_surrogate` writes caption first, then description, then the
-#: transcription — so a cap taken from the top leaves exactly what the question is being
-#: matched against and drops the literal contents, which is evidence for ANSWERING and
-#: noise for grading.
-#:
-#: It is also the only bound on the grading prompt as a whole. `_format_docs` passes
-#: every retrieved chunk in full, so at `top_k: 8` the prompt was whatever the corpus
-#: happened to hold — and a figure whose transcription is a school calendar rendered as
-#: a year of table rows pushed one deployment's grader past its completion budget, which
-#: comes back as `finish_reason: length` and no JSON at all.
-#:
-#: Set above a normal leaf (`level_3_size`, 800 here) so an ordinary chunk is untouched
-#: and only the outliers are trimmed.
-_GRADER_CHUNK_CHARS = 1200
-
-
-def _head(text: str, cap: int) -> str:
-    """The first `cap` characters of `text`, cut at a line boundary."""
-    if len(text) <= cap:
-        return text
-    kept: List[str] = []
-    used = 0
-    for line in text.splitlines():
-        if used + len(line) + 1 > cap:
-            break
-        kept.append(line)
-        used += len(line) + 1
-    # A single line longer than the whole budget still has to give — a transcription
-    # rendered as one enormous row is the case — and half of it beats none of it.
-    return "\n".join(kept) if kept else text[:cap]
-
-
-#: How much of a FIGURE's own text the grader sees, before its tags and questions.
-#:
-#: Tighter than `_GRADER_CHUNK_CHARS` because a figure's text is not prose that trails
-#: off — it is a caption, then a description, then a transcription of every word printed
-#: in the image, and only the first two say what the figure IS. The third is what the
-#: ANSWER is written from, and sending it to a grader deciding "are these snippets about
-#: school uniform" buys nothing while outweighing the rest of the prompt.
-_GRADER_FIGURE_BODY_CHARS = 500
-
-#: The compact lines `AssetDossier.render_surrogate` puts AFTER the transcription. Both
-#: are one line, and both are close to exactly what a grade is made of — what the picture
-#: is about, and which questions it can answer — so they are kept even though what sits
-#: between them and the caption was cut.
-_FIGURE_SUMMARY_PREFIXES = ("Tags:", "Answers:")
-
-#: How `render_surrogate` marks the caption line, and therefore how a figure chunk is
-#: recognised here without the dossier being in scope.
-_FIGURE_MARKER = "[Figure]"
-
-
-def _grading_view(text: str) -> str:
-    """One chunk as the grader should see it: enough to judge it, and no transcription.
-
-    Prose is simply capped — a leaf is `level_3_size` and the cap sits above it, so an
-    ordinary chunk passes through whole.
-
-    A figure is summarised instead, because truncating it from the top would keep the
-    first rows of a table and drop the `Tags:` and `Answers:` lines underneath, which are
-    the two most useful lines in it for this decision and one line each. So the head
-    (section path, caption, description) is kept to a tight budget, the transcription in
-    the middle is dropped, and the summary lines are put back.
-
-    Heuristic in one respect and knowingly so: `render_surrogate` writes description and
-    transcription as adjacent blocks with no marker between them, so "the head" is a
-    character budget rather than a field. It is sized to hold a caption and a couple of
-    sentences, which is what a description is.
-    """
-    text = text or ""
-    lines = text.splitlines()
-    if not any(line.startswith(_FIGURE_MARKER) for line in lines[:3]):
-        return _head(text, _GRADER_CHUNK_CHARS)
-
-    body: List[str] = []
-    summary: List[str] = []
-    for line in lines:
-        if line.startswith(_FIGURE_SUMMARY_PREFIXES):
-            summary.append(line)
-        elif not summary:
-            body.append(line)
-    kept = _head("\n".join(body), _GRADER_FIGURE_BODY_CHARS)
-    return "\n".join([kept, *summary]) if summary else kept
-
-
-def _format_docs_for_grading(docs: List[dict]) -> str:
-    """The chunks as the GRADER sees them: the same list, each one topped and tailed.
-
-    Deliberately not `_format_docs`. The answer prompt needs a figure's transcription —
-    a fee table read out of an image is only useful entire — while the grader is deciding
-    whether the snippets are on the subject and whether they settle it, and neither
-    question is answered by row 200 of a table. Sending it anyway made the size of the
-    grading prompt a property of the corpus rather than of the retrieval.
-    """
-    if not docs:
-        return ""
-    chunks = []
-    for i, doc in enumerate(docs, 1):
-        source = doc.get("filename", "Unknown")
-        page = doc.get("page_number", "N/A")
-        text = _grading_view(doc.get("text", ""))
-        chunks.append(f"[{i}] {source} (Page {page}):\n{text}")
-    return "\n\n---\n\n".join(chunks)
-
-
-def _copy_jsonable_doc(doc: dict) -> dict:
-    """Keep resume snapshots small and JSON-safe."""
-    allowed = {
-        "filename",
-        "page_number",
-        "text",
-        "score",
-        "rrf_rank",
-        "rerank_score",
-        "chunk_id",
-        "doc_id",
-        "asset_ids",
-        "modality",
-    }
-    return {key: value for key, value in doc.items() if key in allowed}
-
-
-def _copy_jsonable_docs(docs: List[dict] | None) -> List[dict]:
-    return [_copy_jsonable_doc(doc) for doc in (docs or []) if isinstance(doc, dict)]
-
-
-def _is_hitl_result(result: dict | None) -> bool:
-    if not isinstance(result, dict):
-        return False
-    trace = result.get("rag_trace") or {}
-    status = result.get("retrieval_status") or trace.get("retrieval_status")
-    route = result.get("route") or trace.get("route")
-    return status in ("needs_clarification", "needs_scope_selection") or route in ("clarify", "scope_select")
-
-
-def _build_hitl_resume_state(result: dict) -> dict:
-    trace = result.get("rag_trace") or {}
-    return HitlResumeState(
-        question=result.get("question") or trace.get("query") or "",
-        route=result.get("route") or trace.get("route"),
-        retrieval_status=result.get("retrieval_status") or trace.get("retrieval_status"),
-        rewrite_count=int(result.get("rewrite_count") or 0),
-        hitl_rounds=int(result.get("hitl_rounds") or 0),
-        complexity=result.get("complexity") or trace.get("complexity"),
-        complexity_reason=result.get("complexity_reason") or trace.get("complexity_reason"),
-        sub_questions=result.get("sub_questions") or trace.get("sub_questions") or [],
-        # Conditions the user set before the clarification. They survive the resume
-        # boundary or they are lost: the graph starts fresh there, and the turn that
-        # established "up to Year 6" is several messages back by the time the user
-        # answers.
-        carried_constraints=list(result.get("carried_constraints") or []),
-    ).model_dump()
-
-
-def _refined_question_for_hitl(
-    resume_state: dict,
-    user_answer: str,
-    resolved=None,
-    original_question: str = "",
-) -> str:
-    """The question a resumed turn should actually search for.
-
-    The resolved form when a resolver produced one, and this is the whole reason the
-    resolver is reachable from here. What it replaced was `f"{answer}: {question}"`,
-    and string formatting cannot express the thing a clarification reply most often
-    does: replace. "no i mean the school fees" concatenated onto the reading it was
-    correcting produces a query containing both readings, retrieves both, and answers
-    from the union — which is exactly what the user was trying to stop.
-
-    The fallback keeps the old shape but anchors on the USER's question rather than
-    `resume_state["question"]`. That field holds the query the AGENT wrote for the tool,
-    so any condition the user set and the agent did not repeat was already gone before
-    this function ever saw it.
-    """
-    if resolved is not None and getattr(resolved, "resolved", False):
-        refined = (getattr(resolved, "question", "") or "").strip()
-        if refined:
-            return refined
-
-    question = (original_question or resume_state.get("question") or "").strip()
-    answer = user_answer.strip()
-    if not question:
-        return answer
-    if answer and answer in question:
-        return question
-    return f"{answer}: {question}" if answer else question
-
-
-def _emit(state: RAGState, icon: str, label: str, detail: str = "") -> None:
-    ctx = state["request_context"]
-    ctx.emit_rag_step(
-        icon,
-        label,
-        detail,
-        group=state.get("rag_step_group"),
-        group_label=state.get("rag_step_group_label"),
-    )
-
-
 def _initial_state(
     question: str,
     ctx: ChatRequestContext,
@@ -491,206 +222,6 @@ def _initial_state(
     }
 
 
-def grading_conditions(state) -> List[str]:
-    """Every condition the grader should judge the material against.
-
-    The child's year joins the conditions the user set rather than getting a channel of
-    its own, because the question being asked of the grader is the same for both: does
-    this material give different answers depending on them? A fee table does; a document
-    list written once for everybody does not, and that verdict is what stops a general
-    rule being withheld from a parent whose child is in Year 1.
-
-    Its wording says where it came from. The grader is not told the user set it, because
-    the user did not — the roster did, and a condition that misreports its own source is
-    the fabricated-provenance pattern `backend/rag/evidence.py` exists to prevent.
-    """
-    conditions = list(state.get("carried_constraints") or [])
-    year = str(state.get("child_year") or "").strip()
-    if year:
-        conditions.append(_RAG.child_year_condition.format(year=year))
-    return conditions
-
-
-def _search_query(state: RAGState) -> str:
-    """The text this state searches for: the question, and nothing appended to it.
-
-    An earlier revision appended the turn's carried conditions here, on the reasoning
-    that the agent's tool query might omit a condition the user set two turns ago.
-    Measured over a twenty-turn conversation (tests/test_conversation_sequence.py) that
-    cost three of twenty turns outright: "what time does the school day start (the child
-    is 5 years old)" ranks the term-dates passage below anything sharing the words
-    "child" or "years", because those terms appear nowhere in a passage about opening
-    hours. Every query term absent from the target passage is dilution, and a condition
-    is absent from every passage the corpus wrote once for everybody.
-
-    The condition still reaches retrieval when it belongs there — the RESOLVED question
-    states it in natural language ("the fees for the years up to Year 6"), which is
-    vocabulary the fee table actually contains. What it must not do is arrive twice, or
-    arrive as bare keywords stapled to a question about something else.
-
-    Constraints now travel to the two stages that can act on them without costing
-    recall: the grader, which reports whether the material varies by them, and the
-    answer prompt, which narrows or does not on that verdict.
-
-    The child's NAME goes the other way: out. It is the same argument as the paragraph
-    above, only stronger, because a name is not merely absent from the target passage —
-    it is absent from the whole corpus, which is the school's own material and is written
-    once for every family. On the sparse half that is worse than dilution: a name is a
-    rare term, so its IDF is high, and any chunk that happens to carry it outranks the
-    one that answers the question.
-
-    Cut HERE rather than from `state["question"]` itself, and that distinction is the
-    feature. This function is what every retrieval reads; the question is what the
-    grader, the HITL prompts and `service._resume_answer` read, and that last one hands
-    it to a model that has to write the parent a sentence naming their child. Which one
-    of a parent's children a turn is about still reaches records, the prompt and the
-    answer — it just stops reaching the search box.
-    """
-    question = state["question"]
-    stripped, _cuts = strip_child_names(question, _child_names(state))
-    return stripped
-
-
-def _child_names(state: RAGState) -> list:
-    """The name spellings this turn's message used, as the planner settled them.
-
-    Off the request context, like every other hint the graph reads, and defaulted to
-    nothing — a sub-agent state, a direct `run_rag_graph` in a test, or a profile with no
-    roster behind it has no child and needs no special case.
-    """
-    ctx = state.get("request_context")
-    return list(getattr(ctx, "child_names", None) or [])
-
-
-def retrieve_initial(state: RAGState) -> RAGState:
-    query = _search_query(state)
-    _emit(state, "🔍", "Searching the knowledge base...", "Initial retrieval")
-    if query != state["question"]:
-        # Said once, here, rather than inside `_search_query` — which also runs for the
-        # rewriter and would report the same cut twice on one turn. The DETAIL names no
-        # child: this trace is persisted per message and streamed to a browser, and the
-        # rule `turn_policy.as_trace` states holds here too — report that a decision was
-        # made, never what it was.
-        _emit(
-            state, "🙈", "Searching without the child's name",
-            "the corpus is the school's own material and names no pupil",
-        )
-    if state.get("carried_constraints"):
-        _emit(
-            state, "🧷", "Conditions carried from earlier turns",
-            "Applied when the answer is written, not to the search — "
-            + "; ".join(state["carried_constraints"]),
-        )
-    retrieved = retrieve_documents(
-        query, top_k=RETRIEVAL_TOP_K, language=str(state.get("language") or "")
-    )
-    results = retrieved.get("docs", [])
-    retrieve_meta = retrieved.get("meta", {})
-    retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
-    context = _format_docs(results)
-    if retrieval_failed:
-        _emit(
-            state,
-            "🚧",
-            "Knowledge base temporarily unreachable",
-            retrieve_meta.get("retrieval_error") or "retrieval backend error",
-        )
-    else:
-        _emit(
-            state,
-            "🧱",
-            "Three-tier chunk retrieval",
-            (
-                f"Leaf level L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
-                f"candidates {retrieve_meta.get('candidate_k', 0)}"
-            ),
-        )
-        _emit(
-            state,
-            "🧩",
-            "Auto-merging",
-            (
-                f"Enabled: {bool(retrieve_meta.get('auto_merge_enabled'))}, "
-                f"Applied: {bool(retrieve_meta.get('auto_merge_applied'))}, "
-                f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
-            ),
-        )
-        _emit(state, "✅", f"Retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
-        if not results:
-            _emit(state, "⚠️", "No snippets available, proceeding to the evidence-grading short-circuit check")
-    rag_trace = {
-        "tool_used": True,
-        "tool_name": "search_knowledge_base",
-        "query": query,
-        "retrieved_chunks": results,
-        "initial_retrieved_chunks": results,
-        "retrieval_stage": "initial",
-        "child_name_removed": query != state["question"],
-        "complexity": state.get("complexity"),
-        "complexity_reason": state.get("complexity_reason"),
-        **retrieval_trace_fields(retrieve_meta),
-    }
-    return {
-        "query": query,
-        "docs": results,
-        "context": context,
-        "retrieval_failed": retrieval_failed,
-        "rag_trace": rag_trace,
-    }
-
-
-def _route_after_initial(state: RAGState) -> Literal["grade_documents"]:
-    return "grade_documents"
-
-
-def _route_after_grade(state: RAGState) -> Literal["rewrite_question", "end"]:
-    if state.get("route") == "rewrite":
-        return "rewrite_question"
-    return "end"
-
-
-def _route_after_rewrite(state: RAGState) -> Literal["retrieve_rewritten", "end"]:
-    """Only re-retrieve when a rewrite was actually planned.
-
-    This edge used to be unconditional, so a node that gave up on planning one fell
-    into `retrieve_rewritten`, which requires `rewrite_method` and raises `ValueError`
-    without it. A planner that returned nothing — an unconfigured FAST_MODEL, a
-    provider error, a response that failed schema validation — therefore failed the
-    whole turn, and did it on the path meant to degrade gracefully.
-    """
-    return "retrieve_rewritten" if state.get("rewrite_method") else "end"
-
-
-def _retrieval_status_for_route(route: str, report: EvidenceReport) -> str:
-    if route == "answer":
-        # Only `sufficient` earns "answerable". Everything else routed to answer rests
-        # on less than the question asked for — including `none`, which reaches this
-        # route now that on-subject evidence is never denied. That distinction is what
-        # the knowledge tool reads to tell the model to answer from what it has and name
-        # the gap, so collapsing it into "answerable" would silently drop the guidance
-        # on exactly the turns that need it.
-        return "answerable" if report.sufficiency == "sufficient" else "partial"
-    if route == "rewrite":
-        return "needs_rewrite"
-    if route == "clarify":
-        return "needs_clarification"
-    if route == "scope_select":
-        return "needs_scope_selection"
-    if route == "retrieval_error":
-        return "retrieval_error"
-    return "no_knowledge"
-
-
-def _default_hitl_prompt(route: str, report: EvidenceReport) -> str:
-    if report.hitl_prompt:
-        return report.hitl_prompt
-    if route == "scope_select":
-        return _COPY.hitl_scope_default
-    if report.missing_slots:
-        return _COPY.hitl_clarify_missing_slots + ", ".join(report.missing_slots)
-    return _COPY.hitl_clarify_default
-
-
 class LLMGraderAssessor:
     """The top rung: a model reads the question and the chunks together.
 
@@ -715,7 +246,7 @@ class LLMGraderAssessor:
             EVIDENCE_GRADE_PROMPT,
             "rag/evidence_grade.j2",
             question=ctx.question,
-            context=_format_docs_for_grading(ctx.docs),
+            context=format_docs_for_grading(ctx.docs),
             # Alongside the question, never folded into it. See AssessmentContext.
             constraints=list(ctx.constraints),
         )
@@ -768,642 +299,72 @@ class LLMGraderAssessor:
         )
 
 
-def _assess_evidence(state: RAGState) -> EvidenceReport:
-    """Climb the ladder for this retrieval, once.
-
-    Rungs are ordered by the certainty each can establish, which is also their cost, so
-    the grader is reached only when the cheaper rungs cannot conclude.
-    """
-    docs = state.get("docs") or []
-    ladder = build_ladder(_RAG, extra=[CrossEncoderAssessor(), LLMGraderAssessor()])
-    return ladder.run(
-        AssessmentContext(
-            # The QUESTION, not the constrained query. Folding the conditions in was a
-            # mistake with one visible failure mode: a grader asked whether a general
-            # admissions document list answers "what documents are required (grades up
-            # to Year 6)" sees no year mentioned anywhere, honestly returns
-            # `relevance: none`, and `decide_route` denies — which is the one outcome
-            # that policy exists to make impossible while material is in hand.
-            #
-            # The conditions travel beside the question instead, and the grader reports
-            # on them in `constraints_discriminate` rather than scoring against them.
-            question=state["question"],
-            docs=docs,
-            retrieval_meta=state.get("rag_trace") or {},
-            config=_RAG,
-            constraints=grading_conditions(state),
-        )
-    )
-
-
-def _report_update(
-    report: EvidenceReport,
-    route: str,
-    scope_options: List[str] | None = None,
-    *,
-    is_followup: bool = False,
-) -> dict:
-    """Flatten a report plus its route into the trace fields the rest of the system
-    already reads. Names are unchanged so the frontend and any integrating client keep
-    working; `evidence_certainty` and `evidence_assessed_by` are additive."""
-    hitl_prompt = _default_hitl_prompt(route, report) if route in ("clarify", "scope_select") else ""
-    # The grader's own list wins when it wrote one. The catalogued directions are the
-    # fallback, and on a scope_select routed BY those directions they are the only list
-    # there is — a scope_select with no options is never asked, so without this the
-    # route decided in policy would be silently dropped here.
-    #
-    # `offerable_directions` is applied rather than the raw list, so this fallback obeys
-    # the same rule routing does. Without it a follow-up could still be handed the
-    # catalogue neighbours that routing had just refused to ask about, arriving through
-    # a grader-initiated scope_select instead.
-    options = list(report.hitl_options) or offerable_directions(
-        scope_options or [], is_followup=is_followup
-    )
-    return {
-        **report.as_trace(),
-        "retrieval_status": _retrieval_status_for_route(route, report),
-        "hitl_prompt": hitl_prompt,
-        "hitl_options": options if route == "scope_select" else list(report.hitl_options),
-        "route": route,
-    }
-
-
-def grade_documents_node(state: RAGState) -> RAGState:
-    """Assess the retrieved evidence once, then apply the policies that read it.
-
-    This node orchestrates and nothing more: it holds no thresholds, computes no
-    signals, and does not know which assessors exist. Assessment produces one report;
-    routing and context sizing are pure functions over it.
-    """
-    if state.get("retrieval_failed"):
-        # A backend outage says nothing about what the KB contains, so this must not
-        # reach an assessor or surface as no_knowledge. Static short-circuit only.
-        rag_trace = state.get("rag_trace", {}) or {}
-        rag_trace.update({
-            "retrieval_status": "retrieval_error",
-            "route": "retrieval_error",
-            "evidence_reason": "knowledge_base_unreachable",
-        })
-        _emit(state, "\U0001f6a7", "Retrieval failed, returning a static retry notice", "Not treated as missing knowledge")
-        return {
-            "route": "retrieval_error",
-            "retrieval_status": "retrieval_error",
-            "docs": [],
-            "context": "",
-            "rag_trace": rag_trace,
-        }
-
-    docs = state.get("docs") or []
-    if docs:
-        _emit(state, "\U0001f4ca", "Evaluating evidence quality...")
-
-    report = _assess_evidence(state)
-    scope_options = list(state.get("scope_options") or [])
-    route, route_reason = decide_route(
-        report,
-        has_docs=bool(docs),
-        rewrite_count=int(state.get("rewrite_count") or 0),
-        is_sub_agent=bool(state.get("is_sub_agent")),
-        config=_RAG,
-        hitl_rounds=int(state.get("hitl_rounds") or 0),
-        scope_options=scope_options,
-        is_followup=bool(state.get("is_followup")),
-    )
-
-    report_update = _report_update(
-        report, route, scope_options, is_followup=bool(state.get("is_followup"))
-    )
-    rag_trace = state.get("rag_trace", {}) or {}
-    rag_trace.update(report_update)
-    rag_trace["route_reason"] = route_reason
-
-    if route == "answer":
-        if report.sufficiency == "partial":
-            _emit(state, "\U0001f7e1", "Keeping partially relevant evidence", f"Confidence: {report.confidence:.2f}")
-        else:
-            _emit(state, "\u2705", "Evidence sufficient, returning retrieved snippets", f"Confidence: {report.confidence:.2f}")
-    elif route == "rewrite":
-        _emit(state, "\u26a0\ufe0f", "Evidence insufficient, will rewrite the query once", f"Confidence: {report.confidence:.2f}")
-    elif route in ("clarify", "scope_select"):
-        _emit(state, "\u2753", "Needs more information from the user", report_update["hitl_prompt"])
-    elif route == "retrieval_error":
-        # Retrieval worked but assessment could not reach the required standard, so
-        # neither answering nor denying would be honest. Say "try again" instead.
-        _emit(state, "\U0001f6a7", "Evidence could not be assessed", route_reason)
-    else:
-        _emit(state, "\u26d4", "No usable evidence found in the knowledge base", route_reason)
-
-    update = {
-        "route": route,
-        "retrieval_status": report_update["retrieval_status"],
-        "evidence_relevance": report.relevance,
-        "evidence_answerability": report.sufficiency,
-        "evidence_ambiguity": report.ambiguity,
-        "evidence_confidence": report.confidence,
-        "missing_slots": list(report.missing_slots),
-        "hitl_prompt": report_update["hitl_prompt"],
-        "hitl_options": list(report_update["hitl_options"]),
-        "rag_trace": rag_trace,
-    }
-
-    if route in ("no_knowledge", "clarify", "scope_select", "retrieval_error"):
-        # Dropping the chunks from the TRACE too, not just from the state. Asset
-        # attachment falls back to `rag_trace.retrieved_chunks` whenever the knowledge
-        # tool pinned nothing (backend/chat/assets_bridge.py), and on these routes it
-        # pins nothing by design — so leaving them here attached the figures from
-        # chunks this turn just decided not to answer from. "The knowledge base has no
-        # reliable information on this" arriving with the picture that answers the
-        # question is the most confusing thing the system can do. `initial_retrieved_chunks`
-        # still holds the full set for the trace panel.
-        if docs:
-            rag_trace["retrieved_chunks"] = []
-        update.update({"docs": [], "context": ""})
-        return update
-
-    if route == "answer" and docs:
-        keep, reason = select_context_indices(
-            report, docs, _RAG, answer_ceiling=RETRIEVAL_TOP_K,
-        )
-        rag_trace["context_selection_reason"] = reason
-        rag_trace["context_chunks_available"] = len(docs)
-        if keep:
-            kept = [docs[i - 1] for i in keep]
-            _emit(
-                state, "\u2702\ufe0f", f"Sending {len(kept)} of {len(docs)} chunks to the model", reason,
-            )
-            update.update({"docs": kept, "context": _format_docs(kept)})
-            # retrieved_chunks has to match what the answer was built from: citation
-            # markers and asset attribution both index into it. The full set stays in
-            # initial_retrieved_chunks for the trace panel.
-            rag_trace["retrieved_chunks"] = kept
-            rag_trace["context_trimmed"] = True
-            rag_trace["context_chunks_kept"] = len(kept)
-        else:
-            rag_trace["context_trimmed"] = False
-            rag_trace["context_chunks_kept"] = len(docs)
-
-    return update
-
-
-def _stop_rewriting(state: RAGState, reason: str, label: str, detail: str) -> RAGState:
-    """End the rewrite branch without re-retrieving, keeping the first pass.
-
-    The rewrite is a bonus second attempt, so failing to plan one must cost the turn
-    nothing it already had. Both callers used to return `no_knowledge` with `docs`
-    cleared — which denied knowledge the first pass had retrieved and graded on-subject,
-    the exact outcome `decide_route` exists to prevent — while their own step message
-    said "answering from the first pass only". The first pass is now what the turn
-    answers from, and only a genuinely empty one still denies.
-    """
-    docs = state.get("docs") or []
-    status = "partial" if docs else "no_knowledge"
-    rag_trace = state.get("rag_trace", {}) or {}
-    rag_trace.update({
-        "retrieval_status": status,
-        "route": "answer" if docs else "no_knowledge",
-        "evidence_reason": reason,
-    })
-    if not docs:
-        rag_trace["retrieved_chunks"] = []
-    _emit(state, "⚠️" if docs else "⛔", label, detail)
-    return {
-        "route": "answer" if docs else "no_knowledge",
-        "retrieval_status": status,
-        "docs": docs,
-        "context": state.get("context") or "",
-        "rag_trace": rag_trace,
-    }
-
-
-def rewrite_question_node(state: RAGState) -> RAGState:
-    question = _search_query(state)
-    _emit(state, "✏️", "Rewriting the query...")
-
-    rewrite_count = int(state.get("rewrite_count") or 0)
-    if rewrite_count >= _RAG.max_rewrites:
-        return _stop_rewriting(
-            state,
-            "rewrite_budget_exhausted",
-            "Rewrite budget exhausted, stopping retrieval",
-            "Answering from what the earlier passes found",
-        )
-
-    _emit(state, "🧠", "Choosing between Step-back / HyDE rewrite")
-    rewrite = rewrite_query_once(question)
-    if not rewrite:
-        return _stop_rewriting(
-            state,
-            "rewrite_unavailable",
-            "Could not plan a rewrite, stopping retrieval",
-            "Answering from the first pass only",
-        )
-
-    rewrite_method = (rewrite.get("rewrite_method") or "").strip()
-    step_back_question = (rewrite.get("step_back_question") or "").strip()
-    hyde_document = (rewrite.get("hyde_document") or "").strip()
-    rewritten_query = (rewrite.get("rewritten_query") or "").strip()
-
-    method_label = "Step-back" if rewrite_method == "step_back" else "HyDE"
-    _emit(state, "✅", f"Selected {method_label} rewrite", "Only this rewrite method will run this round")
-
-    rag_trace = state.get("rag_trace", {}) or {}
-    rag_trace.update({
-        "rewrite_method": rewrite_method,
-        "rewritten_query": rewritten_query,
-        "rewrite_count": rewrite_count + 1,
-    })
-    if step_back_question:
-        rag_trace["step_back_question"] = step_back_question
-    if hyde_document:
-        rag_trace["hyde_document"] = hyde_document
-
-    return {
-        "rewrite_method": rewrite_method,
-        "rewritten_query": rewritten_query,
-        "step_back_question": step_back_question,
-        "hyde_document": hyde_document,
-        "rewrite_count": rewrite_count + 1,
-        "rag_trace": rag_trace,
-    }
-
-
-def retrieve_rewritten(state: RAGState) -> RAGState:
-    rewrite_method = (state.get("rewrite_method") or "").strip()
-    if rewrite_method not in ("step_back", "hyde"):
-        raise ValueError("rewrite_method is required for rewritten retrieval")
-    rewritten_query = (state.get("rewritten_query") or "").strip()
-    if not rewritten_query:
-        raise ValueError("rewritten_query is required for rewritten retrieval")
-    # The rewriter was handed the stripped question, so this is normally a no-op. It is
-    # here because the rewrite is written by a MODEL, and a step-back question composed
-    # from a turn about one child is exactly the place one would reappear.
-    rewritten_query, _cuts = strip_child_names(rewritten_query, _child_names(state))
-    method_label = "Step-back" if rewrite_method == "step_back" else "HyDE"
-    _emit(state, "🔄", f"Re-retrieving with the {method_label} query...")
-    retrieved = retrieve_documents(
-        rewritten_query, top_k=RETRIEVAL_TOP_K, language=str(state.get("language") or "")
-    )
-    results = retrieved.get("docs", [])
-    retrieve_meta = retrieved.get("meta", {})
-    retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
-
-    # The rewrite ADDS to the first pass, it does not replace it. A step-back or HyDE
-    # query is a different question by construction, so its results can easily miss a
-    # chunk the literal question found — and that chunk was already graded on-subject,
-    # or this branch would not be running. Replacing the set meant a rewrite could
-    # leave the turn with less evidence than it started with, and the second grading
-    # pass would then deny knowledge the first pass had in hand.
-    #
-    # Rewritten results lead because they are the targeted retry; the first pass keeps
-    # whatever they did not rediscover. The graded set can reach 2 x top_k on the
-    # minority of turns that rewrite at all, and adaptive context selection trims it
-    # back to the chunks the grader cites before any of it reaches the answer prompt.
-    first_pass = [] if retrieval_failed else list(state.get("docs") or [])
-    merged = dedupe_documents(results + first_pass)
-    for index, item in enumerate(merged, 1):
-        item["rrf_rank"] = index
-    context = _format_docs(merged)
-    if retrieval_failed:
-        _emit(
-            state,
-            "🚧",
-            "Knowledge base temporarily unreachable during rewritten retrieval",
-            retrieve_meta.get("retrieval_error") or "retrieval backend error",
-        )
-    else:
-        _emit(
-            state,
-            "🧱",
-            f"{method_label} three-tier retrieval",
-            (
-                f"L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
-                f"candidates {retrieve_meta.get('candidate_k', 0)}, "
-                f"merge-replaced {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
-            ),
-        )
-        _emit(
-            state,
-            "✅",
-            f"Rewritten retrieval complete, {len(merged)} snippets total",
-            f"{len(results)} from the {method_label} query, "
-            f"{len(merged) - len(results)} kept from the first pass",
-        )
-    rag_trace = state.get("rag_trace", {}) or {}
-    rag_trace.update({
-        "rewrite_method": rewrite_method,
-        "rewritten_query": rewritten_query,
-        "retrieved_chunks": merged,
-        # The rewritten pass ALONE, so a trace still shows what the rewrite itself
-        # found rather than the union it was folded into.
-        "rewrite_retrieved_chunks": results,
-        "retrieval_stage": "rewritten",
-        **retrieval_trace_fields(retrieve_meta),
-    })
-    if state.get("step_back_question"):
-        rag_trace["step_back_question"] = state["step_back_question"]
-    if state.get("hyde_document"):
-        rag_trace["hyde_document"] = state["hyde_document"]
-    return {"docs": merged, "context": context, "retrieval_failed": retrieval_failed, "rag_trace": rag_trace}
-
-
 # ---------------------------------------------------------------------------
-# Complexity classification & sub-question decomposition
+# The graph's steps, bound to this module
 # ---------------------------------------------------------------------------
 
-COMPLEXITY_PROMPT = _RAG.complexity_prompt
+class _ModuleDependencies:
+    """`RagDependencies` read from this module's globals at the moment a step asks.
 
-# Fast-path classification vocabulary. These are language- AND domain-specific, so
-# they are profile data: an e-commerce catalogue needs product-attribute markers where
-# a school corpus needs admissions vocabulary. Tuples keep the original membership-test
-# semantics at the call sites below.
-_SIMPLE_OVERRIDE_MARKERS = tuple(_RAG.simple_override_markers)
-_SIMPLE_QUERY_MARKERS = tuple(_RAG.simple_query_markers)
-_COMPLEX_QUERY_MARKERS = tuple(_RAG.complex_query_markers)
-_QUERY_DIMENSION_MARKERS = tuple(_RAG.query_dimension_markers)
-
-
-
-def _simple_question_fast_path_reason(question: str) -> Optional[str]:
-    """Return a reason only when a local rule can confidently classify a simple query."""
-    normalized = re.sub(r"\s+", " ", (question or "").strip()).lower()
-    if not normalized or len(normalized) > _RAG.fast_path_max_chars:
-        return None
-    # Overrides run FIRST. "how many students" is a single-fact lookup, but it contains
-    # "how ", which also opens genuinely analytical questions. Without this the complex
-    # marker wins and a plain lookup is sent to the planner — which may decompose it
-    # into several sub-questions, each paying its own retrieval and grader call.
-    if any(marker in normalized for marker in _SIMPLE_OVERRIDE_MARKERS):
-        return "obvious_simple_fast_path:single_fact_override"
-    if any(marker in normalized for marker in _COMPLEX_QUERY_MARKERS):
-        return None
-    if "、" in normalized:
-        return None
-    if re.search(r"[一-鿿]", normalized) and normalized.count(" ") >= 2:
-        return None
-    if sum(marker in normalized for marker in _QUERY_DIMENSION_MARKERS) >= 2:
-        return None
-    if sum(normalized.count(mark) for mark in ("?", "？", ";", "；")) > 1:
-        return None
-    if any(marker in normalized for marker in _SIMPLE_QUERY_MARKERS):
-        return "obvious_simple_fast_path:single_fact_marker"
-    # A wh-question opening directly onto a copula ("what are the partners") or with an
-    # attribute in between ("what element is X"). Both are single-fact lookups that the
-    # literal markers miss, and the first form is common enough that missing it sent
-    # ordinary plural questions down the decomposition path.
-    if re.match(
-        r"^(what|which|who|where|when)\s+(?:\w+\s+)?(is|are|was|were|does|do)\b",
-        normalized,
-    ):
-        return "obvious_simple_fast_path:wh_attribute_question"
-    # Terminators include Arabic ؟ and ۔ — otherwise an Arabic question keeps its
-    # mark and measures one character longer against the length rule below.
-    if len(normalized.rstrip("?？。.!！؟۔،")) <= _RAG.fast_path_short_intent_chars:
-        return "obvious_simple_fast_path:short_single_intent"
-    return None
-
-
-def classify_complexity(state: RAGState) -> RAGState:
-    """Uses FAST_MODEL to determine question complexity."""
-    question = state["question"]
-    _emit(state, "🧭", "Analyzing question complexity...")
-
-    fast_path_reason = _simple_question_fast_path_reason(question)
-    if fast_path_reason:
-        _emit(state, "⚡", "Fast-classified as a simple question → using the standard RAG flow")
-        return {"complexity": "simple", "complexity_reason": fast_path_reason}
-
-    model = _get_complexity_model()
-    if not model:
-        raise RuntimeError("FAST_MODEL is required for complexity planning")
-
-    prompt = resolve_prompt(COMPLEXITY_PROMPT, "rag/complexity.j2", question=question)
-    result = model.with_structured_output(ComplexityResult).invoke(
-        [{"role": "user", "content": prompt}]
-    )
-    complexity = (result.complexity or "simple").strip().lower()
-    reason = (result.reason or "").strip()
-    sub_questions = [
-        item.strip()
-        for item in (result.sub_questions or [])
-        if item and item.strip()
-    ][: _RAG.max_sub_questions]
-    if complexity not in ("simple", "complex"):
-        raise ValueError(f"Unsupported complexity result: {complexity}")
-    if complexity == "complex" and not sub_questions:
-        raise ValueError("Complexity planner returned no sub-questions")
-
-    if complexity == "simple":
-        _emit(state, "✅", "Simple question → using the standard RAG flow", f"Reason: {reason[:60]}")
-    else:
-        _emit(state, "🔀", "Complex question → decomposing into sub-questions for parallel retrieval", f"Reason: {reason[:60]}")
-
-    return {
-        "complexity": complexity,
-        "complexity_reason": reason,
-        "sub_questions": sub_questions if complexity == "complex" else [],
-    }
-
-
-def prepare_sub_questions(state: RAGState) -> RAGState:
-    """Emit the sub-questions produced by the complexity planner."""
-    planned_sub_questions = [
-        item.strip()
-        for item in (state.get("sub_questions") or [])
-        if item and item.strip()
-    ]
-    for i, sq in enumerate(planned_sub_questions, 1):
-        _emit(state, "📌", f"Sub-question {i}", f"{sq[:80]} added to parallel retrieval")
-    return {"sub_questions": planned_sub_questions}
-
-
-def _route_after_complexity(state: RAGState):
-    """Simple questions go straight to retrieval; complex questions retrieve the planned sub-questions in parallel."""
-    if state.get("complexity") == "complex":
-        return "prepare_sub_questions"
-    return "retrieve_initial"
-
-
-def _fanout_sub_questions(state: RAGState):
-    """Dispatches the planned sub-questions to rag_sub_agent in parallel via the Send API."""
-    sub_qs = state.get("sub_questions") or []
-    ctx = state["request_context"]
-    return [
-        Send(
-            "rag_sub_agent",
-            _initial_state(
-                sq,
-                ctx,
-                is_sub_agent=True,
-                rag_step_group=f"Sub-question {i}",
-                rag_step_group_label=sq,
-            ),
-        )
-        for i, sq in enumerate(sub_qs, 1)
-    ]
-
-
-def _synthesis_report(
-    docs: List[dict],
-    retrieval_status: str,
-    sub_results: List[dict],
-) -> EvidenceReport:
-    """The merged evidence report for a decomposed question.
-
-    Synthesis does not assess anything itself — every document here was already graded by
-    the sub-agent that retrieved it. So the report inherits HIGH certainty and records
-    that provenance, rather than restating conclusions in its own words. Before this, this
-    function hand-wrote `relevance="strong" if has_docs else "none"`, which is the same
-    fabricated-grade pattern the ladder exists to remove.
+    Resolved per call rather than captured, so the seams the tests rely on — the stubs a
+    re-executed module is loaded with, and `patch.object` on this module afterwards —
+    still reach a step inside a graph compiled before either of them happened.
     """
-    assessed_by = ["synthesis"]
-    for result in sub_results:
-        for name in (result.get("rag_trace") or {}).get("evidence_assessed_by") or []:
-            if name not in assessed_by:
-                assessed_by.append(name)
 
-    if not docs:
-        return EvidenceReport(
-            certainty=Certainty.HIGH,
-            relevance="none",
-            sufficiency="none",
-            assessed_by=assessed_by,
-            reasons=[f"no sub-question produced usable evidence ({retrieval_status})"],
-        )
+    @property
+    def config(self):
+        return _RAG
 
-    return EvidenceReport(
-        chunks=[ChunkAssessment(index=i) for i, _ in enumerate(docs, 1)],
-        certainty=Certainty.HIGH,
-        relevance="strong",
-        sufficiency="partial" if retrieval_status == "partial" else "sufficient",
-        preferred_route="answer",
-        assessed_by=assessed_by,
-        reasons=[f"merged {len(docs)} graded chunk(s) from {len(sub_results)} sub-question(s)"],
-    )
+    @property
+    def copy(self):
+        return _COPY
 
+    @property
+    def top_k(self) -> int:
+        return RETRIEVAL_TOP_K
 
-def synthesis(state: RAGState) -> RAGState:
-    """Merges all documents retrieved by the sub-agents, dedupes and ranks them, and outputs the final context."""
-    sub_results = state.get("sub_results", [])
-    _emit(state, "🔬", f"Synthesizing retrieval results from {len(sub_results)} sub-questions...")
+    @property
+    def complexity_prompt(self) -> str:
+        return COMPLEXITY_PROMPT
 
-    all_docs: List[dict] = []
-    for result in sub_results:
-        status = result.get("retrieval_status")
-        if status not in ("answerable", "partial"):
-            continue
-        docs = result.get("docs", [])
-        all_docs.extend(docs)
+    @property
+    def complexity_schema(self) -> type:
+        return ComplexityResult
 
-    deduped = dedupe_documents(all_docs)
-    for idx, item in enumerate(deduped, 1):
-        item["rrf_rank"] = idx
+    def retrieve_documents(self, query: str, *, top_k: int, language: str) -> dict:
+        return retrieve_documents(query, top_k=top_k, language=language)
 
-    # An outage on any sub-question with zero merged docs means the empty result reflects
-    # backend availability, not corpus coverage — surface retry, not no_knowledge.
-    retrieval_outage = (not deduped) and any(
-        result.get("retrieval_status") == "retrieval_error" for result in sub_results
-    )
+    def rewrite_query_once(self, question: str) -> dict:
+        return rewrite_query_once(question)
 
-    context = _format_docs(deduped)
-    if deduped:
-        _emit(state, "✅", f"Synthesis complete, {len(deduped)} deduplicated snippets total")
-    elif retrieval_outage:
-        _emit(state, "🚧", "Knowledge base temporarily unreachable for the sub-questions", "Returning a static retry notice")
-    else:
-        _emit(state, "⛔", "None of the sub-questions had usable evidence")
+    def dedupe_documents(self, docs: List[dict]) -> List[dict]:
+        return dedupe_documents(docs)
 
-    # Merge rag_trace from all sub-agents
-    sub_traces = []
-    for result in sub_results:
-        trace = result.get("rag_trace")
-        if trace:
-            normalized_trace = normalize_rag_sub_trace(trace)
-            if normalized_trace:
-                sub_traces.append(normalized_trace)
+    def retrieval_trace_fields(self, meta: dict) -> dict:
+        return retrieval_trace_fields(meta)
 
-    original_trace = state.get("rag_trace") or {}
-    has_docs = bool(deduped)
-    retrieval_status = "answerable" if has_docs else "no_knowledge"
-    if has_docs and any(result.get("retrieval_status") == "partial" for result in sub_results):
-        retrieval_status = "partial"
-    if retrieval_outage:
-        retrieval_status = "retrieval_error"
-    hitl_traces = [
-        trace for trace in sub_traces
-        if trace.get("retrieval_status") in ("needs_clarification", "needs_scope_selection")
-    ]
-    hitl_route = None
-    hitl_prompt = ""
-    hitl_options: List[str] = []
-    # Outage outranks HITL: asking the user to clarify can't fix an unreachable backend.
-    if not has_docs and not retrieval_outage and hitl_traces:
-        scope_trace = next(
-            (trace for trace in hitl_traces if trace.get("retrieval_status") == "needs_scope_selection"),
-            None,
-        )
-        chosen_trace = scope_trace or hitl_traces[0]
-        retrieval_status = chosen_trace.get("retrieval_status") or "needs_clarification"
-        hitl_route = "scope_select" if retrieval_status == "needs_scope_selection" else "clarify"
-        prompts = [
-            trace.get("hitl_prompt")
-            for trace in hitl_traces
-            if trace.get("hitl_prompt")
-        ]
-        hitl_prompt = "; ".join(dict.fromkeys(prompts))
-        for trace in hitl_traces:
-            for option in trace.get("hitl_options") or []:
-                if option not in hitl_options:
-                    hitl_options.append(option)
+    def model_assessors(self) -> list:
+        return [CrossEncoderAssessor(), LLMGraderAssessor()]
 
-    fallback_route = "retrieval_error" if retrieval_outage else "no_knowledge"
-    route = "answer" if has_docs else (hitl_route or fallback_route)
-    rag_trace = {
-        **original_trace,
-        "tool_used": True,
-        "tool_name": "search_knowledge_base",
-        "query": state["question"],
-        "retrieved_chunks": deduped,
-        "retrieval_stage": "synthesis",
-        "complexity": "complex",
-        "complexity_reason": state.get("complexity_reason", ""),
-        "sub_questions": state.get("sub_questions", []),
-        "sub_agent_count": len(sub_results),
-        "synthesis_merged_count": len(all_docs),
-        "sub_traces": sub_traces,
-        "retrieval_status": retrieval_status,
-        "route": route,
-        "hitl_prompt": hitl_prompt,
-        "hitl_options": hitl_options,
-        **_synthesis_report(deduped, retrieval_status, sub_results).as_trace(),
-    }
+    def complexity_model(self):
+        return _get_complexity_model()
 
-    return {
-        "docs": deduped,
-        "context": context,
-        "route": route,
-        "retrieval_status": retrieval_status,
-        "hitl_prompt": hitl_prompt,
-        "hitl_options": hitl_options,
-        "rag_trace": rag_trace,
-    }
+    def initial_state(self, question: str, ctx: ChatRequestContext, **kwargs) -> dict:
+        return _initial_state(question, ctx, **kwargs)
 
 
-def rag_sub_agent(state: RAGState) -> RAGState:
-    """Run the only reachable sub-agent path directly: retrieve → grade."""
-    question = state.get("question", "")
-    result = dict(state)
-    result.update(retrieve_initial(result))
-    result.update(grade_documents_node(result))
-    trace = result.get("rag_trace") or {}
-    return {
-        "sub_results": [{
-            "question": question,
-            "docs": result.get("docs", []),
-            "retrieval_status": result.get("retrieval_status") or trace.get("retrieval_status"),
-            "route": result.get("route") or trace.get("route"),
-            "rag_trace": trace,
-        }],
-    }
+_DEPENDENCIES = _ModuleDependencies()
+
+retrieve_initial = RetrieveInitial(_DEPENDENCIES)
+grade_documents_node = GradeDocuments(_DEPENDENCIES)
+rewrite_question_node = RewriteQuestion(_DEPENDENCIES)
+retrieve_rewritten = RetrieveRewritten(_DEPENDENCIES)
+classify_complexity = ClassifyComplexity(_DEPENDENCIES)
+prepare_sub_questions = PrepareSubQuestions()
+fanout_sub_questions = FanOutSubQuestions(_DEPENDENCIES)
+rag_sub_agent = RagSubAgent(retrieve_initial, grade_documents_node)
+synthesis = Synthesis(_DEPENDENCIES)
+resume_retrieval = ResumeRetrieval(_DEPENDENCIES, grade_documents_node)
 
 
 # ---------------------------------------------------------------------------
@@ -1447,14 +408,14 @@ def build_rag_graph(complexity_planning_enabled: Optional[bool] = None):
         # Simple questions go straight to retrieval; complex questions use the sub-questions the planner produced in one pass.
         graph.add_conditional_edges(
             "classify_complexity",
-            _route_after_complexity,
+            route_after_complexity,
             {
                 "retrieve_initial": "retrieve_initial",
                 "prepare_sub_questions": "prepare_sub_questions",
             },
         )
 
-        graph.add_conditional_edges("prepare_sub_questions", _fanout_sub_questions)
+        graph.add_conditional_edges("prepare_sub_questions", fanout_sub_questions)
 
         # Parallel sub-agents → synthesis
         graph.add_edge("rag_sub_agent", "synthesis")
@@ -1469,7 +430,7 @@ def build_rag_graph(complexity_planning_enabled: Optional[bool] = None):
     graph.add_edge("retrieve_initial", "grade_documents")
     graph.add_conditional_edges(
         "grade_documents",
-        _route_after_grade,
+        route_after_grade,
         {
             "rewrite_question": "rewrite_question",
             "end": END,
@@ -1477,7 +438,7 @@ def build_rag_graph(complexity_planning_enabled: Optional[bool] = None):
     )
     graph.add_conditional_edges(
         "rewrite_question",
-        _route_after_rewrite,
+        route_after_rewrite,
         {
             "retrieve_rewritten": "retrieve_rewritten",
             "end": END,
@@ -1500,7 +461,7 @@ def _state_from_resume(
     original_question: str = "",
 ) -> dict:
     current_resume_state = HitlResumeState.model_validate(resume_state).model_dump()
-    refined_question = _refined_question_for_hitl(
+    refined_question = refined_question_for_hitl(
         current_resume_state, user_answer, resolved, original_question
     )
     # The conditions in force before the clarification, plus anything the reply itself
@@ -1548,67 +509,6 @@ def _state_from_resume(
     return state
 
 
-def _retrieve_resume_query(state: dict) -> dict:
-    _emit(state, "🔎", "Running targeted retrieval using the HITL follow-up", "Skipping complexity classification and sub-question decomposition")
-    query = _search_query(state)
-    retrieved = retrieve_documents(
-        query, top_k=RETRIEVAL_TOP_K, language=str(state.get("language") or "")
-    )
-    results = retrieved.get("docs", [])
-    retrieve_meta = retrieved.get("meta", {})
-    retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
-    context = _format_docs(results)
-    if retrieval_failed:
-        _emit(
-            state,
-            "🚧",
-            "Knowledge base temporarily unreachable during HITL retrieval",
-            retrieve_meta.get("retrieval_error") or "retrieval backend error",
-        )
-    else:
-        _emit(
-            state,
-            "🧱",
-            "HITL three-tier chunk retrieval",
-            (
-                f"Leaf level L{retrieve_meta.get('leaf_retrieve_level', 3)} recall, "
-                f"candidates {retrieve_meta.get('candidate_k', 0)}"
-            ),
-        )
-        _emit(
-            state,
-            "🧩",
-            "Auto-merging",
-            (
-                f"Enabled: {bool(retrieve_meta.get('auto_merge_enabled'))}, "
-                f"Applied: {bool(retrieve_meta.get('auto_merge_applied'))}, "
-                f"Replaced chunks: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
-            ),
-        )
-        _emit(state, "✅", f"HITL targeted retrieval complete, found {len(results)} snippets", f"Mode: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
-    rag_trace = state.get("rag_trace") or {}
-    rag_trace.update({
-        "tool_used": True,
-        "tool_name": "search_knowledge_base",
-        "query": query,
-        "retrieved_chunks": results,
-        "hitl_targeted_retrieved_chunks": results,
-        "hitl_resumed": True,
-        "hitl_resume_strategy": "targeted_retrieval",
-        "retrieval_stage": "hitl_targeted_retrieval",
-        **retrieval_trace_fields(retrieve_meta),
-    })
-    state.update({
-        "query": query,
-        "docs": results,
-        "context": context,
-        "retrieval_failed": retrieval_failed,
-        "rag_trace": rag_trace,
-    })
-    state.update(grade_documents_node(state))
-    return state
-
-
 def resume_rag_from_hitl(
     resume_state: dict,
     user_answer: str,
@@ -1628,13 +528,13 @@ def resume_rag_from_hitl(
     state = _state_from_resume(
         resume_state, user_answer, ctx, resolved=resolved, original_question=original_question
     )
-    _emit(state, "▶️", "Received HITL follow-up, continuing the original RAG flow", user_answer)
+    emit(state, "▶️", "Received HITL follow-up, continuing the original RAG flow", user_answer)
     if state["question"] != user_answer:
-        _emit(state, "🧭", "Read in context, the question is", state["question"][:90])
+        emit(state, "🧭", "Read in context, the question is", state["question"][:90])
 
-    state = _retrieve_resume_query(state)
-    if _is_hitl_result(state):
-        state["hitl_resume_state"] = _build_hitl_resume_state(state)
+    state = resume_retrieval(state)
+    if is_hitl_result(state):
+        state["hitl_resume_state"] = build_hitl_resume_state(state)
     return state
 
 
@@ -1667,8 +567,8 @@ def run_rag_graph(question: str, ctx: ChatRequestContext) -> dict:
         return dict(cached)
 
     result = rag_graph.invoke(_initial_state(question, ctx))
-    if _is_hitl_result(result):
-        result["hitl_resume_state"] = _build_hitl_resume_state(result)
+    if is_hitl_result(result):
+        result["hitl_resume_state"] = build_hitl_resume_state(result)
     if ctx is not None:
         ctx.remember_retrieval(key, result)
     return result

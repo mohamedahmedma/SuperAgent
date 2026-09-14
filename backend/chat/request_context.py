@@ -81,7 +81,7 @@ class ChatRequestContext:
     is_followup: bool = False
     # The year group the school's records put this turn's child in, when the turn is
     # about one child and the question did not name a year itself. Travels BESIDE the
-    # question, never inside it — see `backend/rag/pipeline.py:_search_query` for the
+    # question, never inside it — see `backend/rag/graph_nodes.py:search_query` for the
     # measurement that settled that.
     child_year: str = ""
     # WHICH child this turn is about, as the planner resolved it against the school's
@@ -515,7 +515,7 @@ class ChatRequestContext:
 
     @property
     def figure_numbers(self) -> dict:
-        """Figure number -> asset_id, as `_resolve_figure_markers` reads it.
+        """Figure number -> asset_id, as `resolve_figure_markers` reads it.
 
         A property rather than a method to match `answer_blocks`, which finalize reads
         the same way one line above the call to this.

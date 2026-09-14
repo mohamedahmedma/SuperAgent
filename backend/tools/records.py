@@ -209,7 +209,7 @@ def _reporter(ctx: ChatRequestContext, tool_name: str):
     its own could not.
 
     The OUTCOME names are shared across the three tools and unchanged by the split:
-    `service.RECORDS_RETRIEVED` reads outcomes rather than tool names, so the check that
+    `answer_checks.RECORDS_RETRIEVED` reads outcomes rather than tool names, so the check that
     catches an answer denying the record it just read keeps working without needing to
     know how many tools can produce one.
     """

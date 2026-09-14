@@ -43,7 +43,7 @@ def effective_capabilities(
 # "[1]", "[2][3]", "[1, 2]" — the citation markers the agent is instructed to emit.
 _CITATION_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
-# The anchors `backend/chat/service.py::_resolve_figure_markers` left behind, one per
+# The anchors `backend/chat/answer_blocks.py::resolve_figure_markers` left behind, one per
 # figure marker the answer actually wrote. Non-greedy up to the closing `-->` rather than
 # `[^>]` — an asset_id carries a filename, and a filename may contain anything.
 _FIGURE_ANCHOR_RE = re.compile(r"<!--figure:(.+?)-->")

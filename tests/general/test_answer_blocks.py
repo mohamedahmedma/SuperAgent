@@ -36,18 +36,18 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
             self.answer_blocks = list(blocks)
 
     def test_the_block_goes_under_the_prose(self):
-        from backend.chat.service import BLOCK_MARKER, _append_answer_blocks
+        from backend.chat.answer_blocks import BLOCK_MARKER, _append_answer_blocks
 
         out = _append_answer_blocks("جدول بنتك:", self._Ctx([self.BLOCK]))
         self.assertEqual(f"جدول بنتك:\n\n{BLOCK_MARKER}\n{self.BLOCK}", out)
 
     def test_no_block_leaves_the_answer_untouched(self):
-        from backend.chat.service import _append_answer_blocks
+        from backend.chat.answer_blocks import _append_answer_blocks
 
         self.assertEqual("أهلاً", _append_answer_blocks("أهلاً", self._Ctx([])))
 
     def test_a_block_with_no_prose_stands_alone(self):
-        from backend.chat.service import BLOCK_MARKER, _append_answer_blocks
+        from backend.chat.answer_blocks import BLOCK_MARKER, _append_answer_blocks
 
         self.assertEqual(
             f"{BLOCK_MARKER}\nTABLE", _append_answer_blocks("   ", self._Ctx(["TABLE"]))
@@ -57,7 +57,7 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
         """An HTML comment, and only because the frontend drops raw HTML outright
         (`renderer.html = () => ''` in utils/markdown.ts). That is the whole reason a
         marker can live inside a message a parent reads."""
-        from backend.chat.service import BLOCK_MARKER
+        from backend.chat.answer_blocks import BLOCK_MARKER
 
         self.assertTrue(BLOCK_MARKER.startswith("<!--"))
         self.assertTrue(BLOCK_MARKER.endswith("-->"))
@@ -65,7 +65,7 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
     def test_relayed_evidence_is_cut_before_the_block_is_added(self):
         """Told not to reformat the grid, the live model pasted the MODEL-FACING render
         instead — outcome header, raw `07:45:00`, English day keys. First try."""
-        from backend.chat.service import _append_answer_blocks
+        from backend.chat.answer_blocks import _append_answer_blocks
 
         leaked = (
             "حضرتك، الجدول كالتالي:\n\n"
@@ -83,7 +83,7 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
         import io
         import re
 
-        from backend.chat.service import _EVIDENCE_MARKERS
+        from backend.chat.answer_blocks import _EVIDENCE_MARKERS
 
         rendered = io.open(
             "backend/prompts/templates/tools/records_result.j2", encoding="utf-8"
@@ -121,7 +121,7 @@ class TheBlockIsNarrowedToWhatWasAsked(unittest.TestCase):
             self.answer_blocks = list(blocks)
 
     def _shown(self, answer, kind, block):
-        from backend.chat.service import BLOCK_MARKER, _append_answer_blocks
+        from backend.chat.answer_blocks import BLOCK_MARKER, _append_answer_blocks
 
         out = _append_answer_blocks(answer, self._Ctx([{"kind": kind, "text": block}]))
         return out.split(BLOCK_MARKER, 1)[1].strip()
@@ -162,19 +162,19 @@ class TheBlockStaysOutOfTheModelsHistory(unittest.TestCase):
             self.answer_blocks = list(blocks)
 
     def test_the_stored_answer_keeps_the_block(self):
-        from backend.chat.service import _append_answer_blocks
+        from backend.chat.answer_blocks import _append_answer_blocks
 
         out = _append_answer_blocks("جدولها:", self._Ctx(["**الأحد**\n1) عربي"]))
         self.assertIn("**الأحد**", out)
 
     def test_the_model_reads_back_only_the_prose(self):
-        from backend.chat.service import _append_answer_blocks, strip_answer_blocks
+        from backend.chat.answer_blocks import _append_answer_blocks, strip_answer_blocks
 
         out = _append_answer_blocks("جدولها:", self._Ctx(["**الأحد**\n1) عربي"]))
         self.assertEqual("جدولها:", strip_answer_blocks(out))
 
     def test_an_answer_with_no_block_survives_intact(self):
-        from backend.chat.service import strip_answer_blocks
+        from backend.chat.answer_blocks import strip_answer_blocks
 
         self.assertEqual("أهلاً بحضرتك", strip_answer_blocks("أهلاً بحضرتك"))
 
@@ -182,7 +182,7 @@ class TheBlockStaysOutOfTheModelsHistory(unittest.TestCase):
         from langchain_core.messages import AIMessage, HumanMessage
 
         from backend.chat.resolution import conversation_text
-        from backend.chat.service import _append_answer_blocks
+        from backend.chat.answer_blocks import _append_answer_blocks
 
         stored = _append_answer_blocks(
             "حضرتك، جدول فاطمة للفصل الدراسي الثاني:",
@@ -241,7 +241,7 @@ TIMETABLE_BLOCK = {"kind": "timetable", "index": 0, "language": "ar", "data": WE
 
 
 class _TurnCtx:
-    """What `_settle_answer_blocks` reads off the real context, and nothing else."""
+    """What `settle_answer_blocks` reads off the real context, and nothing else."""
 
     def __init__(self, blocks, language=""):
         self.answer_blocks = list(blocks)
@@ -249,16 +249,16 @@ class _TurnCtx:
 
 
 def _settle(answer, blocks, language="ar"):
-    from backend.chat.service import _settle_answer_blocks
+    from backend.chat.answer_blocks import settle_answer_blocks
 
-    return _settle_answer_blocks(answer, _TurnCtx(blocks, language))
+    return settle_answer_blocks(answer, _TurnCtx(blocks, language))
 
 
 class TheRecordAlsoTravelsAsData(unittest.TestCase):
     """One decision, two copies: the text every client can show, the data one can draw."""
 
     def test_the_data_rides_beside_an_unchanged_text(self):
-        from backend.chat.service import BLOCK_MARKER
+        from backend.chat.answer_blocks import BLOCK_MARKER
 
         text, blocks = _settle(
             "دي جدولها:", [{"kind": "timetable", "text": WEEK_TEXT, "data": WEEK_DATA}]
@@ -279,7 +279,7 @@ class TheRecordAlsoTravelsAsData(unittest.TestCase):
 
     def test_the_index_names_its_own_marker_after_a_text_only_block(self):
         """Positional matching would draw the week in the grades' place."""
-        from backend.chat.service import BLOCK_MARKER
+        from backend.chat.answer_blocks import BLOCK_MARKER
 
         text, blocks = _settle("درجاتها وجدولها:", [
             {"kind": "grades", "text": GRADES_TEXT, "data": None},
@@ -315,7 +315,7 @@ class BothCopiesAreNarrowedAlike(unittest.TestCase):
     two answers to one question. The rules are separate code; these hold them in step."""
 
     def _both(self, answer, kind, text, data):
-        from backend.chat.service import BLOCK_MARKER
+        from backend.chat.answer_blocks import BLOCK_MARKER
 
         settled, blocks = _settle(answer, [{"kind": kind, "text": text, "data": data}])
         return settled.split(BLOCK_MARKER, 1)[1].strip(), blocks[0]["data"]
@@ -390,11 +390,11 @@ class TheBlocksSurviveTheTrace(unittest.TestCase):
         self.assertNotIn("اللغة العربية", logged)
 
     def test_a_turn_with_no_trace_gets_one_rather_than_losing_its_blocks(self):
-        from backend.chat.service import _attach_answer_blocks
+        from backend.chat.answer_blocks import attach_answer_blocks
 
         self.assertEqual({"answer_blocks": [TIMETABLE_BLOCK]},
-                         _attach_answer_blocks(None, [TIMETABLE_BLOCK]))
-        self.assertIsNone(_attach_answer_blocks(None, []))
+                         attach_answer_blocks(None, [TIMETABLE_BLOCK]))
+        self.assertIsNone(attach_answer_blocks(None, []))
 
     def test_storage_keeps_the_blocks_while_it_trims_the_assets(self):
         from backend.chat.assets_bridge import trace_for_storage
@@ -428,7 +428,7 @@ class TheStreamSendsTheDataAheadOfItsText(scenarios.ParentTurnScenario):
 
     async def test_the_data_arrives_before_the_text_that_places_it(self):
         """The other way round, the reader sees the markdown for one event, then a swap."""
-        from backend.chat.service import BLOCK_MARKER
+        from backend.chat.answer_blocks import BLOCK_MARKER
 
         events, shown, _ = await self._timetable_turn()
         kinds = [event["type"] for event in events]

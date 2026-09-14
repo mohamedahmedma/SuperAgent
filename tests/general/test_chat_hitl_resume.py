@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from backend.composition import Services
+from backend.chat.clarification import PENDING_HITL_KEY
 
 service = importlib.import_module("backend.chat.service")
 
@@ -194,7 +195,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("Please specify the character name", hitl_events[0]["hitl"]["prompt"])
         self.assertEqual(["Danjin", "Dan Heng"], hitl_events[0]["hitl"]["options"])
 
-        pending_hitl = fake_storage.metadata.get(service.PENDING_HITL_KEY)
+        pending_hitl = fake_storage.metadata.get(PENDING_HITL_KEY)
         self.assertIsInstance(pending_hitl, dict)
         self.assertEqual("What is this character's element?", pending_hitl["original_question"])
         self.assertEqual("Please specify the character name", pending_hitl["prompt"])
@@ -230,7 +231,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
                 HumanMessage(content="What is this character's element?"),
                 AIMessage(content="Please specify the character name"),
             ],
-            metadata={service.PENDING_HITL_KEY: pending_hitl},
+            metadata={PENDING_HITL_KEY: pending_hitl},
         )
         fake_model = FakeDirectModel(["Danjin is the Imaginary element.[1]"])
         resume_mock = Mock(return_value={
@@ -256,7 +257,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             event["content"] for event in events if event.get("type") == "content"
         ])
         self.assertFalse([event for event in events if event.get("type") == "hitl_request"])
-        self.assertIsNone(fake_storage.metadata.get(service.PENDING_HITL_KEY))
+        self.assertIsNone(fake_storage.metadata.get(PENDING_HITL_KEY))
         self.assertEqual("Danjin", fake_storage.messages[-2].content)
         self.assertEqual("Danjin is the Imaginary element.[1]", fake_storage.messages[-1].content)
         resume_mock.assert_called_once()

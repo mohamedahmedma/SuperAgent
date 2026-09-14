@@ -48,6 +48,7 @@ from backend.chat.assets_bridge import (
 from backend.chat.request_context import ChatRequestContext
 from backend.profiles.registry import load_profile
 from tests.general.postgres_support import postgres_schema
+from backend.chat.turn_pipeline import message_data_for_save
 
 
 def make_png(width=200, height=200, seed=1) -> bytes:
@@ -397,7 +398,7 @@ class AssetsBridgeTests(unittest.TestCase):
         service = importlib.import_module("backend.chat.service")
         wire = attach_assets_to_trace({"route": "answer"}, [AssetReference(asset_id="x")])
 
-        extra = service._message_data_for_save([1, 2], wire)
+        extra = message_data_for_save([1, 2], wire)
 
         self.assertEqual([None], extra[:1])
         self.assertEqual(["x"], extra[-1]["rag_trace"]["asset_ids"])

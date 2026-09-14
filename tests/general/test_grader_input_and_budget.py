@@ -5,7 +5,7 @@ Production failed with `openai.LengthFinishReasonError: Could not parse response
 as the length limit was reached` — a grading call that ended at `finish_reason: length`
 having emitted no JSON at all. Three things were true at once and each is fixed here:
 
-  * `_format_docs` hands the grader EVERY retrieved chunk in full, so the size of the
+  * `format_docs` hands the grader EVERY retrieved chunk in full, so the size of the
     grading prompt was whatever the corpus happened to hold. A figure whose transcription
     is a school calendar rendered as a year of table rows is one chunk;
   * `grade_max_tokens` was 0, which does not mean "no limit" — it means the provider's
@@ -21,16 +21,8 @@ from unittest.mock import patch
 from backend.llm_models import GRADE_RETRY_MAX_TOKENS
 from backend.profiles import get_profile
 from backend.rag.evidence import AssessmentContext, Certainty
-from backend.rag.pipeline import (
-    _GRADER_CHUNK_CHARS,
-    _GRADER_FIGURE_BODY_CHARS,
-    _grading_view,
-    EvidenceGrade,
-    LLMGraderAssessor,
-    _format_docs,
-    _format_docs_for_grading,
-    _head,
-)
+from backend.rag.pipeline import EvidenceGrade, LLMGraderAssessor
+from backend.rag.grading_view import _GRADER_CHUNK_CHARS, _GRADER_FIGURE_BODY_CHARS, _grading_view, _head, format_docs, format_docs_for_grading
 
 
 def _figure_doc(rows: int = 300) -> dict:
@@ -44,7 +36,7 @@ def _figure_doc(rows: int = 300) -> dict:
 
 class TheGraderSeesLessThanTheAnswerDoes(unittest.TestCase):
     def test_each_chunk_is_capped(self):
-        rendered = _format_docs_for_grading([_figure_doc() for _ in range(8)])
+        rendered = format_docs_for_grading([_figure_doc() for _ in range(8)])
         # Eight chunks, each capped, plus the per-chunk header and separator.
         self.assertLess(len(rendered), 8 * (_GRADER_CHUNK_CHARS + 200))
 
@@ -53,14 +45,14 @@ class TheGraderSeesLessThanTheAnswerDoes(unittest.TestCase):
         answering model is given. Only the grade is taken on the head of the chunk."""
         docs = [_figure_doc()]
         self.assertGreater(
-            len(_format_docs(docs)), 5 * len(_format_docs_for_grading(docs))
+            len(format_docs(docs)), 5 * len(format_docs_for_grading(docs))
         )
 
     def test_the_caption_and_description_survive(self):
         """What a grade is actually made of. `render_surrogate` writes caption first and
         description second, so a cap taken from the top keeps exactly the part that says
         what the figure IS and drops the literal rows."""
-        rendered = _format_docs_for_grading([_figure_doc()])
+        rendered = format_docs_for_grading([_figure_doc()])
         self.assertIn("[Figure] School calendar 2025-2026", rendered)
         self.assertIn("A year planner for every term.", rendered)
         self.assertNotIn("Week 299", rendered)
@@ -68,15 +60,15 @@ class TheGraderSeesLessThanTheAnswerDoes(unittest.TestCase):
     def test_an_ordinary_chunk_is_not_trimmed_at_all(self):
         """The cap sits above a normal leaf, so it only ever touches an outlier."""
         doc = {"filename": "kb.docx", "page_number": 0, "text": "الرسوم الدراسية للصف الثالث"}
-        self.assertIn("الرسوم الدراسية للصف الثالث", _format_docs_for_grading([doc]))
+        self.assertIn("الرسوم الدراسية للصف الثالث", format_docs_for_grading([doc]))
 
     def test_chunk_numbering_still_matches_the_answer_path(self):
         """`supporting_chunks` is 1-based over this list and `select_context_indices`
         applies it to the full docs, so the two renderings must number alike."""
         docs = [_figure_doc(), _figure_doc(), _figure_doc()]
         for marker in ("[1]", "[2]", "[3]"):
-            self.assertIn(marker, _format_docs_for_grading(docs))
-            self.assertIn(marker, _format_docs(docs))
+            self.assertIn(marker, format_docs_for_grading(docs))
+            self.assertIn(marker, format_docs(docs))
 
     def test_a_figure_keeps_its_title_tags_and_questions(self):
         """What the grade is actually made of. The transcription is the ANSWER's

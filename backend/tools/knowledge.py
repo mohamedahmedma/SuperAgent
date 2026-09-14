@@ -89,7 +89,7 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         one variable and cannot disagree.
 
         The recorded half is load-bearing. A turn the planner REQUIRED this tool on is
-        checked afterwards by `service._enforce_forced_tool_ran`, which reads
+        checked afterwards by `answer_checks.enforce_forced_tool_ran`, which reads
         `ctx.tool_outcomes` to see whether the required tool ran — and a tool that never
         reported there was, to that check, a tool that never ran. That is how every
         knowledge-base answer on a forced turn came to be replaced by the

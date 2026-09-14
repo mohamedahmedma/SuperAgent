@@ -25,7 +25,7 @@ Four separate defects produced that, and each has tests below:
      the correction onto the reading it was correcting — so it retrieved both
 """
 import unittest
-from unittest.mock import patch
+
 
 from backend.chat.resolution import (
     CORRECTION,
@@ -43,6 +43,7 @@ from backend.profiles.registry import load_profile, set_profile
 from backend.rag.evidence import Certainty, EvidenceReport
 from backend.rag.policy import can_ask_human, decide_route, offerable_directions
 from backend.rag.scope_index import ScopeMatch
+from backend.chat.context_messages import _turn_context_message, build_context_messages
 
 
 def _config(**overrides):
@@ -438,13 +439,13 @@ class ConstraintTests(unittest.TestCase):
     """
 
     def test_the_search_query_is_the_question_alone(self):
-        from backend.rag.pipeline import _search_query
+        from backend.rag.graph_nodes import search_query
 
         state = {
             "question": "what time does the school day start",
             "carried_constraints": ["the child is 5 years old"],
         }
-        self.assertEqual(state["question"], _search_query(state))
+        self.assertEqual(state["question"], search_query(state))
 
     def test_nothing_appends_conditions_to_a_query_any_more(self):
         """A guard against reintroducing it. The condition still reaches the grader and
@@ -606,9 +607,9 @@ class ResumeQuestionTests(unittest.TestCase):
     }
 
     def test_a_correction_replaces_rather_than_concatenates(self):
-        from backend.rag.pipeline import _refined_question_for_hitl
+        from backend.rag.hitl_resume import refined_question_for_hitl
 
-        refined = _refined_question_for_hitl(
+        refined = refined_question_for_hitl(
             self.RESUME_STATE,
             "no i mean what is the school fees for this years",
             ResolvedQuestion(
@@ -625,9 +626,9 @@ class ResumeQuestionTests(unittest.TestCase):
     def test_without_a_resolution_it_anchors_on_the_users_question(self):
         """`resume_state["question"]` holds the query the AGENT wrote, so a condition
         the user set and the agent dropped was already gone before this ran."""
-        from backend.rag.pipeline import _refined_question_for_hitl
+        from backend.rag.hitl_resume import refined_question_for_hitl
 
-        refined = _refined_question_for_hitl(
+        refined = refined_question_for_hitl(
             self.RESUME_STATE,
             "Primary",
             None,
@@ -637,9 +638,9 @@ class ResumeQuestionTests(unittest.TestCase):
         self.assertIn("Primary", refined)
 
     def test_an_abstaining_resolver_falls_back_rather_than_blanking(self):
-        from backend.rag.pipeline import _refined_question_for_hitl
+        from backend.rag.hitl_resume import refined_question_for_hitl
 
-        refined = _refined_question_for_hitl(
+        refined = refined_question_for_hitl(
             self.RESUME_STATE,
             "Primary",
             ResolvedQuestion(question="Primary", intent=STANDALONE, resolved=False),
@@ -715,12 +716,14 @@ class TurnEntryTests(unittest.TestCase):
     }
 
     def _enter(self, user_text, resolution):
-        import backend.chat.service as service
+        from backend.chat.clarification import PENDING_HITL_KEY, enter_turn
 
-        with patch.object(service, "resolve_turn_question", lambda *a, **k: resolution):
-            return service._enter_turn(
-                user_text, list(UNIFORM_TURN), {service.PENDING_HITL_KEY: self.PENDING}
-            )
+        return enter_turn(
+            user_text,
+            list(UNIFORM_TURN),
+            {PENDING_HITL_KEY: self.PENDING},
+            resolve=lambda *a, **k: resolution,
+        )
 
     def test_a_correction_abandons_the_clarification(self):
         entry = self._enter(
@@ -759,13 +762,12 @@ class TurnEntryTests(unittest.TestCase):
         self.assertFalse(entry.is_hitl_resume)
 
     def test_no_pending_clarification_means_no_resolver_call_here(self):
-        import backend.chat.service as service
+        from backend.chat.clarification import enter_turn
 
         calls = []
-        with patch.object(
-            service, "resolve_turn_question", lambda *a, **k: calls.append(a) or None
-        ):
-            entry = service._enter_turn("what are the fees", [], {})
+        entry = enter_turn(
+            "what are the fees", [], {}, resolve=lambda *a, **k: calls.append(a) or None
+        )
         self.assertEqual([], calls, "the planner resolves an ordinary turn, not this")
         self.assertFalse(entry.is_hitl_resume)
         self.assertIsNone(entry.resolution)
@@ -782,14 +784,14 @@ class TurnContextMessageTests(unittest.TestCase):
         import backend.chat.service as service
         from backend.chat.turn_policy import TurnPlan
 
-        self.assertIsNone(service._turn_context_message(TurnPlan()))
-        self.assertIsNone(service._turn_context_message(None))
+        self.assertIsNone(_turn_context_message(TurnPlan()))
+        self.assertIsNone(_turn_context_message(None))
 
     def test_the_resolved_question_and_conditions_are_both_stated(self):
         import backend.chat.service as service
         from backend.chat.turn_policy import TurnPlan
 
-        message = service._turn_context_message(
+        message = _turn_context_message(
             TurnPlan(
                 resolved_question="what are the school fees up to Year 6",
                 carried_constraints=["grades up to Year 6"],
@@ -805,7 +807,7 @@ class TurnContextMessageTests(unittest.TestCase):
         from backend.chat.turn_policy import TurnPlan
         from langchain_core.messages import HumanMessage
 
-        built = service._build_context_messages(
+        built = build_context_messages(
             [HumanMessage(content="earlier")],
             "",
             "and the fees?",
