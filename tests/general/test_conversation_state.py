@@ -15,8 +15,10 @@ from backend.chat.child_context import SESSION_CHILD_KEY
 from backend.chat.clarification import build_pending_hitl, enter_turn
 from backend.chat.persistent_note import NOTE_GUARDIAN_KEY, NOTE_KEY, usable_note
 from backend.chat.request_context import ChatRequestContext
+from backend.chat.resolution import unresolved
 from backend.chat.turn_pipeline import TurnCollaborators, TurnPipeline
 from backend.profiles import get_profile
+from backend.rag.hitl_resume import build_hitl_resume_state
 from tests.general.test_chat_hitl_resume import FakeStorage
 
 ASKED_AT = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
@@ -186,6 +188,72 @@ class TheNoteIsReadForTheGuardianItWasWrittenFor(unittest.TestCase):
         self.assertEqual(OLD_NOTE, update_note.call_args.args[0])
         self.assertEqual("G-1", storage.metadata[NOTE_GUARDIAN_KEY])
         self.assertNotIn(NOTE_KEY, pipeline.save_metadata(turn))
+
+
+class AResumedSearchRunsUnderTheHintsItsQuestionWasAskedWith(unittest.TestCase):
+    """The planner runs on the fresh-question path only. A search paused for a
+    clarification was resumed on a context nothing had planned into: no language, so both
+    halves of a bilingual document competed; no year group; and the child's name back in
+    the query. The hints travel in the resume state and reach the context before the
+    search resumes — the same way the conditions and the round count already did.
+    """
+
+    ASKED = {"retrieval_status": "needs_clarification", "route": "clarify", "hitl_prompt": "Which term?"}
+
+    def _graph_result(self) -> dict:
+        """What the graph leaves behind when it stops to ask, on a planned turn."""
+        ctx = ChatRequestContext.for_sync(user_id="parent", session_id="s")
+        ctx.note_turn_plan(["fees"], [], language="ar", child_year="Year 6", child_names=["عمر"])
+        return {
+            **self.ASKED,
+            "question": "مصاريف عمر",
+            "language": "ar",
+            "child_year": "Year 6",
+            "retrieval_sections": ["fees"],
+            "request_context": ctx,
+        }
+
+    def test_the_hints_are_carried_when_the_question_is_asked(self):
+        carried = build_hitl_resume_state(self._graph_result())
+
+        self.assertEqual(
+            ("ar", "Year 6", ["fees"], ["عمر"]),
+            (carried["language"], carried["child_year"], carried["retrieval_sections"], carried["child_names"]),
+        )
+
+    def _resume(self, resume_state: dict) -> dict:
+        """The hints on the context at the moment retrieval resumes."""
+        seen = {}
+
+        def resume_retrieval(pending, user_text, ctx, resolution):
+            seen.update(
+                language=ctx.language,
+                child_year=ctx.child_year,
+                sections=list(ctx.retrieval_sections),
+                names=list(ctx.child_names),
+            )
+            return {}
+
+        pending = build_pending_hitl(self.ASKED, "مصاريف عمر", resume_state=resume_state)
+        pipeline = _pipeline(
+            FakeStorage(metadata={"pending_hitl": pending}),
+            resolve_question=lambda question, history, **kwargs: unresolved(question, "unit"),
+            resume_retrieval=resume_retrieval,
+        )
+        turn = _turn(pipeline, "الترم الأول")
+        self.assertTrue(pipeline.resumes_a_search(turn))
+        pipeline.run_resumed_search(turn)
+        return seen
+
+    def test_the_resumed_search_gets_them_back(self):
+        seen = self._resume(build_hitl_resume_state(self._graph_result()))
+
+        self.assertEqual({"language": "ar", "child_year": "Year 6", "sections": ["fees"], "names": ["عمر"]}, seen)
+
+    def test_a_question_paused_before_the_hints_were_carried_resumes_as_an_unplanned_turn(self):
+        seen = self._resume({"question": "مصاريف عمر", "route": "clarify", "retrieval_status": "needs_clarification"})
+
+        self.assertEqual({"language": "", "child_year": "", "sections": [], "names": []}, seen)
 
 
 def _pending_asked_at(moment: datetime) -> dict:

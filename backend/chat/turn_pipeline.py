@@ -366,6 +366,26 @@ class TurnPipeline:
         return bool(turn.entry.is_hitl_resume and turn.entry.resume_state)
 
     def run_resumed_search(self, turn: Turn) -> dict:
+        """Pick the paused search up, under the hints the turn that paused it ran with.
+
+        The planner runs on the fresh-question path only, and the graph starts a resume
+        on a context nothing has planned into. So a search paused in Arabic resumed with
+        no language — both halves of a bilingual document competing — with no year group,
+        and with the child's name back in the query. The hints the question was asked
+        under travel in the resume state (`HitlResumeState`) and are handed to the
+        context here, where the planner would have. A question paused before they were
+        carried resumes with none, which is what an unplanned turn has always run with.
+        """
+        carried = turn.entry.resume_state or {}
+        turn.ctx.note_turn_plan(
+            carried.get("retrieval_sections") or [],
+            # No scope options: a resumed turn is a continuation, and offering a fresh
+            # choice of corpus directions would be the second interruption in a row.
+            [],
+            language=carried.get("language") or "",
+            child_year=carried.get("child_year") or "",
+            child_names=carried.get("child_names") or [],
+        )
         return self._c.resume_retrieval(
             turn.entry.pending_hitl, turn.user_text, turn.ctx, turn.entry.resolution
         )

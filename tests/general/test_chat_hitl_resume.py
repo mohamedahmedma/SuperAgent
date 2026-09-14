@@ -188,6 +188,12 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             # Conditions set before the clarification, carried across the resume
             # boundary for the same reason `hitl_rounds` is.
             "carried_constraints": [],
+            # The planner's hints the question ran with, carried so the resumed search
+            # runs under them too. Empty here: this fake agent planned nothing.
+            "language": "",
+            "child_year": "",
+            "retrieval_sections": [],
+            "child_names": [],
         }
         fake_storage = FakeStorage()
         update_note = Mock(return_value="updated note")
