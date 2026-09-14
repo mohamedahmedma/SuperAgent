@@ -7,9 +7,8 @@ and surfaces as `UndefinedColumn` partway through a user's upload.
 import unittest
 from unittest.mock import patch
 
-from sqlalchemy import JSON, Boolean, Column, Integer, MetaData, String, Table, create_engine, inspect
+from sqlalchemy import JSON, Boolean, Column, Integer, MetaData, String, Table, inspect
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.pool import StaticPool
 
 from backend.db.migrate import (
     SchemaDrift,
@@ -18,19 +17,15 @@ from backend.db.migrate import (
     detect_drift,
     generate_sql,
 )
-
-
-def make_engine():
-    return create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+from tests.general.postgres_support import postgres_schema
 
 
 class DriftFixture:
-    """An 'old' table created without the columns a newer model declares."""
+    """An 'old' table created without the columns a newer model declares, in a schema
+    that lives as long as `test` does."""
 
-    def __init__(self):
-        self.engine = make_engine()
+    def __init__(self, test):
+        self.engine = postgres_schema(test).engine
         self.Base = declarative_base()
 
         class Widget(self.Base):
@@ -61,7 +56,7 @@ class DriftFixture:
 
 class DetectionTests(unittest.TestCase):
     def setUp(self):
-        self.fixture = DriftFixture()
+        self.fixture = DriftFixture(self)
 
     def test_missing_columns_on_an_existing_table_are_detected(self):
         """The exact bug: create_all left parent_chunks without its new columns."""
@@ -97,7 +92,7 @@ class DetectionTests(unittest.TestCase):
 
 class SqlGenerationTests(unittest.TestCase):
     def setUp(self):
-        self.fixture = DriftFixture()
+        self.fixture = DriftFixture(self)
         self.statements = {
             item.name: sql
             for item, sql in zip(
@@ -139,7 +134,7 @@ class SqlGenerationTests(unittest.TestCase):
 
 class ApplyTests(unittest.TestCase):
     def setUp(self):
-        self.fixture = DriftFixture()
+        self.fixture = DriftFixture(self)
 
     def test_applying_adds_the_columns(self):
         executed = self.fixture.apply(self.fixture.drift())
@@ -188,7 +183,7 @@ class ApplyTests(unittest.TestCase):
 
 class StartupCheckTests(unittest.TestCase):
     def test_drift_is_reported_as_an_error_with_the_fix_command(self):
-        fixture = DriftFixture()
+        fixture = DriftFixture(self)
         with patch("backend.db.migrate._metadata", return_value=fixture.Base.metadata):
             with self.assertLogs("backend.db.migrate", level="ERROR") as captured:
                 drift = check_and_report(fixture.engine)
@@ -198,7 +193,7 @@ class StartupCheckTests(unittest.TestCase):
         self.assertTrue(drift.has_drift)
 
     def test_a_clean_schema_logs_nothing(self):
-        fixture = DriftFixture()
+        fixture = DriftFixture(self)
         with patch("backend.db.migrate._metadata", return_value=fixture.Base.metadata):
             fixture.apply(fixture.drift())
             with patch("backend.db.migrate.logger") as logger:
@@ -207,7 +202,7 @@ class StartupCheckTests(unittest.TestCase):
         self.assertFalse(drift.has_drift)
 
     def test_an_unreachable_database_does_not_crash_startup(self):
-        broken = Mock = create_engine("sqlite://")
+        broken = object()  # never touched: inspect() is patched to fail first
         with patch("backend.db.migrate.inspect", side_effect=RuntimeError("no db")):
             with patch("backend.db.migrate.logger"):
                 drift = check_and_report(broken)
@@ -218,7 +213,7 @@ class RealModelTests(unittest.TestCase):
     """Against the actual models, so a future column addition is covered too."""
 
     def test_the_live_metadata_reconciles_onto_an_empty_database(self):
-        engine = make_engine()
+        engine = postgres_schema(self).engine
         drift = detect_drift(engine)
         self.assertTrue(drift.has_drift)  # empty database: every table is missing
         apply_drift(drift, engine)

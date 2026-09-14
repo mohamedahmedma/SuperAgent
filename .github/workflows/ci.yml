@@ -39,6 +39,21 @@ jobs:
   backend-tests-general:
     name: CI - Backend tests (general)
     runs-on: ubuntu-latest
+    # The backend's persistence tests run on real Postgres, each test in a throwaway
+    # schema (tests/general/postgres_support.py). Same image as docker-compose.yml.
+    services:
+      postgres:
+        image: postgres:15.8-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: superagent_test
+        ports: ["55432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d superagent_test"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:55432/superagent_test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

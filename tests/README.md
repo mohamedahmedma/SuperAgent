@@ -29,6 +29,20 @@ python tests/run_regression.py          # the build gate: each suite isolated
 python tests/run_regression.py --eval   # and score retrieval afterwards
 ```
 
+### The chat backend's tests need Postgres
+
+`tests/general` runs the backend's persistence code — conversations, document pairs,
+assets, the entity index — against real Postgres, one throwaway schema per test
+(`tests/general/postgres_support.py`). Without one those tests fail rather than skip, and
+the failure says how to start it:
+
+```bash
+docker run -d --name superagent-test-postgres -p 55432:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=superagent_test postgres:15.8-alpine
+```
+
+`TEST_DATABASE_URL` points them at any other Postgres. CI starts the same image as a service.
+
 `pytest` from the root still collects all of it, exactly as before. The runner exists for
 the different question — *is this build good?* — and the difference between them is worth
 understanding before you trust either.

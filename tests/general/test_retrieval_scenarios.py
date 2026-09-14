@@ -14,14 +14,11 @@ import re
 import unittest
 from unittest.mock import patch
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from backend.chat.language import ARABIC, ENGLISH, detect_language
 from backend.db.models import DocumentPair
 from backend.indexing import pair_store
 from backend.text_matching import search_key
+from tests.general.postgres_support import postgres_schema
 
 
 def terms(text):
@@ -34,14 +31,6 @@ def terms(text):
     "اجاز؟" against "اجاز" and report a mismatch that does not exist in production.
     """
     return set(re.findall(r"\w+", search_key(text), re.UNICODE))
-
-
-def _memory_sessionmaker():
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    DocumentPair.__table__.create(engine)
-    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
 class ParentQuestionLanguageTests(unittest.TestCase):
@@ -170,7 +159,10 @@ class BilingualCorpusRoutingTests(unittest.TestCase):
     """
 
     def setUp(self):
-        patcher = patch.object(pair_store, "SessionLocal", _memory_sessionmaker())
+        patcher = patch.object(
+            pair_store, "SessionLocal",
+            postgres_schema(self, DocumentPair).sessionmaker(autoflush=False),
+        )
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -233,7 +225,10 @@ class RetrievalFilterShapeTests(unittest.TestCase):
     """What the routing decision looks like by the time Milvus sees it."""
 
     def setUp(self):
-        patcher = patch.object(pair_store, "SessionLocal", _memory_sessionmaker())
+        patcher = patch.object(
+            pair_store, "SessionLocal",
+            postgres_schema(self, DocumentPair).sessionmaker(autoflush=False),
+        )
         patcher.start()
         self.addCleanup(patcher.stop)
 

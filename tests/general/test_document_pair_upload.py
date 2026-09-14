@@ -9,13 +9,10 @@ with no obvious way back.
 import unittest
 from unittest.mock import MagicMock, patch
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from backend.chat.language import ARABIC, ENGLISH
 from backend.db.models import DocumentPair
 from backend.indexing import pair_store
+from tests.general.postgres_support import postgres_schema
 
 ARABIC_BODY = "الرسوم الدراسية للصف الرابع الابتدائي تشمل الكتب والأنشطة والنقل المدرسي بالكامل"
 ENGLISH_BODY = "Tuition fees for grade four include books, activities and school transport in full"
@@ -31,13 +28,9 @@ def _chunks(text):
 
 class PairUploadJobTests(unittest.TestCase):
     def setUp(self):
-        engine = create_engine(
-            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-        )
-        DocumentPair.__table__.create(engine)
         patcher = patch.object(
             pair_store, "SessionLocal",
-            sessionmaker(bind=engine, autoflush=False, expire_on_commit=False),
+            postgres_schema(self, DocumentPair).sessionmaker(autoflush=False),
         )
         patcher.start()
         self.addCleanup(patcher.stop)

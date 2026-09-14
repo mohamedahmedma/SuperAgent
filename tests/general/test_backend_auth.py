@@ -15,10 +15,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from jose import jwt
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from backend.db.models import User
+from tests.general.postgres_support import postgres_schema
 
 _KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 PRIVATE_PEM = _KEY.private_bytes(
@@ -70,14 +69,11 @@ def mint(
 
 
 class BackendAuthTests(unittest.TestCase):
-    """`get_current_user` against a throwaway SQLite projection table."""
+    """`get_current_user` against a throwaway Postgres projection table."""
 
     def setUp(self):
         # Only the users table is needed: it is the sole thing this module touches.
-        self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-        User.__table__.create(self.engine)
-        self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
-        self.db = self.Session()
+        self.db = postgres_schema(self, User).sessionmaker()()
 
         self._saved = os.environ.get("IDENTITY_PUBLIC_KEY_PEM")
         os.environ["IDENTITY_PUBLIC_KEY_PEM"] = PUBLIC_PEM
