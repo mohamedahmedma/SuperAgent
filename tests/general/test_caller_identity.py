@@ -191,16 +191,16 @@ class ServiceSignatureTests(unittest.TestCase):
                 self.assertIsNone(parameter.default)
 
     def test_a_caller_is_authoritative_over_the_positional_user_id(self):
-        from backend.chat.service import _resolve_caller
+        from backend.chat.turn_pipeline import resolve_caller
 
-        caller, user_id = _resolve_caller(CallerIdentity("real", "G-1", TOKEN), "default_user")
+        caller, user_id = resolve_caller(CallerIdentity("real", "G-1", TOKEN), "default_user")
         self.assertEqual("real", user_id)
         self.assertEqual("G-1", caller.guardian_id)
 
     def test_no_caller_falls_back_to_the_positional_user_id(self):
-        from backend.chat.service import _resolve_caller
+        from backend.chat.turn_pipeline import resolve_caller
 
-        caller, user_id = _resolve_caller(None, "someone")
+        caller, user_id = resolve_caller(None, "someone")
         self.assertEqual("someone", user_id)
         self.assertEqual("someone", caller.user_id)
         self.assertFalse(caller.is_parent)
