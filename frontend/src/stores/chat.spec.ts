@@ -637,6 +637,63 @@ describe('chat store streaming sessions', () => {
     expect(chatStore.pendingHitlBySession.session_current).toBeUndefined();
   });
 
+  it('shows a message as typed when the server reads it as a new question, not an answer', async () => {
+    // Asked "which child?", the parent asks about the bus instead. The message was
+    // marked as an answer at send time; the server's `turn` event says otherwise.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+    chatStore.pendingHitlBySession.session_current = {
+      id: 'which-child',
+      prompt: 'Which child do you mean?',
+      options: ['Fatma — Year 11', 'Fatma — Year 9'],
+      route: 'child_select',
+    };
+
+    chatStore.userInput = 'When does the bus come?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    expect(chatStore.messagesBySession.session_current[0].isHitlAnswer).toBe(true);
+
+    stream.pushEvent({ type: 'turn', answers_clarification: false });
+    stream.pushEvent({ type: 'content', content: 'At 07:30.' });
+    stream.close();
+    await sendPromise;
+
+    const [question, answer] = chatStore.messagesBySession.session_current;
+    expect(question).toMatchObject({ text: 'When does the bus come?', isUser: true, isHitlAnswer: false });
+    expect(answer.hitlResumeText).toBeUndefined();
+    expect(answer.text).toBe('At 07:30.');
+  });
+
+  it('shows a stored question that replaced a clarification as a message on reload', () => {
+    const { chatStore } = setupStores();
+    const messages = chatStore.mapServerMessages([
+      { type: 'human', content: 'What are her subjects?' },
+      {
+        type: 'ai',
+        content: 'Which child do you mean?',
+        rag_trace: { retrieval_status: 'needs_child_choice', route: 'child_select', hitl_prompt: 'Which child do you mean?' },
+      },
+      { type: 'human', content: 'When does the bus come?' },
+      { type: 'ai', content: 'At 07:30.', rag_trace: { turn_clarification: 'replaced' } },
+    ]);
+
+    // `needs_child_choice` is not a retrieval clarification, so message 1 is not a HITL
+    // request here; the rule under test is the one on messages 2 and 3.
+    expect(messages[2]).toMatchObject({ isUser: true, isHitlAnswer: false });
+    expect(messages[3].hitlResumeText).toBeUndefined();
+
+    const retrieval = chatStore.mapServerMessages([
+      { type: 'human', content: 'What are the fees?' },
+      { type: 'ai', content: 'Which year group?', rag_trace: { retrieval_status: 'needs_clarification', route: 'clarify' } },
+      { type: 'human', content: 'Who is the principal?' },
+      { type: 'ai', content: 'Mr Hany.', rag_trace: { turn_clarification: 'replaced' } },
+    ]);
+    expect(retrieval[2]).toMatchObject({ text: 'Who is the principal?', isHitlAnswer: false });
+    expect(retrieval[3].hitlResumeText).toBeUndefined();
+  });
+
   it('maps persisted HITL answer turns as continuation state instead of normal chat turns', () => {
     const { chatStore } = setupStores();
 

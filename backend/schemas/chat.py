@@ -245,6 +245,10 @@ class RagTraceFields(StrictSchema):
     # The stream was cut off — the parent pressed Stop or the connection dropped — and
     # what is stored as the answer is what had reached them by then, not a finished one.
     turn_interrupted: Optional[bool] = None
+    # What the message before this answer did to a pending clarification: settled it, or
+    # set it aside for a new question. A reopened conversation folds an answered
+    # exchange together and shows a replacing question as the parent typed it.
+    turn_clarification: Optional[Literal["answered", "replaced"]] = None
     request_scope: Optional[str] = None
     request_scope_certainty: Optional[str] = None
     request_language: Optional[str] = None

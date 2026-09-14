@@ -275,11 +275,51 @@ class TurnPipeline:
     def _attach(self, turn: Turn, ctx):
         turn.ctx = ctx
         ctx.reset_knowledge_tool_budget()
-        # Settled before anything plans this turn, so the pin is in place by the time the
-        # planner resolves a child.
-        if turn.entry.child_choice:
-            pin_the_child_the_parent_named(ctx, turn.entry.child_choice)
         return ctx
+
+    def settle_child_choice(self, turn: Turn) -> None:
+        """Read the reply to "which child?" against the roster and, failing that, the conversation.
+
+        Before anything plans this turn, so the pin is in place by the time the planner
+        resolves a child. May cost a roster read and, when the reply names nobody, a
+        resolver call — which is why the streamed entry point runs it on a worker thread.
+
+        A reply that pins a child is the answer. One that pins nobody used to be
+        re-planned as the ORIGINAL question regardless, so a parent who typed a new
+        question instead of a name was ignored and asked "which child?" again — for as
+        long as they kept typing questions. The resolver now reads such a reply against
+        the conversation: a correction or a change of subject replaces the pending
+        question, and the turn is about what the parent just typed. Anything else — a
+        nickname, a spelling the roster cannot place, a resolver that abstained — still
+        asks again, which is the only honest answer to a name nobody recognised.
+        """
+        entry = turn.entry
+        if not entry.child_choice:
+            return
+        if pin_the_child_the_parent_named(turn.ctx, entry.child_choice):
+            return
+        pending = entry.pending_hitl or {}
+        resolution = self._c.resolve_question(
+            turn.user_text,
+            list(turn.messages),
+            hitl_prompt=pending.get("prompt") or "",
+            hitl_options=pending.get("options") or [],
+        )
+        if getattr(resolution, "supersedes_pending_question", False):
+            entry.replace_with_new_question(turn.user_text, resolution)
+
+    @staticmethod
+    def turn_event(turn: Turn) -> dict | None:
+        """How this message was read against the question the assistant was waiting on.
+
+        For the client, which marked the message as an answer the moment it was sent and
+        hides it as one. Sent before anything slow, and only when something was pending:
+        a message that REPLACED the question is an ordinary message, shown as typed.
+        """
+        entry = turn.entry
+        if entry.pending_hitl is None and not entry.invalid_pending_hitl:
+            return None
+        return {"type": "turn", "answers_clarification": entry.clarification_outcome == "answered"}
 
     def record_question(self, turn: Turn) -> None:
         turn.messages.append(HumanMessage(content=turn.user_text))
@@ -575,6 +615,12 @@ class TurnPipeline:
         """
         turn.messages.append(AIMessage(content=turn.answer))
         turn.committed = True
+        # On the STORED copy: a reopened conversation has to know whether the message
+        # before this answer settled a pending question or set it aside, and the trace
+        # is where a stored message keeps what the wire told the client live.
+        outcome = turn.entry.clarification_outcome if turn.entry is not None else None
+        if outcome:
+            turn.rag_trace = normalize_rag_trace({**(turn.rag_trace or {}), "turn_clarification": outcome})
         self._store(
             turn,
             [MessageToStore("ai", turn.answer, rag_trace=trace_for_storage(turn.rag_trace))],

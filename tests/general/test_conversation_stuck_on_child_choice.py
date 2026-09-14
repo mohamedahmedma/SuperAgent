@@ -31,6 +31,7 @@ from backend.chat.child_resolution import resolve_child
 from backend.chat.child_roster import ChildOption, _as_options
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.signals import RequestSignals
+from backend.chat.resolution import NEW_TOPIC, ResolvedQuestion, unresolved
 from backend.chat.turn_policy import TurnPlan
 from backend.composition import Services
 from backend.school_week import day_phrase
@@ -150,6 +151,10 @@ class _Session(unittest.IsolatedAsyncioTestCase):
         self.planned = []
         self.fail_agent = False
         self.on_run = None
+        # What the resolver says about a reply the roster could not place. None means it
+        # abstains — the message as written — which is what a live resolver says about a
+        # nickname, and what the pre-resolver behaviour amounted to.
+        self.resolution = None
         env = patch.dict(os.environ, {"CHILD_ROSTER_TTL_SECONDS": "0"})
         env.start()
         self.addCleanup(env.stop)
@@ -157,6 +162,9 @@ class _Session(unittest.IsolatedAsyncioTestCase):
     def _plan(self, question, history=None, ctx=None, **kwargs):
         self.planned.append(question)
         return self.plans.get(question, TurnPlan()), RequestSignals(question=question)
+
+    def _resolve(self, question, history=None, **kwargs):
+        return self.resolution or unresolved(question, "unit")
 
     def _agent(self, ctx, tool_names=None, language=None):
         asked = self.planned[-1] if self.planned else ""
@@ -168,6 +176,7 @@ class _Session(unittest.IsolatedAsyncioTestCase):
         with (
             patch("backend.chat.child_roster.requests.get", _roster(self.roster)),
             patch.object(service, "plan_turn", self._plan),
+            patch.object(service, "resolve_turn_question", self._resolve),
             patch.object(service, "create_agent_for_request", self._agent),
             patch.object(service, "generate_session_title", Mock(return_value="س")),
             patch.object(service, "_update_persistent_note_sync", Mock(return_value="")),
@@ -288,6 +297,69 @@ class TheAnsweredChildQuestionIsSpent(_Session):
 
         self.assertIsNotNone(self.pending)
         self.assertEqual(self.pending["route"], "clarify")
+
+
+BUS = "طيب والباص بييجي امتى؟"
+
+
+class ANewQuestionInsteadOfAName(_Session):
+    """Asked "which child?", the parent asks about the bus instead.
+
+    Every reply used to be read as a name: it pinned nobody, the original question was
+    planned again, and the parent was asked "which child?" again — for as long as they
+    kept typing questions. Only a reply the roster cannot place is read against the
+    conversation, and only a resolver that calls it a new subject changes the turn.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.plans[ORIGINAL] = _asks([f"{FATMA} — Year 11", f"{FATMA} — Year 9"])
+        self.replies[BUS] = "الباص بييجي ٧:٣٠ الصبح."
+
+    async def test_the_new_question_is_answered_and_the_pending_one_dropped(self):
+        await self.say(ORIGINAL)
+        self.resolution = ResolvedQuestion(question=BUS, intent=NEW_TOPIC, resolved=True)
+
+        events = await self.say(BUS)
+
+        self.assertEqual(self.planned[-1], BUS, "planned as the parent typed it, not as the original question")
+        self.assertIn("٧:٣٠", _shown(events))
+        self.assertIsNone(self.pending)
+        self.assertEqual(self.pin.get("student_id", ""), "", "nobody was pinned on the strength of a question")
+
+    async def test_the_client_is_told_the_message_replaced_the_question(self):
+        """Live, so the web app un-hides the message it had marked as an answer; and
+        on the stored answer, so a reopened conversation shows it as typed too."""
+        await self.say(ORIGINAL)
+        self.resolution = ResolvedQuestion(question=BUS, intent=NEW_TOPIC, resolved=True)
+
+        events = await self.say(BUS)
+
+        self.assertIn({"type": "turn", "answers_clarification": False}, events)
+        self.assertEqual(BUS, self.storage.messages[-2].content)
+        stored = self.storage.appends[-1]["messages"][-1].rag_trace
+        self.assertEqual("replaced", stored["turn_clarification"])
+
+    async def test_a_chosen_child_is_reported_as_an_answer(self):
+        await self.say(ORIGINAL)
+        self.plans[ORIGINAL] = TurnPlan()
+        self.replies[ORIGINAL] = "بتاخد العربي."
+
+        events = await self.say(f"{FATMA} — Year 11")
+
+        self.assertIn({"type": "turn", "answers_clarification": True}, events)
+        self.assertEqual("answered", self.storage.appends[-1]["messages"][-1].rag_trace["turn_clarification"])
+
+    async def test_a_nickname_the_roster_cannot_place_still_asks_again(self):
+        """The resolver abstains — «الكبيرة» is a description, not a new subject — and
+        the only honest reply is the question again."""
+        await self.say(ORIGINAL)
+
+        events = await self.say("الكبيرة")
+
+        self.assertEqual(self.pending["route"], "child_select")
+        self.assertEqual(self.planned[-1], ORIGINAL)
+        self.assertIn({"type": "turn", "answers_clarification": True}, events)
 
 
 class TheSyncPathSpendsItToo(unittest.TestCase):

@@ -245,6 +245,40 @@ class TurnEntry:
     # by code holding a verified identity this dataclass deliberately does not.
     child_choice: str = ""
 
+    def replace_with_new_question(self, user_text: str, resolution: ResolvedQuestion) -> None:
+        """The reply to "which child?" turned out to be a new question, not a name.
+
+        Decided after the roster has had its look (`TurnPipeline.settle_child_choice`):
+        a reply that pins nobody is either a name the roster cannot place or a change of
+        subject, and only a resolver reading the conversation can tell «الكبيرة» from
+        «والمصاريف كام؟». Read as a new question, the turn is about what the parent just
+        typed — the same reading a correction to a retrieval clarification gets — and the
+        pending question is spent as replaced rather than asked again.
+        """
+        self.child_choice = ""
+        self.superseded = True
+        self.resolution = resolution
+        self.effective_user_text = user_text
+        self.original_question = (resolution.question if resolution.resolved else "") or user_text
+
+    @property
+    def clarification_outcome(self) -> str | None:
+        """What this message did to the question the assistant was waiting on.
+
+        "answered" — it settled it (a retrieval clarification resumed, a child chosen);
+        "replaced" — it set it aside for a new question; None — nothing was pending, or
+        the reply was neither. Stored on the answer's trace and sent to the client, which
+        otherwise cannot tell an answer it should fold into the exchange from a question
+        it should show as typed.
+        """
+        if self.pending_hitl is None:
+            return None
+        if self.is_hitl_resume or self.child_choice:
+            return "answered"
+        if self.superseded:
+            return "replaced"
+        return None
+
     def spends_the_pending_question(self, *, agent_error: bool = False) -> bool:
         """Whether the clarification that was waiting is finished with after this turn.
 
@@ -314,6 +348,11 @@ def enter_turn(
         # that the pin can settle it. Deliberately not a `hitl_resume`: there is no
         # search to continue, and folding the name into the old query as the other routes
         # do would retrieve for "علي" rather than for what the parent actually asked.
+        #
+        # Provisional. A reply the roster then cannot place is read once more, against
+        # the conversation, by `TurnPipeline.settle_child_choice` — which is where a
+        # parent who typed a new question instead of a name stops being asked "which
+        # child?" about a question they have moved on from.
         entry.child_choice = user_text
         entry.original_question = entry.pending_hitl.get("original_question") or user_text
         entry.effective_user_text = entry.original_question
