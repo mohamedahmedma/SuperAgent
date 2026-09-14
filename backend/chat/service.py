@@ -1409,6 +1409,14 @@ def chat_with_agent(
                     response_content = message_text(result)
                 else:
                     response_content = str(result)
+                # The graph ended itself on a terminal retrieval result, so its last message
+                # is the TOOL's and not an answer. The streamed path serves the profile's own
+                # reply here; the commit that taught it that never reached this path, which
+                # then handed the tool result to the evidence cut and served its
+                # could-not-verify copy. See `_end_turn_on_terminal_retrieval`.
+                terminal_status = ctx.short_circuit_status()
+                if terminal_status:
+                    response_content = _terminal_reply(terminal_status, turn_plan.language)
                 # Same rules as the streamed path. The agent loop has ended, so the last
                 # message answered rather than called a tool — but it may still be
                 # wearing its transcript. See `backend/chat/finalize.py`.

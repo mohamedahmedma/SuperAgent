@@ -15,9 +15,12 @@ import unittest
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, Mock, patch
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from backend.chat.signals import RequestSignals
+from backend.chat.turn_policy import TurnPlan
 from backend.composition import Services
+from backend.tools import KNOWLEDGE_TOOL
 from tests.general.test_chat_hitl_resume import FakeStorage, _parse_sse_events
 
 service = importlib.import_module("backend.chat.service")
@@ -132,6 +135,96 @@ class AResumedClarificationAfterAnOutage(unittest.TestCase):
 
         self.assertEqual(service._COPY.retrieval_error, response["response"])
         self.assertEqual(service._COPY.retrieval_error, storage.messages[-1].content)
+
+
+class _SyncAgentEndingOnATerminalResult:
+    """What the real graph leaves behind after `_end_turn_on_terminal_retrieval` jumps
+    to the end: the model's tool call, the tool's result, and no answer after them."""
+
+    def __init__(self, ctx, status):
+        self.ctx, self.status = ctx, status
+
+    def invoke(self, payload, config=None):
+        self.ctx.store_rag_trace({"retrieval_status": self.status, "route": self.status}, None)
+        self.ctx.note_short_circuit(self.status)
+        call = AIMessage(content="", tool_calls=[{
+            "name": KNOWLEDGE_TOOL, "args": {"query": "q"}, "id": "c1", "type": "tool_call",
+        }])
+        result = ToolMessage(
+            content="NO_KNOWLEDGE: nothing in the school's documents covers this.",
+            tool_call_id="c1",
+            name=KNOWLEDGE_TOOL,
+        )
+        return {"messages": [*payload["messages"], call, result]}
+
+
+class _StreamAgentEndingOnATerminalResult(_SyncAgentEndingOnATerminalResult):
+    async def astream(self, payload, stream_mode=None, config=None):
+        self.ctx.store_rag_trace({"retrieval_status": self.status, "route": self.status}, None)
+        self.ctx.note_short_circuit(self.status)
+        yield ToolMessage(
+            content="NO_KNOWLEDGE: nothing in the school's documents covers this.",
+            tool_call_id="c1",
+            name=KNOWLEDGE_TOOL,
+        ), {}
+
+
+class AKnowledgeSearchThatEndsTheTurn(unittest.TestCase):
+    """When retrieval concludes, the graph ends itself and the profile's copy is served.
+
+    `_end_turn_on_terminal_retrieval` stops the agent before a second model call would
+    reword profile copy, and records why on the context. The streamed path reads that and
+    serves the profile's own reply. The sync path never did — the commit that added it
+    touched only the streamed entry point — so its answer became the graph's last
+    message, which is the TOOL result: the evidence cut strips it, and the parent was
+    handed the could-not-verify copy instead.
+    """
+
+    STATUSES = ("no_knowledge", "retrieval_error")
+
+    def setUp(self):
+        for status in self.STATUSES:
+            self.assertNotEqual(
+                service._terminal_reply(status, "en"), service._COPY.unverified_answer
+            )
+
+    def _patched(self, agent_type, status) -> ExitStack:
+        plan = TurnPlan(exposed_tools=[KNOWLEDGE_TOOL], language="en", reasons=["unit"])
+        stack = ExitStack()
+        stack.enter_context(patch.object(
+            service, "plan_turn", lambda *a, **k: (plan, RequestSignals()),
+        ))
+        stack.enter_context(patch.object(
+            service, "create_agent_for_request",
+            lambda ctx, *a, **k: agent_type(ctx, status),
+        ))
+        stack.enter_context(patch.object(service, "update_persistent_note", AsyncMock(return_value="")))
+        stack.enter_context(patch.object(service, "_update_persistent_note_sync", Mock(return_value="")))
+        return stack
+
+    def test_the_streamed_path_serves_the_profile_reply(self):
+        for status in self.STATUSES:
+            with self.subTest(status=status):
+                storage = FakeStorage()
+                with self._patched(_StreamAgentEndingOnATerminalResult, status):
+                    shown = _stream_shown(
+                        "what is partner", "u", "s", services=Services(conversations=storage)
+                    )
+                expected = service._terminal_reply(status, "en")
+                self.assertEqual(expected, shown)
+                self.assertEqual(expected, storage.messages[-1].content)
+
+    def test_the_sync_path_serves_the_profile_reply(self):
+        for status in self.STATUSES:
+            with self.subTest(status=status):
+                storage = FakeStorage()
+                with self._patched(_SyncAgentEndingOnATerminalResult, status):
+                    response = service.chat_with_agent(
+                        "what is partner", "u", "s", services=Services(conversations=storage)
+                    )
+                expected = service._terminal_reply(status, "en")
+                self.assertEqual(expected, response["response"])
+                self.assertEqual(expected, storage.messages[-1].content)
 
 
 if __name__ == "__main__":
