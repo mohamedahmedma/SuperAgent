@@ -18,6 +18,7 @@ from backend.chat.child_roster import (
     load_roster,
 )
 from backend.chat.request_context import ChatRequestContext
+from backend.composition import Services, set_default_services
 
 ROWS = [
     {"student_id": "S-1", "full_name_ar": "ليلى", "full_name_en": "Layla"},
@@ -100,16 +101,29 @@ class TestOutcomesStayDistinct:
 class TestCaching:
     @pytest.fixture(autouse=True)
     def spy_cache(self, monkeypatch):
+        """A cache that records what the roster writes.
+
+        Installed as the container's cache rather than patched onto the module: the
+        roster resolves one per call, which is what stopped a Redis client being built
+        the first time a turn was planned.
+        """
         writes = {}
         monkeypatch.setenv("CHILD_ROSTER_TTL_SECONDS", "90")
-        monkeypatch.setattr(child_roster.cache, "get_json", lambda key: writes.get(key))
-        monkeypatch.setattr(
-            child_roster.cache,
-            "set_json",
-            lambda key, value, ttl=None: writes.__setitem__(key, value),
-        )
-        monkeypatch.setattr(child_roster.cache, "delete", lambda key: writes.pop(key, None))
+
+        class SpyCache:
+            def get_json(self, key):
+                return writes.get(key)
+
+            def set_json(self, key, value, ttl=None):
+                writes[key] = value
+
+            def delete(self, key):
+                writes.pop(key, None)
+
+        set_default_services(Services(cache=SpyCache()))
         self.writes = writes
+        yield
+        set_default_services(None)
 
     def test_a_second_read_in_the_conversation_costs_nothing(self):
         probe = _fetch(OK, ROWS)

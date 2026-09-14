@@ -56,5 +56,3 @@ class RedisCache:
         except Exception:
             return
 
-
-cache = RedisCache()

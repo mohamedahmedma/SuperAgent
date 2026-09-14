@@ -42,16 +42,22 @@ class MergeBehaviourTests(unittest.TestCase):
     SELECTED by counting the merges reported."""
 
     def _merge(self, docs, **kwargs):
-        from unittest.mock import patch
+        from unittest.mock import MagicMock
+
+        from backend.composition import Services, set_default_services
 
         # Stand in for the Postgres parent lookup: every requested parent exists.
         def fake_parents(ids):
             return [{"chunk_id": pid, "text": f"parent {pid}", "chunk_level": 2,
                      "modality": "text", "asset_ids": []} for pid in ids]
 
-        with patch("backend.rag.utils._parent_chunk_store") as store:
-            store.get_documents_by_ids.side_effect = fake_parents
-            return _merge_to_parent_level(docs, **kwargs)
+        store = MagicMock()
+        store.get_documents_by_ids.side_effect = fake_parents
+        # The merge resolves its parent store from the process container, so that is
+        # where the stand-in goes.
+        set_default_services(Services(parent_chunks=store))
+        self.addCleanup(set_default_services, None)
+        return _merge_to_parent_level(docs, **kwargs)
 
     def test_text_siblings_still_merge_at_the_normal_threshold(self):
         docs = [chunk("c1", "p1"), chunk("c2", "p1")]

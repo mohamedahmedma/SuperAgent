@@ -149,9 +149,9 @@ class AssetPresenter:
     @property
     def blob_store(self):
         if self._blob_store is None:
-            from backend.assets.blobs import get_blob_store
+            from backend.composition import default_services
 
-            self._blob_store = get_blob_store()
+            self._blob_store = default_services().blob_store
         return self._blob_store
 
     def present(
@@ -223,21 +223,6 @@ class AssetPresenter:
             return None
         content_type = dossier.blob.content_type or "image/png"
         return f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
-
-
-_presenter: Optional[AssetPresenter] = None
-
-
-def get_asset_presenter() -> AssetPresenter:
-    global _presenter
-    if _presenter is None:
-        _presenter = AssetPresenter()
-    return _presenter
-
-
-def set_asset_presenter(presenter: Optional[AssetPresenter]) -> None:
-    global _presenter
-    _presenter = presenter
 
 
 def collect_asset_ids(chunks: Sequence[dict], limit: int = 32) -> List[str]:

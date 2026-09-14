@@ -10,8 +10,6 @@ from backend.assets.blobs import (
     LocalBlobStore,
     S3BlobStore,
     build_blob_store,
-    get_blob_store,
-    set_blob_store,
 )
 from backend.assets.dossier import (
     DOSSIER_VERSION,
@@ -38,8 +36,6 @@ from backend.assets.store import (
     AssetStore,
     BackfillReport,
     DeleteResult,
-    get_asset_store,
-    set_asset_store,
 )
 
 __all__ = [
@@ -68,9 +64,5 @@ __all__ = [
     "build_asset_id",
     "build_blob_store",
     "compute_sha256",
-    "get_asset_store",
-    "get_blob_store",
     "migrate_payload",
-    "set_asset_store",
-    "set_blob_store",
 ]

@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
+from backend.composition import Services
+
 service = importlib.import_module("backend.chat.service")
 
 
@@ -125,12 +127,13 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             return FakeStreamAgent(ctx, chunks=["direct answer"])
 
         with (
-            patch.object(service, "storage", fake_storage),
             patch.object(service, "create_agent_for_request", make_agent),
             patch.object(service, "generate_session_title", Mock(return_value="short question")),
             patch.object(service, "update_persistent_note", update_note),
         ):
-            chunks = await _collect_stream("Hello", "u", "s")
+            chunks = await _collect_stream(
+                "Hello", "u", "s", services=Services(conversations=fake_storage)
+            )
 
         events = _parse_sse_events(chunks)
         self.assertEqual("rag_step", events[0].get("type"))
@@ -173,12 +176,16 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             )
 
         with (
-            patch.object(service, "storage", fake_storage),
             patch.object(service, "create_agent_for_request", make_agent),
             patch.object(service, "generate_session_title", Mock(return_value="character question")),
             patch.object(service, "update_persistent_note", update_note),
         ):
-            chunks = await _collect_stream("What is this character's element?", "u", "s")
+            chunks = await _collect_stream(
+                "What is this character's element?",
+                "u",
+                "s",
+                services=Services(conversations=fake_storage),
+            )
 
         events = _parse_sse_events(chunks)
         self.assertFalse([event for event in events if event.get("type") == "content"])
@@ -235,13 +242,14 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         create_agent_mock = Mock(side_effect=AssertionError("agent should not be created on HITL resume"))
 
         with (
-            patch.object(service, "storage", fake_storage),
             patch.object(service, "create_agent_for_request", create_agent_mock),
             patch.object(service, "_resume_rag_from_hitl_sync", resume_mock),
             patch.object(service, "model", fake_model),
             patch.object(service, "update_persistent_note", AsyncMock(return_value="updated note")),
         ):
-            chunks = await _collect_stream("Danjin", "u", "s")
+            chunks = await _collect_stream(
+                "Danjin", "u", "s", services=Services(conversations=fake_storage)
+            )
 
         events = _parse_sse_events(chunks)
         self.assertEqual(["Danjin is the Imaginary element.[1]"], [

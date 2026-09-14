@@ -6,16 +6,12 @@ import json
 import requests
 from langsmith import traceable
 
-from backend.indexing.milvus_client import get_milvus_store
-from backend.indexing.embedding import embed_query, embedding_service as _embedding_service
+from backend.indexing.embedding import embed_query
 from backend.env import env_bool, env_float, env_int, env_value
-from backend.llm import sampling
-from backend.indexing.parent_chunk_store import ParentChunkStore
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
 from backend.text_matching import search_key
 from backend.text_normalization import normalize_query
-from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -35,9 +31,6 @@ def _optional_env(name: str) -> Optional[str]:
     return value
 
 
-ARK_API_KEY = os.getenv("ARK_API_KEY")
-FAST_MODEL = os.getenv("FAST_MODEL")
-BASE_URL = os.getenv("BASE_URL")
 
 # Retrieval tuning defaults come from the active domain profile; the environment
 # readers below still take precedence, so the effective order is
@@ -114,11 +107,30 @@ RETRIEVAL_TRACE_FIELDS = (
     "retrieval_empty",
 )
 
-# Initialize retrieval dependencies globally (shares embedding_service with the API to keep BM25 state consistent)
-_milvus_manager = get_milvus_store()
-_parent_chunk_store = ParentChunkStore()
+def _milvus():
+    """The vector store, from the process container.
 
-_rewrite_model = None
+    It used to be opened at import, so a process that only wanted
+    `language_filter_clause` connected to Milvus to get it. The container builds one on
+    first real use and shares it with ingest, which is what keeps the BM25 state and the
+    embedder consistent between the two.
+    """
+    from backend.composition import default_services
+
+    return default_services().milvus
+
+
+def _parent_chunks():
+    """The parent-chunk store, from the process container.
+
+    Resolved per call rather than held here: a module-level instance is built at import,
+    which is what step 4 removed. The container caches it, so this costs a dictionary
+    lookup.
+    """
+    from backend.composition import default_services
+
+    return default_services().parent_chunks
+
 
 
 def resolve_candidate_k(top_k: int) -> Tuple[int, Dict[str, Any]]:
@@ -224,7 +236,7 @@ def _merge_to_parent_level(
     if not merge_parent_ids:
         return docs, 0
 
-    parent_docs = _parent_chunk_store.get_documents_by_ids(merge_parent_ids)
+    parent_docs = _parent_chunks().get_documents_by_ids(merge_parent_ids)
     parent_map = {item.get("chunk_id", ""): item for item in parent_docs if item.get("chunk_id")}
 
     merged_docs: List[dict] = []
@@ -397,19 +409,14 @@ REWRITE_PROMPT = _PROFILE.rag.rewrite_prompt
 
 
 def _get_rewrite_model():
-    global _rewrite_model
-    if not ARK_API_KEY or not FAST_MODEL:
-        return None
-    if _rewrite_model is None:
-        _rewrite_model = init_chat_model(
-            model=FAST_MODEL,
-            model_provider="openai",
-            api_key=ARK_API_KEY,
-            base_url=BASE_URL,
-            stream_usage=True,
-            **sampling("rewrite"),
-        )
-    return _rewrite_model
+    """The query-planning model, or None when this deployment has not configured one.
+
+    A function rather than a direct container call at the one call site: it is the seam
+    the rewrite tests substitute.
+    """
+    from backend.composition import default_services
+
+    return default_services().models.rewriter()
 
 
 def rewrite_query_once(query: str) -> Optional[dict]:
@@ -509,8 +516,8 @@ def language_filter_clause(language: str) -> str:
     Excludes the redundant half of a PAIRED document — the one whose twin is in the
     language being asked in. Everything else stays eligible, so a document that exists
     in one language only still answers questions asked in the other. See
-    `pair_store.superseded_filenames` for why this is an exclusion and not a filter down
-    to the asked language.
+    `DocumentPairService.superseded_filenames` for why this is an exclusion and not a
+    filter down to the asked language.
 
     Returns "" whenever there is nothing to exclude, which is the common case and also
     every case before an admin has paired anything — so this costs an empty list lookup
@@ -519,12 +526,12 @@ def language_filter_clause(language: str) -> str:
     if not language:
         return ""
     try:
-        # Imported per call, not at module scope: this module is re-executed with
+        # Resolved per call, not at module scope: this module is re-executed with
         # `backend.indexing` stubbed by the retrieval symmetry tests, and a caller that
         # never routes should not pay for the database layer at import.
-        import backend.indexing.pair_store as pair_store
+        from backend.composition import default_services
 
-        superseded = pair_store.superseded_filenames(language)
+        superseded = default_services().document_pairs.superseded_filenames(language)
     except Exception:
         # A pairing lookup is an optimisation, not a gate. If the table cannot be read
         # the right outcome is to search the whole corpus and possibly answer from the
@@ -587,7 +594,7 @@ def retrieve_documents(
         }
 
     try:
-        retrieved = _milvus_manager.hybrid_retrieve(
+        retrieved = _milvus().hybrid_retrieve(
             dense_embedding=dense_embedding,
             # The SPARSE half only. `bm25_text` was folded and light-stemmed by
             # search_key on the way into the index, so the query has to be put through
@@ -609,7 +616,7 @@ def retrieve_documents(
         )
     except Exception:
         try:
-            retrieved = _milvus_manager.dense_retrieve(
+            retrieved = _milvus().dense_retrieve(
                 dense_embedding=dense_embedding,
                 top_k=candidate_k,
                 filter_expr=filter_expr,

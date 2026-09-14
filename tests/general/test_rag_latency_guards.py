@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.composition import Services, set_default_services
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,31 +35,41 @@ class FakeMilvusStore:
         }]
 
 
+class FakeParentChunks:
+    def get_documents_by_ids(self, chunk_ids):
+        return []
+
+
 def load_utils(env):
+    """Re-execute `backend/rag/utils.py` under `env`, with fake retrieval dependencies.
+
+    The module is re-executed rather than imported because it reads its rerank settings
+    from the environment AT IMPORT, and these tests are about what those settings do.
+
+    What it needs stubbed has shrunk. The module used to open a Milvus client and bind
+    the embedder at import, so both had to be in `sys.modules` before it ran; it now
+    resolves them from the process container per call, so they are simply named in a
+    `Services`. Only `embed_query` is still a module-level import, and that is what the
+    one remaining stub covers.
+    """
     embedding_service = FakeEmbeddingService()
     milvus_store = FakeMilvusStore()
 
     fake_indexing = types.ModuleType("backend.indexing")
     fake_indexing.__path__ = []
 
-    fake_milvus = types.ModuleType("backend.indexing.milvus_client")
-    fake_milvus.get_milvus_store = lambda: milvus_store
-
     fake_embedding = types.ModuleType("backend.indexing.embedding")
-    fake_embedding.embedding_service = embedding_service
     # Both the domain gate and retrieval ask for the query vector; the real module
     # memoizes so only one forward pass happens. The stub delegates so tests that
     # assert on what was embedded still see the call.
-    fake_embedding.embed_query = lambda text: fake_embedding.embedding_service.get_embeddings([text])[0]
+    fake_embedding.embed_query = lambda text: embedding_service.get_embeddings([text])[0]
     fake_embedding.reset_query_vector_cache = lambda: None
 
-    fake_parent_store = types.ModuleType("backend.indexing.parent_chunk_store")
-
-    class ParentChunkStore:
-        def get_documents_by_ids(self, chunk_ids):
-            return []
-
-    fake_parent_store.ParentChunkStore = ParentChunkStore
+    set_default_services(Services(
+        milvus=milvus_store,
+        embedder=embedding_service,
+        parent_chunks=FakeParentChunks(),
+    ))
 
     module_name = f"rag_utils_under_test_{id(embedding_service)}"
     spec = importlib.util.spec_from_file_location(
@@ -72,9 +84,7 @@ def load_utils(env):
             sys.modules,
             {
                 "backend.indexing": fake_indexing,
-                "backend.indexing.milvus_client": fake_milvus,
                 "backend.indexing.embedding": fake_embedding,
-                "backend.indexing.parent_chunk_store": fake_parent_store,
             },
         ),
     ):
@@ -84,6 +94,10 @@ def load_utils(env):
 
 
 class RagLatencyGuardTests(unittest.TestCase):
+    def tearDown(self):
+        # `load_utils` installs a container of fakes; give the process back its own.
+        set_default_services(None)
+
     def test_placeholder_rerank_settings_are_treated_as_disabled(self):
         utils, _ = load_utils({
             "RERANK_MODEL": "your_rerank_model",

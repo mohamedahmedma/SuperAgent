@@ -168,11 +168,11 @@ def build_asset_references(
     if not delivery_config.attach_to_response or not asset_ids:
         return []
     try:
-        from backend.assets.delivery import get_asset_presenter
-        from backend.assets.store import get_asset_store
+        from backend.composition import default_services
 
-        dossiers = get_asset_store().get_many(asset_ids[: capabilities.max_assets])
-        return get_asset_presenter().present_many(dossiers, capabilities)
+        services = default_services()
+        dossiers = services.asset_store.get_many(asset_ids[: capabilities.max_assets])
+        return services.asset_presenter.present_many(dossiers, capabilities)
     except Exception:
         logger.exception("Failed to build asset references for %d asset(s)", len(asset_ids))
         return []

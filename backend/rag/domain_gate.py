@@ -146,8 +146,10 @@ def milvus_reference_provider(level: Optional[int] = None, section_field: str = 
     scoring, and `best_matches` keeps only the strongest leaf per section, so a section
     with many leaves does not out-vote a focused one.
     """
-    from backend.api.resources import milvus_manager
+    from backend.composition import default_services
     from backend.rag.utils import LEAF_RETRIEVE_LEVEL
+
+    milvus_manager = default_services().milvus
 
     effective_level = LEAF_RETRIEVE_LEVEL if level is None else level
     rows = milvus_manager.query_all(

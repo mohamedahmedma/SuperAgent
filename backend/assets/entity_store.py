@@ -13,16 +13,17 @@ at ingest, and query time only narrows.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from backend.application.ports.repositories import EntityAttributeRecord
+from backend.application.ports.unit_of_work import UnitOfWorkFactory
 from backend.assets.attributes import AttributeSchema, AttributeSpec, AttributeType, NumberRange
+from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 
 logger = logging.getLogger(__name__)
 
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+#: Which typed column an attribute type's values live in.
+_VALUE_KIND = {AttributeType.NUMBER: "number", AttributeType.BOOLEAN: "boolean"}
 
 
 def _value_key(value: Any) -> str:
@@ -30,32 +31,20 @@ def _value_key(value: Any) -> str:
 
 
 class EntityAttributeIndex:
-    """Repository over the entity_attributes table."""
+    """The attribute index over entity assets, reached through a unit of work."""
 
-    def __init__(self, session_factory: Optional[Callable] = None):
-        self._session_factory = session_factory
-
-    @property
-    def session_factory(self) -> Callable:
-        if self._session_factory is None:
-            from backend.infra.database import SessionLocal
-
-            self._session_factory = SessionLocal
-        return self._session_factory
-
-    @staticmethod
-    def _model():
-        from backend.db.models import EntityAttribute
-
-        return EntityAttribute
+    def __init__(self, unit_of_work: UnitOfWorkFactory = SqlAlchemyUnitOfWork):
+        self._unit_of_work = unit_of_work
 
     # -- writing ----------------------------------------------------------------
 
     @staticmethod
-    def _rows_for(asset_id: str, profile: str, attributes: Dict[str, Any], schema: AttributeSchema):
+    def _rows_for(
+        asset_id: str, profile: str, attributes: Dict[str, Any], schema: AttributeSchema
+    ) -> List[EntityAttributeRecord]:
         """Flatten an attribute dict into index rows — one per value, so a
         multi-valued attribute is genuinely queryable on each of its values."""
-        rows: List[dict] = []
+        rows: List[EntityAttributeRecord] = []
         for name, value in (attributes or {}).items():
             spec = schema.get(name)
             if spec is None or value is None:
@@ -64,22 +53,18 @@ class EntityAttributeIndex:
             for item in values:
                 if item is None:
                     continue
-                row = {
-                    "asset_id": asset_id,
-                    "profile": profile,
-                    "name": name,
-                    "value_key": _value_key(item),
-                    "value_text": None,
-                    "value_number": None,
-                    "value_bool": None,
-                }
+                typed: Dict[str, Any] = {}
                 if spec.type is AttributeType.NUMBER:
-                    row["value_number"] = float(item)
+                    typed["value_number"] = float(item)
                 elif spec.type is AttributeType.BOOLEAN:
-                    row["value_bool"] = bool(item)
+                    typed["value_bool"] = bool(item)
                 else:
-                    row["value_text"] = str(item)[:255]
-                rows.append(row)
+                    typed["value_text"] = str(item)[:255]
+                rows.append(
+                    EntityAttributeRecord(
+                        asset_id=asset_id, profile=profile, name=name, value_key=_value_key(item), **typed
+                    )
+                )
         return rows
 
     def index_asset(
@@ -94,19 +79,10 @@ class EntityAttributeIndex:
         index too instead of lingering as a stale facet."""
         if not asset_id:
             return 0
-        EntityAttribute = self._model()
         rows = self._rows_for(asset_id, profile, attributes, schema)
-
-        session = self.session_factory()
-        try:
-            session.query(EntityAttribute).filter(EntityAttribute.asset_id == asset_id).delete(
-                synchronize_session=False
-            )
-            for row in rows:
-                session.add(EntityAttribute(updated_at=_utcnow(), **row))
-            session.commit()
-        finally:
-            session.close()
+        with self._unit_of_work() as uow:
+            uow.entity_attributes.replace_for_asset(asset_id, rows)
+            uow.commit()
         return len(rows)
 
     def index_many(self, items: Sequence[tuple], schema: AttributeSchema) -> int:
@@ -120,18 +96,10 @@ class EntityAttributeIndex:
         ids = [item for item in asset_ids if item]
         if not ids:
             return 0
-        EntityAttribute = self._model()
-        session = self.session_factory()
-        try:
-            deleted = (
-                session.query(EntityAttribute)
-                .filter(EntityAttribute.asset_id.in_(ids))
-                .delete(synchronize_session=False)
-            )
-            session.commit()
-            return int(deleted or 0)
-        finally:
-            session.close()
+        with self._unit_of_work() as uow:
+            deleted = uow.entity_attributes.delete_for_assets(ids)
+            uow.commit()
+        return deleted
 
     # -- querying ---------------------------------------------------------------
 
@@ -142,33 +110,23 @@ class EntityAttributeIndex:
         profile: Optional[str],
         restrict_to: Optional[Sequence[str]],
     ) -> set:
-        EntityAttribute = self._model()
-        session = self.session_factory()
-        try:
-            query = session.query(EntityAttribute.asset_id).filter(EntityAttribute.name == spec.name)
-            if profile:
-                query = query.filter(EntityAttribute.profile == profile)
-            if restrict_to is not None:
-                query = query.filter(EntityAttribute.asset_id.in_(list(restrict_to)))
+        criteria: Dict[str, Any] = {}
+        if spec.type is AttributeType.NUMBER:
+            bounds = condition if isinstance(condition, NumberRange) else NumberRange.model_validate(condition)
+            criteria.update(minimum=bounds.min, maximum=bounds.max)
+        elif spec.type is AttributeType.BOOLEAN:
+            criteria["boolean"] = bool(condition)
+        else:
+            wanted = condition if isinstance(condition, (list, tuple, set)) else [condition]
+            keys = [_value_key(item) for item in wanted if item is not None]
+            if not keys:
+                return set()
+            criteria["keys"] = keys
 
-            if spec.type is AttributeType.NUMBER:
-                bounds = condition if isinstance(condition, NumberRange) else NumberRange.model_validate(condition)
-                if bounds.min is not None:
-                    query = query.filter(EntityAttribute.value_number >= bounds.min)
-                if bounds.max is not None:
-                    query = query.filter(EntityAttribute.value_number <= bounds.max)
-            elif spec.type is AttributeType.BOOLEAN:
-                query = query.filter(EntityAttribute.value_bool == bool(condition))
-            else:
-                wanted = condition if isinstance(condition, (list, tuple, set)) else [condition]
-                keys = [_value_key(item) for item in wanted if item is not None]
-                if not keys:
-                    return set()
-                query = query.filter(EntityAttribute.value_key.in_(keys))
-
-            return {row[0] for row in query.distinct().all()}
-        finally:
-            session.close()
+        with self._unit_of_work() as uow:
+            return uow.entity_attributes.matching_asset_ids(
+                spec.name, profile=profile, restrict_to=restrict_to, **criteria
+            )
 
     def find(
         self,
@@ -228,59 +186,15 @@ class EntityAttributeIndex:
         spec = schema.get(name)
         if spec is None:
             return []
-        from sqlalchemy import func
-
-        EntityAttribute = self._model()
-        column = {
-            AttributeType.NUMBER: EntityAttribute.value_number,
-            AttributeType.BOOLEAN: EntityAttribute.value_bool,
-        }.get(spec.type, EntityAttribute.value_text)
-
-        session = self.session_factory()
-        try:
-            query = (
-                session.query(column, func.count(EntityAttribute.asset_id))
-                .filter(EntityAttribute.name == name)
-                .group_by(column)
-                .order_by(func.count(EntityAttribute.asset_id).desc())
+        with self._unit_of_work() as uow:
+            return uow.entity_attributes.facet_counts(
+                name,
+                kind=_VALUE_KIND.get(spec.type, "text"),
+                profile=profile,
+                restrict_to=restrict_to,
+                limit=limit,
             )
-            if profile:
-                query = query.filter(EntityAttribute.profile == profile)
-            if restrict_to is not None:
-                query = query.filter(EntityAttribute.asset_id.in_(list(restrict_to)))
-            return [(value, int(count)) for value, count in query.limit(limit).all() if value is not None]
-        finally:
-            session.close()
 
     def stats(self) -> dict:
-        from sqlalchemy import func
-
-        EntityAttribute = self._model()
-        session = self.session_factory()
-        try:
-            total = session.query(EntityAttribute).count()
-            assets = session.query(EntityAttribute.asset_id).distinct().count()
-            by_name = {
-                name: int(count)
-                for name, count in session.query(
-                    EntityAttribute.name, func.count(EntityAttribute.id)
-                ).group_by(EntityAttribute.name).all()
-            }
-        finally:
-            session.close()
-        return {"rows": total, "indexed_assets": assets, "by_attribute": by_name}
-
-
-_index: Optional[EntityAttributeIndex] = None
-
-
-def get_entity_index() -> EntityAttributeIndex:
-    global _index
-    if _index is None:
-        _index = EntityAttributeIndex()
-    return _index
-
-
-def set_entity_index(index: Optional[EntityAttributeIndex]) -> None:
-    global _index
-    _index = index
+        with self._unit_of_work() as uow:
+            return uow.entity_attributes.stats()

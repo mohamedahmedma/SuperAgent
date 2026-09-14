@@ -34,43 +34,58 @@ from backend.rag.evidence import AssessmentContext, Certainty, ChunkAssessment, 
 
 logger = logging.getLogger(__name__)
 
-_model = None
-_model_lock = threading.Lock()
-_model_failed = False
+class CrossEncoderProvider:
+    """The cross-encoder, loaded once per process — including its failure.
+
+    A missing dependency or an absent model must not be retried on every request: the
+    ladder has a rung above this one that still works, and re-attempting a failed import
+    per turn would pay the cost of the failure over and over.
+    """
+
+    def __init__(self) -> None:
+        self._model = None
+        self._failed = False
+        self._lock = threading.Lock()
+
+    def model(self, model_name: str, device: str):
+        """The loaded cross-encoder, or None if it is unavailable here."""
+        if self._model is not None or self._failed:
+            return self._model
+        with self._lock:
+            if self._model is not None or self._failed:
+                return self._model
+            try:
+                from sentence_transformers import CrossEncoder
+
+                self._model = CrossEncoder(model_name, device=device)
+                logger.info("cross-encoder reranker loaded: %s on %s", model_name, device)
+            except Exception:
+                logger.warning(
+                    "cross-encoder %s unavailable; the ladder will fall through to the LLM grader",
+                    model_name, exc_info=True,
+                )
+                self._failed = True
+        return self._model
+
+    def reset(self) -> None:
+        """Forget the model and the failure, so the next caller loads again."""
+        with self._lock:
+            self._model = None
+            self._failed = False
+
+
+#: One per process. Not in the container: this is retrieval's own detail, it takes no
+#: collaborators, and nothing outside this module has ever asked for it.
+_provider = CrossEncoderProvider()
 
 
 def _load_model(model_name: str, device: str):
-    """Load the cross-encoder once per process.
-
-    Failure is cached: a missing dependency or an absent model must not be retried on
-    every request, and the ladder has a rung above this one that still works.
-    """
-    global _model, _model_failed
-    if _model is not None or _model_failed:
-        return _model
-    with _model_lock:
-        if _model is not None or _model_failed:
-            return _model
-        try:
-            from sentence_transformers import CrossEncoder
-
-            _model = CrossEncoder(model_name, device=device)
-            logger.info("cross-encoder reranker loaded: %s on %s", model_name, device)
-        except Exception:
-            logger.warning(
-                "cross-encoder %s unavailable; the ladder will fall through to the LLM grader",
-                model_name, exc_info=True,
-            )
-            _model_failed = True
-    return _model
+    return _provider.model(model_name, device)
 
 
 def reset_model_cache() -> None:
     """For tests, and for switching models without a restart."""
-    global _model, _model_failed
-    with _model_lock:
-        _model = None
-        _model_failed = False
+    _provider.reset()
 
 
 def score_pairs(question: str, texts: Sequence[str], config) -> Optional[List[float]]:

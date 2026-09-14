@@ -4,8 +4,10 @@ import re
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
+from backend.api.deps import get_services
 from backend.chat import chat_with_agent, chat_with_agent_stream
 from backend.chat.caller_identity import CallerIdentity
+from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
 from backend.schemas import ChatRequest, ChatResponse
 
@@ -17,7 +19,8 @@ THREAD_HEADER = "X-Thread-ID"
 # is survivable only because storage keys on (user_id, session_id) — see `_thread_id`.
 DEFAULT_THREAD = "default_session"
 # Long enough for a UUID and then some; short enough that the storage column
-# (String(120), backend/db/models.py:38) cannot be overrun by a header.
+# (`ChatSession.session_id`, String(120), in backend/db/models/conversations.py) cannot be
+# overrun by a header.
 _MAX_THREAD_ID = 120
 _THREAD_ID_SAFE = re.compile(r"[^A-Za-z0-9._:-]")
 
@@ -59,6 +62,7 @@ def chat_endpoint(
     request: ChatRequest,
     current_user: AuthenticatedUser = Depends(get_current_user),
     x_thread_id: str | None = Header(default=None, alias=THREAD_HEADER),
+    services: Services = Depends(get_services),
 ):
     try:
         session_id = _thread_id(x_thread_id, request.session_id)
@@ -71,6 +75,7 @@ def chat_endpoint(
             # signature has been verified — and nowhere else. Everything downstream
             # receives it and cannot change it.
             caller=CallerIdentity.from_principal(current_user),
+            services=services,
         )
         if isinstance(resp, dict):
             return ChatResponse(**resp)
@@ -100,6 +105,7 @@ async def chat_stream_endpoint(
     request: ChatRequest,
     current_user: AuthenticatedUser = Depends(get_current_user),
     x_thread_id: str | None = Header(default=None, alias=THREAD_HEADER),
+    services: Services = Depends(get_services),
 ):
     # Built once, outside the generator. The generator body runs after the response has
     # started, by which point the dependency-injected principal is no longer something
@@ -120,6 +126,7 @@ async def chat_stream_endpoint(
                 session_id,
                 client_capabilities=request.client_capabilities,
                 caller=caller,
+                services=services,
             ):
                 yield chunk
         except Exception as e:

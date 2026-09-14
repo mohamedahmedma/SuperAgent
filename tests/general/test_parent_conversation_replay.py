@@ -43,6 +43,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
 import backend.chat.runtime as runtime
+from backend.composition import Services
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.child_roster import _as_options
 from backend.chat.orchestrator import plan_turn as _real_plan_turn
@@ -529,7 +530,13 @@ class _Replay:
         self.current = Observed(says=says)
         caller = CallerIdentity(user_id=USER, guardian_id=GUARDIAN, guardian_token=TOKEN)
         chunks = []
-        async for chunk in service.chat_with_agent_stream(says, USER, SESSION, caller=caller):
+        async for chunk in service.chat_with_agent_stream(
+            says,
+            USER,
+            SESSION,
+            caller=caller,
+            services=Services(conversations=self.storage),
+        ):
             chunks.append(chunk)
         observed = self.current
         for chunk in chunks:
@@ -566,7 +573,6 @@ class _Replay:
             patch("requests.get", self.facade),
             patch.object(service, "_PROFILE", self.profile),
             patch.object(service, "_COPY", self.profile.user_copy),
-            patch.object(service, "storage", self.storage),
             patch.object(service, "plan_turn", self._plan),
             patch.object(service, "create_agent_for_request", self._agent),
             patch.object(service, "generate_session_title", Mock(return_value="جدول بنتي")),

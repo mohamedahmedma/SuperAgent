@@ -45,7 +45,6 @@ from urllib.parse import quote
 import requests
 
 from backend.env import records_api_key, records_base_url
-from backend.infra.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +114,17 @@ def _ttl() -> int:
         return int(os.getenv("CHILD_ROSTER_TTL_SECONDS") or ROSTER_TTL_SECONDS)
     except ValueError:
         return ROSTER_TTL_SECONDS
+
+
+def _cache():
+    """The shared cache, from the process container.
+
+    Resolved per call rather than bound at import: this module is imported by the turn
+    planner, and a module-level instance is built whenever that first happens.
+    """
+    from backend.composition import default_services
+
+    return default_services().cache
 
 
 def _cache_key(guardian_id: str) -> str:
@@ -259,7 +269,7 @@ def load_roster(
     ttl = _ttl()
     key = _cache_key(guardian_id)
     if ttl > 0:
-        cached = cache.get_json(key)
+        cached = _cache().get_json(key)
         if isinstance(cached, list) and cached:
             return OK, _as_options(cached)
 
@@ -270,7 +280,7 @@ def load_roster(
     # three-second blip into ninety seconds of a parent being told nothing is there,
     # and caching an empty list would do the same for any future 200-with-[].
     if ttl > 0 and outcome == OK and rows:
-        cache.set_json(key, rows, ttl=ttl)
+        _cache().set_json(key, rows, ttl=ttl)
     if outcome == OK and not rows:
         outcome = NONE
     if outcome == UNAVAILABLE:
@@ -384,7 +394,7 @@ def forget(ctx) -> None:
     """
     guardian_id = getattr(ctx, "guardian_id", "") or ""
     if guardian_id:
-        cache.delete(_cache_key(guardian_id))
+        _cache().delete(_cache_key(guardian_id))
 
 
 __all__ = [

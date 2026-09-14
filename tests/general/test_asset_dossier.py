@@ -265,13 +265,16 @@ class AssetStoreTestCase(unittest.TestCase):
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        self.session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
+        schema = postgres_schema(self, DocumentAsset, AssetExtraction)
+        # A raw session as well, for the tests that plant rows the store would never write.
+        self.session_factory = schema.sessionmaker()
+        self.unit_of_work = schema.unit_of_work
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
         # cache_enabled=False keeps Redis out of the unit tests entirely.
         self.store = AssetStore(
-            session_factory=self.session_factory,
+            unit_of_work=self.unit_of_work,
             blob_store=self.blobs,
             cache_enabled=False,
         )
@@ -553,7 +556,7 @@ class CachedStoreTests(AssetStoreTestCase):
         super().setUp()
         self.fake_cache = FakeCache()
         self.store = AssetStore(
-            session_factory=self.session_factory,
+            unit_of_work=self.unit_of_work,
             blob_store=self.blobs,
             cache=self.fake_cache,
         )
@@ -564,7 +567,7 @@ class CachedStoreTests(AssetStoreTestCase):
 
     def test_get_is_served_from_cache_without_touching_the_database(self):
         self.store.record(make_dossier())
-        with patch.object(self.store, "_models", side_effect=AssertionError("hit the database")):
+        with patch.object(self.store, "_unit_of_work", side_effect=AssertionError("hit the database")):
             loaded = self.store.get("doc.pdf::p1::img0")
         self.assertEqual("Grade 5 fee schedule", loaded.extraction.text.caption)
 

@@ -1,22 +1,20 @@
 """AssetStore: persistence for asset occurrences and the global extraction cache.
 
-Mirrors the ParentChunkStore pattern (Postgres for durability, Redis for hot reads)
-and adds the one thing image ingest cannot do without — a content-addressed extraction
-cache, so the expensive half of ingest is paid per distinct image rather than per
-occurrence.
+Mirrors ParentChunkStore (Postgres for durability, Redis for hot reads) and adds the one
+thing image ingest cannot do without — a content-addressed extraction cache, so the
+expensive half of ingest is paid per distinct image rather than per occurrence.
 
-The session factory and blob store are injected rather than imported, so tests run the
-whole repository against a throwaway Postgres schema and a temporary blob directory.
+The database is reached through a unit of work, and the blob store and cache are injected
+too, so tests run the whole store against a throwaway Postgres schema and a temporary
+blob directory.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Set
 
-from sqlalchemy import func
-
+from backend.application.ports.unit_of_work import UnitOfWorkFactory
 from backend.assets.dossier import (
     DOSSIER_VERSION,
     AssetDossier,
@@ -26,14 +24,9 @@ from backend.assets.dossier import (
     ExtractionStatus,
     migrate_payload,
 )
+from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> datetime:
-    """Naive UTC, matching the timezone-less DateTime columns these rows write to.
-    `datetime.utcnow()` would do the same but is deprecated."""
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 @dataclass
@@ -64,80 +57,41 @@ class BackfillReport:
 class AssetStore:
     def __init__(
         self,
-        session_factory: Optional[Callable] = None,
+        unit_of_work: UnitOfWorkFactory = SqlAlchemyUnitOfWork,
         blob_store=None,
         cache=None,
         cache_enabled: bool = True,
     ):
-        self._session_factory = session_factory
+        self._unit_of_work = unit_of_work
         self._blob_store = blob_store
         self._cache = cache
         self._cache_enabled = cache_enabled
 
     # -- lazily resolved collaborators -----------------------------------------
-    # Imported on first use so that constructing an AssetStore (which happens at
-    # module import in api/resources.py) never opens a database connection or
-    # instantiates a blob backend as a side effect.
-
-    @property
-    def session_factory(self) -> Callable:
-        if self._session_factory is None:
-            from backend.infra.database import SessionLocal
-
-            self._session_factory = SessionLocal
-        return self._session_factory
+    # Resolved on first use so that constructing an AssetStore never instantiates a blob
+    # backend or a Redis client as a side effect.
 
     @property
     def blob_store(self):
         if self._blob_store is None:
-            from backend.assets.blobs import get_blob_store
+            from backend.composition import default_services
 
-            self._blob_store = get_blob_store()
+            self._blob_store = default_services().blob_store
         return self._blob_store
 
     @property
     def cache(self):
         if self._cache is None and self._cache_enabled:
-            from backend.infra.cache import cache
+            from backend.composition import default_services
 
-            self._cache = cache
+            self._cache = default_services().cache
         return self._cache
-
-    @staticmethod
-    def _models():
-        from backend.db.models import AssetExtraction, DocumentAsset
-
-        return DocumentAsset, AssetExtraction
 
     @staticmethod
     def _cache_key(asset_id: str) -> str:
         return f"asset:{asset_id}"
 
     # -- occurrences ------------------------------------------------------------
-
-    @staticmethod
-    def _to_row_values(dossier: AssetDossier) -> dict:
-        return {
-            "sha256": dossier.sha256,
-            "profile": dossier.profile,
-            "dossier_version": dossier.dossier_version,
-            "filename": dossier.source.filename,
-            "page_number": int(dossier.source.page_number or 0),
-            "role": dossier.role.value,
-            "tier": dossier.tier.value,
-            "status": dossier.status.value,
-            "storage_uri": dossier.blob.uri,
-            "content_type": dossier.blob.content_type,
-            "byte_size": int(dossier.blob.byte_size or 0),
-            "width": int(dossier.blob.width or 0),
-            "height": int(dossier.blob.height or 0),
-            "dossier": dossier.model_dump(mode="json"),
-            "updated_at": _utcnow(),
-        }
-
-    @staticmethod
-    def _from_row(row) -> AssetDossier:
-        return AssetDossier.model_validate(row.dossier)
 
     def record_many(self, dossiers: Sequence[AssetDossier]) -> int:
         """Upsert asset occurrences. Idempotent on asset_id, so re-ingesting a document
@@ -146,34 +100,16 @@ class AssetStore:
         if not items:
             return 0
 
-        DocumentAsset, _ = self._models()
-        session = self.session_factory()
-        written = 0
-        try:
-            existing = {
-                row.asset_id: row
-                for row in session.query(DocumentAsset)
-                .filter(DocumentAsset.asset_id.in_([d.asset_id for d in items]))
-                .all()
-            }
-            for dossier in items:
-                dossier.touch()
-                values = self._to_row_values(dossier)
-                row = existing.get(dossier.asset_id)
-                if row is not None:
-                    for key, value in values.items():
-                        setattr(row, key, value)
-                else:
-                    session.add(DocumentAsset(asset_id=dossier.asset_id, **values))
-                written += 1
-            session.commit()
-        finally:
-            session.close()
+        for dossier in items:
+            dossier.touch()
+        with self._unit_of_work() as uow:
+            uow.document_assets.upsert_many(items)
+            uow.commit()
 
         if self.cache is not None:
             for dossier in items:
                 self.cache.set_json(self._cache_key(dossier.asset_id), dossier.model_dump(mode="json"))
-        return written
+        return len(items)
 
     def record(self, dossier: AssetDossier) -> AssetDossier:
         self.record_many([dossier])
@@ -194,15 +130,10 @@ class AssetStore:
                     # a read; fall through to the database, which is authoritative.
                     logger.warning("Discarding unreadable cached dossier for %s", key)
 
-        DocumentAsset, _ = self._models()
-        session = self.session_factory()
-        try:
-            row = session.query(DocumentAsset).filter(DocumentAsset.asset_id == key).first()
-            if row is None:
-                return None
-            dossier = self._from_row(row)
-        finally:
-            session.close()
+        with self._unit_of_work() as uow:
+            dossier = uow.document_assets.get(key)
+        if dossier is None:
+            return None
 
         if self.cache is not None:
             self.cache.set_json(self._cache_key(key), dossier.model_dump(mode="json"))
@@ -212,20 +143,15 @@ class AssetStore:
         ids = [item.strip() for item in asset_ids if item and item.strip()]
         if not ids:
             return []
-        DocumentAsset, _ = self._models()
-        session = self.session_factory()
-        try:
-            rows = session.query(DocumentAsset).filter(DocumentAsset.asset_id.in_(ids)).all()
-            found = {row.asset_id: self._from_row(row) for row in rows}
-        finally:
-            session.close()
+        with self._unit_of_work() as uow:
+            found = {dossier.asset_id: dossier for dossier in uow.document_assets.get_many(ids)}
         return [found[item] for item in ids if item in found]
 
     def displayable_hashes_by_filename(self, filenames) -> Dict[str, Set[str]]:
         """Content hashes of the images each of `filenames` can actually SHOW.
 
         Two scalar columns, no dossiers: this runs on the retrieval path (see
-        `pair_store.superseded_filenames`, which uses it to avoid excluding a
+        `DocumentPairService.superseded_filenames`, which uses it to avoid excluding a
         translation that is the only side carrying a picture), so it must stay one
         indexed query and must not pay to rebuild an AssetDossier per row.
 
@@ -240,16 +166,8 @@ class AssetStore:
         names = [name for name in (filenames or []) if name]
         if not names:
             return {}
-        DocumentAsset, _ = self._models()
-        session = self.session_factory()
-        try:
-            rows = (
-                session.query(DocumentAsset.filename, DocumentAsset.sha256)
-                .filter(DocumentAsset.filename.in_(names), DocumentAsset.storage_uri != "")
-                .all()
-            )
-        finally:
-            session.close()
+        with self._unit_of_work() as uow:
+            rows = uow.document_assets.displayable_hashes(names)
         hashes: Dict[str, Set[str]] = {name: set() for name in names}
         for filename, sha256 in rows:
             if sha256:
@@ -259,16 +177,8 @@ class AssetStore:
     def list_by_filename(self, filename: str, indexable_only: bool = False) -> List[AssetDossier]:
         if not filename:
             return []
-        DocumentAsset, _ = self._models()
-        session = self.session_factory()
-        try:
-            query = session.query(DocumentAsset).filter(DocumentAsset.filename == filename)
-            if indexable_only:
-                query = query.filter(DocumentAsset.status == ExtractionStatus.EXTRACTED.value)
-            rows = query.order_by(DocumentAsset.page_number, DocumentAsset.asset_id).all()
-            dossiers = [self._from_row(row) for row in rows]
-        finally:
-            session.close()
+        with self._unit_of_work() as uow:
+            dossiers = list(uow.document_assets.list_by_filename(filename, extracted_only=indexable_only))
         return [d for d in dossiers if d.is_indexable] if indexable_only else dossiers
 
     # -- extraction cache -------------------------------------------------------
@@ -282,27 +192,7 @@ class AssetStore:
         """The cache lookup that makes repeat images free. Called before any model."""
         if not sha256:
             return None
-        _, AssetExtraction = self._models()
-        session = self.session_factory()
-        try:
-            row = (
-                session.query(AssetExtraction)
-                .filter(
-                    AssetExtraction.sha256 == sha256,
-                    AssetExtraction.profile == profile,
-                    AssetExtraction.dossier_version == dossier_version,
-                )
-                .first()
-            )
-            if row is None:
-                return None
-            try:
-                return ExtractionPayload.model_validate(row.payload)
-            except Exception:
-                logger.exception("Corrupt extraction payload for sha256=%s — ignoring cache", sha256)
-                return None
-        finally:
-            session.close()
+        return self.find_extractions([sha256], profile, dossier_version).get(sha256)
 
     def find_extractions(
         self,
@@ -319,35 +209,23 @@ class AssetStore:
 
         Digests missing from the result simply have no cache entry; the caller reads this
         as a dict and falls through exactly as it did on a `None`. Corrupt payloads are
-        dropped individually rather than failing the batch, matching `find_extraction`:
-        one unreadable row must not send a whole document back through vision.
+        dropped individually rather than failing the batch: one unreadable row must not
+        send a whole document back through vision.
         """
         keys = {item for item in digests if item}
         if not keys:
             return {}
-        _, AssetExtraction = self._models()
-        session = self.session_factory()
-        try:
-            rows = (
-                session.query(AssetExtraction)
-                .filter(
-                    AssetExtraction.sha256.in_(keys),
-                    AssetExtraction.profile == profile,
-                    AssetExtraction.dossier_version == dossier_version,
+        with self._unit_of_work() as uow:
+            stored = uow.asset_extractions.find_many(keys, profile, dossier_version)
+        found: Dict[str, ExtractionPayload] = {}
+        for extraction in stored:
+            try:
+                found[extraction.sha256] = ExtractionPayload.model_validate(extraction.payload)
+            except Exception:
+                logger.exception(
+                    "Corrupt extraction payload for sha256=%s — ignoring cache", extraction.sha256
                 )
-                .all()
-            )
-            found: Dict[str, ExtractionPayload] = {}
-            for row in rows:
-                try:
-                    found[row.sha256] = ExtractionPayload.model_validate(row.payload)
-                except Exception:
-                    logger.exception(
-                        "Corrupt extraction payload for sha256=%s — ignoring cache", row.sha256
-                    )
-            return found
-        finally:
-            session.close()
+        return found
 
     def save_extraction(
         self,
@@ -358,40 +236,17 @@ class AssetStore:
     ) -> None:
         if not sha256:
             return
-        _, AssetExtraction = self._models()
-        session = self.session_factory()
-        try:
-            row = (
-                session.query(AssetExtraction)
-                .filter(
-                    AssetExtraction.sha256 == sha256,
-                    AssetExtraction.profile == profile,
-                    AssetExtraction.dossier_version == dossier_version,
-                )
-                .first()
+        with self._unit_of_work() as uow:
+            uow.asset_extractions.save(
+                sha256,
+                profile,
+                dossier_version,
+                payload.model_dump(mode="json"),
+                model_used=payload.provenance.model_used,
+                confidence=float(payload.provenance.confidence or 0.0),
+                needs_review=bool(payload.provenance.needs_review),
             )
-            values = {
-                "payload": payload.model_dump(mode="json"),
-                "model_used": payload.provenance.model_used,
-                "confidence": float(payload.provenance.confidence or 0.0),
-                "needs_review": bool(payload.provenance.needs_review),
-                "updated_at": _utcnow(),
-            }
-            if row is not None:
-                for key, value in values.items():
-                    setattr(row, key, value)
-            else:
-                session.add(
-                    AssetExtraction(
-                        sha256=sha256,
-                        profile=profile,
-                        dossier_version=dossier_version,
-                        **values,
-                    )
-                )
-            session.commit()
-        finally:
-            session.close()
+            uow.commit()
 
     def attach_cached_extraction(self, dossier: AssetDossier) -> bool:
         """Populate a pending dossier from the cache. True when the caller can skip
@@ -419,31 +274,16 @@ class AssetStore:
         if not filename:
             return result
 
-        DocumentAsset, _ = self._models()
-        session = self.session_factory()
-        try:
-            rows = session.query(DocumentAsset).filter(DocumentAsset.filename == filename).all()
-            if not rows:
+        with self._unit_of_work() as uow:
+            removed = uow.document_assets.delete_by_filename(filename)
+            if not removed:
                 return result
+            uow.commit()
+            digests = {ref.sha256: ref.storage_uri for ref in removed if ref.sha256}
+            still_referenced = uow.document_assets.referenced_digests(digests) if digests else set()
 
-            asset_ids = [row.asset_id for row in rows]
-            digests = {row.sha256: row.storage_uri for row in rows if row.sha256}
-
-            session.query(DocumentAsset).filter(DocumentAsset.filename == filename).delete(
-                synchronize_session=False
-            )
-            session.commit()
-            result.assets_deleted = len(asset_ids)
-
-            still_referenced = {
-                row.sha256
-                for row in session.query(DocumentAsset.sha256)
-                .filter(DocumentAsset.sha256.in_(list(digests)))
-                .distinct()
-                .all()
-            } if digests else set()
-        finally:
-            session.close()
+        asset_ids = [ref.asset_id for ref in removed]
+        result.assets_deleted = len(asset_ids)
 
         if self.cache is not None:
             for asset_id in asset_ids:
@@ -452,9 +292,9 @@ class AssetStore:
         # The attribute index is derived from these assets; leaving rows behind would
         # let a deleted product keep matching catalogue filters.
         try:
-            from backend.assets.entity_store import get_entity_index
+            from backend.composition import default_services
 
-            get_entity_index().delete_assets(asset_ids)
+            default_services().entity_index.delete_assets(asset_ids)
         except Exception:
             logger.exception("Failed to clear the attribute index for %s", filename)
 
@@ -485,29 +325,18 @@ class AssetStore:
         """Yield batches of occurrences older than `target_version`.
 
         Keyset pagination on asset_id rather than OFFSET: the backfill mutates the rows
-        it scans, and OFFSET over a shifting result set silently skips records.
+        it scans, and OFFSET over a shifting result set silently skips records. Each
+        batch is its own short transaction, so a long backfill never holds one open.
         """
-        DocumentAsset, _ = self._models()
         cursor = ""
         while True:
-            session = self.session_factory()
-            try:
-                rows = (
-                    session.query(DocumentAsset)
-                    .filter(
-                        DocumentAsset.dossier_version < target_version,
-                        DocumentAsset.asset_id > cursor,
-                    )
-                    .order_by(DocumentAsset.asset_id)
-                    .limit(batch_size)
-                    .all()
+            with self._unit_of_work() as uow:
+                batch = list(
+                    uow.document_assets.older_than(target_version, after_asset_id=cursor, limit=batch_size)
                 )
-                if not rows:
-                    return
-                cursor = rows[-1].asset_id
-                batch = [self._from_row(row) for row in rows]
-            finally:
-                session.close()
+            if not batch:
+                return
+            cursor = batch[-1].asset_id
             yield batch
 
     def backfill(
@@ -556,22 +385,11 @@ class AssetStore:
 
     def stats(self) -> dict:
         """Operational counters: how much of the corpus is extracted, stale, or failed."""
-        DocumentAsset, AssetExtraction = self._models()
-        session = self.session_factory()
-        try:
-            by_status: Dict[str, int] = {}
-            for status, count in (
-                session.query(DocumentAsset.status, func.count(DocumentAsset.asset_id))
-                .group_by(DocumentAsset.status)
-                .all()
-            ):
-                by_status[status] = int(count)
-
-            total_assets = session.query(DocumentAsset).count()
-            distinct_digests = session.query(DocumentAsset.sha256).distinct().count()
-            extractions = session.query(AssetExtraction).count()
-        finally:
-            session.close()
+        with self._unit_of_work() as uow:
+            by_status = uow.document_assets.status_counts()
+            total_assets = uow.document_assets.occurrence_count()
+            distinct_digests = uow.document_assets.distinct_image_count()
+            extractions = uow.asset_extractions.count()
 
         return {
             "assets": total_assets,
@@ -585,27 +403,10 @@ class AssetStore:
         }
 
 
-_store: Optional[AssetStore] = None
-
-
-def get_asset_store() -> AssetStore:
-    global _store
-    if _store is None:
-        _store = AssetStore()
-    return _store
-
-
-def set_asset_store(store: Optional[AssetStore]) -> None:
-    global _store
-    _store = store
-
-
 __all__ = [
     "AssetStore",
     "BackfillReport",
     "DeleteResult",
-    "get_asset_store",
-    "set_asset_store",
     "AssetRole",
     "AssetTier",
     "ExtractionStatus",

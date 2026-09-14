@@ -16,6 +16,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.composition import Services, set_default_services
+
 import backend.indexing.document_loader as document_loader_module
 from backend.indexing.document_loader import DocumentLoader, SentenceSplitter
 from backend.indexing.pdf_layout import (
@@ -711,36 +713,36 @@ class QueryIndexSymmetryTests(unittest.TestCase):
         fake_indexing = types.ModuleType("backend.indexing")
         fake_indexing.__path__ = []
 
-        fake_milvus = types.ModuleType("backend.indexing.milvus_client")
-
         class _Store:
             def hybrid_retrieve(self, dense_embedding, query, top_k, filter_expr):
                 captured["bm25_query"] = query
                 return []
-
-        fake_milvus.get_milvus_store = lambda: _Store()
-
-        fake_embedding = types.ModuleType("backend.indexing.embedding")
 
         class _Embed:
             def get_embeddings(self, texts):
                 captured["embedded"] = texts[0]
                 return [[0.1, 0.2]]
 
-        fake_embedding.embedding_service = _Embed()
-        # Both the domain gate and retrieval ask for the query vector; the real module
-        # memoizes so only one forward pass happens. The stub delegates so tests that
-        # assert on what was embedded still see the call.
-        fake_embedding.embed_query = lambda text: fake_embedding.embedding_service.get_embeddings([text])[0]
-        fake_embedding.reset_query_vector_cache = lambda: None
-
-        fake_parent = types.ModuleType("backend.indexing.parent_chunk_store")
-
-        class ParentChunkStore:
+        class _Parents:
             def get_documents_by_ids(self, ids):
                 return []
 
-        fake_parent.ParentChunkStore = ParentChunkStore
+        embedder = _Embed()
+
+        fake_embedding = types.ModuleType("backend.indexing.embedding")
+        # Both the domain gate and retrieval ask for the query vector; the real module
+        # memoizes so only one forward pass happens. The stub delegates so tests that
+        # assert on what was embedded still see the call.
+        fake_embedding.embed_query = lambda text: embedder.get_embeddings([text])[0]
+        fake_embedding.reset_query_vector_cache = lambda: None
+
+        # The store and the embedder are named here rather than stubbed into
+        # `sys.modules`: retrieval resolves them from the container per call, and only
+        # `embed_query` is still a module-level import.
+        set_default_services(Services(
+            milvus=_Store(), embedder=embedder, parent_chunks=_Parents(),
+        ))
+        self.addCleanup(set_default_services, None)
 
         spec = importlib.util.spec_from_file_location(
             "rag_utils_symmetry",
@@ -749,9 +751,7 @@ class QueryIndexSymmetryTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {
             "backend.indexing": fake_indexing,
-            "backend.indexing.milvus_client": fake_milvus,
             "backend.indexing.embedding": fake_embedding,
-            "backend.indexing.parent_chunk_store": fake_parent,
         }):
             spec.loader.exec_module(module)
 

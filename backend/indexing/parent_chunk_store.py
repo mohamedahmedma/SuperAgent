@@ -1,138 +1,122 @@
-"""Parent chunk document store (used for the Auto-merging Retriever)"""
-from datetime import UTC, datetime
+"""Parent chunks for the auto-merging retriever: Postgres through a unit of work, Redis in front."""
+from __future__ import annotations
+
 from typing import List
 
-from backend.infra.cache import cache
-from backend.infra.database import SessionLocal
-from backend.db.models import ParentChunk
+from backend.application.ports.repositories import ParentChunkRecord
+from backend.application.ports.unit_of_work import UnitOfWorkFactory
+from backend.infra.cache import RedisCache
+from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 
 
 class ParentChunkStore:
-    """Parent chunk store backed by PostgreSQL + Redis."""
+    """Parent chunks by id: read through the cache, written through a unit of work."""
 
-    @staticmethod
-    def _to_dict(item: ParentChunk) -> dict:
-        return {
-            "text": item.text,
-            "filename": item.filename,
-            "file_type": item.file_type,
-            "file_path": item.file_path,
-            "page_number": item.page_number,
-            "chunk_id": item.chunk_id,
-            "parent_chunk_id": item.parent_chunk_id,
-            "root_chunk_id": item.root_chunk_id,
-            "chunk_level": item.chunk_level,
-            "chunk_idx": item.chunk_idx,
-            "modality": getattr(item, "modality", "text") or "text",
-            "asset_ids": list(getattr(item, "asset_ids", None) or []),
-        }
+    def __init__(
+        self,
+        unit_of_work: UnitOfWorkFactory = SqlAlchemyUnitOfWork,
+        cache: RedisCache | None = None,
+    ) -> None:
+        self._unit_of_work = unit_of_work
+        if cache is None:
+            from backend.composition import default_services
+
+            cache = default_services().cache
+        self._cache = cache
 
     @staticmethod
     def _cache_key(chunk_id: str) -> str:
         return f"parent_chunk:{chunk_id}"
 
+    @staticmethod
+    def _to_dict(chunk: ParentChunkRecord) -> dict:
+        return {
+            "text": chunk.text,
+            "filename": chunk.filename,
+            "file_type": chunk.file_type,
+            "file_path": chunk.file_path,
+            "page_number": chunk.page_number,
+            "chunk_id": chunk.chunk_id,
+            "parent_chunk_id": chunk.parent_chunk_id,
+            "root_chunk_id": chunk.root_chunk_id,
+            "chunk_level": chunk.chunk_level,
+            "chunk_idx": chunk.chunk_idx,
+            "modality": chunk.modality or "text",
+            "asset_ids": list(chunk.asset_ids),
+        }
+
+    @staticmethod
+    def _from_document(doc: dict) -> ParentChunkRecord | None:
+        chunk_id = (doc.get("chunk_id") or "").strip()
+        if not chunk_id:
+            return None
+        return ParentChunkRecord(
+            chunk_id=chunk_id,
+            text=doc.get("text", ""),
+            filename=doc.get("filename", ""),
+            file_type=doc.get("file_type", ""),
+            file_path=doc.get("file_path", ""),
+            page_number=int(doc.get("page_number", 0) or 0),
+            parent_chunk_id=doc.get("parent_chunk_id", ""),
+            root_chunk_id=doc.get("root_chunk_id", ""),
+            chunk_level=int(doc.get("chunk_level", 0) or 0),
+            chunk_idx=int(doc.get("chunk_idx", 0) or 0),
+            modality=doc.get("modality", "text") or "text",
+            asset_ids=tuple(doc.get("asset_ids") or ()),
+        )
+
     def upsert_documents(self, docs: List[dict]) -> int:
         """Inserts/updates parent chunks, returning the number of records written."""
-        if not docs:
+        chunks = [chunk for chunk in map(self._from_document, docs or []) if chunk is not None]
+        if not chunks:
             return 0
-
-        db = SessionLocal()
-        upserted = 0
-        try:
-            for doc in docs:
-                chunk_id = (doc.get("chunk_id") or "").strip()
-                if not chunk_id:
-                    continue
-
-                record = db.query(ParentChunk).filter(ParentChunk.chunk_id == chunk_id).first()
-                payload = {
-                    "text": doc.get("text", ""),
-                    "filename": doc.get("filename", ""),
-                    "file_type": doc.get("file_type", ""),
-                    "file_path": doc.get("file_path", ""),
-                    "page_number": int(doc.get("page_number", 0) or 0),
-                    "parent_chunk_id": doc.get("parent_chunk_id", ""),
-                    "root_chunk_id": doc.get("root_chunk_id", ""),
-                    "chunk_level": int(doc.get("chunk_level", 0) or 0),
-                    "chunk_idx": int(doc.get("chunk_idx", 0) or 0),
-                    "modality": doc.get("modality", "text") or "text",
-                    "asset_ids": list(doc.get("asset_ids") or []),
-                    # Naive UTC, matching the timezone-less column. `utcnow()` is deprecated.
-                    "updated_at": datetime.now(UTC).replace(tzinfo=None),
-                }
-                cache_payload = {
-                    "chunk_id": chunk_id,
-                    "text": payload["text"],
-                    "filename": payload["filename"],
-                    "file_type": payload["file_type"],
-                    "file_path": payload["file_path"],
-                    "page_number": payload["page_number"],
-                    "parent_chunk_id": payload["parent_chunk_id"],
-                    "root_chunk_id": payload["root_chunk_id"],
-                    "chunk_level": payload["chunk_level"],
-                    "chunk_idx": payload["chunk_idx"],
-                    "modality": payload["modality"],
-                    "asset_ids": payload["asset_ids"],
-                }
-                if record:
-                    for key, value in payload.items():
-                        setattr(record, key, value)
-                else:
-                    db.add(ParentChunk(chunk_id=chunk_id, **payload))
-
-                cache.set_json(self._cache_key(chunk_id), cache_payload)
-                upserted += 1
-
-            db.commit()
-        finally:
-            db.close()
-
-        return upserted
+        with self._unit_of_work() as uow:
+            uow.parent_chunks.upsert_many(chunks)
+            uow.commit()
+        # After the commit, so the cache never serves a chunk the database rolled back.
+        for chunk in chunks:
+            self._cache.set_json(self._cache_key(chunk.chunk_id), self._to_dict(chunk))
+        return len(chunks)
 
     def get_documents_by_ids(self, chunk_ids: List[str]) -> List[dict]:
         if not chunk_ids:
             return []
 
-        ordered_results = {}
-        missing_ids = []
+        found: dict[str, dict] = {}
+        missing: list[str] = []
         for chunk_id in chunk_ids:
             key = (chunk_id or "").strip()
             if not key:
                 continue
-            cached = cache.get_json(self._cache_key(key))
+            cached = self._cache.get_json(self._cache_key(key))
             if cached:
-                ordered_results[key] = cached
+                found[key] = cached
             else:
-                missing_ids.append(key)
+                missing.append(key)
 
-        if missing_ids:
-            db = SessionLocal()
-            try:
-                rows = db.query(ParentChunk).filter(ParentChunk.chunk_id.in_(missing_ids)).all()
-                for row in rows:
-                    payload = self._to_dict(row)
-                    ordered_results[row.chunk_id] = payload
-                    cache.set_json(self._cache_key(row.chunk_id), payload)
-            finally:
-                db.close()
+        if missing:
+            with self._unit_of_work() as uow:
+                chunks = uow.parent_chunks.get_many(missing)
+            for chunk in chunks:
+                payload = self._to_dict(chunk)
+                found[chunk.chunk_id] = payload
+                self._cache.set_json(self._cache_key(chunk.chunk_id), payload)
 
-        return [ordered_results[item] for item in chunk_ids if item in ordered_results]
+        return [found[item] for item in chunk_ids if item in found]
 
     def delete_by_filename(self, filename: str) -> int:
-        """Deletes parent chunks by filename, returning the number of records deleted."""
+        """Deletes a document's parent chunks, returning how many were deleted."""
         if not filename:
             return 0
+        with self._unit_of_work() as uow:
+            removed = uow.parent_chunks.delete_by_filename(filename)
+            uow.commit()
+        for chunk_id in removed:
+            self._cache.delete(self._cache_key(chunk_id))
+        return len(removed)
 
-        db = SessionLocal()
-        try:
-            rows = db.query(ParentChunk).filter(ParentChunk.filename == filename).all()
-            chunk_ids = [row.chunk_id for row in rows]
-            deleted = len(chunk_ids)
-            if deleted > 0:
-                db.query(ParentChunk).filter(ParentChunk.filename == filename).delete(synchronize_session=False)
-                db.commit()
-                for chunk_id in chunk_ids:
-                    cache.delete(self._cache_key(chunk_id))
-            return deleted
-        finally:
-            db.close()
+    def sections(self, level: int) -> List[ParentChunkRecord]:
+        """Every chunk at `level`, in file and position order. Uncached: only a catalogue
+        build reads it, and it wants the database's view rather than the cache's."""
+        with self._unit_of_work() as uow:
+            return list(uow.parent_chunks.sections(level))

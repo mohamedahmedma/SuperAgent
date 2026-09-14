@@ -12,11 +12,11 @@ wrong.
 """
 import re
 import unittest
-from unittest.mock import patch
 
 from backend.chat.language import ARABIC, ENGLISH, detect_language
+from backend.composition import Services, set_default_services
 from backend.db.models import DocumentPair
-from backend.indexing import pair_store
+from backend.indexing.pair_store import DocumentPairService
 from backend.text_matching import search_key
 from tests.general.postgres_support import postgres_schema
 
@@ -159,24 +159,19 @@ class BilingualCorpusRoutingTests(unittest.TestCase):
     """
 
     def setUp(self):
-        patcher = patch.object(
-            pair_store, "SessionLocal",
-            postgres_schema(self, DocumentPair).sessionmaker(autoflush=False),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
 
         # Fees and the calendar exist in both languages; bus routes are English only
         # and the uniform policy is Arabic only.
-        fees = pair_store.attach("", ARABIC, "fees_ar.docx", title="Fees")["pair_id"]
-        pair_store.attach(fees, ENGLISH, "fees_en.docx")
-        calendar = pair_store.attach("", ENGLISH, "calendar_en.docx", title="Calendar")["pair_id"]
-        pair_store.attach(calendar, ARABIC, "calendar_ar.docx")
-        pair_store.attach("", ENGLISH, "bus_en.docx", title="Bus routes")
-        pair_store.attach("", ARABIC, "uniform_ar.docx", title="Uniform")
+        fees = self.pairs.attach("", ARABIC, "fees_ar.docx", title="Fees").pair_id
+        self.pairs.attach(fees, ENGLISH, "fees_en.docx")
+        calendar = self.pairs.attach("", ENGLISH, "calendar_en.docx", title="Calendar").pair_id
+        self.pairs.attach(calendar, ARABIC, "calendar_ar.docx")
+        self.pairs.attach("", ENGLISH, "bus_en.docx", title="Bus routes")
+        self.pairs.attach("", ARABIC, "uniform_ar.docx", title="Uniform")
 
     def _excluded(self, question):
-        return set(pair_store.superseded_filenames(detect_language(question)))
+        return set(self.pairs.superseded_filenames(detect_language(question)))
 
     def test_an_arabic_question_drops_every_english_twin(self):
         excluded = self._excluded("المصاريف كام للصف الرابع؟")
@@ -214,8 +209,8 @@ class BilingualCorpusRoutingTests(unittest.TestCase):
         english = "What is the uniform policy?"
         self.assertEqual(set(), self._excluded(english) & {"uniform_ar.docx"})
 
-        row = pair_store.find_by_filename("uniform_ar.docx")
-        pair_store.attach(row["pair_id"], ENGLISH, "uniform_en.docx")
+        row = self.pairs.find_by_filename("uniform_ar.docx")
+        self.pairs.attach(row.pair_id, ENGLISH, "uniform_en.docx")
 
         self.assertIn("uniform_ar.docx", self._excluded(english))
         self.assertIn("uniform_en.docx", self._excluded("ايه الزي المطلوب؟"))
@@ -225,12 +220,11 @@ class RetrievalFilterShapeTests(unittest.TestCase):
     """What the routing decision looks like by the time Milvus sees it."""
 
     def setUp(self):
-        patcher = patch.object(
-            pair_store, "SessionLocal",
-            postgres_schema(self, DocumentPair).sessionmaker(autoflush=False),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
+        # `language_filter_clause` resolves its service from the process container;
+        # point that at this test's own.
+        set_default_services(Services(document_pairs=self.pairs))
+        self.addCleanup(set_default_services, None)
 
     def _clause(self, question):
         from backend.rag.utils import language_filter_clause
@@ -240,15 +234,15 @@ class RetrievalFilterShapeTests(unittest.TestCase):
     def test_a_corpus_with_nothing_paired_adds_no_filter(self):
         """The state every deployment starts in: routing must cost nothing and change
         nothing until an admin actually pairs a document."""
-        pair_store.attach("", ENGLISH, "bus_en.docx")
-        pair_store.attach("", ARABIC, "uniform_ar.docx")
+        self.pairs.attach("", ENGLISH, "bus_en.docx")
+        self.pairs.attach("", ARABIC, "uniform_ar.docx")
 
         self.assertEqual("", self._clause("الباص بيعدي منين؟"))
         self.assertEqual("", self._clause("Does the bus cover Maadi?"))
 
     def test_a_paired_corpus_filters_by_filename(self):
-        pair_id = pair_store.attach("", ARABIC, "fees_ar.docx")["pair_id"]
-        pair_store.attach(pair_id, ENGLISH, "fees_en.docx")
+        pair_id = self.pairs.attach("", ARABIC, "fees_ar.docx").pair_id
+        self.pairs.attach(pair_id, ENGLISH, "fees_en.docx")
 
         clause = self._clause("المصاريف كام؟")
         self.assertTrue(clause.startswith(" and filename not in ["))

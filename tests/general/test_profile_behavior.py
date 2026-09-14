@@ -90,27 +90,22 @@ def _fake_rag_utils():
 
 def _fake_indexing():
     """Stand-in for the indexing package so rag/utils.py can be re-executed without
-    loading the embedding model or connecting to Milvus."""
+    loading the embedding model.
+
+    Only `embed_query` needs stubbing now: the Milvus client, the embedder and the
+    parent-chunk store are resolved from the process container per call rather than
+    bound when this module is executed."""
     fake_indexing = types.ModuleType("backend.indexing")
     fake_indexing.__path__ = []
-    fake_milvus = types.ModuleType("backend.indexing.milvus_client")
-    fake_milvus.get_milvus_store = lambda: object()
     fake_embedding = types.ModuleType("backend.indexing.embedding")
-    fake_embedding.embedding_service = object()
     # Both the domain gate and retrieval ask for the query vector; the real module
     # memoizes so only one forward pass happens. The stub delegates so tests that
     # assert on what was embedded still see the call.
     fake_embedding.embed_query = lambda text: [0.1, 0.2, 0.3]
     fake_embedding.reset_query_vector_cache = lambda: None
-    fake_parent = types.ModuleType("backend.indexing.parent_chunk_store")
-    fake_parent.ParentChunkStore = type(
-        "ParentChunkStore", (), {"get_documents_by_ids": lambda self, ids: []}
-    )
     return {
         "backend.indexing": fake_indexing,
-        "backend.indexing.milvus_client": fake_milvus,
         "backend.indexing.embedding": fake_embedding,
-        "backend.indexing.parent_chunk_store": fake_parent,
     }
 
 

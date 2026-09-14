@@ -19,7 +19,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from backend.assets.blobs import get_blob_store
 from backend.assets.dossier import (
     DOSSIER_VERSION,
     AssetDossier,
@@ -43,7 +42,7 @@ from backend.assets.extractors import (
     HeuristicExtractor,
     build_extractor,
 )
-from backend.assets.store import AssetStore, get_asset_store
+from backend.assets.store import AssetStore
 from backend.assets.triage import ImageFacts, count_digest_pages, probe_dimensions, triage_image
 
 logger = logging.getLogger(__name__)
@@ -135,13 +134,17 @@ class FigurePipeline:
     @property
     def store(self) -> AssetStore:
         if self._store is None:
-            self._store = get_asset_store()
+            from backend.composition import default_services
+
+            self._store = default_services().asset_store
         return self._store
 
     @property
     def blob_store(self):
         if self._blob_store is None:
-            self._blob_store = get_blob_store()
+            from backend.composition import default_services
+
+            self._blob_store = default_services().blob_store
         return self._blob_store
 
     @property
@@ -169,9 +172,9 @@ class FigurePipeline:
     @property
     def entity_index(self):
         if self._entity_index is None:
-            from backend.assets.entity_store import get_entity_index
+            from backend.composition import default_services
 
-            self._entity_index = get_entity_index()
+            self._entity_index = default_services().entity_index
         return self._entity_index
 
     def _extractor_for(self, role: AssetRole) -> FigureExtractor:
@@ -463,18 +466,3 @@ class FigurePipeline:
         except Exception:
             logger.exception("Fallback extraction also failed for %s", filename)
             return None
-
-
-_pipeline: Optional[FigurePipeline] = None
-
-
-def get_figure_pipeline() -> FigurePipeline:
-    global _pipeline
-    if _pipeline is None:
-        _pipeline = FigurePipeline()
-    return _pipeline
-
-
-def set_figure_pipeline(pipeline: Optional[FigurePipeline]) -> None:
-    global _pipeline
-    _pipeline = pipeline

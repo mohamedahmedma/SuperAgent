@@ -22,7 +22,6 @@ def load_milvus_writer_module():
     fake_embedding.EmbeddingService = EmbeddingService
     fake_embedding.embed_query = lambda text: [0.1, 0.2, 0.3]
     fake_embedding.reset_query_vector_cache = lambda: None
-    fake_embedding.embedding_service = None
 
     fake_client = types.ModuleType("backend.indexing.milvus_client")
 
@@ -30,7 +29,6 @@ def load_milvus_writer_module():
         pass
 
     fake_client.MilvusStore = MilvusStore
-    fake_client.get_milvus_store = lambda: None
 
     with patch.dict(
         sys.modules,

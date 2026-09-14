@@ -12,9 +12,8 @@ import threading
 import time
 import unittest
 
-from backend.indexing.embedding import embed_query, embedding_service
+from backend.indexing.embedding import embed_query
 from backend.indexing.milvus_client import MilvusStore
-from backend.infra.cache import cache
 from tests.general.integration_support import (
     TEST_PREFIX,
     corpus_indexed,
@@ -40,6 +39,20 @@ AR_QUERIES = [
 ]
 
 
+def _cache():
+    """The shared cache, from the process container."""
+    from backend.composition import default_services
+
+    return default_services().cache
+
+
+def _embedder():
+    """The shared embedding model, from the process container."""
+    from backend.composition import default_services
+
+    return default_services().embedder
+
+
 @requires_redis
 class RedisCacheTests(unittest.TestCase):
     def setUp(self):
@@ -47,7 +60,7 @@ class RedisCacheTests(unittest.TestCase):
 
     def tearDown(self):
         for key in self.keys:
-            cache.delete(key)
+            _cache().delete(key)
 
     def key(self, name):
         full = f"{TEST_PREFIX}:{name}"
@@ -56,43 +69,43 @@ class RedisCacheTests(unittest.TestCase):
 
     def test_a_value_round_trips(self):
         key = self.key("roundtrip")
-        cache.set_json(key, {"chunk": "text", "n": 3}, ttl=30)
-        self.assertEqual({"chunk": "text", "n": 3}, cache.get_json(key))
+        _cache().set_json(key, {"chunk": "text", "n": 3}, ttl=30)
+        self.assertEqual({"chunk": "text", "n": 3}, _cache().get_json(key))
 
     def test_a_missing_key_reads_as_none(self):
-        self.assertIsNone(cache.get_json(self.key("never-written")))
+        self.assertIsNone(_cache().get_json(self.key("never-written")))
 
     def test_arabic_survives_the_round_trip(self):
         key = self.key("arabic")
         payload = {"text": "الرسوم الدراسية للصف الخامس", "ok": True}
-        cache.set_json(key, payload, ttl=30)
-        self.assertEqual(payload, cache.get_json(key))
+        _cache().set_json(key, payload, ttl=30)
+        self.assertEqual(payload, _cache().get_json(key))
 
     def test_a_nested_structure_survives(self):
         key = self.key("nested")
         payload = {"docs": [{"id": i, "meta": {"page": i * 2}} for i in range(20)]}
-        cache.set_json(key, payload, ttl=30)
-        self.assertEqual(payload, cache.get_json(key))
+        _cache().set_json(key, payload, ttl=30)
+        self.assertEqual(payload, _cache().get_json(key))
 
     def test_a_deleted_key_is_gone(self):
         key = self.key("deleted")
-        cache.set_json(key, {"a": 1}, ttl=30)
-        cache.delete(key)
-        self.assertIsNone(cache.get_json(key))
+        _cache().set_json(key, {"a": 1}, ttl=30)
+        _cache().delete(key)
+        self.assertIsNone(_cache().get_json(key))
 
     def test_a_short_ttl_expires(self):
         key = self.key("expiring")
-        cache.set_json(key, {"a": 1}, ttl=1)
-        self.assertIsNotNone(cache.get_json(key))
+        _cache().set_json(key, {"a": 1}, ttl=1)
+        self.assertIsNotNone(_cache().get_json(key))
         time.sleep(1.6)
-        self.assertIsNone(cache.get_json(key))
+        self.assertIsNone(_cache().get_json(key))
 
     def test_keys_are_namespaced_by_prefix(self):
         """Two profiles sharing one Redis must not read each other's parent chunks."""
         key = self.key("prefixed")
-        cache.set_json(key, {"a": 1}, ttl=30)
-        client = cache._get_client()
-        self.assertTrue(client.exists(f"{cache.key_prefix}:{key}"))
+        _cache().set_json(key, {"a": 1}, ttl=30)
+        client = _cache()._get_client()
+        self.assertTrue(client.exists(f"{_cache().key_prefix}:{key}"))
 
     def test_concurrent_writers_do_not_corrupt_values(self):
         errors = []
@@ -103,8 +116,8 @@ class RedisCacheTests(unittest.TestCase):
             self.keys.append(key)
             try:
                 barrier.wait(timeout=30)
-                cache.set_json(key, {"index": index}, ttl=30)
-                if cache.get_json(key) != {"index": index}:
+                _cache().set_json(key, {"index": index}, ttl=30)
+                if _cache().get_json(key) != {"index": index}:
                     errors.append(index)
             except Exception as exc:
                 errors.append(exc)
@@ -119,8 +132,8 @@ class RedisCacheTests(unittest.TestCase):
     def test_a_broken_payload_degrades_to_none(self):
         """The cache is an optimisation; a bad value must never raise into a turn."""
         key = self.key("corrupt")
-        cache._get_client().setex(f"{cache.key_prefix}:{key}", 30, "not json{{{")
-        self.assertIsNone(cache.get_json(key))
+        _cache()._get_client().setex(f"{_cache().key_prefix}:{key}", 30, "not json{{{")
+        self.assertIsNone(_cache().get_json(key))
 
 
 @requires_milvus
@@ -291,9 +304,9 @@ class EmbedderTests(unittest.TestCase):
     def test_batch_and_single_embedding_agree(self):
         """Coalescing turns singles into batches, so the two paths must not diverge."""
         texts = EN_QUERIES[:3]
-        batched = embedding_service.get_embeddings(texts)
+        batched = _embedder().get_embeddings(texts)
         for text, vector in zip(texts, batched):
-            single = embedding_service.get_embeddings([text])[0]
+            single = _embedder().get_embeddings([text])[0]
             for a, b in zip(vector, single):
                 self.assertAlmostEqual(a, b, places=5)
 
@@ -309,14 +322,14 @@ class EmbedderTests(unittest.TestCase):
         else" is what actually catches a caller being handed someone else's vector.
         """
         texts = [f"{q} number {i}" for i, q in enumerate(EN_QUERIES + AR_QUERIES)]
-        expected = {text: embedding_service.get_embeddings([text])[0] for text in texts}
+        expected = {text: _embedder().get_embeddings([text])[0] for text in texts}
 
         results = {}
         barrier = threading.Barrier(len(texts))
 
         def call(text):
             barrier.wait(timeout=60)
-            results[text] = embedding_service.get_embeddings([text])[0]
+            results[text] = _embedder().get_embeddings([text])[0]
 
         threads = [threading.Thread(target=call, args=(t,)) for t in texts]
         for thread in threads:
@@ -339,14 +352,14 @@ class EmbedderTests(unittest.TestCase):
             self.assertGreater(own, 0.999, f"{text!r} drifted further than batching explains")
 
     def test_empty_input_returns_nothing(self):
-        self.assertEqual([], embedding_service.get_embeddings([]))
+        self.assertEqual([], _embedder().get_embeddings([]))
 
     def test_whitespace_only_text_still_embeds(self):
         self.assertEqual(len(embed_query("a")), len(embed_query("   ")))
 
     def test_a_long_document_embeds_without_error(self):
         long_text = "The school covers admissions, fees and transport. " * 200
-        vectors = embedding_service.get_embeddings([long_text])
+        vectors = _embedder().get_embeddings([long_text])
         self.assertEqual(1, len(vectors))
 
 

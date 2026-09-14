@@ -94,10 +94,10 @@ def make_search_products(ctx: ChatRequestContext):
         if filters is not None:
             payload = filters.model_dump(exclude_none=True) if hasattr(filters, "model_dump") else dict(filters)
 
-        from backend.rag.entity_retrieval import get_entity_retriever
+        from backend.composition import default_services
 
         try:
-            result = get_entity_retriever().search(query, payload)
+            result = default_services().entity_retriever.search(query, payload)
         except Exception as exc:
             logger.exception("Product search failed")
             return f"PRODUCT_SEARCH_ERROR: {exc}"

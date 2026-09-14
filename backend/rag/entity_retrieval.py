@@ -93,17 +93,17 @@ class EntityRetriever:
     @property
     def asset_store(self):
         if self._asset_store is None:
-            from backend.assets.store import get_asset_store
+            from backend.composition import default_services
 
-            self._asset_store = get_asset_store()
+            self._asset_store = default_services().asset_store
         return self._asset_store
 
     @property
     def entity_index(self):
         if self._entity_index is None:
-            from backend.assets.entity_store import get_entity_index
+            from backend.composition import default_services
 
-            self._entity_index = get_entity_index()
+            self._entity_index = default_services().entity_index
         return self._entity_index
 
     def _recall_candidates(self, query: str, top_k: int) -> List[dict]:
@@ -168,18 +168,3 @@ class EntityRetriever:
                 page_number=dossier.source.page_number,
             ))
         return result
-
-
-_retriever: Optional[EntityRetriever] = None
-
-
-def get_entity_retriever() -> EntityRetriever:
-    global _retriever
-    if _retriever is None:
-        _retriever = EntityRetriever()
-    return _retriever
-
-
-def set_entity_retriever(retriever: Optional[EntityRetriever]) -> None:
-    global _retriever
-    _retriever = retriever

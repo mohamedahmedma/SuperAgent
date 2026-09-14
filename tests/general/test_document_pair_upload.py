@@ -10,8 +10,10 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from backend.chat.language import ARABIC, ENGLISH
+from backend.composition import Services
 from backend.db.models import DocumentPair
-from backend.indexing import pair_store
+from backend.indexing.pair_store import DocumentPairService
+from backend.indexing.removal import DocumentRemover
 from tests.general.postgres_support import postgres_schema
 
 ARABIC_BODY = "الرسوم الدراسية للصف الرابع الابتدائي تشمل الكتب والأنشطة والنقل المدرسي بالكامل"
@@ -28,12 +30,7 @@ def _chunks(text):
 
 class PairUploadJobTests(unittest.TestCase):
     def setUp(self):
-        patcher = patch.object(
-            pair_store, "SessionLocal",
-            postgres_schema(self, DocumentPair).sessionmaker(autoflush=False),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.pairs = DocumentPairService(unit_of_work=postgres_schema(self, DocumentPair).unit_of_work)
 
         import backend.api.routes.documents as documents
 
@@ -41,22 +38,23 @@ class PairUploadJobTests(unittest.TestCase):
         self.loader = MagicMock()
         self.writer = MagicMock()
         self.parents = MagicMock()
-        self.cleanup = MagicMock(return_value=0)
+        self.remover = MagicMock()
+        self.remover.remove.return_value = 0
         self.jobs = MagicMock()
 
-        for name, double in (
-            ("loader", self.loader),
-            ("milvus_writer", self.writer),
-            ("parent_chunk_store", self.parents),
-            ("delete_document_transactionally", self.cleanup),
-            ("upload_job_manager", self.jobs),
-        ):
-            p = patch.object(documents, name, double)
-            p.start()
-            self.addCleanup(p.stop)
+        # Every collaborator the job uses, named. Nothing is patched: the job is handed
+        # this container and can reach nothing else.
+        self.services = Services(
+            document_loader=self.loader,
+            milvus_writer=self.writer,
+            parent_chunks=self.parents,
+            document_remover=self.remover,
+            upload_jobs=self.jobs,
+            document_pairs=self.pairs,
+        )
 
     def _run(self, sides, pair_id="", title="Fees"):
-        self.documents._process_pair_upload_job("job1", pair_id, title, sides)
+        self.documents._process_pair_upload_job(self.services, "job1", pair_id, title, sides)
 
     def _failure(self):
         self.assertTrue(self.jobs.fail_job.called, "the job was expected to fail")
@@ -73,12 +71,12 @@ class PairUploadJobTests(unittest.TestCase):
         self.jobs.fail_job.assert_not_called()
         self.assertEqual(2, self.writer.write_documents.call_count)
 
-        rows = pair_store.list_pairs()
+        rows = self.pairs.list_pairs()
         self.assertEqual(1, len(rows), "the two files should be ONE entry")
-        self.assertEqual("fees_ar.docx", rows[0]["filename_ar"])
-        self.assertEqual("fees_en.docx", rows[0]["filename_en"])
-        self.assertTrue(rows[0]["paired"])
-        self.assertEqual("Fees", rows[0]["title"])
+        self.assertEqual("fees_ar.docx", rows[0].filename_ar)
+        self.assertEqual("fees_en.docx", rows[0].filename_en)
+        self.assertTrue(rows[0].paired)
+        self.assertEqual("Fees", rows[0].title)
 
     def test_one_side_alone_is_a_complete_entry(self):
         self.loader.load_document.side_effect = [_chunks(ENGLISH_BODY)]
@@ -86,10 +84,10 @@ class PairUploadJobTests(unittest.TestCase):
         self._run([(ENGLISH, "/tmp/bus_en.docx", "bus_en.docx")])
 
         self.jobs.fail_job.assert_not_called()
-        rows = pair_store.list_pairs()
-        self.assertEqual("bus_en.docx", rows[0]["filename_en"])
-        self.assertEqual("", rows[0]["filename_ar"])
-        self.assertFalse(rows[0]["paired"], "one side is not a pair")
+        rows = self.pairs.list_pairs()
+        self.assertEqual("bus_en.docx", rows[0].filename_en)
+        self.assertEqual("", rows[0].filename_ar)
+        self.assertFalse(rows[0].paired, "one side is not a pair")
 
     def test_a_file_in_the_wrong_column_is_rejected(self):
         self.loader.load_document.side_effect = [_chunks(ENGLISH_BODY)]
@@ -118,23 +116,23 @@ class PairUploadJobTests(unittest.TestCase):
         self._failure()
         self.writer.write_documents.assert_not_called()
         self.parents.upsert_documents.assert_not_called()
-        self.cleanup.assert_not_called()
-        self.assertEqual([], pair_store.list_pairs(), "a rejected upload left a row behind")
+        self.remover.remove.assert_not_called()
+        self.assertEqual([], self.pairs.list_pairs(), "a rejected upload left a row behind")
 
     def test_the_second_language_joins_the_existing_entry(self):
         """Uploading the Arabic half months later must fill the SAME row, which is the
         reason pairs are a table rather than a value on a chunk."""
         self.loader.load_document.side_effect = [_chunks(ENGLISH_BODY)]
         self._run([(ENGLISH, "/tmp/fees_en.docx", "fees_en.docx")], title="Fees policy")
-        pair_id = pair_store.list_pairs()[0]["pair_id"]
+        pair_id = self.pairs.list_pairs()[0].pair_id
 
         self.loader.load_document.side_effect = [_chunks(ARABIC_BODY)]
         self._run([(ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx")], pair_id=pair_id, title="Fees policy")
 
-        rows = pair_store.list_pairs()
+        rows = self.pairs.list_pairs()
         self.assertEqual(1, len(rows), "a second entry was created instead of filling the first")
-        self.assertTrue(rows[0]["paired"])
-        self.assertEqual(["fees_en.docx"], pair_store.superseded_filenames(ARABIC))
+        self.assertTrue(rows[0].paired)
+        self.assertEqual(["fees_en.docx"], self.pairs.superseded_filenames(ARABIC))
 
     def test_a_document_that_yields_no_leaf_chunks_is_rejected(self):
         self.loader.load_document.side_effect = [
@@ -144,7 +142,7 @@ class PairUploadJobTests(unittest.TestCase):
         self._run([(ARABIC, "/tmp/fees_ar.docx", "fees_ar.docx")])
 
         self.assertIn("leaf chunks", self._failure())
-        self.assertEqual([], pair_store.list_pairs())
+        self.assertEqual([], self.pairs.list_pairs())
 
     def test_an_unreadable_file_is_rejected_by_name(self):
         self.loader.load_document.side_effect = [[]]
@@ -152,7 +150,7 @@ class PairUploadJobTests(unittest.TestCase):
         self._run([(ARABIC, "/tmp/broken.docx", "broken.docx")])
 
         self.assertIn("broken.docx", self._failure())
-        self.assertEqual([], pair_store.list_pairs())
+        self.assertEqual([], self.pairs.list_pairs())
 
     def test_the_cleanup_spares_the_asset_rows_the_parse_just_wrote(self):
         """Parsing is NOT read-only, which is what makes the ordering above dangerous.
@@ -173,8 +171,8 @@ class PairUploadJobTests(unittest.TestCase):
         ])
 
         self.jobs.fail_job.assert_not_called()
-        self.assertEqual(2, self.cleanup.call_count)
-        for call in self.cleanup.call_args_list:
+        self.assertEqual(2, self.remover.remove.call_count)
+        for call in self.remover.remove.call_args_list:
             self.assertIs(
                 False, call.kwargs.get("include_assets"),
                 "the pair job must ask the cleanup to spare asset rows, since its own "
@@ -183,16 +181,13 @@ class PairUploadJobTests(unittest.TestCase):
 
 
 class CleanupAssetGateTests(unittest.TestCase):
-    """`include_assets` on delete_document_transactionally, in both directions.
+    """`include_assets` on `DocumentRemover.remove`, in both directions.
 
     The pair job's correctness rests on this flag actually gating the delete, so the
     flag is pinned here rather than only at the call site.
     """
 
     def setUp(self):
-        import backend.api.resources as resources
-
-        self.resources = resources
         self.store = MagicMock()
         self.store.delete_by_filename.return_value = MagicMock(
             assets_deleted=0, blobs_deleted=0, blobs_retained=0
@@ -201,28 +196,20 @@ class CleanupAssetGateTests(unittest.TestCase):
         profile.assets.enabled = True
         profile.assets.gc_orphan_blobs = True
 
-        doubles = (
-            ("milvus_manager", MagicMock()),
-            ("parent_chunk_store", MagicMock()),
-            ("get_profile", MagicMock(return_value=profile)),
+        self.remover = DocumentRemover(
+            milvus=MagicMock(),
+            parent_chunks=MagicMock(),
+            asset_store=lambda: self.store,
+            profile=lambda: profile,
         )
-        for name, double in doubles:
-            p = patch.object(resources, name, double)
-            p.start()
-            self.addCleanup(p.stop)
-
-        # Imported inside the function under test, so it is patched at its source.
-        p = patch("backend.assets.store.get_asset_store", MagicMock(return_value=self.store))
-        p.start()
-        self.addCleanup(p.stop)
 
     def test_a_plain_delete_still_removes_the_asset_rows(self):
         """The delete route and the single-file upload both depend on this default."""
-        self.resources.delete_document_transactionally("fees_ar.docx")
+        self.remover.remove("fees_ar.docx")
         self.store.delete_by_filename.assert_called_once()
 
     def test_include_assets_false_leaves_them_alone(self):
-        self.resources.delete_document_transactionally("fees_ar.docx", include_assets=False)
+        self.remover.remove("fees_ar.docx", include_assets=False)
         self.store.delete_by_filename.assert_not_called()
 
 

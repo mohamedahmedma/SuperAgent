@@ -19,7 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.router import router
-from backend.infra.database import init_db, log_database_status, verify_connectivity
+from backend.composition import Services, set_default_services
+from backend.infra.database import log_database_status, verify_connectivity
 from backend.profiles import get_profile
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
@@ -51,7 +52,7 @@ def _cors_origins() -> list[str]:
     return origins or ["*"]
 
 
-def create_app() -> FastAPI:
+def create_app(services: Services | None = None) -> FastAPI:
     # Give this application's own loggers somewhere to go.
     #
     # uvicorn configures `uvicorn.*` and leaves the root logger bare, so every
@@ -62,8 +63,8 @@ def create_app() -> FastAPI:
     # reasoning about precedence, which is exactly the thing that was got wrong in the
     # first place.
     #
-    # Guarded, so a process that has already set up logging — the CLI entry points in
-    # `backend/db/migrate.py` and `backend/assets/backfill.py`, a test harness, or a
+    # Guarded, so a process that has already set up logging — the CLI entry point in
+    # `backend/assets/backfill.py`, alembic's env.py, a test harness, or a
     # deployment with its own dictConfig — keeps its own configuration untouched.
     if not logging.getLogger().handlers:
         logging.basicConfig(
@@ -72,6 +73,15 @@ def create_app() -> FastAPI:
         )
 
     profile = get_profile()
+
+    # The composition root for this application: every service this process serves
+    # requests with, built on first use. Accepted as an argument so a test can assemble
+    # the real application over its own database, and published as the process default so
+    # the paths that have no injection seam yet — a background job, a chat turn served
+    # without one — reach the SAME instances as the routes rather than building a second
+    # set of their own.
+    services = services if services is not None else Services()
+    set_default_services(services)
 
     # LangSmith reads LANGSMITH_PROJECT from the environment itself, so the profile
     # can only supply it as a default — an explicit env var still wins.
@@ -91,20 +101,18 @@ def create_app() -> FastAPI:
 
         log_provider_status()
         # Which database, with whose credentials, and can we actually authenticate —
-        # before anything downstream depends on the answer. init_db() opens the same
-        # connection a line later, so this adds no work; it adds the diagnosis. A
-        # rotated POSTGRES_PASSWORD on an estate whose postgres_data volume predates it
-        # is refused here by name, rather than surfacing as SQLAlchemy pool internals
-        # from create_all() while pg_isready still calls the container healthy.
+        # before anything downstream depends on the answer. A rotated POSTGRES_PASSWORD
+        # on an estate whose postgres_data volume predates it is refused here by name,
+        # rather than surfacing as SQLAlchemy pool internals while pg_isready still
+        # calls the container healthy.
         log_database_status()
         verify_connectivity()
-        init_db()
-        # create_all() creates missing TABLES but never adds columns to existing ones,
-        # so a model change ships silently and surfaces as UndefinedColumn partway
-        # through a user's upload. Report it at boot instead.
-        from backend.db.migrate import check_and_report
+        # Alembic owns the schema. A database this build was not written for would fail
+        # later, on the first query that meets a missing column, so it is refused here.
+        # The container applies `alembic upgrade head` before uvicorn starts.
+        from backend.db.schema_version import verify_database_is_migrated
 
-        check_and_report()
+        verify_database_is_migrated()
         # Vision misconfiguration is otherwise silent: a profile can ask for it, the
         # credentials can be missing, and extraction quietly degrades forever. One
         # line at boot makes the state visible.
@@ -119,14 +127,12 @@ def create_app() -> FastAPI:
         # one configured to embed remotely. Construction is lazy now, so this is where
         # a serving process pays it: at boot, before traffic, and visibly in the log
         # rather than inside whichever request happened to be first.
-        from backend.indexing.embedding import embedding_service
-
         # Do not hold FastAPI's startup gate while a cold bge-m3 cache downloads and
         # loads. Uvicorn only accepts connections after this lifespan yields, so an
         # inline warm-up makes even /health unreachable. /ready remains the traffic
         # gate and reports "loading" until this daemon thread finishes.
         threading.Thread(
-            target=embedding_service.warm_up,
+            target=services.embedder.warm_up,
             name="embedding-warmup",
             daemon=True,
         ).start()
@@ -138,6 +144,10 @@ def create_app() -> FastAPI:
         description=profile.identity.description,
         lifespan=lifespan,
     )
+
+    # Where `backend/api/deps.py` reads it from, so a route declares the service it needs
+    # in its signature instead of importing an instance of it.
+    app.state.services = services
 
     # This API authenticates with a bearer token in the Authorization header
     # (backend/infra/auth.py), never with a cookie. That is what settles the

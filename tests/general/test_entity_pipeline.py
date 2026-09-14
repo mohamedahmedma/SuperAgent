@@ -353,10 +353,10 @@ class IndexTestCase(unittest.TestCase):
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset, EntityAttribute
 
-        self.session_factory = postgres_schema(
+        self.unit_of_work = postgres_schema(
             self, DocumentAsset, AssetExtraction, EntityAttribute
-        ).sessionmaker()
-        self.index = EntityAttributeIndex(session_factory=self.session_factory)
+        ).unit_of_work
+        self.index = EntityAttributeIndex(unit_of_work=self.unit_of_work)
         self.schema = shop_schema()
 
     def _seed(self):
@@ -481,7 +481,7 @@ class EntityIngestTests(IndexTestCase):
         super().setUp()
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(session_factory=self.session_factory, blob_store=self.blobs,
+        self.store = AssetStore(unit_of_work=self.unit_of_work, blob_store=self.blobs,
                                 cache_enabled=False)
         self.profile = load_profile("ecommerce")
 
@@ -579,7 +579,7 @@ class EntityRetrievalTests(IndexTestCase):
     def setUp(self):
         super().setUp()
         self._tmp = TemporaryDirectory()
-        self.store = AssetStore(session_factory=self.session_factory,
+        self.store = AssetStore(unit_of_work=self.unit_of_work,
                                 blob_store=LocalBlobStore(Path(self._tmp.name)),
                                 cache_enabled=False)
         self.profile = load_profile("ecommerce")
@@ -691,6 +691,17 @@ class EntityRetrievalTests(IndexTestCase):
                           "rejected_filters", "filtered_to_empty"], list(payload))
 
 
+def _use_retriever(retriever):
+    """Serve the product tool this retriever.
+
+    The tool resolves its retriever from the process container, so that is where a
+    stand-in goes; `tearDown` drops the container again.
+    """
+    from backend.composition import Services, set_default_services
+
+    set_default_services(Services(entity_retriever=retriever))
+
+
 class SearchProductsToolTests(unittest.TestCase):
     def setUp(self):
         from backend.profiles.registry import set_profile
@@ -698,11 +709,11 @@ class SearchProductsToolTests(unittest.TestCase):
         set_profile(load_profile("ecommerce"))
 
     def tearDown(self):
+        from backend.composition import set_default_services
         from backend.profiles.registry import set_profile
-        from backend.rag.entity_retrieval import set_entity_retriever
 
         set_profile(None)
-        set_entity_retriever(None)
+        set_default_services(None)
 
     def _tool(self, ctx=None):
         from backend.chat.request_context import ChatRequestContext
@@ -727,7 +738,7 @@ class SearchProductsToolTests(unittest.TestCase):
 
     def test_results_are_formatted_with_asset_ids_for_display(self):
         from backend.chat.request_context import ChatRequestContext
-        from backend.rag.entity_retrieval import EntityHit, EntitySearchResult, set_entity_retriever
+        from backend.rag.entity_retrieval import EntityHit, EntitySearchResult
 
         retriever = Mock()
         retriever.search.return_value = EntitySearchResult(
@@ -735,7 +746,7 @@ class SearchProductsToolTests(unittest.TestCase):
                             attributes={"color": ["red"], "price": 85.0})],
             recalled=4, after_filter=1,
         )
-        set_entity_retriever(retriever)
+        _use_retriever(retriever)
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         output = self._tool(ctx).invoke({"query": "red shoes", "filters": {"color": ["red"]}})
@@ -747,13 +758,13 @@ class SearchProductsToolTests(unittest.TestCase):
         self.assertEqual(["p1"], ctx.surfaced_asset_ids())
 
     def test_filtering_to_empty_suggests_relaxing_a_constraint(self):
-        from backend.rag.entity_retrieval import EntitySearchResult, set_entity_retriever
+        from backend.rag.entity_retrieval import EntitySearchResult
 
         retriever = Mock()
         retriever.search.return_value = EntitySearchResult(
             recalled=6, after_filter=0, filtered_to_empty=True, filters_applied={"color": ["green"]}
         )
-        set_entity_retriever(retriever)
+        _use_retriever(retriever)
         output = self._tool().invoke({"query": "shoes", "filters": {"color": ["green"]}})
         self.assertIn("NO_PRODUCTS_FOUND", output)
         self.assertIn("relaxing", output)
@@ -765,20 +776,18 @@ class SearchProductsToolTests(unittest.TestCase):
         self.assertIn("PRODUCT_SEARCH_UNAVAILABLE", self._tool().invoke({"query": "shoes"}))
 
     def test_a_retrieval_failure_is_reported_not_raised(self):
-        from backend.rag.entity_retrieval import set_entity_retriever
-
         retriever = Mock()
         retriever.search.side_effect = RuntimeError("milvus down")
-        set_entity_retriever(retriever)
+        _use_retriever(retriever)
         self.assertIn("PRODUCT_SEARCH_ERROR", self._tool().invoke({"query": "shoes"}))
 
     def test_the_turn_budget_is_enforced(self):
         from backend.chat.request_context import ChatRequestContext
-        from backend.rag.entity_retrieval import EntitySearchResult, set_entity_retriever
+        from backend.rag.entity_retrieval import EntitySearchResult
 
         retriever = Mock()
         retriever.search.return_value = EntitySearchResult()
-        set_entity_retriever(retriever)
+        _use_retriever(retriever)
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         tool = self._tool(ctx)

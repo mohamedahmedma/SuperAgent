@@ -34,9 +34,9 @@ def run_backfill(
     batch_size: int = 200,
     dry_run: bool = False,
 ) -> BackfillReport:
-    from backend.assets.store import get_asset_store
+    from backend.composition import default_services
 
-    active = store or get_asset_store()
+    active = store or default_services().asset_store
     report = active.backfill(
         target_version=target_version,
         batch_size=batch_size,
@@ -73,9 +73,9 @@ def main(argv: list[str] | None = None) -> int:
 
     load_env()
 
-    from backend.assets.store import get_asset_store
+    from backend.composition import default_services
 
-    store = get_asset_store()
+    store = default_services().asset_store
 
     if args.stats:
         print(json.dumps(store.stats(), indent=2))

@@ -48,7 +48,10 @@ class PostgresSchema:
     def __init__(self, *tables):
         self.name = f"test_{uuid.uuid4().hex[:12]}"
         self._url = database_url()
+        self._sessions = None
         self._admin(f'CREATE SCHEMA "{self.name}"')
+        from backend.infra.database import serialize_json
+
         self.engine: Engine = create_engine(
             self._url,
             connect_args={
@@ -56,6 +59,8 @@ class PostgresSchema:
                 # How `drop` finds the connections a test left open.
                 "application_name": self.name,
             },
+            # The application's serialiser, so JSON columns behave as they do in production.
+            json_serializer=serialize_json,
         )
         try:
             # Models or tables; created parents first so foreign keys resolve.
@@ -68,6 +73,16 @@ class PostgresSchema:
     def sessionmaker(self, **options) -> sessionmaker:
         options.setdefault("expire_on_commit", False)
         return sessionmaker(bind=self.engine, **options)
+
+    def unit_of_work(self):
+        """A fresh unit of work over this schema — what a service takes as its factory."""
+        from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
+
+        if self._sessions is None:
+            # autoflush off, as `SessionLocal` has it: a repository that forgets to flush
+            # before querying its own writes must fail here, not only in production.
+            self._sessions = self.sessionmaker(autoflush=False)
+        return SqlAlchemyUnitOfWork(self._sessions)
 
     def drop(self) -> None:
         self.engine.dispose()

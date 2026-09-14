@@ -363,10 +363,9 @@ class TwentyTurnConversationTests(unittest.TestCase):
         }))
         cls.grader = ScriptedGrader()
         cls.pipeline = load_pipeline(retrieve_documents=retrieve)
-        cls.pipeline.API_KEY = "k"
-        cls.pipeline.GRADE_MODEL = "g"
-        cls.pipeline._grader_model = FakeStructuredModel(cls.grader)
-        cls.pipeline._get_grader_model = lambda: cls.pipeline._grader_model
+        # The grading seam, substituted where the pipeline reaches for it.
+        grading_model = FakeStructuredModel(cls.grader)
+        cls.pipeline._get_grader_model = lambda **kwargs: grading_model
 
         chat = Conversation(cls.pipeline, cls.grader)
         cls.chat = chat

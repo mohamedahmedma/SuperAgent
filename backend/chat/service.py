@@ -30,7 +30,8 @@ from backend.chat.orchestrator import plan_turn, resolve_turn_question
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import ResolvedQuestion, conversation_text
 from backend.chat.runtime import create_agent_for_request, fast_model, model
-from backend.chat.storage import storage
+from backend.chat.storage import ConversationStorage
+from backend.composition import Services, default_services
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
 from backend.schemas.chat import (
@@ -476,6 +477,8 @@ async def _stream_static_reply(
     is_first_message: bool,
     pending_hitl: dict | None = None,
     child_state=None,
+    *,
+    conversations: ConversationStorage,
 ):
     """Emit a planned reply that no model composed, and persist the turn.
 
@@ -522,7 +525,7 @@ async def _stream_static_reply(
 
     messages.append(AIMessage(content=reply))
     extra_message_data = _message_data_for_save(messages, rag_trace)
-    storage.save(user_id, session_id, messages, metadata=save_meta,
+    conversations.save(user_id, session_id, messages, metadata=save_meta,
                  extra_message_data=extra_message_data)
 
     yield "data: [DONE]\n\n"
@@ -1272,6 +1275,7 @@ def chat_with_agent(
     client_capabilities: ClientCapabilities | None = None,
     *,
     caller: CallerIdentity | None = None,
+    services: Services | None = None,
 ):
     """Serve one turn.
 
@@ -1284,7 +1288,8 @@ def chat_with_agent(
     positional argument, so the storage key and the identity can never disagree.
     """
     caller, user_id = _resolve_caller(caller, user_id)
-    messages, metadata = storage.load_with_meta(user_id, session_id)
+    conversations = (services or default_services()).conversations
+    messages, metadata = conversations.load_with_meta(user_id, session_id)
     # The pin travels by reference into the turn's context and back out into
     # `save_meta`, so a turn that resolves a child has already recorded it.
     child_state = load_child_state(metadata, guardian_id=caller.guardian_id if caller else "")
@@ -1319,7 +1324,7 @@ def chat_with_agent(
 
     try:
         messages.append(HumanMessage(content=user_text))
-        storage.save(user_id, session_id, messages)
+        conversations.save(user_id, session_id, messages)
 
         if is_hitl_resume and resume_state:
             rag_result = _resume_rag_from_hitl_sync(
@@ -1475,7 +1480,7 @@ def chat_with_agent(
 
         messages.append(AIMessage(content=response_content))
         extra_message_data = _message_data_for_save(messages, rag_trace)
-        storage.save(
+        conversations.save(
             user_id,
             session_id,
             messages,
@@ -1503,6 +1508,7 @@ async def chat_with_agent_stream(
     client_capabilities: ClientCapabilities | None = None,
     *,
     caller: CallerIdentity | None = None,
+    services: Services | None = None,
 ):
     """Serve one turn, streaming. See `chat_with_agent` for `caller`.
 
@@ -1511,6 +1517,7 @@ async def chat_with_agent_stream(
     silently dead in the streaming one that users actually hit.
     """
     caller, user_id = _resolve_caller(caller, user_id)
+    conversations = (services or default_services()).conversations
     initial_step = {
         "type": "rag_step",
         "step": {
@@ -1523,7 +1530,7 @@ async def chat_with_agent_stream(
     }
     yield f"data: {json.dumps(initial_step)}\n\n"
 
-    messages, metadata = storage.load_with_meta(user_id, session_id)
+    messages, metadata = conversations.load_with_meta(user_id, session_id)
     # The pin travels by reference into the turn's context and back out into
     # `save_meta`, so a turn that resolves a child has already recorded it.
     child_state = load_child_state(metadata, guardian_id=caller.guardian_id if caller else "")
@@ -1560,7 +1567,7 @@ async def chat_with_agent_stream(
 
     try:
         messages.append(HumanMessage(content=user_text))
-        storage.save(user_id, session_id, messages)
+        conversations.save(user_id, session_id, messages)
 
         if is_hitl_resume and resume_state:
             loop = asyncio.get_running_loop()
@@ -1662,7 +1669,7 @@ async def chat_with_agent_stream(
 
             messages.append(AIMessage(content=full_response))
             extra_message_data = _message_data_for_save(messages, rag_trace)
-            storage.save(
+            conversations.save(
                 user_id,
                 session_id,
                 messages,
@@ -1690,6 +1697,7 @@ async def chat_with_agent_stream(
                 messages, metadata, persistent_note, is_first_message,
                 _child_choice_pending(turn_plan, entry.original_question or user_text),
                 child_state,
+                conversations=conversations,
             ):
                 yield chunk
             return
@@ -1895,7 +1903,7 @@ async def chat_with_agent_stream(
 
         messages.append(AIMessage(content=full_response))
         extra_message_data = _message_data_for_save(messages, rag_trace)
-        storage.save(
+        conversations.save(
             user_id,
             session_id,
             messages,

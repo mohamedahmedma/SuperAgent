@@ -316,11 +316,11 @@ class AssetStoreTestCase(unittest.TestCase):
     def setUp(self):
         from backend.db.models import AssetExtraction, DocumentAsset
 
-        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
+        unit_of_work = postgres_schema(self, DocumentAsset, AssetExtraction).unit_of_work
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(session_factory=session_factory, blob_store=self.blobs,
+        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs,
                                 cache_enabled=False)
 
         data = make_png(60, 60)
@@ -329,18 +329,14 @@ class AssetStoreTestCase(unittest.TestCase):
         self.dossier = make_dossier(uri=uri, sha256=digest, byte_size=len(data))
         self.store.record(self.dossier)
 
-        from backend.assets.store import set_asset_store
-        from backend.assets.blobs import set_blob_store
+        from backend.composition import Services, set_default_services
 
-        set_asset_store(self.store)
-        set_blob_store(self.blobs)
+        set_default_services(Services(asset_store=self.store, blob_store=self.blobs))
 
     def tearDown(self):
-        from backend.assets.store import set_asset_store
-        from backend.assets.blobs import set_blob_store
+        from backend.composition import set_default_services
 
-        set_asset_store(None)
-        set_blob_store(None)
+        set_default_services(None)
         self._tmp.cleanup()
 
 class AssetsBridgeTests(unittest.TestCase):
@@ -418,10 +414,25 @@ class AssetsBridgeTests(unittest.TestCase):
         self.assertEqual([], build_asset_references(["a"], ClientCapabilities(), config))
 
     def test_a_store_failure_costs_pictures_not_the_answer(self):
-        with patch("backend.assets.store.get_asset_store", side_effect=RuntimeError("db down")):
-            self.assertEqual(
-                [], build_asset_references(["a"], ClientCapabilities(), self.delivery)
-            )
+        _failing_asset_store(RuntimeError("db down"))
+        self.assertEqual(
+            [], build_asset_references(["a"], ClientCapabilities(), self.delivery)
+        )
+
+
+def _failing_asset_store(error):
+    """Install an asset store whose lookup raises.
+
+    Pictures are a best-effort embellishment: a store that cannot be read must cost the
+    images and never the answer or the history, which is what these two tests pin.
+    """
+    from unittest.mock import Mock
+
+    from backend.composition import Services, set_default_services
+
+    store = Mock()
+    store.get_many.side_effect = error
+    set_default_services(Services(asset_store=store))
 
 
 class DictCache:
@@ -458,11 +469,11 @@ class StoredConversationAssetTests(unittest.TestCase):
     """
 
     def setUp(self):
-        import backend.chat.storage as storage_module
-
+        from backend.chat.storage import ConversationStorage
         from backend.db.models import ChatMessage, ChatSession, User
 
-        factory = postgres_schema(self, User, ChatSession, ChatMessage).sessionmaker()
+        schema = postgres_schema(self, User, ChatSession, ChatMessage)
+        factory = schema.sessionmaker()
 
         db = factory()
         db.add(User(username="u", password_hash="x"))
@@ -471,17 +482,8 @@ class StoredConversationAssetTests(unittest.TestCase):
 
         self.factory = factory
         self.cache = DictCache()
-        self.storage = storage_module.ConversationStorage()
-        self._patches = [
-            patch.object(storage_module, "SessionLocal", factory),
-            patch.object(storage_module, "cache", self.cache),
-        ]
-        for item in self._patches:
-            item.start()
+        self.storage = ConversationStorage(unit_of_work=schema.unit_of_work, cache=self.cache)
 
-    def tearDown(self):
-        for item in self._patches:
-            item.stop()
     def _trace(self, asset_id, inline=False):
         """A trace as it goes on the WIRE: renditions in full, inline bytes and all."""
         reference = AssetReference(
@@ -779,8 +781,8 @@ class StoredPointerRoundTripTests(AssetStoreTestCase):
         self.assertIs(records, restore_session_assets(records))
 
     def test_a_store_failure_costs_the_pictures_not_the_history(self):
-        with patch("backend.assets.store.get_asset_store", side_effect=RuntimeError("db down")):
-            restored = restore_session_assets([self._record([self.dossier.asset_id])])
+        _failing_asset_store(RuntimeError("db down"))
+        restored = restore_session_assets([self._record([self.dossier.asset_id])])
         self.assertEqual("Here it is. [1]", restored[0]["content"])
 
 
@@ -829,19 +831,17 @@ class AssetRouteTests(unittest.TestCase):
         from fastapi.testclient import TestClient
 
         from backend.api.routes.assets import router
-        from backend.assets.blobs import set_blob_store
-        from backend.assets.store import set_asset_store
+        from backend.composition import Services, set_default_services
         from backend.db.models import AssetExtraction, DocumentAsset, User
         from backend.infra.auth import get_current_user
 
-        session_factory = postgres_schema(self, DocumentAsset, AssetExtraction).sessionmaker()
+        unit_of_work = postgres_schema(self, DocumentAsset, AssetExtraction).unit_of_work
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(session_factory=session_factory, blob_store=self.blobs,
+        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs,
                                 cache_enabled=False)
-        set_asset_store(self.store)
-        set_blob_store(self.blobs)
+        set_default_services(Services(asset_store=self.store, blob_store=self.blobs))
 
         self.data = make_png(50, 50)
         digest = compute_sha256(self.data)
@@ -855,11 +855,9 @@ class AssetRouteTests(unittest.TestCase):
         self.client = TestClient(app)
 
     def tearDown(self):
-        from backend.assets.blobs import set_blob_store
-        from backend.assets.store import set_asset_store
+        from backend.composition import set_default_services
 
-        set_asset_store(None)
-        set_blob_store(None)
+        set_default_services(None)
         self._tmp.cleanup()
     def _url(self, suffix=""):
         return asset_url_path(self.dossier.asset_id) + suffix

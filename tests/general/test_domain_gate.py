@@ -7,6 +7,8 @@ false acceptance costs one search the grader would have caught anyway.
 import unittest
 from unittest.mock import patch
 
+from backend.composition import Services, set_default_services
+
 from backend.profiles.registry import load_profile
 from backend.rag.domain_gate import (
     DomainReference,
@@ -168,13 +170,14 @@ class SharedEmbeddingTests(unittest.TestCase):
 
         embedding.reset_query_vector_cache()
         try:
-            with patch.object(embedding, "embedding_service", Counting()):
-                first = embedding.embed_query("what is the uniform policy")
-                second = embedding.embed_query("what is the uniform policy")
+            set_default_services(Services(embedder=Counting()))
+            first = embedding.embed_query("what is the uniform policy")
+            second = embedding.embed_query("what is the uniform policy")
             self.assertEqual(1, len(calls))
             self.assertEqual(first, second)
         finally:
             embedding.reset_query_vector_cache()
+            set_default_services(None)
 
     def test_a_caller_mutating_the_vector_cannot_corrupt_the_memo(self):
         import backend.indexing.embedding as embedding
@@ -185,12 +188,13 @@ class SharedEmbeddingTests(unittest.TestCase):
 
         embedding.reset_query_vector_cache()
         try:
-            with patch.object(embedding, "embedding_service", Fixed()):
-                first = embedding.embed_query("q")
-                first.append(99.0)
-                self.assertEqual([0.1, 0.2, 0.3], embedding.embed_query("q"))
+            set_default_services(Services(embedder=Fixed()))
+            first = embedding.embed_query("q")
+            first.append(99.0)
+            self.assertEqual([0.1, 0.2, 0.3], embedding.embed_query("q"))
         finally:
             embedding.reset_query_vector_cache()
+            set_default_services(None)
 
 
 class CrossEncoderAssessorTests(unittest.TestCase):

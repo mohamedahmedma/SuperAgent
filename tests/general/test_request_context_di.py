@@ -1,5 +1,6 @@
 import asyncio
 import ast
+import inspect
 import importlib.util
 import sys
 import types
@@ -118,15 +119,28 @@ class KnowledgeToolFactoryTests(unittest.TestCase):
 
 
 class RouteImportTests(unittest.TestCase):
-    def test_sessions_route_uses_storage_instance(self):
+    def test_sessions_route_receives_its_store_by_injection(self):
+        """The route NAMES the service it needs. It does not import an instance of one.
+
+        A module-level store binds the route to whatever was built the moment something
+        first imported it: a test cannot hand it another, and two applications in one
+        process cannot differ. Declaring the dependency instead is what makes both
+        possible, so this asserts the shape rather than the object.
+        """
         path = REPO_ROOT / "backend" / "api" / "routes" / "sessions.py"
         spec = importlib.util.spec_from_file_location("sessions_route_under_test", path)
         sessions = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(sessions)
 
-        self.assertTrue(callable(sessions.storage.list_session_infos))
-        self.assertTrue(callable(sessions.storage.get_session_messages))
-        self.assertTrue(callable(sessions.storage.delete_session))
+        self.assertFalse(hasattr(sessions, "storage"))
+        endpoints = (
+            sessions.get_session_messages,
+            sessions.list_sessions,
+            sessions.delete_session,
+        )
+        for endpoint in endpoints:
+            parameter = inspect.signature(endpoint).parameters["conversations"]
+            self.assertIs(parameter.default.dependency, sessions.conversation_storage)
 
 
 class ImportShapeTests(unittest.TestCase):

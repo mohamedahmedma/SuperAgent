@@ -28,6 +28,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 import backend.chat.runtime as runtime
+from backend.composition import Services
 
 service = importlib.import_module("backend.chat.service")
 
@@ -185,15 +186,18 @@ class ParentTurnScenario(unittest.IsolatedAsyncioTestCase):
         if question is not None:
             self.question = question
 
+        conversations = storage or FakeStorage(storage_messages or [])
         chunks = []
         with (
-            patch.object(service, "storage", storage or FakeStorage(storage_messages or [])),
             patch.object(service, "create_agent_for_request", make_agent),
             patch.object(service, "generate_session_title", Mock(return_value="سؤال")),
             patch.object(service, "update_persistent_note", AsyncMock(return_value="")),
         ):
             async for chunk in service.chat_with_agent_stream(
-                self.question, "parent-1", "session-1"
+                self.question,
+                "parent-1",
+                "session-1",
+                services=Services(conversations=conversations),
             ):
                 chunks.append(chunk)
 

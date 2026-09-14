@@ -66,9 +66,9 @@ def _check_embedder() -> dict:
     the very CPU the request path is contending for, on every probe, from every replica.
     """
     try:
-        from backend.indexing.embedding import embedding_service
+        from backend.composition import default_services
 
-        if embedding_service.is_ready:
+        if default_services().embedder.is_ready:
             return {"ok": True, "detail": "loaded"}
         return {"ok": False, "detail": "loading"}
     except Exception as exc:  # pragma: no cover - import failure is not a normal state
