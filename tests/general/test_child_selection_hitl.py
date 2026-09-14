@@ -24,6 +24,7 @@ The existing suite covers the happy path. Everything below is a way the parent's
 or the world around it, can go wrong — plus the guarantee that the two older HITL routes
 did not change when this branch was added in front of them.
 """
+from datetime import datetime, timezone
 import os
 import unittest
 from unittest.mock import Mock, patch
@@ -38,6 +39,10 @@ from backend.chat.clarification import _current_pending_hitl, child_choice_pendi
 from backend.chat.signals import RequestSignals
 from backend.chat.turn_policy import resolve_turn
 from backend.schemas.chat import PendingHitlState
+
+# A clarification asked a moment ago. Pending questions expire after a day
+# (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
+_ASKED_JUST_NOW = datetime.now(timezone.utc).isoformat()
 
 # One family, spelled the way a school's SIS actually spells it: a bare alif on one row,
 # a hamza on another. Both are the same word to a parent typing it, and neither is
@@ -346,7 +351,7 @@ class TheOlderHitlRoutesAreUnaffected(unittest.TestCase):
                 "route": route,
                 "retrieval_status": status,
             },
-            created_at="2026-01-01T00:00:00+00:00",
+            created_at=_ASKED_JUST_NOW,
         ).model_dump()
 
     def test_a_clarify_reply_still_takes_the_resolver_path(self):
