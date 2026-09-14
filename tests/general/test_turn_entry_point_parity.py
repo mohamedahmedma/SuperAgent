@@ -22,6 +22,8 @@ from backend.chat.turn_policy import TurnPlan
 from backend.composition import Services
 from backend.tools import KNOWLEDGE_TOOL
 from tests.general.test_chat_hitl_resume import FakeStorage, _parse_sse_events
+from backend.chat.answer_checks import terminal_reply
+from backend.chat.clarification import PENDING_HITL_KEY
 
 service = importlib.import_module("backend.chat.service")
 
@@ -101,7 +103,7 @@ class AResumedClarificationAfterAnOutage(unittest.TestCase):
                 HumanMessage(content="What is this character's element?"),
                 AIMessage(content="Please specify the character name"),
             ],
-            metadata={service.PENDING_HITL_KEY: dict(self.PENDING)},
+            metadata={PENDING_HITL_KEY: dict(self.PENDING)},
         )
 
     def _patched(self) -> ExitStack:
@@ -185,7 +187,7 @@ class AKnowledgeSearchThatEndsTheTurn(unittest.TestCase):
     def setUp(self):
         for status in self.STATUSES:
             self.assertNotEqual(
-                service._terminal_reply(status, "en"), service._COPY.unverified_answer
+                terminal_reply(status, "en"), service._COPY.unverified_answer
             )
 
     def _patched(self, agent_type, status) -> ExitStack:
@@ -210,7 +212,7 @@ class AKnowledgeSearchThatEndsTheTurn(unittest.TestCase):
                     shown = _stream_shown(
                         "what is partner", "u", "s", services=Services(conversations=storage)
                     )
-                expected = service._terminal_reply(status, "en")
+                expected = terminal_reply(status, "en")
                 self.assertEqual(expected, shown)
                 self.assertEqual(expected, storage.messages[-1].content)
 
@@ -222,7 +224,7 @@ class AKnowledgeSearchThatEndsTheTurn(unittest.TestCase):
                     response = service.chat_with_agent(
                         "what is partner", "u", "s", services=Services(conversations=storage)
                     )
-                expected = service._terminal_reply(status, "en")
+                expected = terminal_reply(status, "en")
                 self.assertEqual(expected, response["response"])
                 self.assertEqual(expected, storage.messages[-1].content)
 

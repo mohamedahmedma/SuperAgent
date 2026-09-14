@@ -515,7 +515,7 @@ class ChatRequestContext:
 
     @property
     def figure_numbers(self) -> dict:
-        """Figure number -> asset_id, as `_resolve_figure_markers` reads it.
+        """Figure number -> asset_id, as `resolve_figure_markers` reads it.
 
         A property rather than a method to match `answer_blocks`, which finalize reads
         the same way one line above the call to this.

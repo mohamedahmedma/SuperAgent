@@ -19,6 +19,7 @@ from backend.profiles import get_profile
 from backend.profiles.registry import load_profile, set_profile
 from backend.rag.evidence import Certainty
 from backend.tools import KNOWLEDGE_TOOL
+from backend.chat.answer_checks import terminal_reply
 
 
 class ForgetfulStorage:
@@ -346,19 +347,19 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
     def test_the_reply_comes_from_profile_copy_in_the_right_language(self):
         import backend.chat.service as service
 
-        english = service._terminal_reply("no_knowledge", "en")
-        arabic = service._terminal_reply("no_knowledge", "ar")
+        english = terminal_reply("no_knowledge", "en")
+        arabic = terminal_reply("no_knowledge", "ar")
         self.assertTrue(english)
         self.assertTrue(arabic)
-        self.assertEqual(english, service._terminal_reply("no_knowledge", "de"),
+        self.assertEqual(english, terminal_reply("no_knowledge", "de"),
                          "an unknown language falls back rather than blanking")
 
     def test_retrieval_error_and_no_knowledge_read_differently(self):
         import backend.chat.service as service
 
         self.assertNotEqual(
-            service._terminal_reply("no_knowledge", "en"),
-            service._terminal_reply("retrieval_error", "en"),
+            terminal_reply("no_knowledge", "en"),
+            terminal_reply("retrieval_error", "en"),
         )
 
     def test_a_non_terminal_status_is_not_short_circuited(self):

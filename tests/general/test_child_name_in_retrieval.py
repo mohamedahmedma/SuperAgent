@@ -23,7 +23,7 @@ from backend.chat.child_names import name_surfaces, strip_child_names
 from backend.chat.child_resolution import ResolvedChild, no_child, resolve_child
 from backend.chat.child_roster import ChildOption
 from backend.chat.request_context import ChatRequestContext
-from backend.chat.service import _turn_context_message
+from backend.chat.context_messages import _turn_context_message
 from backend.chat.signals import RequestSignals
 from backend.chat.turn_policy import resolve_turn
 from backend.rag.pipeline import _search_query

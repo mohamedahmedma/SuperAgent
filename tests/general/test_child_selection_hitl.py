@@ -10,7 +10,7 @@ clarification in the system, and every difference is somewhere it can break:
     persistence round trip because the schema was widened to allow that.
     `_current_pending_hitl` re-validates whatever was stored on every later message, so a
     field the schema rejects does not degrade the route — it deletes it;
-  * it is the only route `_enter_turn` answers without a resolver call, so a regression
+  * it is the only route `enter_turn` answers without a resolver call, so a regression
     there costs a model call per reply and, worse, folds a child's NAME into the query
     the clarify/scope_select routes build — searching the corpus for a child rather than
     for what the parent actually asked;
@@ -26,7 +26,7 @@ did not change when this branch was added in front of them.
 """
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.chat import service
 from backend.chat.caller_identity import CallerIdentity
@@ -34,12 +34,7 @@ from backend.chat.child_resolution import resolve_child
 from backend.chat.child_roster import ChildOption
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import CORRECTION, STANDALONE, ResolvedQuestion
-from backend.chat.service import (
-    _child_choice_pending,
-    _current_pending_hitl,
-    _enter_turn,
-    _pin_the_child_the_parent_named,
-)
+from backend.chat.clarification import _current_pending_hitl, child_choice_pending, enter_turn, pin_the_child_the_parent_named
 from backend.chat.signals import RequestSignals
 from backend.chat.turn_policy import resolve_turn
 from backend.schemas.chat import PendingHitlState
@@ -142,7 +137,7 @@ def _asking_plan(roster=(ALI, AHMED)):
 
 
 def _pending(question=QUESTION, roster=(ALI, AHMED)):
-    return _child_choice_pending(_asking_plan(roster), question)
+    return child_choice_pending(_asking_plan(roster), question)
 
 
 class _NoRosterCache(unittest.TestCase):
@@ -161,7 +156,7 @@ class _NoRosterCache(unittest.TestCase):
 
 
 class ThePendingQuestionSurvivesStorage(unittest.TestCase):
-    """What `_child_choice_pending` builds is written to session metadata and read back
+    """What `child_choice_pending` builds is written to session metadata and read back
     on the next message through `PendingHitlState.model_validate(...)`. If that round
     trip loses or rejects anything, the reply arrives as an ordinary new question and the
     parent is asked which child forever."""
@@ -223,7 +218,7 @@ class ThePlannerOnlyAsksWhenThereIsSomethingToAsk(unittest.TestCase):
             child_question_kind="records",
         )
         self.assertTrue(plan.child_hint)
-        self.assertIsNone(_child_choice_pending(plan, QUESTION))
+        self.assertIsNone(child_choice_pending(plan, QUESTION))
 
     def test_a_plan_with_no_static_reply_stores_nothing(self):
         """Options with no copy to ask them with is not a question anybody was asked, so
@@ -242,14 +237,14 @@ class ThePlannerOnlyAsksWhenThereIsSomethingToAsk(unittest.TestCase):
             child=resolve_child(reference="son", roster=[ALI, AHMED]),
         )
         self.assertIsNone(plan.static_reply)
-        self.assertIsNone(_child_choice_pending(plan, QUESTION))
+        self.assertIsNone(child_choice_pending(plan, QUESTION))
 
     def test_a_plan_with_no_options_stores_nothing(self):
         class _Bare:
             child_options = []
             static_reply = "Which of your children do you mean?"
 
-        self.assertIsNone(_child_choice_pending(_Bare(), QUESTION))
+        self.assertIsNone(child_choice_pending(_Bare(), QUESTION))
 
     def test_a_plan_object_missing_the_field_entirely_stores_nothing(self):
         """An integrating deployment's own plan object, or an older one. Reading the
@@ -258,15 +253,15 @@ class ThePlannerOnlyAsksWhenThereIsSomethingToAsk(unittest.TestCase):
         class _Foreign:
             static_reply = "..."
 
-        self.assertIsNone(_child_choice_pending(_Foreign(), QUESTION))
+        self.assertIsNone(child_choice_pending(_Foreign(), QUESTION))
 
 
 class TheReplyReopensTheOriginalQuestion(unittest.TestCase):
-    """`_enter_turn` on the message after the question. No roster is read at this stage —
+    """`enter_turn` on the message after the question. No roster is read at this stage —
     it only decides what the turn is about."""
 
     def test_choosing_an_offered_option_replays_the_question_not_the_name(self):
-        entry = _enter_turn("أحمد احمد", [], {"pending_hitl": _pending()})
+        entry = enter_turn("أحمد احمد", [], {"pending_hitl": _pending()})
 
         self.assertEqual(entry.child_choice, "أحمد احمد")
         self.assertEqual(entry.effective_user_text, QUESTION)
@@ -277,7 +272,7 @@ class TheReplyReopensTheOriginalQuestion(unittest.TestCase):
         question, because there the reply NARROWS a search. Here the reply names a person,
         and folding it would retrieve for a child's name instead of for the fees, the
         timetable, or whatever was actually asked."""
-        entry = _enter_turn("علي", [], {"pending_hitl": _pending()})
+        entry = enter_turn("علي", [], {"pending_hitl": _pending()})
 
         self.assertNotIn("علي", entry.effective_user_text)
         self.assertNotIn("continuation", entry.effective_user_text.lower())
@@ -287,7 +282,7 @@ class TheReplyReopensTheOriginalQuestion(unittest.TestCase):
         """There is no half-finished search to pick up. Treating it as a resume would
         send the turn down the resume path, which restores graph state this route never
         saved and reads a `resume_state` that is None."""
-        entry = _enter_turn("علي", [], {"pending_hitl": _pending()})
+        entry = enter_turn("علي", [], {"pending_hitl": _pending()})
 
         self.assertFalse(entry.is_hitl_resume)
         self.assertFalse(entry.superseded)
@@ -296,8 +291,8 @@ class TheReplyReopensTheOriginalQuestion(unittest.TestCase):
     def test_the_reply_costs_no_resolver_call(self):
         """Matching a name to a roster row is not a judgement. A resolver call here pays
         a model to re-derive a fact the roster already holds — on every reply."""
-        with patch.object(service, "resolve_turn_question") as resolver:
-            service._enter_turn("علي", [], {"pending_hitl": _pending()})
+        resolver = Mock()
+        enter_turn("علي", [], {"pending_hitl": _pending()}, resolve=resolver)
 
         resolver.assert_not_called()
 
@@ -305,7 +300,7 @@ class TheReplyReopensTheOriginalQuestion(unittest.TestCase):
         """"the older one" is not a name, and this stage cannot know that — the roster is
         read later. What matters is that the turn is still about the question the parent
         asked, so the next plan can ask again rather than answer about a phrase."""
-        entry = _enter_turn("الكبير", [], {"pending_hitl": _pending()})
+        entry = enter_turn("الكبير", [], {"pending_hitl": _pending()})
 
         self.assertEqual(entry.effective_user_text, QUESTION)
         self.assertEqual(entry.child_choice, "الكبير")
@@ -315,8 +310,8 @@ class TheReplyReopensTheOriginalQuestion(unittest.TestCase):
         say the previous question was dropped."""
         metadata = {"pending_hitl": {"route": "child_select", "options": ["علي"]}}
 
-        with patch.object(service, "resolve_turn_question") as resolver:
-            entry = service._enter_turn("علي", [], metadata)
+        resolver = Mock()
+        entry = enter_turn("علي", [], metadata, resolve=resolver)
 
         self.assertTrue(entry.invalid_pending_hitl)
         self.assertEqual(entry.child_choice, "")
@@ -324,7 +319,7 @@ class TheReplyReopensTheOriginalQuestion(unittest.TestCase):
         resolver.assert_not_called()
 
     def test_no_pending_state_at_all_is_an_ordinary_turn(self):
-        entry = _enter_turn("متى تبدأ الدراسة؟", [], {})
+        entry = enter_turn("متى تبدأ الدراسة؟", [], {})
 
         self.assertFalse(entry.invalid_pending_hitl)
         self.assertEqual(entry.child_choice, "")
@@ -332,7 +327,7 @@ class TheReplyReopensTheOriginalQuestion(unittest.TestCase):
 
 
 class TheOlderHitlRoutesAreUnaffected(unittest.TestCase):
-    """The child branch was added in FRONT of the resolver call in `_enter_turn`. If it
+    """The child branch was added in FRONT of the resolver call in `enter_turn`. If it
     ever matched more than its own route, every retrieval clarification in the product
     would stop resuming and start being read as a child's name."""
 
@@ -360,12 +355,11 @@ class TheOlderHitlRoutesAreUnaffected(unittest.TestCase):
                 resolved = ResolvedQuestion(
                     question="ما هي المصاريف؟", intent=STANDALONE, resolved=True
                 )
-                with patch.object(
-                    service, "resolve_turn_question", return_value=resolved
-                ) as resolver:
-                    entry = service._enter_turn(
-                        "Year 4", [], {"pending_hitl": self._pending_clarify(route)}
-                    )
+                resolver = Mock(return_value=resolved)
+                entry = enter_turn(
+                    "Year 4", [], {"pending_hitl": self._pending_clarify(route)},
+                    resolve=resolver,
+                )
 
                 resolver.assert_called_once()
                 self.assertTrue(entry.is_hitl_resume)
@@ -379,10 +373,10 @@ class TheOlderHitlRoutesAreUnaffected(unittest.TestCase):
         resolved = ResolvedQuestion(
             question="ما هي مواعيد الحافلة؟", intent=CORRECTION, resolved=True
         )
-        with patch.object(service, "resolve_turn_question", return_value=resolved):
-            entry = service._enter_turn(
-                "no, I meant the bus", [], {"pending_hitl": self._pending_clarify()}
-            )
+        entry = enter_turn(
+            "no, I meant the bus", [], {"pending_hitl": self._pending_clarify()},
+            resolve=Mock(return_value=resolved),
+        )
 
         self.assertTrue(entry.superseded)
         self.assertFalse(entry.is_hitl_resume)
@@ -391,7 +385,7 @@ class TheOlderHitlRoutesAreUnaffected(unittest.TestCase):
 
 
 class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
-    """`_pin_the_child_the_parent_named`, driven through a canned facade.
+    """`pin_the_child_the_parent_named`, driven through a canned facade.
 
     Pinning is what makes the answer stick for the rest of the conversation, so the bar
     for pinning is a UNIQUE roster match and nothing less.
@@ -403,7 +397,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         is asked the same question again immediately after answering it correctly."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)):
-            pinned = _pin_the_child_the_parent_named(ctx, "سارة احمد")
+            pinned = pin_the_child_the_parent_named(ctx, "سارة احمد")
 
         self.assertTrue(pinned)
         self.assertEqual(ctx.child.student_id, "S-3")
@@ -413,7 +407,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         """A parent on an English keyboard answering a question rendered in Arabic."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)):
-            self.assertTrue(_pin_the_child_the_parent_named(ctx, "Sara"))
+            self.assertTrue(pin_the_child_the_parent_named(ctx, "Sara"))
 
         self.assertEqual(ctx.child.student_id, "S-3")
 
@@ -422,7 +416,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         parent's spelling would let the same child be named two ways in one turn."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)):
-            _pin_the_child_the_parent_named(ctx, "سارة احمد")
+            pin_the_child_the_parent_named(ctx, "سارة احمد")
 
         self.assertEqual(ctx.child.label, "سارة أحمد")
 
@@ -436,7 +430,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
                 with patch(
                     "backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)
                 ):
-                    pinned = _pin_the_child_the_parent_named(ctx, reply)
+                    pinned = pin_the_child_the_parent_named(ctx, reply)
 
                 self.assertFalse(pinned)
                 self.assertEqual(ctx.child.student_id, "")
@@ -446,7 +440,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         brother's marks while the parent watched, asking about the other."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(SAME_NAME_ROWS)):
-            pinned = _pin_the_child_the_parent_named(ctx, "أحمد")
+            pinned = pin_the_child_the_parent_named(ctx, "أحمد")
 
         self.assertFalse(pinned)
         self.assertEqual(ctx.child.student_id, "")
@@ -455,7 +449,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         """The other half of the rule above: the parent CAN settle it, by saying more."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(SAME_NAME_ROWS)):
-            self.assertTrue(_pin_the_child_the_parent_named(ctx, "أحمد عمر"))
+            self.assertTrue(pin_the_child_the_parent_named(ctx, "أحمد عمر"))
 
         self.assertEqual(ctx.child.student_id, "S-2")
 
@@ -464,7 +458,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         with patch(
             "backend.chat.child_roster.requests.get", side_effect=_refuses(500)
         ) as spy:
-            self.assertFalse(_pin_the_child_the_parent_named(ctx, ""))
+            self.assertFalse(pin_the_child_the_parent_named(ctx, ""))
 
         spy.assert_not_called()
 
@@ -473,7 +467,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         cannot be checked — which is one repeated question, never a guess."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _refuses(500)):
-            pinned = _pin_the_child_the_parent_named(ctx, "سارة")
+            pinned = pin_the_child_the_parent_named(ctx, "سارة")
 
         self.assertFalse(pinned)
         self.assertEqual(ctx.child.student_id, "")
@@ -486,7 +480,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
 
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", explode):
-            self.assertFalse(_pin_the_child_the_parent_named(ctx, "سارة"))
+            self.assertFalse(pin_the_child_the_parent_named(ctx, "سارة"))
 
         self.assertEqual(ctx.child.student_id, "")
 
@@ -494,7 +488,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         """An expired sign-in between the question and the reply."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _refuses(401)):
-            self.assertFalse(_pin_the_child_the_parent_named(ctx, "سارة"))
+            self.assertFalse(pin_the_child_the_parent_named(ctx, "سارة"))
 
         self.assertEqual(ctx.child.student_id, "")
 
@@ -504,12 +498,12 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         with patch(
             "backend.chat.child_roster.requests.get", side_effect=_serves(ROSTER_ROWS)
         ) as spy:
-            self.assertFalse(_pin_the_child_the_parent_named(ctx, "سارة"))
+            self.assertFalse(pin_the_child_the_parent_named(ctx, "سارة"))
 
         spy.assert_not_called()
 
     def test_no_context_at_all_pins_nothing(self):
-        self.assertFalse(_pin_the_child_the_parent_named(None, "سارة"))
+        self.assertFalse(pin_the_child_the_parent_named(None, "سارة"))
 
 
 class TheNextPlanUsesWhateverWasPinned(_NoRosterCache):
@@ -528,7 +522,7 @@ class TheNextPlanUsesWhateverWasPinned(_NoRosterCache):
     def test_a_settled_reply_answers_the_original_question_without_asking_again(self):
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(TWO_SONS_ROWS)):
-            _pin_the_child_the_parent_named(ctx, "علي")
+            pin_the_child_the_parent_named(ctx, "علي")
 
         plan = self._replan(ctx)
 
@@ -543,7 +537,7 @@ class TheNextPlanUsesWhateverWasPinned(_NoRosterCache):
         again rather than on an answer about somebody."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(TWO_SONS_ROWS)):
-            _pin_the_child_the_parent_named(ctx, "الكبير")
+            pin_the_child_the_parent_named(ctx, "الكبير")
 
         plan = self._replan(ctx)
 
@@ -558,9 +552,9 @@ class TheNextPlanUsesWhateverWasPinned(_NoRosterCache):
         possible place."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(TWO_SONS_ROWS)):
-            _pin_the_child_the_parent_named(ctx, "asdf")
+            pin_the_child_the_parent_named(ctx, "asdf")
 
-        pending = _child_choice_pending(self._replan(ctx), QUESTION)
+        pending = child_choice_pending(self._replan(ctx), QUESTION)
 
         self.assertIsNotNone(pending)
         self.assertEqual(pending["original_question"], QUESTION)
@@ -572,7 +566,7 @@ class TheNextPlanUsesWhateverWasPinned(_NoRosterCache):
         answering about the brother."""
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)):
-            _pin_the_child_the_parent_named(ctx, "علي")
+            pin_the_child_the_parent_named(ctx, "علي")
 
         plan = _plan(
             resolve_child(reference="daughter", roster=[ALI, SARA], pin=ctx.child),
@@ -591,16 +585,16 @@ class TheWholeRoundTrip(_NoRosterCache):
         asked = _asking_plan()
         self.assertTrue(asked.short_circuit)
         self.assertEqual(asked.exposed_tools, [])
-        stored = {"pending_hitl": _child_choice_pending(asked, QUESTION)}
+        stored = {"pending_hitl": child_choice_pending(asked, QUESTION)}
 
         # Message two: the parent taps the second option.
-        with patch.object(service, "resolve_turn_question") as resolver:
-            entry = service._enter_turn("أحمد احمد", [], stored)
+        resolver = Mock()
+        entry = enter_turn("أحمد احمد", [], stored, resolve=resolver)
         resolver.assert_not_called()
 
         ctx = _ctx()
         with patch("backend.chat.child_roster.requests.get", _serves(TWO_SONS_ROWS)):
-            self.assertTrue(_pin_the_child_the_parent_named(ctx, entry.child_choice))
+            self.assertTrue(pin_the_child_the_parent_named(ctx, entry.child_choice))
 
         replanned = _plan(
             resolve_child(reference="son", roster=[ALI, AHMED], pin=ctx.child),

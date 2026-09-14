@@ -215,9 +215,9 @@ def conversation_text(history: Sequence[Any], limit: int = 6, max_chars: int = 6
         # Blocks out, before the clip. A rendered record is most of the message it is
         # attached to, so a 600-character window spent on lesson rows leaves nothing of
         # the sentence that says what the turn was about — and a follow-up then resolves
-        # against the table instead of the subject. See `service.strip_answer_blocks`.
+        # against the table instead of the subject. See `answer_blocks.strip_answer_blocks`.
         if role == "assistant":
-            from backend.chat.service import strip_answer_blocks
+            from backend.chat.answer_blocks import strip_answer_blocks
 
             text = strip_answer_blocks(text)
         clean = _WHITESPACE.sub(" ", text or "").strip()

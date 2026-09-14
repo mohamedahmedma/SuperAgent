@@ -25,7 +25,7 @@ Four separate defects produced that, and each has tests below:
      the correction onto the reading it was correcting — so it retrieved both
 """
 import unittest
-from unittest.mock import patch
+
 
 from backend.chat.resolution import (
     CORRECTION,
@@ -43,6 +43,7 @@ from backend.profiles.registry import load_profile, set_profile
 from backend.rag.evidence import Certainty, EvidenceReport
 from backend.rag.policy import can_ask_human, decide_route, offerable_directions
 from backend.rag.scope_index import ScopeMatch
+from backend.chat.context_messages import _turn_context_message, build_context_messages
 
 
 def _config(**overrides):
@@ -715,12 +716,14 @@ class TurnEntryTests(unittest.TestCase):
     }
 
     def _enter(self, user_text, resolution):
-        import backend.chat.service as service
+        from backend.chat.clarification import PENDING_HITL_KEY, enter_turn
 
-        with patch.object(service, "resolve_turn_question", lambda *a, **k: resolution):
-            return service._enter_turn(
-                user_text, list(UNIFORM_TURN), {service.PENDING_HITL_KEY: self.PENDING}
-            )
+        return enter_turn(
+            user_text,
+            list(UNIFORM_TURN),
+            {PENDING_HITL_KEY: self.PENDING},
+            resolve=lambda *a, **k: resolution,
+        )
 
     def test_a_correction_abandons_the_clarification(self):
         entry = self._enter(
@@ -759,13 +762,12 @@ class TurnEntryTests(unittest.TestCase):
         self.assertFalse(entry.is_hitl_resume)
 
     def test_no_pending_clarification_means_no_resolver_call_here(self):
-        import backend.chat.service as service
+        from backend.chat.clarification import enter_turn
 
         calls = []
-        with patch.object(
-            service, "resolve_turn_question", lambda *a, **k: calls.append(a) or None
-        ):
-            entry = service._enter_turn("what are the fees", [], {})
+        entry = enter_turn(
+            "what are the fees", [], {}, resolve=lambda *a, **k: calls.append(a) or None
+        )
         self.assertEqual([], calls, "the planner resolves an ordinary turn, not this")
         self.assertFalse(entry.is_hitl_resume)
         self.assertIsNone(entry.resolution)
@@ -782,14 +784,14 @@ class TurnContextMessageTests(unittest.TestCase):
         import backend.chat.service as service
         from backend.chat.turn_policy import TurnPlan
 
-        self.assertIsNone(service._turn_context_message(TurnPlan()))
-        self.assertIsNone(service._turn_context_message(None))
+        self.assertIsNone(_turn_context_message(TurnPlan()))
+        self.assertIsNone(_turn_context_message(None))
 
     def test_the_resolved_question_and_conditions_are_both_stated(self):
         import backend.chat.service as service
         from backend.chat.turn_policy import TurnPlan
 
-        message = service._turn_context_message(
+        message = _turn_context_message(
             TurnPlan(
                 resolved_question="what are the school fees up to Year 6",
                 carried_constraints=["grades up to Year 6"],
@@ -805,7 +807,7 @@ class TurnContextMessageTests(unittest.TestCase):
         from backend.chat.turn_policy import TurnPlan
         from langchain_core.messages import HumanMessage
 
-        built = service._build_context_messages(
+        built = build_context_messages(
             [HumanMessage(content="earlier")],
             "",
             "and the fees?",
