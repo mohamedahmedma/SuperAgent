@@ -140,6 +140,14 @@ def resolve_child(
         # records tool has careful wording for, and only it should say it.
         return no_child("no readable children")
 
+    # 0. An only child. Nothing to disambiguate, so the parent is never asked — whatever
+    #    the message called the child. "My son" about a daughter, a nickname, a spelling
+    #    the roster cannot place: with one child on file the wording chooses nothing, and
+    #    asking "which child?" with a single option is a question with no answer but one.
+    #    The words matter only from two children up, where they FILTER.
+    if len(roster) == 1:
+        return _found(roster[0], "only_child", "an only child")
+
     # 1. A name in the message. Always wins, so "and how is Omar?" moves the
     #    conversation on even when the previous question was about his sister.
     if reference == "named":
@@ -169,10 +177,6 @@ def resolve_child(
         # pin: the parent named somebody, and answering about a different child while
         # they watch is worse than one more question.
         return _ask(roster, "the name matches none of this parent's children")
-
-    # 2. An only child. Nothing to disambiguate, so they are never asked at all.
-    if len(roster) == 1:
-        return _found(roster[0], "only_child", "an only child")
 
     # 3. Plural. Never narrows and never asks — collapsing "all of them" to one child is
     #    worse than not helping, and the tool can still read the whole roster.

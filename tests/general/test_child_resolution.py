@@ -39,6 +39,19 @@ class NobodyToChooseFrom(unittest.TestCase):
         self.assertEqual(out.label, "علي حسن")
         self.assertEqual(out.year_level, "Year 4")
 
+    def test_an_only_child_is_chosen_whatever_the_message_called_them(self):
+        """One child on file: the wording chooses nothing, so it is not asked about.
+        "My son" about a daughter, a nickname, a spelling the roster cannot place — each
+        used to end in "which child?" with a single option, a question with one answer.
+        From two children up the same words FILTER; here they are ignored."""
+        for reference, name in (("son", ""), ("daughter", ""), ("named", "خالد"), ("named", "Loulou"), ("child", "")):
+            with self.subTest(reference=reference, name=name):
+                out = resolve_child(reference=reference, child_name=name, roster=[LAYLA])
+                self.assertTrue(out.resolved)
+                self.assertFalse(out.ask)
+                self.assertEqual(out.student_id, "S-3")
+                self.assertEqual(out.source, "only_child")
+
 
 class TheParentNamedSomebody(unittest.TestCase):
     def test_a_unique_name_resolves(self):
