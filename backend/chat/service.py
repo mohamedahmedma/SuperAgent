@@ -1084,25 +1084,45 @@ def _resume_constraints(rag_result: dict) -> list[str]:
     return [str(item) for item in (trace.get("turn_carried_constraints") or [])]
 
 
+def _resumed_static_reply(rag_result: dict | None) -> str | None:
+    """The copy for a resumed clarification with nothing to answer from, or None.
+
+    One rule for both entry points, and it used to be two. The retrieval-error branch
+    was added to the sync answer and never carried to the streamed one, which looked only
+    at whether any documents came back — so a parent resuming a clarification while the
+    knowledge base was unreachable was told the school had no information on it. That is
+    precisely the reading B1 forbids: an outage says nothing about what the corpus holds.
+
+    None means the retrieved documents stand and the model should answer from them. A
+    string, even an empty one, is the reply — the distinction matters because a profile
+    may configure empty copy, and that must still skip the model.
+    """
+    if not isinstance(rag_result, dict):
+        return _no_knowledge_response()
+    trace = rag_result.get("rag_trace") or {}
+    status = rag_result.get("retrieval_status") or trace.get("retrieval_status")
+    route = rag_result.get("route") or trace.get("route")
+    if status == "retrieval_error" or route == "retrieval_error":
+        return _retrieval_error_response()
+    if status == "no_knowledge" or route == "no_knowledge" or not (rag_result.get("docs") or []):
+        return _no_knowledge_response()
+    return None
+
+
 def _answer_resumed_rag_sync(
     pending_hitl: dict,
     user_answer: str,
     rag_result: dict,
     history: list | None = None,
 ) -> str:
-    docs = rag_result.get("docs") or []
-    trace = rag_result.get("rag_trace") or {}
-    status = rag_result.get("retrieval_status") or trace.get("retrieval_status")
-    route = rag_result.get("route") or trace.get("route")
-    if status == "retrieval_error" or route == "retrieval_error":
-        return _retrieval_error_response()
-    if status == "no_knowledge" or route == "no_knowledge" or not docs:
-        return _no_knowledge_response()
+    static_reply = _resumed_static_reply(rag_result)
+    if static_reply is not None:
+        return static_reply
     res = model.invoke(
         _build_resume_answer_messages(
             pending_hitl,
             user_answer,
-            docs,
+            rag_result.get("docs") or [],
             resolved_question=rag_result.get("question") or "",
             constraints=_resume_constraints(rag_result),
             history=history,
@@ -1607,8 +1627,10 @@ async def chat_with_agent_stream(
                     next_pending_hitl["prompt"],
                     next_pending_hitl["options"],
                 )
-            elif not (rag_result.get("docs") if isinstance(rag_result, dict) else None):
-                full_response = _no_knowledge_response()
+            elif (static_reply := _resumed_static_reply(rag_result)) is not None:
+                # Nothing to answer from: an outage, or a search that found nothing. The
+                # same rule the sync path applies — see `_resumed_static_reply`.
+                full_response = static_reply
                 yield f"data: {json.dumps({'type': 'content', 'content': full_response})}\n\n"
             else:
                 answer_messages = _build_resume_answer_messages(
