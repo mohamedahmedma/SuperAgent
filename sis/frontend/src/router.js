@@ -23,6 +23,7 @@
 var routes = [];
 var listeners = [];
 var current = null;
+var onHashChange = null;
 
 /** Parse `#/name?a=1&b=2` into `{name, params}`. Anything unrecognised is the home route. */
 function parse(hash) {
@@ -37,7 +38,7 @@ function parse(hash) {
       params[key] = value;
     });
   }
-  return { name: name || routes[0].name, params: params };
+  return { name: name || (routes[0] && routes[0].name) || '', params: params };
 }
 
 function find(name) {
@@ -140,8 +141,16 @@ function subscribe(fn) {
  * home route first — `routes[0]` is what an unknown hash falls back to.
  */
 function start(table) {
+  if (!Array.isArray(table) || table.length === 0) {
+    throw new Error('Router.start requires at least one route');
+  }
+
+  // `start` is normally called once. Making it idempotent keeps Vite HMR and focused UI
+  // tests from registering duplicate hash handlers, which previously rendered and scrolled
+  // once per earlier start call.
+  if (onHashChange) window.removeEventListener('hashchange', onHashChange);
   routes = table.slice();
-  window.addEventListener('hashchange', function () {
+  onHashChange = function () {
     resolve();
     /*
      * Scroll to the top on a route change, and only on a route change. A screen that
@@ -151,7 +160,8 @@ function start(table) {
      * to the page heading.
      */
     window.scrollTo(0, 0);
-  });
+  };
+  window.addEventListener('hashchange', onHashChange);
   resolve();
 }
 

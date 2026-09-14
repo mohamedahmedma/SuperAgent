@@ -1775,6 +1775,149 @@ class TeacherAttendance(Base):
     )
 
 
+class ChatConversation(Base):
+    """One durable staff conversation; membership in automatic groups is derived live."""
+
+    __tablename__ = "chat_conversations"
+    __table_args__ = (
+        UniqueConstraint("school_id", "group_key", name="uq_chat_conversations_group"),
+        UniqueConstraint(
+            "school_id", "direct_user_one_id", "direct_user_two_id",
+            name="uq_chat_conversations_direct_pair",
+        ),
+        CheckConstraint("kind IN ('group', 'direct')", name="chat_conversations_kind"),
+        CheckConstraint(
+            "(kind = 'group' AND group_key IS NOT NULL AND direct_user_one_id IS NULL "
+            "AND direct_user_two_id IS NULL) OR "
+            "(kind = 'direct' AND group_key IS NULL AND direct_user_one_id IS NOT NULL "
+            "AND direct_user_two_id IS NOT NULL AND direct_user_one_id < direct_user_two_id)",
+            name="chat_conversations_shape",
+        ),
+        Index("ix_chat_conversations_school_updated", "school_id", "updated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    school_id: Mapped[int] = mapped_column(
+        ForeignKey("schools.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(12), nullable=False)
+    group_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    direct_user_one_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    direct_user_two_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    title_en: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    title_ar: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
+class ChatMessage(Base):
+    """An immutable message. Membership changes visibility, never message history."""
+
+    __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("ix_chat_messages_conversation_id", "conversation_id", "id"),
+        CheckConstraint("length(body) <= 4000", name="chat_messages_body_length"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    sender_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class ChatAttachment(Base):
+    """A securely stored file belonging to one chat message."""
+
+    __tablename__ = "chat_attachments"
+    __table_args__ = (
+        CheckConstraint("kind IN ('image', 'file', 'audio')", name="chat_attachments_kind"),
+        CheckConstraint("size_bytes > 0", name="chat_attachments_size"),
+        Index("ix_chat_attachments_message_id", "message_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(12), nullable=False)
+    file_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class ChatReceipt(Base):
+    """Delivery/read state for one intended recipient, snapshotted when sent."""
+
+    __tablename__ = "chat_receipts"
+    __table_args__ = (
+        Index("ix_chat_receipts_user_delivery", "user_id", "delivered_at"),
+    )
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ChatRead(Base):
+    """The newest message one person has seen in one conversation."""
+
+    __tablename__ = "chat_reads"
+
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    last_read_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True
+    )
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class ChatPresence(Base):
+    """Ephemeral staff availability persisted just long enough to span web workers."""
+
+    __tablename__ = "chat_presence"
+    __table_args__ = (
+        Index("ix_chat_presence_school_seen", "school_id", "last_seen_at"),
+        Index("ix_chat_presence_typing", "typing_conversation_id", "typing_until"),
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    school_id: Mapped[int] = mapped_column(
+        ForeignKey("schools.id", ondelete="CASCADE"), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    typing_conversation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    typing_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class SystemSetting(Base):
     """Estate-wide switches the administrator can turn, one row per key.
 

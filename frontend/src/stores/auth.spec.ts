@@ -31,6 +31,15 @@ vi.mock('@/utils/identityApi', () => ({
   default: { get: vi.fn(), post: vi.fn() },
   ACCESS_TOKEN_KEY: 'accessToken',
   REFRESH_TOKEN_KEY: 'refreshToken',
+  persistSession: ({ access_token, refresh_token }: { access_token: string; refresh_token?: string | null }) => {
+    localStorage.setItem('accessToken', access_token);
+    if (refresh_token) localStorage.setItem('refreshToken', refresh_token);
+    else localStorage.removeItem('refreshToken');
+  },
+  clearStoredSession: () => {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+  },
 }));
 
 const post = identityApi.post as unknown as ReturnType<typeof vi.fn>;
@@ -183,6 +192,17 @@ describe('signing in through WhatsApp', () => {
     // The challenge is spent and its state cleared, so a reload cannot resubmit it.
     expect(auth.whatsapp.status).toBe('idle');
     expect(auth.whatsapp.pollSecret).toBe('');
+  });
+
+  it('removes a refresh token left by a previous session when the new session has none', () => {
+    const auth = useAuthStore();
+    localStorage.setItem('refreshToken', 'stale-token');
+
+    auth.applySession({ ...TOKENS, refresh_token: undefined });
+
+    expect(auth.token).toBe('access');
+    expect(auth.refreshToken).toBe('');
+    expect(localStorage.getItem('refreshToken')).toBeNull();
   });
 
   it('keeps a parent on the same screen after one wrong code', async () => {

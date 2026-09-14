@@ -406,6 +406,7 @@ function request(path, options) {
 
   return fetch(url, init).then(
     function (response) {
+      if (response.ok && opts.responseType === 'blob') return response.blob();
       return response.text().then(function (text) {
         var body = null;
         if (text) {
@@ -861,6 +862,50 @@ var api = {
   restoreTeacher: function (schoolCode, staffNumber) {
     return post('/schools/' + encodeURIComponent(schoolCode) + '/teachers/' +
       encodeURIComponent(staffNumber) + '/restore');
+  },
+  chatConversations: function (schoolCode) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations');
+  },
+  chatPresence: function (schoolCode, body) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/presence', body || {});
+  },
+  chatMembers: function (schoolCode, conversationId) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/members');
+  },
+  chatPeople: function (schoolCode, search) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/people', { q: search });
+  },
+  openDirectChat: function (schoolCode, userId) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/direct', { user_id: userId });
+  },
+  chatMessages: function (schoolCode, conversationId, beforeId) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/messages', { before_id: beforeId || null });
+  },
+  sendChatMessage: function (schoolCode, conversationId, body) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/messages', { body: body });
+  },
+  sendChatAttachments: function (schoolCode, conversationId, files, body, durationSeconds) {
+    var form = new window.FormData();
+    Array.from(files || []).forEach(function (file) { form.append('files', file); });
+    if (body) form.append('body', body);
+    if (durationSeconds) form.append('duration_seconds', String(durationSeconds));
+    return postForm('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/attachments', form);
+  },
+  chatAttachmentBlob: function (schoolCode, attachmentId) {
+    return request('/schools/' + encodeURIComponent(schoolCode) + '/chat/attachments/' +
+      encodeURIComponent(attachmentId) + '/file', { responseType: 'blob' });
+  },
+  chatMessageReceipts: function (schoolCode, messageId) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/messages/' +
+      encodeURIComponent(messageId) + '/receipts');
+  },
+  markChatRead: function (schoolCode, conversationId) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/read');
   },
   teacherAttendance: function (schoolCode, fromDate, toDate) {
     return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers/attendance', {

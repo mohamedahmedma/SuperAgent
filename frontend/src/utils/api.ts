@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, refreshAccessToken } from '@/utils/identityApi';
+import { ACCESS_TOKEN_KEY, clearStoredSession, refreshAccessToken } from '@/utils/identityApi';
 
 /**
  * The chat backend's origin.
@@ -95,8 +95,7 @@ api.interceptors.response.use(
     }
 
     if (error.response?.status === 401) {
-      localStorage.removeItem(ACCESS_TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
+      clearStoredSession();
       window.dispatchEvent(new CustomEvent('unauthorized'));
     }
 

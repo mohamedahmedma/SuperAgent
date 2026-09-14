@@ -96,6 +96,11 @@ class Permission(StrEnum):
     REPORTS_READ = "reports.read"
     AUDIT_READ = "audit.read"
 
+    # Staff communication. Kept separate so a school can make messaging read-only for a
+    # custom role without also granting the ability to send as that person.
+    CHAT_READ = "chat.read"
+    CHAT_WRITE = "chat.write"
+
 
 class OverrideEffect(StrEnum):
     """The two exceptional outcomes an Admin may set for one user permission."""
@@ -242,6 +247,7 @@ _READS: Final[tuple[Permission, ...]] = (
     Permission.TEACHER_ATTENDANCE_READ,
     Permission.USERS_READ,
     Permission.REPORTS_READ,
+    Permission.CHAT_READ,
 )
 
 # School Owners normally remain read-only. The explicitly approved operational
@@ -253,6 +259,7 @@ _SCHOOL_OWNER_STAFFING_WRITES: Final[frozenset[Permission]] = frozenset({
     Permission.TEACHERS_ASSIGN_SUBJECTS,
     Permission.TEACHERS_ASSIGN_CLASSES,
     Permission.ROLES_ASSIGN,
+    Permission.CHAT_WRITE,
 })
 
 
@@ -332,6 +339,8 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.TEACHER_ATTENDANCE_READ,
             Permission.USERS_READ,
             Permission.ROLES_ASSIGN,
+            Permission.CHAT_READ,
+            Permission.CHAT_WRITE,
         ),
     ),
     RoleDefinition(
@@ -353,6 +362,8 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.GRADES_READ,
             Permission.REPORTS_READ,
             Permission.TEACHERS_ASSIGN_CLASSES,
+            Permission.CHAT_READ,
+            Permission.CHAT_WRITE,
         ),
     ),
     RoleDefinition(
@@ -365,6 +376,8 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.STRUCTURE_READ,
             Permission.ATTENDANCE_READ,
             Permission.ATTENDANCE_WRITE,
+            Permission.CHAT_READ,
+            Permission.CHAT_WRITE,
         ),
     ),
     RoleDefinition(
@@ -383,6 +396,8 @@ BUILT_IN_ROLES: Final[tuple[RoleDefinition, ...]] = (
             Permission.ATTENDANCE_READ,
             Permission.GRADES_READ,
             Permission.GRADES_WRITE,
+            Permission.CHAT_READ,
+            Permission.CHAT_WRITE,
         ),
     ),
 )
