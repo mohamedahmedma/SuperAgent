@@ -286,7 +286,7 @@ class RagGraphTests(unittest.TestCase):
     def test_the_evidence_ladder_is_untouched(self):
         import backend.rag.pipeline as pipeline
 
-        self.assertTrue(hasattr(pipeline, "_assess_evidence"))
+        self.assertTrue(hasattr(pipeline.grade_documents_node, "assess"))
         self.assertTrue(hasattr(pipeline, "LLMGraderAssessor"))
 
 

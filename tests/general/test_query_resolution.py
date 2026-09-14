@@ -439,13 +439,13 @@ class ConstraintTests(unittest.TestCase):
     """
 
     def test_the_search_query_is_the_question_alone(self):
-        from backend.rag.pipeline import _search_query
+        from backend.rag.graph_nodes import search_query
 
         state = {
             "question": "what time does the school day start",
             "carried_constraints": ["the child is 5 years old"],
         }
-        self.assertEqual(state["question"], _search_query(state))
+        self.assertEqual(state["question"], search_query(state))
 
     def test_nothing_appends_conditions_to_a_query_any_more(self):
         """A guard against reintroducing it. The condition still reaches the grader and

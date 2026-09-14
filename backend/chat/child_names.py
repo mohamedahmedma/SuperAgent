@@ -11,10 +11,10 @@ The name still has to reach everything else. Which child this turn is about deci
 which record is read (`planned_child_id`), how the answer is worded, and what the parent
 is asked when two children match. So this is not redaction for privacy and it is not a
 rewrite of the message: it is one derived view of the question, for retrieval only, and
-`backend/rag/pipeline.py:_search_query` is the only caller.
+`backend/rag/graph_nodes.py:search_query` is the only caller.
 
 That is the same shape the child's YEAR already has, for the same measured reason — see
-`_search_query`'s docstring. Conditions and identity travel BESIDE the question; only
+`search_query`'s docstring. Conditions and identity travel BESIDE the question; only
 words the corpus might actually contain travel inside it.
 
 ## Why this is not a name detector

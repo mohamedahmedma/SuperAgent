@@ -7,7 +7,7 @@ answer. Retrieval ranked the whole fee table and the wrong row won.
 
 The obvious fix is the one that must NOT be made. Appending conditions to the retrieval
 query was tried and reverted here after costing three of twenty turns
-(`backend/rag/pipeline.py:_search_query`): a year group appears in no passage the corpus
+(`backend/rag/graph_nodes.py:search_query`): a year group appears in no passage the corpus
 wrote once for everybody, so every such query term is dilution. The year therefore
 travels beside the question to the two stages that can act on it without costing recall
 — the grader, and the answer prompt.
@@ -20,6 +20,7 @@ from backend.chat.turn_policy import _plan_child, TurnPlan, question_names_a_yea
 from backend.profiles import get_profile
 from backend.prompts import render as render_prompt, resolve as resolve_prompt
 from backend.rag import pipeline
+from backend.rag.graph_nodes import search_query
 
 MARKERS = get_profile().agent.year_reference_markers
 YEAR = "الصف الأول الابتدائي"
@@ -94,31 +95,31 @@ class ItReachesTheGraphTests(unittest.TestCase):
 
     def test_the_search_query_is_still_only_the_question(self):
         """The measured regression this whole design avoids. If this ever fails, recall
-        has been traded away — read `_search_query`'s docstring before changing it."""
+        has been traded away — read `search_query`'s docstring before changing it."""
         ctx = ChatRequestContext(user_id="u", session_id="s")
         ctx.note_turn_plan([], [], child_year=YEAR)
         state = pipeline._initial_state("مصاريف ابني كام", ctx)
-        self.assertEqual(pipeline._search_query(state), "مصاريف ابني كام")
-        self.assertNotIn(YEAR, pipeline._search_query(state))
+        self.assertEqual(search_query(state), "مصاريف ابني كام")
+        self.assertNotIn(YEAR, search_query(state))
 
     def test_the_grader_is_told_the_year_as_a_condition(self):
         state = {"carried_constraints": [], "child_year": YEAR}
-        conditions = pipeline.grading_conditions(state)
+        conditions = pipeline.grade_documents_node.conditions(state)
         self.assertEqual(len(conditions), 1)
         self.assertIn(YEAR, conditions[0])
 
     def test_the_condition_says_the_records_are_its_source(self):
         """A condition that misreports where it came from is the fabricated-provenance
         pattern `backend/rag/evidence.py` exists to prevent — the user did not say this."""
-        conditions = pipeline.grading_conditions({"child_year": YEAR})
+        conditions = pipeline.grade_documents_node.conditions({"child_year": YEAR})
         self.assertIn("school's records", conditions[0])
 
     def test_user_conditions_and_the_year_travel_together(self):
         state = {"carried_constraints": ["up to Year 6"], "child_year": YEAR}
-        self.assertEqual(len(pipeline.grading_conditions(state)), 2)
+        self.assertEqual(len(pipeline.grade_documents_node.conditions(state)), 2)
 
     def test_no_year_adds_no_condition(self):
-        self.assertEqual(pipeline.grading_conditions({"carried_constraints": []}), [])
+        self.assertEqual(pipeline.grade_documents_node.conditions({"carried_constraints": []}), [])
 
 
 class AnswerPromptTests(unittest.TestCase):
