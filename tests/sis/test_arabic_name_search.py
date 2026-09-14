@@ -20,7 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.sis.conftest import registrar_headers
-from sis.domain.arabic import fold_for_search
+from sis.domain.arabic import compact_for_search, fold_for_search
 
 
 @pytest.fixture()
@@ -78,6 +78,10 @@ def test_a_latin_name_passes_through_untouched() -> None:
     assert fold_for_search("") == ""
 
 
+def test_search_key_ignores_extra_or_missing_spaces() -> None:
+    assert compact_for_search("  عبد   الرحمن ") == compact_for_search("عبدالرحمن")
+
+
 # ---------------------------------------------------------------------------
 # And over HTTP, which is where the registrar meets it
 # ---------------------------------------------------------------------------
@@ -114,6 +118,14 @@ def test_the_english_name_and_the_number_still_match_as_they_did(
     assert client.get("/v1/students", params={"q": "ahmed"}, headers=registrar).json()["count"] == 1
     assert client.get("/v1/students", params={"q": "Ahmed"}, headers=registrar).json()["count"] == 1
     assert client.get("/v1/students", params={"q": "10432"}, headers=registrar).json()["count"] == 1
+
+
+def test_a_compound_name_is_found_with_extra_or_missing_spaces(
+    client: TestClient, registrar: dict[str, str]
+) -> None:
+    _add(client, registrar, "10433", "عبد الرحمن أحمد")
+    assert client.get("/v1/students", params={"q": "عبدالرحمن"}, headers=registrar).json()["count"] == 1
+    assert client.get("/v1/students", params={"q": "عبد   الرحمن"}, headers=registrar).json()["count"] == 1
 
 
 def test_a_wildcard_is_still_a_character_and_not_a_wildcard(

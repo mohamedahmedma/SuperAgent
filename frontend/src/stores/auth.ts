@@ -1,7 +1,10 @@
 import { defineStore } from 'pinia';
 import identityApi, {
   ACCESS_TOKEN_KEY,
+  clearStoredSession,
+  persistSession,
   REFRESH_TOKEN_KEY,
+  type IdentitySession,
 } from '@/utils/identityApi';
 import type { CurrentUser, UserRole } from '@/types/user';
 
@@ -323,19 +326,16 @@ export const useAuthStore = defineStore('auth', {
       this.whatsapp.busy = false;
     },
 
-    applySession(data: any) {
+    applySession(data: IdentitySession & Record<string, unknown>) {
       this.token = data.access_token;
       this.refreshToken = data.refresh_token || '';
       this.currentUser = {
-        username: data.username,
+        username: String(data.username || ''),
         role: data.role as UserRole,
-        guardianId: data.guardian_id ?? null,
-        displayName: data.display_name || '',
+        guardianId: (data.guardian_id as string | null | undefined) ?? null,
+        displayName: String(data.display_name || ''),
       };
-      localStorage.setItem(ACCESS_TOKEN_KEY, this.token);
-      if (this.refreshToken) {
-        localStorage.setItem(REFRESH_TOKEN_KEY, this.refreshToken);
-      }
+      persistSession(data);
     },
 
     async handleLogout() {
@@ -347,8 +347,7 @@ export const useAuthStore = defineStore('auth', {
       this.token = '';
       this.refreshToken = '';
       this.currentUser = null;
-      localStorage.removeItem(ACCESS_TOKEN_KEY);
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
+      clearStoredSession();
 
       if (refreshToken) {
         try {

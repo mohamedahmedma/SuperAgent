@@ -698,4 +698,135 @@
     "teaching_slots": 5
   },
   "PUT /v1/timetable/week": []
+  ,"GET /v1/schools/MAIN/chat/conversations": [
+    {
+      "id": 91,
+      "kind": "group",
+      "category": "school",
+      "title_en": "All school staff",
+      "title_ar": "كل هيئة المدرسة",
+      "unread_count": 0,
+      "last_message": {
+        "body": "Welcome to the staff chat",
+        "sender_name_en": "Nadia Kamal",
+        "sender_name_ar": "نادية كمال",
+        "created_at": "2026-09-14T08:30:00Z"
+      },
+      "updated_at": "2026-09-14T08:30:00Z"
+    },
+    {
+      "id": 92,
+      "kind": "group",
+      "category": "floor",
+      "title_en": "Grade 3 staff · 2025-2026",
+      "title_ar": "فريق الصف الثالث · 2025-2026",
+      "scope_code": "Y3",
+      "scope_name_en": "Grade 3",
+      "scope_name_ar": "الصف الثالث",
+      "unread_count": 0,
+      "last_message": null,
+      "updated_at": "2026-09-14T08:20:00Z"
+    },
+    {
+      "id": 93,
+      "kind": "group",
+      "category": "class",
+      "title_en": "Class 3A · 2025-2026",
+      "title_ar": "فصل ٣ أ · 2025-2026",
+      "scope_code": "Y3",
+      "scope_name_en": "Grade 3",
+      "scope_name_ar": "الصف الثالث",
+      "unread_count": 0,
+      "last_message": null,
+      "updated_at": "2026-09-14T08:10:00Z"
+    },
+    {
+      "id": 94,
+      "kind": "group",
+      "category": "subject",
+      "title_en": "Mathematics teachers · Grade 3",
+      "title_ar": "مدرسو الرياضيات · الصف الثالث",
+      "scope_code": "Y3",
+      "scope_name_en": "Grade 3",
+      "scope_name_ar": "الصف الثالث",
+      "unread_count": 0,
+      "last_message": null,
+      "updated_at": "2026-09-14T08:05:00Z"
+    },
+    {
+      "id": 95,
+      "kind": "direct",
+      "category": "direct",
+      "title_en": "Ahmed Hassan",
+      "title_ar": "أحمد حسن",
+      "unread_count": 0,
+      "last_message": null,
+      "updated_at": "2026-09-14T08:00:00Z"
+    },
+    {
+      "id": 96,
+      "kind": "group",
+      "category": "leadership",
+      "title_en": "School manager and floor supervisors",
+      "title_ar": "مدير المدرسة ومشرفو الصفوف",
+      "unread_count": 0,
+      "last_message": null,
+      "updated_at": "2026-09-14T07:55:00Z"
+    }
+  ]
+  ,"GET /v1/schools/MAIN/chat/conversations/91/messages": [
+    {
+      "id": 501,
+      "conversation_id": 91,
+      "sender_user_id": 7,
+      "sender_name_en": "Nadia Kamal",
+      "sender_name_ar": "نادية كمال",
+      "body": "Welcome to the staff chat",
+      "created_at": "2026-09-14T08:30:00Z",
+      "attachments": [
+        { "id": "attachment-pdf-1", "kind": "file", "original_filename": "staff-guide.pdf", "mime_type": "application/pdf", "size_bytes": 4096, "duration_seconds": null }
+      ],
+      "receipts": { "total": 4, "delivered": 3, "read": 2 }
+    },
+    {
+      "id": 502,
+      "conversation_id": 91,
+      "sender_user_id": 8,
+      "sender_name_en": "Ahmed Hassan",
+      "sender_name_ar": "أحمد حسن",
+      "body": "",
+      "created_at": "2026-09-14T08:35:00Z",
+      "attachments": [
+        { "id": "attachment-image-1", "kind": "image", "original_filename": "board.jpg", "mime_type": "image/jpeg", "size_bytes": 2048, "duration_seconds": null }
+      ],
+      "receipts": null
+    }
+  ]
+  ,"POST /v1/schools/MAIN/chat/presence": { "online": true, "delivered_messages": 0 }
+  ,"GET /v1/schools/MAIN/chat/conversations/91/members": [
+    {
+      "user_id": 8, "username": "ahmed.hassan", "full_name_en": "Ahmed Hassan", "full_name_ar": "أحمد حسن",
+      "roles": ["teacher"], "role_caption_en": "Mathematics teacher · Grade 3", "role_caption_ar": "مدرس الرياضيات · الصف الثالث",
+      "subjects": [{ "code": "MATH", "name_en": "Mathematics", "name_ar": "الرياضيات" }],
+      "grades": [{ "code": "Y3", "name_en": "Grade 3", "name_ar": "الصف الثالث" }],
+      "classes": [{ "code": "3A", "name_en": "3A", "name_ar": "٣ أ" }],
+      "online": true, "last_seen_at": "2026-09-14T08:36:00Z", "typing": true
+    }
+  ]
+  ,"GET /v1/schools/MAIN/chat/conversations/92/members": []
+  ,"GET /v1/schools/MAIN/chat/conversations/93/members": []
+  ,"GET /v1/schools/MAIN/chat/conversations/94/members": []
+  ,"GET /v1/schools/MAIN/chat/conversations/95/members": []
+  ,"GET /v1/schools/MAIN/chat/conversations/96/members": []
+  ,"GET /v1/schools/MAIN/chat/messages/501/receipts": [
+    { "user_id": 8, "full_name_en": "Ahmed Hassan", "full_name_ar": "أحمد حسن", "delivered_at": "2026-09-14T08:31:00Z", "read_at": "2026-09-14T08:32:00Z" },
+    { "user_id": 9, "full_name_en": "Mariam Fouad", "full_name_ar": "مريم فؤاد", "delivered_at": "2026-09-14T08:31:30Z", "read_at": "2026-09-14T08:33:00Z" },
+    { "user_id": 10, "full_name_en": "Omar Ali", "full_name_ar": "عمر علي", "delivered_at": "2026-09-14T08:34:00Z", "read_at": null },
+    { "user_id": 11, "full_name_en": "Salma Adel", "full_name_ar": "سلمى عادل", "delivered_at": null, "read_at": null }
+  ]
+  ,"GET /v1/schools/MAIN/chat/conversations/92/messages": []
+  ,"GET /v1/schools/MAIN/chat/conversations/93/messages": []
+  ,"GET /v1/schools/MAIN/chat/conversations/94/messages": []
+  ,"GET /v1/schools/MAIN/chat/conversations/95/messages": []
+  ,"GET /v1/schools/MAIN/chat/conversations/96/messages": []
 }

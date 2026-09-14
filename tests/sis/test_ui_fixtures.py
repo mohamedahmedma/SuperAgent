@@ -74,8 +74,22 @@ def _operation(route: str, spec: dict) -> dict | None:
     return None
 
 
+def _nullable(schema: dict, schemas: dict) -> bool:
+    """Whether the declared schema admits `null` — the `X | None` that `_resolve` collapses."""
+    seen = 0
+    while "$ref" in schema and seen < 8:
+        schema = schemas[schema["$ref"].rsplit("/", 1)[-1]]
+        seen += 1
+    if schema.get("type") == "null":
+        return True
+    return any(_nullable(arm, schemas) for arm in schema.get("anyOf", ()))
+
+
 def _check(value: object, schema: dict, schemas: dict, where: str) -> list[str]:
     """Structural comparison, recursive. Returns human-readable complaints."""
+    if value is None and _nullable(schema, schemas):
+        # `last_message: Model | None` is honestly null on an empty conversation.
+        return []
     schema = _resolve(schema, schemas)
     problems: list[str] = []
 

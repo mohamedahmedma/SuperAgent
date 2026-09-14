@@ -152,7 +152,8 @@ function newWindow(script, language = 'en', session = '') {
         'structure.read', 'students.read', 'students.create', 'students.write', 'guardians.read',
         'grades.read', 'grades.write', 'imports.run', 'roles.assign', 'users.read',
         'teachers.read', 'teachers.assign_subjects', 'teachers.assign_classes',
-        'attendance.read', 'attendance.write', 'timetable.read', 'timetable.write'
+        'attendance.read', 'attendance.write', 'timetable.read', 'timetable.write',
+        'chat.read', 'chat.write'
       ];
       payload.profile.is_system_admin = true;
       payload.profile.roles = [
@@ -163,6 +164,21 @@ function newWindow(script, language = 'en', session = '') {
       payload.profile.grants = permissions.map((permission) => ({
         permission, scope_type: 'global', scope_id: null, scope_code: null
       }));
+    }
+    if (session === 'smoke-manager-chat' && method === 'GET' && url.includes('/v1/auth/me')) {
+      payload = JSON.parse(JSON.stringify(payload));
+      payload.profile.is_system_admin = false;
+      payload.profile.roles = [
+        { role_code: 'school_manager', scope_type: 'school', scope_id: 1 }
+      ];
+      /* Simulate a still-valid session issued before chat.write was added to auth/me.
+         Chat keeps the composer visible for the manager; the API remains authoritative. */
+      payload.profile.permissions = ['structure.read', 'chat.read'];
+      payload.profile.grants = [
+        { permission: 'structure.read', scope_type: 'school', scope_id: 1, scope_code: 'MAIN' },
+        { permission: 'chat.read', scope_type: 'school', scope_id: 1, scope_code: 'MAIN' }
+      ];
+      payload.profile.overrides = [];
     }
     if (session === 'smoke-supervisor' && method === 'GET' && url.includes('/v1/auth/me')) {
       payload = JSON.parse(JSON.stringify(payload));
@@ -191,6 +207,7 @@ function newWindow(script, language = 'en', session = '') {
       ok: true,
       status: 200,
       headers: { get: (name) => (name.toLowerCase() === 'content-type' ? 'application/json' : null) },
+      blob: () => Promise.resolve(new window.Blob([body], { type: 'application/pdf' })),
       json: () => Promise.resolve(JSON.parse(body)),
       text: () => Promise.resolve(body)
     });
@@ -198,6 +215,8 @@ function newWindow(script, language = 'en', session = '') {
   window.FormData = class FormData {
     append() {}
   };
+  window.URL.createObjectURL = () => 'blob:http://localhost/mock-attachment';
+  window.URL.revokeObjectURL = () => {};
   /* jsdom has no layout, so scrolling is unimplemented and throws through the virtual console.
      The router scrolls to the top on every route change, which would otherwise report thirteen
      errors for correct behaviour. `scrollIntoView` is worse than unimplemented — it is absent
@@ -257,6 +276,7 @@ const SCREENS = [
      panel underneath, driven by the classes fixture rather than by navigating a structure
      an attendance supervisor cannot read. */
   { hash: '#/attendance', expect: ['Take attendance', 'Year 3', '3A'] },
+  { hash: '#/chat', expect: ['Messages', 'All school staff', 'Ahmed Hassan is typing', 'Grade groups', 'Class groups'] },
   { hash: '#/timetable', expect: ['Timetable', 'Weekly timetable', 'Mathematics'] }
 ];
 
@@ -300,6 +320,91 @@ async function main() {
       console.log(`  ok   ${screen.hash}`);
     }
   }
+
+  window.location.hash = '#/chat';
+  await settle(window, 140);
+  assert.ok(window.document.querySelector('.sis-app-chat'), 'chat did not activate its viewport-bound app shell');
+  assert.ok(window.document.querySelector('.sis-main-chat'), 'chat main region is not internally constrained');
+  assert.ok(window.document.querySelector('.sis-chat-compose textarea'), 'the active chat has no visible message composer');
+  assert.ok(window.document.querySelector('.sis-chat-messages'), 'the active chat has no internal message scroller');
+  const attachedFile = window.document.querySelector('.sis-chat-file');
+  assert.ok(attachedFile, 'the chat fixture has no attached file preview trigger');
+  attachedFile.click();
+  await settle(window, 80);
+  const attachmentPreview = window.document.querySelector('.sis-attachment-preview');
+  assert.ok(attachmentPreview, 'clicking an attached file downloaded it instead of opening the preview');
+  assert.ok(attachmentPreview.querySelector('iframe'), 'a PDF attachment did not open inside the preview');
+  assert.ok(attachmentPreview.querySelector('.sis-preview-download'), 'the attachment preview has no separate download action');
+  attachmentPreview.querySelector('.sis-preview-close').click();
+  await settle(window, 40);
+  const attachedImage = window.document.querySelector('.sis-chat-image');
+  assert.ok(attachedImage, 'the chat fixture has no image attachment');
+  attachedImage.click();
+  await settle(window, 80);
+  const imagePreview = window.document.querySelector('.sis-attachment-preview-backdrop');
+  assert.ok(imagePreview?.querySelector('.sis-attachment-preview-body img'), 'clicking an image did not open it in the preview');
+  /* The route and every message run transform animations, which make them the containing
+     block for position: fixed. Rendered inside a bubble, the overlay shrank to the bubble. */
+  assert.equal(imagePreview.parentElement, window.document.body, 'the image preview is trapped inside the message instead of covering the page');
+  imagePreview.querySelector('.sis-preview-close').click();
+  await settle(window, 40);
+  assert.ok(!window.document.querySelector('.sis-attachment-preview'), 'closing the image preview left it open');
+  const groupReceipt = window.document.querySelector('.sis-chat-receipts.has-count');
+  assert.ok(groupReceipt, 'a sent group message has no discoverable member receipt control');
+  assert.ok(groupReceipt.textContent.includes('2/4'), 'the group receipt control does not show read members out of total members');
+  groupReceipt.click();
+  await settle(window, 80);
+  const receiptPanel = window.document.querySelector('.sis-chat-receipt-panel');
+  assert.ok(receiptPanel, 'clicking the group receipt control did not open message info');
+  assert.ok(receiptPanel.textContent.includes('Read by'), 'message info does not separate members who read the message');
+  assert.ok(receiptPanel.textContent.includes('Delivered to'), 'message info does not separate delivered unread members');
+  assert.ok(receiptPanel.textContent.includes('Not delivered yet'), 'message info does not separate undelivered members');
+  receiptPanel.querySelector('header button').click();
+  await settle(window, 40);
+  assert.ok(window.document.querySelector('.sis-chat-thread-head .sis-chat-typing'), 'a typing group member is not shown in the conversation header');
+  const onlineSender = [...window.document.querySelectorAll('.sis-chat-sender')].find((button) => !button.disabled);
+  assert.ok(onlineSender?.querySelector('.sis-chat-presence-dot.is-online'), 'an online sender has no green presence dot');
+  onlineSender.click();
+  await settle(window, 60);
+  const staffProfile = window.document.querySelector('.sis-chat-profile');
+  assert.ok(staffProfile?.textContent.includes('Mathematics teacher · Grade 3'), 'clicking a sender did not open their staff profile');
+  assert.equal(staffProfile.parentElement.parentElement, window.document.body, 'the staff profile is trapped inside the chat pane');
+  staffProfile.querySelector('.sis-chat-profile-close').click();
+  await settle(window, 40);
+  const composerTool = window.document.querySelector('.sis-chat-compose .sis-chat-tool');
+  composerTool.focus();
+  composerTool.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await settle(window, 30);
+  assert.equal(window.document.activeElement, window.document.querySelector('.sis-chat-compose textarea'), 'Enter repeated the last composer action instead of returning to message sending');
+  const conversationButtons = [...window.document.querySelectorAll('.sis-chat-conversation')];
+  assert.equal(conversationButtons.length, 6, 'the chat fixture must cover every conversation category');
+  for (const conversationButton of conversationButtons) {
+    conversationButton.click();
+    await settle(window, 80);
+    assert.ok(
+      window.document.querySelector('.sis-chat-compose textarea'),
+      `the composer disappeared after switching to ${conversationButton.textContent.trim()}`
+    );
+  }
+
+  const managerChat = newWindow(script, 'ar', 'smoke-manager-chat');
+  managerChat.window.location.hash = '#/chat';
+  await settle(managerChat.window, 180);
+  assert.ok(managerChat.window.document.querySelector('.sis-chat-conversations'), 'the manager has no group list scroller');
+  const managerConversations = [...managerChat.window.document.querySelectorAll('.sis-chat-conversation')];
+  assert.equal(managerConversations.length, 6, 'the manager did not receive every chat category');
+  for (const conversationButton of managerConversations) {
+    conversationButton.click();
+    await settle(managerChat.window, 80);
+    assert.ok(
+      managerChat.window.document.querySelector('.sis-chat-compose textarea'),
+      `the manager composer disappeared after switching to ${conversationButton.textContent.trim()}`
+    );
+  }
+  errors.push(...managerChat.errors);
+
+  window.location.hash = '#/timetable';
+  await settle(window, 140);
 
   /* Timetable edits stay in the browser until the authorised user presses Save. The save
      then sends additions and removals together to the transactional endpoint. */

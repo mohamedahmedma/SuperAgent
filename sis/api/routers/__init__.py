@@ -123,6 +123,7 @@ def all_routers() -> tuple["APIRouter", ...]:
         admin,
         access,
         attendance,
+        chat,
         classroom,
         estate,
         grades,
@@ -151,6 +152,7 @@ def all_routers() -> tuple["APIRouter", ...]:
         # the OpenAPI page should read in the order a school is actually set up.
         timetable.router,
         teachers.router,
+        chat.router,
         # After teachers: it reads the assignments those routes write, from the other end
         # — one room's staff rather than one teacher's rooms.
         classroom.router,

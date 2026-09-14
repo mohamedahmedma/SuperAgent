@@ -61,6 +61,7 @@ const ROUTE_PERMISSION = {
   teacherSetup: 'teachers.assign_subjects',
   teachingStaff: 'teachers.read',
   gradeAssignments: 'teachers.assign_classes',
+  chat: 'chat.read',
   /* Read, not write: a supervisor who may read a register and not record it still has
      somewhere to read it, and the panel decides which of the two they get. */
   attendance: 'attendance.read',
@@ -76,6 +77,7 @@ function principalExperience() {
 }
 
 const NAV = [
+  { name: 'chat', label: 'Messages', icon: 'chat' },
   { name: 'school', label: 'School', icon: 'school', roles: ['admin', 'school_owner', 'school_manager'] },
   { name: 'student', label: 'Find a child', icon: 'search' },
   { name: 'studentSetup', label: 'Create student', icon: 'studentAdd' },
@@ -472,6 +474,41 @@ function Footer() {
   );
 }
 
+const CHAT_PRESENCE_PULSE_MS = 15000;
+
+/* Presence belongs to the signed-in shell, not to the chat route. This keeps a member
+   online and acknowledges delivery while they are working anywhere in SIS; opening a
+   conversation remains the separate action that marks its messages as read. */
+function ChatPresenceHeartbeat() {
+  const state = useStore();
+  const school = state.school;
+  const userId = state.profile?.user_id;
+  const canChat = (state.profile?.permissions || []).includes('chat.read');
+
+  useEffect(() => {
+    if (!school || !userId || !canChat) return undefined;
+    let alive = true;
+    const pulse = () => {
+      if (!alive || document.visibilityState === 'hidden' || !navigator.onLine) return;
+      api.chatPresence(school, {}).catch(() => {});
+    };
+    pulse();
+    const timer = window.setInterval(pulse, CHAT_PRESENCE_PULSE_MS);
+    window.addEventListener('online', pulse);
+    window.addEventListener('focus', pulse);
+    document.addEventListener('visibilitychange', pulse);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener('online', pulse);
+      window.removeEventListener('focus', pulse);
+      document.removeEventListener('visibilitychange', pulse);
+    };
+  }, [school, userId, canChat]);
+
+  return null;
+}
+
 /* -- Root ------------------------------------------------------------------------ */
 
 /**
@@ -533,15 +570,16 @@ export function App() {
   const allowed = (!needed || Store.can(needed)) && roleAllowed && experienceAllowed;
 
   return (
-    <div className="sis-app">
+    <div className={cx('sis-app', route.route.name === 'chat' && 'sis-app-chat')}>
+      <ChatPresenceHeartbeat />
       <Header
         onOpenSettings={() => setSettingsOpen(true)}
         onSignIn={() => {}}
       />
       <SchoolTabs />
       <Nav active={route.route.name} />
-      <main className="flex-grow-1 w-100 mx-auto p-3 p-sm-4" style={{ maxWidth: '96rem' }}>
-        <div className="sis-rise" key={route.route.name}>
+      <main className={cx('flex-grow-1 w-100 mx-auto p-3 p-sm-4', route.route.name === 'chat' && 'sis-main-chat')} style={{ maxWidth: '96rem' }}>
+        <div className={cx('sis-rise', route.route.name === 'chat' && 'sis-chat-route')} key={route.route.name}>
           {allowed ? (
             <View params={route.params} />
           ) : (
