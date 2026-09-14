@@ -365,18 +365,41 @@ export const useChatStore = defineStore('chat', {
       sessionStore.showHistorySidebar = false;
     },
 
-    handleClearChat() {
+    /**
+     * Clear the current conversation — on the server as well as on screen.
+     *
+     * Clearing only what was on screen left the conversation stored: it came back on
+     * reopen, and the assistant kept reading it as this chat's history. So the server's
+     * copy is deleted (the same call the history list's delete makes) and a fresh
+     * conversation is started in its place. A conversation the server never saw — no
+     * message stored, not in the history — has nothing to delete and is simply dropped.
+     */
+    async handleClearChat() {
       if (this.streamingSessionId === this.sessionId) {
         alert('This chat is still generating a response. Stop it or wait for it to finish before clearing.');
         return;
       }
-      if (confirm('Clear the current conversation? Meow?')) {
-        this.messagesBySession[this.sessionId] = [];
-        this.messages = this.messagesBySession[this.sessionId];
-        delete this.pendingHitlBySession[this.sessionId];
-        // Otherwise scrolling up would pull the cleared conversation back in.
-        delete this.pagingBySession[this.sessionId];
+      if (!confirm('Clear the current conversation? Meow?')) return;
+
+      const sessionId = this.sessionId;
+      const sessionStore = useSessionStore();
+      const stored =
+        sessionStore.sessions.some((session) => session.session_id === sessionId) ||
+        (this.messagesBySession[sessionId] || []).some((message) => message.id !== undefined);
+      if (stored) {
+        try {
+          await sessionStore.deleteSession(sessionId);
+        } catch (error: any) {
+          alert('Could not clear this conversation: ' + (error?.message || 'unknown error'));
+          return;
+        }
       }
+
+      delete this.messagesBySession[sessionId];
+      delete this.pendingHitlBySession[sessionId];
+      // Otherwise scrolling up would pull the cleared conversation back in.
+      delete this.pagingBySession[sessionId];
+      this.handleNewChat();
     },
 
     recordPaging(sessionId: string, serverMessages: any[], hasMore: boolean) {

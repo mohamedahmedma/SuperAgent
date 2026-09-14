@@ -988,14 +988,62 @@ describe('chat store conversation paging', () => {
     vi.mocked(api.get).mockResolvedValue({
       data: { messages: [serverMessage(41, 'Question')], has_more: true },
     });
+    vi.mocked(api.delete).mockResolvedValue({ data: { message: 'Session deleted successfully' } });
 
     const { chatStore } = setupStores();
     await chatStore.loadSession('session_long');
     expect(chatStore.canLoadOlderMessages).toBe(true);
 
-    chatStore.handleClearChat();
+    await chatStore.handleClearChat();
 
     expect(chatStore.pagingBySession.session_long).toBeUndefined();
     expect(chatStore.canLoadOlderMessages).toBe(false);
+  });
+
+  it('clears a conversation on the server too, and starts a fresh one', async () => {
+    // Clearing only the screen left the conversation stored: it came back on reopen and
+    // the assistant kept reading it as history.
+    vi.mocked(api.get).mockResolvedValue({
+      data: { messages: [serverMessage(41, 'Question'), serverMessage(42, 'Answer')], has_more: false },
+    });
+    vi.mocked(api.delete).mockResolvedValue({ data: { message: 'Session deleted successfully' } });
+
+    const { chatStore, sessionStore } = setupStores();
+    sessionStore.sessions = [{ session_id: 'session_long', title: 'Q', message_count: 2, updated_at: 'now' }];
+    await chatStore.loadSession('session_long');
+
+    await chatStore.handleClearChat();
+
+    expect(api.delete).toHaveBeenCalledWith('/sessions/session_long');
+    expect(chatStore.messagesBySession.session_long).toBeUndefined();
+    expect(sessionStore.sessions.find((s) => s.session_id === 'session_long')).toBeUndefined();
+    expect(chatStore.sessionId).not.toBe('session_long');
+    expect(chatStore.messages).toEqual([]);
+  });
+
+  it('drops a conversation the server never saw without asking it to delete anything', async () => {
+    const { chatStore } = setupStores();
+    chatStore.messagesBySession.session_current = [{ text: 'typed, never sent', isUser: true }];
+    chatStore.messages = chatStore.messagesBySession.session_current;
+
+    await chatStore.handleClearChat();
+
+    expect(api.delete).not.toHaveBeenCalled();
+    expect(chatStore.messages).toEqual([]);
+  });
+
+  it('keeps the conversation when the server refuses to delete it', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: { messages: [serverMessage(41, 'Question')], has_more: false },
+    });
+    vi.mocked(api.delete).mockRejectedValue(new Error('Network Error'));
+
+    const { chatStore } = setupStores();
+    await chatStore.loadSession('session_long');
+
+    await chatStore.handleClearChat();
+
+    expect(chatStore.sessionId).toBe('session_long');
+    expect(chatStore.messages.map((msg) => msg.text)).toEqual(['Question']);
   });
 });
