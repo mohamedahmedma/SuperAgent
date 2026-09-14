@@ -12,7 +12,7 @@ from unittest.mock import patch
 from backend.chat.child_context import SessionChild
 from backend.chat.child_resolution import ResolvedChild, no_child, resolve_child
 from backend.chat.child_roster import ChildOption
-from backend.chat.service import _turn_context_message
+from backend.chat.context_messages import _turn_context_message
 from backend.chat.signals import RequestSignals
 from backend.chat.turn_policy import resolve_turn
 

@@ -23,10 +23,10 @@ from backend.chat.child_names import name_surfaces, strip_child_names
 from backend.chat.child_resolution import ResolvedChild, no_child, resolve_child
 from backend.chat.child_roster import ChildOption
 from backend.chat.request_context import ChatRequestContext
-from backend.chat.service import _turn_context_message
+from backend.chat.context_messages import _turn_context_message
 from backend.chat.signals import RequestSignals
 from backend.chat.turn_policy import resolve_turn
-from backend.rag.pipeline import _search_query
+from backend.rag.graph_nodes import search_query
 
 #: The homograph, as this deployment actually carries it.
 ALI = ChildOption(student_id="S-1", label="علي حسن", gender="male", year_level="Year 4")
@@ -230,21 +230,21 @@ class _Ctx:
 class TheGraphSearchesWithoutItAndAnswersWithIt(unittest.TestCase):
     def test_the_search_text_loses_the_name(self):
         state = {"question": "مصاريف علي كام؟", "request_context": _Ctx(["علي حسن", "علي"])}
-        self.assertEqual("مصاريف كام؟", _search_query(state))
+        self.assertEqual("مصاريف كام؟", search_query(state))
 
     def test_the_question_itself_is_untouched(self):
         """The distinction the whole feature rests on. `state["question"]` is what the
         grader, the HITL prompts and `service._resume_answer` read, and the last of those
         hands it to a model that has to write the parent a sentence about their child."""
         state = {"question": "مصاريف علي كام؟", "request_context": _Ctx(["علي حسن", "علي"])}
-        _search_query(state)
+        search_query(state)
         self.assertEqual("مصاريف علي كام؟", state["question"])
 
     def test_a_state_with_no_context_behind_it_searches_as_it_always_did(self):
         for ctx in (None, _Ctx(), object()):
             with self.subTest(ctx=type(ctx).__name__):
                 state = {"question": "مصاريف علي كام؟", "request_context": ctx}
-                self.assertEqual("مصاريف علي كام؟", _search_query(state))
+                self.assertEqual("مصاريف علي كام؟", search_query(state))
 
     def test_the_context_takes_the_hint(self):
         ctx = ChatRequestContext.for_sync(user_id="u-1", session_id="s-1")

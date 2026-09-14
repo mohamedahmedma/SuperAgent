@@ -34,6 +34,7 @@ from backend.chat.turn_policy import (
     GRADES_TOOL as RECORDS_TOOL,
     resolve_turn,
 )
+from backend.chat.answer_checks import _denies_the_records
 
 LAYLA = ChildOption(student_id="S-1", label="ليلى أحمد", gender="female", year_level="Year 4")
 OMAR = ChildOption(student_id="S-2", label="عمر أحمد", gender="male")
@@ -293,17 +294,7 @@ class DenyingWhatTheToolReturned(unittest.TestCase):
             self.tool_outcomes = list(outcomes)
 
     def _denies(self, outcomes, answer, phrases=("couldn't find", "ما لقيتش")):
-        from backend.chat import service
-
-        class _AgentCfg:
-            records_denial_phrases = list(phrases)
-
-        original = service._PROFILE.agent
-        try:
-            service._PROFILE.__dict__["agent"] = _AgentCfg()
-            return service._denies_the_records(self._Outcomes(outcomes), answer)
-        finally:
-            service._PROFILE.__dict__["agent"] = original
+        return _denies_the_records(self._Outcomes(outcomes), answer, phrases=list(phrases))
 
     def test_a_denial_after_a_successful_lookup_is_caught(self):
         self.assertTrue(self._denies(
@@ -436,11 +427,11 @@ class TheChoiceComesBackAsAnAnswer(unittest.TestCase):
     """The second half: what the parent taps becomes a pinned child, not a search term."""
 
     def _pending(self):
-        from backend.chat.service import _child_choice_pending
+        from backend.chat.clarification import child_choice_pending
 
         plan = _plan(resolve_child(reference="son", roster=[ALI, AHMED]),
                      about_child=True, child_question_kind="records")
-        return _child_choice_pending(plan, "نتيجة ابني ايه؟")
+        return child_choice_pending(plan, "نتيجة ابني ايه؟")
 
     def test_the_question_is_stored_as_a_real_clarification(self):
         pending = self._pending()
@@ -456,18 +447,18 @@ class TheChoiceComesBackAsAnAnswer(unittest.TestCase):
         self.assertIsNone(pending["resume_state"])
 
     def test_a_plan_that_settled_the_child_asks_nothing(self):
-        from backend.chat.service import _child_choice_pending
+        from backend.chat.clarification import child_choice_pending
 
         plan = _plan(resolve_child(reference="son", roster=[ALI, SARA]),
                      about_child=True, child_question_kind="records")
-        self.assertIsNone(_child_choice_pending(plan, "q"))
+        self.assertIsNone(child_choice_pending(plan, "q"))
 
     def test_the_reply_reopens_the_original_question_rather_than_searching_for_a_name(self):
         """Folding "علي" into the query the way the retrieval clarifications do would
         search for a child's name instead of for what the parent actually asked."""
-        from backend.chat.service import _enter_turn
+        from backend.chat.clarification import enter_turn
 
-        entry = _enter_turn("علي", [], {"pending_hitl": self._pending()})
+        entry = enter_turn("علي", [], {"pending_hitl": self._pending()})
 
         self.assertEqual(entry.child_choice, "علي")
         self.assertEqual(entry.effective_user_text, "نتيجة ابني ايه؟")
@@ -476,10 +467,10 @@ class TheChoiceComesBackAsAnAnswer(unittest.TestCase):
     def test_the_reply_costs_no_model_call(self):
         """Matching a name to a roster row is not a judgement, so nothing here may reach
         a model — a resolver call on this path would be paying to re-derive a fact."""
-        from unittest.mock import patch
+        from unittest.mock import Mock
 
-        import backend.chat.service as service
+        from backend.chat.clarification import enter_turn
 
-        with patch.object(service, "resolve_turn_question") as resolver:
-            service._enter_turn("علي", [], {"pending_hitl": self._pending()})
+        resolver = Mock()
+        enter_turn("علي", [], {"pending_hitl": self._pending()}, resolve=resolver)
         resolver.assert_not_called()

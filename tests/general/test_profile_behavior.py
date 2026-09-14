@@ -313,14 +313,14 @@ class PipelineBehaviourTests(ProfileTestCase):
             pipeline = self._pipeline()
 
         # An ecommerce-specific marker classifies as simple...
-        self.assertIsNotNone(pipeline._simple_question_fast_path_reason("price of the blue shoe"))
+        self.assertIsNotNone(pipeline.classify_complexity.fast_path_reason("price of the blue shoe"))
         # ...and an ecommerce comparison marker blocks the fast path.
-        self.assertIsNone(pipeline._simple_question_fast_path_reason("recommend a running shoe"))
+        self.assertIsNone(pipeline.classify_complexity.fast_path_reason("recommend a running shoe"))
 
     def test_base_profile_does_not_know_ecommerce_vocabulary(self):
         with active_profile("base"):
             pipeline = self._pipeline()
-        self.assertIsNone(pipeline._simple_question_fast_path_reason("price of the blue shoe today"))
+        self.assertIsNone(pipeline.classify_complexity.fast_path_reason("price of the blue shoe today"))
 
     def test_fast_path_length_limit_is_profile_driven(self):
         question = "what is the refund window for online orders placed abroad"  # 58 chars
@@ -329,8 +329,8 @@ class PipelineBehaviourTests(ProfileTestCase):
         with active_profile("ecommerce"):  # limit 64
             shop_pipeline = self._pipeline()
 
-        self.assertIsNone(base_pipeline._simple_question_fast_path_reason(question))
-        self.assertIsNotNone(shop_pipeline._simple_question_fast_path_reason(question))
+        self.assertIsNone(base_pipeline.classify_complexity.fast_path_reason(question))
+        self.assertIsNotNone(shop_pipeline.classify_complexity.fast_path_reason(question))
 
     def test_empty_marker_lists_disable_the_fast_path_markers(self):
         """Only the vocabulary is profile data. The wh-pattern rule is independent of
@@ -343,14 +343,14 @@ class PipelineBehaviourTests(ProfileTestCase):
         )
         with temp_profile(body):
             pipeline = self._pipeline()
-        self.assertIsNone(pipeline._simple_question_fast_path_reason("the fee for grade 5"))
+        self.assertIsNone(pipeline.classify_complexity.fast_path_reason("the fee for grade 5"))
         # With the vocabulary restored, the same question is recognised.
         with temp_profile(
             'name: withmarkers\nrag:\n  simple_query_markers: ["the fee"]\n'
             "  fast_path_short_intent_chars: 0\n"
         ):
             restored = self._pipeline()
-        self.assertIsNotNone(restored._simple_question_fast_path_reason("the fee for grade 5"))
+        self.assertIsNotNone(restored.classify_complexity.fast_path_reason("the fee for grade 5"))
 
     @staticmethod
     def _rewrite_report():
@@ -425,7 +425,7 @@ class PipelineBehaviourTests(ProfileTestCase):
         )
         self.assertEqual(
             "I found a few product lines that could match. Which one did you mean?",
-            pipeline._default_hitl_prompt("scope_select", grade),
+            pipeline.grade_documents_node.default_hitl_prompt("scope_select", grade),
         )
 
     def test_missing_slot_copy_is_profile_driven(self):
@@ -440,7 +440,7 @@ class PipelineBehaviourTests(ProfileTestCase):
             route="clarify",
             missing_slots=["grade", "term"],
         )
-        self.assertEqual("Still need: grade, term", pipeline._default_hitl_prompt("clarify", grade))
+        self.assertEqual("Still need: grade, term", pipeline.grade_documents_node.default_hitl_prompt("clarify", grade))
 
     def test_sub_question_cap_is_profile_driven(self):
         with temp_profile("name: wide\nrag:\n  max_sub_questions: 2\n"):

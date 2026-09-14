@@ -80,9 +80,9 @@ class AnInventedMarkerCostsNothing(unittest.TestCase):
     """The rule that makes this feature safe to ship at all."""
 
     def test_a_known_marker_becomes_an_anchor(self):
-        from backend.chat.service import _resolve_figure_markers
+        from backend.chat.answer_blocks import resolve_figure_markers
 
-        out = _resolve_figure_markers(
+        out = resolve_figure_markers(
             "الزي الصيفي كالتالي [FIGURE 1] وبيتغير في الشتاء.",
             _Ctx({1: "kb.pdf::p2::img0"}),
         )
@@ -92,9 +92,9 @@ class AnInventedMarkerCostsNothing(unittest.TestCase):
     def test_an_unknown_number_is_deleted_and_the_answer_survives(self):
         """The load-bearing test. A model that writes [FIGURE 9] on a turn that
         retrieved one figure must not cost the parent their answer."""
-        from backend.chat.service import _resolve_figure_markers
+        from backend.chat.answer_blocks import resolve_figure_markers
 
-        out = _resolve_figure_markers(
+        out = resolve_figure_markers(
             "المصروفات 12,000 جنيه [FIGURE 9] للعام الدراسي.",
             _Ctx({1: "kb.pdf::p2::img0"}),
         )
@@ -104,33 +104,33 @@ class AnInventedMarkerCostsNothing(unittest.TestCase):
         self.assertIn("للعام الدراسي.", out)
 
     def test_deleting_a_marker_does_not_leave_a_double_space(self):
-        from backend.chat.service import _resolve_figure_markers
+        from backend.chat.answer_blocks import resolve_figure_markers
 
-        out = _resolve_figure_markers("قبل [FIGURE 4] بعد", _Ctx({1: "a::p1::img0"}))
+        out = resolve_figure_markers("قبل [FIGURE 4] بعد", _Ctx({1: "a::p1::img0"}))
         self.assertEqual("قبل بعد", out)
 
     def test_arabic_indic_digits_name_the_same_figure(self):
         """The corpus is Arabic and so is the prose. A parser that only knew ASCII would
         have dropped most real markers and shown no picture at all."""
-        from backend.chat.service import _resolve_figure_markers
+        from backend.chat.answer_blocks import resolve_figure_markers
 
         for marker in ("[FIGURE ٢]", "[الشكل ٢]", "[شكل 2]", "[figure 2]"):
             with self.subTest(marker=marker):
-                out = _resolve_figure_markers(
+                out = resolve_figure_markers(
                     f"انظر {marker} هنا", _Ctx({2: "kb.pdf::p5::img1"})
                 )
                 self.assertIn("<!--figure:kb.pdf::p5::img1-->", out)
 
     def test_an_answer_with_no_marker_is_untouched(self):
-        from backend.chat.service import _resolve_figure_markers
+        from backend.chat.answer_blocks import resolve_figure_markers
 
         answer = "المصروفات 12,000 جنيه للعام الدراسي [1]."
-        self.assertEqual(answer, _resolve_figure_markers(answer, _Ctx({1: "a::p1::img0"})))
+        self.assertEqual(answer, resolve_figure_markers(answer, _Ctx({1: "a::p1::img0"})))
 
     def test_a_turn_that_retrieved_no_figure_still_drops_the_marker(self):
-        from backend.chat.service import _resolve_figure_markers
+        from backend.chat.answer_blocks import resolve_figure_markers
 
-        out = _resolve_figure_markers("انظر [FIGURE 1] هنا", _Ctx({}))
+        out = resolve_figure_markers("انظر [FIGURE 1] هنا", _Ctx({}))
         self.assertEqual("انظر هنا", out)
 
 
@@ -199,9 +199,9 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
         """An HTML comment, and only because the frontend drops raw HTML outright
         (`renderer.html = () => ''`). Same reason BLOCK_MARKER is one, and the same
         payoff: a frontend that predates this renders clean prose."""
-        from backend.chat.service import _resolve_figure_markers
+        from backend.chat.answer_blocks import resolve_figure_markers
 
-        out = _resolve_figure_markers("انظر [FIGURE 1]", _Ctx({1: "a::p1::img0"}))
+        out = resolve_figure_markers("انظر [FIGURE 1]", _Ctx({1: "a::p1::img0"}))
         anchor = out[out.index("<!--"):]
         self.assertTrue(anchor.startswith("<!--"))
         self.assertTrue(anchor.endswith("-->"))
@@ -210,9 +210,9 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
         """The anchor carries an asset_id, and an id in the model's history is an id in
         its next answer — shown one, a small model writes it back as an image link that
         cannot load. The reader keeps the picture; the model reads the sentence."""
-        from backend.chat.service import _resolve_figure_markers, strip_answer_blocks
+        from backend.chat.answer_blocks import resolve_figure_markers, strip_answer_blocks
 
-        stored = _resolve_figure_markers(
+        stored = resolve_figure_markers(
             "الزي الصيفي [FIGURE 1] كالتالي", _Ctx({1: "kb.pdf::p2::img0"})
         )
         seen = strip_answer_blocks(stored)

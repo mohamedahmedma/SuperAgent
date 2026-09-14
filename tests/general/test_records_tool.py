@@ -602,7 +602,7 @@ def test_the_narrowed_outcome_counts_as_a_record_that_came_back(monkeypatch):
     A turn that read tomorrow's lessons and then told the parent nothing was found would
     pass unnoticed — on the commonest question this deployment gets.
     """
-    from backend.chat.service import RECORDS_RETRIEVED
+    from backend.chat.answer_checks import RECORDS_RETRIEVED
 
     monkeypatch.setattr(
         requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
@@ -1101,7 +1101,7 @@ def test_each_classroom_tool_reports_its_own_outcome(
 ):
     """So the turn can tell a record WAS retrieved.
 
-    Every one of these names has to appear in `backend.chat.service.RECORDS_RETRIEVED` too,
+    Every one of these names has to appear in `backend.chat.answer_checks.RECORDS_RETRIEVED` too,
     or the check that catches an answer denying the record it just read cannot fire — which
     is exactly how `timetable` was missed.
     """
@@ -1111,7 +1111,7 @@ def test_each_classroom_tool_reports_its_own_outcome(
 
     assert ctx.tool_outcomes == [(tool_name, outcome)]
 
-    from backend.chat.service import RECORDS_RETRIEVED
+    from backend.chat.answer_checks import RECORDS_RETRIEVED
 
     assert outcome in RECORDS_RETRIEVED
 

@@ -269,4 +269,16 @@ def finalize_text(text: str, *, has_tool_calls: bool = False) -> str:
     return strip_harmony(text or "")
 
 
-__all__ = ["Finalizer", "finalize_text", "message_text"]
+def visible_text(msg: Any) -> str:
+    """The text of a model message, as a user may see it.
+
+    Reading the content and cleaning it are one step on purpose. This is the only way a
+    direct `model.invoke`/`model.astream` result becomes a string in the chat layer, so
+    putting the transcript strip anywhere else would leave the paths that bypass the
+    agent — a resumed clarification's answer, the persistent note — able to put a raw
+    Harmony envelope in front of a user.
+    """
+    return finalize_text(message_text(msg))
+
+
+__all__ = ["Finalizer", "finalize_text", "message_text", "visible_text"]

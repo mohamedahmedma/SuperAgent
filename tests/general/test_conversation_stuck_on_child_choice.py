@@ -10,11 +10,11 @@ dates: the same answer, with the tool's own evidence header pasted into it.
 unit tests for each thing that was wrong, grouped by the component it lived in, so a
 regression says WHICH rule broke rather than that a fifteen-message replay did.
 
-  * The answered "which child?" question was never cleared — `_TurnEntry`, both save sites.
+  * The answered "which child?" question was never cleared — `TurnEntry`, both save sites.
   * A short-circuit turn dropped the child pin — `_stream_static_reply`.
-  * The evidence cut ran only on turns with a table — `_settle_answer_blocks`.
+  * The evidence cut ran only on turns with a table — `settle_answer_blocks`.
   * One child listed twice, and two children under one name, made the question
-    unanswerable — `child_roster`, `child_resolution`, `_pin_the_child_the_parent_named`.
+    unanswerable — `child_roster`, `child_resolution`, `pin_the_child_the_parent_named`.
   * A spelling of Monday the school's vocabulary did not carry — `school_week`.
 """
 import importlib
@@ -35,6 +35,8 @@ from backend.chat.turn_policy import TurnPlan
 from backend.composition import Services
 from backend.school_week import day_phrase
 from tests.general.test_chat_hitl_resume import FakeStorage
+from backend.chat.answer_blocks import _append_answer_blocks, settle_answer_blocks
+from backend.chat.clarification import TurnEntry, build_pending_hitl, child_choice_pending, pin_the_child_the_parent_named
 
 service = importlib.import_module("backend.chat.service")
 
@@ -195,31 +197,31 @@ class _Session(unittest.IsolatedAsyncioTestCase):
 
 
 class TheRuleForSpendingAPendingQuestion(unittest.TestCase):
-    """`_TurnEntry.spends_the_pending_question`, the one place every save site asks."""
+    """`TurnEntry.spends_the_pending_question`, the one place every save site asks."""
 
     def test_a_child_choice_spends_it(self):
-        self.assertTrue(service._TurnEntry(child_choice=FATMA).spends_the_pending_question())
+        self.assertTrue(TurnEntry(child_choice=FATMA).spends_the_pending_question())
 
     def test_a_child_choice_spends_it_even_when_the_agent_then_fails(self):
         """The pin was written before the agent ran. Keeping the question would read
         the parent's next message as another name."""
-        entry = service._TurnEntry(child_choice=FATMA)
+        entry = TurnEntry(child_choice=FATMA)
         self.assertTrue(entry.spends_the_pending_question(agent_error=True))
 
     def test_a_resumed_clarification_spends_it(self):
-        self.assertTrue(service._TurnEntry(is_hitl_resume=True).spends_the_pending_question())
+        self.assertTrue(TurnEntry(is_hitl_resume=True).spends_the_pending_question())
 
     def test_a_superseded_clarification_spends_it(self):
-        self.assertTrue(service._TurnEntry(superseded=True).spends_the_pending_question())
+        self.assertTrue(TurnEntry(superseded=True).spends_the_pending_question())
 
     def test_a_retrieval_clarification_survives_an_agent_error(self):
         """Unchanged behaviour, stated: the answer was never used, so the parent can
         retry it."""
-        entry = service._TurnEntry(is_hitl_resume=True)
+        entry = TurnEntry(is_hitl_resume=True)
         self.assertFalse(entry.spends_the_pending_question(agent_error=True))
 
     def test_an_ordinary_turn_spends_nothing(self):
-        self.assertFalse(service._TurnEntry().spends_the_pending_question())
+        self.assertFalse(TurnEntry().spends_the_pending_question())
 
 
 class TheAnsweredChildQuestionIsSpent(_Session):
@@ -275,7 +277,7 @@ class TheAnsweredChildQuestionIsSpent(_Session):
 
     async def test_a_retrieval_clarification_still_outlives_an_agent_error(self):
         """The sibling route keeps its existing contract."""
-        self.storage.metadata["pending_hitl"] = service._build_pending_hitl(
+        self.storage.metadata["pending_hitl"] = build_pending_hitl(
             {"retrieval_status": "needs_clarification", "hitl_prompt": "أي سنة؟"},
             "مصاريف كام",
         )
@@ -298,7 +300,7 @@ class TheSyncPathSpendsItToo(unittest.TestCase):
 
     def test_the_pending_state_is_cleared_once_the_child_is_chosen(self):
         storage = FakeStorage([])
-        storage.metadata["pending_hitl"] = service._child_choice_pending(
+        storage.metadata["pending_hitl"] = child_choice_pending(
             _asks([f"{FATMA} — Year 11", f"{FATMA} — Year 9"]), ORIGINAL
         )
         planned = []
@@ -380,42 +382,42 @@ class TheEvidenceCutRunsWithoutATable(unittest.TestCase):
     def test_a_subjects_answer_loses_the_header_it_pasted(self):
         """Verbatim from production. `subjects` renders no block, and the cut used to
         live behind the block check."""
-        settled, blocks = service._settle_answer_blocks(LEAKED, _Ctx())
+        settled, blocks = settle_answer_blocks(LEAKED, _Ctx())
         self.assertEqual(settled, f"حضرتك، {FATMA} بتاخد المواد التالية:")
         self.assertEqual(blocks, [])
 
     def test_the_sync_text_only_path_cuts_too(self):
-        self.assertNotIn("SUBJECTS", service._append_answer_blocks(LEAKED, _Ctx()))
+        self.assertNotIn("SUBJECTS", _append_answer_blocks(LEAKED, _Ctx()))
 
     def test_every_records_header_is_cut_with_or_without_a_block(self):
         for header in ("CLASS", "TEACHERS", "SUBJECT_TEACHER", "ATTENDANCE", "NO_RECORDS", "NOT_AUTHORIZED"):
             with self.subTest(header=header):
                 text = f"الجواب:\n{header} for X: something the model should not have pasted"
-                self.assertEqual(service._append_answer_blocks(text, _Ctx()), "الجواب:")
+                self.assertEqual(_append_answer_blocks(text, _Ctx()), "الجواب:")
 
     def test_the_knowledge_tools_headers_are_cut_as_well(self):
         for header in ("NO_KNOWLEDGE", "PARTIAL_EVIDENCE", "RETRIEVAL_ERROR", "NEEDS_CLARIFICATION", "NEEDS_SCOPE_SELECTION"):
             with self.subTest(header=header):
                 text = f"عذرًا.\n{header}: instructions to the model"
-                self.assertEqual(service._append_answer_blocks(text, _Ctx()), "عذرًا.")
+                self.assertEqual(_append_answer_blocks(text, _Ctx()), "عذرًا.")
 
     def test_an_answer_that_was_only_evidence_becomes_the_unverified_copy(self):
-        settled, _ = service._settle_answer_blocks(f"SUBJECTS for {FATMA}: العربي", _Ctx())
+        settled, _ = settle_answer_blocks(f"SUBJECTS for {FATMA}: العربي", _Ctx())
         self.assertEqual(settled, service._COPY.unverified_answer)
 
     def test_an_answer_that_said_nothing_stays_silent(self):
-        self.assertEqual(service._settle_answer_blocks("", _Ctx()), ("", []))
-        self.assertEqual(service._settle_answer_blocks("   ", _Ctx())[0], "")
+        self.assertEqual(settle_answer_blocks("", _Ctx()), ("", []))
+        self.assertEqual(settle_answer_blocks("   ", _Ctx())[0], "")
 
     def test_a_clean_answer_is_untouched(self):
         clean = "حضرتك، فاطمه في الصف الثاني الثانوي."
-        self.assertEqual(service._settle_answer_blocks(clean, _Ctx()), (clean, []))
+        self.assertEqual(settle_answer_blocks(clean, _Ctx()), (clean, []))
 
     def test_english_prose_a_parent_may_legitimately_read_survives(self):
         """The fee and uniform answers from the same conversation."""
         for line in ("Sports Wear: All Grades - Unisex", "Pre-K: 34,000", "Y11-Y12: 72,000 SAR (VAT)"):
             with self.subTest(line=line):
-                self.assertEqual(service._append_answer_blocks(line, _Ctx()), line)
+                self.assertEqual(_append_answer_blocks(line, _Ctx()), line)
 
 
 class TheLeakIsCutOnTheWire(_Session):
@@ -573,7 +575,7 @@ class TheChoiceIsRememberedAsAChoice(unittest.TestCase):
 
 
 class TappingAnOfferedOptionPinsThatChild(unittest.TestCase):
-    """`_pin_the_child_the_parent_named`, where two offered names contain each other."""
+    """`pin_the_child_the_parent_named`, where two offered names contain each other."""
 
     def setUp(self):
         env = patch.dict(os.environ, {"CHILD_ROSTER_TTL_SECONDS": "0"})
@@ -587,7 +589,7 @@ class TappingAnOfferedOptionPinsThatChild(unittest.TestCase):
 
     def _pin(self, chosen, rows=(DAUGHTER, NAMESAKE)):
         with patch("backend.chat.child_roster.requests.get", _roster(list(rows))):
-            return service._pin_the_child_the_parent_named(self.ctx, chosen)
+            return pin_the_child_the_parent_named(self.ctx, chosen)
 
     def test_the_tapped_option_pins_exactly_that_child(self):
         self.assertTrue(self._pin(f"{FATMA} — Year 9"))

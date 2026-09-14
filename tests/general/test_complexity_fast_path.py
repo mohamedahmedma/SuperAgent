@@ -15,7 +15,7 @@ class SingularAndPluralTests(unittest.TestCase):
     fast-pathed while "what ARE the partners" went to the planner and got decomposed."""
 
     def _simple(self, question):
-        return pipeline._simple_question_fast_path_reason(question) is not None
+        return pipeline.classify_complexity.fast_path_reason(question) is not None
 
     def test_singular_and_plural_are_treated_alike(self):
         pairs = [
@@ -46,7 +46,7 @@ class SingularAndPluralTests(unittest.TestCase):
             with self.subTest(question=question):
                 self.assertEqual(
                     "obvious_simple_fast_path:wh_attribute_question",
-                    pipeline._simple_question_fast_path_reason(question),
+                    pipeline.classify_complexity.fast_path_reason(question),
                 )
 
 
@@ -55,10 +55,10 @@ class OverrideMarkerTests(unittest.TestCase):
     question. The override list must beat the complex list, not lose to it."""
 
     def _reason(self, question):
-        return pipeline._simple_question_fast_path_reason(question)
+        return pipeline.classify_complexity.fast_path_reason(question)
 
     def test_how_many_beats_the_how_complex_marker(self):
-        self.assertIn("how ", pipeline._COMPLEX_QUERY_MARKERS)
+        self.assertIn("how ", pipeline._RAG.complex_query_markers)
         self.assertEqual(
             "obvious_simple_fast_path:single_fact_override",
             self._reason("how many students are there"),
@@ -80,7 +80,7 @@ class ComplexQuestionsStillDecomposeTests(unittest.TestCase):
     genuinely need it — that was the point of the feature."""
 
     def _reason(self, question):
-        return pipeline._simple_question_fast_path_reason(question)
+        return pipeline.classify_complexity.fast_path_reason(question)
 
     def test_comparisons_reach_the_planner(self):
         for question in (
@@ -107,7 +107,7 @@ class ArabicBehaviourTests(unittest.TestCase):
     """The corpus is Arabic-first; widening the English rules must not regress it."""
 
     def _reason(self, question):
-        return pipeline._simple_question_fast_path_reason(question)
+        return pipeline.classify_complexity.fast_path_reason(question)
 
     def test_arabic_single_fact_questions_fast_path(self):
         for question in ("ما هي الرسوم؟", "متى التسجيل؟", "أين المدرسة؟", "كم عدد الطلاب"):

@@ -425,7 +425,7 @@ class DocumentLoader:
     # Making a figure atomic removed the splitter, and with it the only size bound a
     # figure leaf had: until this constant existed the sole remaining limit was
     # `_MILVUS_TEXT_CAP_BYTES`, which is 60 KB — seventy-five times the leaf budget. That
-    # matters beyond storage, because `rag/pipeline._format_docs` hands the grader every
+    # matters beyond storage, because `rag/grading_view.format_docs` hands the grader every
     # retrieved chunk in full and nothing trims them: eight figures at that size is a
     # prompt no grading model can answer inside its output window, and the call comes
     # back `finish_reason: length` — a priced call turned into a parse failure, which is

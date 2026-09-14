@@ -515,7 +515,7 @@ class RagConfig(_Section):
     # prompt as a condition. `{year}` is the roster's own string («الصف الأول الابتدائي»),
     # which is the vocabulary the corpus uses, so it is inserted rather than translated.
     # Says the school's records are the source, because they are — see
-    # `backend/rag/pipeline.py:grading_conditions`.
+    # `backend/rag/graph_nodes.py:GradeDocuments.conditions`.
     child_year_condition: str = "the student this question is about is in {year}, according to the school's records"
 
     evidence_grade_prompt: str = ""

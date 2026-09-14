@@ -43,6 +43,7 @@ from pydantic import Field
 
 from backend.chat import runtime
 from backend.profiles import load_profile, registry, set_profile
+from backend.chat.answer_checks import enforce_forced_tool_ran
 
 RECORDS_TOOL = "get_student_grades"
 KNOWLEDGE_TOOL = "search_knowledge_base"
@@ -320,7 +321,7 @@ class ProviderToolChoiceFallback(unittest.TestCase):
     it had no reason to call, and came back as this text — so the matcher is pinned to
     an observed body rather than a guess. It comes from the endpoint, not from any
     pinned dependency, so it can be reworded without a lockfile change: the retry logs
-    `exc_info` for that reason, and `_enforce_forced_tool_ran` in `service.py` is what
+    `exc_info` for that reason, and `enforce_forced_tool_ran` in `answer_checks.py` is what
     keeps the turn safe whether or not this match still fires.
     """
 
@@ -626,7 +627,7 @@ class TheRequirementIsCheckedAfterTheTurn(unittest.TestCase):
     def _verdict(self, forced, outcomes):
         from backend.chat import service
 
-        return service._enforce_forced_tool_ran(
+        return enforce_forced_tool_ran(
             self._Finalizer(), self._Ctx(forced, outcomes), self._Plan()
         )
 

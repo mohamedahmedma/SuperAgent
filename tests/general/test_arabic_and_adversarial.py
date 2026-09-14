@@ -790,7 +790,7 @@ class ArabicComplexityRoutingTests(unittest.TestCase):
     def _reason(self, question):
         import backend.rag.pipeline as pipeline
 
-        return pipeline._simple_question_fast_path_reason(question)
+        return pipeline.classify_complexity.fast_path_reason(question)
 
     def test_arabic_comparison_questions_are_not_fast_pathed(self):
         for question in (
