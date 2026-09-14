@@ -153,6 +153,7 @@ def chat_with_agent(
     *,
     caller: CallerIdentity | None = None,
     services: Services | None = None,
+    attachment_id: str | None = None,
 ):
     """Serve one turn.
 
@@ -164,11 +165,15 @@ def chat_with_agent(
     When given, it is authoritative: `user_id` is taken from it rather than from the
     positional argument, so the storage key and the identity can never disagree.
 
+    `attachment_id` names the voice note `user_text` is the transcript of, already stored
+    and checked to be the caller's own (backend/api/routes/chat.py). It is kept on the
+    stored question so the recording comes back with the conversation.
+
     Returns once the answer is stored. The note update it may owe runs behind it.
     """
     caller, user_id = resolve_caller(caller, user_id)
     pipeline = _pipeline(services)
-    turn = pipeline.open(user_text, user_id, session_id, caller)
+    turn = pipeline.open(user_text, user_id, session_id, caller, attachment_id=attachment_id)
     pipeline.enter(turn)
     ctx = pipeline.sync_context(turn)
     try:
@@ -210,8 +215,9 @@ async def chat_with_agent_stream(
     *,
     caller: CallerIdentity | None = None,
     services: Services | None = None,
+    attachment_id: str | None = None,
 ):
-    """Serve one turn, streaming. See `chat_with_agent` for `caller`.
+    """Serve one turn, streaming. See `chat_with_agent` for `caller` and `attachment_id`.
 
     The two entry points take identity the same way on purpose: a parameter present on
     one and missing on the other is how a feature ends up working in the sync path and
@@ -237,7 +243,9 @@ async def chat_with_agent_stream(
     # reads the conversation, and deciding whether this message answers the pending
     # clarification may cost a small model call — and the event loop is already streaming
     # tokens to other requests.
-    turn = await asyncio.to_thread(pipeline.open, user_text, user_id, session_id, caller)
+    turn = await asyncio.to_thread(
+        pipeline.open, user_text, user_id, session_id, caller, attachment_id=attachment_id
+    )
     await asyncio.to_thread(pipeline.enter, turn)
 
     output_queue = asyncio.Queue()

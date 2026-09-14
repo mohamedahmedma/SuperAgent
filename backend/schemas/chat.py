@@ -18,6 +18,25 @@ class ChatRequest(StrictSchema):
     # What this client can render. Omitted means "an ordinary browser"; a bot or a
     # downstream service declares its own limits instead of the server guessing.
     client_capabilities: Optional[ClientCapabilities] = None
+    # The voice note this message was spoken as, uploaded first through
+    # POST /chat/attachments. `message` then carries its transcript — the words the
+    # assistant answers — and the note is what the parent hears back on every device.
+    attachment_id: Optional[str] = None
+
+
+class AttachmentInfo(StrictSchema):
+    """A recording a parent sent, as a client shows it. Mirrors `AttachmentRecord`; the
+    bytes are behind `url`, which needs the caller's bearer token."""
+
+    id: str
+    kind: str
+    url: str
+    content_type: str
+    byte_size: int
+    duration_ms: int
+    transcript: Optional[str] = None
+    # "ok" | "empty" | "unavailable" — see `backend/chat/transcription.py`.
+    transcript_status: str
 
 
 class RetrievedChunk(StrictSchema):
@@ -449,6 +468,8 @@ class MessageInfo(StrictSchema):
     content: str
     timestamp: str
     rag_trace: Optional[RagTrace] = None
+    # The recording this message was spoken as, when it was one.
+    attachment: Optional[AttachmentInfo] = None
 
 
 class SessionMessagesResponse(StrictSchema):

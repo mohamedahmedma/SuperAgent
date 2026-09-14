@@ -56,8 +56,8 @@
       <textarea v-if="!isRecording" data-gramm="false" data-gramm_editor="false" spellcheck="false"
         ref="textareaRef"
         v-model="chatStore.userInput"
-        class="chat-input-textarea" :placeholder="language === 'ar' ? 'اكتب رسالتك إلى أوركسيس...' : 'Say something to Aurexis...'"
-        :disabled="chatStore.isInputLocked"
+        class="chat-input-textarea" :placeholder="isTranscribing ? copy.transcribing : (language === 'ar' ? 'اكتب رسالتك إلى أوركسيس...' : 'Say something to Aurexis...')"
+        :disabled="chatStore.isInputLocked || isTranscribing"
         rows="1"
         @keydown="handleKeyDown"
         @compositionstart="handleCompositionStart"
@@ -80,8 +80,8 @@
         v-else-if="!isRecording"
         type="button"
         class="send-btn"
-        :disabled="chatStore.isLoading"
-        :title="chatStore.isLoading ? 'A response is already being generated' : 'Send'"
+        :disabled="chatStore.isLoading || isTranscribing"
+        :title="chatStore.isLoading ? 'A response is already being generated' : isTranscribing ? copy.transcribing : 'Send'"
         aria-label="Send message"
         @click="onSend"
       >
@@ -95,13 +95,14 @@
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { useChatStore } from '@/stores/chat';
 
-defineProps<{ language: 'en' | 'ar' }>();
+const props = defineProps<{ language: 'en' | 'ar' }>();
 const chatStore = useChatStore();
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const isComposing = ref(false);
 const recorder = ref<MediaRecorder | null>(null);
 const audioChunks = ref<Blob[]>([]);
 const isRecording = ref(false);
+const isTranscribing = ref(false);
 const startedAt = ref(0);
 const elapsed = ref(0);
 const isPaused = ref(false);
@@ -110,7 +111,59 @@ const locked = ref(false);
 const startPoint = ref<{ x: number; y: number } | null>(null);
 let timer: number | undefined;
 const recordingTime = computed(() => `00:${String(elapsed.value).padStart(2, '0')}`);
-const voiceAttachmentLabel = '[Voice recording attached]';
+
+const copy = computed(() => props.language === 'ar'
+  ? {
+      transcribing: 'جارٍ تحويل رسالتك الصوتية إلى نص…',
+      nothingHeard: 'لم أسمع شيئًا في التسجيل. حاول مرة أخرى أو اكتب سؤالك.',
+      noTranscript: 'لا يمكن تحويل الرسائل الصوتية إلى نص الآن. من فضلك اكتب سؤالك.',
+      uploadFailed: 'تعذّر إرسال الرسالة الصوتية. حاول مرة أخرى أو اكتب سؤالك.',
+    }
+  : {
+      transcribing: 'Turning your voice note into text…',
+      nothingHeard: "I couldn't hear anything in that recording. Try again, or type your question.",
+      noTranscript: "Voice notes can't be transcribed right now. Please type your question.",
+      uploadFailed: "Your voice note couldn't be sent. Try again, or type your question.",
+    });
+
+/**
+ * What the browser records with, and how much of it.
+ *
+ * Opus in WebM is what Chrome and Firefox record; Safari records AAC in MP4. Asking for
+ * a container the browser lacks throws, so the first supported one is used and the
+ * browser's default stands where none is. 32 kbit/s is plenty for speech and keeps a
+ * minute's note under 300 KB — what is stored, uploaded and played back.
+ */
+const recorderOptions = (): MediaRecorderOptions => {
+  const supported = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4']
+    .find((type) => typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(type));
+  return { ...(supported ? { mimeType: supported } : {}), audioBitsPerSecond: 32_000 };
+};
+
+/**
+ * Send the recording to the server, and put its words in the composer.
+ *
+ * The transcript is the message. A note whose transcript came back is queued with it
+ * and the text appears where the parent can read — and correct — it before sending; a
+ * note nobody could transcribe is not sent as a message at all, because the assistant
+ * would be answering silence. The recording is already stored on the server either way.
+ */
+const attachRecording = async (blob: Blob, durationSeconds: number, sendImmediately: boolean) => {
+  isTranscribing.value = true;
+  try {
+    const attachment = await chatStore.attachVoiceNote(blob, durationSeconds);
+    if (attachment.transcript_status === 'ok' && attachment.transcript) {
+      chatStore.userInput = [chatStore.userInput.trim(), attachment.transcript.trim()].filter(Boolean).join(' ');
+      if (sendImmediately) await onSend();
+      return;
+    }
+    alert(attachment.transcript_status === 'empty' ? copy.value.nothingHeard : copy.value.noTranscript);
+  } catch {
+    alert(copy.value.uploadFailed);
+  } finally {
+    isTranscribing.value = false;
+  }
+};
 
 const stopRecording = (discard = false, sendImmediately = false) => {
   window.clearInterval(timer); isRecording.value = false; isPaused.value = false; recordingLimitReached.value = false;
@@ -119,18 +172,12 @@ const stopRecording = (discard = false, sendImmediately = false) => {
   active.ondataavailable = (event) => { if (!discard && event.data.size) audioChunks.value.push(event.data); };
   active.onstop = async () => {
     active.stream.getTracks().forEach((track) => track.stop());
-    if (!discard && audioChunks.value.length) {
-      const blob = new Blob(audioChunks.value, { type: active.mimeType || 'audio/webm' });
-      chatStore.queueVoiceMessage({
-        url: URL.createObjectURL(blob),
-        duration: elapsed.value,
-        mimeType: blob.type,
-      });
-      chatStore.userInput += (chatStore.userInput ? ' ' : '') + voiceAttachmentLabel;
-      if (sendImmediately) await onSend();
-    }
+    const chunks = audioChunks.value;
     audioChunks.value = [];
     recorder.value = null;
+    if (!discard && chunks.length) {
+      await attachRecording(new Blob(chunks, { type: active.mimeType || 'audio/webm' }), elapsed.value, sendImmediately);
+    }
   };
   active.stop();
 };
@@ -138,7 +185,7 @@ const toggleRecording = async (event: PointerEvent) => {
   if (isRecording.value) return stopRecording();
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder.value = new MediaRecorder(stream); audioChunks.value = []; elapsed.value = 0; isPaused.value = false; recordingLimitReached.value = false; startedAt.value = Date.now(); startPoint.value = { x: event.clientX, y: event.clientY }; locked.value = false; isRecording.value = true; recorder.value.start();
+    recorder.value = new MediaRecorder(stream, recorderOptions()); audioChunks.value = []; elapsed.value = 0; isPaused.value = false; recordingLimitReached.value = false; startedAt.value = Date.now(); startPoint.value = { x: event.clientX, y: event.clientY }; locked.value = false; isRecording.value = true; recorder.value.start();
     timer = window.setInterval(() => {
       if (!isPaused.value) elapsed.value = Math.min(60, elapsed.value + 1);
       if (elapsed.value >= 60) {
@@ -195,7 +242,7 @@ const selectHitlOption = async (option: string) => {
 
 const onSend = async () => {
   const text = chatStore.userInput.trim();
-  if (!text || chatStore.isLoading || isComposing.value) return;
+  if (!text || chatStore.isLoading || isComposing.value || isTranscribing.value) return;
   await chatStore.handleSend();
   await nextTick();
   resetTextareaHeight();

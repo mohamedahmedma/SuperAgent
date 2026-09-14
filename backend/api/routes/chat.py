@@ -25,6 +25,22 @@ _MAX_THREAD_ID = 120
 _THREAD_ID_SAFE = re.compile(r"[^A-Za-z0-9._:-]")
 
 
+def _attachment_id(request: ChatRequest, username: str, services: Services) -> str | None:
+    """The voice note this message was spoken as, checked to be the caller's own.
+
+    A note is addressed by owner and id, so one that resolves for nobody — a stranger's,
+    or a made-up id — is refused here rather than stored against the message as a
+    reference to something the parent could never play. Checked at the boundary, where
+    the identity is, so nothing downstream has to.
+    """
+    attachment_id = (request.attachment_id or "").strip()
+    if not attachment_id:
+        return None
+    if services.attachments.get(username, attachment_id) is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return attachment_id
+
+
 def _thread_id(header_value: str | None, body_value: str | None) -> str:
     """Which conversation this message belongs to.
 
@@ -66,6 +82,7 @@ def chat_endpoint(
 ):
     try:
         session_id = _thread_id(x_thread_id, request.session_id)
+        attachment_id = _attachment_id(request, current_user.username, services)
         resp = chat_with_agent(
             request.message,
             current_user.username,
@@ -76,10 +93,13 @@ def chat_endpoint(
             # receives it and cannot change it.
             caller=CallerIdentity.from_principal(current_user),
             services=services,
+            attachment_id=attachment_id,
         )
         if isinstance(resp, dict):
             return ChatResponse(**resp)
         return ChatResponse(response=resp)
+    except HTTPException:
+        raise
     except Exception as e:
         message = str(e)
         match = re.search(r"Error code:\s*(\d{3})", message)
@@ -115,8 +135,10 @@ async def chat_stream_endpoint(
 
     # Resolved outside the generator, for the same reason `caller` is: the generator
     # body runs after the response has started and must not be reaching back into
-    # request-scoped dependencies.
+    # request-scoped dependencies. The attachment check is also what turns an unknown
+    # note into a 404 here, while a status can still be sent.
     session_id = _thread_id(x_thread_id, request.session_id)
+    attachment_id = _attachment_id(request, current_user.username, services)
 
     async def event_generator():
         try:
@@ -127,6 +149,7 @@ async def chat_stream_endpoint(
                 client_capabilities=request.client_capabilities,
                 caller=caller,
                 services=services,
+                attachment_id=attachment_id,
             ):
                 yield chunk
         except Exception as e:

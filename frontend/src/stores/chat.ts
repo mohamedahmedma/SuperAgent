@@ -3,7 +3,16 @@ import { useAuthStore } from './auth';
 import { useSessionStore } from './sessions';
 import api, { apiUrl } from '@/utils/api';
 import { readAnswerBlocks } from '@/utils/answerBlocks';
-import type { Message, RagStep, GroupedRagStep, HitlRequest, RagTrace, SessionPaging, VoiceMessage } from '@/types/chat';
+import type {
+  AttachmentInfo,
+  Message,
+  RagStep,
+  GroupedRagStep,
+  HitlRequest,
+  RagTrace,
+  SessionPaging,
+  VoiceMessage,
+} from '@/types/chat';
 
 // One scroll-back. Opening a chat loads the last screenful; older batches arrive as the
 // user scrolls up to them, so a conversation with a thousand messages opens as fast as
@@ -17,6 +26,19 @@ const RESPONSE_STOPPED_SUFFIX = '\n\n_(Response was stopped)_';
 
 function stoppedText(content: string): string {
   return content ? `${content}${RESPONSE_STOPPED_SUFFIX}` : RESPONSE_STOPPED;
+}
+
+/** The player for a note the server holds. Its URL is a path; `apiUrl` sends it where the
+ *  API lives, and the player fetches it with the bearer token. */
+function voiceFromAttachment(attachment: AttachmentInfo | null | undefined): VoiceMessage | undefined {
+  if (!attachment || attachment.kind !== 'voice') return undefined;
+  return {
+    url: apiUrl(attachment.url),
+    duration: (attachment.duration_ms || 0) / 1000,
+    mimeType: attachment.content_type,
+    attachmentId: attachment.id,
+    transcript: attachment.transcript || undefined,
+  };
 }
 
 export const useChatStore = defineStore('chat', {
@@ -84,6 +106,35 @@ export const useChatStore = defineStore('chat', {
 
     queueVoiceMessage(voice: VoiceMessage) {
       this.pendingVoice = voice;
+    },
+
+    /**
+     * Send a recording to the server and get back its note — id, URL and transcript.
+     *
+     * Uploaded before the message, not with it: the transcript IS the message, and the
+     * parent sees it in the composer before it goes. The recording is kept in the blob
+     * store under its digest and played back from the server on every device; this tab
+     * keeps playing its own copy meanwhile. Only a note whose transcript came back `ok`
+     * is queued to send — the caller tells the parent about the other two outcomes.
+     */
+    async attachVoiceNote(blob: Blob, durationSeconds: number): Promise<AttachmentInfo> {
+      const form = new FormData();
+      form.append('file', blob, 'voice-note');
+      form.append('duration_ms', String(Math.round(durationSeconds * 1000)));
+      const response = await api.post('/chat/attachments', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const attachment = response.data as AttachmentInfo;
+      if (attachment.transcript_status === 'ok' && attachment.transcript) {
+        this.queueVoiceMessage({
+          url: URL.createObjectURL(blob),
+          duration: durationSeconds,
+          mimeType: blob.type || attachment.content_type,
+          attachmentId: attachment.id,
+          transcript: attachment.transcript,
+        });
+      }
+      return attachment;
     },
 
     isHitlTrace(trace?: RagTrace | null): boolean {
@@ -206,6 +257,9 @@ export const useChatStore = defineStore('chat', {
           hitlOptions: isHitlRequest ? ragTrace?.hitl_options || [] : undefined,
           hitlResumeText: resumeTextForMessage,
           ragTrace,
+          // And its voice notes: the recording is the server's, and comes back with the
+          // message it was spoken as.
+          voice: voiceFromAttachment(msg.attachment),
           // Reloading a past session restores its images too: the backend persists
           // them on the trace, so they survive a page refresh.
           assets: ragTrace?.assets || [],
@@ -554,6 +608,8 @@ export const useChatStore = defineStore('chat', {
           body: JSON.stringify({
             message: text,
             session_id: requestSessionId,
+            // The note this message was spoken as, so the server keeps the two together.
+            ...(voice?.attachmentId ? { attachment_id: voice.attachmentId } : {}),
           }),
           signal: this.abortController.signal,
         });

@@ -35,6 +35,7 @@ _MESSAGE_COLUMNS = (
     ChatMessage.content,
     ChatMessage.timestamp,
     ChatMessage.rag_trace,
+    ChatMessage.attachment_id,
 )
 
 
@@ -81,6 +82,7 @@ class SqlAlchemyConversationRepository:
                 content=message.content,
                 timestamp=message.timestamp,
                 rag_trace=message.rag_trace,
+                attachment_id=message.attachment_id,
             )
             for message in messages
         ]
@@ -159,6 +161,7 @@ def _message(row) -> StoredMessage:
         content=row.content,
         timestamp=row.timestamp,
         rag_trace=row.rag_trace,
+        attachment_id=row.attachment_id,
     )
 
 

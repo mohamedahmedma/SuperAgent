@@ -8,6 +8,7 @@ import api from '@/utils/api';
 vi.mock('@/utils/api', () => ({
   default: {
     get: vi.fn(),
+    post: vi.fn(),
     delete: vi.fn(),
   },
   // The store now builds its stream URL through this. Mocked as the identity function,
@@ -445,6 +446,77 @@ describe('chat store streaming sessions', () => {
       id: 52,
       text: 'The fees for Year 1 are \n\n_(Response was stopped)_',
     });
+  });
+
+  it('uploads a voice note, queues it with its transcript, and sends the two together', async () => {
+    // The transcript is the message; the note goes with it so the server keeps them as one
+    // turn and the recording comes back on every device.
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:local-note'), revokeObjectURL: vi.fn() });
+    vi.mocked(api.post).mockResolvedValueOnce({
+      data: {
+        id: 'note-1', kind: 'voice', url: '/chat/attachments/note-1', content_type: 'audio/webm',
+        byte_size: 1200, duration_ms: 4200, transcript: 'إمتى الباص بييجي؟', transcript_status: 'ok',
+      },
+    });
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+
+    const attachment = await chatStore.attachVoiceNote(new Blob(['audio'], { type: 'audio/webm' }), 4.2);
+    expect(attachment.transcript_status).toBe('ok');
+    expect(api.post).toHaveBeenCalledWith('/chat/attachments', expect.any(FormData), expect.anything());
+    expect(chatStore.pendingVoice).toMatchObject({ url: 'blob:local-note', attachmentId: 'note-1', duration: 4.2 });
+
+    chatStore.userInput = attachment.transcript!;
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    stream.close();
+    await sendPromise;
+
+    const body = JSON.parse((stream.fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body).toMatchObject({ message: 'إمتى الباص بييجي؟', attachment_id: 'note-1' });
+    expect(chatStore.messagesBySession.session_current[0]).toMatchObject({
+      isUser: true,
+      text: 'إمتى الباص بييجي؟',
+      voice: { attachmentId: 'note-1', url: 'blob:local-note' },
+    });
+    expect(chatStore.pendingVoice).toBeNull();
+  });
+
+  it('does not queue a note nobody could transcribe', async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({
+      data: {
+        id: 'note-2', kind: 'voice', url: '/chat/attachments/note-2', content_type: 'audio/webm',
+        byte_size: 1200, duration_ms: 4200, transcript: null, transcript_status: 'unavailable',
+      },
+    });
+    const { chatStore } = setupStores();
+
+    const attachment = await chatStore.attachVoiceNote(new Blob(['audio']), 4.2);
+
+    expect(attachment.transcript_status).toBe('unavailable');
+    expect(chatStore.pendingVoice).toBeNull();
+  });
+
+  it('restores a voice note from the server copy of the message', () => {
+    const { chatStore } = setupStores();
+    const [question] = chatStore.mapServerMessages([
+      serverPageMessage(41, 'إمتى الباص بييجي؟', {
+        attachment: {
+          id: 'note-1', kind: 'voice', url: '/chat/attachments/note-1', content_type: 'audio/webm',
+          byte_size: 1200, duration_ms: 4200, transcript: 'إمتى الباص بييجي؟', transcript_status: 'ok',
+        },
+      }),
+    ]);
+
+    expect(question.voice).toEqual({
+      url: '/chat/attachments/note-1',
+      duration: 4.2,
+      mimeType: 'audio/webm',
+      attachmentId: 'note-1',
+      transcript: 'إمتى الباص بييجي؟',
+    });
+    expect(question.text).toBe('إمتى الباص بييجي؟');
   });
 
   it('does not let a drained stream clear a newer request state', async () => {

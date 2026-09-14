@@ -14,11 +14,13 @@ from backend.schemas.chat import normalize_rag_trace
 @dataclass(frozen=True)
 class MessageToStore:
     """One message a turn adds to its conversation: the role, the text, and — on an
-    answer — the trace it should be stored with."""
+    answer — the trace it should be stored with; on a question, the recording it was
+    spoken as."""
 
     message_type: str
     content: str
     rag_trace: dict | None = None
+    attachment_id: str | None = None
 
 
 class ConversationStorage:
@@ -128,6 +130,7 @@ class ConversationStorage:
                         content=str(message.content),
                         timestamp=now,
                         rag_trace=normalize_rag_trace(message.rag_trace),
+                        attachment_id=message.attachment_id or None,
                     )
                     for message in messages
                 ],
@@ -219,13 +222,16 @@ class ConversationStorage:
 
     @staticmethod
     def _record(message: StoredMessage) -> dict:
-        return {
+        record = {
             "id": message.id,
             "type": message.message_type,
             "content": message.content,
             "timestamp": message.timestamp.isoformat(),
             "rag_trace": normalize_rag_trace(message.rag_trace),
         }
+        if message.attachment_id:
+            record["attachment_id"] = message.attachment_id
+        return record
 
     def get_session_page(
         self,

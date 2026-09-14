@@ -105,6 +105,9 @@ class Turn:
     is_first_message: bool
     #: The conversation before this message, for the direct answer a resumed search gets.
     history: list
+    #: The voice note this message was spoken as, already stored and checked to be the
+    #: caller's own. `user_text` is its transcript. Stored on the question, not read here.
+    attachment_id: str | None = None
     entry: TurnEntry | None = None
     ctx: Any = None
     plan: Any = None
@@ -205,7 +208,15 @@ class TurnPipeline:
 
     # -- opening -----------------------------------------------------------------------
 
-    def open(self, user_text: str, user_id: str, session_id: str, caller: CallerIdentity) -> Turn:
+    def open(
+        self,
+        user_text: str,
+        user_id: str,
+        session_id: str,
+        caller: CallerIdentity,
+        *,
+        attachment_id: str | None = None,
+    ) -> Turn:
         """Load the conversation this message belongs to.
 
         After the previous turn's writes: its save was queued rather than waited for, and a
@@ -231,6 +242,7 @@ class TurnPipeline:
             persistent_note=metadata.get("persistent_note", ""),
             is_first_message=len(messages) == 0,
             history=list(messages),
+            attachment_id=attachment_id or None,
         )
 
     def enter(self, turn: Turn) -> None:
@@ -271,7 +283,11 @@ class TurnPipeline:
 
     def record_question(self, turn: Turn) -> None:
         turn.messages.append(HumanMessage(content=turn.user_text))
-        self._store(turn, [MessageToStore("human", turn.user_text)], describe="store the question")
+        self._store(
+            turn,
+            [MessageToStore("human", turn.user_text, attachment_id=turn.attachment_id)],
+            describe="store the question",
+        )
 
     def _store(self, turn: Turn, messages: list, *, metadata: dict | None = None, describe: str) -> None:
         """Queue an append to this conversation, behind whatever it already has queued."""

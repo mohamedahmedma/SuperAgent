@@ -18,6 +18,7 @@ from typing import Protocol
 
 from backend.application.ports.repositories import (
     AssetExtractionRepository,
+    ChatAttachmentRepository,
     ConversationRepository,
     CorpusDigestRepository,
     DocumentAssetRepository,
@@ -33,6 +34,7 @@ class UnitOfWork(Protocol):
     """One transaction, entered as a context manager, exposing every repository."""
 
     conversations: ConversationRepository
+    attachments: ChatAttachmentRepository
     document_pairs: DocumentPairRepository
     parent_chunks: ParentChunkRepository
     section_summaries: SectionSummaryRepository

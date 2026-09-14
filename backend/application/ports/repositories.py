@@ -44,6 +44,8 @@ class StoredMessage:
     content: str
     timestamp: datetime
     rag_trace: dict | None
+    #: The recording this message was spoken as, when it was one. See `ChatAttachment`.
+    attachment_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +54,7 @@ class NewMessage:
     content: str
     timestamp: datetime
     rag_trace: dict | None
+    attachment_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +109,57 @@ class ConversationRepository(Protocol):
 
     def delete_session(self, username: str, session_id: str) -> bool:
         """Remove the conversation and its messages. False when there was nothing to remove."""
+        ...
+
+
+# -- attachments ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class NewAttachment:
+    """A recording to store: everything but the owner, who is named at the call."""
+
+    id: str
+    kind: str
+    sha256: str
+    storage_uri: str
+    content_type: str
+    byte_size: int
+    duration_ms: int
+    transcript: str | None
+    transcript_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentRecord:
+    id: str
+    kind: str
+    sha256: str
+    storage_uri: str
+    content_type: str
+    byte_size: int
+    duration_ms: int
+    transcript: str | None
+    transcript_status: str
+    created_at: datetime
+
+
+class ChatAttachmentRepository(Protocol):
+    """Recordings parents sent, addressed by owner and id.
+
+    Every read names the owner, so a URL that carries a note's id resolves only for the
+    account that sent it. There is no read by id alone.
+    """
+
+    def add(self, username: str, attachment: NewAttachment) -> AttachmentRecord | None:
+        """Stage the attachment for `username`; None only for an unknown user."""
+        ...
+
+    def get(self, username: str, attachment_id: str) -> AttachmentRecord | None:
+        ...
+
+    def get_many(self, username: str, attachment_ids: Sequence[str]) -> Sequence[AttachmentRecord]:
+        """The owner's attachments among `attachment_ids`, in no particular order."""
         ...
 
 

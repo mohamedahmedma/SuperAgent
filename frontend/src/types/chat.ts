@@ -245,11 +245,32 @@ export interface Message {
   _groupedSteps?: GroupedRagStep[];
 }
 
-/** A locally recorded voice note attached to a user turn. */
+/**
+ * A voice note the server holds. Mirrors backend `AttachmentInfo` (backend/schemas/chat.py).
+ * `url` needs the bearer token, so the player fetches it through the auth store.
+ */
+export interface AttachmentInfo {
+  id: string;
+  kind: 'voice' | string;
+  url: string;
+  content_type: string;
+  byte_size: number;
+  duration_ms: number;
+  transcript?: string | null;
+  /** ok — `transcript` is what was said; empty — nothing was heard; unavailable — no
+   *  transcriber, or it failed. Only `ok` is sent as a message. */
+  transcript_status: 'ok' | 'empty' | 'unavailable' | string;
+}
+
+/** A voice note on a user turn: the parent's own recording, played back from `url`. */
 export interface VoiceMessage {
+  /** A `blob:` URL while the tab that recorded it holds it; the server's URL on reload. */
   url: string;
   duration: number;
   mimeType: string;
+  /** The server's note, once uploaded. Sent with the message so the two stay together. */
+  attachmentId?: string;
+  transcript?: string;
 }
 
 /** How far back through a conversation the client has read. */

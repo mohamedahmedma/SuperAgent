@@ -14,8 +14,16 @@
       </div>
 
       <template v-if="msg.isUser">
+        <!-- A spoken message shows the recording and, under it, the words the assistant
+             answered: the parent can check what was heard, and a reopened chat reads the
+             same as it did live. -->
         <VoiceMessage v-if="msg.voice" :voice="msg.voice" />
-        <MessageContent v-else :text="msg.text" :is-user="true" :msg-index="msgIndex" />
+        <MessageContent
+          v-if="!msg.voice || msg.text.trim()"
+          :text="msg.text"
+          :is-user="true"
+          :msg-index="msgIndex"
+        />
       </template>
 
       <template v-else>
