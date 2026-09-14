@@ -20,6 +20,7 @@ keys, a barrier the next turn can wait on — and that is tested first, without 
 """
 import asyncio
 import importlib
+import json
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -330,6 +331,21 @@ class StreamedTurnStorageTests(unittest.TestCase):
 
         self.assertEqual(["bus?", "The bus leaves at 07:30."], [m.content for m in storage.messages])
         self.assertEqual("title", storage.metadata["title"])
+
+    def test_the_stream_reports_the_row_ids_once_the_turn_is_stored(self):
+        """After `[DONE]`, a `stored` event names the rows the question and the answer now
+        have. The client keys its copies on them when it reopens the conversation."""
+        storage = FakeStorage()
+        self._agent(lambda ctx, *a, **k: FakeStreamAgent(ctx, chunks=["07:30."]))
+
+        async def whole_stream():
+            return [chunk async for chunk in service.chat_with_agent_stream("bus?", "u", "s", services=self._services(storage))]
+
+        chunks = asyncio.run(whole_stream())
+
+        done_at = chunks.index(service._DONE)
+        stored = [json.loads(c[len("data: "):]) for c in chunks[done_at + 1:] if c.startswith("data: {")]
+        self.assertEqual([{"type": "stored", "message_ids": [1, 2]}], stored)
 
     def test_a_stream_cut_off_mid_answer_stores_what_the_parent_saw(self):
         """Stop pressed, or the connection dropped, while the model was still talking.

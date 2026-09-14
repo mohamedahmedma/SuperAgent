@@ -10,6 +10,15 @@ import type { Message, RagStep, GroupedRagStep, HitlRequest, RagTrace, SessionPa
 // one with ten.
 const PAGE_SIZE = 15;
 
+// What a stopped answer reads as — live, when the parent presses Stop, and again when
+// the server's stored copy of that turn is reopened (it is marked `turn_interrupted`).
+const RESPONSE_STOPPED = '(Response stopped)';
+const RESPONSE_STOPPED_SUFFIX = '\n\n_(Response was stopped)_';
+
+function stoppedText(content: string): string {
+  return content ? `${content}${RESPONSE_STOPPED_SUFFIX}` : RESPONSE_STOPPED;
+}
+
 export const useChatStore = defineStore('chat', {
   state: () => ({
     messages: [] as Message[],
@@ -183,8 +192,13 @@ export const useChatStore = defineStore('chat', {
           hitlResumeText = undefined;
         }
 
+        // A turn cut off mid-answer stores what had reached the parent, marked so. It
+        // reads on reopen exactly as it read when they pressed Stop.
+        const interrupted = !isUser && !!ragTrace?.turn_interrupted;
+
         return {
-          text: msg.content,
+          id: typeof msg.id === 'number' ? msg.id : undefined,
+          text: interrupted ? stoppedText(msg.content || '') : msg.content,
           isUser,
           isHitlRequest,
           isHitlAnswer,
@@ -326,7 +340,10 @@ export const useChatStore = defineStore('chat', {
         );
         const data = response.data;
         const serverMessages = data.messages || [];
-        const loadedMessages = this.mapServerMessages(serverMessages);
+        const loadedMessages = this.reconcileWithServer(
+          cachedMessages || [],
+          this.mapServerMessages(serverMessages),
+        );
         this.messagesBySession[sessionId] = loadedMessages;
         this.recordPaging(sessionId, serverMessages, data.has_more);
         this.syncPendingHitlFromMessages(sessionId);
@@ -341,6 +358,24 @@ export const useChatStore = defineStore('chat', {
         }
         throw new Error(errMsg);
       }
+    },
+
+    /**
+     * The server's newest page, plus whatever this tab holds that the server does not yet.
+     *
+     * Everything the server returns is authoritative: it is what every other device sees,
+     * and it carries what only the server has — the row id, the stored copy of a voice
+     * note. A local message with no id is a turn whose save is still landing: the composer
+     * is released at `[DONE]` and the `stored` event that names the rows follows it by
+     * milliseconds, and a parent who switches chats and back inside that window used to
+     * watch the answer they had just read disappear. It is kept behind the page until the
+     * ids arrive. One the stream ended without confirming is dropped instead: the server
+     * either stored it, in which case the page has it, or lost it, in which case nothing
+     * has it and showing a copy would be showing a message that does not exist.
+     */
+    reconcileWithServer(local: Message[], server: Message[]): Message[] {
+      const pending = local.filter((message) => message.id === undefined && !message.unconfirmed);
+      return pending.length ? [...server, ...pending] : server;
     },
 
     /**
@@ -493,6 +528,7 @@ export const useChatStore = defineStore('chat', {
       const requestAbortController = this.abortController;
       const isStillTheLiveRequest = () => this.abortController === requestAbortController;
       let receivedHitlRequest = false;
+      let receivedStored = false;
       let streamHadError = false;
 
       try {
@@ -645,6 +681,18 @@ export const useChatStore = defineStore('chat', {
                       isStreaming: data.session_id === this.streamingSessionId,
                     });
                   }
+                } else if (data.type === 'stored') {
+                  // After `[DONE]`: the rows the question and the answer were stored under,
+                  // in that order. From here the server's copy and this one are the same
+                  // message, and reopening the chat can tell them apart from a turn still
+                  // being stored — see `reconcileWithServer`.
+                  const ids: unknown[] = Array.isArray(data.message_ids) ? data.message_ids : [];
+                  const [questionId, answerId] = ids;
+                  const userMsg = requestMessages[botMsgIdx - 1];
+                  const botMsg = requestMessages[botMsgIdx];
+                  if (userMsg && typeof questionId === 'number') userMsg.id = questionId;
+                  if (botMsg && typeof answerId === 'number') botMsg.id = answerId;
+                  receivedStored = true;
                 } else if (data.type === 'error') {
                   streamHadError = true;
                   const botMsg = requestMessages[botMsgIdx];
@@ -664,11 +712,7 @@ export const useChatStore = defineStore('chat', {
         if (!botMsg) return;
         if (error.name === 'AbortError') {
           botMsg.isThinking = false;
-          if (!botMsg.text) {
-            botMsg.text = '(Response stopped)';
-          } else {
-            botMsg.text += '\n\n_(Response was stopped)_';
-          }
+          botMsg.text = stoppedText(botMsg.text);
         } else {
           botMsg.isThinking = false;
           botMsg.text = `Meow... something went wrong: ${error.message}`;
@@ -676,6 +720,13 @@ export const useChatStore = defineStore('chat', {
       } finally {
         if (streamHadError && pendingHitlAtSend && !receivedHitlRequest) {
           this.pendingHitlBySession[requestSessionId] = pendingHitlAtSend;
+        }
+        if (!receivedStored) {
+          // The connection ended without the server naming the rows. Whether it stored the
+          // turn (a stopped answer is) or not, its copy is the one to show on reopen.
+          for (const message of [requestMessages[botMsgIdx - 1], requestMessages[botMsgIdx]]) {
+            if (message && message.id === undefined) message.unconfirmed = true;
+          }
         }
         // Guarded: see `requestAbortController`. A stream that has already released the
         // composer at `[DONE]` may reach here long after a newer message took over, and

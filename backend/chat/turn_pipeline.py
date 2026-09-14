@@ -119,6 +119,9 @@ class Turn:
     #: Whether the answer has been handed to storage. An interrupted turn stores what had
     #: reached the parent — unless the turn had already stored its answer.
     committed: bool = False
+    #: The writes this turn queued, in order. Their results are the row ids the messages
+    #: were stored under, which the client is told so it can tell its copy from the server's.
+    writes: list = field(default_factory=list)
 
     def asset_payload(self) -> list:
         return [
@@ -276,11 +279,11 @@ class TurnPipeline:
         user_id, session_id = turn.user_id, turn.session_id
 
         def work():
-            conversations.append(user_id, session_id, messages, metadata=metadata)
+            return conversations.append(user_id, session_id, messages, metadata=metadata)
 
-        self._c.background.submit(
+        turn.writes.append(self._c.background.submit(
             self.conversation_key(user_id, session_id), work, describe=f"{describe} ({user_id}/{session_id})"
-        )
+        ))
 
     # -- a resumed search --------------------------------------------------------------
 
@@ -588,6 +591,20 @@ class TurnPipeline:
             self.conversation_key(turn.user_id, turn.session_id),
             timeout=self.SAVE_WAIT_SECONDS if timeout is None else timeout,
         )
+
+    @staticmethod
+    def stored_message_ids(turn: Turn) -> list[int]:
+        """The row ids this turn's messages were stored under, in conversation order.
+
+        Only the writes that have finished and succeeded; a write still running or failed
+        contributes nothing, and the client then simply holds copies without ids. Meant
+        to be read after `wait_for_save`.
+        """
+        ids: list[int] = []
+        for write in turn.writes:
+            if write.done() and write.exception() is None:
+                ids.extend(int(item) for item in (write.result() or []))
+        return ids
 
     @staticmethod
     def response(turn: Turn) -> dict:

@@ -284,7 +284,9 @@ async def chat_with_agent_stream(
             pipeline.schedule_note(turn)
             pipeline.commit(turn, pipeline.save_metadata(turn))
             yield _DONE
-            await _hold_until_stored(pipeline, turn)
+            stored = await _hold_until_stored(pipeline, turn)
+            if stored:
+                yield stored
             return
 
         # Plan the turn before building the agent. A confirmed out-of-domain question ends
@@ -311,7 +313,9 @@ async def chat_with_agent_stream(
             pipeline.schedule_note(turn)
             pipeline.commit(turn, pipeline.save_metadata(turn))
             yield _DONE
-            await _hold_until_stored(pipeline, turn)
+            stored = await _hold_until_stored(pipeline, turn)
+            if stored:
+                yield stored
             return
 
         agent, context_messages, config = pipeline.agent_call(turn)
@@ -403,7 +407,9 @@ async def chat_with_agent_stream(
         pipeline.schedule_note(turn)
         pipeline.commit(turn, pipeline.save_metadata(turn))
         yield _DONE
-        await _hold_until_stored(pipeline, turn)
+        stored = await _hold_until_stored(pipeline, turn)
+        if stored:
+            yield stored
     except (asyncio.CancelledError, GeneratorExit):
         # The connection is gone, or the parent pressed Stop. The agent is told so first —
         # left running it would finish the answer for nobody — and then what the parent
@@ -420,17 +426,25 @@ async def chat_with_agent_stream(
         ctx.close()
 
 
-async def _hold_until_stored(pipeline: TurnPipeline, turn) -> None:
-    """Keep the connection open until the answer has been stored.
+async def _hold_until_stored(pipeline: TurnPipeline, turn) -> str | None:
+    """Keep the connection open until the answer has been stored, then say what it is.
 
     Not for the parent's sake — their answer is complete and their composer was released
     at `[DONE]`. It is what makes the close of this connection mean the turn is durable,
-    for a client that waits for it, and it costs the milliseconds the append takes rather
-    than the seconds the note update used to. On a worker thread, so the wait holds no
-    event loop; a browser that leaves first cancels only this wait, never the save.
+    and it costs the milliseconds the append takes rather than the seconds the note update
+    used to. On a worker thread, so the wait holds no event loop; a browser that leaves
+    first cancels only this wait, never the save.
+
+    Returns the `stored` event: the row ids the turn's messages now have. With them the
+    client can tell its own copy of a message from the server's when it reopens the chat,
+    instead of guessing by position — the copy it holds keeps whatever the server does not
+    (a voice note's local playback) and yields to the server on everything else.
     """
     if not await asyncio.to_thread(pipeline.wait_for_save, turn):
         logger.warning(
             "the save for %s/%s is still running after %.0fs; closing the stream without it",
             turn.user_id, turn.session_id, pipeline.SAVE_WAIT_SECONDS,
         )
+        return None
+    ids = pipeline.stored_message_ids(turn)
+    return _event({"type": "stored", "message_ids": ids}) if ids else None

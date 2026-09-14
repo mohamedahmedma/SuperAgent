@@ -217,6 +217,16 @@ export interface HitlRequest {
 }
 
 export interface Message {
+  /**
+   * The server's row id, once the message is stored. Absent while a turn sent from this
+   * tab is still being stored — the composer is released at `[DONE]` and the `stored`
+   * event follows — and for a message the server never confirmed. It is what tells this
+   * tab's copy from the server's when a conversation is reopened.
+   */
+  id?: number;
+  /** Sent from this tab and never confirmed stored: the stream ended without a `stored`
+   *  event. Yields to the server's copy when the conversation is reopened. */
+  unconfirmed?: boolean;
   text: string;
   isUser: boolean;
   voice?: VoiceMessage;

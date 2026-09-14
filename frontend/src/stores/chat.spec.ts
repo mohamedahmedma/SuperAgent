@@ -128,6 +128,15 @@ const createControlledSseFetch = () => {
   };
 };
 
+/** A message as `/sessions/{id}` returns it: stored, and so carrying its row id. */
+const serverPageMessage = (id: number, content: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  type: id % 2 === 1 ? 'human' : 'ai',
+  content,
+  timestamp: '2026-09-14T00:00:00',
+  ...extra,
+});
+
 const setupStores = () => {
   setActivePinia(createPinia());
 
@@ -337,6 +346,105 @@ describe('chat store streaming sessions', () => {
     stream.close();
     await sendPromise;
     expect(chatStore.isLoading).toBe(false);
+  });
+
+  it('keys the turn on the rows the server stored it under', async () => {
+    // The `stored` event follows `[DONE]`. From then on this tab's copy and the server's
+    // are one message, which is what reopening the chat relies on.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+
+    chatStore.userInput = 'When does the bus leave?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    stream.pushEvent({ type: 'content', content: 'At 07:30.' });
+    stream.pushDone();
+    stream.pushEvent({ type: 'stored', message_ids: [41, 42] });
+    stream.close();
+    await sendPromise;
+
+    const [question, answer] = chatStore.messagesBySession.session_current;
+    expect(question).toMatchObject({ id: 41, isUser: true });
+    expect(answer).toMatchObject({ id: 42, text: 'At 07:30.' });
+    expect(question.unconfirmed).toBeUndefined();
+    expect(answer.unconfirmed).toBeUndefined();
+  });
+
+  it('keeps a turn whose save has not landed when the chat is reopened, then knows it once stored', async () => {
+    // The composer is released at `[DONE]`; the save follows by milliseconds. A parent who
+    // switches chats and back inside that window used to see the answer they had just
+    // read disappear, replaced by a page from the server that did not hold it yet.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+    const older = [serverPageMessage(31, 'Earlier question'), serverPageMessage(32, 'Earlier answer')];
+
+    chatStore.userInput = 'When does the bus leave?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    stream.pushEvent({ type: 'content', content: 'At 07:30.' });
+    stream.pushDone();
+    await flushPromises();
+    expect(chatStore.isLoading).toBe(false);
+
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { messages: older, has_more: false } });
+    await chatStore.loadSession('session_current');
+    expect(chatStore.messages.map((msg) => msg.text)).toEqual([
+      'Earlier question',
+      'Earlier answer',
+      'When does the bus leave?',
+      'At 07:30.',
+    ]);
+
+    stream.pushEvent({ type: 'stored', message_ids: [41, 42] });
+    stream.close();
+    await sendPromise;
+    expect(chatStore.messages[3]).toMatchObject({ id: 42 });
+
+    // The server now returns the turn; the reconciled list holds it once, not twice.
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        messages: [...older, serverPageMessage(41, 'When does the bus leave?'), serverPageMessage(42, 'At 07:30.')],
+        has_more: false,
+      },
+    });
+    await chatStore.loadSession('session_current');
+    expect(chatStore.messages.map((msg) => msg.id)).toEqual([31, 32, 41, 42]);
+  });
+
+  it('yields to the server for a turn the stream never confirmed', async () => {
+    // Stop was pressed. The server stores what had reached the parent, marked as
+    // interrupted; this tab's copy must not appear beside it on reopen.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+
+    chatStore.userInput = 'What are the fees?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    stream.pushEvent({ type: 'content', content: 'The fees for Year 1 are ' });
+    await flushPromises();
+    chatStore.handleStop();
+    await sendPromise;
+    expect(chatStore.messages[1].text).toBe('The fees for Year 1 are \n\n_(Response was stopped)_');
+
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        messages: [
+          serverPageMessage(51, 'What are the fees?'),
+          serverPageMessage(52, 'The fees for Year 1 are ', { rag_trace: { turn_interrupted: true } }),
+        ],
+        has_more: false,
+      },
+    });
+    await chatStore.loadSession('session_current');
+
+    expect(chatStore.messages).toHaveLength(2);
+    expect(chatStore.messages[1]).toMatchObject({
+      id: 52,
+      text: 'The fees for Year 1 are \n\n_(Response was stopped)_',
+    });
   });
 
   it('does not let a drained stream clear a newer request state', async () => {
