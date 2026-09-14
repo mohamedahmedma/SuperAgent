@@ -60,6 +60,7 @@ from backend.chat.clarification import (
 from backend.chat.context_messages import build_context_messages, build_resume_answer_messages
 from backend.chat.background import MODELS, JobRunner
 from backend.chat.finalize import Finalizer, finalize_text, message_text
+from backend.chat.persistent_note import cleared_note_patch, note_patch, usable_note
 from backend.chat.storage import MessageToStore
 from backend.schemas.chat import normalize_rag_trace
 
@@ -101,6 +102,8 @@ class Turn:
     messages: list
     metadata: dict
     child_state: Any
+    #: The note this caller may read — empty when the stored one was written for a
+    #: different guardian (`backend/chat/persistent_note.py`).
     persistent_note: str
     is_first_message: bool
     #: The conversation before this message, for the direct answer a resumed search gets.
@@ -108,6 +111,10 @@ class Turn:
     #: The voice note this message was spoken as, already stored and checked to be the
     #: caller's own. `user_text` is its transcript. Stored on the question, not read here.
     attachment_id: str | None = None
+    #: A note was stored and refused: another guardian's. Cleared at the save, unless this
+    #: turn's note job writes over it first.
+    note_discarded: bool = False
+    note_scheduled: bool = False
     entry: TurnEntry | None = None
     ctx: Any = None
     plan: Any = None
@@ -125,6 +132,11 @@ class Turn:
     #: The writes this turn queued, in order. Their results are the row ids the messages
     #: were stored under, which the client is told so it can tell its copy from the server's.
     writes: list = field(default_factory=list)
+
+    @property
+    def guardian_id(self) -> str:
+        """The guardian this turn is served for; empty for a staff session or a job."""
+        return self.caller.guardian_id if self.caller else ""
 
     def asset_payload(self) -> list:
         return [
@@ -229,6 +241,11 @@ class TurnPipeline:
                 user_id, session_id, self.SAVE_WAIT_SECONDS,
             )
         messages, metadata = self._c.conversations.load_with_meta(user_id, session_id)
+        guardian_id = caller.guardian_id if caller else ""
+        # Both keyed to the guardian, not the account: a conversation outlives a custody
+        # transfer, and neither the previous family's child nor its summary may steer the
+        # next family's answers.
+        note, note_discarded = usable_note(metadata, guardian_id)
         return Turn(
             user_text=user_text,
             user_id=user_id,
@@ -238,8 +255,9 @@ class TurnPipeline:
             metadata=metadata,
             # The pin travels by reference into the turn's context and back out into the
             # saved metadata, so a turn that resolves a child has already recorded it.
-            child_state=load_child_state(metadata, guardian_id=caller.guardian_id if caller else ""),
-            persistent_note=metadata.get("persistent_note", ""),
+            child_state=load_child_state(metadata, guardian_id=guardian_id),
+            persistent_note=note,
+            note_discarded=note_discarded,
             is_first_message=len(messages) == 0,
             history=list(messages),
             attachment_id=attachment_id or None,
@@ -545,6 +563,10 @@ class TurnPipeline:
         """
         patch: dict = {}
         save_child_state(patch, turn.child_state, stored=turn.metadata.get(SESSION_CHILD_KEY))
+        if turn.note_discarded and not turn.note_scheduled:
+            # Another guardian's note, refused at `open`. Dropped so it is not read again —
+            # unless this turn's note job is about to write over it anyway.
+            patch.update(cleared_note_patch())
         if turn.entry.invalid_pending_hitl:
             patch[PENDING_HITL_KEY] = None
         if turn.title:
@@ -581,22 +603,26 @@ class TurnPipeline:
         The note it builds on is read when the job RUNS, not copied from when the turn
         began: another turn may have finished in between and folded itself in, and a
         summary written over its work would drop it. Jobs for one conversation's note run
-        in order, so two turns cannot race each other to the write either.
+        in order, so two turns cannot race each other to the write either. Read and
+        written for this turn's guardian: a note another guardian left is not a starting
+        point, and the note written is stamped as this one's.
         """
         if not self.note_is_due(turn):
             return False
         conversations, update_note = self._c.conversations, self._c.update_note
-        user_id, session_id = turn.user_id, turn.session_id
+        user_id, session_id, guardian_id = turn.user_id, turn.session_id, turn.guardian_id
         user_text, answer = turn.entry.effective_user_text, turn.answer
         # The whole conversation only when there is no note yet to build on — a note is
         # bootstrapped from the history the window has already trimmed.
         history = list(turn.messages[:-1]) if not turn.persistent_note else None
 
         def work():
-            current = str(conversations.session_metadata(user_id, session_id).get("persistent_note") or "")
+            current, discarded = usable_note(conversations.session_metadata(user_id, session_id), guardian_id)
             note = update_note(current, user_text, answer, history_messages=history)
             if note and note != current:
-                conversations.patch_metadata(user_id, session_id, {"persistent_note": note})
+                conversations.patch_metadata(user_id, session_id, note_patch(note, guardian_id))
+            elif discarded:
+                conversations.patch_metadata(user_id, session_id, cleared_note_patch())
 
         self._c.background.submit(
             self.note_key(user_id, session_id),
@@ -606,6 +632,7 @@ class TurnPipeline:
             lane=MODELS,
             describe=f"update the persistent note ({user_id}/{session_id})",
         )
+        turn.note_scheduled = True
         return True
 
     def commit(self, turn: Turn, save_meta: dict) -> None:

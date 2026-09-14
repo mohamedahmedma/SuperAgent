@@ -410,7 +410,11 @@ class StreamedTurnStorageTests(unittest.TestCase):
 
         self.assertEqual("asked about the uniform; asked about fees", seen["current"])
         self.assertEqual(
-            [{"persistent_note": "asked about the uniform; asked about fees; the bus leaves at 07:30"}],
+            [{
+                "persistent_note": "asked about the uniform; asked about fees; the bus leaves at 07:30",
+                # Stamped with the guardian it was written for; this turn has none.
+                "persistent_note_guardian": None,
+            }],
             storage.patches,
         )
 
