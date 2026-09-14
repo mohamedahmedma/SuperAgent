@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sis.api.deps import Principal, SchoolCodeDep, get_teaching_service, require_permission
 from sis.application.services.teaching import TeachingService
 from sis.domain.rbac import Permission
+from sis.infrastructure.db import models as m
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
 router = APIRouter(prefix="/v1/homework", tags=["homework"])
@@ -139,6 +140,18 @@ def _row(row) -> HomeworkOut:
     )
 
 
+def _audit_values(row) -> dict[str, object]:
+    values = row._mapping
+    return {
+        "academic_year_code": values["academic_year_code"],
+        "class_code": values["class_code"],
+        "subject_code": values["subject_code"],
+        "title": values["title"],
+        "details": values["details"],
+        "original_filename": values["original_filename"],
+    }
+
+
 @router.get("", response_model=HomeworkListOut)
 def list_teacher_homework(
     caller: TeacherReader,
@@ -254,6 +267,22 @@ async def upload_homework(
                     "x": extracted,
                 },
             )
+            uow._session.add(m.AuditLog(
+                actor_user_id=caller.profile.user_id if caller.profile else None,
+                actor=caller.username,
+                action="homework_uploaded",
+                entity_type="Homework",
+                entity_id=file_id,
+                old_values=None,
+                new_values={
+                    "academic_year_code": academic_year,
+                    "class_code": class_code,
+                    "subject_code": subject_code,
+                    "title": title,
+                    "details": details,
+                    "original_filename": original,
+                },
+            ))
             uow.commit()
             row = uow._session.execute(
                 text("SELECT * FROM teacher_homework WHERE id=:id"), {"id": file_id}
@@ -284,6 +313,16 @@ def delete_homework(
             text("UPDATE teacher_homework SET deleted_at=:now WHERE id=:id"),
             {"id": homework_id, "now": datetime.now(ZoneInfo("Africa/Cairo")).isoformat()},
         )
+        values = _audit_values(row)
+        uow._session.add(m.AuditLog(
+            actor_user_id=caller.profile.user_id if caller.profile else None,
+            actor=caller.username,
+            action="homework_deleted",
+            entity_type="Homework",
+            entity_id=homework_id,
+            old_values=values,
+            new_values={**values, "deleted_at": datetime.now(ZoneInfo("Africa/Cairo")).isoformat()},
+        ))
         uow.commit()
     return None
 
@@ -306,6 +345,16 @@ def restore_homework(
             text("UPDATE teacher_homework SET deleted_at=NULL WHERE id=:id"),
             {"id": homework_id},
         )
+        values = _audit_values(row)
+        uow._session.add(m.AuditLog(
+            actor_user_id=caller.profile.user_id if caller.profile else None,
+            actor=caller.username,
+            action="homework_restored",
+            entity_type="Homework",
+            entity_id=homework_id,
+            old_values=values,
+            new_values={**values, "deleted_at": None},
+        ))
         uow.commit()
         restored = uow._session.execute(
             text("SELECT * FROM teacher_homework WHERE id=:id"), {"id": homework_id}

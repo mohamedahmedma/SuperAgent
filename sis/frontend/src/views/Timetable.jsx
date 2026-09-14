@@ -2,16 +2,45 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Store } from '../store.js';
 import { pickName, useQuery, useStore } from '../hooks.js';
-import { Badge, Button, Card, Empty, ErrorNote, PageHead, Select, Skeleton } from '../components/Ui.jsx';
+import { Badge, Button, Card, Empty, ErrorNote, Icon, PageHead, Select, Skeleton } from '../components/Ui.jsx';
 import { t } from '../i18n.js';
 
 const DAY_LABELS = {
   sunday: 'Sunday', monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday',
   thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday'
 };
+const CALENDAR_DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+function preferredTimetableDay(days, date = new Date()) {
+  if (!days.length) return '';
+  for (let offset = 0; offset < CALENDAR_DAYS.length; offset += 1) {
+    const day = CALENDAR_DAYS[(date.getDay() + offset) % CALENDAR_DAYS.length];
+    if (days.includes(day)) return day;
+  }
+  return days[0];
+}
 
 const slotKey = (day, period) => `${day}:${period}`;
 const copyEntries = (entries) => (entries || []).map((entry) => ({ ...entry }));
+
+function edgeScrollVelocity(clientY, viewportHeight) {
+  const edge = Math.min(96, Math.max(56, viewportHeight * 0.16));
+  if (clientY < edge) {
+    const strength = (edge - Math.max(0, clientY)) / edge;
+    return -Math.ceil(18 * strength * strength);
+  }
+  if (clientY > viewportHeight - edge) {
+    const strength = (Math.min(viewportHeight, clientY) - (viewportHeight - edge)) / edge;
+    return Math.ceil(18 * strength * strength);
+  }
+  return 0;
+}
+
+function sameDragPayload(left, right) {
+  if (!left || !right || left.kind !== right.kind) return false;
+  if (left.kind === 'subject') return left.subject === right.subject;
+  return left.day === right.day && left.period === right.period;
+}
 
 function changedSlots(before, after) {
   const oldBySlot = new Map(before.map((entry) => [
@@ -33,6 +62,7 @@ export function Timetable() {
   const [klass, setKlass] = useState('');
   const [grade, setGrade] = useState('');
   const [term, setTerm] = useState('');
+  const [mobileDay, setMobileDay] = useState('');
   const [dragged, setDragged] = useState(null);
   const [savedEntries, setSavedEntries] = useState([]);
   const [draftEntries, setDraftEntries] = useState([]);
@@ -47,6 +77,16 @@ export function Timetable() {
   const [saved, setSaved] = useState(false);
   const [actionError, setActionError] = useState(null);
   const automaticCopyAttempt = useRef('');
+  const dragInteractionCleanup = useRef(null);
+  const suppressDragClick = useRef(false);
+  const nativeDragY = useRef(null);
+  const nativeDragFrame = useRef(0);
+
+  useEffect(() => () => {
+    if (dragInteractionCleanup.current) dragInteractionCleanup.current();
+    if (nativeDragFrame.current) cancelAnimationFrame(nativeDragFrame.current);
+    document.body.classList.remove('sis-is-touch-dragging');
+  }, []);
 
   const supervisedGrades = useMemo(() => [...new Set(
     ((state.profile && state.profile.grants) || [])
@@ -124,6 +164,25 @@ export function Timetable() {
     !!state.year && !!klass && !!term
   );
   const plan = week.value;
+  const planDays = plan?.days || [];
+  const activeMobileDay = planDays.includes(mobileDay)
+    ? mobileDay
+    : preferredTimetableDay(planDays);
+  const activeMobileDayIndex = Math.max(0, planDays.indexOf(activeMobileDay));
+
+  useEffect(() => {
+    if (!planDays.length) {
+      setMobileDay('');
+      return;
+    }
+    setMobileDay((current) => planDays.includes(current) ? current : preferredTimetableDay(planDays));
+  }, [planDays.join('|')]);
+
+  const moveMobileDay = (offset) => {
+    if (planDays.length < 2) return;
+    const nextIndex = (activeMobileDayIndex + offset + planDays.length) % planDays.length;
+    setMobileDay(planDays[nextIndex]);
+  };
   const sourceTerm = useMemo(() => terms
     .filter((item) => item.code !== term && Number(item.sequence || 0) < Number(terms.find((row) => row.code === term)?.sequence || 0))
     .sort((left, right) => Number(right.sequence || 0) - Number(left.sequence || 0))[0], [terms, term]);
@@ -229,6 +288,155 @@ export function Timetable() {
     setActionError(null);
     setSaved(false);
     setDragged(null);
+  };
+
+  const chooseByTap = (payload) => {
+    if (suppressDragClick.current) {
+      suppressDragClick.current = false;
+      return;
+    }
+    setDragged((current) => sameDragPayload(current, payload) ? null : payload);
+  };
+
+  const stopNativeAutoScroll = () => {
+    nativeDragY.current = null;
+    if (nativeDragFrame.current) cancelAnimationFrame(nativeDragFrame.current);
+    nativeDragFrame.current = 0;
+  };
+
+  const runNativeAutoScroll = () => {
+    const tick = () => {
+      if (nativeDragY.current === null) {
+        nativeDragFrame.current = 0;
+        return;
+      }
+      const velocity = edgeScrollVelocity(nativeDragY.current, window.innerHeight);
+      if (velocity) window.scrollBy(0, velocity);
+      nativeDragFrame.current = requestAnimationFrame(tick);
+    };
+    if (!nativeDragFrame.current) nativeDragFrame.current = requestAnimationFrame(tick);
+  };
+
+  const beginNativeDrag = (event, payload) => {
+    if (!editable) return;
+    setDragged(payload);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', JSON.stringify(payload));
+    }
+  };
+
+  const trackNativeDrag = (event) => {
+    if (!editable || !dragged) return;
+    nativeDragY.current = event.clientY;
+    runNativeAutoScroll();
+  };
+
+  /* HTML drag events do not provide a usable touch interaction on phones. Pointer events do:
+     after a short movement threshold, keep a small floating copy under the finger, highlight
+     the slot beneath it, and scroll the document for as long as the pointer stays near either
+     viewport edge. A tap remains available below as the single-pointer alternative. */
+  const beginPointerDrag = (event, payload) => {
+    if (!editable || event.pointerType === 'mouse' || event.button !== 0) return;
+    if (dragInteractionCleanup.current) dragInteractionCleanup.current();
+
+    const source = event.currentTarget;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let pointerX = startX;
+    let pointerY = startY;
+    let active = false;
+    let dropTarget = null;
+    let ghost = null;
+    let frame = 0;
+
+    const targetAtPointer = () => {
+      const found = document.elementFromPoint(pointerX, pointerY)?.closest('.sis-timetable-slot');
+      return found && found.dataset.day && found.dataset.period ? found : null;
+    };
+
+    const updateTarget = () => {
+      const nextTarget = targetAtPointer();
+      if (nextTarget === dropTarget) return;
+      if (dropTarget) dropTarget.classList.remove('is-pointer-over');
+      dropTarget = nextTarget;
+      if (dropTarget) dropTarget.classList.add('is-pointer-over');
+    };
+
+    const positionGhost = () => {
+      if (ghost) ghost.style.transform = `translate3d(${pointerX + 12}px, ${pointerY + 12}px, 0)`;
+    };
+
+    const autoScroll = () => {
+      if (!active) return;
+      const velocity = edgeScrollVelocity(pointerY, window.innerHeight);
+      if (velocity) {
+        window.scrollBy(0, velocity);
+        updateTarget();
+      }
+      frame = requestAnimationFrame(autoScroll);
+    };
+
+    const activate = () => {
+      active = true;
+      setDragged(payload);
+      document.body.classList.add('sis-is-touch-dragging');
+      ghost = document.createElement('div');
+      ghost.className = 'sis-timetable-drag-ghost';
+      ghost.textContent = source.textContent.trim();
+      document.body.appendChild(ghost);
+      positionGhost();
+      updateTarget();
+      frame = requestAnimationFrame(autoScroll);
+    };
+
+    const cleanup = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', finish);
+      document.removeEventListener('pointercancel', cancel);
+      if (frame) cancelAnimationFrame(frame);
+      if (dropTarget) dropTarget.classList.remove('is-pointer-over');
+      if (ghost) ghost.remove();
+      document.body.classList.remove('sis-is-touch-dragging');
+      dragInteractionCleanup.current = null;
+    };
+
+    const move = (moveEvent) => {
+      pointerX = moveEvent.clientX;
+      pointerY = moveEvent.clientY;
+      if (!active && Math.hypot(pointerX - startX, pointerY - startY) >= 7) activate();
+      if (!active) return;
+      moveEvent.preventDefault();
+      positionGhost();
+      updateTarget();
+    };
+
+    const finish = (upEvent) => {
+      pointerX = upEvent.clientX;
+      pointerY = upEvent.clientY;
+      if (!active) {
+        cleanup();
+        return;
+      }
+      upEvent.preventDefault();
+      updateTarget();
+      const destination = dropTarget;
+      suppressDragClick.current = true;
+      window.setTimeout(() => { suppressDragClick.current = false; }, 80);
+      cleanup();
+      if (destination) place(destination.dataset.day, Number(destination.dataset.period), payload);
+      else setDragged(null);
+    };
+
+    const cancel = () => {
+      cleanup();
+      if (active) setDragged(null);
+    };
+
+    document.addEventListener('pointermove', move, { passive: false });
+    document.addEventListener('pointerup', finish);
+    document.addEventListener('pointercancel', cancel);
+    dragInteractionCleanup.current = cleanup;
   };
 
   const clear = (day, period) => {
@@ -362,7 +570,7 @@ export function Timetable() {
   return <>
     <PageHead title={t('Timetable')}
       lede={t('Choose a class to view its weekly timetable. Supervisors can drag subjects into lessons and swap existing lessons.')} />
-    <div className="vstack gap-3">
+    <div className="vstack gap-3" onDragOver={trackNativeDrag}>
       <Card title={t('Class and term')}>
         <div className="row g-3">
           {isSchoolLeader ? <div className="col-12 col-md-4"><label className="form-label">{t('Grade')}</label>
@@ -428,12 +636,18 @@ export function Timetable() {
 
       {chosen && mayEdit ? <Card title={t('Subjects')}
         subtitle={t('Drag a subject onto any lesson. Drag one lesson onto another to swap them.')}>
+        <p className="small text-body-tertiary mb-3 d-md-none">
+          {t('On touch screens, drag a subject or lesson, or tap it and then tap its destination.')}
+        </p>
         {subjects.loading ? <Skeleton rows={2} /> : <div className="sis-subject-tray">
           {(subjects.value || []).map((subject) => <button type="button" key={subject.code}
             className={`sis-subject-chip ${dragged?.kind === 'subject' && dragged.subject === subject.code ? 'active' : ''}`}
             draggable={editable} disabled={saving}
-            onClick={() => setDragged({ kind: 'subject', subject: subject.code })}
-            onDragStart={() => setDragged({ kind: 'subject', subject: subject.code })}>
+            aria-pressed={dragged?.kind === 'subject' && dragged.subject === subject.code}
+            onClick={() => chooseByTap({ kind: 'subject', subject: subject.code })}
+            onPointerDown={(event) => beginPointerDrag(event, { kind: 'subject', subject: subject.code })}
+            onDragStart={(event) => beginNativeDrag(event, { kind: 'subject', subject: subject.code })}
+            onDragEnd={stopNativeAutoScroll}>
             <span>{pickName(subject, state.lang) || subject.code}</span><small>{subject.code}</small>
           </button>)}
         </div>}
@@ -455,21 +669,66 @@ export function Timetable() {
         {actionError ? <div className="p-3 pb-0"><div className="alert alert-danger mb-0" role="alert">
           {actionError.message || t('Could not save the timetable settings.')}
         </div></div> : null}
-        {plan ? <div className="sis-timetable-scroll"><table className="sis-timetable-grid">
-          <thead><tr><th>{t('Period')}</th>{plan.days.map((day) => <th key={day}>{t(DAY_LABELS[day] || day)}</th>)}</tr></thead>
+        {plan ? <><nav className="sis-timetable-day-nav" aria-label={t('Timetable days')}>
+          <button type="button" className="sis-timetable-day-button" disabled={planDays.length < 2}
+            aria-label={t('Previous day')} onClick={() => moveMobileDay(-1)}>
+            <Icon name={state.lang === 'ar' ? 'arrowRight' : 'arrowLeft'} size={18} />
+            <span>{t('Previous')}</span>
+          </button>
+          <div className="sis-timetable-day-current" aria-live="polite" aria-atomic="true">
+            <strong>{t(DAY_LABELS[activeMobileDay] || activeMobileDay)}</strong>
+            <small>{t('Day {0} of {1}', [activeMobileDayIndex + 1, planDays.length])}</small>
+          </div>
+          <button type="button" className="sis-timetable-day-button" disabled={planDays.length < 2}
+            aria-label={t('Next day')} onClick={() => moveMobileDay(1)}>
+            <span>{t('Next')}</span>
+            <Icon name={state.lang === 'ar' ? 'arrowLeft' : 'arrowRight'} size={18} />
+          </button>
+        </nav>
+        <div className="sis-timetable-scroll"><table className="sis-timetable-grid">
+          <thead><tr><th>{t('Period')}</th>{plan.days.map((day) => <th key={day} data-day={day}
+            className={day === activeMobileDay ? 'is-mobile-day-active' : 'is-mobile-day-inactive'}>
+            {t(DAY_LABELS[day] || day)}
+          </th>)}</tr></thead>
           <tbody>{plan.periods.map((period) => <tr key={period.period_number}>
             <th><strong>{pickName(period, state.lang) || `${t('Period')} ${period.period_number}`}</strong>
               {period.is_timed ? <small>{String(period.starts_at).slice(0, 5)}–{String(period.ends_at).slice(0, 5)}</small> : null}</th>
             {plan.days.map((day) => {
               const entry = entryAt(day, period.period_number);
               const subject = entry && subjectMap.get(entry.subject_code);
-              if (!period.is_teaching) return <td className="sis-timetable-break" key={day}>{pickName(period, state.lang) || t('Break')}</td>;
-              return <td key={day} className={`sis-timetable-slot ${dragged && editable ? 'is-drop-ready' : ''}`}
-                onClick={() => dragged?.kind === 'subject' && place(day, period.period_number, dragged)}
+              const mobileDayClass = day === activeMobileDay ? 'is-mobile-day-active' : 'is-mobile-day-inactive';
+              if (!period.is_teaching) return <td className={`sis-timetable-break ${mobileDayClass}`} data-day={day} key={day}>{pickName(period, state.lang) || t('Break')}</td>;
+              const slotPayload = { kind: 'slot', day, period: period.period_number, subject: entry?.subject_code };
+              return <td key={day} data-day={day} data-period={period.period_number} className={`sis-timetable-slot ${mobileDayClass} ${dragged && editable ? 'is-drop-ready' : ''}`}
+                role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined}
+                aria-label={editable ? t('Place in {0}, {1}', [t(DAY_LABELS[day] || day), pickName(period, state.lang) || `${t('Period')} ${period.period_number}`]) : undefined}
+                onClick={() => dragged && place(day, period.period_number, dragged)}
+                onKeyDown={(event) => {
+                  if (!dragged || (event.key !== 'Enter' && event.key !== ' ')) return;
+                  event.preventDefault();
+                  place(day, period.period_number, dragged);
+                }}
                 onDragOver={(event) => editable && event.preventDefault()}
-                onDrop={() => place(day, period.period_number, dragged)}>
-                {entry?.subject_code ? <div className="sis-lesson" draggable={editable}
-                  onDragStart={() => setDragged({ kind: 'slot', day, period: period.period_number, subject: entry.subject_code })}>
+                onDrop={(event) => { event.preventDefault(); stopNativeAutoScroll(); place(day, period.period_number, dragged); }}>
+                {entry?.subject_code ? <div className={`sis-lesson ${sameDragPayload(dragged, slotPayload) ? 'active' : ''}`} draggable={editable}
+                  role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined}
+                  aria-label={editable ? `${t('Move lesson')}: ${pickName(subject, state.lang) || entry.subject_code}` : undefined}
+                  aria-pressed={editable ? sameDragPayload(dragged, slotPayload) : undefined}
+                  onPointerDown={(event) => beginPointerDrag(event, slotPayload)}
+                  onClick={(event) => {
+                    if (!dragged) {
+                      event.stopPropagation();
+                      chooseByTap(slotPayload);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (!editable || (event.key !== 'Enter' && event.key !== ' ')) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    chooseByTap(slotPayload);
+                  }}
+                  onDragStart={(event) => beginNativeDrag(event, slotPayload)}
+                  onDragEnd={stopNativeAutoScroll}>
                   <strong>{pickName(subject, state.lang) || entry.subject_code}</strong><small>{entry.subject_code}</small>
                   {mayEdit ? <Button size="sm" variant="quiet" title={t('Clear lesson')} disabled={saving}
                     onClick={(event) => { event.stopPropagation(); clear(day, period.period_number); }}>×</Button> : null}
@@ -477,7 +736,7 @@ export function Timetable() {
               </td>;
             })}
           </tr>)}</tbody>
-        </table></div> : null}
+        </table></div></> : null}
       </Card> : null}
     </div>
   </>;

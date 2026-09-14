@@ -3,22 +3,120 @@ import { createPortal } from 'react-dom';
 
 import { api } from '../api.js';
 import { useStore } from '../hooks.js';
-import { Icon } from '../components/Ui.jsx';
+import { Icon, useConfirm } from '../components/Ui.jsx';
 import { t } from '../i18n.js';
 
 const CONVERSATION_POLL_MS = 5000;
 const MESSAGE_POLL_MS = 3000;
 const PRESENCE_POLL_MS = 3000;
 
+const ARABIC_TO_ENGLISH_WORDS = {
+  'مدير المدرسة': 'School Manager',
+  'مالك المدرسة': 'School Owner',
+  'مشرف دور': 'Grade Supervisor',
+  'مشرف صفوف': 'Grade Supervisor',
+  'مشرف غياب': 'Attendance Supervisor',
+  'مشرف الحضور والغياب': 'Attendance Supervisor',
+  'مدرس': 'Teacher',
+  'معلم': 'Teacher',
+  'هيئة المدرسة': 'School Staff',
+  'كل هيئة المدرسة': 'All School Staff',
+  'فريق': 'Team',
+  'فصل': 'Class',
+  'بنين': 'Boys',
+  'بنات': 'Girls',
+  'الصف 1 الابتدائي': 'Primary 1',
+  'الصف 2 الابتدائي': 'Primary 2',
+  'الصف 3 الابتدائي': 'Primary 3',
+  'الصف 4 الابتدائي': 'Primary 4',
+  'الصف 5 الابتدائي': 'Primary 5',
+  'الصف 6 الابتدائي': 'Primary 6',
+  'الصف 1 الإعدادي': 'Preparatory 1',
+  'الصف 2 الإعدادي': 'Preparatory 2',
+  'الصف 3 الإعدادي': 'Preparatory 3',
+  'الصف الأول الثانوي': 'Secondary 1',
+  'الصف الثاني الثانوي': 'Secondary 2',
+  'الصف الثالث الثانوي': 'Secondary 3',
+  'علمي': 'Scientific',
+  'أدبي': 'Literary',
+  'علمي علوم': 'Science',
+  'علمي رياضة': 'Math',
+  'اللغة العربية': 'Arabic',
+  'اللغة الإنجليزية': 'English',
+  'الرياضيات': 'Mathematics',
+  'العلوم': 'Science',
+  'الدراسات الاجتماعية': 'Social Studies',
+  'الكمبيوتر': 'Computer',
+  'الرسم': 'Art',
+  'الألعاب': 'Physical Education',
+  'التربية الدينية': 'Religion',
+  'الفيزياء': 'Physics',
+  'الكيمياء': 'Chemistry',
+  'الأحياء': 'Biology',
+  'التاريخ': 'History',
+  'الجغرافيا': 'Geography',
+  'الفلسفة': 'Philosophy',
+  'المنطق': 'Logic',
+  'الجيولوجيا': 'Geology',
+  'رياضة 1': 'Mathematics 1',
+  'رياضة 2': 'Mathematics 2',
+  'رياضة بحتة': 'Pure Mathematics',
+  'رياضة تطبيقية': 'Applied Mathematics',
+  'محمد': 'Mohamed', 'أحمد': 'Ahmed', 'عمر': 'Omar', 'يوسف': 'Youssef',
+  'آدم': 'Adam', 'ياسين': 'Yassin', 'محمود': 'Mahmoud', 'مصطفى': 'Moustafa',
+  'زياد': 'Ziad', 'حمزة': 'Hamza', 'علي': 'Ali', 'كريم': 'Kareem',
+  'فاطمة': 'Fatma', 'ليلى': 'Layla', 'مريم': 'Mariam', 'ملك': 'Malak',
+  'نور': 'Nour', 'سارة': 'Sarah', 'جنى': 'Jana', 'سلمى': 'Salma',
+  'فرح': 'Farah', 'هدى': 'Hoda', 'يارا': 'Yara', 'منة': 'Menna',
+  'خالد': 'Khaled', 'حسن': 'Hassan', 'إبراهيم': 'Ibrahim', 'طارق': 'Tarek',
+  'وليد': 'Walid', 'أيمن': 'Ayman', 'شريف': 'Sherif', 'عمرو': 'Amr',
+  'هشام': 'Hesham', 'عبد الرحمن': 'Abdelrahman', 'عبد الحميد': 'Abdel Hamid',
+  'السيد': 'Elsayed', 'عثمان': 'Osman', 'منصور': 'Mansour', 'رشاد': 'Rashad',
+  'فؤاد': 'Fouad', 'النجار': 'Elnaggar', 'الشاذلي': 'Elshazly', 'الرفاعي': 'Elrefaie',
+  'أبو الحسن': 'Aboulhassan', 'سامح': 'Sameh', 'عبد العزيز': 'Abdelaziz',
+  'نجوى': 'Nagwa', 'سراج الدين': 'Serageldin', 'بيتر': 'Peter', 'غطاس': 'Ghattas',
+  'منى': 'Mona', 'كمال': 'Kamal', 'سليم': 'Selim', 'رندا': 'Randa',
+  'وجدي': 'Wagdy', 'شيرين': 'Sherine', 'بشارة': 'Bishara', 'تامر': 'Tamer',
+  'حليم': 'Halim', 'إيمان': 'Iman', 'عبد الهادي': 'Abdelhady', 'باسم': 'Bassem',
+  'نشأت': 'Nashaat', 'غادة': 'Ghada', 'لطفي': 'Lotfy', 'نبيل': 'Nabil',
+  'عامر': 'Amer', 'هالة': 'Hala', 'فاروق': 'Farouk', 'سيد': 'Sayed'
+};
+
+function transliterateToEn(text) {
+  if (!text || !/[\u0600-\u06FF]/.test(text)) return text || '';
+  let result = text;
+  const sortedKeys = Object.keys(ARABIC_TO_ENGLISH_WORDS).sort((a, b) => b.length - a.length);
+  for (const key of sortedKeys) {
+    if (result.includes(key)) {
+      result = result.split(key).join(ARABIC_TO_ENGLISH_WORDS[key]);
+    }
+  }
+  return result.replace(/\s+/g, ' ').trim();
+}
+
 function localName(row, lang, prefix = 'title') {
   const primary = row && row[`${prefix}_${lang}`];
   const fallback = row && row[`${prefix}_${lang === 'ar' ? 'en' : 'ar'}`];
-  return primary || fallback || '';
+  let value = primary || fallback || '';
+  if (lang === 'en' && /[\u0600-\u06FF]/.test(value)) {
+    return transliterateToEn(value);
+  }
+  return value;
+}
+
+export function parseUtcDate(value) {
+  if (!value) return new Date(NaN);
+  if (value instanceof Date) return value;
+  let str = String(value).trim();
+  if (!str.endsWith('Z') && !/[+-]\d{2}(?::?\d{2})?$/.test(str)) {
+    str = str.replace(' ', 'T') + 'Z';
+  }
+  return new Date(str);
 }
 
 function timeLabel(value, lang) {
   if (!value) return '';
-  const date = new Date(value);
+  const date = parseUtcDate(value);
   if (Number.isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-EG' : 'en', {
     hour: 'numeric', minute: '2-digit',
@@ -58,7 +156,9 @@ function mergeMessages(previous, incoming) {
 
 function ConversationButton({ conversation, active, lang, onSelect }) {
   const last = conversation.last_message;
-  const lastPreview = last?.body || ({ image: t('Photo'), audio: t('Voice message'), file: t('Attachment') }[last?.attachment_kind] || '');
+  const lastPreview = last?.deleted
+    ? t('Message deleted')
+    : (last?.body || ({ image: t('Photo'), audio: t('Voice message'), file: t('Attachment') }[last?.attachment_kind] || ''));
   return (
     <button
       type="button"
@@ -68,7 +168,7 @@ function ConversationButton({ conversation, active, lang, onSelect }) {
     >
       <span className={`sis-chat-avatar is-${conversation.category}`}>
         <Icon name={conversation.kind === 'direct' ? 'people' : 'chat'} size={18} />
-        {conversation.kind === 'direct' ? <span className={`sis-chat-presence-dot${conversation.online ? ' is-online' : ''}`} aria-hidden="true" /> : null}
+        {conversation.kind === 'direct' && !conversation.observer_view ? <span className={`sis-chat-presence-dot${conversation.online ? ' is-online' : ''}`} aria-hidden="true" /> : null}
       </span>
       <span className="sis-chat-conversation-copy">
         <span className="sis-chat-conversation-topline">
@@ -77,6 +177,7 @@ function ConversationButton({ conversation, active, lang, onSelect }) {
         </span>
         <span className="sis-chat-conversation-bottomline">
           <span>{last ? `${localName(last, lang, 'sender_name')}: ${lastPreview}` : (localName(conversation, lang, 'subtitle') || categoryLabel(conversation.category))}</span>
+          {conversation.is_muted ? <span className="sis-chat-muted-mark" title={t('Notifications muted')} aria-label={t('Notifications muted')}><Icon name="bellOff" size={14} /></span> : null}
           {conversation.unread_count ? (
             <span className="sis-chat-unread" aria-label={t('{0} unread messages', [conversation.unread_count])}>
               {conversation.unread_count > 99 ? '99+' : conversation.unread_count}
@@ -408,11 +509,130 @@ function StaffProfile({ person, lang, onClose }) {
   );
 }
 
+function MessageActionSheet({
+  message,
+  mine,
+  canEdit,
+  canDelete,
+  canShowReceipts,
+  hasText,
+  isAdmin,
+  lang,
+  onClose,
+  onEdit,
+  onDelete,
+  onInfo,
+  onCopy,
+}) {
+  useEffect(() => {
+    const handleKey = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  if (!message) return null;
+
+  const snippet = message.body
+    ? (message.body.length > 70 ? message.body.slice(0, 70) + '…' : message.body)
+    : (message.attachments?.length ? t('Attach files') : '');
+
+  return createPortal(
+    <div
+      className="sis-chat-action-backdrop"
+      role="presentation"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      onTouchStart={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="sis-chat-action-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('Message actions')}
+      >
+        <div className="sis-chat-action-header">
+          <span className="sis-chat-action-handle" aria-hidden="true" />
+          {snippet ? <p className="sis-chat-action-snippet">{snippet}</p> : null}
+        </div>
+        <div className="sis-chat-action-list">
+          {hasText ? (
+            <button
+              type="button"
+              className="sis-chat-action-item"
+              onClick={() => {
+                onCopy();
+                onClose();
+              }}
+            >
+              <span className="sis-chat-action-icon"><Icon name="copy" size={16} /></span>
+              <span>{t('Copy text')}</span>
+            </button>
+          ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              className="sis-chat-action-item"
+              onClick={() => {
+                onEdit();
+                onClose();
+              }}
+            >
+              <span className="sis-chat-action-icon"><Icon name="pencil" size={16} /></span>
+              <span>{t('Edit message')}</span>
+            </button>
+          ) : null}
+          {canShowReceipts ? (
+            <button
+              type="button"
+              className="sis-chat-action-item"
+              onClick={() => {
+                onInfo();
+                onClose();
+              }}
+            >
+              <span className="sis-chat-action-icon"><Icon name="info" size={16} /></span>
+              <span>{t('Message info')}</span>
+            </button>
+          ) : null}
+          {canDelete ? (
+            <button
+              type="button"
+              className="sis-chat-action-item is-danger"
+              onClick={() => {
+                onDelete();
+                onClose();
+              }}
+            >
+              <span className="sis-chat-action-icon"><Icon name="trash" size={16} /></span>
+              <span>{t('Delete message')}</span>
+            </button>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className="sis-chat-action-cancel"
+          onClick={onClose}
+        >
+          {t('Cancel')}
+        </button>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export function Chat() {
   const state = useStore();
   const school = state.school;
   const currentUserId = state.profile?.user_id;
   const mayWrite = mayWriteChat(state.profile);
+  const isAdmin = Boolean(state.profile?.is_system_admin);
+  const [deleteDialog, askDelete] = useConfirm();
   const [conversations, setConversations] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -436,6 +656,13 @@ export function Chat() {
   const [openingPerson, setOpeningPerson] = useState(null);
   const [error, setError] = useState(null);
   const [searchError, setSearchError] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [savedDraft, setSavedDraft] = useState('');
+  const [selectedActionMessage, setSelectedActionMessage] = useState(null);
+  const [muteMenuOpen, setMuteMenuOpen] = useState(false);
+  const [savingMute, setSavingMute] = useState(false);
+  const touchTimerRef = useRef(null);
+  const touchStartPosRef = useRef({ x: 0, y: 0 });
   const endRef = useRef(null);
   const messagesRef = useRef(null);
   const composerRef = useRef(null);
@@ -447,10 +674,10 @@ export function Chat() {
   const stickToBottom = useRef(true);
   const active = conversations.find((item) => item.id === activeId) || null;
   const memberById = new Map(members.map((member) => [member.user_id, member]));
-  const activePeer = active?.kind === 'direct'
+  const activePeer = active?.kind === 'direct' && !active.observer_view
     ? (memberById.get(active.peer_user_id) || members[0] || null)
     : null;
-  const headerPerson = active?.kind === 'direct' ? (activePeer || {
+  const headerPerson = active?.kind === 'direct' && !active.observer_view ? (activePeer || {
     user_id: active.peer_user_id,
     full_name_en: active.title_en,
     full_name_ar: active.title_ar,
@@ -493,7 +720,7 @@ export function Chat() {
       setConversations(rows || []);
       setActiveId((selected) => {
         if (selected && rows.some((item) => item.id === selected)) return selected;
-        return rows.length ? rows[0].id : null;
+        return null;
       });
       setError(null);
     } catch (failure) {
@@ -501,6 +728,12 @@ export function Chat() {
     } finally {
       if (!quiet) setLoadingConversations(false);
     }
+  }, [school]);
+
+  // Conversation selection belongs to the user. Polling may briefly return a partial list,
+  // so it must never replace the open conversation with the first row automatically.
+  useEffect(() => {
+    setActiveId(null);
   }, [school]);
 
   useEffect(() => {
@@ -514,6 +747,10 @@ export function Chat() {
 
   useEffect(() => {
     setMessages([]);
+    setDraft('');
+    setEditingMessage(null);
+    setSavedDraft('');
+    setMuteMenuOpen(false);
     if (!school || !activeId) return undefined;
     stickToBottom.current = true;
     let alive = true;
@@ -625,6 +862,23 @@ export function Chat() {
     }
   };
 
+  const changeMute = async (duration) => {
+    if (!activeId || savingMute) return;
+    setSavingMute(true);
+    setError(null);
+    try {
+      const preference = await api.setChatMute(school, activeId, duration);
+      setConversations((items) => items.map((item) => item.id === activeId
+        ? { ...item, ...preference }
+        : item));
+      setMuteMenuOpen(false);
+    } catch (failure) {
+      setError(failure);
+    } finally {
+      setSavingMute(false);
+    }
+  };
+
   const send = async (filesOverride = null, durationOverride = null) => {
     const body = draft.trim();
     const files = filesOverride || selectedFiles;
@@ -648,6 +902,83 @@ export function Chat() {
     }
   };
 
+  const requestMessageDelete = (message) => {
+    askDelete({
+      title: t('Delete this message?'),
+      tone: 'bad',
+      confirmLabel: t('Delete message'),
+      body: <p>{t('Everyone else will see that a message was deleted. Its original content is retained for administrative review.')}</p>,
+      run: async () => {
+        const deleted = await api.deleteChatMessage(school, activeId, message.id);
+        setMessages((items) => items.map((item) => item.id === deleted.id ? deleted : item));
+        await refreshConversations(true);
+      }
+    });
+  };
+
+  const handleCopyMessage = (msg) => {
+    if (!msg?.body) return;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(msg.body).catch(() => {});
+    } else {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = msg.body;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } catch {}
+    }
+  };
+
+  const handleMessageTouchStart = (msg, event) => {
+    if (touchTimerRef.current) window.clearTimeout(touchTimerRef.current);
+    if (event.target.closest('.sis-voice-wave, .sis-voice-play, .sis-voice-speed')) return;
+    const touch = event.touches?.[0];
+    if (touch) {
+      touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+    }
+    touchTimerRef.current = window.setTimeout(() => {
+      touchTimerRef.current = null;
+      if (navigator.vibrate) {
+        try { navigator.vibrate(40); } catch {}
+      }
+      setSelectedActionMessage(msg);
+    }, 450);
+  };
+
+  const handleMessageTouchMove = (event) => {
+    if (!touchTimerRef.current) return;
+    const touch = event.touches?.[0];
+    if (touch) {
+      const dx = Math.abs(touch.clientX - touchStartPosRef.current.x);
+      const dy = Math.abs(touch.clientY - touchStartPosRef.current.y);
+      if (dx > 10 || dy > 10) {
+        window.clearTimeout(touchTimerRef.current);
+        touchTimerRef.current = null;
+      }
+    }
+  };
+
+  const handleMessageTouchEnd = () => {
+    if (touchTimerRef.current) {
+      window.clearTimeout(touchTimerRef.current);
+      touchTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    setSelectedActionMessage(null);
+  }, [activeId]);
+
+  useEffect(() => () => {
+    if (touchTimerRef.current) window.clearTimeout(touchTimerRef.current);
+  }, []);
+
   const handleComposerEnter = (event) => {
     if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.nativeEvent?.isComposing) return;
     event.preventDefault();
@@ -655,7 +986,7 @@ export function Chat() {
       if (recordingSeconds >= 1) stopRecording(false, true);
       return;
     }
-    send();
+    if (editingMessage) { submitEdit(); } else { send(); }
     window.requestAnimationFrame(() => composerRef.current?.focus());
   };
 
@@ -689,23 +1020,35 @@ export function Chat() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
+      const startRecordingClock = () => {
+        window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = window.setInterval(() => {
+          if (recorder.state !== 'recording') return;
+          setRecordingSeconds((seconds) => {
+            if (seconds >= 59) {
+              window.clearInterval(recordingTimerRef.current);
+              if (recorder.state === 'recording') recorder.pause();
+              return 60;
+            }
+            return seconds + 1;
+          });
+        }, 1000);
+      };
       recorderRef.current = recorder;
       audioChunksRef.current = [];
       setRecordingSeconds(0);
       setIsPaused(false);
       setIsRecording(true);
+      recorder.addEventListener('pause', () => {
+        window.clearInterval(recordingTimerRef.current);
+        setIsPaused(true);
+      });
+      recorder.addEventListener('resume', () => {
+        setIsPaused(false);
+        startRecordingClock();
+      });
       recorder.start();
-      recordingTimerRef.current = window.setInterval(() => {
-        setRecordingSeconds((seconds) => {
-          if (seconds >= 59) {
-            window.clearInterval(recordingTimerRef.current);
-            if (recorder.state === 'recording') recorder.pause();
-            setIsPaused(true);
-            return 60;
-          }
-          return seconds + 1;
-        });
-      }, 1000);
+      startRecordingClock();
     } catch {
       setError({ message: t('Allow microphone access to record a voice message.') });
     }
@@ -714,8 +1057,12 @@ export function Chat() {
   const toggleRecordingPause = () => {
     const recorder = recorderRef.current;
     if (!recorder || recordingSeconds >= 60) return;
-    if (recorder.state === 'recording') { recorder.pause(); setIsPaused(true); }
-    else if (recorder.state === 'paused') { recorder.resume(); setIsPaused(false); }
+    try {
+      if (recorder.state === 'recording') recorder.pause();
+      else if (recorder.state === 'paused') recorder.resume();
+    } catch {
+      setError({ message: t('Voice recording could not be paused. Try recording again.') });
+    }
   };
 
   useEffect(() => () => {
@@ -755,6 +1102,46 @@ export function Chat() {
     if (['school', 'leadership', 'direct'].includes(category)) setScopeFilter('all');
   };
   const closeProfile = useCallback(() => setProfilePerson(null), []);
+
+  const EDIT_WINDOW_MS = 3600000; // 1 hour
+  const canEditMessage = (message) => {
+    if (!message || message.deleted) return false;
+    if (message.sender_user_id !== currentUserId) return false;
+    const msgTime = parseUtcDate(message.created_at).getTime();
+    if (Number.isNaN(msgTime)) return false;
+    return (Date.now() - msgTime) < EDIT_WINDOW_MS;
+  };
+
+  const startEditMessage = (message) => {
+    setSavedDraft(draft);
+    setDraft(message.body);
+    setEditingMessage(message);
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  const cancelEdit = () => {
+    setDraft(savedDraft);
+    setSavedDraft('');
+    setEditingMessage(null);
+  };
+
+  const submitEdit = async () => {
+    const text = draft.trim();
+    if (!text || !editingMessage) return;
+    setSending(true);
+    try {
+      const updated = await api.editChatMessage(school, activeId, editingMessage.id, text);
+      setMessages((items) => items.map((item) => item.id === updated.id ? updated : item));
+      setDraft('');
+      setSavedDraft('');
+      setEditingMessage(null);
+      await refreshConversations(true);
+    } catch (failure) {
+      setError(failure);
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <section className={`sis-chat-shell${active ? ' has-active-chat' : ''}`} aria-label={t('Staff messages')}>
@@ -843,8 +1230,13 @@ export function Chat() {
               <button type="button" className="sis-chat-back" onClick={() => setActiveId(null)} aria-label={t('Back to conversations')}>
                 <span aria-hidden="true">←</span>
               </button>
-              <span className={`sis-chat-avatar is-${active.category}`}><Icon name={active.kind === 'direct' ? 'people' : 'chat'} size={18} />{active.kind === 'direct' ? <span className={`sis-chat-presence-dot${headerPerson?.online ? ' is-online' : ''}`} aria-hidden="true" /> : null}</span>
-              {active.kind === 'direct' ? (
+              <span className={`sis-chat-avatar is-${active.category}`}><Icon name={active.kind === 'direct' ? 'people' : 'chat'} size={18} />{active.kind === 'direct' && !active.observer_view ? <span className={`sis-chat-presence-dot${headerPerson?.online ? ' is-online' : ''}`} aria-hidden="true" /> : null}</span>
+              {active.kind === 'direct' && active.observer_view ? (
+                <div className="sis-chat-group-title">
+                  <h2>{localName(active, state.lang)}</h2>
+                  <p>{localName(active, state.lang, 'subtitle') || categoryLabel(active.category)}</p>
+                </div>
+              ) : active.kind === 'direct' ? (
                 <button type="button" className="sis-chat-person-title" onClick={() => setProfilePerson(headerPerson)}>
                   <h2>{localName(active, state.lang)}</h2>
                   {activePeer?.typing ? <TypingIndicator names={[localName(activePeer, state.lang, 'full_name')]} compact /> : <p>{localName(headerPerson, state.lang, 'role_caption') || categoryLabel(active.category)} · {headerPerson?.online ? t('Online') : t('Offline')}</p>}
@@ -855,6 +1247,31 @@ export function Chat() {
                   {typingMembers.length ? <TypingIndicator names={typingMembers.map((member) => localName(member, state.lang, 'full_name'))} compact /> : <p>{categoryLabel(active.category)}</p>}
                 </div>
               )}
+              <div className="sis-chat-mute-menu">
+                <button
+                  type="button"
+                  className={`sis-chat-mute-trigger${active.is_muted ? ' is-active' : ''}`}
+                  onClick={() => setMuteMenuOpen((open) => !open)}
+                  aria-label={active.is_muted ? t('Unmute notifications') : t('Mute notifications')}
+                  aria-expanded={muteMenuOpen}
+                  aria-haspopup="menu"
+                  disabled={savingMute}
+                >
+                  <Icon name={active.is_muted ? 'bellOff' : 'bell'} size={18} />
+                </button>
+                {muteMenuOpen ? (
+                  <div className="sis-chat-mute-popover" role="menu" aria-label={t('Mute notifications')}>
+                    <strong>{active.is_muted ? t('Notifications muted') : t('Mute notifications')}</strong>
+                    {active.is_muted ? (
+                      <button type="button" role="menuitem" onClick={() => changeMute('off')}>{t('Unmute notifications')}</button>
+                    ) : <>
+                      <button type="button" role="menuitem" onClick={() => changeMute('eight_hours')}>{t('For 8 hours')}</button>
+                      <button type="button" role="menuitem" onClick={() => changeMute('one_week')}>{t('For one week')}</button>
+                      <button type="button" role="menuitem" onClick={() => changeMute('always')}>{t('Always')}</button>
+                    </>}
+                  </div>
+                ) : null}
+              </div>
             </header>
 
             <div
@@ -883,16 +1300,36 @@ export function Chat() {
               {messages.map((message) => {
                 const mine = message.sender_user_id === currentUserId;
                 const sender = memberById.get(message.sender_user_id);
-                const mediaOnly = !message.body && message.attachments?.length;
+                const mediaOnly = !message.deleted && !message.body && message.attachments?.length;
                 const voiceOnly = mediaOnly && message.attachments.length === 1 && message.attachments[0].kind === 'audio';
                 const imageOnly = mediaOnly && message.attachments.length === 1 && message.attachments[0].kind === 'image';
                 const fileOnly = mediaOnly && message.attachments.length === 1 && message.attachments[0].kind === 'file';
                 return (
-                  <article className={`sis-chat-message${mine ? ' is-mine' : ''}${mediaOnly ? ' is-media-only' : ''}${voiceOnly ? ' is-voice-only' : ''}${imageOnly ? ' is-image-only' : ''}${fileOnly ? ' is-file-only' : ''}`} key={message.id}>
+                  <article
+                    className={`sis-chat-message${mine ? ' is-mine' : ''}${message.deleted ? ' is-deleted' : ''}${message.deleted && isAdmin ? ' is-deleted-audit' : ''}${mediaOnly ? ' is-media-only' : ''}${voiceOnly ? ' is-voice-only' : ''}${imageOnly ? ' is-image-only' : ''}${fileOnly ? ' is-file-only' : ''}`}
+                    key={message.id}
+                    onTouchStart={(event) => handleMessageTouchStart(message, event)}
+                    onTouchMove={handleMessageTouchMove}
+                    onTouchEnd={handleMessageTouchEnd}
+                    onTouchCancel={handleMessageTouchEnd}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setSelectedActionMessage(message);
+                    }}
+                  >
                     {!mine ? <div className="sis-chat-sender-block"><button type="button" className="sis-chat-sender" onClick={() => sender && setProfilePerson(sender)} disabled={!sender}><strong>{localName(message, state.lang, 'sender_name')}</strong>{sender ? <span className={`sis-chat-presence-dot${sender.online ? ' is-online' : ''}`} aria-hidden="true" /> : null}</button>{sender ? <small>{localName(sender, state.lang, 'role_caption')}</small> : null}</div> : null}
+                    {message.deleted ? <span className="sis-chat-deleted-label"><Icon name="trash" size={14} />{isAdmin ? t('Deleted message') : t('This message was deleted')}</span> : null}
                     {message.body ? <p>{message.body}</p> : null}
+                    {isAdmin && message.original_body ? <button type="button" className="sis-chat-original-toggle" onClick={(e) => { const el = e.currentTarget.nextElementSibling; if (el) el.hidden = !el.hidden; }}><Icon name="eye" size={12} />{t('Show original')}</button> : null}
+                    {isAdmin && message.original_body ? <p className="sis-chat-original-body" hidden>{message.original_body}</p> : null}
                     {message.attachments?.length ? <div className="sis-chat-attachments">{message.attachments.map((attachment) => <Attachment key={attachment.id} attachment={attachment} school={school} />)}</div> : null}
-                    <footer><time dateTime={message.created_at}>{timeLabel(message.created_at, state.lang)}</time>{mine ? <ReceiptTicks summary={message.receipts} showCount={active.category !== 'direct'} onClick={() => showReceipts(message.id)} /> : null}</footer>
+                    <footer>
+                      <time dateTime={message.created_at}>{timeLabel(message.created_at, state.lang)}</time>
+                      {message.edited ? <span className="sis-chat-edited-label">{t('edited')}</span> : null}
+                      {mine && canEditMessage(message) ? <button type="button" className="sis-chat-edit-message" onClick={() => startEditMessage(message)} aria-label={t('Edit message')} title={t('Edit message')}><Icon name="pencil" size={13} /></button> : null}
+                      {mine ? <ReceiptTicks summary={message.receipts} showCount={active.category !== 'direct'} onClick={() => showReceipts(message.id)} /> : null}
+                      {mine && !message.deleted ? <button type="button" className="sis-chat-delete-message" onClick={() => requestMessageDelete(message)} aria-label={t('Delete message')} title={t('Delete message')}><Icon name="trash" size={15} /></button> : null}
+                    </footer>
                   </article>
                 );
               })}
@@ -900,7 +1337,8 @@ export function Chat() {
             </div>
 
             {error ? <p className="sis-chat-error sis-chat-thread-error" role="alert">{error.message}</p> : null}
-            {mayWrite ? <form className={`sis-chat-compose${isRecording ? ' is-recording' : ''}`} onSubmit={(event) => { event.preventDefault(); send(); }} onKeyDownCapture={handleComposerEnter}>
+            {editingMessage ? <div className="sis-chat-editing-banner"><Icon name="pencil" size={14} /><span>{t('Editing message')}</span><button type="button" onClick={cancelEdit} aria-label={t('Cancel editing')}><Icon name="close" size={14} /></button></div> : null}
+            {mayWrite ? <form className={`sis-chat-compose${isRecording ? ' is-recording' : ''}`} onSubmit={(event) => { event.preventDefault(); if (editingMessage) { submitEdit(); } else { send(); } }} onKeyDownCapture={handleComposerEnter}>
               <input ref={fileInputRef} className="visually-hidden" type="file" multiple accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip" onChange={(event) => setSelectedFiles(Array.from(event.target.files || []).slice(0, 5))} />
               {selectedFiles.length ? <div className="sis-chat-selected-files">{selectedFiles.map((file, index) => <span key={`${file.name}-${index}`}><Icon name={file.type.startsWith('image/') ? 'eye' : file.type.startsWith('audio/') ? 'microphone' : 'file'} size={14} />{file.name}<button type="button" onClick={() => setSelectedFiles((items) => items.filter((_item, itemIndex) => itemIndex !== index))} aria-label={t('Remove {0}', [file.name])}><Icon name="close" size={13} /></button></span>)}</div> : null}
               {isRecording ? <div className={`sis-chat-recording${isPaused ? ' is-paused' : ''}`}>
@@ -910,7 +1348,7 @@ export function Chat() {
                 <div className="sis-record-wave" aria-hidden="true">{VOICE_WAVE.slice(0, 18).map((height, index) => <span key={index} style={{ height: `${Math.max(7, height * .65)}px`, animationDelay: `${index * -45}ms` }} />)}</div>
                 <span className="sis-record-status">{recordingSeconds >= 60 ? t('One minute reached') : isPaused ? t('Recording paused') : t('Recording voice message')}</span>
                 {recordingSeconds < 60 ? <button type="button" className="sis-record-pause" onClick={toggleRecordingPause} aria-label={isPaused ? t('Resume recording') : t('Pause recording')} title={isPaused ? t('Resume recording') : t('Pause recording')}><Icon name={isPaused ? 'play' : 'pause'} size={17} /></button> : null}
-                <button type="button" className="sis-record-send" onClick={() => stopRecording(false, true)} disabled={recordingSeconds < 1} aria-label={t('Send recording')} title={t('Send recording')}><Icon name="send" size={18} /></button>
+                <button type="button" className="sis-record-send" onClick={() => stopRecording(false, true)} disabled={recordingSeconds < 1} aria-label={t('Send recording')} title={t('Send recording')}><span className={`sis-chat-send-icon${state.lang === 'ar' ? ' is-rtl' : ''}`}><Icon name="send" size={18} /></span></button>
               </div> : <>
                 <button type="button" className="sis-chat-tool" onClick={() => fileInputRef.current?.click()} aria-label={t('Attach files')}><Icon name="paperclip" size={19} /></button>
                 <button type="button" className="sis-chat-tool" onClick={startRecording} aria-label={t('Record voice message')}><Icon name="microphone" size={19} /></button>
@@ -929,8 +1367,26 @@ export function Chat() {
           </div>
         )}
       </div>
+      {selectedActionMessage ? (
+        <MessageActionSheet
+          message={selectedActionMessage}
+          mine={selectedActionMessage.sender_user_id === currentUserId}
+          canEdit={selectedActionMessage.sender_user_id === currentUserId && canEditMessage(selectedActionMessage)}
+          canDelete={selectedActionMessage.sender_user_id === currentUserId && !selectedActionMessage.deleted}
+          canShowReceipts={selectedActionMessage.sender_user_id === currentUserId || isAdmin}
+          hasText={Boolean(selectedActionMessage.body)}
+          isAdmin={isAdmin}
+          lang={state.lang}
+          onClose={() => setSelectedActionMessage(null)}
+          onEdit={() => startEditMessage(selectedActionMessage)}
+          onDelete={() => requestMessageDelete(selectedActionMessage)}
+          onInfo={() => showReceipts(selectedActionMessage.id)}
+          onCopy={() => handleCopyMessage(selectedActionMessage)}
+        />
+      ) : null}
       {receiptRows !== null ? <ReceiptDetails rows={receiptRows} lang={state.lang} loading={receiptLoading} onClose={() => setReceiptRows(null)} /> : null}
       {profilePerson ? <StaffProfile person={profilePerson} lang={state.lang} onClose={closeProfile} /> : null}
+      {deleteDialog}
     </section>
   );
 }

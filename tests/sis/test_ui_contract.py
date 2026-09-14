@@ -745,9 +745,9 @@ def test_the_accent_is_not_spent_on_ordinary_buttons() -> None:
             "focus and the current item, and nothing else"
         )
 
-    assert "accent" in css, (
-        "the accent has disappeared from the theme entirely — it is meant to be held back, "
-        "not abandoned"
+    assert "var(--theme-primary)" in css, (
+        "the primary colour has disappeared from the theme entirely — it is meant to be held "
+        "back, not abandoned"
     )
 
 
@@ -785,19 +785,20 @@ def test_the_action_colour_is_systemblue_with_its_stated_label() -> None:
     """
     tokens = _css("tokens.css")
 
-    ramp = dict(re.findall(r"(--(?:grey|accent)-\d+|--black)\s*:\s*(#[0-9a-fA-F]{6})", tokens))
+    literals = dict(re.findall(r"(--[\w-]+)\s*:\s*(#[0-9a-fA-F]{6})", tokens))
 
     def resolve(name: str) -> str:
-        """Follow one `var(--…)` hop to a literal, which is all these tokens ever use."""
-        declaration = re.search(rf"{name}\s*:\s*([^;]+);", tokens)
-        assert declaration, f"{name} is not defined"
-        value = declaration.group(1).strip()
-        reference = re.fullmatch(r"var\((--[\w-]+)\)", value)
-        if reference:
-            resolved = ramp.get(reference.group(1))
-            assert resolved, f"{name} points at {reference.group(1)}, which is not in the ramp"
-            return resolved.lower()
-        return value.lower()
+        """Follow the small chain of semantic theme variables to its literal colour."""
+        current = name
+        for _ in range(4):
+            declaration = re.search(rf"{current}\s*:\s*([^;]+);", tokens)
+            assert declaration, f"{current} is not defined"
+            value = declaration.group(1).strip()
+            reference = re.fullmatch(r"var\((--[\w-]+)\)", value)
+            if not reference:
+                return value.lower()
+            current = reference.group(1)
+        raise AssertionError(f"{name} contains an unexpectedly deep or cyclic variable chain")
 
     assert resolve("--action") == "#007aff", (
         f"--action is {resolve('--action')}; the action colour is specified as #007AFF, Apple's "
@@ -843,12 +844,6 @@ def test_the_action_hover_darkens_so_a_light_label_survives_it() -> None:
     colour stays a design choice while the direction stays a rule.
     """
     tokens = _css("tokens.css")
-    # Both ramps: the action trio points into the accent now, and a dict of greys alone would
-    # raise a KeyError rather than fail with something a reader can act on.
-    ramp = dict(
-        re.findall(r"(--(?:grey|accent)-\d+|--black)\s*:\s*(#[0-9a-fA-F]{6})", tokens)
-    )
-
     def luminance(colour: str) -> float:
         def channel(part: str) -> float:
             value = int(part, 16) / 255
@@ -867,11 +862,11 @@ def test_the_action_hover_darkens_so_a_light_label_survives_it() -> None:
     # Every theme block declares the trio, and each is checked on its own: the toggle's copy of
     # the dark theme is written out separately from the media query's, and a fix applied to one
     # and not the other is exactly the bug that duplication invites.
-    blocks = re.findall(
-        r"--action:\s*var\((--[\w-]+)\);\s*--action-hover:\s*var\((--[\w-]+)\);\s*"
-        r"--action-ink:\s*var\((--[\w-]+)\);",
-        tokens,
-    )
+    blocks = list(zip(
+        re.findall(r"--theme-primary:\s*(#[0-9a-fA-F]{6});", tokens),
+        re.findall(r"--theme-primary-hover:\s*(#[0-9a-fA-F]{6});", tokens),
+        re.findall(r"--theme-primary-ink:\s*(#[0-9a-fA-F]{6});", tokens),
+    ))
     assert len(blocks) == 3, (
         f"expected the action trio in all three theme blocks, found {len(blocks)}. The light "
         "theme, the `prefers-color-scheme` block and the `[data-theme=dark]` block each declare "
@@ -879,11 +874,11 @@ def test_the_action_hover_darkens_so_a_light_label_survives_it() -> None:
     )
 
     for action, hover, ink in blocks:
-        resting = contrast(ramp[action], ramp[ink])
-        hovered = contrast(ramp[hover], ramp[ink])
+        resting = contrast(action, ink)
+        hovered = contrast(hover, ink)
         assert hovered >= resting, (
             f"hovering drops the label from {resting:.2f}:1 to {hovered:.2f}:1. The hover fill "
-            f"({hover} = {ramp[hover]}) moves toward the label ({ink} = {ramp[ink]}) instead of "
+            f"({hover}) moves toward the label ({ink}) instead of "
             "away from it, so the button's own text fades as the pointer lands on it."
         )
 
@@ -953,21 +948,21 @@ def test_the_page_colour_is_one_token_and_every_surface_follows_it() -> None:
 
     light = tokens[: tokens.index("@media (prefers-color-scheme: dark)")]
 
-    for name in ("--canvas", "--field", "--surface-raised"):
-        assert re.search(rf"{name}\s*:\s*var\(--tint\)\s*;", light), (
-            f"{name} is not `var(--tint)`. These three are the page colour itself: the page, "
-            "the fields on it and anything floating above it. A field that is not the page "
-            "colour is a field you cannot see the edge of on a grey card."
-        )
-
-    for name in ("--surface", "--surface-hover", "--surface-sunken", "--line", "--line-strong"):
+    expected_sources = {
+        "--canvas": "--theme-bg-canvas",
+        "--field": "--theme-bg-surface",
+        "--surface-raised": "--theme-bg-surface",
+        "--surface": "--theme-bg-surface",
+        "--surface-hover": "--theme-bg-hover",
+        "--surface-sunken": "--theme-bg-sunken",
+        "--line": "--theme-border",
+        "--line-strong": "--theme-border-strong",
+    }
+    for name, source in expected_sources.items():
         declaration = re.search(rf"{name}\s*:\s*([^;]+);", light)
         assert declaration, f"{name} is not defined"
-        value = declaration.group(1)
-        assert "color-mix" in value and "var(--tint)" in value, (
-            f"{name} is `{value.strip()}`, which does not follow the page colour. Every surface "
-            "is the tint mixed toward a grey; one that names a ramp step directly stays put "
-            "while the page around it moves."
+        assert declaration.group(1).strip() == f"var({source})", (
+            f"{name} no longer follows the centralized theme variable {source}"
         )
 
 
@@ -986,8 +981,8 @@ def test_the_default_page_is_off_white_rather_than_white() -> None:
     tokens = _css("tokens.css")
 
     light = tokens[: tokens.index("@media (prefers-color-scheme: dark)")]
-    declared = re.search(r"--tint\s*:\s*(#[0-9a-fA-F]{6})\s*;", light)
-    assert declared, "the light theme does not declare a --tint"
+    declared = re.search(r"--theme-bg-canvas\s*:\s*(#[0-9a-fA-F]{6})\s*;", light)
+    assert declared, "the light theme does not declare a --theme-bg-canvas"
     tint = declared.group(1).lower()
 
     assert tint != "#ffffff", (
@@ -1010,9 +1005,9 @@ def test_the_default_page_is_off_white_rather_than_white() -> None:
 
     # Both dark blocks declare one too, or switching appearance leaves the light page's colour
     # on a dark theme.
-    dark_blocks = re.findall(r"--tint\s*:\s*#[0-9a-fA-F]{6}\s*;", tokens)
+    dark_blocks = re.findall(r"--theme-bg-canvas\s*:\s*#[0-9a-fA-F]{6}\s*;", tokens)
     assert len(dark_blocks) == 3, (
-        f"expected a --tint in all three theme blocks, found {len(dark_blocks)}. The light "
+            f"expected a --theme-bg-canvas in all three theme blocks, found {len(dark_blocks)}. The light "
         "theme, the `prefers-color-scheme` block and the `[data-theme=dark]` block each declare "
         "the page colour, and a block missing one inherits the wrong theme's page."
     )

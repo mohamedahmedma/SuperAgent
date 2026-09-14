@@ -57,6 +57,14 @@ def _refuse(code: str, message: str, status_code: int = 403) -> HTTPException:
     return HTTPException(status_code=status_code, detail=error_detail(code, message))
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
 @dataclass(frozen=True, slots=True)
 class GroupSpec:
     key: str
@@ -106,6 +114,8 @@ class PresenceOut(BaseModel):
 class LastMessageOut(BaseModel):
     body: str
     attachment_kind: Literal["image", "file", "audio"] | None = None
+    deleted: bool = False
+    edited: bool = False
     sender_name_en: str
     sender_name_ar: str
     created_at: datetime
@@ -121,16 +131,28 @@ class ConversationOut(BaseModel):
     scope_name_en: str | None = None
     scope_name_ar: str | None = None
     peer_user_id: int | None = None
+    observer_view: bool = False
     subtitle_en: str | None = None
     subtitle_ar: str | None = None
     online: bool = False
     unread_count: int = 0
+    is_muted: bool = False
+    muted_until: datetime | None = None
     last_message: LastMessageOut | None = None
     updated_at: datetime
 
 
 class MessageIn(BaseModel):
     body: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
+
+
+class ConversationMuteIn(BaseModel):
+    duration: Literal["off", "eight_hours", "one_week", "always"]
+
+
+class ConversationMuteOut(BaseModel):
+    is_muted: bool
+    muted_until: datetime | None = None
 
 
 class AttachmentOut(BaseModel):
@@ -156,6 +178,11 @@ class MessageOut(BaseModel):
     sender_name_ar: str
     body: str
     created_at: datetime
+    deleted: bool = False
+    deleted_at: datetime | None = None
+    edited: bool = False
+    edited_at: datetime | None = None
+    original_body: str | None = None
     attachments: list[AttachmentOut] = Field(default_factory=list)
     receipts: ReceiptSummaryOut | None = None
 
@@ -187,6 +214,29 @@ def _roles_for(session, user_id: int) -> set[str]:  # noqa: ANN001
         .join(m.UserRole, m.UserRole.role_id == m.Role.id)
         .where(m.UserRole.user_id == user_id)
     ).all())
+
+
+def _admin_user_ids():
+    """A composable query for accounts that must be invisible to ordinary chat users."""
+    return (
+        select(m.UserRole.user_id)
+        .join(m.Role, m.Role.id == m.UserRole.role_id)
+        .where(m.Role.code == RoleCode.SYSTEM_ADMIN.value)
+    )
+
+
+def _is_admin_user(session, user_id: int | None) -> bool:  # noqa: ANN001
+    if user_id is None:
+        return False
+    return session.scalar(
+        select(m.UserRole.user_id)
+        .join(m.Role, m.Role.id == m.UserRole.role_id)
+        .where(
+            m.UserRole.user_id == user_id,
+            m.Role.code == RoleCode.SYSTEM_ADMIN.value,
+        )
+        .limit(1)
+    ) is not None
 
 
 def _presence_online(presence: m.ChatPresence | None, now: datetime | None = None) -> bool:
@@ -560,8 +610,29 @@ def _authorised_conversation(
     if conversation.kind == "group":
         if conversation.group_key not in specs:
             raise _refuse("not_authorized", "You are no longer a member of this group.")
-    elif profile.user_id not in {conversation.direct_user_one_id, conversation.direct_user_two_id}:
-        raise _refuse("not_authorized", "This private conversation belongs to other staff.")
+    else:
+        if (
+            not profile.is_system_admin
+            and profile.user_id not in {
+                conversation.direct_user_one_id,
+                conversation.direct_user_two_id,
+            }
+        ):
+            raise _refuse("not_authorized", "This private conversation belongs to other staff.")
+        peer_id = None
+        if profile.user_id in {
+            conversation.direct_user_one_id,
+            conversation.direct_user_two_id,
+        }:
+            peer_id = (
+                conversation.direct_user_two_id
+                if conversation.direct_user_one_id == profile.user_id
+                else conversation.direct_user_one_id
+            )
+        if not profile.is_system_admin and _is_admin_user(session, peer_id):
+            # Return the same answer as a missing conversation so the protected account's
+            # existence cannot be inferred by guessing a conversation id.
+            raise _refuse("unknown_reference", "No conversation with that id exists.", 404)
     return conversation, specs
 
 
@@ -585,6 +656,7 @@ def _recipient_ids(
             m.User.school_id == school.id,
             m.User.is_active.is_(True),
             m.User.id != sender_user_id,
+            ~m.User.id.in_(_admin_user_ids()),
             m.PermissionRow.code == Permission.CHAT_READ.value,
             ~m.User.id.in_(select(m.Teacher.user_id).where(
                 m.Teacher.user_id.is_not(None), m.Teacher.is_active.is_(False)
@@ -614,6 +686,10 @@ def _recipient_ids(
 def _add_receipts(
     session, school: m.School, conversation: m.ChatConversation, message: m.ChatMessage  # noqa: ANN001
 ) -> None:
+    # Admin activity is intentionally invisible to school accounts. Do not create a
+    # delivery trail that could surface through presence counters or read receipts.
+    if _is_admin_user(session, message.sender_user_id):
+        return
     now = datetime.now(UTC)
     online_ids = set(session.scalars(
         select(m.ChatPresence.user_id).where(
@@ -631,13 +707,18 @@ def _add_receipts(
     ])
 
 
-def _message_out(session, message: m.ChatMessage, sender: m.User, viewer_user_id: int) -> MessageOut:  # noqa: ANN001
-    attachments = session.scalars(
-        select(m.ChatAttachment).where(m.ChatAttachment.message_id == message.id)
-        .order_by(m.ChatAttachment.created_at, m.ChatAttachment.id)
-    ).all()
+def _message_out(
+    session, message: m.ChatMessage, sender: m.User, viewer: AccessProfile  # noqa: ANN001
+) -> MessageOut:
+    reveal_deleted = message.deleted_at is None or viewer.is_system_admin
+    attachments = []
+    if reveal_deleted:
+        attachments = session.scalars(
+            select(m.ChatAttachment).where(m.ChatAttachment.message_id == message.id)
+            .order_by(m.ChatAttachment.created_at, m.ChatAttachment.id)
+        ).all()
     summary = None
-    if message.sender_user_id == viewer_user_id:
+    if message.sender_user_id == viewer.user_id:
         receipt_rows = session.scalars(
             select(m.ChatReceipt).where(m.ChatReceipt.message_id == message.id)
         ).all()
@@ -652,8 +733,13 @@ def _message_out(session, message: m.ChatMessage, sender: m.User, viewer_user_id
         sender_user_id=message.sender_user_id,
         sender_name_en=_name(sender, "en"),
         sender_name_ar=_name(sender, "ar"),
-        body=message.body,
-        created_at=message.created_at,
+        body=message.body if reveal_deleted else "",
+        created_at=_as_utc(message.created_at),
+        deleted=message.deleted_at is not None,
+        deleted_at=_as_utc(message.deleted_at),
+        edited=message.edited_at is not None,
+        edited_at=_as_utc(message.edited_at),
+        original_body=message.original_body if viewer.is_system_admin else None,
         attachments=[AttachmentOut.model_validate(row, from_attributes=True) for row in attachments],
         receipts=summary,
     )
@@ -668,6 +754,7 @@ def _conversation_out(
     peer_user_id = None
     subtitle_en = subtitle_ar = None
     online = False
+    observer_view = False
     if conversation.kind == "group":
         spec = specs[conversation.group_key]
         category, title_en, title_ar = spec.category, spec.title_en, spec.title_ar
@@ -675,42 +762,75 @@ def _conversation_out(
         scope_name_en = spec.scope_name_en
         scope_name_ar = spec.scope_name_ar
     else:
-        other_id = (
-            conversation.direct_user_two_id
-            if conversation.direct_user_one_id == profile.user_id
-            else conversation.direct_user_one_id
-        )
-        other = session.get(m.User, other_id)
-        if other is not None:
-            title_en, title_ar = _name(other, "en"), _name(other, "ar")
-            conversation_school = session.get(m.School, conversation.school_id)
-            if conversation_school is not None:
-                peer = _staff_profile(session, conversation_school, other)
-                peer_user_id = other.id
-                subtitle_en, subtitle_ar = peer.role_caption_en, peer.role_caption_ar
-                online = peer.online
+        participant_ids = {
+            conversation.direct_user_one_id,
+            conversation.direct_user_two_id,
+        }
+        observer_view = profile.is_system_admin and profile.user_id not in participant_ids
+        if observer_view:
+            participants = {
+                user.id: user for user in session.scalars(
+                    select(m.User).where(m.User.id.in_(participant_ids))
+                ).all()
+            }
+            first = participants.get(conversation.direct_user_one_id)
+            second = participants.get(conversation.direct_user_two_id)
+            if first is not None and second is not None:
+                title_en = f"{_name(first, 'en')} / {_name(second, 'en')}"
+                title_ar = f"{_name(first, 'ar')} / {_name(second, 'ar')}"
+            subtitle_en = "Private conversation"
+            subtitle_ar = "\u0645\u062d\u0627\u062f\u062b\u0629 \u062e\u0627\u0635\u0629"
+        else:
+            other_id = (
+                conversation.direct_user_two_id
+                if conversation.direct_user_one_id == profile.user_id
+                else conversation.direct_user_one_id
+            )
+            other = session.get(m.User, other_id)
+            if other is not None:
+                title_en, title_ar = _name(other, "en"), _name(other, "ar")
+                conversation_school = session.get(m.School, conversation.school_id)
+                if conversation_school is not None:
+                    peer = _staff_profile(session, conversation_school, other)
+                    peer_user_id = other.id
+                    subtitle_en, subtitle_ar = peer.role_caption_en, peer.role_caption_ar
+                    online = peer.online
 
-    last = session.execute(
+    last_statement = (
         select(m.ChatMessage, m.User)
         .join(m.User, m.User.id == m.ChatMessage.sender_user_id)
         .where(m.ChatMessage.conversation_id == conversation.id)
-        .order_by(m.ChatMessage.id.desc()).limit(1)
-    ).first()
+    )
+    if not profile.is_system_admin:
+        last_statement = last_statement.where(~m.ChatMessage.sender_user_id.in_(_admin_user_ids()))
+    last = session.execute(last_statement.order_by(m.ChatMessage.id.desc()).limit(1)).first()
     read_id = session.scalar(select(m.ChatRead.last_read_message_id).where(
         m.ChatRead.conversation_id == conversation.id,
         m.ChatRead.user_id == profile.user_id,
     )) or 0
-    unread = session.scalar(select(func.count(m.ChatMessage.id)).where(
+    unread_statement = select(func.count(m.ChatMessage.id)).where(
         m.ChatMessage.conversation_id == conversation.id,
         m.ChatMessage.id > read_id,
         m.ChatMessage.sender_user_id != profile.user_id,
-    )) or 0
+    )
+    if not profile.is_system_admin:
+        unread_statement = unread_statement.where(
+            ~m.ChatMessage.sender_user_id.in_(_admin_user_ids())
+        )
+    unread = session.scalar(unread_statement) or 0
     last_message, last_sender = last if last else (None, None)
     last_attachment_kind = None
     if last_message is not None:
-        last_attachment_kind = session.scalar(
-            select(m.ChatAttachment.kind).where(m.ChatAttachment.message_id == last_message.id).limit(1)
-        )
+        if last_message.deleted_at is None or profile.is_system_admin:
+            last_attachment_kind = session.scalar(
+                select(m.ChatAttachment.kind).where(m.ChatAttachment.message_id == last_message.id).limit(1)
+            )
+    preference = session.get(m.ChatConversationPreference, (conversation.id, profile.user_id))
+    now = datetime.now(UTC)
+    is_muted = bool(preference and preference.muted and (
+        preference.muted_until is None
+        or _timestamp(preference.muted_until) > _timestamp(now)
+    ))
     return ConversationOut(
         id=conversation.id,
         kind=conversation.kind,
@@ -721,18 +841,27 @@ def _conversation_out(
         scope_name_en=scope_name_en,
         scope_name_ar=scope_name_ar,
         peer_user_id=peer_user_id,
+        observer_view=observer_view,
         subtitle_en=subtitle_en,
         subtitle_ar=subtitle_ar,
         online=online,
         unread_count=unread,
+        is_muted=is_muted,
+        muted_until=(_as_utc(preference.muted_until) if is_muted and preference else None),
         last_message=(LastMessageOut(
-            body=last_message.body,
+            body=(
+                last_message.body
+                if last_message.deleted_at is None or profile.is_system_admin
+                else ""
+            ),
             attachment_kind=last_attachment_kind,
+            deleted=last_message.deleted_at is not None,
+            edited=last_message.edited_at is not None,
             sender_name_en=_name(last_sender, "en"),
             sender_name_ar=_name(last_sender, "ar"),
-            created_at=last_message.created_at,
+            created_at=_as_utc(last_message.created_at),
         ) if last_message is not None else None),
-        updated_at=conversation.updated_at,
+        updated_at=_as_utc(conversation.updated_at),
     )
 
 
@@ -779,12 +908,18 @@ def heartbeat_presence(
                 presence.typing_conversation_id = None
                 presence.typing_until = None
 
+        delivery_conditions = [
+            m.ChatReceipt.user_id == profile.user_id,
+            m.ChatReceipt.delivered_at.is_(None),
+        ]
+        if not profile.is_system_admin:
+            visible_message_ids = select(m.ChatMessage.id).where(
+                ~m.ChatMessage.sender_user_id.in_(_admin_user_ids())
+            )
+            delivery_conditions.append(m.ChatReceipt.message_id.in_(visible_message_ids))
         delivered = session.execute(
             update(m.ChatReceipt)
-            .where(
-                m.ChatReceipt.user_id == profile.user_id,
-                m.ChatReceipt.delivered_at.is_(None),
-            )
+            .where(*delivery_conditions)
             .values(delivered_at=now)
         ).rowcount or 0
         uow.commit()
@@ -834,14 +969,22 @@ def list_conversations(
         school = _school(uow._session, school_code, profile)
         specs = _group_specs(uow._session, school, profile)
         groups = _ensure_group_conversations(uow._session, school, specs)
-        directs = uow._session.scalars(select(m.ChatConversation).where(
+        direct_statement = select(m.ChatConversation).where(
             m.ChatConversation.school_id == school.id,
             m.ChatConversation.kind == "direct",
-            or_(
-                m.ChatConversation.direct_user_one_id == profile.user_id,
-                m.ChatConversation.direct_user_two_id == profile.user_id,
-            ),
-        )).all()
+        )
+        if not profile.is_system_admin:
+            direct_statement = direct_statement.where(
+                or_(
+                    m.ChatConversation.direct_user_one_id == profile.user_id,
+                    m.ChatConversation.direct_user_two_id == profile.user_id,
+                ),
+                ~m.ChatConversation.direct_user_one_id.in_(_admin_user_ids()),
+                ~m.ChatConversation.direct_user_two_id.in_(_admin_user_ids()),
+            )
+        # Admin deliberately receives the school's complete private-chat index without
+        # being added as a participant or creating delivery/read receipts.
+        directs = uow._session.scalars(direct_statement).all()
         output = [_conversation_out(uow._session, row, profile, specs) for row in [*groups, *directs]]
         uow.commit()
     return sorted(
@@ -861,8 +1004,7 @@ def search_people(
     with uow_factory() as uow:
         school = _school(uow._session, school_code, profile)
         needle = _like_term(q)
-        users = uow._session.scalars(
-            select(m.User).where(
+        statement = select(m.User).where(
                 m.User.school_id == school.id,
                 m.User.is_active.is_(True),
                 m.User.id != profile.user_id,
@@ -874,7 +1016,11 @@ def search_people(
                 ~m.User.id.in_(select(m.Teacher.user_id).where(
                     m.Teacher.user_id.is_not(None), m.Teacher.is_active.is_(False)
                 )),
-            ).order_by(m.User.full_name_en, m.User.username).limit(30)
+            )
+        if not profile.is_system_admin:
+            statement = statement.where(~m.User.id.in_(_admin_user_ids()))
+        users = uow._session.scalars(
+            statement.order_by(m.User.full_name_en, m.User.username).limit(30)
         ).all()
         result = [_staff_profile(uow._session, school, user) for user in users]
     return result
@@ -890,6 +1036,8 @@ def open_direct_conversation(
         school = _school(uow._session, school_code, profile)
         other = uow._session.get(m.User, body.user_id)
         if other is None or not other.is_active or other.school_id != school.id:
+            raise _refuse("unknown_reference", "No active staff account with that id exists.", 404)
+        if not profile.is_system_admin and _is_admin_user(uow._session, other.id):
             raise _refuse("unknown_reference", "No active staff account with that id exists.", 404)
         inactive_teacher = uow._session.scalar(select(m.Teacher.id).where(
             m.Teacher.user_id == other.id, m.Teacher.is_active.is_(False)
@@ -945,6 +1093,8 @@ def list_messages(
             .join(m.User, m.User.id == m.ChatMessage.sender_user_id)
             .where(m.ChatMessage.conversation_id == conversation_id)
         )
+        if not profile.is_system_admin:
+            statement = statement.where(~m.ChatMessage.sender_user_id.in_(_admin_user_ids()))
         if before_id is not None:
             statement = statement.where(m.ChatMessage.id < before_id)
         rows = uow._session.execute(statement.order_by(m.ChatMessage.id.desc()).limit(limit)).all()
@@ -964,7 +1114,7 @@ def list_messages(
         # Materialise the response while the ORM rows are still attached. The unit of
         # work closes its session on exit and SQLAlchemy expires loaded attributes there.
         result = [
-            _message_out(uow._session, message, sender, profile.user_id)
+            _message_out(uow._session, message, sender, profile)
             for message, sender in reversed(rows)
         ]
         uow.commit()
@@ -1005,7 +1155,111 @@ def send_message(
         uow._session.flush()
         _add_receipts(uow._session, school, conversation, message)
         uow._session.flush()
-        result = _message_out(uow._session, message, sender, profile.user_id)
+        result = _message_out(uow._session, message, sender, profile)
+        uow.commit()
+    return result
+
+
+@router.delete(
+    "/conversations/{conversation_id}/messages/{message_id}",
+    response_model=MessageOut,
+)
+def delete_message(
+    school_code: str,
+    conversation_id: int,
+    message_id: int,
+    profile: ChatWriter,
+    uow_factory: UowFactoryDep,
+) -> MessageOut:
+    """Hide a sender's own message while retaining its original audit record for Admin."""
+    with uow_factory() as uow:
+        school = _school(uow._session, school_code, profile)
+        conversation, _ = _authorised_conversation(
+            uow._session, school, profile, conversation_id
+        )
+        row = uow._session.execute(
+            select(m.ChatMessage, m.User)
+            .join(m.User, m.User.id == m.ChatMessage.sender_user_id)
+            .where(
+                m.ChatMessage.id == message_id,
+                m.ChatMessage.conversation_id == conversation.id,
+            )
+        ).first()
+        if row is None:
+            raise _refuse("unknown_reference", "No message with that id exists.", 404)
+        message, sender = row
+        if message.sender_user_id != profile.user_id:
+            raise _refuse("not_authorized", "Only the sender may delete this message.")
+        if message.deleted_at is None:
+            now = datetime.now(UTC)
+            message.deleted_at = now
+            conversation.updated_at = now
+            uow._session.flush()
+        result = _message_out(uow._session, message, sender, profile)
+        uow.commit()
+    return result
+
+
+EDIT_WINDOW_SECONDS = 3600  # one hour
+
+
+@router.put(
+    "/conversations/{conversation_id}/messages/{message_id}",
+    response_model=MessageOut,
+)
+def edit_message(
+    school_code: str,
+    conversation_id: int,
+    message_id: int,
+    body: MessageIn,
+    profile: ChatWriter,
+    uow_factory: UowFactoryDep,
+) -> MessageOut:
+    """Replace the text of a sender's own message within the edit window."""
+    new_text = body.body.strip()
+    if not new_text:
+        raise _refuse("invalid_value", "A message cannot be blank.", 422)
+    with uow_factory() as uow:
+        school = _school(uow._session, school_code, profile)
+        conversation, _ = _authorised_conversation(
+            uow._session, school, profile, conversation_id
+        )
+        row = uow._session.execute(
+            select(m.ChatMessage, m.User)
+            .join(m.User, m.User.id == m.ChatMessage.sender_user_id)
+            .where(
+                m.ChatMessage.id == message_id,
+                m.ChatMessage.conversation_id == conversation.id,
+            )
+        ).first()
+        if row is None:
+            raise _refuse("unknown_reference", "No message with that id exists.", 404)
+        message, sender = row
+        if message.sender_user_id != profile.user_id:
+            raise _refuse("not_authorized", "Only the sender may edit this message.")
+        if message.deleted_at is not None:
+            raise _refuse("not_authorized", "A deleted message cannot be edited.")
+        now = datetime.now(UTC)
+        created_at = (
+            message.created_at
+            if message.created_at.tzinfo is not None
+            else message.created_at.replace(tzinfo=UTC)
+        )
+        created_at = _as_utc(message.created_at)
+        age = (now - created_at).total_seconds()
+        if age > EDIT_WINDOW_SECONDS:
+            raise _refuse(
+                "edit_window_expired",
+                "Messages can only be edited within one hour of sending.",
+            )
+        # Preserve the original body on the first edit for admin audit.
+        if message.original_body is None:
+            message.original_body = message.body
+        message.body = new_text
+        message.edited_at = now
+        conversation.updated_at = now
+        uow._session.flush()
+        result = _message_out(uow._session, message, sender, profile)
         uow.commit()
     return result
 
@@ -1084,7 +1338,7 @@ async def send_attachments(
                 ))
             _add_receipts(uow._session, school, conversation, message)
             uow._session.flush()
-            result = _message_out(uow._session, message, sender, profile.user_id)
+            result = _message_out(uow._session, message, sender, profile)
             uow.commit()
         return result
     except Exception:
@@ -1111,6 +1365,10 @@ def download_attachment(
             raise _refuse("unknown_reference", "No attachment with that id exists.", 404)
         attachment, message = row
         _authorised_conversation(uow._session, school, profile, message.conversation_id)
+        if not profile.is_system_admin and _is_admin_user(uow._session, message.sender_user_id):
+            raise _refuse("unknown_reference", "No attachment with that id exists.", 404)
+        if message.deleted_at is not None and not profile.is_system_admin:
+            raise _refuse("unknown_reference", "No attachment with that id exists.", 404)
         path = _storage_root() / attachment.file_key
         if not path.is_file():
             raise _refuse("file_missing", "The stored attachment is unavailable.", 404)
@@ -1139,11 +1397,15 @@ def message_receipts(
         _authorised_conversation(uow._session, school, profile, message.conversation_id)
         if message.sender_user_id != profile.user_id:
             raise _refuse("not_authorized", "Only the sender can view message receipts.")
-        rows = uow._session.execute(
+        receipt_statement = (
             select(m.ChatReceipt, m.User)
             .join(m.User, m.User.id == m.ChatReceipt.user_id)
             .where(m.ChatReceipt.message_id == message.id)
-            .order_by(m.User.full_name_en, m.User.username)
+        )
+        if not profile.is_system_admin:
+            receipt_statement = receipt_statement.where(~m.User.id.in_(_admin_user_ids()))
+        rows = uow._session.execute(
+            receipt_statement.order_by(m.User.full_name_en, m.User.username)
         ).all()
         return [ReceiptPersonOut(
             user_id=user.id,
@@ -1197,3 +1459,43 @@ def mark_read(
                 .values(delivered_at=func.coalesce(m.ChatReceipt.delivered_at, now), read_at=now)
             )
         uow.commit()
+
+
+@router.put(
+    "/conversations/{conversation_id}/mute",
+    response_model=ConversationMuteOut,
+)
+def set_conversation_mute(
+    school_code: str,
+    conversation_id: int,
+    body: ConversationMuteIn,
+    profile: ChatReader,
+    uow_factory: UowFactoryDep,
+) -> ConversationMuteOut:
+    """Mute notifications for this user only; unread state remains untouched."""
+    with uow_factory() as uow:
+        school = _school(uow._session, school_code, profile)
+        _authorised_conversation(uow._session, school, profile, conversation_id)
+        preference = uow._session.get(
+            m.ChatConversationPreference, (conversation_id, profile.user_id)
+        )
+        if preference is None:
+            preference = m.ChatConversationPreference(
+                conversation_id=conversation_id,
+                user_id=profile.user_id,
+            )
+            uow._session.add(preference)
+
+        now = datetime.now(UTC)
+        preference.muted = body.duration != "off"
+        preference.muted_until = {
+            "eight_hours": now + timedelta(hours=8),
+            "one_week": now + timedelta(days=7),
+        }.get(body.duration)
+        preference.updated_at = now
+        result = ConversationMuteOut(
+            is_muted=preference.muted,
+            muted_until=preference.muted_until,
+        )
+        uow.commit()
+    return result

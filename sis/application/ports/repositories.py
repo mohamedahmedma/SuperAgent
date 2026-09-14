@@ -49,7 +49,7 @@ from sis.domain.auth import ApiKey
 from sis.domain.grades import SubjectGrade
 from sis.domain.guardians import Guardian, StudentGuardian
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
-from sis.domain.people import ClassEnrolment, Student
+from sis.domain.people import ClassEnrolment, Gender, Student
 from sis.domain.structure import (
     AcademicTrack,
     AcademicYear,
@@ -218,6 +218,7 @@ class TeacherRepository(Protocol):
             tuple[AcademicYearCode, SubjectCode, YearCode, Sequence[ClassCode]]
         ],
         assigned_by: str,
+        gender: Gender = Gender.UNSPECIFIED,
     ) -> TeacherRecord: ...
 
     def teaching_for_section(

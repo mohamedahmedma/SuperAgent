@@ -17,14 +17,16 @@ def test_new_teacher_receives_a_system_generated_staff_reference(
     response = client.post(
         f"/v1/schools/{SCHOOL}/teachers",
         headers=registrar,
-        json={"full_name_en": "Generated Teacher", "full_name_ar": "معلم جديد"},
+        json={"full_name_en": "Generated Teacher", "full_name_ar": "معلم جديد", "gender": "female"},
     )
     assert response.status_code == 201, response.text
     staff_number = response.json()["staff_number"]
     assert staff_number.startswith("T-")
-    assert client.get(
+    found = client.get(
         f"/v1/schools/{SCHOOL}/teachers/{staff_number}", headers=registrar
-    ).status_code == 200
+    )
+    assert found.status_code == 200
+    assert found.json()["gender"] == "female"
 
 
 def test_teacher_may_hold_multiple_grades_tracks_and_classes(

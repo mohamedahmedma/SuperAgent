@@ -41,9 +41,12 @@ const PATHS = {
   moon: 'M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z',
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zm5.5-1.5L21 21',
   chat: 'M21 12a8 8 0 0 1-8 8H5l-3 2 1-5a8 8 0 1 1 18-5zM7.5 12h.01M12 12h.01M16.5 12h.01',
+  bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',
+  bellOff: 'M3 3l18 18M9.4 4.6A6 6 0 0 1 18 10c0 3.6.8 5.3 1.7 6.3M6.3 16.3C7.2 14.9 7 12.9 7 10c0-.6.1-1.2.2-1.7M4 17h13M10 21h4',
   send: 'M3 4l18 8-18 8 3-8-3-8zm3 8h15',
   paperclip: 'M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.3-8.3',
   microphone: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3M9 21h6',
+  pencil: 'M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z',
   trash: 'M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6',
   pause: 'M9 5v14M15 5v14',
   play: 'm8 5 11 7-11 7z',
@@ -64,7 +67,15 @@ const PATHS = {
   chevron: 'm6 9 6 6 6-6',
   /* A door with an arrow leaving it. The arrow points out of the frame rather than into it,
      which is the only thing separating "sign out" from "sign in" at 16px. */
-  signout: 'M9 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h4M16 17l5-5-5-5M21 12H9'
+  signout:'M9 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h4M16 17l5-5-5-5M21 12H9',
+  menu: 'M3 12h18M3 6h18M3 18h18',
+  expand: 'M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7',
+  minimize: 'M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7',
+  layers: 'M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
+  arrowLeft: 'M19 12H5M12 19l-7-7 7-7',
+  arrowRight: 'M5 12h14M12 5l7 7-7 7',
+  copy: 'M9 9h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11a2 2 0 0 1 2-2z M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+  info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M12 16v-4 M12 8h.01'
 };
 
 export function Icon({ name, size = 16, weight = 1.7 }) {
@@ -86,4 +97,3 @@ export function Icon({ name, size = 16, weight = 1.7 }) {
     </svg>
   );
 }
-

@@ -11,6 +11,7 @@ from sis.application.ports.repositories import (
     TeacherTeachingAssignment,
 )
 from sis.domain.errors import DomainRuleViolation, UnknownReference, ValidationError
+from sis.domain.people import Gender
 from sis.domain.staff import Teacher
 from sis.domain.value_objects import AcademicYearCode, ClassCode, SchoolCode, SubjectCode, YearCode
 from sis.infrastructure.db import models as m
@@ -157,7 +158,7 @@ class SqlAlchemyTeacherRepository:
         full_name_ar: str, email: str, phone: str, is_active: bool,
         username: str | None, password_hash: str | None,
         assignments: Sequence[tuple[AcademicYearCode, SubjectCode, YearCode, Sequence[ClassCode]]],
-        assigned_by: str,
+        assigned_by: str, gender: Gender = Gender.UNSPECIFIED,
     ) -> TeacherRecord:
         school = self._session.scalar(select(m.School).where(m.School.code == str(school_code)))
         if school is None:
@@ -201,6 +202,7 @@ class SqlAlchemyTeacherRepository:
             self._session.add(teacher)
         teacher.user_id = user.id if user else None
         teacher.full_name_en, teacher.full_name_ar = full_name_en.strip(), full_name_ar.strip()
+        teacher.gender = gender.value
         teacher.email, teacher.phone, teacher.is_active = email.strip(), phone.strip(), is_active
         self._session.flush()
 
@@ -313,6 +315,7 @@ class SqlAlchemyTeacherRepository:
             teacher=Teacher(id=teacher.id, staff_number=teacher.staff_number,
                 school_id=teacher.school_id, user_id=teacher.user_id,
                 full_name_en=teacher.full_name_en, full_name_ar=teacher.full_name_ar,
+                gender=Gender(teacher.gender),
                 is_active=teacher.is_active),
             school_code=school_code, username=None if user is None else user.username,
             email=teacher.email, phone=teacher.phone, assignments=tuple(assignments),

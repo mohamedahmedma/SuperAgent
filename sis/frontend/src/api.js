@@ -834,6 +834,15 @@ var api = {
   commitGrades: function (batchId) {
     return post('/imports/grades/' + encodeURIComponent(batchId) + '/commit');
   },
+  previewPromotions: function (sourceYearCode, targetYearCode) {
+    return post('/promotions/preview', {
+      source_year_code: sourceYearCode,
+      target_year_code: targetYearCode
+    });
+  },
+  commitPromotions: function (body) {
+    return post('/promotions/commit', body);
+  },
   importReport: function (batchId, params) {
     return get('/imports/' + encodeURIComponent(batchId), params);
   },
@@ -887,6 +896,18 @@ var api = {
     return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
       encodeURIComponent(conversationId) + '/messages', { body: body });
   },
+  deleteChatMessage: function (schoolCode, conversationId, messageId) {
+    return request('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/messages/' + encodeURIComponent(messageId), {
+        method: 'DELETE'
+      });
+  },
+  editChatMessage: function (schoolCode, conversationId, messageId, body) {
+    return put('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/messages/' + encodeURIComponent(messageId), {
+        body: body
+      });
+  },
   sendChatAttachments: function (schoolCode, conversationId, files, body, durationSeconds) {
     var form = new window.FormData();
     Array.from(files || []).forEach(function (file) { form.append('files', file); });
@@ -906,6 +927,10 @@ var api = {
   markChatRead: function (schoolCode, conversationId) {
     return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
       encodeURIComponent(conversationId) + '/read');
+  },
+  setChatMute: function (schoolCode, conversationId, duration) {
+    return put('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/mute', { duration: duration });
   },
   teacherAttendance: function (schoolCode, fromDate, toDate) {
     return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers/attendance', {
@@ -931,6 +956,14 @@ var api = {
   saveRolePermissionMatrix: function (roleCode, resources) {
     return request('/rbac/roles/' + encodeURIComponent(roleCode) + '/permission-matrix', {
       method: 'PUT', body: { resources: resources }
+    });
+  },
+  rolePermissions: function (roleCode) {
+    return get('/rbac/roles/' + encodeURIComponent(roleCode) + '/permissions');
+  },
+  saveRolePermissions: function (roleCode, permissions) {
+    return request('/rbac/roles/' + encodeURIComponent(roleCode) + '/permissions', {
+      method: 'PUT', body: { permissions: permissions }
     });
   },
   rbacYearLevels: function (schoolCode) {

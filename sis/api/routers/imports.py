@@ -71,7 +71,7 @@ from sis.application.services import (
 )
 from sis.config import Settings, get_settings
 from sis.domain.imports import ImportBatch, ImportKind, ImportRow, ImportStatus, RowOutcome
-from sis.domain.value_objects import AcademicYearCode, ClassCode, SubjectCode, TermCode
+from sis.domain.value_objects import AcademicYearCode, ClassCode, SubjectCode, TermCode, YearCode
 # One source of truth for what the door accepts, so the extension check here and the
 # parser's own refusal cannot drift into accepting a file the layer below rejects.
 from sis.infrastructure.parsers import SUPPORTED_EXTENSIONS
@@ -601,7 +601,7 @@ def commit_guardians(
     response_model=ImportPreviewOut,
     summary="Preview a marks upload",
     description="Multipart. Send the sheet as `file` and `term_code` as a form field; "
-    "`subject_code` and `class_code` narrow the upload so a file sent against the wrong "
+    "`subject_code`, `year_level_code` and `class_code` narrow the upload so a file sent against the wrong "
     "class is refused loudly instead of matched across the whole school. **Nothing is "
     "written.** A blank cell previews as not-graded and never as zero.",
     responses=_PREVIEW_ERRORS,
@@ -609,6 +609,7 @@ def commit_guardians(
         required={"term_code": "The term these marks belong to, e.g. `2026-T1`."},
         optional={
             "subject_code": "Refuse rows naming any other subject.",
+            "year_level_code": "Refuse rows for children outside this grade.",
             "class_code": "Refuse rows for children who were in another class this term.",
         },
     ),
@@ -618,6 +619,7 @@ async def preview_grades(
 ) -> ImportPreviewOut:
     upload = await _read_upload(request, max_bytes=settings.max_upload_bytes)
     subject_code = upload.optional("subject_code")
+    year_level_code = upload.optional("year_level_code")
     class_code = upload.optional("class_code")
     with domain_errors():
         result = imports.preview(
@@ -628,6 +630,7 @@ async def preview_grades(
                 actor=caller.prefix,
                 subject_code=None if subject_code is None else SubjectCode(subject_code),
                 class_code=None if class_code is None else ClassCode(class_code),
+                year_level_code=None if year_level_code is None else YearCode(year_level_code),
             )
         )
     return ImportPreviewOut.of(result)

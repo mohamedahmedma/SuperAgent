@@ -29,6 +29,11 @@ FIRST_F = ("فاطمة", "ليلى", "مريم", "ملك", "نور", "سارة",
 FATHERS = ("أحمد", "محمود", "محمد", "خالد", "حسن", "إبراهيم", "طارق", "وليد", "أيمن", "شريف", "عمرو", "هشام")
 FAMILIES = ("عبد الرحمن", "السيد", "حسن", "علي", "إبراهيم", "عثمان", "منصور", "رشاد", "فؤاد", "النجار", "الشاذلي", "الرفاعي")
 
+FIRST_M_EN = ("Mohamed", "Ahmed", "Omar", "Youssef", "Adam", "Yassin", "Mahmoud", "Moustafa", "Ziad", "Hamza", "Ali", "Kareem")
+FIRST_F_EN = ("Fatma", "Layla", "Mariam", "Malak", "Nour", "Sarah", "Jana", "Salma", "Farah", "Hoda", "Yara", "Menna")
+FATHERS_EN = ("Ahmed", "Mahmoud", "Mohamed", "Khaled", "Hassan", "Ibrahim", "Tarek", "Walid", "Ayman", "Sherif", "Amr", "Hesham")
+FAMILIES_EN = ("Abdelrahman", "Elsayed", "Hassan", "Ali", "Ibrahim", "Osman", "Mansour", "Rashad", "Fouad", "Elnaggar", "Elshazly", "Elrefaie")
+
 SUBJECTS = {
     "AR": ("Arabic", "اللغة العربية"), "MATH": ("Mathematics", "الرياضيات"),
     "EN": ("English", "اللغة الإنجليزية"), "CS": ("Computer", "الكمبيوتر"),
@@ -106,6 +111,11 @@ def _person_name(n: int, female: bool) -> tuple[str, str]:
     family = FAMILIES[(n // 144) % 12]
     ar = f"{first} {father} {family}"
     return ar, f"Demo Person {n:04d}"
+    first_en = (FIRST_F_EN if female else FIRST_M_EN)[n % 12]
+    father_en = FATHERS_EN[(n // 12) % 12]
+    family_en = FAMILIES_EN[(n // 144) % 12]
+    en = f"{first_en} {father_en} {family_en}"
+    return ar, en
 
 
 def _class_name(level: Level, index: int) -> tuple[str, str, str]:
@@ -121,8 +131,11 @@ def _class_name(level: Level, index: int) -> tuple[str, str, str]:
 def _account(session: Session, school_id: int, role_id: int, scope_type: str,
              scope_id: int | None, username: str, ar_name: str, purpose: str,
              credentials: list[tuple[str, str, str, str]], password_hash: str) -> m.User:
+             credentials: list[tuple[str, str, str, str]], password_hash: str,
+             en_name: str = "") -> m.User:
     user = m.User(username=username, password_hash=password_hash,
                   email=f"{username}@arabic-demo.school", full_name_en=purpose,
+                  email=f"{username}@arabic-demo.school", full_name_en=en_name or ar_name,
                   full_name_ar=ar_name, preferred_language="ar", school_id=school_id,
                   is_active=True)
     session.add(user); session.flush()
@@ -197,17 +210,24 @@ def load(session: Session) -> dict[str, int]:
     shared_hash = hash_password(PASSWORD)
     _account(session, school.id, roles["principal"], "school", school.id, "arabic.manager",
              "أحمد عبد الحميد", "مدير المدرسة", credentials, shared_hash)
+             "أحمد عبد الحميد", "مدير المدرسة", credentials, shared_hash, en_name="Ahmed Abdel Hamid")
 
     # Grade/floor supervisors and attendance supervisors are deliberately different people.
     attendance_user: dict[str, str] = {}
     for n, spec in enumerate(LEVELS, 1):
+        ar_sup, en_sup = _person_name(7000+n, n % 2 == 0)
         _account(session, school.id, roles["year_supervisor"], "year_level", levels[spec.code].id,
                  f"floor.{spec.code.lower()}", _person_name(7000+n, n % 2 == 0)[0],
                  f"مشرف دور {spec.ar}", credentials, shared_hash)
+                 f"floor.{spec.code.lower()}", ar_sup,
+                 f"مشرف دور {spec.ar}", credentials, shared_hash, en_name=en_sup)
+        ar_att, en_att = _person_name(7100+n, n % 2 == 1)
         att = _account(session, school.id, roles["attendance_supervisor"], "year_level",
                        levels[spec.code].id, f"attendance.{spec.code.lower()}",
                        _person_name(7100+n, n % 2 == 1)[0], f"مشرف غياب {spec.ar}",
                        credentials, shared_hash)
+                       ar_att, f"مشرف غياب {spec.ar}",
+                       credentials, shared_hash, en_name=en_att)
         attendance_user[spec.code] = att.username
 
     # Three teacher teams for large grades, two for KG/secondary. Each gets its own account.
@@ -220,11 +240,15 @@ def load(session: Session) -> dict[str, int]:
             for team_no in range(1, team_count + 1):
                 username = f"teacher.{subject_code.lower()}.{spec.code.lower()}.{team_no}"
                 ar_name = _person_name(8000 + teacher_number, teacher_number % 3 == 0)[0]
+                ar_name, en_name = _person_name(8000 + teacher_number, teacher_number % 3 == 0)
                 user = _account(session, school.id, roles["teacher"], "year_level",
                                 levels[spec.code].id, username, ar_name,
                                 f"مدرس {SUBJECTS[subject_code][1]} - {spec.ar}", credentials, shared_hash)
+                                f"مدرس {SUBJECTS[subject_code][1]} - {spec.ar}", credentials, shared_hash,
+                                en_name=en_name)
                 teacher = m.Teacher(staff_number=f"AR-T-{teacher_number:04d}", school_id=school.id,
                                     user_id=user.id, full_name_en=f"Teacher {teacher_number:04d}",
+                                    user_id=user.id, full_name_en=en_name,
                                     full_name_ar=ar_name, email=f"{username}@arabic-demo.school",
                                     phone=_phone(70000000 + teacher_number), is_active=True)
                 session.add(teacher); session.flush()
