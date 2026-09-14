@@ -170,7 +170,7 @@ class _Session(unittest.IsolatedAsyncioTestCase):
             patch.object(service, "plan_turn", self._plan),
             patch.object(service, "create_agent_for_request", self._agent),
             patch.object(service, "generate_session_title", Mock(return_value="س")),
-            patch.object(service, "update_persistent_note", AsyncMock(return_value="")),
+            patch.object(service, "_update_persistent_note_sync", Mock(return_value="")),
         ):
             async for chunk in service.chat_with_agent_stream(
                 text,

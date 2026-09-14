@@ -48,7 +48,6 @@ from backend.chat.assets_bridge import (
 from backend.chat.request_context import ChatRequestContext
 from backend.profiles.registry import load_profile
 from tests.general.postgres_support import postgres_schema
-from backend.chat.turn_pipeline import message_data_for_save
 
 
 def make_png(width=200, height=200, seed=1) -> bytes:
@@ -392,17 +391,34 @@ class AssetsBridgeTests(unittest.TestCase):
         self.assertIsNone(trace_for_storage(None))
         self.assertEqual({"route": "answer"}, trace_for_storage({"route": "answer"}))
 
-    def test_the_service_stores_every_turns_trace_by_id(self):
-        """The wiring, not just the function: a save path that skipped it would put
+    def test_the_pipeline_stores_every_turns_trace_by_id(self):
+        """The wiring, not just the function: a commit path that skipped it would put
         renditions back in the database without any test noticing."""
-        service = importlib.import_module("backend.chat.service")
-        wire = attach_assets_to_trace({"route": "answer"}, [AssetReference(asset_id="x")])
+        from backend.chat.background import InlineJobs
+        from backend.chat.caller_identity import CallerIdentity
+        from backend.chat.child_context import SessionChild
+        from backend.chat.turn_pipeline import Turn, TurnCollaborators, TurnPipeline
+        from tests.general.test_chat_hitl_resume import FakeStorage
 
-        extra = message_data_for_save([1, 2], wire)
+        storage = FakeStorage()
+        pipeline = TurnPipeline(TurnCollaborators(
+            conversations=storage, background=InlineJobs(), profile=None, plan=None,
+            resolve_question=None, create_agent=None, resume_retrieval=None, answer_model=None,
+            session_title=None, update_note=None, context_type=None,
+        ))
+        turn = Turn(
+            user_text="show me", user_id="u", session_id="s", caller=CallerIdentity.for_user("u"),
+            messages=[], metadata={}, child_state=SessionChild(), persistent_note="",
+            is_first_message=True, history=[],
+        )
+        turn.answer = "Here. [1]"
+        turn.rag_trace = attach_assets_to_trace({"route": "answer"}, [AssetReference(asset_id="x")])
 
-        self.assertEqual([None], extra[:1])
-        self.assertEqual(["x"], extra[-1]["rag_trace"]["asset_ids"])
-        self.assertNotIn("assets", extra[-1]["rag_trace"])
+        pipeline.commit(turn, {})
+
+        stored = storage.appends[-1]["messages"][-1].rag_trace
+        self.assertEqual(["x"], stored["asset_ids"])
+        self.assertNotIn("assets", stored)
 
     def test_attach_does_not_mutate_the_original_trace(self):
         trace = {"route": "answer"}
@@ -497,19 +513,15 @@ class StoredConversationAssetTests(unittest.TestCase):
         return {"tool_used": True, "assets": [reference.model_dump(mode="json", exclude_none=True)]}
 
     def _turn(self, question, answer, trace=None):
-        """One turn, saved the way the chat service saves it: once when the question
-        arrives, once when the answer is complete, with the trace stored by id."""
-        from langchain_core.messages import AIMessage, HumanMessage
+        """One turn, stored the way the chat service stores it: the question appended
+        when it arrives, the answer appended when it is complete, its trace by id."""
+        from backend.chat.storage import MessageToStore
 
-        messages = self.storage.load("u", "s")
-        messages.append(HumanMessage(content=question))
-        self.storage.save("u", "s", messages)
-        messages.append(AIMessage(content=answer))
-        self.storage.save(
-            "u", "s", messages,
+        self.storage.append("u", "s", [MessageToStore("human", question)])
+        self.storage.append(
+            "u", "s",
+            [MessageToStore("ai", answer, rag_trace=trace_for_storage(trace))],
             metadata={},
-            extra_message_data=[None] * (len(messages) - 1)
-            + [{"rag_trace": trace_for_storage(trace)}],
         )
 
     def _stored_ids(self):
@@ -548,38 +560,6 @@ class StoredConversationAssetTests(unittest.TestCase):
 
         self.assertEqual([[], ["a1"], [], []], self._stored_ids())
 
-    def test_a_supplied_trace_replaces_the_stored_one(self):
-        """Keeping what is stored must not outrank what this save was actually given."""
-        from langchain_core.messages import AIMessage, HumanMessage
-
-        self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
-        messages = [HumanMessage(content="what is the uniform?"), AIMessage(content="Navy. [1]")]
-        self.storage.save(
-            "u", "s", messages, metadata={},
-            extra_message_data=[None, {"rag_trace": trace_for_storage(self._trace("a2"))}],
-        )
-
-        self.assertEqual([[], ["a2"]], self._stored_ids())
-
-    def test_a_rewritten_conversation_is_replaced_rather_than_appended_to(self):
-        """Position alone is not identity. Roles that disagree mean the conversation was
-        rewritten, and appending to it would splice two conversations together."""
-        from langchain_core.messages import AIMessage, HumanMessage
-
-        self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
-        self.storage.save("u", "s", [AIMessage(content="Navy. [1]"), HumanMessage(content="ok")])
-
-        self.assertEqual([[], []], self._stored_ids())
-        self.assertEqual(["ai", "human"], [row.message_type for row in self._rows()])
-
-    def test_a_shorter_conversation_replaces_what_was_stored(self):
-        from langchain_core.messages import HumanMessage
-
-        self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
-        self.storage.save("u", "s", [HumanMessage(content="starting over")])
-
-        self.assertEqual(1, len(self._rows()))
-
     def test_the_cached_copy_and_the_database_agree(self):
         """`get_session_messages` prefers the cache, so a fix that only reached the
         database would still hand a live client the wrong history."""
@@ -592,7 +572,7 @@ class StoredConversationAssetTests(unittest.TestCase):
 
     def test_a_turn_appends_rather_than_rewriting_the_conversation(self):
         """Three turns used to cost three deletes and twelve inserts. The rows that were
-        already right are left alone now, which is what keeps their ids and timestamps."""
+        already right are left alone, which is what keeps their ids and timestamps."""
         self._turn("what is the uniform?", "Navy. [1]", self._trace("a1"))
         first_pass = [(row.id, row.timestamp) for row in self._rows()]
 

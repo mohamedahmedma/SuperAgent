@@ -445,7 +445,7 @@ class TheStreamSendsTheDataAheadOfItsText(scenarios.ParentTurnScenario):
         events, _, _ = await self._timetable_turn(storage)
         trace = next(e["rag_trace"] for e in events if e["type"] == "trace")
         self.assertEqual("timetable", trace["answer_blocks"][0]["kind"])
-        stored = storage.saves[-1]["extra_message_data"][-1]["rag_trace"]
+        stored = storage.appends[-1]["messages"][-1].rag_trace
         self.assertEqual("timetable", stored["answer_blocks"][0]["kind"])
 
 

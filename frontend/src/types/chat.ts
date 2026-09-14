@@ -174,6 +174,8 @@ export interface RagTraceFields {
   synthesis_merged_count?: number;
   initial_retrieved_chunks?: RetrievedChunk[];
   rewrite_retrieved_chunks?: RetrievedChunk[];
+  /** The stream was stopped or dropped; the stored answer is what had arrived by then. */
+  turn_interrupted?: boolean;
 }
 
 export interface RagSubTrace extends RagTraceFields {}

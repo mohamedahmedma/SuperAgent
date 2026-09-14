@@ -223,6 +223,9 @@ class RagTraceFields(StrictSchema):
     turn_resolved_question: Optional[str] = None
     turn_carried_constraints: Optional[List[str]] = None
     turn_is_followup: Optional[bool] = None
+    # The stream was cut off — the parent pressed Stop or the connection dropped — and
+    # what is stored as the answer is what had reached them by then, not a finished one.
+    turn_interrupted: Optional[bool] = None
     request_scope: Optional[str] = None
     request_scope_certainty: Optional[str] = None
     request_language: Optional[str] = None

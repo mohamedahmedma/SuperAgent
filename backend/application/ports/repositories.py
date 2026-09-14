@@ -38,16 +38,6 @@ class StoredSession:
 
 
 @dataclass(frozen=True, slots=True)
-class MessageHead:
-    """A stored message without its body — what deciding how to save a turn needs."""
-
-    id: int
-    message_type: str
-    timestamp: datetime
-    rag_trace: dict | None
-
-
-@dataclass(frozen=True, slots=True)
 class StoredMessage:
     id: int
     message_type: str
@@ -83,24 +73,21 @@ class ConversationRepository(Protocol):
         """The conversation, created with `metadata` if absent; None only for an unknown user."""
         ...
 
-    def update_session(
+    def patch_session(
         self, session: StoredSession, *, metadata: dict | None, updated_at: datetime
     ) -> None:
-        """Replace the metadata when given, and always move `updated_at`."""
-        ...
+        """Merge `metadata` into the stored metadata, key by key, and move `updated_at`.
 
-    def message_heads(self, session: StoredSession) -> Sequence[MessageHead]:
-        """Every message, oldest first, without reading a single body."""
+        A merge in the database rather than a replacement from memory: two writers holding
+        the metadata as it was when their turn began — a turn's save and a note update
+        running behind it — each land only the keys they changed, and neither puts the
+        other's back the way it found them. A key mapped to None is stored as null, which
+        is how a pending question is cleared.
+        """
         ...
 
     def add_messages(self, session: StoredSession, messages: Sequence[NewMessage]) -> Sequence[int]:
         """Stage the messages in order and return the ids they were given, in that order."""
-        ...
-
-    def replace_trace(self, message_id: int, rag_trace: dict) -> None:
-        ...
-
-    def delete_messages(self, session: StoredSession) -> None:
         ...
 
     def messages(self, session: StoredSession) -> Sequence[StoredMessage]:

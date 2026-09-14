@@ -74,24 +74,6 @@ def _resume_rag_from_hitl_sync(
     )
 
 
-async def update_persistent_note(
-    current_note: str,
-    user_text: str,
-    ai_response: str,
-    history_messages: list | None = None,
-) -> str:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None,
-        lambda: _update_persistent_note_sync(
-            current_note,
-            user_text,
-            ai_response,
-            history_messages=history_messages,
-        ),
-    )
-
-
 def generate_session_title(user_text: str) -> str:
     compact_title = " ".join(user_text.split()).strip(" \t\r\n。！？!?，,；;：:")
     return compact_title[:16] or _COPY.new_session_title
@@ -104,6 +86,12 @@ def _update_persistent_note_sync(
     *,
     history_messages: list | None = None,
 ) -> str:
+    """The rolling conversation summary, rewritten around this turn.
+
+    Runs on a background thread after the turn has been answered and stored — see
+    `TurnPipeline.schedule_note` — so a failure here costs the note an update and nothing
+    else, and is logged rather than raised: the parent it concerned has already gone.
+    """
     try:
         history_text = ""
         if history_messages:
@@ -134,15 +122,17 @@ def _update_persistent_note_sync(
         # so a note that overruns its budget is not a one-off, it is a permanent
         # per-turn tax for the rest of the session.
         return (res.content or "").strip()[: _PROFILE.agent.persistent_note_max_chars]
-    except Exception as e:
-        print(f"Context Manager Error: {e}")
+    except Exception:
+        logger.exception("the persistent note could not be updated; keeping the previous one")
         return current_note
 
 
 def _pipeline(services: Services | None) -> TurnPipeline:
     """A turn pipeline over this module's collaborators, as they are at call time."""
+    container = services or default_services()
     return TurnPipeline(TurnCollaborators(
-        conversations=(services or default_services()).conversations,
+        conversations=container.conversations,
+        background=container.background_jobs,
         profile=_PROFILE,
         plan=plan_turn,
         resolve_question=resolve_turn_question,
@@ -151,7 +141,6 @@ def _pipeline(services: Services | None) -> TurnPipeline:
         answer_model=model,
         session_title=generate_session_title,
         update_note=_update_persistent_note_sync,
-        update_note_async=update_persistent_note,
         context_type=ChatRequestContext,
     ))
 
@@ -174,6 +163,8 @@ def chat_with_agent(
 
     When given, it is authoritative: `user_id` is taken from it rather than from the
     positional argument, so the storage key and the identity can never disagree.
+
+    Returns once the answer is stored. The note update it may owe runs behind it.
     """
     caller, user_id = resolve_caller(caller, user_id)
     pipeline = _pipeline(services)
@@ -203,11 +194,9 @@ def chat_with_agent(
         if answered is not None:
             pipeline.record_finalize_stage(turn, answered)
 
-        save_meta = pipeline.save_metadata(turn)
-        if pipeline.note_is_due(turn):
-            args, kwargs = pipeline.note_request(turn)
-            save_meta["persistent_note"] = pipeline.collaborators.update_note(*args, **kwargs)
-        pipeline.commit(turn, save_meta)
+        pipeline.schedule_note(turn)
+        pipeline.commit(turn, pipeline.save_metadata(turn))
+        pipeline.wait_for_save(turn)
         return pipeline.response(turn)
     finally:
         ctx.close()
@@ -230,21 +219,33 @@ async def chat_with_agent_stream(
 
     One generator with every branch inline, deliberately. A branch delegated to a nested
     async generator would be left suspended when the client disconnects — Python does not
-    finalize it at the outer `yield` — and the handler that cancels the agent would run
+    finalize it at the outer `yield` — and the handler that stores the turn would run
     later, at garbage collection, instead of now.
+
+    The answer is queued for storage before `[DONE]` goes on the wire, on a thread this
+    request does not own. That is what a browser leaving at `[DONE]` used to cost: the
+    save ran after it, on the request, and the disconnect cancelled it — the parent had
+    read an answer that was never stored. The connection is then held only until the save
+    has run (milliseconds), never for the note update behind it. A stream cut off before
+    its answer settled stores what had reached the parent, marked interrupted.
     """
     caller, user_id = resolve_caller(caller, user_id)
     pipeline = _pipeline(services)
     yield _event(_REQUEST_RECEIVED)
 
-    turn = pipeline.open(user_text, user_id, session_id, caller)
-    # On a worker thread: deciding whether this message answers the pending clarification
-    # or replaces it may cost a small model call, and the event loop is already streaming
+    # On a worker thread, both of them: opening waits for the previous turn's save and
+    # reads the conversation, and deciding whether this message answers the pending
+    # clarification may cost a small model call — and the event loop is already streaming
     # tokens to other requests.
+    turn = await asyncio.to_thread(pipeline.open, user_text, user_id, session_id, caller)
     await asyncio.to_thread(pipeline.enter, turn)
 
     output_queue = asyncio.Queue()
     ctx = pipeline.stream_context(turn, output_queue)
+    # What the agent has put on the wire so far. `turn.answer` holds the settled answer, or
+    # the resumed search's, so between them an interrupted turn knows what the parent saw.
+    full_response = ""
+    agent_task = None
     try:
         pipeline.record_question(turn)
 
@@ -280,11 +281,10 @@ async def chat_with_agent_stream(
                 yield _event({"type": "trace", "rag_trace": turn.rag_trace})
             if turn.next_pending:
                 yield _event({"type": "hitl_request", "hitl": build_hitl_event(turn.next_pending)})
+            pipeline.schedule_note(turn)
+            pipeline.commit(turn, pipeline.save_metadata(turn))
             yield _DONE
-
-            save_meta = pipeline.save_metadata(turn)
-            await _update_note_streamed(pipeline, turn, save_meta)
-            pipeline.commit(turn, save_meta)
+            await _hold_until_stored(pipeline, turn)
             return
 
         # Plan the turn before building the agent. A confirmed out-of-domain question ends
@@ -308,8 +308,10 @@ async def chat_with_agent_stream(
             if turn.next_pending:
                 yield _event({"type": "hitl_request", "hitl": build_hitl_event(turn.next_pending)})
             yield _event({"type": "trace", "rag_trace": turn.rag_trace})
+            pipeline.schedule_note(turn)
             pipeline.commit(turn, pipeline.save_metadata(turn))
             yield _DONE
+            await _hold_until_stored(pipeline, turn)
             return
 
         agent, context_messages, config = pipeline.agent_call(turn)
@@ -317,7 +319,6 @@ async def chat_with_agent_stream(
         if turn.title:
             yield _event({"type": "session_title", "title": turn.title, "session_id": session_id})
 
-        full_response = ""
         # Every chunk the model produces crosses this, and nothing reaches the browser that it
         # did not return. Held out here rather than inside the worker because settling the
         # answer needs it once the stream has finished — see `backend/chat/finalize.py`.
@@ -370,22 +371,11 @@ async def chat_with_agent_stream(
                 await output_queue.put(None)
 
         agent_task = asyncio.create_task(_agent_worker())
-        try:
-            while True:
-                event = await output_queue.get()
-                if event is None:
-                    break
-                yield _event(event)
-        except GeneratorExit:
-            agent_task.cancel()
-            try:
-                await agent_task
-            except asyncio.CancelledError:
-                pass
-            raise
-        finally:
-            if not agent_task.done():
-                agent_task.cancel()
+        while True:
+            event = await output_queue.get()
+            if event is None:
+                break
+            yield _event(event)
 
         answered = StreamedAnswer(text=full_response, finalizer=finalizer)
         settlement = pipeline.settle_agent_answer(turn, answered)
@@ -410,21 +400,37 @@ async def chat_with_agent_stream(
             yield _event({"type": "trace", "rag_trace": turn.rag_trace})
         if turn.next_pending:
             yield _event({"type": "hitl_request", "hitl": build_hitl_event(turn.next_pending)})
+        pipeline.schedule_note(turn)
+        pipeline.commit(turn, pipeline.save_metadata(turn))
         yield _DONE
-
-        save_meta = pipeline.save_metadata(turn)
-        await _update_note_streamed(pipeline, turn, save_meta)
-        pipeline.commit(turn, save_meta)
+        await _hold_until_stored(pipeline, turn)
+    except (asyncio.CancelledError, GeneratorExit):
+        # The connection is gone, or the parent pressed Stop. The agent is told so first —
+        # left running it would finish the answer for nobody — and then what the parent
+        # had seen is stored, unless the turn had already stored its answer.
+        if agent_task is not None and not agent_task.done():
+            agent_task.cancel()
+            try:
+                await agent_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        pipeline.commit_interrupted(turn, turn.answer or full_response)
+        raise
     finally:
         ctx.close()
 
 
-async def _update_note_streamed(pipeline: TurnPipeline, turn, save_meta: dict) -> None:
-    """Maintain the persistent note off the event loop, when the turn is due for it."""
-    if not pipeline.note_is_due(turn):
-        return
-    args, kwargs = pipeline.note_request(turn)
-    try:
-        save_meta["persistent_note"] = await pipeline.collaborators.update_note_async(*args, **kwargs)
-    except Exception as e:
-        print(f"Update persistent note error: {e}")
+async def _hold_until_stored(pipeline: TurnPipeline, turn) -> None:
+    """Keep the connection open until the answer has been stored.
+
+    Not for the parent's sake — their answer is complete and their composer was released
+    at `[DONE]`. It is what makes the close of this connection mean the turn is durable,
+    for a client that waits for it, and it costs the milliseconds the append takes rather
+    than the seconds the note update used to. On a worker thread, so the wait holds no
+    event loop; a browser that leaves first cancels only this wait, never the save.
+    """
+    if not await asyncio.to_thread(pipeline.wait_for_save, turn):
+        logger.warning(
+            "the save for %s/%s is still running after %.0fs; closing the stream without it",
+            turn.user_id, turn.session_id, pipeline.SAVE_WAIT_SECONDS,
+        )

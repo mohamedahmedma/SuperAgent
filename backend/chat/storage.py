@@ -1,4 +1,6 @@
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Sequence
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -9,12 +11,40 @@ from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 from backend.schemas.chat import normalize_rag_trace
 
 
+@dataclass(frozen=True)
+class MessageToStore:
+    """One message a turn adds to its conversation: the role, the text, and — on an
+    answer — the trace it should be stored with."""
+
+    message_type: str
+    content: str
+    rag_trace: dict | None = None
+
+
 class ConversationStorage:
     """Conversation history: Postgres through a unit of work, with Redis in front of it.
 
     Both collaborators are constructor arguments. The defaults are the process-wide unit
-    of work and cache, which is what the module-level `storage` below uses; a test passes
-    its own, and so will the composition root once the singletons are gone.
+    of work and cache; a test passes its own, and so does the composition root.
+
+    ## Writes only ever add
+
+    A turn appends its messages and patches the keys of the session metadata it changed.
+    The save used to take the whole conversation as the caller held it and make the
+    database match, deleting and re-inserting every row whenever the two disagreed. They
+    disagreed more often than "the conversation was rewritten": two turns overlapping in
+    one chat, or one Redis write that failed silently and left the next turn loading a
+    stale copy, and the rewrite then dropped the other turn's rows and the trace — the
+    images, the tables — of every message the caller had not re-supplied. An append cannot
+    lose what is already stored, whatever the caller believed the conversation was.
+
+    ## The cache is a cache
+
+    A write invalidates the cached conversation rather than rewriting it from the caller's
+    copy, and a turn loads its history from the database, which is the authority. The
+    cache serves the web app's page reads, and it may be briefly stale in the one case
+    Redis cache-aside always allows — a read that started before a write and finished
+    after — which costs a page a refresh, never a message its row.
     """
 
     # What one scroll-back fetches. A conversation is read in batches because opening a
@@ -68,118 +98,83 @@ class ConversationStorage:
             normalized.append(current)
         return normalized
 
-    @staticmethod
-    def _continues(stored: list, messages: list) -> bool:
-        """Whether what is stored is still a prefix of what is being saved.
+    # -- writes ------------------------------------------------------------------------
 
-        A chat only ever grows at the end, so the ordinary case is that every stored row
-        matches the message at its position and the save has a tail to append. Roles are
-        compared, not content: what is stored has been through the engine's sanitiser —
-        NFC normalisation, invisible characters, NUL — so it does not match the in-memory
-        string for the Arabic and emoji this corpus is full of, and comparing it would
-        force a needless rewrite on exactly those conversations.
-        """
-        if len(stored) > len(messages):
-            return False
-        return all(row.message_type == messages[index].type for index, row in enumerate(stored))
-
-    def save(
+    def append(
         self,
         user_id: str,
         session_id: str,
-        messages: list,
-        metadata: dict = None,
-        extra_message_data: list = None,
-    ):
+        messages: Sequence[MessageToStore],
+        *,
+        metadata: dict | None = None,
+    ) -> list[int]:
+        """Add `messages` to the conversation and merge `metadata` into its session.
+
+        Returns the row ids in order. Creates the conversation on its first message. The
+        metadata is a PATCH — only the keys this turn changed — merged in the database, so
+        a turn never writes back a key it did not touch. Nothing when the user is unknown:
+        a conversation belongs to a `users` row, and there is none to hang it off.
+        """
         now = datetime.now(UTC)
         with self._unit_of_work() as uow:
-            conversations = uow.conversations
-            session = conversations.open_session(user_id, session_id, metadata or {})
+            session = uow.conversations.open_session(user_id, session_id, {})
             if session is None:
-                return
-            merged = {**session.metadata, **metadata} if metadata is not None else None
-
-            # A turn adds one or two messages to a conversation that is otherwise
-            # unchanged, so it is written as an append: the rows already stored stay
-            # where they are, and only the tail is inserted.
-            #
-            # Deleting and re-inserting every message instead made each turn cost a
-            # rewrite of the whole conversation, reset every timestamp to now, and — the
-            # reason this changed — dropped the rag_trace of every message the caller did
-            # not re-supply. `assets` lives on the trace, so an answer's images survived
-            # only until the next message was saved.
-            #
-            # Heads rather than whole messages: the bodies are not needed to decide any of
-            # this, and re-reading them on every save is a cost that grows with the
-            # conversation.
-            stored = list(conversations.message_heads(session))
-            if not self._continues(stored, messages):
-                # The conversation was rewritten rather than continued. Rare enough to
-                # be worth handling simply: replace the lot.
-                conversations.delete_messages(session)
-                stored = []
-
-            serialized = []
-            appended_records = []
-            appended = []
-            for idx, msg in enumerate(messages):
-                supplied = None
-                if extra_message_data and idx < len(extra_message_data):
-                    extra = extra_message_data[idx] or {}
-                    supplied = normalize_rag_trace(extra.get("rag_trace"))
-
-                record = {"type": msg.type, "content": str(msg.content), "rag_trace": None, "id": None}
-                if idx < len(stored):
-                    head = stored[idx]
-                    record["id"] = head.id
-                    record["timestamp"] = head.timestamp.isoformat()
-                    record["rag_trace"] = (
-                        supplied if supplied is not None else normalize_rag_trace(head.rag_trace)
+                return []
+            ids = list(uow.conversations.add_messages(
+                session,
+                [
+                    NewMessage(
+                        message_type=message.message_type,
+                        content=str(message.content),
+                        timestamp=now,
+                        rag_trace=normalize_rag_trace(message.rag_trace),
                     )
-                    # Only when this save actually brought one: a turn supplies a trace
-                    # for the answer it just wrote, and nothing for the history behind it.
-                    if supplied is not None:
-                        conversations.replace_trace(head.id, supplied)
-                else:
-                    record["timestamp"] = now.isoformat()
-                    record["rag_trace"] = supplied
-                    appended.append(
-                        NewMessage(
-                            message_type=msg.type,
-                            content=str(msg.content),
-                            timestamp=now,
-                            rag_trace=supplied,
-                        )
-                    )
-                    appended_records.append(record)
-                serialized.append(record)
-
-            # Before the commit, so the cached records carry the same row ids the
-            # paginated read uses as its cursor. A cached page without them could not be
-            # scrolled back from.
-            for record, message_id in zip(appended_records, conversations.add_messages(session, appended)):
-                record["id"] = message_id
-            conversations.update_session(session, metadata=merged, updated_at=now)
+                    for message in messages
+                ],
+            ))
+            uow.conversations.patch_session(session, metadata=metadata or None, updated_at=now)
             uow.commit()
 
-        self._cache.set_json(self._messages_cache_key(user_id, session_id), serialized)
+        self._cache.delete(self._messages_cache_key(user_id, session_id))
+        self._cache.delete(self._sessions_cache_key(user_id))
+        return ids
+
+    def patch_metadata(self, user_id: str, session_id: str, patch: dict) -> None:
+        """Merge `patch` into the session's metadata. For state that changes between
+        turns rather than with one — the persistent note, written after the turn that
+        prompted it has been answered and stored."""
+        if not patch:
+            return
+        with self._unit_of_work() as uow:
+            session = uow.conversations.open_session(user_id, session_id, {})
+            if session is None:
+                return
+            uow.conversations.patch_session(session, metadata=patch, updated_at=datetime.now(UTC))
+            uow.commit()
         self._cache.delete(self._sessions_cache_key(user_id))
 
-    def load(self, user_id: str, session_id: str) -> list:
-        cached = self._cache.get_json(self._messages_cache_key(user_id, session_id))
-        if cached is not None:
-            return self._to_langchain_messages(cached)
+    # -- reads -------------------------------------------------------------------------
 
-        records = self.get_session_messages(user_id, session_id)
-        self._cache.set_json(self._messages_cache_key(user_id, session_id), records)
-        return self._to_langchain_messages(records)
+    def load(self, user_id: str, session_id: str) -> list:
+        """The whole conversation, for the agent's history. Read from the database: what a
+        turn is shown must be what is stored, not what a cache held a moment ago."""
+        return self._to_langchain_messages(self._read_records(user_id, session_id))
 
     def load_with_meta(self, user_id: str, session_id: str) -> tuple[list, dict]:
         """Load conversation messages and session metadata (title, persistent note, etc.)."""
-        messages = self.load(user_id, session_id)
         with self._unit_of_work() as uow:
             session = uow.conversations.find_session(user_id, session_id)
-        return messages, dict(session.metadata) if session is not None else {}
+            if session is None:
+                return [], {}
+            records = [self._record(message) for message in uow.conversations.messages(session)]
+            metadata = dict(session.metadata)
+        self._cache.set_json(self._messages_cache_key(user_id, session_id), records)
+        return self._to_langchain_messages(records), metadata
+
+    def session_metadata(self, user_id: str, session_id: str) -> dict:
+        with self._unit_of_work() as uow:
+            session = uow.conversations.find_session(user_id, session_id)
+        return dict(session.metadata) if session is not None else {}
 
     def list_sessions(self, user_id: str) -> list:
         return [item["session_id"] for item in self.list_session_infos(user_id)]
@@ -210,7 +205,10 @@ class ConversationStorage:
             if normalized != cached:
                 self._cache.set_json(self._messages_cache_key(user_id, session_id), normalized)
             return normalized
+        return self._read_records(user_id, session_id)
 
+    def _read_records(self, user_id: str, session_id: str) -> list[dict]:
+        """Every message from the database, and the cache refreshed with them."""
         with self._unit_of_work() as uow:
             session = uow.conversations.find_session(user_id, session_id)
             if session is None:
@@ -253,7 +251,7 @@ class ConversationStorage:
 
         cached = self._cache.get_json(self._messages_cache_key(user_id, session_id))
         # Entries written before ids were cached carry no cursor, so they cannot be paged
-        # from; the database answers instead, and the next save refreshes them.
+        # from; the database answers instead, and the next read refreshes them.
         if cached is not None and all(item.get("id") is not None for item in cached):
             return self._page_from_records(self._normalize_message_records(cached), limit, before_id)
 
@@ -289,3 +287,5 @@ class ConversationStorage:
         self._cache.delete(self._sessions_cache_key(user_id))
         return True
 
+
+__all__ = ["ConversationStorage", "MessageToStore"]
