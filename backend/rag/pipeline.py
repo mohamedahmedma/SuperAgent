@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Literal, TypedDict, List, Optional
+from typing import Annotated, Literal, TypedDict, List, Optional
 import logging
 import operator
 import re
@@ -15,9 +15,10 @@ from backend.rag.evidence import (
     build_ladder,
 )
 from backend.prompts import resolve as resolve_prompt
+from backend.rag.grading_view import format_docs, format_docs_for_grading
+from backend.rag.hitl_resume import build_hitl_resume_state, is_hitl_result, refined_question_for_hitl
 from backend.rag.policy import decide_route, offerable_directions, select_context_indices
 from backend.rag.rerank_assessor import CrossEncoderAssessor
-from backend.assets.vision import call_with_rate_limit_retry
 from backend.profiles import get_profile
 from backend.schemas.chat import HitlResumeState, normalize_rag_sub_trace
 from backend.chat.child_names import strip_child_names
@@ -38,17 +39,6 @@ _PROFILE = get_profile()
 _RAG = _PROFILE.rag
 _COPY = _PROFILE.user_copy
 
-
-class _RetryBudget:
-    """Adapts the rag section to the retry helper's attribute names, which were coined
-    for the vision path. One helper, two callers, no duplicated backoff logic."""
-
-    vision_retry_attempts = _RAG.model_retry_attempts
-    vision_retry_base_seconds = _RAG.model_retry_base_seconds
-    vision_retry_max_seconds = _RAG.model_retry_max_seconds
-
-
-_RETRY = _RetryBudget()
 
 #: What a response cut off at the output ceiling raises. Imported defensively: the
 #: concrete class lives in the OpenAI client, which is a transitive dependency here, and
@@ -227,209 +217,6 @@ class RAGState(TypedDict):
     child_year: Optional[str]
 
 
-def _format_docs(docs: List[dict]) -> str:
-    if not docs:
-        return ""
-    chunks = []
-    for i, doc in enumerate(docs, 1):
-        source = doc.get("filename", "Unknown")
-        page = doc.get("page_number", "N/A")
-        text = doc.get("text", "")
-        chunks.append(f"[{i}] {source} (Page {page}):\n{text}")
-    return "\n\n---\n\n".join(chunks)
-
-
-#: How much of one chunk the GRADER sees. The answer model still gets all of it.
-#:
-#: A grade is a judgement about subject and sufficiency, and the top of a chunk settles
-#: both: `AssetDossier.render_surrogate` writes caption first, then description, then the
-#: transcription — so a cap taken from the top leaves exactly what the question is being
-#: matched against and drops the literal contents, which is evidence for ANSWERING and
-#: noise for grading.
-#:
-#: It is also the only bound on the grading prompt as a whole. `_format_docs` passes
-#: every retrieved chunk in full, so at `top_k: 8` the prompt was whatever the corpus
-#: happened to hold — and a figure whose transcription is a school calendar rendered as
-#: a year of table rows pushed one deployment's grader past its completion budget, which
-#: comes back as `finish_reason: length` and no JSON at all.
-#:
-#: Set above a normal leaf (`level_3_size`, 800 here) so an ordinary chunk is untouched
-#: and only the outliers are trimmed.
-_GRADER_CHUNK_CHARS = 1200
-
-
-def _head(text: str, cap: int) -> str:
-    """The first `cap` characters of `text`, cut at a line boundary."""
-    if len(text) <= cap:
-        return text
-    kept: List[str] = []
-    used = 0
-    for line in text.splitlines():
-        if used + len(line) + 1 > cap:
-            break
-        kept.append(line)
-        used += len(line) + 1
-    # A single line longer than the whole budget still has to give — a transcription
-    # rendered as one enormous row is the case — and half of it beats none of it.
-    return "\n".join(kept) if kept else text[:cap]
-
-
-#: How much of a FIGURE's own text the grader sees, before its tags and questions.
-#:
-#: Tighter than `_GRADER_CHUNK_CHARS` because a figure's text is not prose that trails
-#: off — it is a caption, then a description, then a transcription of every word printed
-#: in the image, and only the first two say what the figure IS. The third is what the
-#: ANSWER is written from, and sending it to a grader deciding "are these snippets about
-#: school uniform" buys nothing while outweighing the rest of the prompt.
-_GRADER_FIGURE_BODY_CHARS = 500
-
-#: The compact lines `AssetDossier.render_surrogate` puts AFTER the transcription. Both
-#: are one line, and both are close to exactly what a grade is made of — what the picture
-#: is about, and which questions it can answer — so they are kept even though what sits
-#: between them and the caption was cut.
-_FIGURE_SUMMARY_PREFIXES = ("Tags:", "Answers:")
-
-#: How `render_surrogate` marks the caption line, and therefore how a figure chunk is
-#: recognised here without the dossier being in scope.
-_FIGURE_MARKER = "[Figure]"
-
-
-def _grading_view(text: str) -> str:
-    """One chunk as the grader should see it: enough to judge it, and no transcription.
-
-    Prose is simply capped — a leaf is `level_3_size` and the cap sits above it, so an
-    ordinary chunk passes through whole.
-
-    A figure is summarised instead, because truncating it from the top would keep the
-    first rows of a table and drop the `Tags:` and `Answers:` lines underneath, which are
-    the two most useful lines in it for this decision and one line each. So the head
-    (section path, caption, description) is kept to a tight budget, the transcription in
-    the middle is dropped, and the summary lines are put back.
-
-    Heuristic in one respect and knowingly so: `render_surrogate` writes description and
-    transcription as adjacent blocks with no marker between them, so "the head" is a
-    character budget rather than a field. It is sized to hold a caption and a couple of
-    sentences, which is what a description is.
-    """
-    text = text or ""
-    lines = text.splitlines()
-    if not any(line.startswith(_FIGURE_MARKER) for line in lines[:3]):
-        return _head(text, _GRADER_CHUNK_CHARS)
-
-    body: List[str] = []
-    summary: List[str] = []
-    for line in lines:
-        if line.startswith(_FIGURE_SUMMARY_PREFIXES):
-            summary.append(line)
-        elif not summary:
-            body.append(line)
-    kept = _head("\n".join(body), _GRADER_FIGURE_BODY_CHARS)
-    return "\n".join([kept, *summary]) if summary else kept
-
-
-def _format_docs_for_grading(docs: List[dict]) -> str:
-    """The chunks as the GRADER sees them: the same list, each one topped and tailed.
-
-    Deliberately not `_format_docs`. The answer prompt needs a figure's transcription —
-    a fee table read out of an image is only useful entire — while the grader is deciding
-    whether the snippets are on the subject and whether they settle it, and neither
-    question is answered by row 200 of a table. Sending it anyway made the size of the
-    grading prompt a property of the corpus rather than of the retrieval.
-    """
-    if not docs:
-        return ""
-    chunks = []
-    for i, doc in enumerate(docs, 1):
-        source = doc.get("filename", "Unknown")
-        page = doc.get("page_number", "N/A")
-        text = _grading_view(doc.get("text", ""))
-        chunks.append(f"[{i}] {source} (Page {page}):\n{text}")
-    return "\n\n---\n\n".join(chunks)
-
-
-def _copy_jsonable_doc(doc: dict) -> dict:
-    """Keep resume snapshots small and JSON-safe."""
-    allowed = {
-        "filename",
-        "page_number",
-        "text",
-        "score",
-        "rrf_rank",
-        "rerank_score",
-        "chunk_id",
-        "doc_id",
-        "asset_ids",
-        "modality",
-    }
-    return {key: value for key, value in doc.items() if key in allowed}
-
-
-def _copy_jsonable_docs(docs: List[dict] | None) -> List[dict]:
-    return [_copy_jsonable_doc(doc) for doc in (docs or []) if isinstance(doc, dict)]
-
-
-def _is_hitl_result(result: dict | None) -> bool:
-    if not isinstance(result, dict):
-        return False
-    trace = result.get("rag_trace") or {}
-    status = result.get("retrieval_status") or trace.get("retrieval_status")
-    route = result.get("route") or trace.get("route")
-    return status in ("needs_clarification", "needs_scope_selection") or route in ("clarify", "scope_select")
-
-
-def _build_hitl_resume_state(result: dict) -> dict:
-    trace = result.get("rag_trace") or {}
-    return HitlResumeState(
-        question=result.get("question") or trace.get("query") or "",
-        route=result.get("route") or trace.get("route"),
-        retrieval_status=result.get("retrieval_status") or trace.get("retrieval_status"),
-        rewrite_count=int(result.get("rewrite_count") or 0),
-        hitl_rounds=int(result.get("hitl_rounds") or 0),
-        complexity=result.get("complexity") or trace.get("complexity"),
-        complexity_reason=result.get("complexity_reason") or trace.get("complexity_reason"),
-        sub_questions=result.get("sub_questions") or trace.get("sub_questions") or [],
-        # Conditions the user set before the clarification. They survive the resume
-        # boundary or they are lost: the graph starts fresh there, and the turn that
-        # established "up to Year 6" is several messages back by the time the user
-        # answers.
-        carried_constraints=list(result.get("carried_constraints") or []),
-    ).model_dump()
-
-
-def _refined_question_for_hitl(
-    resume_state: dict,
-    user_answer: str,
-    resolved=None,
-    original_question: str = "",
-) -> str:
-    """The question a resumed turn should actually search for.
-
-    The resolved form when a resolver produced one, and this is the whole reason the
-    resolver is reachable from here. What it replaced was `f"{answer}: {question}"`,
-    and string formatting cannot express the thing a clarification reply most often
-    does: replace. "no i mean the school fees" concatenated onto the reading it was
-    correcting produces a query containing both readings, retrieves both, and answers
-    from the union — which is exactly what the user was trying to stop.
-
-    The fallback keeps the old shape but anchors on the USER's question rather than
-    `resume_state["question"]`. That field holds the query the AGENT wrote for the tool,
-    so any condition the user set and the agent did not repeat was already gone before
-    this function ever saw it.
-    """
-    if resolved is not None and getattr(resolved, "resolved", False):
-        refined = (getattr(resolved, "question", "") or "").strip()
-        if refined:
-            return refined
-
-    question = (original_question or resume_state.get("question") or "").strip()
-    answer = user_answer.strip()
-    if not question:
-        return answer
-    if answer and answer in question:
-        return question
-    return f"{answer}: {question}" if answer else question
-
-
 def _emit(state: RAGState, icon: str, label: str, detail: str = "") -> None:
     ctx = state["request_context"]
     ctx.emit_rag_step(
@@ -587,7 +374,7 @@ def retrieve_initial(state: RAGState) -> RAGState:
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
-    context = _format_docs(results)
+    context = format_docs(results)
     if retrieval_failed:
         _emit(
             state,
@@ -637,10 +424,6 @@ def retrieve_initial(state: RAGState) -> RAGState:
         "retrieval_failed": retrieval_failed,
         "rag_trace": rag_trace,
     }
-
-
-def _route_after_initial(state: RAGState) -> Literal["grade_documents"]:
-    return "grade_documents"
 
 
 def _route_after_grade(state: RAGState) -> Literal["rewrite_question", "end"]:
@@ -715,7 +498,7 @@ class LLMGraderAssessor:
             EVIDENCE_GRADE_PROMPT,
             "rag/evidence_grade.j2",
             question=ctx.question,
-            context=_format_docs_for_grading(ctx.docs),
+            context=format_docs_for_grading(ctx.docs),
             # Alongside the question, never folded into it. See AssessmentContext.
             constraints=list(ctx.constraints),
         )
@@ -931,7 +714,7 @@ def grade_documents_node(state: RAGState) -> RAGState:
             _emit(
                 state, "\u2702\ufe0f", f"Sending {len(kept)} of {len(docs)} chunks to the model", reason,
             )
-            update.update({"docs": kept, "context": _format_docs(kept)})
+            update.update({"docs": kept, "context": format_docs(kept)})
             # retrieved_chunks has to match what the answer was built from: citation
             # markers and asset attribution both index into it. The full set stays in
             # initial_retrieved_chunks for the trace panel.
@@ -1062,7 +845,7 @@ def retrieve_rewritten(state: RAGState) -> RAGState:
     merged = dedupe_documents(results + first_pass)
     for index, item in enumerate(merged, 1):
         item["rrf_rank"] = index
-    context = _format_docs(merged)
+    context = format_docs(merged)
     if retrieval_failed:
         _emit(
             state,
@@ -1120,7 +903,6 @@ _SIMPLE_OVERRIDE_MARKERS = tuple(_RAG.simple_override_markers)
 _SIMPLE_QUERY_MARKERS = tuple(_RAG.simple_query_markers)
 _COMPLEX_QUERY_MARKERS = tuple(_RAG.complex_query_markers)
 _QUERY_DIMENSION_MARKERS = tuple(_RAG.query_dimension_markers)
-
 
 
 def _simple_question_fast_path_reason(question: str) -> Optional[str]:
@@ -1304,7 +1086,7 @@ def synthesis(state: RAGState) -> RAGState:
         result.get("retrieval_status") == "retrieval_error" for result in sub_results
     )
 
-    context = _format_docs(deduped)
+    context = format_docs(deduped)
     if deduped:
         _emit(state, "✅", f"Synthesis complete, {len(deduped)} deduplicated snippets total")
     elif retrieval_outage:
@@ -1500,7 +1282,7 @@ def _state_from_resume(
     original_question: str = "",
 ) -> dict:
     current_resume_state = HitlResumeState.model_validate(resume_state).model_dump()
-    refined_question = _refined_question_for_hitl(
+    refined_question = refined_question_for_hitl(
         current_resume_state, user_answer, resolved, original_question
     )
     # The conditions in force before the clarification, plus anything the reply itself
@@ -1557,7 +1339,7 @@ def _retrieve_resume_query(state: dict) -> dict:
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     retrieval_failed = retrieve_meta.get("retrieval_mode") == "failed"
-    context = _format_docs(results)
+    context = format_docs(results)
     if retrieval_failed:
         _emit(
             state,
@@ -1633,8 +1415,8 @@ def resume_rag_from_hitl(
         _emit(state, "🧭", "Read in context, the question is", state["question"][:90])
 
     state = _retrieve_resume_query(state)
-    if _is_hitl_result(state):
-        state["hitl_resume_state"] = _build_hitl_resume_state(state)
+    if is_hitl_result(state):
+        state["hitl_resume_state"] = build_hitl_resume_state(state)
     return state
 
 
@@ -1667,8 +1449,8 @@ def run_rag_graph(question: str, ctx: ChatRequestContext) -> dict:
         return dict(cached)
 
     result = rag_graph.invoke(_initial_state(question, ctx))
-    if _is_hitl_result(result):
-        result["hitl_resume_state"] = _build_hitl_resume_state(result)
+    if is_hitl_result(result):
+        result["hitl_resume_state"] = build_hitl_resume_state(result)
     if ctx is not None:
         ctx.remember_retrieval(key, result)
     return result

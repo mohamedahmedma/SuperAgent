@@ -107,7 +107,7 @@ class AFigureSurrogateIsNeverCutInHalf(unittest.TestCase):
     def test_a_figure_is_bounded_even_though_it_is_never_split(self):
         """Atomic is not the same as unlimited, and conflating them cost a production
         turn. Removing the splitter left `_MILVUS_TEXT_CAP_BYTES` — 60 KB, seventy-five
-        times the leaf budget — as the only bound. `pipeline._format_docs` hands the
+        times the leaf budget — as the only bound. `grading_view.format_docs` hands the
         grader every retrieved chunk in full, so a handful of figures that size is a
         prompt the grading model cannot answer inside its output window, and the call
         returns `finish_reason: length`: a priced call turned into a parse failure."""

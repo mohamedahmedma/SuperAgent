@@ -607,9 +607,9 @@ class ResumeQuestionTests(unittest.TestCase):
     }
 
     def test_a_correction_replaces_rather_than_concatenates(self):
-        from backend.rag.pipeline import _refined_question_for_hitl
+        from backend.rag.hitl_resume import refined_question_for_hitl
 
-        refined = _refined_question_for_hitl(
+        refined = refined_question_for_hitl(
             self.RESUME_STATE,
             "no i mean what is the school fees for this years",
             ResolvedQuestion(
@@ -626,9 +626,9 @@ class ResumeQuestionTests(unittest.TestCase):
     def test_without_a_resolution_it_anchors_on_the_users_question(self):
         """`resume_state["question"]` holds the query the AGENT wrote, so a condition
         the user set and the agent dropped was already gone before this ran."""
-        from backend.rag.pipeline import _refined_question_for_hitl
+        from backend.rag.hitl_resume import refined_question_for_hitl
 
-        refined = _refined_question_for_hitl(
+        refined = refined_question_for_hitl(
             self.RESUME_STATE,
             "Primary",
             None,
@@ -638,9 +638,9 @@ class ResumeQuestionTests(unittest.TestCase):
         self.assertIn("Primary", refined)
 
     def test_an_abstaining_resolver_falls_back_rather_than_blanking(self):
-        from backend.rag.pipeline import _refined_question_for_hitl
+        from backend.rag.hitl_resume import refined_question_for_hitl
 
-        refined = _refined_question_for_hitl(
+        refined = refined_question_for_hitl(
             self.RESUME_STATE,
             "Primary",
             ResolvedQuestion(question="Primary", intent=STANDALONE, resolved=False),
