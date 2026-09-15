@@ -18,6 +18,25 @@ class ChatRequest(StrictSchema):
     # What this client can render. Omitted means "an ordinary browser"; a bot or a
     # downstream service declares its own limits instead of the server guessing.
     client_capabilities: Optional[ClientCapabilities] = None
+    # The voice note this message was spoken as, uploaded first through
+    # POST /chat/attachments. `message` then carries its transcript — the words the
+    # assistant answers — and the note is what the parent hears back on every device.
+    attachment_id: Optional[str] = None
+
+
+class AttachmentInfo(StrictSchema):
+    """A recording a parent sent, as a client shows it. Mirrors `AttachmentRecord`; the
+    bytes are behind `url`, which needs the caller's bearer token."""
+
+    id: str
+    kind: str
+    url: str
+    content_type: str
+    byte_size: int
+    duration_ms: int
+    transcript: Optional[str] = None
+    # "ok" | "empty" | "unavailable" — see `backend/chat/transcription.py`.
+    transcript_status: str
 
 
 class RetrievedChunk(StrictSchema):
@@ -223,6 +242,13 @@ class RagTraceFields(StrictSchema):
     turn_resolved_question: Optional[str] = None
     turn_carried_constraints: Optional[List[str]] = None
     turn_is_followup: Optional[bool] = None
+    # The stream was cut off — the parent pressed Stop or the connection dropped — and
+    # what is stored as the answer is what had reached them by then, not a finished one.
+    turn_interrupted: Optional[bool] = None
+    # What the message before this answer did to a pending clarification: settled it, or
+    # set it aside for a new question. A reopened conversation folds an answered
+    # exchange together and shows a replacing question as the parent typed it.
+    turn_clarification: Optional[Literal["answered", "replaced"]] = None
     request_scope: Optional[str] = None
     request_scope_certainty: Optional[str] = None
     request_language: Optional[str] = None
@@ -344,6 +370,16 @@ class HitlResumeState(StrictSchema):
     # starts fresh there, and the turn that established them is several messages back by
     # the time the user answers.
     carried_constraints: List[str] = Field(default_factory=list, max_length=8)
+    # What the planner handed the graph for the turn that asked — see
+    # `ChatRequestContext.note_turn_plan`. The planner runs only on a fresh question, so
+    # a resumed search got a context nothing had planned into: no language (both halves
+    # of a bilingual document competing), no year group, the child's name back in the
+    # query, no sections. Carried here and handed over again when the search resumes.
+    # Empty on a question paused before they were carried, which resumes as before.
+    language: str = ""
+    child_year: str = ""
+    retrieval_sections: List[str] = Field(default_factory=list)
+    child_names: List[str] = Field(default_factory=list)
 
 
 class PendingHitlState(StrictSchema):
@@ -446,6 +482,8 @@ class MessageInfo(StrictSchema):
     content: str
     timestamp: str
     rag_trace: Optional[RagTrace] = None
+    # The recording this message was spoken as, when it was one.
+    attachment: Optional[AttachmentInfo] = None
 
 
 class SessionMessagesResponse(StrictSchema):

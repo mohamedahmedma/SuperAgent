@@ -85,6 +85,11 @@ class RAGState(TypedDict):
     # uploaded in both Arabic and English, retrieval answers from the half that matches
     # the question rather than letting both compete. Empty searches everything, which is
     # also what an unpaired corpus does — see rag/utils.language_filter_clause.
+    #
+    # Declared here or dropped: LangGraph keeps only the keys the state schema names, so
+    # for as long as this line was missing `_initial_state` wrote the language and every
+    # node read None — both halves of a paired document competed on every bilingual turn.
+    language: Optional[str]
     # The year group the school's records put this turn's child in. Beside the question,
     # never appended to it: a year group is absent from every passage the corpus wrote
     # once for everybody, so stapling it to the query dilutes recall exactly as carried

@@ -9,6 +9,7 @@ failing test rather than a support ticket.
 These are also the specification for folding the two paths into one turn pipeline: once
 every case passes on both, the unification has nothing left to reconcile.
 """
+from datetime import datetime, timezone
 import asyncio
 import importlib
 import unittest
@@ -24,6 +25,10 @@ from backend.tools import KNOWLEDGE_TOOL
 from tests.general.test_chat_hitl_resume import FakeStorage, _parse_sse_events
 from backend.chat.answer_checks import terminal_reply
 from backend.chat.clarification import PENDING_HITL_KEY
+
+# A clarification asked a moment ago. Pending questions expire after a day
+# (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
+_ASKED_JUST_NOW = datetime.now(timezone.utc).isoformat()
 
 service = importlib.import_module("backend.chat.service")
 
@@ -75,7 +80,7 @@ class AResumedClarificationAfterAnOutage(unittest.TestCase):
         "route": "clarify",
         "retrieval_status": "needs_clarification",
         "answers": [],
-        "created_at": "2026-07-11T00:00:00+00:00",
+        "created_at": _ASKED_JUST_NOW,
         "resume_state": {
             "question": "What is this character's element?",
             "route": "clarify",
@@ -116,7 +121,6 @@ class AResumedClarificationAfterAnOutage(unittest.TestCase):
             service, "_resume_rag_from_hitl_sync", Mock(return_value=dict(self.OUTAGE)),
         ))
         stack.enter_context(patch.object(service, "model", _ModelThatMustNotAnswer()))
-        stack.enter_context(patch.object(service, "update_persistent_note", AsyncMock(return_value="")))
         stack.enter_context(patch.object(service, "_update_persistent_note_sync", Mock(return_value="")))
         return stack
 
@@ -200,7 +204,6 @@ class AKnowledgeSearchThatEndsTheTurn(unittest.TestCase):
             service, "create_agent_for_request",
             lambda ctx, *a, **k: agent_type(ctx, status),
         ))
-        stack.enter_context(patch.object(service, "update_persistent_note", AsyncMock(return_value="")))
         stack.enter_context(patch.object(service, "_update_persistent_note_sync", Mock(return_value="")))
         return stack
 
@@ -237,6 +240,9 @@ class AShortCircuitedTurn(unittest.TestCase):
     the one model call on a path whose point is making none. The sync path never learned
     that, and folded canned replies into a long conversation's memory at the price of a
     call. Its trace also dropped the request signals the streamed trace records.
+
+    The note runs as a background job now, so each path is driven through a job runner
+    that is drained before the assertion — "not called" has to mean "not queued either".
     """
 
     def _history(self):
@@ -247,7 +253,7 @@ class AShortCircuitedTurn(unittest.TestCase):
             for index in range(window + 2)
         ]
 
-    def _patched(self, sync_note, async_note) -> ExitStack:
+    def _patched(self, note) -> ExitStack:
         plan = TurnPlan(static_reply="That is outside what I can help with.", exposed_tools=[], reasons=["unit"])
         stack = ExitStack()
         stack.enter_context(patch.object(service, "plan_turn", lambda *a, **k: (plan, RequestSignals())))
@@ -255,38 +261,36 @@ class AShortCircuitedTurn(unittest.TestCase):
             service, "create_agent_for_request",
             Mock(side_effect=AssertionError("a short-circuited turn builds no agent")),
         ))
-        stack.enter_context(patch.object(service, "_update_persistent_note_sync", sync_note))
-        stack.enter_context(patch.object(service, "update_persistent_note", async_note))
+        stack.enter_context(patch.object(service, "_update_persistent_note_sync", note))
         return stack
 
+    def _services(self):
+        from backend.chat.background import InlineJobs
+
+        return Services(conversations=FakeStorage(self._history()), background_jobs=InlineJobs())
+
     def test_the_sync_path_spends_no_note_update(self):
-        sync_note, async_note = Mock(return_value="note"), AsyncMock(return_value="note")
-        with self._patched(sync_note, async_note):
-            service.chat_with_agent(
-                "what is the weather", "u", "s", services=Services(conversations=FakeStorage(self._history()))
-            )
-        sync_note.assert_not_called()
-        async_note.assert_not_called()
+        note = Mock(return_value="note")
+        with self._patched(note):
+            service.chat_with_agent("what is the weather", "u", "s", services=self._services())
+        note.assert_not_called()
 
     def test_the_streamed_path_spends_no_note_update(self):
-        sync_note, async_note = Mock(return_value="note"), AsyncMock(return_value="note")
-        with self._patched(sync_note, async_note):
-            _stream_shown(
-                "what is the weather", "u", "s", services=Services(conversations=FakeStorage(self._history()))
-            )
-        sync_note.assert_not_called()
-        async_note.assert_not_called()
+        note = Mock(return_value="note")
+        with self._patched(note):
+            _stream_shown("what is the weather", "u", "s", services=self._services())
+        note.assert_not_called()
 
     def test_both_paths_store_the_request_signals(self):
         for path in ("sync", "stream"):
             with self.subTest(path=path):
                 storage = FakeStorage(self._history())
-                with self._patched(Mock(return_value=""), AsyncMock(return_value="")):
+                with self._patched(Mock(return_value="")):
                     if path == "sync":
                         service.chat_with_agent("what is the weather", "u", "s", services=Services(conversations=storage))
                     else:
                         _stream_shown("what is the weather", "u", "s", services=Services(conversations=storage))
-                stored = storage.saves[-1]["extra_message_data"][-1]["rag_trace"]
+                stored = storage.appends[-1]["messages"][-1].rag_trace
                 self.assertIn("request_scope", stored)
 
 

@@ -1,34 +1,58 @@
+from datetime import datetime, timezone
 import importlib
 import json
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
+from backend.chat.background import InlineJobs
 from backend.composition import Services
 from backend.chat.clarification import PENDING_HITL_KEY
+
+# A clarification asked a moment ago. Pending questions expire after a day
+# (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
+_ASKED_JUST_NOW = datetime.now(timezone.utc).isoformat()
 
 service = importlib.import_module("backend.chat.service")
 
 
 class FakeStorage:
+    """`ConversationStorage` in memory: what a turn appends, and the metadata it patches.
+
+    `messages` are the stored conversation as langchain messages, so a test reads the
+    last answer as `storage.messages[-1].content`; `appends` keeps each append as it was
+    handed over, trace included, for the tests that check what a turn stored beside it.
+    """
+
     def __init__(self, messages=None, metadata=None):
         self.messages = list(messages or [])
         self.metadata = dict(metadata or {})
-        self.saves = []
+        self.appends = []
+        self.patches = []
 
     def load_with_meta(self, user_id, session_id):
         return list(self.messages), dict(self.metadata)
 
-    def save(self, user_id, session_id, messages, metadata=None, extra_message_data=None):
-        self.messages = list(messages)
-        if metadata is not None:
-            self.metadata = {**self.metadata, **metadata}
-        self.saves.append({
-            "messages": list(messages),
-            "metadata": metadata,
-            "extra_message_data": extra_message_data,
-        })
+    def session_metadata(self, user_id, session_id):
+        return dict(self.metadata)
+
+    def append(self, user_id, session_id, messages, *, metadata=None):
+        for message in messages:
+            self.messages.append(
+                HumanMessage(content=message.content)
+                if message.message_type == "human"
+                else AIMessage(content=message.content)
+            )
+        if metadata:
+            # The same merge Postgres does with `||`: right-hand keys win, None stays.
+            self.metadata.update(metadata)
+        self.appends.append({"messages": list(messages), "metadata": metadata})
+        return list(range(len(self.messages) - len(messages) + 1, len(self.messages) + 1))
+
+    def patch_metadata(self, user_id, session_id, patch):
+        self.metadata.update(patch)
+        self.patches.append(dict(patch))
 
 
 class FakeStreamAgent:
@@ -122,7 +146,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stream_immediately_reports_progress_and_skips_note_for_short_chat(self):
         fake_storage = FakeStorage()
-        update_note = AsyncMock(return_value="updated note")
+        update_note = Mock(return_value="updated note")
 
         def make_agent(ctx, tool_names=None, language=None):
             return FakeStreamAgent(ctx, chunks=["direct answer"])
@@ -130,10 +154,10 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(service, "create_agent_for_request", make_agent),
             patch.object(service, "generate_session_title", Mock(return_value="short question")),
-            patch.object(service, "update_persistent_note", update_note),
+            patch.object(service, "_update_persistent_note_sync", update_note),
         ):
             chunks = await _collect_stream(
-                "Hello", "u", "s", services=Services(conversations=fake_storage)
+                "Hello", "u", "s", services=Services(conversations=fake_storage, background_jobs=InlineJobs())
             )
 
         events = _parse_sse_events(chunks)
@@ -164,9 +188,15 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             # Conditions set before the clarification, carried across the resume
             # boundary for the same reason `hitl_rounds` is.
             "carried_constraints": [],
+            # The planner's hints the question ran with, carried so the resumed search
+            # runs under them too. Empty here: this fake agent planned nothing.
+            "language": "",
+            "child_year": "",
+            "retrieval_sections": [],
+            "child_names": [],
         }
         fake_storage = FakeStorage()
-        update_note = AsyncMock(return_value="updated note")
+        update_note = Mock(return_value="updated note")
 
         def make_agent(ctx, tool_names=None, language=None):
             return FakeStreamAgent(
@@ -179,13 +209,13 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(service, "create_agent_for_request", make_agent),
             patch.object(service, "generate_session_title", Mock(return_value="character question")),
-            patch.object(service, "update_persistent_note", update_note),
+            patch.object(service, "_update_persistent_note_sync", update_note),
         ):
             chunks = await _collect_stream(
                 "What is this character's element?",
                 "u",
                 "s",
-                services=Services(conversations=fake_storage),
+                services=Services(conversations=fake_storage, background_jobs=InlineJobs()),
             )
 
         events = _parse_sse_events(chunks)
@@ -215,7 +245,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             "route": "clarify",
             "retrieval_status": "needs_clarification",
             "answers": [],
-            "created_at": "2026-07-11T00:00:00+00:00",
+            "created_at": _ASKED_JUST_NOW,
             "resume_state": {
                 "question": "What is this character's element?",
                 "route": "clarify",
@@ -246,10 +276,10 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(service, "create_agent_for_request", create_agent_mock),
             patch.object(service, "_resume_rag_from_hitl_sync", resume_mock),
             patch.object(service, "model", fake_model),
-            patch.object(service, "update_persistent_note", AsyncMock(return_value="updated note")),
+            patch.object(service, "_update_persistent_note_sync", Mock(return_value="updated note")),
         ):
             chunks = await _collect_stream(
-                "Danjin", "u", "s", services=Services(conversations=fake_storage)
+                "Danjin", "u", "s", services=Services(conversations=fake_storage, background_jobs=InlineJobs())
             )
 
         events = _parse_sse_events(chunks)

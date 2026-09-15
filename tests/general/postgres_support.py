@@ -63,8 +63,9 @@ class PostgresSchema:
             json_serializer=serialize_json,
         )
         try:
-            # Models or tables; created parents first so foreign keys resolve.
-            for table in sort_tables([getattr(item, "__table__", item) for item in tables]):
+            # Models or tables, plus whatever they reference; created parents first so
+            # foreign keys resolve.
+            for table in sort_tables(_with_referenced_tables(getattr(item, "__table__", item) for item in tables)):
                 table.create(self.engine)
         except Exception:
             self.drop()
@@ -105,6 +106,26 @@ class PostgresSchema:
             raise RuntimeError(_unreachable(self._url, exc)) from None
         finally:
             engine.dispose()
+
+
+def _with_referenced_tables(tables) -> list:
+    """`tables`, and every table one of them points at through a foreign key, transitively.
+
+    A test names the tables it exercises. Postgres refuses to create a table whose foreign
+    key names one that does not exist, so a model gaining a reference used to break every
+    test that created the model without also naming the new parent — a change in one
+    module failing tests in a dozen files that never mention it. Following the keys here
+    keeps "the tables this test uses" the whole of what a test has to say.
+    """
+    wanted: dict = {}
+    pending = list(tables)
+    while pending:
+        table = pending.pop()
+        if table.key in wanted:
+            continue
+        wanted[table.key] = table
+        pending.extend(fk.column.table for fk in table.foreign_keys)
+    return list(wanted.values())
 
 
 def postgres_schema(test: unittest.TestCase, *tables) -> PostgresSchema:

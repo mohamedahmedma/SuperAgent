@@ -96,6 +96,10 @@ SETTINGS: Tuple[str, ...] = (
     "MODEL",
     "FAST_MODEL",
     "GRADE_MODEL",
+    # Speech-to-text for voice notes (backend/chat/transcription.py). Served through the
+    # same OpenAI-compatible endpoint and key as the text models, so it is a model id and
+    # nothing else; unset means voice notes are stored but not understood.
+    "TRANSCRIPTION_MODEL",
     "VISION_MODEL",
     "VISION_API_KEY",
     "VISION_BASE_URL",

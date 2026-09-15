@@ -191,7 +191,7 @@ class ParentTurnScenario(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(service, "create_agent_for_request", make_agent),
             patch.object(service, "generate_session_title", Mock(return_value="سؤال")),
-            patch.object(service, "update_persistent_note", AsyncMock(return_value="")),
+            patch.object(service, "_update_persistent_note_sync", Mock(return_value="")),
         ):
             async for chunk in service.chat_with_agent_stream(
                 self.question,

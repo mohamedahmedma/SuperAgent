@@ -34,10 +34,17 @@ class IssuedSession:
 
 @dataclass(frozen=True, slots=True)
 class IssuedAccessToken:
-    """A refresh, which mints no new refresh token."""
+    """A refresh: a new access token, and the refresh token that replaces the one spent.
+
+    The presented refresh token is finished with once this is returned — the client keeps
+    `refresh_token` and forgets the old one. `refresh_expires_at` is the new end of the
+    session's inactivity window.
+    """
 
     access_token: str
     expires_at: datetime
+    refresh_token: str
+    refresh_expires_at: datetime
 
 
 @dataclass(frozen=True, slots=True)

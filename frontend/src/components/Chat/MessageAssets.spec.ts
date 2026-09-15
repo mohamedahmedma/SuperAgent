@@ -29,7 +29,7 @@ describe('asset fetching is routed at the API, not at the page', () => {
   });
 
   it('passes the asset URL through apiUrl', () => {
-    expect(SOURCE).toContain('fetch(apiUrl(asset.url)');
+    expect(SOURCE).toContain('authorizedFetch(apiUrl(asset.url)');
   });
 
   it('no longer fetches the bare path', () => {
@@ -37,11 +37,13 @@ describe('asset fetching is routed at the API, not at the page', () => {
     expect(SOURCE).not.toContain('fetch(asset.url');
   });
 
-  it('still sends the bearer token the media endpoint requires', () => {
-    /* Routing changed; authentication was not allowed to. Without the header the endpoint
-       401s, which renders as the same "Image unavailable" placeholder as a bad URL — so a
-       regression here would look exactly like the bug this fix just removed. */
-    expect(SOURCE).toMatch(/Authorization:\s*`Bearer \$\{authStore\.token\}`/);
+  it('sends the bearer token through the auth store, which keeps it fresh', () => {
+    /* Without the header the endpoint 401s, which renders as the same "Image unavailable"
+       placeholder as a bad URL. Reading `authStore.token` here sent the token the page had
+       started with, so half an hour into a session every picture failed the same way —
+       `authorizedFetch` renews it first (see stores/auth.ts). */
+    expect(SOURCE).toContain('authStore.authorizedFetch(');
+    expect(SOURCE).not.toMatch(/Authorization:\s*`Bearer \$\{authStore\.token\}`/);
   });
 
   it('still short-circuits inline assets instead of fetching them', () => {

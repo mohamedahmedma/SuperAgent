@@ -8,6 +8,7 @@ import api from '@/utils/api';
 vi.mock('@/utils/api', () => ({
   default: {
     get: vi.fn(),
+    post: vi.fn(),
     delete: vi.fn(),
   },
   // The store now builds its stream URL through this. Mocked as the identity function,
@@ -128,6 +129,15 @@ const createControlledSseFetch = () => {
   };
 };
 
+/** A message as `/sessions/{id}` returns it: stored, and so carrying its row id. */
+const serverPageMessage = (id: number, content: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  type: id % 2 === 1 ? 'human' : 'ai',
+  content,
+  timestamp: '2026-09-14T00:00:00',
+  ...extra,
+});
+
 const setupStores = () => {
   setActivePinia(createPinia());
 
@@ -147,7 +157,10 @@ const setupStores = () => {
 
 describe('chat store streaming sessions', () => {
   beforeEach(() => {
+    // Restoring puts spies back; it no longer empties a `vi.fn()`'s call history (Vitest 3+),
+    // so the shared `api` mock is cleared too — a test that counts calls starts from zero.
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     vi.stubGlobal('localStorage', createLocalStorageMock());
     vi.stubGlobal('alert', vi.fn());
     vi.stubGlobal('confirm', vi.fn(() => true));
@@ -339,6 +352,176 @@ describe('chat store streaming sessions', () => {
     expect(chatStore.isLoading).toBe(false);
   });
 
+  it('keys the turn on the rows the server stored it under', async () => {
+    // The `stored` event follows `[DONE]`. From then on this tab's copy and the server's
+    // are one message, which is what reopening the chat relies on.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+
+    chatStore.userInput = 'When does the bus leave?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    stream.pushEvent({ type: 'content', content: 'At 07:30.' });
+    stream.pushDone();
+    stream.pushEvent({ type: 'stored', message_ids: [41, 42] });
+    stream.close();
+    await sendPromise;
+
+    const [question, answer] = chatStore.messagesBySession.session_current;
+    expect(question).toMatchObject({ id: 41, isUser: true });
+    expect(answer).toMatchObject({ id: 42, text: 'At 07:30.' });
+    expect(question.unconfirmed).toBeUndefined();
+    expect(answer.unconfirmed).toBeUndefined();
+  });
+
+  it('keeps a turn whose save has not landed when the chat is reopened, then knows it once stored', async () => {
+    // The composer is released at `[DONE]`; the save follows by milliseconds. A parent who
+    // switches chats and back inside that window used to see the answer they had just
+    // read disappear, replaced by a page from the server that did not hold it yet.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+    const older = [serverPageMessage(31, 'Earlier question'), serverPageMessage(32, 'Earlier answer')];
+
+    chatStore.userInput = 'When does the bus leave?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    stream.pushEvent({ type: 'content', content: 'At 07:30.' });
+    stream.pushDone();
+    await flushPromises();
+    expect(chatStore.isLoading).toBe(false);
+
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { messages: older, has_more: false } });
+    await chatStore.loadSession('session_current');
+    expect(chatStore.messages.map((msg) => msg.text)).toEqual([
+      'Earlier question',
+      'Earlier answer',
+      'When does the bus leave?',
+      'At 07:30.',
+    ]);
+
+    stream.pushEvent({ type: 'stored', message_ids: [41, 42] });
+    stream.close();
+    await sendPromise;
+    expect(chatStore.messages[3]).toMatchObject({ id: 42 });
+
+    // The server now returns the turn; the reconciled list holds it once, not twice.
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        messages: [...older, serverPageMessage(41, 'When does the bus leave?'), serverPageMessage(42, 'At 07:30.')],
+        has_more: false,
+      },
+    });
+    await chatStore.loadSession('session_current');
+    expect(chatStore.messages.map((msg) => msg.id)).toEqual([31, 32, 41, 42]);
+  });
+
+  it('yields to the server for a turn the stream never confirmed', async () => {
+    // Stop was pressed. The server stores what had reached the parent, marked as
+    // interrupted; this tab's copy must not appear beside it on reopen.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+
+    chatStore.userInput = 'What are the fees?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    stream.pushEvent({ type: 'content', content: 'The fees for Year 1 are ' });
+    await flushPromises();
+    chatStore.handleStop();
+    await sendPromise;
+    expect(chatStore.messages[1].text).toBe('The fees for Year 1 are \n\n_(Response was stopped)_');
+
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: {
+        messages: [
+          serverPageMessage(51, 'What are the fees?'),
+          serverPageMessage(52, 'The fees for Year 1 are ', { rag_trace: { turn_interrupted: true } }),
+        ],
+        has_more: false,
+      },
+    });
+    await chatStore.loadSession('session_current');
+
+    expect(chatStore.messages).toHaveLength(2);
+    expect(chatStore.messages[1]).toMatchObject({
+      id: 52,
+      text: 'The fees for Year 1 are \n\n_(Response was stopped)_',
+    });
+  });
+
+  it('uploads a voice note, queues it with its transcript, and sends the two together', async () => {
+    // The transcript is the message; the note goes with it so the server keeps them as one
+    // turn and the recording comes back on every device.
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:local-note'), revokeObjectURL: vi.fn() });
+    vi.mocked(api.post).mockResolvedValueOnce({
+      data: {
+        id: 'note-1', kind: 'voice', url: '/chat/attachments/note-1', content_type: 'audio/webm',
+        byte_size: 1200, duration_ms: 4200, transcript: 'إمتى الباص بييجي؟', transcript_status: 'ok',
+      },
+    });
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+
+    const attachment = await chatStore.attachVoiceNote(new Blob(['audio'], { type: 'audio/webm' }), 4.2);
+    expect(attachment.transcript_status).toBe('ok');
+    expect(api.post).toHaveBeenCalledWith('/chat/attachments', expect.any(FormData), expect.anything());
+    expect(chatStore.pendingVoice).toMatchObject({ url: 'blob:local-note', attachmentId: 'note-1', duration: 4.2 });
+
+    chatStore.userInput = attachment.transcript!;
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    stream.close();
+    await sendPromise;
+
+    const body = JSON.parse((stream.fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body).toMatchObject({ message: 'إمتى الباص بييجي؟', attachment_id: 'note-1' });
+    expect(chatStore.messagesBySession.session_current[0]).toMatchObject({
+      isUser: true,
+      text: 'إمتى الباص بييجي؟',
+      voice: { attachmentId: 'note-1', url: 'blob:local-note' },
+    });
+    expect(chatStore.pendingVoice).toBeNull();
+  });
+
+  it('does not queue a note nobody could transcribe', async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({
+      data: {
+        id: 'note-2', kind: 'voice', url: '/chat/attachments/note-2', content_type: 'audio/webm',
+        byte_size: 1200, duration_ms: 4200, transcript: null, transcript_status: 'unavailable',
+      },
+    });
+    const { chatStore } = setupStores();
+
+    const attachment = await chatStore.attachVoiceNote(new Blob(['audio']), 4.2);
+
+    expect(attachment.transcript_status).toBe('unavailable');
+    expect(chatStore.pendingVoice).toBeNull();
+  });
+
+  it('restores a voice note from the server copy of the message', () => {
+    const { chatStore } = setupStores();
+    const [question] = chatStore.mapServerMessages([
+      serverPageMessage(41, 'إمتى الباص بييجي؟', {
+        attachment: {
+          id: 'note-1', kind: 'voice', url: '/chat/attachments/note-1', content_type: 'audio/webm',
+          byte_size: 1200, duration_ms: 4200, transcript: 'إمتى الباص بييجي؟', transcript_status: 'ok',
+        },
+      }),
+    ]);
+
+    expect(question.voice).toEqual({
+      url: '/chat/attachments/note-1',
+      duration: 4.2,
+      mimeType: 'audio/webm',
+      attachmentId: 'note-1',
+      transcript: 'إمتى الباص بييجي؟',
+    });
+    expect(question.text).toBe('إمتى الباص بييجي؟');
+  });
+
   it('does not let a drained stream clear a newer request state', async () => {
     // Releasing the composer early means a next message can start while the previous
     // connection is still draining. That stream's teardown must not clear the state the
@@ -457,6 +640,63 @@ describe('chat store streaming sessions', () => {
     expect(chatStore.pendingHitlBySession.session_current).toBeUndefined();
   });
 
+  it('shows a message as typed when the server reads it as a new question, not an answer', async () => {
+    // Asked "which child?", the parent asks about the bus instead. The message was
+    // marked as an answer at send time; the server's `turn` event says otherwise.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+    chatStore.pendingHitlBySession.session_current = {
+      id: 'which-child',
+      prompt: 'Which child do you mean?',
+      options: ['Fatma — Year 11', 'Fatma — Year 9'],
+      route: 'child_select',
+    };
+
+    chatStore.userInput = 'When does the bus come?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    expect(chatStore.messagesBySession.session_current[0].isHitlAnswer).toBe(true);
+
+    stream.pushEvent({ type: 'turn', answers_clarification: false });
+    stream.pushEvent({ type: 'content', content: 'At 07:30.' });
+    stream.close();
+    await sendPromise;
+
+    const [question, answer] = chatStore.messagesBySession.session_current;
+    expect(question).toMatchObject({ text: 'When does the bus come?', isUser: true, isHitlAnswer: false });
+    expect(answer.hitlResumeText).toBeUndefined();
+    expect(answer.text).toBe('At 07:30.');
+  });
+
+  it('shows a stored question that replaced a clarification as a message on reload', () => {
+    const { chatStore } = setupStores();
+    const messages = chatStore.mapServerMessages([
+      { type: 'human', content: 'What are her subjects?' },
+      {
+        type: 'ai',
+        content: 'Which child do you mean?',
+        rag_trace: { retrieval_status: 'needs_child_choice', route: 'child_select', hitl_prompt: 'Which child do you mean?' },
+      },
+      { type: 'human', content: 'When does the bus come?' },
+      { type: 'ai', content: 'At 07:30.', rag_trace: { turn_clarification: 'replaced' } },
+    ]);
+
+    // `needs_child_choice` is not a retrieval clarification, so message 1 is not a HITL
+    // request here; the rule under test is the one on messages 2 and 3.
+    expect(messages[2]).toMatchObject({ isUser: true, isHitlAnswer: false });
+    expect(messages[3].hitlResumeText).toBeUndefined();
+
+    const retrieval = chatStore.mapServerMessages([
+      { type: 'human', content: 'What are the fees?' },
+      { type: 'ai', content: 'Which year group?', rag_trace: { retrieval_status: 'needs_clarification', route: 'clarify' } },
+      { type: 'human', content: 'Who is the principal?' },
+      { type: 'ai', content: 'Mr Hany.', rag_trace: { turn_clarification: 'replaced' } },
+    ]);
+    expect(retrieval[2]).toMatchObject({ text: 'Who is the principal?', isHitlAnswer: false });
+    expect(retrieval[3].hitlResumeText).toBeUndefined();
+  });
+
   it('maps persisted HITL answer turns as continuation state instead of normal chat turns', () => {
     const { chatStore } = setupStores();
 
@@ -564,7 +804,10 @@ describe('chat store streaming sessions', () => {
 
 describe('chat store conversation paging', () => {
   beforeEach(() => {
+    // Restoring puts spies back; it no longer empties a `vi.fn()`'s call history (Vitest 3+),
+    // so the shared `api` mock is cleared too — a test that counts calls starts from zero.
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     vi.stubGlobal('localStorage', createLocalStorageMock());
     vi.stubGlobal('alert', vi.fn());
     vi.stubGlobal('confirm', vi.fn(() => true));
@@ -751,14 +994,62 @@ describe('chat store conversation paging', () => {
     vi.mocked(api.get).mockResolvedValue({
       data: { messages: [serverMessage(41, 'Question')], has_more: true },
     });
+    vi.mocked(api.delete).mockResolvedValue({ data: { message: 'Session deleted successfully' } });
 
     const { chatStore } = setupStores();
     await chatStore.loadSession('session_long');
     expect(chatStore.canLoadOlderMessages).toBe(true);
 
-    chatStore.handleClearChat();
+    await chatStore.handleClearChat();
 
     expect(chatStore.pagingBySession.session_long).toBeUndefined();
     expect(chatStore.canLoadOlderMessages).toBe(false);
+  });
+
+  it('clears a conversation on the server too, and starts a fresh one', async () => {
+    // Clearing only the screen left the conversation stored: it came back on reopen and
+    // the assistant kept reading it as history.
+    vi.mocked(api.get).mockResolvedValue({
+      data: { messages: [serverMessage(41, 'Question'), serverMessage(42, 'Answer')], has_more: false },
+    });
+    vi.mocked(api.delete).mockResolvedValue({ data: { message: 'Session deleted successfully' } });
+
+    const { chatStore, sessionStore } = setupStores();
+    sessionStore.sessions = [{ session_id: 'session_long', title: 'Q', message_count: 2, updated_at: 'now' }];
+    await chatStore.loadSession('session_long');
+
+    await chatStore.handleClearChat();
+
+    expect(api.delete).toHaveBeenCalledWith('/sessions/session_long');
+    expect(chatStore.messagesBySession.session_long).toBeUndefined();
+    expect(sessionStore.sessions.find((s) => s.session_id === 'session_long')).toBeUndefined();
+    expect(chatStore.sessionId).not.toBe('session_long');
+    expect(chatStore.messages).toEqual([]);
+  });
+
+  it('drops a conversation the server never saw without asking it to delete anything', async () => {
+    const { chatStore } = setupStores();
+    chatStore.messagesBySession.session_current = [{ text: 'typed, never sent', isUser: true }];
+    chatStore.messages = chatStore.messagesBySession.session_current;
+
+    await chatStore.handleClearChat();
+
+    expect(api.delete).not.toHaveBeenCalled();
+    expect(chatStore.messages).toEqual([]);
+  });
+
+  it('keeps the conversation when the server refuses to delete it', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: { messages: [serverMessage(41, 'Question')], has_more: false },
+    });
+    vi.mocked(api.delete).mockRejectedValue(new Error('Network Error'));
+
+    const { chatStore } = setupStores();
+    await chatStore.loadSession('session_long');
+
+    await chatStore.handleClearChat();
+
+    expect(chatStore.sessionId).toBe('session_long');
+    expect(chatStore.messages.map((msg) => msg.text)).toEqual(['Question']);
   });
 });

@@ -140,15 +140,21 @@ const handleUnauthorized = () => {
   alert('Your session has expired, please log in again');
 };
 
+// Tokens another tab renews or revokes are adopted here, so two tabs are one session.
+let stopWatchingOtherTabs: (() => void) | undefined;
+
 onMounted(async () => {
   window.addEventListener('unauthorized', handleUnauthorized);
-  if (authStore.token) {
-    try { await authStore.fetchMe(); }
-    catch (_) { authStore.handleLogout(); }
-  }
+  stopWatchingOtherTabs = authStore.watchOtherTabs();
+  // Whatever storage holds, renewed first if it has gone stale: a parent who reopens the
+  // app days later is signed in, not signed out.
+  await authStore.restoreSession();
 });
 
-onUnmounted(() => window.removeEventListener('unauthorized', handleUnauthorized));
+onUnmounted(() => {
+  window.removeEventListener('unauthorized', handleUnauthorized);
+  stopWatchingOtherTabs?.();
+});
 
 const mobileSidebarOpen = ref(false);
 

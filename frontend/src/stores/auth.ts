@@ -1,11 +1,14 @@
 import { defineStore } from 'pinia';
-import identityApi, {
-  ACCESS_TOKEN_KEY,
-  clearStoredSession,
-  persistSession,
-  REFRESH_TOKEN_KEY,
-  type IdentitySession,
-} from '@/utils/identityApi';
+import identityApi, { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from '@/utils/identityApi';
+import {
+  clearStoredTokens,
+  exchangeRefreshToken,
+  isStale,
+  readStoredTokens,
+  withRefreshLock,
+  writeStoredTokens,
+} from '@/utils/session';
+import type { SessionTokens } from '@/utils/session';
 import type { CurrentUser, UserRole } from '@/types/user';
 
 /**
@@ -44,6 +47,14 @@ function stopPolling() {
 const POLL_INTERVAL_MS = 2000;
 
 /**
+ * The one refresh in flight, if any. Module-scoped like the poll timer, and for the same
+ * reason: a promise is not something to re-render on. Every caller that finds the token
+ * stale at the same moment — the stream, an image, a sessions fetch — waits on this one
+ * exchange instead of spending the refresh token three times.
+ */
+let refreshInFlight: Promise<string> | null = null;
+
+/**
  * Pull the machine-readable code out of an identity refusal.
  *
  * The existing handler keeps only `message`, which is right for a password login where
@@ -71,11 +82,21 @@ function refusal(error: any): { code: string; message: string } {
  * The backend no longer has `/auth/*` routes — it only verifies the tokens it is
  * handed. Login, registration and refresh all go to a separate origin, which is why
  * every call here uses `identityApi` rather than the shared `api` instance.
+ *
+ * ## The session stays open until the parent signs out
+ *
+ * This store is the authority on the live session. Every caller that needs a token asks
+ * it — `ensureFreshToken()` for axios, `authorizedFetch()` for the two raw `fetch` calls —
+ * and gets one that will still be valid when the request lands, renewed first if not.
+ * Identity rotates the refresh token on every renewal and keeps the session alive for a
+ * full inactivity window from each, so a parent who keeps using the app is never asked to
+ * sign in again. The session ends in exactly two ways: the parent signs out
+ * (`handleLogout`), or identity refuses a renewal (`endSession`).
  */
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    token: localStorage.getItem(ACCESS_TOKEN_KEY) || '',
-    refreshToken: localStorage.getItem(REFRESH_TOKEN_KEY) || '',
+    token: readStoredTokens().accessToken,
+    refreshToken: readStoredTokens().refreshToken,
     currentUser: null as CurrentUser | null,
     authForm: {
       username: '',
@@ -126,11 +147,132 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
-    async fetchMe() {
-      if (!this.token) return;
+    /**
+     * A token good for the request about to be made, renewed first if the one in hand is
+     * about to expire. Empty when there is no session — nothing stored, or a renewal
+     * identity refused.
+     */
+    async ensureFreshToken(): Promise<string> {
+      if (!isStale(this.token)) return this.token;
+      if (!this.refreshToken) return this.token;
+      return this.refreshSession();
+    },
+
+    /**
+     * Exchange the refresh token for new tokens — once, however many callers ask at the
+     * same moment, and once across tabs where the browser can arrange that.
+     *
+     * Resolves to the new access token, or to the current one when identity could not be
+     * reached (it may still work, and the next call tries again), or to '' when identity
+     * refused — in which case the session has been ended and the app told.
+     */
+    refreshSession(): Promise<string> {
+      if (!refreshInFlight) {
+        refreshInFlight = withRefreshLock(() => this.renewTokens()).finally(() => {
+          refreshInFlight = null;
+        });
+      }
+      return refreshInFlight;
+    },
+
+    async renewTokens(): Promise<string> {
+      // Another tab may have renewed while this one waited for the lock, or a moment
+      // before it: its tokens are in storage, and adopting them costs nothing.
+      const stored = readStoredTokens();
+      if (stored.accessToken && stored.accessToken !== this.token && !isStale(stored.accessToken)) {
+        this.token = stored.accessToken;
+        this.refreshToken = stored.refreshToken || this.refreshToken;
+        return this.token;
+      }
+
+      const outcome = await exchangeRefreshToken(this.refreshToken);
+      if (outcome.status === 'refreshed') {
+        this.applyTokens(outcome.tokens);
+        return this.token;
+      }
+      if (outcome.status === 'rejected') {
+        this.endSession();
+        return '';
+      }
+      // Identity is unreachable. The token in hand may not have expired yet, and a request
+      // made with it may well succeed; a network blip must not sign a parent out.
+      return this.token;
+    },
+
+    /**
+     * `fetch` with a bearer token that is fresh, and one renewal-and-retry should the
+     * server refuse it anyway. For the two calls axios cannot make: the chat stream, which
+     * reads a `ReadableStream`, and an image, which is fetched as a blob.
+     */
+    async authorizedFetch(input: string, init: RequestInit = {}): Promise<Response> {
+      const send = (token: string) =>
+        fetch(input, {
+          ...init,
+          headers: {
+            ...((init.headers as Record<string, string> | undefined) || {}),
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+      let response = await send(await this.ensureFreshToken());
+      if (response.status === 401 && this.refreshToken) {
+        const token = await this.refreshSession();
+        if (token) {
+          response = await send(token);
+        }
+      }
+      return response;
+    },
+
+    /**
+     * Pick the session up where the browser left it: on page load, with whatever storage
+     * holds. A stale access token is renewed before anything is asked of it, so a parent
+     * who reopens the app a week later is signed in, not signed out.
+     */
+    async restoreSession(): Promise<void> {
+      if (!this.token && !this.refreshToken) return;
+      const token = await this.ensureFreshToken();
+      if (!token) return;
+      try {
+        await this.fetchMe();
+      } catch {
+        // `fetchMe` has already ended the session; the login panel is showing.
+      }
+    },
+
+    /**
+     * Adopt tokens another tab writes, and sign out when another tab signs out. Returns
+     * the function that stops watching.
+     */
+    watchOtherTabs(): () => void {
+      const onStorage = (event: StorageEvent) => {
+        if (event.key !== null && event.key !== ACCESS_TOKEN_KEY && event.key !== REFRESH_TOKEN_KEY) {
+          return;
+        }
+        const stored = readStoredTokens();
+        if (!stored.accessToken && !stored.refreshToken) {
+          if (this.token || this.refreshToken) {
+            this.token = '';
+            this.refreshToken = '';
+            this.currentUser = null;
+          }
+          return;
+        }
+        if (stored.accessToken !== this.token || stored.refreshToken !== this.refreshToken) {
+          this.token = stored.accessToken;
+          this.refreshToken = stored.refreshToken;
+        }
+      };
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    },
+
+    async fetchMe(retried = false): Promise<void> {
+      const token = await this.ensureFreshToken();
+      if (!token) return;
       try {
         const response = await identityApi.get('/v1/auth/me', {
-          headers: { Authorization: `Bearer ${this.token}` },
+          headers: { Authorization: `Bearer ${token}` },
         });
         this.currentUser = {
           username: response.data.username,
@@ -138,7 +280,15 @@ export const useAuthStore = defineStore('auth', {
           guardianId: response.data.guardian_id ?? null,
           displayName: response.data.display_name || '',
         };
-      } catch (error) {
+      } catch (error: any) {
+        // A token the clock called fresh was refused — the signing key rotated, or the
+        // session was revoked. One renewal and one retry; refused again, it is over.
+        if (error?.response?.status === 401 && !retried && this.refreshToken) {
+          const renewed = await this.refreshSession();
+          if (renewed && renewed !== token) {
+            return this.fetchMe(true);
+          }
+        }
         this.handleLogout();
         throw error;
       }
@@ -326,28 +476,50 @@ export const useAuthStore = defineStore('auth', {
       this.whatsapp.busy = false;
     },
 
-    applySession(data: IdentitySession & Record<string, unknown>) {
-      this.token = data.access_token;
-      this.refreshToken = data.refresh_token || '';
+    applySession(data: any) {
+      this.applyTokens({
+        accessToken: String(data.access_token || ''),
+        refreshToken: String(data.refresh_token || ''),
+      });
       this.currentUser = {
         username: String(data.username || ''),
         role: data.role as UserRole,
         guardianId: (data.guardian_id as string | null | undefined) ?? null,
         displayName: String(data.display_name || ''),
       };
-      persistSession(data);
+    },
+
+    /** Both tokens together, in memory and in storage. Rotation replaces the pair. */
+    applyTokens(tokens: SessionTokens) {
+      this.token = tokens.accessToken;
+      this.refreshToken = tokens.refreshToken;
+      writeStoredTokens(tokens);
+    },
+
+    /**
+     * The session is over and it was not the parent's doing: identity refused to renew it.
+     * Cleared locally — the refresh token is already dead, so there is nothing to revoke —
+     * and announced, so the app can show the sign-in screen and say why.
+     */
+    endSession() {
+      stopPolling();
+      this.token = '';
+      this.refreshToken = '';
+      this.currentUser = null;
+      clearStoredTokens();
+      window.dispatchEvent(new CustomEvent('unauthorized'));
     },
 
     async handleLogout() {
       stopPolling();
-      // Tell identity to revoke the refresh token. Best effort: the local session is
-      // cleared either way, because a user who clicked "log out" must end up logged
-      // out even if the network call fails.
+      // Tell identity to revoke the session — every refresh token rotated from this
+      // sign-in. Best effort: the local session is cleared either way, because a user
+      // who clicked "log out" must end up logged out even if the network call fails.
       const refreshToken = this.refreshToken;
       this.token = '';
       this.refreshToken = '';
       this.currentUser = null;
-      clearStoredSession();
+      clearStoredTokens();
 
       if (refreshToken) {
         try {

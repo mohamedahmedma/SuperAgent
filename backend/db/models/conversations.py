@@ -35,6 +35,13 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     timestamp: Mapped[datetime] = timestamp_column()
     rag_trace: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: The recording this message was spoken as, when it was. `content` holds the
+    #: transcript — what the assistant answered and what history shows the model — and
+    #: the attachment is what the parent hears back. SET NULL rather than CASCADE: a
+    #: recording removed later leaves the words it carried in place.
+    attachment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("chat_attachments.id", ondelete="SET NULL"), nullable=True
+    )
 
     session = relationship("ChatSession", back_populates="messages")
 

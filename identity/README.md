@@ -99,6 +99,8 @@ pytest tests/identity -q
 | `IDENTITY_BOOTSTRAP_ADMIN_USER` / `_PASSWORD` | — | The administrator seeded on **every** startup, so one exists however the database arrived. Never overwrites an existing username, so a password changed through the API survives the next deploy. Set both or neither. |
 | `IDENTITY_ISSUER` / `IDENTITY_AUDIENCE` | `school-identity` / `school-services` | Must match the verifier's settings. |
 | `IDENTITY_ACCESS_TTL_MINUTES` | `30` | Bounds the revocation window. |
+| `IDENTITY_REFRESH_TTL_DAYS` | `365` | The session's **inactivity** window. Every refresh issues a new refresh token that lives this long again, so a parent who keeps using the app stays signed in until they sign out. |
+| `IDENTITY_REFRESH_REUSE_GRACE_SECONDS` | `60` | How long a spent refresh token may be presented again (a retried request, a second tab) before that counts as a replay and revokes the whole session. |
 | `IDENTITY_MAX_FAILED_ATTEMPTS` | `8` | Then locked for `IDENTITY_LOCKOUT_MINUTES`. |
 | `IDENTITY_SIS_TIMEOUT_SECONDS` | `5.0` | The guardian lookup a parent's sign-in waits on. |
 | `IDENTITY_SIS_CHILDREN_TIMEOUT_SECONDS` | `1.5` | The children claim, which no sign-in waits on. See below. |
@@ -139,8 +141,8 @@ half-finished state.
 ```
 GET  /.well-known/jwks.json                              public key, for verifiers
 POST /v1/auth/login                                      credentials -> tokens
-POST /v1/auth/refresh                                    re-reads the binding
-POST /v1/auth/logout                                     revokes a refresh token
+POST /v1/auth/refresh                                    re-reads the binding; rotates the refresh token
+POST /v1/auth/logout                                     revokes the whole session (every rotated token)
 GET  /v1/auth/me                                         decode your own token
 
 POST /v1/auth/whatsapp/start                             begin a parent verification
@@ -170,6 +172,12 @@ The last active administrator cannot be deleted, demoted or deactivated.
 - **Refresh re-reads the binding** rather than copying it from the old token. A custody
   change takes effect within one access-token lifetime instead of persisting until the
   parent happens to log out.
+- **Refresh tokens rotate, and a session is a family of them** (RFC 9700 §4.14). Each
+  refresh spends the token presented and returns a new one, valid for a full inactivity
+  window again — so a parent who keeps using the app is never asked to sign in. A spent
+  token presented again inside a short grace window is a retry and is honoured; outside it
+  the token was copied, and the whole family is revoked. Sign-out revokes the family too.
+  Spent tokens are kept for a week so a replay is still recognised, then pruned.
 - **Unbinding revokes refresh tokens.** The urgent custody path: the session dies.
 - **Wrong password and unknown user are indistinguishable**, and the timing is
   equalised. Otherwise this endpoint confirms which parents are registered at the

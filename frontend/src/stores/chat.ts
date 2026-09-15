@@ -3,12 +3,50 @@ import { useAuthStore } from './auth';
 import { useSessionStore } from './sessions';
 import api, { apiUrl } from '@/utils/api';
 import { readAnswerBlocks } from '@/utils/answerBlocks';
-import type { Message, RagStep, GroupedRagStep, HitlRequest, RagTrace, SessionPaging, VoiceMessage } from '@/types/chat';
+import type {
+  AttachmentInfo,
+  Message,
+  RagStep,
+  GroupedRagStep,
+  HitlRequest,
+  RagTrace,
+  SessionPaging,
+  VoiceMessage,
+} from '@/types/chat';
 
 // One scroll-back. Opening a chat loads the last screenful; older batches arrive as the
 // user scrolls up to them, so a conversation with a thousand messages opens as fast as
 // one with ten.
 const PAGE_SIZE = 15;
+
+// What a stopped answer reads as — live, when the parent presses Stop, and again when
+// the server's stored copy of that turn is reopened (it is marked `turn_interrupted`).
+const RESPONSE_STOPPED = '(Response stopped)';
+const RESPONSE_STOPPED_SUFFIX = '\n\n_(Response was stopped)_';
+
+function stoppedText(content: string): string {
+  return content ? `${content}${RESPONSE_STOPPED_SUFFIX}` : RESPONSE_STOPPED;
+}
+
+/** Whether a server message is the answer to a message that REPLACED a pending
+ *  clarification with a new question. Read off the answer because that is where the
+ *  server records how it read the message before it. */
+function replacedAClarification(reply: any): boolean {
+  return !!reply && reply.type !== 'human' && reply.rag_trace?.turn_clarification === 'replaced';
+}
+
+/** The player for a note the server holds. Its URL is a path; `apiUrl` sends it where the
+ *  API lives, and the player fetches it with the bearer token. */
+function voiceFromAttachment(attachment: AttachmentInfo | null | undefined): VoiceMessage | undefined {
+  if (!attachment || attachment.kind !== 'voice') return undefined;
+  return {
+    url: apiUrl(attachment.url),
+    duration: (attachment.duration_ms || 0) / 1000,
+    mimeType: attachment.content_type,
+    attachmentId: attachment.id,
+    transcript: attachment.transcript || undefined,
+  };
+}
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -75,6 +113,35 @@ export const useChatStore = defineStore('chat', {
 
     queueVoiceMessage(voice: VoiceMessage) {
       this.pendingVoice = voice;
+    },
+
+    /**
+     * Send a recording to the server and get back its note — id, URL and transcript.
+     *
+     * Uploaded before the message, not with it: the transcript IS the message, and the
+     * parent sees it in the composer before it goes. The recording is kept in the blob
+     * store under its digest and played back from the server on every device; this tab
+     * keeps playing its own copy meanwhile. Only a note whose transcript came back `ok`
+     * is queued to send — the caller tells the parent about the other two outcomes.
+     */
+    async attachVoiceNote(blob: Blob, durationSeconds: number): Promise<AttachmentInfo> {
+      const form = new FormData();
+      form.append('file', blob, 'voice-note');
+      form.append('duration_ms', String(Math.round(durationSeconds * 1000)));
+      const response = await api.post('/chat/attachments', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const attachment = response.data as AttachmentInfo;
+      if (attachment.transcript_status === 'ok' && attachment.transcript) {
+        this.queueVoiceMessage({
+          url: URL.createObjectURL(blob),
+          duration: durationSeconds,
+          mimeType: blob.type || attachment.content_type,
+          attachmentId: attachment.id,
+          transcript: attachment.transcript,
+        });
+      }
+      return attachment;
     },
 
     isHitlTrace(trace?: RagTrace | null): boolean {
@@ -166,11 +233,15 @@ export const useChatStore = defineStore('chat', {
       let awaitingHitlAnswer = false;
       let hitlResumeText: string | undefined;
 
-      return (messages || []).map((msg: any) => {
+      return (messages || []).map((msg: any, index: number, all: any[]) => {
         const ragTrace = msg.rag_trace || null;
         const isUser = msg.type === 'human';
         const isHitlRequest = !isUser && this.isHitlTrace(ragTrace);
-        const isHitlAnswer = isUser && awaitingHitlAnswer;
+        // The reply that follows says how the server read this message. A question typed
+        // instead of a name or an option REPLACED the pending clarification, and is an
+        // ordinary message shown as the parent typed it — not an answer to fold away.
+        const replacedThePending = isUser && awaitingHitlAnswer && replacedAClarification(all[index + 1]);
+        const isHitlAnswer = isUser && awaitingHitlAnswer && !replacedThePending;
         const resumeTextForMessage = !isUser && !isHitlRequest ? hitlResumeText : undefined;
 
         if (isHitlRequest) {
@@ -179,12 +250,20 @@ export const useChatStore = defineStore('chat', {
         } else if (isHitlAnswer) {
           awaitingHitlAnswer = false;
           hitlResumeText = msg.content;
+        } else if (replacedThePending) {
+          awaitingHitlAnswer = false;
+          hitlResumeText = undefined;
         } else if (!isUser) {
           hitlResumeText = undefined;
         }
 
+        // A turn cut off mid-answer stores what had reached the parent, marked so. It
+        // reads on reopen exactly as it read when they pressed Stop.
+        const interrupted = !isUser && !!ragTrace?.turn_interrupted;
+
         return {
-          text: msg.content,
+          id: typeof msg.id === 'number' ? msg.id : undefined,
+          text: interrupted ? stoppedText(msg.content || '') : msg.content,
           isUser,
           isHitlRequest,
           isHitlAnswer,
@@ -192,6 +271,9 @@ export const useChatStore = defineStore('chat', {
           hitlOptions: isHitlRequest ? ragTrace?.hitl_options || [] : undefined,
           hitlResumeText: resumeTextForMessage,
           ragTrace,
+          // And its voice notes: the recording is the server's, and comes back with the
+          // message it was spoken as.
+          voice: voiceFromAttachment(msg.attachment),
           // Reloading a past session restores its images too: the backend persists
           // them on the trace, so they survive a page refresh.
           assets: ragTrace?.assets || [],
@@ -283,18 +365,41 @@ export const useChatStore = defineStore('chat', {
       sessionStore.showHistorySidebar = false;
     },
 
-    handleClearChat() {
+    /**
+     * Clear the current conversation — on the server as well as on screen.
+     *
+     * Clearing only what was on screen left the conversation stored: it came back on
+     * reopen, and the assistant kept reading it as this chat's history. So the server's
+     * copy is deleted (the same call the history list's delete makes) and a fresh
+     * conversation is started in its place. A conversation the server never saw — no
+     * message stored, not in the history — has nothing to delete and is simply dropped.
+     */
+    async handleClearChat() {
       if (this.streamingSessionId === this.sessionId) {
         alert('This chat is still generating a response. Stop it or wait for it to finish before clearing.');
         return;
       }
-      if (confirm('Clear the current conversation? Meow?')) {
-        this.messagesBySession[this.sessionId] = [];
-        this.messages = this.messagesBySession[this.sessionId];
-        delete this.pendingHitlBySession[this.sessionId];
-        // Otherwise scrolling up would pull the cleared conversation back in.
-        delete this.pagingBySession[this.sessionId];
+      if (!confirm('Clear the current conversation? Meow?')) return;
+
+      const sessionId = this.sessionId;
+      const sessionStore = useSessionStore();
+      const stored =
+        sessionStore.sessions.some((session) => session.session_id === sessionId) ||
+        (this.messagesBySession[sessionId] || []).some((message) => message.id !== undefined);
+      if (stored) {
+        try {
+          await sessionStore.deleteSession(sessionId);
+        } catch (error: any) {
+          alert('Could not clear this conversation: ' + (error?.message || 'unknown error'));
+          return;
+        }
       }
+
+      delete this.messagesBySession[sessionId];
+      delete this.pendingHitlBySession[sessionId];
+      // Otherwise scrolling up would pull the cleared conversation back in.
+      delete this.pagingBySession[sessionId];
+      this.handleNewChat();
     },
 
     recordPaging(sessionId: string, serverMessages: any[], hasMore: boolean) {
@@ -326,7 +431,10 @@ export const useChatStore = defineStore('chat', {
         );
         const data = response.data;
         const serverMessages = data.messages || [];
-        const loadedMessages = this.mapServerMessages(serverMessages);
+        const loadedMessages = this.reconcileWithServer(
+          cachedMessages || [],
+          this.mapServerMessages(serverMessages),
+        );
         this.messagesBySession[sessionId] = loadedMessages;
         this.recordPaging(sessionId, serverMessages, data.has_more);
         this.syncPendingHitlFromMessages(sessionId);
@@ -341,6 +449,24 @@ export const useChatStore = defineStore('chat', {
         }
         throw new Error(errMsg);
       }
+    },
+
+    /**
+     * The server's newest page, plus whatever this tab holds that the server does not yet.
+     *
+     * Everything the server returns is authoritative: it is what every other device sees,
+     * and it carries what only the server has — the row id, the stored copy of a voice
+     * note. A local message with no id is a turn whose save is still landing: the composer
+     * is released at `[DONE]` and the `stored` event that names the rows follows it by
+     * milliseconds, and a parent who switches chats and back inside that window used to
+     * watch the answer they had just read disappear. It is kept behind the page until the
+     * ids arrive. One the stream ended without confirming is dropped instead: the server
+     * either stored it, in which case the page has it, or lost it, in which case nothing
+     * has it and showing a copy would be showing a message that does not exist.
+     */
+    reconcileWithServer(local: Message[], server: Message[]): Message[] {
+      const pending = local.filter((message) => message.id === undefined && !message.unconfirmed);
+      return pending.length ? [...server, ...pending] : server;
     },
 
     /**
@@ -396,9 +522,11 @@ export const useChatStore = defineStore('chat', {
       const request = older[older.length - 1];
       const answer = existing[0];
       if (!request?.isHitlRequest || !answer?.isUser || answer.isHitlAnswer) return;
+      const nextReply = existing[1];
+      // The parent asked something else instead; there is no exchange to join.
+      if (nextReply && !nextReply.isUser && nextReply.ragTrace?.turn_clarification === 'replaced') return;
 
       answer.isHitlAnswer = true;
-      const nextReply = existing[1];
       if (nextReply && !nextReply.isUser && !nextReply.isHitlRequest && !nextReply.hitlResumeText) {
         nextReply.hitlResumeText = answer.text;
       }
@@ -493,17 +621,22 @@ export const useChatStore = defineStore('chat', {
       const requestAbortController = this.abortController;
       const isStillTheLiveRequest = () => this.abortController === requestAbortController;
       let receivedHitlRequest = false;
+      let receivedStored = false;
       let streamHadError = false;
 
       try {
         // `apiUrl`, not a bare path: this is the one call in the store that bypasses
         // axios — it needs the response body as a stream — and so it is also the one
         // that silently ignored VITE_API_BASE_URL and posted to the UI's own origin.
-        const response = await fetch(apiUrl('/chat/stream'), {
+        //
+        // Through the auth store, so the bearer token is one that will still be valid
+        // when the request lands. Read off `authStore.token` directly, this sent the token
+        // the page had started with, and thirty minutes into a session the next message
+        // signed the parent out.
+        const response = await authStore.authorizedFetch(apiUrl('/chat/stream'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${authStore.token}`,
             // The conversation this message belongs to. The server keys everything it
             // remembers about a thread on this — including which child a parent's
             // questions are about — so it has to be the same value for every message
@@ -514,6 +647,8 @@ export const useChatStore = defineStore('chat', {
           body: JSON.stringify({
             message: text,
             session_id: requestSessionId,
+            // The note this message was spoken as, so the server keeps the two together.
+            ...(voice?.attachmentId ? { attachment_id: voice.attachmentId } : {}),
           }),
           signal: this.abortController.signal,
         });
@@ -606,6 +741,17 @@ export const useChatStore = defineStore('chat', {
                   if (botMsg) {
                     botMsg.ragTrace = data.rag_trace;
                   }
+                } else if (data.type === 'turn') {
+                  // How the server read this message against the question it was waiting
+                  // on. The message was marked as an answer the moment it was sent; one
+                  // that REPLACED the pending question is an ordinary message, shown as
+                  // the parent typed it rather than folded into the exchange.
+                  if (data.answers_clarification === false) {
+                    const userMsg = requestMessages[botMsgIdx - 1];
+                    const botMsg = requestMessages[botMsgIdx];
+                    if (userMsg) userMsg.isHitlAnswer = false;
+                    if (botMsg) botMsg.hitlResumeText = undefined;
+                  }
                 } else if (data.type === 'hitl_request') {
                   const botMsg = requestMessages[botMsgIdx];
                   if (!botMsg) continue;
@@ -641,6 +787,18 @@ export const useChatStore = defineStore('chat', {
                       isStreaming: data.session_id === this.streamingSessionId,
                     });
                   }
+                } else if (data.type === 'stored') {
+                  // After `[DONE]`: the rows the question and the answer were stored under,
+                  // in that order. From here the server's copy and this one are the same
+                  // message, and reopening the chat can tell them apart from a turn still
+                  // being stored — see `reconcileWithServer`.
+                  const ids: unknown[] = Array.isArray(data.message_ids) ? data.message_ids : [];
+                  const [questionId, answerId] = ids;
+                  const userMsg = requestMessages[botMsgIdx - 1];
+                  const botMsg = requestMessages[botMsgIdx];
+                  if (userMsg && typeof questionId === 'number') userMsg.id = questionId;
+                  if (botMsg && typeof answerId === 'number') botMsg.id = answerId;
+                  receivedStored = true;
                 } else if (data.type === 'error') {
                   streamHadError = true;
                   const botMsg = requestMessages[botMsgIdx];
@@ -660,11 +818,7 @@ export const useChatStore = defineStore('chat', {
         if (!botMsg) return;
         if (error.name === 'AbortError') {
           botMsg.isThinking = false;
-          if (!botMsg.text) {
-            botMsg.text = '(Response stopped)';
-          } else {
-            botMsg.text += '\n\n_(Response was stopped)_';
-          }
+          botMsg.text = stoppedText(botMsg.text);
         } else {
           botMsg.isThinking = false;
           botMsg.text = `Meow... something went wrong: ${error.message}`;
@@ -672,6 +826,13 @@ export const useChatStore = defineStore('chat', {
       } finally {
         if (streamHadError && pendingHitlAtSend && !receivedHitlRequest) {
           this.pendingHitlBySession[requestSessionId] = pendingHitlAtSend;
+        }
+        if (!receivedStored) {
+          // The connection ended without the server naming the rows. Whether it stored the
+          // turn (a stopped answer is) or not, its copy is the one to show on reopen.
+          for (const message of [requestMessages[botMsgIdx - 1], requestMessages[botMsgIdx]]) {
+            if (message && message.id === undefined) message.unconfirmed = true;
+          }
         }
         // Guarded: see `requestAbortController`. A stream that has already released the
         // composer at `[DONE]` may reach here long after a newer message took over, and

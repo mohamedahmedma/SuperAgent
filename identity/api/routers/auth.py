@@ -52,24 +52,34 @@ def login(body: LoginIn, service: SessionServiceDep, ip: ClientIp) -> TokenOut:
 
 @router.post("/refresh", response_model=AccessTokenOut, responses=AUTH_RESPONSES)
 def refresh(body: RefreshIn, service: SessionServiceDep, ip: ClientIp) -> AccessTokenOut:
-    """Exchange a refresh token for a fresh access token.
+    """Exchange a refresh token for a fresh access token — and a fresh refresh token.
 
     The guardian binding is re-read from the account, not carried over from the old token.
     That is what makes a revoked or corrected binding take effect within one access-token
     lifetime instead of persisting until the parent happens to log out — the case that
     matters is a custody change, and it must not wait a month.
+
+    The token presented is spent. Keep the one returned: it carries the session forward
+    for another full inactivity window, so a parent who keeps using the app is never asked
+    to sign in again. Presenting a spent token outside its grace window ends the session.
     """
     issued = service.refresh(refresh_token=body.refresh_token, client_ip=ip)
-    return AccessTokenOut(access_token=issued.access_token, expires_at=issued.expires_at)
+    return AccessTokenOut(
+        access_token=issued.access_token,
+        expires_at=issued.expires_at,
+        refresh_token=issued.refresh_token,
+        refresh_expires_at=issued.refresh_expires_at,
+    )
 
 
 @router.post("/logout")
 def logout(body: RefreshIn, service: SessionServiceDep) -> dict:
-    """Revoke a refresh token.
+    """Sign out: revoke the session the refresh token belongs to.
 
-    The access token already issued stays valid until it expires — offline verification is
-    the trade made for not calling this service on every request. Keeping access tokens
-    short is what bounds that window.
+    The whole session, not the one token — every refresh token rotated from the same
+    sign-in dies with it. The access token already issued stays valid until it expires:
+    offline verification is the trade made for not calling this service on every request,
+    and keeping access tokens short is what bounds that window.
     """
     return {"revoked": service.logout(refresh_token=body.refresh_token)}
 

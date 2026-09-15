@@ -25,6 +25,7 @@ to.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -127,30 +128,62 @@ class AccountRepository(Protocol):
         """Remove the row. Callers revoke the refresh tokens first."""
 
 
+@dataclass(frozen=True, slots=True)
+class RefreshTokenRecord:
+    """A stored refresh token, as the session rules need to read it.
+
+    Every datetime is timezone-aware, whatever the database handed back. `family_id` is
+    never empty: a row written before rotation existed carries none, and the repository
+    reports it as a family of one under its own hash.
+    """
+
+    account_id: int
+    token_hash: str
+    family_id: str
+    expires_at: datetime
+    revoked_at: datetime | None
+    rotated_at: datetime | None
+
+
 class RefreshTokenRepository(Protocol):
     """Opaque refresh tokens, stored only as hashes.
 
     A refresh token's only job is to be presented back to this service and looked up, so
     signing it would add verification cost and a second way to get revocation wrong.
+
+    What a token means — live, spent, replayed — is `SessionService`'s to decide from the
+    record; the repository only stores and reads. That is why `find` returns the row's
+    facts rather than a verdict.
     """
 
-    def issue(self, *, account_id: int, token_hash: str, expires_at: datetime) -> None: ...
+    def issue(
+        self, *, account_id: int, token_hash: str, expires_at: datetime, family_id: str
+    ) -> None: ...
 
-    def find_active(self, token_hash: str) -> tuple[int, datetime] | None:
-        """`(account_id, expires_at)` for a token that is neither revoked nor expired.
+    def find(self, token_hash: str) -> RefreshTokenRecord | None:
+        """The token's record, or `None` for one this service never issued."""
 
-        One query rather than "fetch, then check two fields in the caller". Expiry and
-        revocation are both storage's business, and three call sites re-deriving that
-        check is three chances to write `>=` where the others wrote `>`.
-        """
+    def mark_rotated(self, token_hash: str, *, replaced_by_hash: str, at: datetime) -> None:
+        """Record that the token was exchanged, and for what."""
 
     def revoke(self, token_hash: str) -> bool:
         """Revoke one token. `True` if it existed and was live; idempotent otherwise."""
+
+    def revoke_family(self, account_id: int, family_id: str) -> int:
+        """Revoke every live token of one session. Returns how many that was."""
 
     def revoke_all_for_account(self, account_id: int) -> int:
         """Revoke every live token for an account. The urgent custody path.
 
         Returns how many were revoked, so the admin route can say what it actually did.
+        """
+
+    def prune(self, account_id: int, *, dead_before: datetime, now: datetime) -> int:
+        """Delete the account's tokens that can never be presented usefully again.
+
+        Expired ones, and ones revoked or rotated before `dead_before`. A rotated token is
+        kept for a while past its grace window on purpose: presenting it is how a theft is
+        recognised, and that needs the row. Returns how many were deleted.
         """
 
 
@@ -245,5 +278,6 @@ __all__ = [
     "AccountRepository",
     "AuditSink",
     "ChallengeRepository",
+    "RefreshTokenRecord",
     "RefreshTokenRepository",
 ]

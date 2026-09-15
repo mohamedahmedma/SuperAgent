@@ -174,6 +174,11 @@ export interface RagTraceFields {
   synthesis_merged_count?: number;
   initial_retrieved_chunks?: RetrievedChunk[];
   rewrite_retrieved_chunks?: RetrievedChunk[];
+  /** The stream was stopped or dropped; the stored answer is what had arrived by then. */
+  turn_interrupted?: boolean;
+  /** What the message before this answer did to a pending clarification: settled it, or
+   *  replaced it with a new question. Absent on answers stored before this existed. */
+  turn_clarification?: 'answered' | 'replaced' | string;
 }
 
 export interface RagSubTrace extends RagTraceFields {}
@@ -215,6 +220,16 @@ export interface HitlRequest {
 }
 
 export interface Message {
+  /**
+   * The server's row id, once the message is stored. Absent while a turn sent from this
+   * tab is still being stored — the composer is released at `[DONE]` and the `stored`
+   * event follows — and for a message the server never confirmed. It is what tells this
+   * tab's copy from the server's when a conversation is reopened.
+   */
+  id?: number;
+  /** Sent from this tab and never confirmed stored: the stream ended without a `stored`
+   *  event. Yields to the server's copy when the conversation is reopened. */
+  unconfirmed?: boolean;
   text: string;
   isUser: boolean;
   voice?: VoiceMessage;
@@ -233,11 +248,32 @@ export interface Message {
   _groupedSteps?: GroupedRagStep[];
 }
 
-/** A locally recorded voice note attached to a user turn. */
+/**
+ * A voice note the server holds. Mirrors backend `AttachmentInfo` (backend/schemas/chat.py).
+ * `url` needs the bearer token, so the player fetches it through the auth store.
+ */
+export interface AttachmentInfo {
+  id: string;
+  kind: 'voice' | string;
+  url: string;
+  content_type: string;
+  byte_size: number;
+  duration_ms: number;
+  transcript?: string | null;
+  /** ok — `transcript` is what was said; empty — nothing was heard; unavailable — no
+   *  transcriber, or it failed. Only `ok` is sent as a message. */
+  transcript_status: 'ok' | 'empty' | 'unavailable' | string;
+}
+
+/** A voice note on a user turn: the parent's own recording, played back from `url`. */
 export interface VoiceMessage {
+  /** A `blob:` URL while the tab that recorded it holds it; the server's URL on reload. */
   url: string;
   duration: number;
   mimeType: string;
+  /** The server's note, once uploaded. Sent with the message so the two stay together. */
+  attachmentId?: string;
+  transcript?: string;
 }
 
 /** How far back through a conversation the client has read. */

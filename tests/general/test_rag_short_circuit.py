@@ -792,6 +792,11 @@ class RagShortCircuitTests(unittest.TestCase):
             # Conditions set before the clarification. They cross the resume boundary
             # for the same reason `hitl_rounds` does: the graph starts fresh there.
             "carried_constraints",
+            # The planner's hints the question ran with, for the same reason again.
+            "language",
+            "child_year",
+            "retrieval_sections",
+            "child_names",
         }, set(resume_state))
 
     def test_resume_goes_directly_to_targeted_retrieval_after_hitl_answer(self):

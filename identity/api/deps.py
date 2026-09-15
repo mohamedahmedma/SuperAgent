@@ -120,6 +120,7 @@ def get_session_service(
             max_failed_attempts=resolved.max_failed_attempts,
             lockout_minutes=resolved.lockout_minutes,
         ),
+        refresh_reuse_grace_seconds=resolved.refresh_reuse_grace_seconds,
     )
 
 

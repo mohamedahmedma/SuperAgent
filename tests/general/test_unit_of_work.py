@@ -89,7 +89,7 @@ class ConversationRepositoryTests(UnitOfWorkTestCase):
                 uow.conversations.add_messages(
                     session, [NewMessage("human", str(i), start, None) for i in range(count)]
                 )
-                uow.conversations.update_session(session, metadata=None, updated_at=start + timedelta(minutes=offset))
+                uow.conversations.patch_session(session, metadata=None, updated_at=start + timedelta(minutes=offset))
             other = uow.conversations.open_session("other", "theirs", {})
             uow.conversations.add_messages(other, [NewMessage("human", "x", start, None)])
             uow.commit()
