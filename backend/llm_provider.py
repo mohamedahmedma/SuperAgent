@@ -155,11 +155,17 @@ class Resolution:
         """Diagnostic line. Never includes a key — this reaches logs."""
         model = self.effective("MODEL", environ) or "unset"
         base_url = self.effective("BASE_URL", environ) or "provider default"
+        # Reported even when it is unset, unlike the settings above. It is the one value a
+        # `.env` older than the feature that reads it cannot have, and "unset" here is the
+        # difference between voice notes working and every one of them coming back as
+        # "please type your question instead".
+        transcription = self.effective("TRANSCRIPTION_MODEL", environ) or "unset"
         return (
             f"provider={self.provider.name} ({self.provider.label}), "
             f"model={model}, endpoint={base_url} "
             f"(from {self.sources.get('BASE_URL', 'unset')}), "
-            f"key from {self.sources.get('ARK_API_KEY', 'unset')}"
+            f"key from {self.sources.get('ARK_API_KEY', 'unset')}, "
+            f"transcription={transcription}"
         )
 
 

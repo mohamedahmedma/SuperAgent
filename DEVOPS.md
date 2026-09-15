@@ -72,6 +72,39 @@ configuration to decide what to recreate, and the *contents* of an `env_file` ar
 of that hash — so a new file sits unread behind containers Compose considers up to date.
 `restart` does nothing. `--force-recreate` is mandatory, and the script always passes it.
 
+## When a release brings a NEW setting
+
+The server's `.env` is persistent state — `deploy.yml` writes it only to bootstrap an
+empty estate, and never again. That is deliberate (an operator-validated file must
+survive a release), and it has a consequence worth stating: **a feature whose setting is
+absent from the live `.env` ships disabled, and the release still reports success.**
+Nothing in the pipeline compares `.env` against what the new code reads.
+
+So when a release adds a setting, it has to be added to `/opt/superagent/.env` by hand:
+
+```
+ssh root@HOST
+cd /opt/superagent
+grep -E '^(LLM_PROVIDER|.*TRANSCRIPTION_MODEL)=' .env    # what is set now
+# add the missing line, then apply it to the services that read it
+bash deploy/scripts/apply-env.sh backend
+```
+
+`.env.example` is the list of what the code reads; a setting missing from `.env` takes
+whatever default the code has, which for a feature-gating value means "off".
+
+This bit the estate on 2026-09-15: voice notes shipped reading `TRANSCRIPTION_MODEL`
+(or `<PROVIDER>_TRANSCRIPTION_MODEL` for the live `LLM_PROVIDER` block), production's
+`.env` predated the feature and named none, so every recording was stored, transcribed
+into nothing, and the parent was told to type their question instead. The backend now
+says which at boot, and it is the first thing to check when a model-backed feature is
+inert in production but works locally:
+
+```
+docker logs superagent-backend 2>&1 | grep 'LLM provider:'
+# ... model=..., key from ..., transcription=<model|unset>
+```
+
 ## Bringing a service onto the release it missed
 
 `.release-image-tags` in `$DEPLOY_PATH` records, per service, the image tag the last
