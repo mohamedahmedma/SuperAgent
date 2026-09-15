@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { onMounted, onUnmounted, ref, watch, type WatchStopHandle } from 'vue';
 import Sidebar from '@/components/Sidebar.vue';
 import AuthPanel from '@/components/AuthPanel.vue';
 import HistorySidebar from '@/components/HistorySidebar.vue';
@@ -68,8 +68,9 @@ const sessionStore = useSessionStore();
 
 // Keep auth forms and document settings on their normal scrolling layout.
 let releaseChatViewport: (() => void) | undefined;
+let stopChatViewportWatch: WatchStopHandle | undefined;
 onMounted(() => {
-  watch(
+  stopChatViewportWatch = watch(
     () => authStore.isAuthenticated && chatStore.activeNav !== 'settings',
     (enabled) => {
       releaseChatViewport?.();
@@ -78,7 +79,10 @@ onMounted(() => {
     { immediate: true, flush: 'post' },
   );
 });
-onUnmounted(() => releaseChatViewport?.());
+onUnmounted(() => {
+  stopChatViewportWatch?.();
+  releaseChatViewport?.();
+});
 
 type Theme = 'dark' | 'light';
 const themeStorageKey = 'superagent-theme-v2';
@@ -104,7 +108,10 @@ const setLanguage = (nextLanguage: Language) => { language.value = nextLanguage;
 
 const toggleTheme = () => {
   const nextTheme: Theme = theme.value === 'dark' ? 'light' : 'dark';
-  const startViewTransition = (document as any).startViewTransition?.bind(document);
+  type ViewTransitionDocument = Document & {
+    startViewTransition?: (update: () => void) => { finished: Promise<unknown> };
+  };
+  const startViewTransition = (document as ViewTransitionDocument).startViewTransition?.bind(document);
   if (!startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     theme.value = nextTheme;
     return;

@@ -11,7 +11,7 @@ an agent or calls a model, except through the resolver `enter_turn` is handed.
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from backend.chat.orchestrator import resolve_turn_question
@@ -232,6 +232,9 @@ class TurnEntry:
     """
 
     pending_hitl: dict | None = None
+    #: Something was stored as the pending question and cannot be used — malformed, or
+    #: asked longer ago than `clarification_ttl_minutes`. Cleared at the save, so the
+    #: message after this one is not read against it either.
     invalid_pending_hitl: bool = False
     is_hitl_resume: bool = False
     resume_state: dict | None = None
@@ -244,6 +247,40 @@ class TurnEntry:
     # question. A name as they typed or tapped it — resolved against the roster later,
     # by code holding a verified identity this dataclass deliberately does not.
     child_choice: str = ""
+
+    def replace_with_new_question(self, user_text: str, resolution: ResolvedQuestion) -> None:
+        """The reply to "which child?" turned out to be a new question, not a name.
+
+        Decided after the roster has had its look (`TurnPipeline.settle_child_choice`):
+        a reply that pins nobody is either a name the roster cannot place or a change of
+        subject, and only a resolver reading the conversation can tell «الكبيرة» from
+        «والمصاريف كام؟». Read as a new question, the turn is about what the parent just
+        typed — the same reading a correction to a retrieval clarification gets — and the
+        pending question is spent as replaced rather than asked again.
+        """
+        self.child_choice = ""
+        self.superseded = True
+        self.resolution = resolution
+        self.effective_user_text = user_text
+        self.original_question = (resolution.question if resolution.resolved else "") or user_text
+
+    @property
+    def clarification_outcome(self) -> str | None:
+        """What this message did to the question the assistant was waiting on.
+
+        "answered" — it settled it (a retrieval clarification resumed, a child chosen);
+        "replaced" — it set it aside for a new question; None — nothing was pending, or
+        the reply was neither. Stored on the answer's trace and sent to the client, which
+        otherwise cannot tell an answer it should fold into the exchange from a question
+        it should show as typed.
+        """
+        if self.pending_hitl is None:
+            return None
+        if self.is_hitl_resume or self.child_choice:
+            return "answered"
+        if self.superseded:
+            return "replaced"
+        return None
 
     def spends_the_pending_question(self, *, agent_error: bool = False) -> bool:
         """Whether the clarification that was waiting is finished with after this turn.
@@ -282,6 +319,7 @@ def enter_turn(
     metadata: dict,
     *,
     resolve: Callable[..., ResolvedQuestion] | None = None,
+    now: datetime | None = None,
 ) -> TurnEntry:
     """Decide whether this message answers the pending clarification or replaces it.
 
@@ -297,12 +335,18 @@ def enter_turn(
     `resolve` is the question resolver, handed in rather than reached for: it is the one
     collaborator here that can cost a model call, so a caller that wants a different one
     — a test, most usually — passes it instead of patching a module attribute. None means
-    the real resolver.
+    the real resolver. `now` is the clock the pending question's age is measured with;
+    None means the wall clock.
     """
     entry = TurnEntry(effective_user_text=user_text, original_question=user_text)
 
     stored = metadata.get(PENDING_HITL_KEY)
     entry.pending_hitl = _current_pending_hitl(stored)
+    if entry.pending_hitl is not None and _has_expired(entry.pending_hitl, now):
+        # Asked too long ago to still be waiting for this. The parent is starting again,
+        # and the stale question is cleared so their NEXT message is not read against it.
+        logger.info("a clarification asked at %s has expired; reading the message as new", entry.pending_hitl.get("created_at"))
+        entry.pending_hitl = None
     entry.invalid_pending_hitl = stored is not None and entry.pending_hitl is None
     if not isinstance(entry.pending_hitl, dict):
         return entry
@@ -314,6 +358,11 @@ def enter_turn(
         # that the pin can settle it. Deliberately not a `hitl_resume`: there is no
         # search to continue, and folding the name into the old query as the other routes
         # do would retrieve for "علي" rather than for what the parent actually asked.
+        #
+        # Provisional. A reply the roster then cannot place is read once more, against
+        # the conversation, by `TurnPipeline.settle_child_choice` — which is where a
+        # parent who typed a new question instead of a name stops being asked "which
+        # child?" about a question they have moved on from.
         entry.child_choice = user_text
         entry.original_question = entry.pending_hitl.get("original_question") or user_text
         entry.effective_user_text = entry.original_question
@@ -339,6 +388,25 @@ def enter_turn(
     entry.effective_user_text = _build_hitl_resume_query(entry.pending_hitl, user_text)
     entry.original_question = entry.pending_hitl.get("original_question") or user_text
     return entry
+
+
+def _has_expired(pending: dict, now: datetime | None) -> bool:
+    """Whether the question was asked longer ago than the profile lets it wait.
+
+    A question with no readable `created_at` is kept: there is nothing to measure it
+    against, and dropping it would cost a parent an answer they may be mid-way through.
+    A TTL of zero never expires anything.
+    """
+    ttl_minutes = int(getattr(get_profile().agent, "clarification_ttl_minutes", 0) or 0)
+    if ttl_minutes <= 0:
+        return False
+    try:
+        asked_at = datetime.fromisoformat(str(pending.get("created_at") or ""))
+    except ValueError:
+        return False
+    if asked_at.tzinfo is None:
+        asked_at = asked_at.replace(tzinfo=timezone.utc)
+    return (now or datetime.now(timezone.utc)) - asked_at > timedelta(minutes=ttl_minutes)
 
 
 def _current_pending_hitl(value: dict | None) -> dict | None:

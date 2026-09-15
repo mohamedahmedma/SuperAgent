@@ -9,6 +9,7 @@ failing test rather than a support ticket.
 These are also the specification for folding the two paths into one turn pipeline: once
 every case passes on both, the unification has nothing left to reconcile.
 """
+from datetime import datetime, timezone
 import asyncio
 import importlib
 import unittest
@@ -24,6 +25,10 @@ from backend.tools import KNOWLEDGE_TOOL
 from tests.general.test_chat_hitl_resume import FakeStorage, _parse_sse_events
 from backend.chat.answer_checks import terminal_reply
 from backend.chat.clarification import PENDING_HITL_KEY
+
+# A clarification asked a moment ago. Pending questions expire after a day
+# (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
+_ASKED_JUST_NOW = datetime.now(timezone.utc).isoformat()
 
 service = importlib.import_module("backend.chat.service")
 
@@ -75,7 +80,7 @@ class AResumedClarificationAfterAnOutage(unittest.TestCase):
         "route": "clarify",
         "retrieval_status": "needs_clarification",
         "answers": [],
-        "created_at": "2026-07-11T00:00:00+00:00",
+        "created_at": _ASKED_JUST_NOW,
         "resume_state": {
             "question": "What is this character's element?",
             "route": "clarify",

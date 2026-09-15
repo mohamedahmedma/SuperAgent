@@ -177,6 +177,7 @@ def chat_with_agent(
     pipeline.enter(turn)
     ctx = pipeline.sync_context(turn)
     try:
+        pipeline.settle_child_choice(turn)
         pipeline.record_question(turn)
         answered = None
 
@@ -255,6 +256,13 @@ async def chat_with_agent_stream(
     full_response = ""
     agent_task = None
     try:
+        # A roster read, and possibly a resolver call: off the loop, like `enter`.
+        await asyncio.to_thread(pipeline.settle_child_choice, turn)
+        # How this message was read against a pending clarification, before anything
+        # slow — the client decides from it whether to show the message as typed.
+        turn_event = pipeline.turn_event(turn)
+        if turn_event is not None:
+            yield _event(turn_event)
         pipeline.record_question(turn)
 
         if pipeline.resumes_a_search(turn):

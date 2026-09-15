@@ -258,10 +258,11 @@ export function AttendancePanel({ classCode, year, on, scope }) {
       <ErrorNote error={register.error} onRetry={register.reload} />
       {mayWrite ? <ErrorNote error={save.error} /> : null}
 
-      <Table
-        loading={register.loading}
-        rows={lines}
-        rowKey={(row) => row.student_number}
+      <div className="sis-attendance-register">
+        <Table
+          loading={register.loading}
+          rows={lines}
+          rowKey={(row) => row.student_number}
         rowTone={(row) => {
           const value = shown(row);
           if (!value) return null;
@@ -285,7 +286,10 @@ export function AttendancePanel({ classCode, year, on, scope }) {
           {
             key: 'name',
             header: t('Child'),
-            className: state.lang === 'ar' ? 'sis-name-ar' : 'sis-name-en',
+            className: cx(
+              'sis-attendance-person',
+              state.lang === 'ar' ? 'sis-name-ar' : 'sis-name-en'
+            ),
             cell: (row) => (
               <>
                 {pickName(row, state.lang) || (
@@ -301,6 +305,7 @@ export function AttendancePanel({ classCode, year, on, scope }) {
           {
             key: 'state',
             header: t('Mark'),
+            className: 'sis-attendance-state-cell',
             cell: (row) => {
               const value = shown(row);
               const dirty = !!draft[row.student_number];
@@ -328,17 +333,16 @@ export function AttendancePanel({ classCode, year, on, scope }) {
                         key={option.key}
                         className={cx(
                           'btn',
-                          value === option.key
-                            ? option.key === 'present'
-                              ? 'btn-primary'
-                              : 'btn-danger'
-                            : 'btn-outline-secondary'
+                          'sis-attendance-choice',
+                          `is-${option.key}`,
+                          value === option.key && 'is-selected'
                         )}
                         /* Disabled rather than hidden when this person may not record
                            the day: the marks already taken are still worth reading, and
                            removing the buttons would make a read-only register look like
                            one nobody has started. */
                         disabled={!canChangeState(row, option.key)}
+                        aria-pressed={value === option.key}
                         onClick={() => mark(row.student_number, option.key)}
                         title={t(option.label)}
                       >
@@ -362,6 +366,7 @@ export function AttendancePanel({ classCode, year, on, scope }) {
           {
             key: 'note',
             header: t('Reason'),
+            className: 'sis-attendance-note-cell',
             cell: (row) => {
               const value = shown(row);
               if (!mayWrite) {
@@ -380,18 +385,23 @@ export function AttendancePanel({ classCode, year, on, scope }) {
                 ) : null;
               }
               return (
-                <Input
-                  className="form-control-sm"
-                  value={shownNote(row)}
-                  placeholder={t('Required — e.g. medical appointment')}
-                  disabled={!mayEdit || (isPast && row.state !== 'absent')}
-                  onInput={(text) => note(row.student_number, text)}
-                />
+                <label className="sis-attendance-reason-field">
+                  <span className="visually-hidden">{t('Reason')}</span>
+                  <span className="d-md-none" aria-hidden="true">{t('Reason')}</span>
+                  <Input
+                    className="form-control-sm"
+                    value={shownNote(row)}
+                    placeholder={t('Required — e.g. medical appointment')}
+                    disabled={!mayEdit || (isPast && row.state !== 'absent')}
+                    onInput={(text) => note(row.student_number, text)}
+                  />
+                </label>
               );
             }
           }
         ]}
-      />
+        />
+      </div>
     </Card>
   );
 }

@@ -193,6 +193,17 @@ describe('signing in through WhatsApp', () => {
     expect(auth.whatsapp.pollSecret).toBe('');
   });
 
+  it('removes a refresh token left by a previous session when the new session has none', () => {
+    const auth = useAuthStore();
+    localStorage.setItem('refreshToken', 'stale-token');
+
+    auth.applySession({ ...TOKENS, refresh_token: undefined });
+
+    expect(auth.token).toBe('access');
+    expect(auth.refreshToken).toBe('');
+    expect(localStorage.getItem('refreshToken')).toBeNull();
+  });
+
   it('keeps a parent on the same screen after one wrong code', async () => {
     post.mockResolvedValueOnce({ data: STARTED });
     const auth = useAuthStore();

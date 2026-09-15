@@ -28,6 +28,13 @@ function stoppedText(content: string): string {
   return content ? `${content}${RESPONSE_STOPPED_SUFFIX}` : RESPONSE_STOPPED;
 }
 
+/** Whether a server message is the answer to a message that REPLACED a pending
+ *  clarification with a new question. Read off the answer because that is where the
+ *  server records how it read the message before it. */
+function replacedAClarification(reply: any): boolean {
+  return !!reply && reply.type !== 'human' && reply.rag_trace?.turn_clarification === 'replaced';
+}
+
 /** The player for a note the server holds. Its URL is a path; `apiUrl` sends it where the
  *  API lives, and the player fetches it with the bearer token. */
 function voiceFromAttachment(attachment: AttachmentInfo | null | undefined): VoiceMessage | undefined {
@@ -226,11 +233,15 @@ export const useChatStore = defineStore('chat', {
       let awaitingHitlAnswer = false;
       let hitlResumeText: string | undefined;
 
-      return (messages || []).map((msg: any) => {
+      return (messages || []).map((msg: any, index: number, all: any[]) => {
         const ragTrace = msg.rag_trace || null;
         const isUser = msg.type === 'human';
         const isHitlRequest = !isUser && this.isHitlTrace(ragTrace);
-        const isHitlAnswer = isUser && awaitingHitlAnswer;
+        // The reply that follows says how the server read this message. A question typed
+        // instead of a name or an option REPLACED the pending clarification, and is an
+        // ordinary message shown as the parent typed it — not an answer to fold away.
+        const replacedThePending = isUser && awaitingHitlAnswer && replacedAClarification(all[index + 1]);
+        const isHitlAnswer = isUser && awaitingHitlAnswer && !replacedThePending;
         const resumeTextForMessage = !isUser && !isHitlRequest ? hitlResumeText : undefined;
 
         if (isHitlRequest) {
@@ -239,6 +250,9 @@ export const useChatStore = defineStore('chat', {
         } else if (isHitlAnswer) {
           awaitingHitlAnswer = false;
           hitlResumeText = msg.content;
+        } else if (replacedThePending) {
+          awaitingHitlAnswer = false;
+          hitlResumeText = undefined;
         } else if (!isUser) {
           hitlResumeText = undefined;
         }
@@ -351,18 +365,41 @@ export const useChatStore = defineStore('chat', {
       sessionStore.showHistorySidebar = false;
     },
 
-    handleClearChat() {
+    /**
+     * Clear the current conversation — on the server as well as on screen.
+     *
+     * Clearing only what was on screen left the conversation stored: it came back on
+     * reopen, and the assistant kept reading it as this chat's history. So the server's
+     * copy is deleted (the same call the history list's delete makes) and a fresh
+     * conversation is started in its place. A conversation the server never saw — no
+     * message stored, not in the history — has nothing to delete and is simply dropped.
+     */
+    async handleClearChat() {
       if (this.streamingSessionId === this.sessionId) {
         alert('This chat is still generating a response. Stop it or wait for it to finish before clearing.');
         return;
       }
-      if (confirm('Clear the current conversation? Meow?')) {
-        this.messagesBySession[this.sessionId] = [];
-        this.messages = this.messagesBySession[this.sessionId];
-        delete this.pendingHitlBySession[this.sessionId];
-        // Otherwise scrolling up would pull the cleared conversation back in.
-        delete this.pagingBySession[this.sessionId];
+      if (!confirm('Clear the current conversation? Meow?')) return;
+
+      const sessionId = this.sessionId;
+      const sessionStore = useSessionStore();
+      const stored =
+        sessionStore.sessions.some((session) => session.session_id === sessionId) ||
+        (this.messagesBySession[sessionId] || []).some((message) => message.id !== undefined);
+      if (stored) {
+        try {
+          await sessionStore.deleteSession(sessionId);
+        } catch (error: any) {
+          alert('Could not clear this conversation: ' + (error?.message || 'unknown error'));
+          return;
+        }
       }
+
+      delete this.messagesBySession[sessionId];
+      delete this.pendingHitlBySession[sessionId];
+      // Otherwise scrolling up would pull the cleared conversation back in.
+      delete this.pagingBySession[sessionId];
+      this.handleNewChat();
     },
 
     recordPaging(sessionId: string, serverMessages: any[], hasMore: boolean) {
@@ -485,9 +522,11 @@ export const useChatStore = defineStore('chat', {
       const request = older[older.length - 1];
       const answer = existing[0];
       if (!request?.isHitlRequest || !answer?.isUser || answer.isHitlAnswer) return;
+      const nextReply = existing[1];
+      // The parent asked something else instead; there is no exchange to join.
+      if (nextReply && !nextReply.isUser && nextReply.ragTrace?.turn_clarification === 'replaced') return;
 
       answer.isHitlAnswer = true;
-      const nextReply = existing[1];
       if (nextReply && !nextReply.isUser && !nextReply.isHitlRequest && !nextReply.hitlResumeText) {
         nextReply.hitlResumeText = answer.text;
       }
@@ -701,6 +740,17 @@ export const useChatStore = defineStore('chat', {
                   const botMsg = requestMessages[botMsgIdx];
                   if (botMsg) {
                     botMsg.ragTrace = data.rag_trace;
+                  }
+                } else if (data.type === 'turn') {
+                  // How the server read this message against the question it was waiting
+                  // on. The message was marked as an answer the moment it was sent; one
+                  // that REPLACED the pending question is an ordinary message, shown as
+                  // the parent typed it rather than folded into the exchange.
+                  if (data.answers_clarification === false) {
+                    const userMsg = requestMessages[botMsgIdx - 1];
+                    const botMsg = requestMessages[botMsgIdx];
+                    if (userMsg) userMsg.isHitlAnswer = false;
+                    if (botMsg) botMsg.hitlResumeText = undefined;
                   }
                 } else if (data.type === 'hitl_request') {
                   const botMsg = requestMessages[botMsgIdx];

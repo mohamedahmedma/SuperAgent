@@ -69,6 +69,7 @@ from sis.domain.value_objects import (
     StudentNumber,
     SubjectCode,
     TermCode,
+    YearCode,
 )
 
 __all__ = ["GradeImportService"]
@@ -96,6 +97,7 @@ class _Request:
 
     row: ParsedGradeRow
     expected_class: ClassCode | None = None
+    expected_year_level: YearCode | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,7 +204,11 @@ class GradeImportService:
             resolved = row if row.term_code is not None else replace(
                 row, term_code=command.term_code
             )
-            requests.append(_Request(row=resolved, expected_class=command.class_code))
+            requests.append(_Request(
+                row=resolved,
+                expected_class=command.class_code,
+                expected_year_level=command.year_level_code,
+            ))
 
         with self._uow_factory() as uow:
             assessments.extend(self._assess(uow, requests))
@@ -412,6 +418,15 @@ class GradeImportService:
                 f"{row.student_number} was in {section.code} for {row.term_code}, not "
                 f"{request.expected_class}",
                 "class_code",
+            )
+        if request.expected_year_level is not None and str(section.year_level_code) != str(
+            request.expected_year_level
+        ):
+            return _Assessment(
+                line, payload, RowCode.UNKNOWN_CLASS, RowOutcome.REJECTED,
+                f"{row.student_number} was in grade {section.year_level_code} for "
+                f"{row.term_code}, not {request.expected_year_level}",
+                "year_level_code",
             )
         section_id = section_ids.get(section.identity)
         if section_id is None:

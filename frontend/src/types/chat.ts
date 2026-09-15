@@ -176,6 +176,9 @@ export interface RagTraceFields {
   rewrite_retrieved_chunks?: RetrievedChunk[];
   /** The stream was stopped or dropped; the stored answer is what had arrived by then. */
   turn_interrupted?: boolean;
+  /** What the message before this answer did to a pending clarification: settled it, or
+   *  replaced it with a new question. Absent on answers stored before this existed. */
+  turn_clarification?: 'answered' | 'replaced' | string;
 }
 
 export interface RagSubTrace extends RagTraceFields {}

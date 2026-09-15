@@ -21,6 +21,11 @@ def is_hitl_result(result: dict | None) -> bool:
 
 def build_hitl_resume_state(result: dict) -> dict:
     trace = result.get("rag_trace") or {}
+    # The planner's hints live half on the state and half on the context: the graph reads
+    # `child_names` off the context directly (`graph_nodes.child_names`), the rest through
+    # `_initial_state`. Snapshotted from wherever each is, because the resume gets a fresh
+    # context and `TurnPipeline.run_resumed_search` hands them back from here.
+    ctx = result.get("request_context")
     return HitlResumeState(
         question=result.get("question") or trace.get("query") or "",
         route=result.get("route") or trace.get("route"),
@@ -35,6 +40,10 @@ def build_hitl_resume_state(result: dict) -> dict:
         # established "up to Year 6" is several messages back by the time the user
         # answers.
         carried_constraints=list(result.get("carried_constraints") or []),
+        language=str(result.get("language") or ""),
+        child_year=str(result.get("child_year") or ""),
+        retrieval_sections=[str(section) for section in (result.get("retrieval_sections") or [])],
+        child_names=[str(name) for name in (getattr(ctx, "child_names", None) or [])],
     ).model_dump()
 
 

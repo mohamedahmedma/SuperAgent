@@ -157,7 +157,10 @@ const setupStores = () => {
 
 describe('chat store streaming sessions', () => {
   beforeEach(() => {
+    // Restoring puts spies back; it no longer empties a `vi.fn()`'s call history (Vitest 3+),
+    // so the shared `api` mock is cleared too — a test that counts calls starts from zero.
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     vi.stubGlobal('localStorage', createLocalStorageMock());
     vi.stubGlobal('alert', vi.fn());
     vi.stubGlobal('confirm', vi.fn(() => true));
@@ -637,6 +640,63 @@ describe('chat store streaming sessions', () => {
     expect(chatStore.pendingHitlBySession.session_current).toBeUndefined();
   });
 
+  it('shows a message as typed when the server reads it as a new question, not an answer', async () => {
+    // Asked "which child?", the parent asks about the bus instead. The message was
+    // marked as an answer at send time; the server's `turn` event says otherwise.
+    const stream = createControlledSseFetch();
+    vi.stubGlobal('fetch', stream.fetchMock);
+    const { chatStore } = setupStores();
+    chatStore.pendingHitlBySession.session_current = {
+      id: 'which-child',
+      prompt: 'Which child do you mean?',
+      options: ['Fatma — Year 11', 'Fatma — Year 9'],
+      route: 'child_select',
+    };
+
+    chatStore.userInput = 'When does the bus come?';
+    const sendPromise = chatStore.handleSend();
+    await flushPromises();
+    expect(chatStore.messagesBySession.session_current[0].isHitlAnswer).toBe(true);
+
+    stream.pushEvent({ type: 'turn', answers_clarification: false });
+    stream.pushEvent({ type: 'content', content: 'At 07:30.' });
+    stream.close();
+    await sendPromise;
+
+    const [question, answer] = chatStore.messagesBySession.session_current;
+    expect(question).toMatchObject({ text: 'When does the bus come?', isUser: true, isHitlAnswer: false });
+    expect(answer.hitlResumeText).toBeUndefined();
+    expect(answer.text).toBe('At 07:30.');
+  });
+
+  it('shows a stored question that replaced a clarification as a message on reload', () => {
+    const { chatStore } = setupStores();
+    const messages = chatStore.mapServerMessages([
+      { type: 'human', content: 'What are her subjects?' },
+      {
+        type: 'ai',
+        content: 'Which child do you mean?',
+        rag_trace: { retrieval_status: 'needs_child_choice', route: 'child_select', hitl_prompt: 'Which child do you mean?' },
+      },
+      { type: 'human', content: 'When does the bus come?' },
+      { type: 'ai', content: 'At 07:30.', rag_trace: { turn_clarification: 'replaced' } },
+    ]);
+
+    // `needs_child_choice` is not a retrieval clarification, so message 1 is not a HITL
+    // request here; the rule under test is the one on messages 2 and 3.
+    expect(messages[2]).toMatchObject({ isUser: true, isHitlAnswer: false });
+    expect(messages[3].hitlResumeText).toBeUndefined();
+
+    const retrieval = chatStore.mapServerMessages([
+      { type: 'human', content: 'What are the fees?' },
+      { type: 'ai', content: 'Which year group?', rag_trace: { retrieval_status: 'needs_clarification', route: 'clarify' } },
+      { type: 'human', content: 'Who is the principal?' },
+      { type: 'ai', content: 'Mr Hany.', rag_trace: { turn_clarification: 'replaced' } },
+    ]);
+    expect(retrieval[2]).toMatchObject({ text: 'Who is the principal?', isHitlAnswer: false });
+    expect(retrieval[3].hitlResumeText).toBeUndefined();
+  });
+
   it('maps persisted HITL answer turns as continuation state instead of normal chat turns', () => {
     const { chatStore } = setupStores();
 
@@ -744,7 +804,10 @@ describe('chat store streaming sessions', () => {
 
 describe('chat store conversation paging', () => {
   beforeEach(() => {
+    // Restoring puts spies back; it no longer empties a `vi.fn()`'s call history (Vitest 3+),
+    // so the shared `api` mock is cleared too — a test that counts calls starts from zero.
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     vi.stubGlobal('localStorage', createLocalStorageMock());
     vi.stubGlobal('alert', vi.fn());
     vi.stubGlobal('confirm', vi.fn(() => true));
@@ -931,14 +994,62 @@ describe('chat store conversation paging', () => {
     vi.mocked(api.get).mockResolvedValue({
       data: { messages: [serverMessage(41, 'Question')], has_more: true },
     });
+    vi.mocked(api.delete).mockResolvedValue({ data: { message: 'Session deleted successfully' } });
 
     const { chatStore } = setupStores();
     await chatStore.loadSession('session_long');
     expect(chatStore.canLoadOlderMessages).toBe(true);
 
-    chatStore.handleClearChat();
+    await chatStore.handleClearChat();
 
     expect(chatStore.pagingBySession.session_long).toBeUndefined();
     expect(chatStore.canLoadOlderMessages).toBe(false);
+  });
+
+  it('clears a conversation on the server too, and starts a fresh one', async () => {
+    // Clearing only the screen left the conversation stored: it came back on reopen and
+    // the assistant kept reading it as history.
+    vi.mocked(api.get).mockResolvedValue({
+      data: { messages: [serverMessage(41, 'Question'), serverMessage(42, 'Answer')], has_more: false },
+    });
+    vi.mocked(api.delete).mockResolvedValue({ data: { message: 'Session deleted successfully' } });
+
+    const { chatStore, sessionStore } = setupStores();
+    sessionStore.sessions = [{ session_id: 'session_long', title: 'Q', message_count: 2, updated_at: 'now' }];
+    await chatStore.loadSession('session_long');
+
+    await chatStore.handleClearChat();
+
+    expect(api.delete).toHaveBeenCalledWith('/sessions/session_long');
+    expect(chatStore.messagesBySession.session_long).toBeUndefined();
+    expect(sessionStore.sessions.find((s) => s.session_id === 'session_long')).toBeUndefined();
+    expect(chatStore.sessionId).not.toBe('session_long');
+    expect(chatStore.messages).toEqual([]);
+  });
+
+  it('drops a conversation the server never saw without asking it to delete anything', async () => {
+    const { chatStore } = setupStores();
+    chatStore.messagesBySession.session_current = [{ text: 'typed, never sent', isUser: true }];
+    chatStore.messages = chatStore.messagesBySession.session_current;
+
+    await chatStore.handleClearChat();
+
+    expect(api.delete).not.toHaveBeenCalled();
+    expect(chatStore.messages).toEqual([]);
+  });
+
+  it('keeps the conversation when the server refuses to delete it', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: { messages: [serverMessage(41, 'Question')], has_more: false },
+    });
+    vi.mocked(api.delete).mockRejectedValue(new Error('Network Error'));
+
+    const { chatStore } = setupStores();
+    await chatStore.loadSession('session_long');
+
+    await chatStore.handleClearChat();
+
+    expect(chatStore.sessionId).toBe('session_long');
+    expect(chatStore.messages.map((msg) => msg.text)).toEqual(['Question']);
   });
 });

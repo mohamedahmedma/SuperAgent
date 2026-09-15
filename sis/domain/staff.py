@@ -38,6 +38,7 @@ from typing import Final
 from enum import StrEnum
 
 from sis.domain.errors import ValidationError
+from sis.domain.people import Gender
 
 # Long enough that a stolen laptop is not an open session tomorrow, short enough that a
 # registrar working a full day is not asked to sign in twice.
@@ -131,11 +132,14 @@ class Teacher:
     user_id: int | None = None
     full_name_en: str = ""
     full_name_ar: str = ""
+    gender: Gender = Gender.UNSPECIFIED
     is_active: bool = True
 
     def __post_init__(self) -> None:
         if not str(self.staff_number).strip():
             raise ValidationError("a teacher needs a staff number", field="staff_number")
+        if not isinstance(self.gender, Gender):
+            object.__setattr__(self, "gender", Gender(str(self.gender or "").lower()))
 
     def display_name(self, language: str = "en") -> str:
         arabic = str(language).lower().startswith("ar")

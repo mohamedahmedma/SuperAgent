@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import importlib
 import json
 import unittest
@@ -8,6 +9,10 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from backend.chat.background import InlineJobs
 from backend.composition import Services
 from backend.chat.clarification import PENDING_HITL_KEY
+
+# A clarification asked a moment ago. Pending questions expire after a day
+# (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
+_ASKED_JUST_NOW = datetime.now(timezone.utc).isoformat()
 
 service = importlib.import_module("backend.chat.service")
 
@@ -183,6 +188,12 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             # Conditions set before the clarification, carried across the resume
             # boundary for the same reason `hitl_rounds` is.
             "carried_constraints": [],
+            # The planner's hints the question ran with, carried so the resumed search
+            # runs under them too. Empty here: this fake agent planned nothing.
+            "language": "",
+            "child_year": "",
+            "retrieval_sections": [],
+            "child_names": [],
         }
         fake_storage = FakeStorage()
         update_note = Mock(return_value="updated note")
@@ -234,7 +245,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             "route": "clarify",
             "retrieval_status": "needs_clarification",
             "answers": [],
-            "created_at": "2026-07-11T00:00:00+00:00",
+            "created_at": _ASKED_JUST_NOW,
             "resume_state": {
                 "question": "What is this character's element?",
                 "route": "clarify",

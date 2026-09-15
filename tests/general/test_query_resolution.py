@@ -24,6 +24,7 @@ Four separate defects produced that, and each has tests below:
   4. the resume path never saw the conversation, and built its query by concatenating
      the correction onto the reading it was correcting — so it retrieved both
 """
+from datetime import datetime, timezone
 import unittest
 
 
@@ -44,6 +45,10 @@ from backend.rag.evidence import Certainty, EvidenceReport
 from backend.rag.policy import can_ask_human, decide_route, offerable_directions
 from backend.rag.scope_index import ScopeMatch
 from backend.chat.context_messages import _turn_context_message, build_context_messages
+
+# A clarification asked a moment ago. Pending questions expire after a day
+# (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
+_ASKED_JUST_NOW = datetime.now(timezone.utc).isoformat()
 
 
 def _config(**overrides):
@@ -703,7 +708,7 @@ class TurnEntryTests(unittest.TestCase):
         "route": "scope_select",
         "retrieval_status": "needs_scope_selection",
         "answers": [],
-        "created_at": "2026-08-07T00:00:00+00:00",
+        "created_at": _ASKED_JUST_NOW,
         "resume_state": {
             "question": "school fees",
             "route": "scope_select",

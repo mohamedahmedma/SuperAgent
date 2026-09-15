@@ -28,6 +28,8 @@ folding an English name is a no-op, and case is handled by `ILIKE` as it always 
 Nothing here reads a clock, a database or the environment.
 """
 from typing import Final
+import re
+import unicodedata
 
 # Every pair is (as it may be written, as it is matched). Written with the codepoint in
 # the comment because a literal Arabic mark is a literal no reviewer can see — several
@@ -68,3 +70,14 @@ def fold_for_search(text: str) -> str:
     for written, matched in SEARCH_FOLDING:
         text = text.replace(written, matched)
     return text
+
+
+def compact_for_search(text: str) -> str:
+    """A forgiving lookup key that also ignores spacing and Unicode presentation.
+
+    Names keep their original spelling on screen. This key is only used for matching,
+    so ``عبد الرحمن`` and ``عبدالرحمن`` deliberately meet while punctuation remains
+    literal and cannot turn into a database wildcard.
+    """
+    normalized = unicodedata.normalize("NFKC", text or "")
+    return re.sub(r"\s+", "", fold_for_search(normalized)).casefold()

@@ -46,7 +46,7 @@ from backend.chat.assets_bridge import (
     trace_for_storage,
 )
 from backend.chat.caller_identity import CallerIdentity
-from backend.chat.child_context import load_child_state, save_child_state
+from backend.chat.child_context import SESSION_CHILD_KEY, load_child_state, save_child_state
 from backend.chat.clarification import (
     PENDING_HITL_KEY,
     TurnEntry,
@@ -60,6 +60,7 @@ from backend.chat.clarification import (
 from backend.chat.context_messages import build_context_messages, build_resume_answer_messages
 from backend.chat.background import MODELS, JobRunner
 from backend.chat.finalize import Finalizer, finalize_text, message_text
+from backend.chat.persistent_note import cleared_note_patch, note_patch, usable_note
 from backend.chat.storage import MessageToStore
 from backend.schemas.chat import normalize_rag_trace
 
@@ -101,6 +102,8 @@ class Turn:
     messages: list
     metadata: dict
     child_state: Any
+    #: The note this caller may read — empty when the stored one was written for a
+    #: different guardian (`backend/chat/persistent_note.py`).
     persistent_note: str
     is_first_message: bool
     #: The conversation before this message, for the direct answer a resumed search gets.
@@ -108,6 +111,10 @@ class Turn:
     #: The voice note this message was spoken as, already stored and checked to be the
     #: caller's own. `user_text` is its transcript. Stored on the question, not read here.
     attachment_id: str | None = None
+    #: A note was stored and refused: another guardian's. Cleared at the save, unless this
+    #: turn's note job writes over it first.
+    note_discarded: bool = False
+    note_scheduled: bool = False
     entry: TurnEntry | None = None
     ctx: Any = None
     plan: Any = None
@@ -125,6 +132,11 @@ class Turn:
     #: The writes this turn queued, in order. Their results are the row ids the messages
     #: were stored under, which the client is told so it can tell its copy from the server's.
     writes: list = field(default_factory=list)
+
+    @property
+    def guardian_id(self) -> str:
+        """The guardian this turn is served for; empty for a staff session or a job."""
+        return self.caller.guardian_id if self.caller else ""
 
     def asset_payload(self) -> list:
         return [
@@ -229,6 +241,11 @@ class TurnPipeline:
                 user_id, session_id, self.SAVE_WAIT_SECONDS,
             )
         messages, metadata = self._c.conversations.load_with_meta(user_id, session_id)
+        guardian_id = caller.guardian_id if caller else ""
+        # Both keyed to the guardian, not the account: a conversation outlives a custody
+        # transfer, and neither the previous family's child nor its summary may steer the
+        # next family's answers.
+        note, note_discarded = usable_note(metadata, guardian_id)
         return Turn(
             user_text=user_text,
             user_id=user_id,
@@ -238,8 +255,9 @@ class TurnPipeline:
             metadata=metadata,
             # The pin travels by reference into the turn's context and back out into the
             # saved metadata, so a turn that resolves a child has already recorded it.
-            child_state=load_child_state(metadata, guardian_id=caller.guardian_id if caller else ""),
-            persistent_note=metadata.get("persistent_note", ""),
+            child_state=load_child_state(metadata, guardian_id=guardian_id),
+            persistent_note=note,
+            note_discarded=note_discarded,
             is_first_message=len(messages) == 0,
             history=list(messages),
             attachment_id=attachment_id or None,
@@ -275,11 +293,51 @@ class TurnPipeline:
     def _attach(self, turn: Turn, ctx):
         turn.ctx = ctx
         ctx.reset_knowledge_tool_budget()
-        # Settled before anything plans this turn, so the pin is in place by the time the
-        # planner resolves a child.
-        if turn.entry.child_choice:
-            pin_the_child_the_parent_named(ctx, turn.entry.child_choice)
         return ctx
+
+    def settle_child_choice(self, turn: Turn) -> None:
+        """Read the reply to "which child?" against the roster and, failing that, the conversation.
+
+        Before anything plans this turn, so the pin is in place by the time the planner
+        resolves a child. May cost a roster read and, when the reply names nobody, a
+        resolver call — which is why the streamed entry point runs it on a worker thread.
+
+        A reply that pins a child is the answer. One that pins nobody used to be
+        re-planned as the ORIGINAL question regardless, so a parent who typed a new
+        question instead of a name was ignored and asked "which child?" again — for as
+        long as they kept typing questions. The resolver now reads such a reply against
+        the conversation: a correction or a change of subject replaces the pending
+        question, and the turn is about what the parent just typed. Anything else — a
+        nickname, a spelling the roster cannot place, a resolver that abstained — still
+        asks again, which is the only honest answer to a name nobody recognised.
+        """
+        entry = turn.entry
+        if not entry.child_choice:
+            return
+        if pin_the_child_the_parent_named(turn.ctx, entry.child_choice):
+            return
+        pending = entry.pending_hitl or {}
+        resolution = self._c.resolve_question(
+            turn.user_text,
+            list(turn.messages),
+            hitl_prompt=pending.get("prompt") or "",
+            hitl_options=pending.get("options") or [],
+        )
+        if getattr(resolution, "supersedes_pending_question", False):
+            entry.replace_with_new_question(turn.user_text, resolution)
+
+    @staticmethod
+    def turn_event(turn: Turn) -> dict | None:
+        """How this message was read against the question the assistant was waiting on.
+
+        For the client, which marked the message as an answer the moment it was sent and
+        hides it as one. Sent before anything slow, and only when something was pending:
+        a message that REPLACED the question is an ordinary message, shown as typed.
+        """
+        entry = turn.entry
+        if entry.pending_hitl is None and not entry.invalid_pending_hitl:
+            return None
+        return {"type": "turn", "answers_clarification": entry.clarification_outcome == "answered"}
 
     def record_question(self, turn: Turn) -> None:
         turn.messages.append(HumanMessage(content=turn.user_text))
@@ -308,6 +366,26 @@ class TurnPipeline:
         return bool(turn.entry.is_hitl_resume and turn.entry.resume_state)
 
     def run_resumed_search(self, turn: Turn) -> dict:
+        """Pick the paused search up, under the hints the turn that paused it ran with.
+
+        The planner runs on the fresh-question path only, and the graph starts a resume
+        on a context nothing has planned into. So a search paused in Arabic resumed with
+        no language — both halves of a bilingual document competing — with no year group,
+        and with the child's name back in the query. The hints the question was asked
+        under travel in the resume state (`HitlResumeState`) and are handed to the
+        context here, where the planner would have. A question paused before they were
+        carried resumes with none, which is what an unplanned turn has always run with.
+        """
+        carried = turn.entry.resume_state or {}
+        turn.ctx.note_turn_plan(
+            carried.get("retrieval_sections") or [],
+            # No scope options: a resumed turn is a continuation, and offering a fresh
+            # choice of corpus directions would be the second interruption in a row.
+            [],
+            language=carried.get("language") or "",
+            child_year=carried.get("child_year") or "",
+            child_names=carried.get("child_names") or [],
+        )
         return self._c.resume_retrieval(
             turn.entry.pending_hitl, turn.user_text, turn.ctx, turn.entry.resolution
         )
@@ -499,10 +577,16 @@ class TurnPipeline:
         (`ConversationStorage.append`). A copy of the metadata as it stood when the turn
         began used to be written back whole, which put every key a concurrent writer had
         changed in between — the note, another turn's pending question — back the way this
-        turn had found it.
+        turn had found it. The child pin was the last key still written that way: a turn
+        that pinned nobody wrote its snapshot of the pin back over the child a turn in
+        flight beside it had just settled.
         """
         patch: dict = {}
-        save_child_state(patch, turn.child_state)
+        save_child_state(patch, turn.child_state, stored=turn.metadata.get(SESSION_CHILD_KEY))
+        if turn.note_discarded and not turn.note_scheduled:
+            # Another guardian's note, refused at `open`. Dropped so it is not read again —
+            # unless this turn's note job is about to write over it anyway.
+            patch.update(cleared_note_patch())
         if turn.entry.invalid_pending_hitl:
             patch[PENDING_HITL_KEY] = None
         if turn.title:
@@ -539,22 +623,26 @@ class TurnPipeline:
         The note it builds on is read when the job RUNS, not copied from when the turn
         began: another turn may have finished in between and folded itself in, and a
         summary written over its work would drop it. Jobs for one conversation's note run
-        in order, so two turns cannot race each other to the write either.
+        in order, so two turns cannot race each other to the write either. Read and
+        written for this turn's guardian: a note another guardian left is not a starting
+        point, and the note written is stamped as this one's.
         """
         if not self.note_is_due(turn):
             return False
         conversations, update_note = self._c.conversations, self._c.update_note
-        user_id, session_id = turn.user_id, turn.session_id
+        user_id, session_id, guardian_id = turn.user_id, turn.session_id, turn.guardian_id
         user_text, answer = turn.entry.effective_user_text, turn.answer
         # The whole conversation only when there is no note yet to build on — a note is
         # bootstrapped from the history the window has already trimmed.
         history = list(turn.messages[:-1]) if not turn.persistent_note else None
 
         def work():
-            current = str(conversations.session_metadata(user_id, session_id).get("persistent_note") or "")
+            current, discarded = usable_note(conversations.session_metadata(user_id, session_id), guardian_id)
             note = update_note(current, user_text, answer, history_messages=history)
             if note and note != current:
-                conversations.patch_metadata(user_id, session_id, {"persistent_note": note})
+                conversations.patch_metadata(user_id, session_id, note_patch(note, guardian_id))
+            elif discarded:
+                conversations.patch_metadata(user_id, session_id, cleared_note_patch())
 
         self._c.background.submit(
             self.note_key(user_id, session_id),
@@ -564,6 +652,7 @@ class TurnPipeline:
             lane=MODELS,
             describe=f"update the persistent note ({user_id}/{session_id})",
         )
+        turn.note_scheduled = True
         return True
 
     def commit(self, turn: Turn, save_meta: dict) -> None:
@@ -575,6 +664,12 @@ class TurnPipeline:
         """
         turn.messages.append(AIMessage(content=turn.answer))
         turn.committed = True
+        # On the STORED copy: a reopened conversation has to know whether the message
+        # before this answer settled a pending question or set it aside, and the trace
+        # is where a stored message keeps what the wire told the client live.
+        outcome = turn.entry.clarification_outcome if turn.entry is not None else None
+        if outcome:
+            turn.rag_trace = normalize_rag_trace({**(turn.rag_trace or {}), "turn_clarification": outcome})
         self._store(
             turn,
             [MessageToStore("ai", turn.answer, rag_trace=trace_for_storage(turn.rag_trace))],

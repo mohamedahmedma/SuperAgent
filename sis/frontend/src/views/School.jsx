@@ -6,15 +6,12 @@
  * anything unclassified last — a rung nobody has grouped yet belongs at the bottom rather than
  * above the kindergarten.
  *
- * A stage is a label and carries no rules: nothing is barred from a class, a term or a subject
- * because of it. That is why reclassifying a rung is an ordinary edit rather than a confirmed
- * one — it moves a card between two headings and touches nothing else.
- *
- * On a phone each rung is a stacked card rather than a row of five things, and the class count
- * and the division picker wrap under the code. The rung itself stays the tap target.
+ * A stage is chosen when a rung is created. Existing rungs are presented as stable school
+ * structure: the card opens the rung, without offering misleading reclassification or deletion
+ * controls beside it.
  */
 import { useEffect, useState } from 'react';
-import { ApiError, api } from '../api.js';
+import { api } from '../api.js';
 import { Router } from '../router.js';
 import { Store } from '../store.js';
 import { dateText, pickName, useAction, useForm, useResource, useStore } from '../hooks.js';
@@ -31,10 +28,9 @@ import {
   Select,
   Skeleton,
   Table,
-  Tile,
-  useConfirm
+  Tile
 } from '../components/Ui.jsx';
-import { SCHOOL_LEVELS, STAGES, byStage } from '../structure.js';
+import { SCHOOL_LEVELS, byStage } from '../structure.js';
 import { PrincipalYearSetup } from '../components/PrincipalYearSetup.jsx';
 
 /* The week, Saturday first, as an Egyptian school reads it. The value is what the service
@@ -402,19 +398,14 @@ function LevelForm({ school, schoolConfig, track, count, onSaved }) {
 /* -- One rung -------------------------------------------------------------------- */
 
 function Rung({ level, school, year, lang, classCount }) {
-  const [dialog, ask] = useConfirm();
-  const [stage, setStage] = useState(level.stage);
-
   return (
-    <div className="card mb-2 sis-row-open">
-      {dialog}
+    <div className="card mb-2 sis-row-open sis-rung">
       {/*
         * The whole rung opens, not the words on it.
         *
         * This used to be an anchor wrapped around the code and the name, so the target was the
         * text and everything to the right of it — most of a very wide row — was dead. The
-        * stretched anchor covers the card instead, and the picker and the Remove button beside
-        * it are lifted clear by `sis-row-actions` so they keep their own clicks.
+        * stretched anchor now covers the full card.
         */}
       <a
         className="sis-row-target"
@@ -431,78 +422,6 @@ function Rung({ level, school, year, lang, classCount }) {
             {classCount === null || classCount === undefined ? '' : t('{0} class(es)', [classCount])}
           </span>
         </span>
-
-        <div className="d-flex align-items-center gap-2 sis-row-actions">
-          <Select
-            size="sm"
-            value={stage}
-            options={STAGES.map((item) => ({ value: item.key, label: t(item.label) }))}
-            onChange={(next) => {
-              setStage(next);
-              /* An ordinary edit: a stage is a label, so moving a rung between divisions
-                 changes which heading it sits under and nothing else. No dialog. */
-              api
-                .createLevel({
-                  code: level.code,
-                  school_code: school,
-                  name_en: level.name_en,
-                  name_ar: level.name_ar,
-                  display_order: level.display_order,
-                  stage: next
-                })
-                .then(() => {
-                  Store.invalidate('levels:');
-                  Store.toast('ok', t('{0} moved to {1}', [level.code, t(STAGES.find((item) => item.key === next)?.label || next)]));
-                })
-                .catch((error) => {
-                  setStage(level.stage);
-                  Store.toast('bad', t('Could not move {0}', [level.code]), error.message);
-                });
-            }}
-          />
-
-          <Button
-            size="sm"
-            variant="quiet"
-            onClick={() =>
-              ask({
-                title: `Remove rung ${level.code}?`,
-                tone: 'bad',
-                confirmLabel: 'Remove it',
-                body: (
-                  <>
-                    <p>
-                      {t("A rung can only be removed while nothing points at it. This school's classes on")} <span className="sis-code">{level.code}</span> {t('would each have to be removed first, and the service will refuse while any of them exist.')}
-                    </p>
-                    <p className="small text-body-tertiary mb-0">
-                      {t("That refusal is the database's, not this screen's — which is why it holds even when two registrars click at once.")}
-                    </p>
-                  </>
-                ),
-                run: () =>
-                  /*
-                   * There is no delete route, deliberately: nothing in this service deletes
-                   * structure, because a rung with a class under it carries marks and registers
-                   * with it. The honest thing is to say so rather than offer a button that
-                   * cannot work.
-                   */
-                  Promise.reject(
-                    ApiError(
-                      'client',
-                      0,
-                      'not_supported',
-                      'Rungs are not deleted by this service. Nothing that has ever held a class ' +
-                        'can be removed without taking its marks and registers with it — leave it ' +
-                        'in place, or move it to a division you do not use.',
-                      'code'
-                    )
-                  )
-              })
-            }
-          >
-            {t('Remove')}
-          </Button>
-        </div>
       </div>
     </div>
   );

@@ -149,6 +149,9 @@ agent:
   # rather than "this is a question". A higher ceiling also caught ordinary
   # self-contained questions, spending a call to be told nothing changed.
   query_resolution_max_chars: 40
+  # A question the assistant asked (year group, which child, which direction) waits this
+  # many minutes for its answer; after that the next message is a fresh one.
+  clarification_ttl_minutes: 1440
   carried_constraint_limit: 4
 
   # Markers that make a message depend on the conversation. Multilingual by default

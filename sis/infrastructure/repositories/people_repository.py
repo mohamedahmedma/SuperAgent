@@ -29,7 +29,7 @@ from sqlalchemy import Select, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 
 from sis.application.ports.repositories import EnrolmentKey
-from sis.domain.arabic import SEARCH_FOLDING, fold_for_search
+from sis.domain.arabic import SEARCH_FOLDING, compact_for_search, fold_for_search
 from sis.domain.errors import DuplicateCode, UnknownReference
 from sis.domain.people import ClassEnrolment, Student
 from sis.domain.structure import ClassSection
@@ -71,6 +71,13 @@ def _fold_search_text(value: str) -> str:
     return folded
 
 
+def _compact_search_text(value: str) -> str:
+    folded = compact_for_search(value)
+    for written, matched in _EXTRA_SEARCH_FOLDING:
+        folded = folded.replace(written, matched)
+    return folded
+
+
 def _chunked(values: Sequence[Any]) -> Iterator[Sequence[Any]]:
     """Split an `IN` list into batches SQLite will accept."""
     for start in range(0, len(values), _IN_CHUNK):
@@ -93,6 +100,15 @@ def _folded(column: Any) -> Any:
     expression = column
     for written, matched in _search_folding():
         expression = func.replace(expression, written, matched)
+    return expression
+
+
+def _compact_folded(column: Any) -> Any:
+    expression = _folded(column)
+    # Real rosters contain ordinary spaces, NBSPs copied from PDFs, and occasional
+    # tabs. Ignoring them makes a joined or split compound name search identically.
+    for spacing in (" ", "\t", "\r", "\n", "\u00a0"):
+        expression = func.replace(expression, spacing, "")
     return expression
 
 
@@ -250,12 +266,12 @@ class SqlAlchemyStudentRepository:
         """
         if not query.strip():
             return []
-        term = _like_term(_fold_search_text(query))
+        term = _like_term(_compact_search_text(query))
         stmt = select(models.Student).where(
             or_(
-                _folded(models.Student.student_number).ilike(term, escape="\\"),
-                _folded(models.Student.full_name_ar).ilike(term, escape="\\"),
-                _folded(models.Student.full_name_en).ilike(term, escape="\\"),
+                _compact_folded(models.Student.student_number).ilike(term, escape="\\"),
+                _compact_folded(models.Student.full_name_ar).ilike(term, escape="\\"),
+                _compact_folded(models.Student.full_name_en).ilike(term, escape="\\"),
             )
         )
         if not include_inactive:

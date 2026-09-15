@@ -475,6 +475,13 @@ class AgentConfig(_Section):
     # bad turn must not be able to bury either.
     carried_constraint_limit: int = 4
 
+    # How long a question the assistant asked — which year group, which child, which of
+    # these — waits for its answer. Past it the next message is an ordinary message: a
+    # parent who comes back days later to a chat that ended on "which year group?" is
+    # starting again, not answering, and reading "when does school start?" as a year
+    # group was how a stale question hijacked a fresh one. Minutes; zero never expires.
+    clarification_ttl_minutes: int = 1440
+
     # Words that make a message depend on the conversation. Language- and domain-
     # specific, hence profile data. Single-word markers are matched on word boundaries
     # ("it" must not fire inside "admission"); anything containing a space is matched
