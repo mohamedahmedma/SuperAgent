@@ -136,7 +136,20 @@ def build_transcriber(environ: Optional[Mapping[str, str]] = None) -> Transcribe
     model = (source.get("TRANSCRIPTION_MODEL") or "").strip()
     api_key = (source.get("ARK_API_KEY") or "").strip()
     if not model or not api_key:
+        # Said out loud, because the alternative is finding out from a parent. A `.env`
+        # written before voice notes existed names no transcription model, and a server's
+        # `.env` is persistent state that a release deliberately does not overwrite — so
+        # this is the normal way a deployment arrives here, and nothing else reports it:
+        # the note is stored, the upload answers 201, the backend is healthy, and every
+        # recording comes back `unavailable` with the client asking the parent to type.
+        logger.warning(
+            "no speech-to-text model is configured, so voice notes will be stored but not "
+            "transcribed; set TRANSCRIPTION_MODEL (or <PROVIDER>_TRANSCRIPTION_MODEL for the "
+            "live LLM_PROVIDER block) to enable them%s",
+            "" if api_key else " — note that ARK_API_KEY is unset too",
+        )
         return NoTranscriber()
+    logger.info("voice notes will be transcribed with %s", model)
     return WhisperTranscriber(api_key=api_key, model=model, base_url=(source.get("BASE_URL") or "").strip())
 
 
