@@ -300,10 +300,19 @@ jobs:
           deploy_path="$1"
           image_tag="$2"
           image_prefix="$3"
-          # ssh rebuilds the remote command as a string, so a quoted empty final
-          # argument is not preserved. Accept a missing $4 for a no-service release.
-          services="${4-}"
+          # ssh rebuilds the remote command as ONE string, so the quotes around the
+          # services list do not survive and every word in it arrives as its own
+          # argument. `services="${4-}"` therefore kept only the first word: a release
+          # detected as "backend frontend identity records sis" pulled and recreated the
+          # backend alone, left the frontend and identity on images from earlier
+          # releases, and was still reported a success (2026-09-15 — the voice-note UI
+          # and the session renewal shipped to main and never reached a browser).
+          # Everything after the third argument is the list; a documentation-only
+          # release arrives with nothing there.
+          shift 3
+          services="$*"
           cd "$deploy_path"
+          echo "Release $image_tag: services [${services:-none}]"
           # A documentation-only change has no application image to release.
           [ -n "$services" ] || exit 0
           tags_file=".release-image-tags"
@@ -364,6 +373,22 @@ jobs:
             $compose up -d --no-deps --pull missing $app_services || return 1
           }
 
+          # Each released service must be RUNNING this release's image, checked by the
+          # container's own record rather than by the manifest we just wrote. The health
+          # gate below cannot tell a new frontend from an old one — both answer 200 — so a
+          # release that recreated only some of its services passed it. Container names
+          # are fixed in docker-compose.yml, which is what makes `docker inspect` exact.
+          running_this_release() {
+            local service image
+            for service in $services; do
+              image="$(docker inspect --format '{{.Config.Image}}' "superagent-$service" 2>/dev/null || true)"
+              case "$image" in
+                *":$image_tag") echo "$service runs $image" ;;
+                *) echo "$service runs ${image:-no container}, not :$image_tag"; return 1 ;;
+              esac
+            done
+          }
+
           healthy() {
             timeout 300 sh -c 'until wget -qO- http://127.0.0.1:8000/health >/dev/null 2>&1 && wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1; do sleep 5; done'
           }
@@ -397,6 +422,7 @@ jobs:
             # is working WITH the .env applied: a bad value fails here and rolls back, instead
             # of being applied after a green run where nothing would check it.
             release || return 1
+            running_this_release || return 1
             healthy || return 1
             # sis runs `alembic upgrade head` in its own entrypoint, so a sis that is
             # healthy has already migrated. This covers the release where sis was not

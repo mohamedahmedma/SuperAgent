@@ -72,6 +72,29 @@ configuration to decide what to recreate, and the *contents* of an `env_file` ar
 of that hash — so a new file sits unread behind containers Compose considers up to date.
 `restart` does nothing. `--force-recreate` is mandatory, and the script always passes it.
 
+## Bringing a service onto the release it missed
+
+`.release-image-tags` in `$DEPLOY_PATH` records, per service, the image tag the last
+successful release put it on, and `apply-env.sh` recreates from that manifest. So if a
+service is running an older image than `main` (check with
+`docker inspect --format '{{.Config.Image}}' superagent-frontend`, and compare with the
+`compose ps` at the end of the last "Stage 3" job), recreating it as-is only re-applies
+the stale tag. Point the manifest at the release first, then recreate:
+
+```
+ssh root@HOST
+cd /opt/superagent
+tag=<full commit sha of the main merge>          # the tag CD published, e.g. 6b67dea191b6...
+for s in FRONTEND IDENTITY; do sed -i "/^${s}_IMAGE_TAG=/d" .release-image-tags; echo "${s}_IMAGE_TAG=$tag" >> .release-image-tags; done
+bash deploy/scripts/apply-env.sh --pull always frontend identity
+```
+
+Every service in a release used to be able to miss it: the pipeline handed the services
+list to the server over ssh, which re-splits the command, and only the first service was
+released while the run reported success (2026-09-15). The release now checks each named
+service's running image against the tag and fails otherwise, so this section is for a
+service that fell behind before that, or for a release rolled back by hand.
+
 If Compose reports `required variable ... is missing a value`, it stops interpolating
 *everything* — `ps` and `logs` included. The running containers still hold what they were
 created with, so recover from them rather than guessing:
