@@ -157,7 +157,10 @@ const setupStores = () => {
 
 describe('chat store streaming sessions', () => {
   beforeEach(() => {
+    // Restoring puts spies back; it no longer empties a `vi.fn()`'s call history (Vitest 3+),
+    // so the shared `api` mock is cleared too — a test that counts calls starts from zero.
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     vi.stubGlobal('localStorage', createLocalStorageMock());
     vi.stubGlobal('alert', vi.fn());
     vi.stubGlobal('confirm', vi.fn(() => true));
@@ -801,7 +804,10 @@ describe('chat store streaming sessions', () => {
 
 describe('chat store conversation paging', () => {
   beforeEach(() => {
+    // Restoring puts spies back; it no longer empties a `vi.fn()`'s call history (Vitest 3+),
+    // so the shared `api` mock is cleared too — a test that counts calls starts from zero.
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     vi.stubGlobal('localStorage', createLocalStorageMock());
     vi.stubGlobal('alert', vi.fn());
     vi.stubGlobal('confirm', vi.fn(() => true));
