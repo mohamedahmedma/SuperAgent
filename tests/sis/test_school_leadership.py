@@ -49,15 +49,16 @@ def test_principal_can_correct_student_and_guardian_records_but_never_becomes_sy
     assert "teacher_attendance.read" in profile["permissions"]
     # A principal admits and corrects children in their own school: the console's Edit button
     # is theirs, and refusing it would leave the head of the school unable to fix a misspelt
-    # name. Reading marks is the same story. What stays out of reach is everything that
-    # rewrites the school itself or the system it runs on.
+    # name. The manager also owns academic structure, term-grade imports and promotion runs.
+    # What stays out of reach is creating schools or administering the system itself.
     assert "students.create" in profile["permissions"]
     assert "students.write" in profile["permissions"]
     assert "guardians.write" in profile["permissions"]
     assert "grades.read" in profile["permissions"]
+    assert "grades.write" in profile["permissions"]
+    assert "imports.run" in profile["permissions"]
     forbidden = {
-        "schools.write", "structure.write", "grades.write",
-        "imports.run", "system.manage", "system.status.write",
+        "schools.write", "structure.write", "system.manage", "system.status.write",
     }
     assert forbidden.isdisjoint(profile["permissions"])
 

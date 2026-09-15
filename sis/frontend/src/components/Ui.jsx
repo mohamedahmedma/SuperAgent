@@ -634,7 +634,7 @@ export function Confirm({
         }}
       >
         <div
-          className="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-fullscreen-sm-down"
+          className="modal-dialog modal-dialog-centered modal-dialog-scrollable sis-confirm-dialog"
           ref={host}
         >
           <div className="modal-content">

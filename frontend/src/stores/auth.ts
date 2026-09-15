@@ -1,8 +1,5 @@
 import { defineStore } from 'pinia';
-import identityApi, {
-  ACCESS_TOKEN_KEY,
-  REFRESH_TOKEN_KEY,
-} from '@/utils/identityApi';
+import identityApi, { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from '@/utils/identityApi';
 import {
   clearStoredTokens,
   exchangeRefreshToken,
@@ -485,10 +482,10 @@ export const useAuthStore = defineStore('auth', {
         refreshToken: String(data.refresh_token || ''),
       });
       this.currentUser = {
-        username: data.username,
+        username: String(data.username || ''),
         role: data.role as UserRole,
-        guardianId: data.guardian_id ?? null,
-        displayName: data.display_name || '',
+        guardianId: (data.guardian_id as string | null | undefined) ?? null,
+        displayName: String(data.display_name || ''),
       };
     },
 

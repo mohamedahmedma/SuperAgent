@@ -18,6 +18,7 @@ from sis.api.routers import domain_errors, error_responses
 from sis.application.ports.repositories import TeacherRecord
 from sis.application.services.teachers import TeacherManagementService
 from sis.domain.staff import PASSWORD_MIN_LENGTH, StaffAttendanceState
+from sis.domain.people import Gender
 from sis.domain.rbac import Permission, RoleCode
 from sis.domain.value_objects import SchoolCode, YearCode
 from sis.infrastructure.db import models as m
@@ -87,6 +88,7 @@ class TeacherAssignmentIn(BaseModel):
 class TeacherIn(BaseModel):
     full_name_en: str = ""
     full_name_ar: str = ""
+    gender: Gender = Gender.UNSPECIFIED
     email: str = ""
     phone: str = ""
     is_active: bool = True
@@ -121,6 +123,7 @@ class TeacherOut(BaseModel):
     username: str | None
     full_name_en: str
     full_name_ar: str
+    gender: Gender = Gender.UNSPECIFIED
     email: str
     phone: str
     is_active: bool
@@ -132,6 +135,7 @@ class TeacherOut(BaseModel):
             staff_number=record.teacher.staff_number, school_code=record.school_code,
             user_id=record.teacher.user_id, username=record.username,
             full_name_en=record.teacher.full_name_en, full_name_ar=record.teacher.full_name_ar,
+            gender=record.teacher.gender,
             email=record.email, phone=record.phone, is_active=record.teacher.is_active,
             assignments=[TeacherAssignmentOut(
                 academic_year_code=row.academic_year_code, subject_code=row.subject_code,
@@ -600,6 +604,7 @@ def save_teacher(school_code: str, staff_number: str, body: TeacherIn,
         row = service.save(
             school_code=SchoolCode(school_code), staff_number=staff_number,
             full_name_en=body.full_name_en, full_name_ar=body.full_name_ar,
+            gender=body.gender,
             email=body.email, phone=body.phone, is_active=body.is_active,
             username=body.username, password=body.password,
             assignments=[(a.academic_year_code, a.subject_code, a.year_level_code, a.class_codes)
@@ -634,6 +639,7 @@ def create_teacher(
         row = service.save(
             school_code=SchoolCode(school_code), staff_number=staff_number,
             full_name_en=body.full_name_en, full_name_ar=body.full_name_ar,
+            gender=body.gender,
             email=body.email, phone=body.phone, is_active=body.is_active,
             username=body.username, password=body.password,
             assignments=[(a.academic_year_code, a.subject_code, a.year_level_code, a.class_codes)

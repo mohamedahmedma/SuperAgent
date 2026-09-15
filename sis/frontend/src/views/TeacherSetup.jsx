@@ -6,7 +6,7 @@ import { Button, Card, Empty, ErrorNote, Field, Input, NoYearNotice, PageHead, S
 import { t } from '../i18n.js';
 
 const blank = () => ({
-  full_name_en: '', full_name_ar: '', email: '', phone: '',
+  full_name_en: '', full_name_ar: '', gender: 'male', email: '', phone: '',
   username: '', password: '', is_active: true, assignments: [], role_code: 'teacher', year_level_id: ''
 });
 
@@ -77,6 +77,7 @@ export function TeacherSetup() {
       const created = await api.createTeacher(state.school, {
         full_name_en: form.full_name_en,
         full_name_ar: form.full_name_ar,
+        gender: form.gender,
         email: form.email,
         phone: form.phone,
         is_active: form.is_active,
@@ -121,6 +122,12 @@ export function TeacherSetup() {
           <Field className="col-12 col-md-6" label={t('Arabic name')}>
             <Input className="sis-name-ar" value={form.full_name_ar} onInput={(value) => setForm((old) => ({ ...old, full_name_ar: value }))} />
           </Field>
+          {!isSupervisor ? <Field className="col-12 col-md-6" label={t('Gender')} required>
+            <Select value={form.gender} disabled={saving} options={[
+              { value: 'male', label: t('Male') },
+              { value: 'female', label: t('Female') }
+            ]} onChange={(value) => setForm((old) => ({ ...old, gender: value }))} />
+          </Field> : null}
           <Field className="col-12 col-md-6" label={t('Username')}>
             <Input value={form.username} onInput={(value) => setForm((old) => ({ ...old, username: value }))} />
           </Field>
@@ -169,7 +176,7 @@ export function TeacherSetup() {
       </Card>}
       {error ? <ErrorNote error={error} /> : null}
       <div><Button variant="primary" pending={saving}
-        disabled={saving || !form.full_name_en.trim() || !form.full_name_ar.trim() || (isSupervisor && (!form.year_level_id || !form.username.trim() || !form.password))}
+        disabled={saving || !form.full_name_en.trim() || !form.full_name_ar.trim() || (!isSupervisor && !form.gender) || (isSupervisor && (!form.year_level_id || !form.username.trim() || !form.password))}
         onClick={save}>{t(isSupervisor ? 'Create supervisor account' : 'Save teacher configuration')}</Button></div>
     </div>
   </>;

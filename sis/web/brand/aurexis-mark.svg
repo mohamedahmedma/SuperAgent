@@ -2,23 +2,22 @@
   <defs>
     <linearGradient id='main' x1='269' y1='0' x2='0' y2='385' gradientUnits='userSpaceOnUse'>
       <stop stop-color='#2DB2FD'/>
-      <stop offset='.34' stop-color='#327AFA'/>
-      <stop offset='.68' stop-color='#4B4CF4'/>
-      <stop offset='1' stop-color='#7A6FF9'/>
+      <stop offset='.34' stop-color='#0A84FF'/>
+      <stop offset='1' stop-color='#0062CC'/>
     </linearGradient>
     <linearGradient id='fold' x1='245' y1='189' x2='320' y2='373' gradientUnits='userSpaceOnUse'>
-      <stop stop-color='#426BF7'/>
-      <stop offset='.5' stop-color='#514EF4'/>
-      <stop offset='1' stop-color='#613BF2'/>
+      <stop stop-color='#0A84FF'/>
+      <stop offset='.6' stop-color='#0052B3'/>
+      <stop offset='1' stop-color='#003D80'/>
     </linearGradient>
     <linearGradient id='data' x1='370' y1='326' x2='370' y2='386' gradientUnits='userSpaceOnUse'>
-      <stop stop-color='#4965F5'/>
-      <stop offset='1' stop-color='#5148F3'/>
+      <stop stop-color='#2DB2FD'/>
+      <stop offset='1' stop-color='#0A84FF'/>
     </linearGradient>
     <linearGradient id='edge' x1='269' y1='0' x2='0' y2='385' gradientUnits='userSpaceOnUse'>
-      <stop stop-color='#8BE8FF'/>
-      <stop offset='.5' stop-color='#829BFF'/>
-      <stop offset='1' stop-color='#A88CFF'/>
+      <stop stop-color='#FFFFFF'/>
+      <stop offset='.5' stop-color='#8BE8FF'/>
+      <stop offset='1' stop-color='#0A84FF'/>
     </linearGradient>
   </defs>
   <path d='M0 385V285L269 0V110L16 370L0 385Z' fill='url(#main)' stroke='url(#edge)' stroke-width='1.5'/>

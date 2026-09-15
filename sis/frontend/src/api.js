@@ -406,6 +406,7 @@ function request(path, options) {
 
   return fetch(url, init).then(
     function (response) {
+      if (response.ok && opts.responseType === 'blob') return response.blob();
       return response.text().then(function (text) {
         var body = null;
         if (text) {
@@ -833,6 +834,15 @@ var api = {
   commitGrades: function (batchId) {
     return post('/imports/grades/' + encodeURIComponent(batchId) + '/commit');
   },
+  previewPromotions: function (sourceYearCode, targetYearCode) {
+    return post('/promotions/preview', {
+      source_year_code: sourceYearCode,
+      target_year_code: targetYearCode
+    });
+  },
+  commitPromotions: function (body) {
+    return post('/promotions/commit', body);
+  },
   importReport: function (batchId, params) {
     return get('/imports/' + encodeURIComponent(batchId), params);
   },
@@ -862,6 +872,66 @@ var api = {
     return post('/schools/' + encodeURIComponent(schoolCode) + '/teachers/' +
       encodeURIComponent(staffNumber) + '/restore');
   },
+  chatConversations: function (schoolCode) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations');
+  },
+  chatPresence: function (schoolCode, body) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/presence', body || {});
+  },
+  chatMembers: function (schoolCode, conversationId) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/members');
+  },
+  chatPeople: function (schoolCode, search) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/people', { q: search });
+  },
+  openDirectChat: function (schoolCode, userId) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/direct', { user_id: userId });
+  },
+  chatMessages: function (schoolCode, conversationId, beforeId) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/messages', { before_id: beforeId || null });
+  },
+  sendChatMessage: function (schoolCode, conversationId, body) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/messages', { body: body });
+  },
+  deleteChatMessage: function (schoolCode, conversationId, messageId) {
+    return request('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/messages/' + encodeURIComponent(messageId), {
+        method: 'DELETE'
+      });
+  },
+  editChatMessage: function (schoolCode, conversationId, messageId, body) {
+    return put('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/messages/' + encodeURIComponent(messageId), {
+        body: body
+      });
+  },
+  sendChatAttachments: function (schoolCode, conversationId, files, body, durationSeconds) {
+    var form = new window.FormData();
+    Array.from(files || []).forEach(function (file) { form.append('files', file); });
+    if (body) form.append('body', body);
+    if (durationSeconds) form.append('duration_seconds', String(durationSeconds));
+    return postForm('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/attachments', form);
+  },
+  chatAttachmentBlob: function (schoolCode, attachmentId) {
+    return request('/schools/' + encodeURIComponent(schoolCode) + '/chat/attachments/' +
+      encodeURIComponent(attachmentId) + '/file', { responseType: 'blob' });
+  },
+  chatMessageReceipts: function (schoolCode, messageId) {
+    return get('/schools/' + encodeURIComponent(schoolCode) + '/chat/messages/' +
+      encodeURIComponent(messageId) + '/receipts');
+  },
+  markChatRead: function (schoolCode, conversationId) {
+    return post('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/read');
+  },
+  setChatMute: function (schoolCode, conversationId, duration) {
+    return put('/schools/' + encodeURIComponent(schoolCode) + '/chat/conversations/' +
+      encodeURIComponent(conversationId) + '/mute', { duration: duration });
+  },
   teacherAttendance: function (schoolCode, fromDate, toDate) {
     return get('/schools/' + encodeURIComponent(schoolCode) + '/teachers/attendance', {
       from: fromDate || null,
@@ -886,6 +956,14 @@ var api = {
   saveRolePermissionMatrix: function (roleCode, resources) {
     return request('/rbac/roles/' + encodeURIComponent(roleCode) + '/permission-matrix', {
       method: 'PUT', body: { resources: resources }
+    });
+  },
+  rolePermissions: function (roleCode) {
+    return get('/rbac/roles/' + encodeURIComponent(roleCode) + '/permissions');
+  },
+  saveRolePermissions: function (roleCode, permissions) {
+    return request('/rbac/roles/' + encodeURIComponent(roleCode) + '/permissions', {
+      method: 'PUT', body: { permissions: permissions }
     });
   },
   rbacYearLevels: function (schoolCode) {

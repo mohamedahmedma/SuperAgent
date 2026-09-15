@@ -5,9 +5,33 @@ import { Store } from '../store.js';
 import { Badge, Button, Card, Empty, ErrorNote, PageHead, Select, Skeleton } from '../components/Ui.jsx';
 import { t } from '../i18n.js';
 
-const permissionResourceLabel = (resource) => resource
-  .replace(/[._]/g, ' ')
-  .replace(/\b\w/g, (character) => character.toUpperCase());
+const PERMISSION_GROUPS = [
+  ['system', 'System administration', ['system.manage', 'system.status.write', 'audit.read']],
+  ['schools', 'Schools', ['schools.read', 'schools.write']],
+  ['accounts', 'Accounts and roles', ['users.read', 'users.write', 'roles.assign']],
+  ['structure', 'Academic structure', ['structure.read', 'structure.write', 'timetable.read', 'timetable.write']],
+  ['students', 'Students and guardians', ['students.read', 'students.create', 'students.write', 'guardians.read', 'guardians.write', 'documents.read', 'documents.write']],
+  ['teaching', 'Teachers and assignments', ['teachers.read', 'teachers.write', 'teachers.assign_subjects', 'teachers.assign_classes', 'teacher_attendance.read', 'teacher_attendance.write']],
+  ['learning', 'Attendance and grades', ['attendance.read', 'attendance.write', 'grades.read', 'grades.write', 'reports.read', 'imports.run']],
+  ['communication', 'Communication', ['chat.read', 'chat.write']]
+];
+
+const PERMISSION_LABELS = {
+  'system.manage': 'Manage system settings', 'system.status.write': 'Change system status', 'audit.read': 'View audit log',
+  'schools.read': 'View schools', 'schools.write': 'Manage schools',
+  'users.read': 'View staff accounts', 'users.write': 'Manage staff accounts', 'roles.assign': 'Assign roles and scopes',
+  'structure.read': 'View academic structure', 'structure.write': 'Manage years, grades, classes and subjects',
+  'timetable.read': 'View timetables', 'timetable.write': 'Create and edit timetables',
+  'students.read': 'View student records', 'students.create': 'Create students and initial enrolment', 'students.write': 'Edit, transfer and promote students',
+  'guardians.read': 'View guardians', 'guardians.write': 'Manage guardians', 'documents.read': 'View student documents', 'documents.write': 'Manage student documents',
+  'teachers.read': 'View teachers', 'teachers.write': 'Manage teacher records', 'teachers.assign_subjects': 'Assign subjects to teachers',
+  'teachers.assign_classes': 'Assign classes to teachers', 'teacher_attendance.read': 'View staff attendance', 'teacher_attendance.write': 'Record staff attendance',
+  'attendance.read': 'View student attendance', 'attendance.write': 'Record student attendance',
+  'grades.read': 'View grades', 'grades.write': 'Record and edit grades', 'reports.read': 'View reports', 'imports.run': 'Upload and commit import files',
+  'chat.read': 'Read staff chats', 'chat.write': 'Send and edit staff messages'
+};
+
+const permissionResourceLabel = (permission) => t(PERMISSION_LABELS[permission] || permission);
 
 export function Roles() {
   const state = useStore();
@@ -16,7 +40,7 @@ export function Roles() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState(null);
   const [permissionRole, setPermissionRole] = useState('school_manager');
-  const [matrix, setMatrix] = useState([]);
+  const [selectedPermissions, setSelectedPermissions] = useState([]);
   const [overrideUserId, setOverrideUserId] = useState('');
   const [overrideRows, setOverrideRows] = useState([]);
   const isAdmin = Store.roles().includes('admin');
@@ -28,14 +52,14 @@ export function Roles() {
   ]), [state.school, state.year], !!state.school && !!state.year);
 
   const [teachers = [], users = [], yearLevels = [], subjectBoard = []] = data.value || [];
-  const permissions = useQuery(() => api.rolePermissionMatrix(permissionRole), [permissionRole], isAdmin);
+  const permissions = useQuery(() => api.rolePermissions(permissionRole), [permissionRole], isAdmin);
   const overrideUsers = users.filter((user) => !(user.roles || []).some((role) => role.role_code === 'admin'));
   const userOverrides = useQuery(
     () => api.userPermissionOverrides(overrideUserId),
     [overrideUserId],
     isAdmin && !!overrideUserId
   );
-  useEffect(() => { if (permissions.value) setMatrix(permissions.value.resources || []); }, [permissions.value]);
+  useEffect(() => { if (permissions.value) setSelectedPermissions(permissions.value.permissions || []); }, [permissions.value]);
   useEffect(() => {
     if (!overrideUserId && overrideUsers.length) setOverrideUserId(String(overrideUsers[0].id));
   }, [overrideUserId, overrideUsers.length]);
@@ -81,15 +105,25 @@ export function Roles() {
       lede={t('Choose a grade and subject to review its teachers. Supervisors are managed separately and may also be teachers.')} />
     {error ? <ErrorNote error={error} /> : null}
     <div className="vstack gap-3">
-      {isAdmin ? <Card title={t('Role permissions')} subtitle={t('Admin-only access policy. Admin permissions are permanent.') }>
-        <div className="row g-3 align-items-end mb-3"><div className="col-12 col-md-5"><label className="form-label">{t('Role')}</label><Select value={permissionRole} options={[
+      {isAdmin ? <Card title={t('Role permissions')} subtitle={t('Set every feature permission independently. Changes affect every user who has this role.') }>
+        <div className="sis-permission-toolbar"><div><label className="form-label">{t('Role')}</label><Select value={permissionRole} options={[
           ['school_owner', t('School Owner')], ['school_manager', t('School Manager')], ['floor_supervisor', t('Floor Supervisor')], ['attendance_supervisor', t('Attendance Supervisor')], ['teacher', t('Teacher')]
-        ].map(([value, label]) => ({ value, label }))} onChange={setPermissionRole} /></div><div className="col-12 col-md-7 small text-body-tertiary">{t('Choose No Access, Read Only, or Read + Write for each resource.')}</div></div>
+        ].map(([value, label]) => ({ value, label }))} onChange={setPermissionRole} /></div><Badge tone="info">{t('{0} permissions selected.', [selectedPermissions.length])}</Badge></div>
         {permissions.error ? <ErrorNote error={permissions.error} onRetry={permissions.reload} /> : null}
-        <div className="vstack gap-2">{matrix.map((row) => <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 border rounded p-2" key={row.resource}><strong>{permissionResourceLabel(row.resource)}</strong><Select className="w-auto" value={row.mode} options={[
-          { value: 'no_access', label: t('No Access') }, { value: 'read_only', label: t('Read Only') }, { value: 'read_write', label: t('Read + Write') }
-        ]} onChange={(mode) => setMatrix((rows) => rows.map((item) => item.resource === row.resource ? { ...item, mode } : item))} /></div>)}</div>
-        <div className="mt-3 d-flex justify-content-end"><Button pending={busy === 'permissions'} disabled={!!busy || !matrix.length} onClick={async () => { setBusy('permissions'); setError(null); try { const saved = await api.saveRolePermissionMatrix(permissionRole, matrix); setMatrix(saved.resources || []); Store.invalidate('roles:'); } catch (reason) { setError(reason); } finally { setBusy(''); } }}>{t('Save permissions')}</Button></div>
+        <div className="sis-permission-grid">{PERMISSION_GROUPS.map(([group, label, codes]) => {
+          const available = permissionRole === 'school_owner' ? codes.filter((code) => code.endsWith('.read')) : codes;
+          const allChecked = available.length > 0 && available.every((code) => selectedPermissions.includes(code));
+          const enabled = available.filter((code) => selectedPermissions.includes(code)).length;
+          return <section className="sis-permission-group" key={group} aria-labelledby={`permission-${group}`}>
+            <header className="sis-permission-group-head"><div><h3 id={`permission-${group}`}>{t(label)}</h3><small>{t('{0} of {1} enabled', [enabled, available.length])}</small></div>
+              <Button size="sm" variant="outline" onClick={() => setSelectedPermissions((current) => allChecked ? current.filter((code) => !available.includes(code)) : [...new Set([...current, ...available])])}>{allChecked ? t('Clear group') : t('Allow group')}</Button></header>
+            <div className="sis-permission-list">{available.map((code) => <label className="sis-permission-option" key={code}>
+              <span className="sis-permission-copy">{permissionResourceLabel(code)}</span>
+              <input type="checkbox" role="switch" aria-label={permissionResourceLabel(code)} checked={selectedPermissions.includes(code)} onChange={(event) => setSelectedPermissions((current) => event.target.checked ? [...current, code] : current.filter((item) => item !== code))} />
+            </label>)}</div>
+          </section>;
+        })}</div>
+        <div className="sis-permission-save"><Button pending={busy === 'permissions'} disabled={!!busy || permissions.loading} onClick={async () => { setBusy('permissions'); setError(null); try { const saved = await api.saveRolePermissions(permissionRole, selectedPermissions); setSelectedPermissions(saved.permissions || []); Store.invalidate('roles:'); Store.toast(t('Permissions saved successfully.'), 'success'); } catch (reason) { setError(reason); } finally { setBusy(''); } }}>{t('Save permissions')}</Button></div>
       </Card> : null}
       {isAdmin ? <Card title={t('Individual user overrides')} subtitle={t('Overrides apply only to this staff user. Default returns to inherited role access.')}>
         <div className="row g-3 align-items-end mb-3"><div className="col-12 col-md-6"><label className="form-label">{t('Staff user')}</label><Select value={overrideUserId} options={overrideUsers.map((user) => ({ value: String(user.id), label: user.full_name_en || user.full_name_ar || user.username }))} onChange={setOverrideUserId} /></div><div className="col-12 col-md-6 small text-body-tertiary">{userOverrides.value?.roles?.length ? <>{t('Roles')}: {userOverrides.value.roles.join(', ')}</> : t('No roles assigned')}</div></div>

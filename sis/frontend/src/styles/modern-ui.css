@@ -1,0 +1,3186 @@
+/*
+ * ==========================================================================
+ * Aurexis SIS Modern UI & Visual Identity
+ * Executive Luxury Neutral System (Obsidian, White, Charcoal & Slate)
+ * Enhanced with UI/UX Pro Max Design Intelligence:
+ * - Awwwards Kinetic Micro-Interactions & Specular Lighting
+ * - WCAG 2.1 AA Accessibility & prefers-reduced-motion Support
+ * - Direction-Aware Chat Drawer (RTL: Right, LTR: Left) with Full Expansion
+ * - Frameless Floating Chat Images
+ * - Tactile Interactive KPI Stat Cards (Hover Lift)
+ * - Zero-Scrollbar Table Row Hover Interactions
+ * - Cinematic Defocus-to-Sharp Page Transitions
+ * ==========================================================================
+ */
+
+/* ==========================================================================
+   1. KEYFRAME ANIMATIONS & MOTIONS
+   ========================================================================== */
+
+/* Cinematic Page Cascade: subtle lift + micro-defocus to razor sharpness */
+@keyframes sis-page-cascade {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.994);
+    filter: blur(2px);
+  }
+  60% {
+    opacity: 0.96;
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes sis-fade-lift {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sis-scale-spring {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes sis-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sis-badge-bounce {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* Arabic RTL Drawer Entrance: slides from right edge */
+@keyframes sis-drawer-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0.9;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* English LTR Drawer Entrance: slides from left edge */
+@keyframes sis-drawer-in-left {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.9;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes sis-dock-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Awwwards Specular Light Sweep */
+@keyframes sis-awwwards-sweep {
+  0% {
+    transform: translateX(-150%) skewX(-15deg);
+  }
+  100% {
+    transform: translateX(250%) skewX(-15deg);
+  }
+}
+
+@keyframes sis-presence-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(22, 163, 74, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0);
+  }
+}
+
+/* Accessibility: prefers-reduced-motion override */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Accessible focus rings */
+:focus-visible {
+  outline: 2px solid var(--ink) !important;
+  outline-offset: 2px !important;
+}
+
+/* ==========================================================================
+   2. GLOBAL LAYOUT & SCROLLBAR
+   ========================================================================== */
+
+.sis-rise {
+  animation: sis-page-cascade 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  will-change: transform, opacity, filter;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--line-strong) 65%, transparent);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-faint);
+}
+
+/* Responsive Table Scrollbar Suppression: No ugly horizontal scrollbars on hover */
+.table-responsive,
+[class*="table-responsive"] {
+  overflow-x: auto !important;
+  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important; /* IE / Edge */
+}
+.table-responsive::-webkit-scrollbar,
+[class*="table-responsive"]::-webkit-scrollbar {
+  display: none !important; /* WebKit */
+}
+
+/* ==========================================================================
+   3. TOP HEADER BAR & USER ACCOUNT CHIP (ROCK-SOLID SEPARATION IN RTL & LTR)
+   ========================================================================== */
+
+.sis-header {
+  position: sticky;
+  top: 0;
+  z-index: 1020;
+  width: 100% !important;
+  min-height: 3.75rem;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--line) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), 0 2px 8px rgba(0, 0, 0, 0.02) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 0.5rem 1.5rem !important;
+  gap: 1.25rem;
+}
+
+/* Brand Group: Anchored firmly to the start side */
+.sis-header-brand-group {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.85rem;
+  flex-shrink: 0 !important;
+  margin-inline-end: auto !important;
+}
+
+/* Actions Group: Anchored firmly to the opposite end side */
+.sis-header-actions-group {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.75rem;
+  flex-shrink: 0 !important;
+  margin-inline-start: auto !important;
+}
+
+.sis-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  transition: opacity 0.15s ease;
+}
+.sis-brand:hover {
+  opacity: 0.85;
+}
+
+.sis-company-mark {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.06));
+}
+
+.sis-brand-mark {
+  display: inline-grid !important;
+  place-items: center !important;
+  box-sizing: border-box !important;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0 !important;
+  font-size: 0.76rem;
+  font-weight: 750;
+  line-height: 1 !important;
+  text-align: center;
+  white-space: nowrap;
+  letter-spacing: 0.06em;
+  text-indent: 0.06em;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--ink-inverse);
+}
+
+/* Attendance becomes a compact card list on phones. The conditional excuse reason is a form
+   field, not a fifth squeezed table column, so it receives the full row while it is visible. */
+@media (max-width: 767.98px) {
+  .sis-attendance-register > .table-responsive {
+    overflow-x: visible !important;
+  }
+
+  .sis-attendance-register .table,
+  .sis-attendance-register .table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .sis-attendance-register .table thead {
+    display: none;
+  }
+
+  .sis-attendance-register .table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(5.25rem, 0.7fr) minmax(11rem, 1.3fr);
+    gap: 0.6rem 0.75rem;
+    width: 100%;
+    padding: 0.8rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .sis-attendance-register .table tbody td {
+    display: block;
+    min-width: 0;
+    padding: 0 !important;
+    border: 0 !important;
+  }
+
+  .sis-attendance-register .sis-attendance-person,
+  .sis-attendance-register .sis-attendance-state-cell {
+    align-self: center;
+  }
+
+  .sis-attendance-register .sis-attendance-person {
+    overflow-wrap: anywhere;
+  }
+
+  .sis-attendance-register .sis-attendance-states > .btn {
+    min-width: 2.6rem;
+    min-height: 2.75rem;
+    padding-inline: 0.55rem;
+  }
+
+  .sis-attendance-register .sis-attendance-states {
+    gap: 0.5rem;
+  }
+
+  .sis-attendance-register .sis-attendance-note-cell {
+    grid-column: 1 / -1;
+  }
+
+  .sis-attendance-register .sis-attendance-note-cell:empty {
+    display: none;
+  }
+
+  .sis-attendance-reason-field {
+    display: grid;
+    gap: 0.4rem;
+    width: 100%;
+    color: var(--ink-muted);
+    font-size: 0.78rem;
+    font-weight: 650;
+  }
+
+  .sis-attendance-reason-field .form-control {
+    width: 100%;
+    min-height: 2.75rem !important;
+    color: var(--ink) !important;
+    background: var(--surface) !important;
+  }
+}
+
+/* Attendance choices stay neutral until selected. Each selected state then receives its own
+   semantic colour; labels/initials and aria-pressed keep meaning available without colour. */
+.sis-attendance-choice.is-present {
+  --sis-attendance-color: var(--ok-ink);
+  --sis-attendance-solid: var(--ok-ink);
+}
+
+.sis-attendance-choice.is-absent {
+  --sis-attendance-color: var(--bad-ink);
+  --sis-attendance-solid: var(--bad-ink);
+}
+
+.sis-attendance-choice.is-late {
+  --sis-attendance-color: var(--warn-ink);
+  --sis-attendance-solid: var(--warn-ink);
+}
+
+.sis-attendance-choice.is-excused {
+  --sis-attendance-color: var(--info-ink);
+  --sis-attendance-solid: var(--action-hover);
+}
+
+.sis-attendance-states > .sis-attendance-choice {
+  color: var(--ink-soft) !important;
+  background: var(--surface) !important;
+  border-color: var(--line-strong) !important;
+}
+
+.sis-attendance-states > .sis-attendance-choice:not(:disabled):hover {
+  color: var(--ink) !important;
+  background: var(--surface-hover) !important;
+  border-color: var(--ink-faint) !important;
+}
+
+.sis-attendance-states > .sis-attendance-choice.is-selected,
+.sis-attendance-states > .sis-attendance-choice.is-selected:not(:disabled):hover {
+  color: #fff !important;
+  background: var(--sis-attendance-solid) !important;
+  border-color: var(--sis-attendance-solid) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sis-attendance-color) 24%, transparent) !important;
+}
+
+.sis-attendance-states > .sis-attendance-choice:focus-visible {
+  outline: 3px solid var(--focus-ring) !important;
+  outline-offset: 2px;
+}
+
+.sis-attendance-states > .sis-attendance-choice.is-selected:focus-visible {
+  outline-color: color-mix(in srgb, var(--sis-attendance-color) 42%, transparent) !important;
+}
+
+@media (max-width: 359.98px) {
+  .sis-attendance-register .table tbody tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sis-attendance-register .sis-attendance-person,
+  .sis-attendance-register .sis-attendance-state-cell,
+  .sis-attendance-register .sis-attendance-note-cell {
+    grid-column: 1;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile timetable: one school day at a time, advanced only by visible buttons.
+   -------------------------------------------------------------------------- */
+
+.sis-timetable-day-nav {
+  display: none;
+}
+
+.sis-timetable-slot.is-pointer-over {
+  background: var(--info-wash) !important;
+  box-shadow: inset 0 0 0 3px var(--action) !important;
+}
+
+.sis-lesson.active {
+  border-color: var(--action) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--action) 22%, transparent) !important;
+}
+
+.sis-timetable-slot[role="button"]:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+.sis-timetable-drag-ghost {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 1100;
+  max-width: min(14rem, 70vw);
+  padding: 0.6rem 0.8rem;
+  overflow: hidden;
+  color: var(--info-ink);
+  background: var(--info-wash);
+  border: 1px solid var(--action);
+  border-radius: 0.7rem;
+  box-shadow: var(--shadow-lg);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.sis-is-touch-dragging,
+.sis-is-touch-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.sis-subject-chip,
+.sis-lesson {
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+.sis-subject-chip {
+  min-height: 2.75rem;
+}
+
+@media (max-width: 767.98px) {
+  .sis-timetable-day-nav {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(6.5rem, 1.15fr) minmax(0, 1fr);
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-raised);
+  }
+
+  .sis-timetable-day-button {
+    display: inline-flex;
+    min-width: 0;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 0.72rem;
+    background: var(--surface-sunken);
+    color: var(--ink);
+    font-size: 0.76rem;
+    font-weight: 650;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: var(--t-colors), transform var(--dur-fast) var(--ease-out);
+  }
+
+  .sis-timetable-day-button:hover,
+  .sis-timetable-day-button:active {
+    border-color: color-mix(in srgb, var(--ink-accent) 35%, var(--line));
+    background: var(--surface-hover);
+    color: var(--ink-accent);
+  }
+
+  .sis-timetable-day-button:active {
+    transform: scale(0.98);
+  }
+
+  .sis-timetable-day-button:focus-visible {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  .sis-timetable-day-button:disabled {
+    opacity: 0.45;
+    cursor: default;
+    transform: none;
+  }
+
+  .sis-timetable-day-current {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.35rem 0.45rem;
+    border: 1px solid color-mix(in srgb, var(--ink-accent) 22%, var(--line));
+    border-radius: 0.72rem;
+    background: var(--theme-primary-wash);
+    color: var(--ink);
+    text-align: center;
+  }
+
+  .sis-timetable-day-current strong {
+    font-size: 0.88rem;
+    font-weight: 720;
+    line-height: 1.25;
+  }
+
+  .sis-timetable-day-current small {
+    margin-top: 0.1rem;
+    color: var(--ink-soft);
+    font-size: 0.66rem;
+    line-height: 1.2;
+  }
+
+  .sis-timetable-scroll {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+    touch-action: pan-y;
+  }
+
+  .sis-timetable-grid {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .sis-timetable-grid [data-day].is-mobile-day-inactive {
+    display: none;
+  }
+
+  .sis-timetable-grid th:first-child {
+    width: 6.75rem;
+  }
+
+  .sis-timetable-grid th,
+  .sis-timetable-grid td {
+    padding: 0.55rem;
+  }
+
+  .sis-timetable-slot {
+    height: 5rem;
+  }
+}
+
+.sis-brand-mark-login {
+  width: 2.65rem;
+  height: 2.65rem;
+  font-size: 1rem;
+}
+
+.sis-brand-divider {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--line-strong);
+}
+
+/* Header Messages Button: Architectural, Refined */
+.sis-header-chat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.42rem 0.95rem;
+  min-height: 2.35rem;
+  gap: 0.45rem;
+  padding: 0.32rem 0.85rem;
+  height: 2.15rem;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 550;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  text-decoration: none;
+}
+
+.sis-header-chat-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--ink-faint);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  border-color: var(--ink);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1.5px);
+  color: var(--ink);
+}
+
+.sis-header-chat-btn:active {
+  transform: scale(0.98);
+  transform: scale(0.97);
+}
+
+.sis-header-chat-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--ink-inverse);
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1;
+}
+
+/* ==========================================================================
+   FLOATING CHAT ACTION BUTTON (CORNER FAB)
+   ========================================================================== */
+
+@keyframes sis-fab-in {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.88);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.sis-fab-chat {
+  display: none !important;
+  position: fixed !important;
+  bottom: 2rem !important;
+  z-index: 1035 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.65rem !important;
+  height: 3.15rem !important;
+  padding: 0 1.35rem 0 1.15rem !important;
+  border-radius: 999px !important;
+  background: var(--palette-surface, #2e2e31) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22), 0 12px 32px -4px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+  font-size: 0.9rem !important;
+  font-weight: 650 !important;
+  cursor: pointer !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  transition: bottom var(--dur-base) var(--ease-out), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.18s ease !important;
+  animation: sis-fab-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards !important;
+  text-decoration: none !important;
+  outline: none !important;
+}
+
+html[dir="rtl"] .sis-fab-chat {
+  left: 2rem !important;
+  right: auto !important;
+}
+
+html[dir="ltr"] .sis-fab-chat {
+  right: 2rem !important;
+  left: auto !important;
+}
+
+.sis-fab-chat:hover {
+  transform: translateY(-4px) scale(1.03) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 18px 44px -4px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+  background: var(--palette-blue, #0a84ff) !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+}
+
+.sis-fab-chat:active {
+  transform: scale(0.96) translateY(-1px) !important;
+}
+
+.sis-fab-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 1.35rem !important;
+  height: 1.35rem !important;
+  padding: 0 0.4rem !important;
+  border-radius: 999px !important;
+  background: #ef4444 !important;
+  color: #ffffff !important;
+  font-size: 0.72rem !important;
+  font-weight: 750 !important;
+  line-height: 1 !important;
+  box-shadow: 0 0 0 2px var(--palette-surface, #2e2e31) !important;
+  animation: sis-pulse-subtle 2s infinite !important;
+}
+
+@media (max-width: 767.98px) {
+  .sis-fab-chat {
+    bottom: calc(3.75rem + 1rem) !important;
+    height: 2.75rem !important;
+    padding: 0 1.1rem !important;
+    font-size: 0.82rem !important;
+  }
+}
+
+/* User Account Chip */
+.sis-user-chip {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.65rem !important;
+  padding: 0.3rem 0.65rem !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--line) !important;
+  background: var(--surface) !important;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.sis-user-chip:hover {
+  border-color: var(--line-strong) !important;
+  background: var(--surface-hover) !important;
+}
+
+.sis-user-avatar {
+  width: 2rem !important;
+  height: 2rem !important;
+  border-radius: 6px !important;
+  background: var(--ink) !important;
+  color: var(--ink-inverse) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-weight: 700 !important;
+  font-size: 0.82rem !important;
+  flex-shrink: 0 !important;
+}
+
+.sis-user-info {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  line-height: 1.25 !important;
+  text-align: start !important;
+}
+
+.sis-user-name {
+  font-size: 0.82rem !important;
+  font-weight: 650 !important;
+  color: var(--ink) !important;
+  white-space: nowrap !important;
+}
+
+.sis-user-role {
+  font-size: 0.68rem !important;
+  color: var(--ink-faint) !important;
+  white-space: nowrap !important;
+}
+
+.sis-user-signout {
+  color: var(--ink-faint) !important;
+  border-radius: 4px !important;
+  padding: 0.2rem !important;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.sis-user-signout:hover {
+  color: var(--ink) !important;
+  background: var(--line) !important;
+}
+
+/* ==========================================================================
+   4. CATEGORIZED NAVIGATION & INTERACTIVE BUTTONS
+   ========================================================================== */
+
+.sis-nav-wrapper {
+  background: color-mix(in srgb, var(--surface) 96%, var(--canvas)) !important;
+  border-bottom: 1px solid var(--line) !important;
+  padding: 0 !important;
+}
+
+.sis-nav-shell {
+  width: min(100%, 96rem);
+  margin-inline: auto;
+  padding-inline: clamp(1rem, 2.2vw, 2rem);
+}
+
+.sis-nav-categories {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.35rem !important;
+  overflow-x: auto;
+  padding-block: 0.62rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  scrollbar-width: none;
+}
+
+.sis-nav-categories::-webkit-scrollbar,
+.sis-nav-track::-webkit-scrollbar {
+  display: none;
+}
+
+.sis-nav-category-pill,
+.sis-category-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.45rem !important;
+  padding: 0.48rem 0.78rem !important;
+  min-height: 2.5rem !important;
+  border-radius: 0.7rem !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--ink-soft) !important;
+  font-size: 0.82rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.15s ease,
+              border-color 0.15s ease,
+              box-shadow 0.15s ease,
+              color 0.15s ease !important;
+  white-space: nowrap !important;
+}
+
+.sis-nav-category-pill:hover,
+.sis-category-btn:hover {
+  color: var(--ink) !important;
+  background: var(--surface-hover) !important;
+  border-color: var(--line) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: none !important;
+}
+
+.sis-nav-category-pill:active,
+.sis-category-btn:active {
+  transform: scale(0.97) !important;
+}
+
+.sis-nav-category-pill.is-active,
+.sis-category-btn.is-active {
+  background: var(--theme-primary-wash) !important;
+  color: var(--ink-accent) !important;
+  border-color: color-mix(in srgb, var(--ink-accent) 24%, var(--line)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink-accent) 5%, transparent) !important;
+}
+
+.sis-nav-category-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.sis-nav-category-pill.is-active .sis-nav-category-count {
+  background: color-mix(in srgb, var(--ink-accent) 14%, transparent);
+  color: var(--ink-accent);
+}
+
+/* Secondary Nav Links */
+.sis-nav-track {
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 3.75rem;
+  padding-block: 0.48rem;
+  margin: 0;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+}
+
+.sis-nav-track .nav-item {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+.sis-nav-link {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.45rem !important;
+  font-size: 0.84rem !important;
+  font-weight: 550 !important;
+  color: var(--ink-soft) !important;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.8rem !important;
+  border-radius: 0.65rem !important;
+  border: 1px solid transparent !important;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.15s ease,
+              color 0.15s ease,
+              border-color 0.15s ease !important;
+}
+
+.sis-nav-link:hover {
+  color: var(--ink) !important;
+  background: var(--surface-hover) !important;
+  transform: translateY(-1.5px) !important;
+}
+
+.sis-nav-link:active {
+  transform: scale(0.98) !important;
+}
+
+.sis-nav-link.active {
+  color: var(--ink-accent) !important;
+  background: var(--theme-primary-wash) !important;
+  border-color: color-mix(in srgb, var(--ink-accent) 22%, var(--line)) !important;
+  font-weight: 650 !important;
+}
+
+.sis-nav-link:focus-visible,
+.sis-nav-category-pill:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ink-accent) 42%, transparent) !important;
+  outline-offset: 2px;
+}
+
+@media (max-width: 767.98px) {
+  .sis-nav-shell {
+    padding-inline: 0.65rem;
+  }
+
+  .sis-nav-track {
+    min-height: 4.5rem;
+    gap: 0.45rem;
+    padding-block: 0.55rem;
+  }
+
+  .sis-nav-link {
+    min-width: 5.25rem;
+    min-height: 3.4rem;
+    padding: 0.5rem 0.65rem !important;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.3rem !important;
+    font-size: 0.75rem !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Settings dialog
+   Desktop keeps the detailed Bootstrap dialog. On phones it becomes the
+   compact, centered preferences card used by the mobile shell.
+   -------------------------------------------------------------------------- */
+
+.sis-settings-eyebrow,
+.sis-settings-mobile-hint,
+.sis-settings-segment-short {
+  display: none;
+}
+
+.sis-settings-body,
+.sis-settings-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.sis-settings-body {
+  gap: 1.5rem;
+}
+
+.sis-settings-group {
+  gap: 0.5rem;
+}
+
+.sis-settings-segments {
+  width: fit-content;
+}
+
+@media (max-width: 575.98px) {
+  .sis-settings-backdrop.modal-backdrop.show {
+    opacity: 1;
+    background: var(--veil);
+    -webkit-backdrop-filter: blur(var(--veil-blur));
+    backdrop-filter: blur(var(--veil-blur));
+  }
+
+  .sis-settings-modal {
+    display: grid !important;
+    place-items: center;
+    overflow-y: auto;
+    padding: max(1rem, env(safe-area-inset-top)) 1.15rem max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .sis-settings-dialog {
+    width: min(100%, 22.5rem);
+    min-height: 0;
+    max-height: calc(100dvh - 2rem);
+    margin: auto;
+  }
+
+  .sis-settings-dialog.modal-dialog-scrollable .sis-settings-card {
+    max-height: calc(100dvh - 2rem);
+  }
+
+  .sis-settings-card {
+    overflow: hidden;
+    border: 1px solid var(--line-strong);
+    border-radius: 1.35rem;
+    background: var(--surface-raised);
+    color: var(--ink);
+    box-shadow: var(--shadow-xl);
+  }
+
+  .sis-settings-header {
+    align-items: flex-start;
+    border: 0;
+    padding: 1.45rem 1.35rem 0.85rem;
+  }
+
+  .sis-settings-eyebrow {
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--ink-accent);
+    font-size: 0.68rem;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    line-height: 1.35;
+    text-transform: uppercase;
+  }
+
+  html[dir="rtl"] .sis-settings-eyebrow {
+    letter-spacing: 0;
+  }
+
+  .sis-settings-header .modal-title {
+    margin: 0;
+    color: var(--ink);
+    font-size: 1.5rem;
+    font-weight: 750;
+    line-height: 1.2;
+  }
+
+  .sis-settings-title-icon {
+    display: none;
+  }
+
+  .sis-settings-close.btn {
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: 0 0 2.75rem;
+    place-items: center;
+    margin-block: -0.35rem 0;
+    padding: 0 !important;
+    border: 0;
+    border-radius: 0.75rem;
+    background: transparent;
+    color: var(--ink-soft);
+  }
+
+  .sis-settings-close.btn:hover,
+  .sis-settings-close.btn:active {
+    background: var(--surface-hover);
+    color: var(--ink);
+  }
+
+  .sis-settings-body {
+    display: flex;
+    flex: none;
+    gap: 0;
+    overflow: visible;
+    padding: 0 1.35rem 1.25rem;
+  }
+
+  .sis-settings-group {
+    display: flex;
+    min-height: 4.55rem;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border-top: 1px solid var(--line);
+    padding: 0.85rem 0;
+  }
+
+  .sis-settings-group-copy {
+    min-width: 0;
+  }
+
+  .sis-settings-group h3 {
+    color: var(--ink);
+    font-size: 1rem;
+    font-weight: 720;
+    line-height: 1.3;
+  }
+
+  .sis-settings-desktop-hint,
+  .sis-settings-language-note {
+    display: none;
+  }
+
+  .sis-settings-mobile-hint {
+    display: block;
+    margin-top: 0.15rem;
+    color: var(--ink-soft);
+    font-size: 0.76rem;
+    line-height: 1.35;
+  }
+
+  .sis-settings-segments.nav {
+    display: flex;
+    width: auto;
+    flex: 0 0 auto;
+    gap: 0.5rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 0.78rem;
+    padding: 0.2rem;
+    background: var(--surface-sunken);
+  }
+
+  .sis-settings-segments .nav-link {
+    display: grid !important;
+    width: 2.65rem;
+    min-width: 2.65rem;
+    height: 2.65rem;
+    place-items: center;
+    gap: 0 !important;
+    border-radius: 0.6rem !important;
+    padding: 0.45rem !important;
+    color: var(--ink-soft);
+    font-size: 0.72rem;
+    font-weight: 750;
+    line-height: 1;
+  }
+
+  .sis-settings-segments .nav-link:hover {
+    color: var(--ink);
+    background: var(--surface-hover);
+  }
+
+  .sis-settings-segments .nav-link.active {
+    background: var(--action);
+    color: var(--action-ink);
+  }
+
+  .sis-settings-segments.is-language .nav-link {
+    width: auto;
+    min-width: 3rem;
+    padding-inline: 0.65rem !important;
+  }
+
+  .sis-settings-segment-label {
+    display: none;
+  }
+
+  .sis-settings-segment-short {
+    display: inline;
+  }
+
+  .sis-settings-close.btn:focus-visible,
+  .sis-settings-segments .nav-link:focus-visible {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+
+  .sis-settings-footer {
+    display: none !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile shell: unclipped labels, separated menu trigger, and phone-native chat
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 767.98px) {
+  body {
+    padding-bottom: 0 !important;
+  }
+
+  .sis-mobile-dock {
+    display: none !important;
+  }
+
+  .sis-header {
+    min-height: 3.75rem !important;
+    padding: 0.45rem 0.75rem !important;
+  }
+
+  .sis-header-brand-group {
+    display: flex !important;
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 auto !important;
+    align-items: center !important;
+    justify-content: space-between;
+    direction: ltr;
+    gap: 0.75rem;
+    margin: 0 !important;
+  }
+
+  .sis-header-brand-group > button {
+    position: static;
+    z-index: auto;
+    display: inline-grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: 0 0 2.75rem;
+    order: 0;
+    place-items: center;
+    padding: 0 !important;
+    border: 1px solid var(--line-strong);
+    border-radius: 0.72rem;
+    background: var(--surface-subtle);
+    color: var(--ink);
+    box-shadow: 0 0.15rem 0.45rem color-mix(in srgb, #000 10%, transparent);
+  }
+
+  .sis-header-brand-group > button:hover,
+  .sis-header-brand-group > button:focus-visible {
+    border-color: var(--ink-faint);
+    background: var(--surface-hover);
+  }
+
+  .sis-header .sis-brand {
+    width: auto;
+    min-width: 0;
+    max-width: calc(100% - 3.5rem);
+    flex: 0 1 auto;
+    order: 1;
+    justify-content: flex-start;
+    direction: rtl;
+    gap: 0.42rem;
+    margin: 0 !important;
+  }
+
+  html[dir="ltr"] .sis-header .sis-brand {
+    direction: ltr;
+    order: 0;
+  }
+
+  html[dir="ltr"] .sis-header-brand-group > button {
+    order: 1;
+  }
+
+  .sis-mobile-school-name {
+    display: block;
+    min-width: 0;
+    max-width: none;
+    overflow: visible;
+    color: var(--ink);
+    font-size: clamp(0.7rem, 3vw, 0.79rem);
+    font-weight: 650;
+    line-height: 1.25;
+    text-align: start;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .sis-mobile-drawer,
+  .sis-mobile-drawer-body {
+    overflow-x: hidden;
+  }
+
+  .sis-mobile-drawer-identity {
+    flex: 1 1 auto;
+    align-items: flex-start;
+  }
+
+  .sis-mobile-drawer-identity strong,
+  .sis-mobile-drawer-identity small,
+  .sis-mobile-nav-item > span,
+  .sis-mobile-section-title {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .sis-mobile-drawer-identity small {
+    font-size: 0.74rem;
+    line-height: 1.4;
+  }
+
+  .sis-mobile-year-card {
+    display: grid;
+    width: 100%;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.7rem;
+  }
+
+  .sis-mobile-year-card > label,
+  .sis-mobile-year-card .sis-field-host,
+  .sis-mobile-year-card .sis-field {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sis-mobile-year-card > label {
+    display: block !important;
+    flex: none !important;
+  }
+
+  .sis-fab-chat {
+    bottom: max(1rem, env(safe-area-inset-bottom)) !important;
+  }
+
+  html[dir="rtl"] .sis-fab-chat {
+    left: 1rem !important;
+  }
+
+  html[dir="ltr"] .sis-fab-chat {
+    right: 1rem !important;
+  }
+
+  .sis-chat-drawer-backdrop {
+    display: none;
+  }
+
+  html[dir="rtl"] .sis-chat-drawer,
+  html[dir="ltr"] .sis-chat-drawer,
+  .sis-chat-drawer.is-fullscreen {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    animation: sis-fade-in 0.18s ease-out backwards !important;
+  }
+
+  .sis-chat-drawer-btn.is-expand {
+    display: none !important;
+  }
+
+  .sis-chat-drawer-header {
+    min-height: 3.75rem;
+    padding: max(0.65rem, env(safe-area-inset-top)) 0.85rem 0.65rem !important;
+  }
+
+  .sis-chat-drawer-title {
+    min-width: 0;
+    font-size: 0.98rem !important;
+  }
+
+  .sis-chat-drawer-btn.is-close {
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell:not(.has-active-chat) .sis-chat-sidebar,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell:not(.has-active-chat) .sis-chat-sidebar {
+    display: flex !important;
+    width: 100% !important;
+    border: 0 !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell:not(.has-active-chat) .sis-chat-thread,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell:not(.has-active-chat) .sis-chat-thread {
+    display: none !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell.has-active-chat .sis-chat-sidebar,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell.has-active-chat .sis-chat-sidebar {
+    display: none !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell.has-active-chat .sis-chat-thread,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell.has-active-chat .sis-chat-thread {
+    display: grid !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .sis-chat-drawer .sis-chat-back,
+  .sis-chat-drawer.is-fullscreen .sis-chat-back {
+    display: inline-grid !important;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    flex: 0 0 2.75rem;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .sis-chat-sidebar-head {
+    padding: 1rem 1rem 0.65rem;
+  }
+
+  .sis-chat-sidebar-head h1 {
+    font-size: 1.25rem;
+  }
+
+  .sis-chat-sidebar-head p,
+  .sis-chat-thread-head p {
+    font-size: 0.76rem;
+    line-height: 1.45;
+  }
+
+  .sis-chat-conversation-topline strong {
+    font-size: 0.88rem;
+    line-height: 1.35;
+  }
+
+  .sis-chat-conversation-bottomline {
+    font-size: 0.76rem;
+    line-height: 1.4;
+  }
+
+  .sis-chat-thread-head h2 {
+    font-size: 0.96rem;
+    line-height: 1.35;
+  }
+
+  .sis-chat-message {
+    max-width: 88% !important;
+    padding: 0.65rem 0.78rem !important;
+    font-size: 0.87rem;
+    line-height: 1.5;
+  }
+
+  .sis-chat-drawer.is-fullscreen .sis-chat-messages,
+  .sis-chat-drawer .sis-chat-messages {
+    width: 100% !important;
+    padding: 0.85rem 0.7rem !important;
+  }
+
+  .sis-chat-drawer.is-fullscreen .sis-chat-compose,
+  .sis-chat-drawer .sis-chat-compose {
+    width: calc(100% - 1rem) !important;
+    margin: 0.4rem auto max(0.55rem, env(safe-area-inset-bottom)) !important;
+  }
+
+  /* Important labels wrap on phones instead of disappearing behind an ellipsis. */
+  .sis-app :where(h1, h2, h3, h4, h5, h6, p, strong, small, label, legend),
+  .sis-app :where(
+    .sis-field-value,
+    .sis-menu-option-label,
+    .sis-role-line,
+    .sis-nav-label,
+    .sis-chat-conversation-bottomline > span:first-child,
+    .sis-chat-person-title h2,
+    .sis-chat-person-title p,
+    .sis-chat-group-title h2,
+    .sis-chat-group-title p,
+    .sis-chat-sender-block > small,
+    .sis-chat-typing > span:last-child,
+    .sis-chat-selected-files > span
+  ) {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* General Buttons (Kinetic Spring Interactivity) */
+.btn {
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  font-size: 0.86rem !important;
+  padding: 0.5rem 1.1rem !important;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.15s ease,
+              border-color 0.15s ease,
+              color 0.15s ease !important;
+}
+
+.btn:hover {
+  transform: translateY(-2px) scale(1.01) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+.btn:active {
+  transform: translateY(0) scale(0.975) !important;
+  transition-duration: 0.08s !important;
+}
+
+.btn-primary {
+  background: var(--ink) !important;
+  border-color: var(--ink) !important;
+  color: var(--ink-inverse) !important;
+}
+
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--ink) 88%, white) !important;
+  border-color: color-mix(in srgb, var(--ink) 88%, white) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15) !important;
+}
+
+.btn-secondary,
+.btn-outline-secondary {
+  border-color: var(--line-strong) !important;
+  background: var(--surface) !important;
+  color: var(--ink) !important;
+}
+
+.btn-secondary:hover,
+.btn-outline-secondary:hover {
+  background: var(--surface-hover) !important;
+  border-color: var(--ink-faint) !important;
+  color: var(--ink) !important;
+}
+
+/* ==========================================================================
+   5. PAGE CARDS, KPI TILES & DATA TABLES
+   ========================================================================== */
+
+.card {
+  border-radius: 12px !important;
+  border: 1px solid var(--line) !important;
+  background: var(--surface) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), 0 2px 8px -2px rgba(0, 0, 0, 0.02) !important;
+  transition: box-shadow 0.18s ease, border-color 0.18s ease, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.card:hover {
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.06) !important;
+}
+
+.card-header {
+  border-bottom: 1px solid var(--line) !important;
+  background: transparent !important;
+  padding: 1rem 1.35rem !important;
+}
+
+.card-header h2,
+.card-header h3 {
+  font-weight: 700 !important;
+  color: var(--ink) !important;
+  letter-spacing: -0.01em;
+}
+
+.card-body {
+  padding: 1.35rem !important;
+}
+
+.card-footer {
+  border-top: 1px solid var(--line) !important;
+  background: transparent !important;
+  padding: 0.9rem 1.35rem !important;
+}
+
+/* KPI Stat Tiles (Clickable Movement & Lift Animation on Hover) */
+.card:has(.sis-tile-value),
+.sis-tile,
+.sis-kpi-card {
+  cursor: pointer !important;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.18s ease !important;
+}
+
+.card:has(.sis-tile-value):hover,
+.sis-tile:hover,
+.sis-kpi-card:hover {
+  transform: translateY(-4px) scale(1.008) !important;
+  box-shadow: 0 10px 28px -4px rgba(0, 0, 0, 0.1), 0 2px 6px -1px rgba(0, 0, 0, 0.04) !important;
+  border-color: var(--line-strong) !important;
+}
+
+.card:has(.sis-tile-value):active,
+.sis-tile:active,
+.sis-kpi-card:active {
+  transform: translateY(-1px) scale(0.996) !important;
+  transition-duration: 0.08s !important;
+}
+
+.card .sis-tile-label {
+  font-size: 0.74rem !important;
+  font-weight: 650 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: var(--ink-faint) !important;
+  margin-bottom: 0.35rem !important;
+}
+
+.card .sis-tile-value {
+  font-size: 1.85rem !important;
+  font-weight: 750 !important;
+  letter-spacing: -0.025em !important;
+  color: var(--ink) !important;
+  line-height: 1.2 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Data Tables (Flawless Hover without Triggering Scrollbars) */
+.table {
+  --bs-table-bg: transparent;
+  --bs-table-striped-bg: rgba(0, 0, 0, 0.015);
+  --bs-table-hover-bg: rgba(0, 0, 0, 0.03);
+  margin-bottom: 0 !important;
+}
+
+.table thead th {
+  font-size: 0.74rem !important;
+  font-weight: 650 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: var(--ink-faint) !important;
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--line-strong) !important;
+  padding: 0.85rem 1rem !important;
+  white-space: nowrap;
+}
+
+.table tbody tr {
+  transition: background-color 0.16s ease, box-shadow 0.16s ease !important;
+}
+
+.table tbody td {
+  padding: 0.85rem 1rem !important;
+  color: var(--ink) !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+
+.table-hover tbody tr:hover,
+.table tbody tr:hover {
+  background-color: var(--surface-hover) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line-strong) 45%, transparent) !important;
+}
+
+.sis-stagger {
+  animation: sis-fade-lift 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 18ms);
+}
+
+/* ==========================================================================
+   6. FORM INPUTS & INTERACTIVE CONTROLS
+   ========================================================================== */
+
+.form-control,
+.form-select {
+  border-radius: 8px !important;
+  border: 1px solid var(--line-strong) !important;
+  background: var(--surface) !important;
+  color: var(--ink) !important;
+  padding: 0.55rem 0.85rem !important;
+  padding: 0.52rem 0.95rem !important;
+  font-size: 0.875rem !important;
+  line-height: 1.4 !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease !important;
+}
+
+.form-control-sm,
+.form-select-sm {
+  min-height: 2.15rem !important;
+  padding: 0.32rem 0.85rem !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.4 !important;
+}
+
+html[dir="rtl"] .form-select {
+  background-position: left 0.85rem center !important;
+  padding-left: 2.25rem !important;
+  padding-right: 0.95rem !important;
+}
+
+html[dir="ltr"] .form-select {
+  background-position: right 0.85rem center !important;
+  padding-right: 2.25rem !important;
+  padding-left: 0.95rem !important;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--ink) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 12%, transparent) !important;
+  outline: none !important;
+}
+
+/* Custom Select & Pill Field Controls — Zero Text Truncation / Generous Pill Breathing Room */
+.sis-field {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.65rem !important;
+  width: 100% !important;
+  min-height: 2.45rem !important;
+  padding-inline: 1.25rem !important;
+  padding-block: 0.42rem !important;
+  border-radius: 999px !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--line-strong) !important;
+  color: var(--ink) !important;
+  font-size: 0.875rem !important;
+  line-height: 1.4 !important;
+  box-sizing: border-box !important;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease !important;
+}
+
+.sis-field-sm {
+  min-height: 2.15rem !important;
+  padding-inline: 1.15rem !important;
+  padding-block: 0.32rem !important;
+  font-size: 0.8125rem !important;
+  gap: 0.55rem !important;
+  border-radius: 999px !important;
+}
+
+.sis-field-trigger {
+  cursor: pointer !important;
+  user-select: none !important;
+}
+
+.sis-field-trigger:hover:not(:disabled) {
+  border-color: var(--ink-soft) !important;
+  background: var(--surface-hover) !important;
+}
+
+.sis-field-trigger:active:not(:disabled) {
+  transform: scale(0.985) !important;
+}
+
+.sis-field-value {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  padding-inline: 0.2rem !important;
+  line-height: 1.4 !important;
+  display: inline-block !important;
+  vertical-align: middle !important;
+}
+
+.sis-field-trigger svg {
+  flex-shrink: 0 !important;
+  width: 14px !important;
+  height: 14px !important;
+  opacity: 0.85 !important;
+  margin-inline-end: 0.15rem !important;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.15s ease !important;
+}
+
+.sis-field-host {
+  min-width: 0 !important;
+}
+
+.sis-field-host.sis-code {
+  min-width: max-content !important;
+}
+
+.sis-field-host.sis-code .sis-field {
+  font-family: var(--font-code) !important;
+  font-size: 0.82rem !important;
+  letter-spacing: -0.015em !important;
+}
+
+.sis-field-search {
+  padding-inline-start: 1rem !important;
+  padding-inline-end: 0.85rem !important;
+}
+
+.sis-field-search svg {
+  flex-shrink: 0 !important;
+  margin-inline-end: 0.45rem !important;
+  opacity: 0.75 !important;
+}
+
+.sis-field-input {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  font: inherit !important;
+  color: var(--ink) !important;
+  background: transparent !important;
+  border: 0 !important;
+  outline: none !important;
+  line-height: 1.4 !important;
+}
+
+.sis-field-clear {
+  flex-shrink: 0 !important;
+  margin-inline-start: 0.35rem !important;
+  padding: 3px !important;
+  border-radius: 999px !important;
+}
+
+
+/* Password eye toggle */
+.sis-password-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.sis-password-input {
+  padding-inline-end: 2.5rem !important;
+}
+
+.sis-password-toggle {
+  position: absolute;
+  inset-inline-end: 0.65rem;
+  background: transparent;
+  border: 0;
+  color: var(--ink-faint);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.sis-password-toggle:hover {
+  color: var(--ink);
+}
+
+/* ==========================================================================
+   7. DIRECTION-AWARE CHAT DRAWER & FULL EXPANSION
+   ========================================================================== */
+
+.sis-chat-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1040;
+  animation: sis-fade-in 0.2s ease backwards;
+}
+
+/* Arabic RTL: Slide out from the RIGHT edge */
+html[dir="rtl"] .sis-chat-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  left: auto;
+  width: min(520px, 94vw);
+  width: min(580px, 96vw);
+  z-index: 1050;
+  background: var(--surface);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.16);
+  border-left: 1px solid var(--line);
+  box-shadow: -8px 0 36px rgba(0, 0, 0, 0.22);
+  border-left: 1px solid var(--line-strong);
+  display: flex;
+  flex-direction: column;
+  animation: sis-drawer-in-right 0.28s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1), height 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* English LTR: Slide out from the LEFT edge */
+html[dir="ltr"] .sis-chat-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: auto;
+  width: min(520px, 94vw);
+  width: min(580px, 96vw);
+  z-index: 1050;
+  background: var(--surface);
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.16);
+  border-right: 1px solid var(--line);
+  box-shadow: 8px 0 36px rgba(0, 0, 0, 0.22);
+  border-right: 1px solid var(--line-strong);
+  display: flex;
+  flex-direction: column;
+  animation: sis-drawer-in-left 0.28s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1), height 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Fullscreen / Maximized Mode: Occupies 100% of viewport */
+.sis-chat-drawer.is-fullscreen,
+.sis-chat-drawer-fullscreen {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100vh !important;
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  z-index: 1060 !important;
+  animation: sis-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) backwards !important;
+}
+
+.sis-chat-drawer-header,
+.sis-chat-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.35rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 0.85rem 1.25rem !important;
+  border-bottom: 1px solid var(--line-strong) !important;
+  background: var(--surface) !important;
+  flex-shrink: 0 !important;
+  z-index: 10 !important;
+}
+
+.sis-chat-drawer-title,
+.sis-chat-drawer-head h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem !important;
+  font-weight: 700 !important;
+  margin: 0 !important;
+  color: var(--ink) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.6rem !important;
+}
+
+.sis-presence-dot-pulse {
+  display: inline-block !important;
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  background: #22c55e !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 30%, transparent) !important;
+  animation: sis-pulse-subtle 2s infinite !important;
+}
+
+.sis-chat-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.sis-chat-drawer-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 2.15rem !important;
+  height: 2.15rem !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--line) !important;
+  background: var(--surface-subtle) !important;
+  color: var(--ink) !important;
+  cursor: pointer !important;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease !important;
+}
+
+.sis-chat-drawer-btn:hover {
+  background: var(--surface-hover) !important;
+  border-color: var(--line-strong) !important;
+  transform: scale(1.06) !important;
+  color: var(--ink) !important;
+}
+
+.sis-chat-drawer-btn:active {
+  transform: scale(0.95) !important;
+}
+
+.sis-chat-drawer-btn.is-close:hover {
+  background: rgba(220, 38, 38, 0.12) !important;
+  color: #dc2626 !important;
+  border-color: rgba(220, 38, 38, 0.3) !important;
+}
+
+.sis-chat-drawer-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+/* Chat Shell within Drawer */
+.sis-chat-drawer-body .sis-chat-shell {
+  height: 100% !important;
+  max-height: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  min-height: 0 !important;
+}
+
+/* Drawer Single-Column Mode when Docked */
+.sis-chat-drawer:not(.is-fullscreen) .sis-chat-shell {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.sis-chat-drawer:not(.is-fullscreen) .sis-chat-shell:not(.has-active-chat) .sis-chat-sidebar {
+  display: flex !important;
+  width: 100% !important;
+  border-inline-end: 0 !important;
+}
+
+.sis-chat-drawer:not(.is-fullscreen) .sis-chat-shell:not(.has-active-chat) .sis-chat-thread {
+  display: none !important;
+}
+
+.sis-chat-drawer:not(.is-fullscreen) .sis-chat-shell.has-active-chat .sis-chat-sidebar {
+  display: none !important;
+}
+
+.sis-chat-drawer:not(.is-fullscreen) .sis-chat-shell.has-active-chat .sis-chat-thread {
+  display: grid !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.sis-chat-drawer:not(.is-fullscreen) .sis-chat-back {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  margin-inline-end: 0.5rem !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--ink) !important;
+  padding: 0.25rem !important;
+}
+
+/* Drawer Two-Column Mode when Fullscreen */
+.sis-chat-drawer.is-fullscreen .sis-chat-shell,
+.sis-chat-drawer-fullscreen .sis-chat-shell {
+  display: grid !important;
+  grid-template-columns: minmax(20rem, 24rem) minmax(0, 1fr) !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.sis-chat-drawer.is-fullscreen .sis-chat-sidebar,
+.sis-chat-drawer-fullscreen .sis-chat-sidebar {
+  display: flex !important;
+  border-inline-end: 1px solid var(--line-strong) !important;
+}
+
+.sis-chat-drawer.is-fullscreen .sis-chat-thread,
+.sis-chat-drawer-fullscreen .sis-chat-thread {
+  display: grid !important;
+  min-width: 0 !important;
+}
+
+.sis-chat-drawer.is-fullscreen .sis-chat-back,
+.sis-chat-drawer-fullscreen .sis-chat-back {
+  display: none !important;
+}
+
+.sis-chat-drawer.is-fullscreen .sis-chat-messages,
+.sis-chat-drawer-fullscreen .sis-chat-messages {
+  max-width: 100% !important;
+  width: 100% !important;
+  padding: 1.5rem 2.5rem !important;
+}
+
+.sis-chat-drawer.is-fullscreen .sis-chat-compose,
+.sis-chat-drawer-fullscreen .sis-chat-compose {
+  max-width: 100% !important;
+  width: calc(100% - 3rem) !important;
+  margin: 0.5rem auto 1rem auto !important;
+}
+
+/* ==========================================================================
+   8. CHAT INTERFACES & THREAD VIEWPORT FILL
+   ========================================================================== */
+
+.sis-chat-shell {
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  background: var(--surface) !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03) !important;
+}
+
+.sis-chat-sidebar {
+  border-inline-end: 1px solid var(--line) !important;
+  background: var(--surface) !important;
+}
+
+.sis-chat-thread {
+  background: var(--surface-subtle) !important;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
+}
+
+.sis-chat-thread-head {
+  border-bottom: 1px solid var(--line) !important;
+  background: var(--surface) !important;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1.35rem;
+}
+
+/* Chat Messages Area (Full Width in Thread Viewport) */
+.sis-chat-messages {
+  grid-row: 2 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  max-width: 100% !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 1.25rem 1.75rem !important;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+/* Chat Composer (Fills Available Width cleanly) */
+.sis-chat-compose {
+  max-width: 100% !important;
+  width: calc(100% - 2.5rem) !important;
+  margin: 0.5rem auto 0.85rem auto !important;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: 12px !important;
+  background: var(--surface) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
+  padding: 0.75rem 1rem !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sis-chat-drawer .sis-chat-messages,
+.sis-chat-shell .sis-chat-messages,
+.sis-chat-drawer-fullscreen .sis-chat-messages {
+  max-width: 100% !important;
+  width: 100% !important;
+  margin: 0 !important;
+}
+
+.sis-chat-drawer .sis-chat-compose,
+.sis-chat-shell .sis-chat-compose,
+.sis-chat-drawer-fullscreen .sis-chat-compose {
+  max-width: 100% !important;
+  width: calc(100% - 2rem) !important;
+  margin: 0.5rem auto 0.85rem auto !important;
+}
+
+.sis-chat-compose:focus-within {
+  border-color: var(--ink) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 12%, transparent) !important;
+}
+
+.sis-chat-compose .sis-chat-tool {
+  border-radius: 8px !important;
+}
+
+.sis-chat-compose .sis-chat-submit {
+  border-radius: 8px !important;
+  background: var(--theme-primary) !important;
+  color: var(--theme-primary-ink) !important;
+}
+
+/* Chat Bubbles */
+.sis-chat-message {
+  border-radius: 12px !important;
+  border: 1px solid var(--line) !important;
+  background: var(--surface) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+  padding: 0.75rem 1.05rem !important;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  max-width: min(78%, 38rem) !important;
+}
+
+.sis-chat-message p {
+  unicode-bidi: plaintext;
+  text-align: start;
+  margin-bottom: 0;
+}
+
+.sis-chat-message.is-mine {
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface)) !important;
+  border-color: var(--line-strong) !important;
+}
+
+/* RTL Bubble Tails */
+html[dir="rtl"] .sis-chat-message {
+  align-self: flex-start !important;
+  border-bottom-right-radius: 4px !important;
+}
+
+html[dir="rtl"] .sis-chat-message.is-mine {
+  align-self: flex-end !important;
+  border-bottom-left-radius: 4px !important;
+}
+
+/* LTR Bubble Tails */
+html[dir="ltr"] .sis-chat-message {
+  align-self: flex-start !important;
+  border-bottom-left-radius: 4px !important;
+}
+
+html[dir="ltr"] .sis-chat-message.is-mine {
+  align-self: flex-end !important;
+  border-bottom-right-radius: 4px !important;
+}
+
+/* Frameless Floating Chat Images (No border, No card container) */
+.sis-chat-message.is-image-only,
+.sis-chat-message.is-media-only:has(.sis-chat-image) {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}
+
+.sis-chat-image {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: 14px !important;
+  display: inline-block !important;
+}
+
+.sis-chat-image img {
+  border: none !important;
+  border-radius: 14px !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16) !important;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  display: block !important;
+}
+
+.sis-chat-image:hover img {
+  transform: scale(1.02) !important;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22) !important;
+}
+
+.sis-chat-message.is-image-only footer {
+  padding: 0.3rem 0.5rem !important;
+}
+
+/* RTL Back button flip */
+html[dir="rtl"] .sis-chat-back span {
+  display: inline-block;
+  transform: scaleX(-1);
+}
+
+/* Voice Player & Audio Components */
+.sis-voice-player {
+  background: var(--surface) !important;
+  border-color: var(--line) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+  border-radius: 10px !important;
+}
+.sis-voice-play {
+  background: var(--theme-primary) !important;
+  color: var(--theme-primary-ink) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12) !important;
+}
+.sis-voice-play:hover {
+  background: var(--theme-primary-hover) !important;
+  transform: scale(1.05) !important;
+}
+.sis-chat-message.is-mine .sis-voice-player {
+  background: color-mix(in srgb, var(--ink) 4%, var(--surface)) !important;
+  border-color: var(--line-strong) !important;
+}
+.sis-chat-message.is-mine .sis-voice-play {
+  background: var(--theme-primary) !important;
+  color: var(--theme-primary-ink) !important;
+}
+.sis-voice-wave span.is-played,
+.sis-chat-message.is-mine .sis-voice-wave span.is-played {
+  color: var(--ink) !important;
+}
+.sis-voice-speed {
+  border-color: var(--line-strong) !important;
+  background: var(--surface) !important;
+  color: var(--ink) !important;
+  border-radius: 6px !important;
+}
+.sis-voice-speed:hover {
+  border-color: var(--ink) !important;
+  background: var(--surface-hover) !important;
+}
+.sis-chat-receipts.is-seen {
+  color: var(--ink) !important;
+}
+.sis-chat-receipts.has-count {
+  background: color-mix(in srgb, var(--ink) 8%, transparent) !important;
+  color: var(--ink) !important;
+}
+
+/* Responsive Collapse for Chat on screens <= 860px */
+@media (max-width: 860px) {
+  .sis-chat-shell {
+    grid-template-columns: 1fr !important;
+  }
+  .sis-chat-shell:not(.has-active-chat) .sis-chat-thread {
+    display: none !important;
+  }
+  .sis-chat-shell.has-active-chat .sis-chat-sidebar {
+    display: none !important;
+  }
+  .sis-chat-shell.has-active-chat .sis-chat-thread {
+    display: grid !important;
+  }
+  .sis-chat-back {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* ==========================================================================
+   9. MOBILE BOTTOM DOCK & FLOATING BUTTONS
+   ========================================================================== */
+
+.sis-mobile-dock {
+  display: none;
+}
+
+@media (max-width: 767.98px) {
+  .sis-mobile-dock {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1030;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    height: 3.75rem;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.04);
+    padding: 0 0.5rem;
+    animation: sis-dock-in 0.24s ease backwards;
+  }
+
+  body {
+    padding-bottom: 3.75rem;
+  }
+}
+
+.sis-dock-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  background: transparent;
+  border: 0;
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 0.68rem;
+  font-weight: 550;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  position: relative;
+  transition: color 0.15s ease;
+  cursor: pointer;
+}
+
+.sis-dock-item:hover,
+.sis-dock-item.is-active {
+  color: var(--ink);
+}
+
+.sis-dock-item.is-active svg {
+  color: var(--ink);
+  transform: scale(1.1);
+}
+
+.sis-dock-badge {
+  position: absolute;
+  top: 2px;
+  right: 12px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--ink-inverse);
+  font-size: 0.6rem;
+  font-weight: 750;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Floating Chat Action Button */
+.sis-chat-fab {
+  position: fixed;
+  bottom: 1.5rem;
+  inset-inline-end: 1.5rem;
+  z-index: 1010;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.15rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--ink);
+  color: var(--ink-inverse);
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.14);
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sis-chat-fab:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.2);
+}
+
+.sis-chat-fab:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.sis-chat-fab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Mobile Offcanvas Drawer */
+.sis-mobile-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: sis-fade-in 0.2s ease forwards;
+}
+
+.sis-mobile-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: 1055;
+  width: min(22rem, calc(100vw - 1rem));
+  height: 100%;
+  background: color-mix(in srgb, var(--surface) 97%, var(--canvas));
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+html[dir="rtl"] .sis-mobile-drawer {
+  left: auto;
+  right: 0;
+  animation: sis-drawer-in-right 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+html[dir="ltr"] .sis-mobile-drawer {
+  right: auto;
+  left: 0;
+  animation: sis-drawer-in-left 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.sis-mobile-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 4.5rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  flex: none;
+}
+
+.sis-mobile-drawer-identity {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0.75rem;
+}
+
+.sis-mobile-drawer-identity > div:last-child {
+  min-width: 0;
+}
+
+.sis-mobile-drawer-identity strong,
+.sis-mobile-drawer-identity small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sis-mobile-drawer-identity strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.sis-mobile-drawer-identity small {
+  margin-top: 0.15rem;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+}
+
+.sis-mobile-drawer-close {
+  display: inline-grid;
+  flex: 0 0 2.75rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  place-items: center;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  cursor: pointer;
+}
+
+.sis-mobile-drawer-close:hover,
+.sis-mobile-drawer-close:focus-visible {
+  color: var(--ink);
+  background: var(--surface-hover);
+  border-color: var(--line);
+}
+
+.sis-mobile-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.85rem 0.75rem 1rem;
+}
+
+.sis-mobile-year-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 3.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--ink-soft);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.sis-mobile-year-card > label {
+  flex: 0 1 10rem !important;
+  min-width: 0;
+}
+
+.sis-mobile-year-card .form-select {
+  min-height: 2.5rem;
+  padding-block: 0.35rem;
+  font-size: 0.72rem;
+}
+
+.sis-mobile-section-title {
+  margin: 0;
+  padding: 0 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+
+.sis-mobile-nav-section {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 1rem;
+}
+
+.sis-mobile-nav-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sis-mobile-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.7rem;
+  min-height: 3rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.75rem;
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 550;
+  line-height: 1.35;
+  transition: color 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
+  background: transparent;
+  border: 1px solid transparent;
+  width: 100%;
+  text-align: start;
+  cursor: pointer;
+}
+
+.sis-mobile-nav-item:hover,
+.sis-mobile-nav-item.is-active {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.sis-mobile-nav-item.is-active {
+  color: var(--ink-accent);
+  background: var(--theme-primary-wash);
+  border-color: color-mix(in srgb, var(--ink-accent) 24%, var(--line));
+  font-weight: 650;
+}
+
+.sis-mobile-drawer-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: none;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+.sis-mobile-drawer-footer .sis-mobile-nav-item {
+  justify-content: center;
+  min-width: 0;
+  padding-inline: 0.5rem;
+  background: var(--canvas);
+  border-color: var(--line);
+}
+
+.sis-mobile-signout {
+  color: var(--danger, #d14343);
+}
+
+@media (max-width: 767.98px) {
+  .sis-header {
+    min-height: 3.75rem !important;
+    padding: 0.45rem 0.75rem !important;
+    justify-content: center !important;
+  }
+
+  .sis-header-brand-group {
+    width: 100%;
+  }
+
+  .sis-header-brand-group > button {
+    position: absolute;
+    inset-inline-start: 0.75rem;
+    z-index: 1;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0 !important;
+  }
+
+  .sis-header .sis-brand {
+    margin-inline: auto;
+    max-width: calc(100% - 3.5rem);
+    gap: 0.45rem;
+  }
+
+  .sis-header-actions-group,
+  .sis-nav-wrapper {
+    display: none !important;
+  }
+
+  .sis-header .sis-company-mark {
+    width: 2rem !important;
+    height: 2rem !important;
+  }
+
+  .sis-header .sis-brand-divider {
+    display: block;
+    height: 1.6rem;
+  }
+
+  .sis-header .sis-brand-mark {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .sis-mobile-school-name {
+    min-width: 0;
+    max-width: min(8.5rem, 35vw);
+    overflow: hidden;
+    color: var(--ink);
+    font-size: 0.78rem;
+    font-weight: 650;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* Final mobile overrides live after the legacy polish layers so the responsive shell has one
+   authoritative result regardless of the older stylesheet order. */
+@media (max-width: 767.98px) {
+  body {
+    padding-bottom: 0 !important;
+  }
+
+  .sis-mobile-dock {
+    display: none !important;
+  }
+
+  .sis-header-brand-group {
+    display: flex !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    direction: ltr;
+    gap: 0.75rem !important;
+    margin: 0 !important;
+  }
+
+  .sis-header-brand-group > button {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    display: inline-grid !important;
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+    min-width: 2.75rem !important;
+    min-height: 2.75rem !important;
+    flex: 0 0 2.75rem !important;
+    order: 0;
+    place-items: center;
+    padding: 0 !important;
+    border: 1px solid var(--line-strong) !important;
+    border-radius: 0.72rem !important;
+    background: var(--surface-subtle) !important;
+    color: var(--ink) !important;
+    box-shadow: 0 0.15rem 0.45rem color-mix(in srgb, #000 10%, transparent) !important;
+  }
+
+  .sis-header .sis-brand {
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: calc(100% - 3.5rem) !important;
+    flex: 0 1 auto !important;
+    order: 1;
+    justify-content: flex-start !important;
+    direction: rtl;
+    gap: 0.42rem !important;
+    margin: 0 !important;
+  }
+
+  html[dir="ltr"] .sis-header .sis-brand {
+    direction: ltr;
+    order: 0;
+  }
+
+  html[dir="ltr"] .sis-header-brand-group > button {
+    order: 1;
+  }
+
+  .sis-mobile-school-name {
+    display: block !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    overflow: visible !important;
+    font-size: clamp(0.7rem, 3vw, 0.79rem) !important;
+    line-height: 1.25 !important;
+    text-align: start;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  .sis-mobile-drawer,
+  .sis-mobile-drawer-body {
+    overflow-x: hidden !important;
+  }
+
+  .sis-mobile-drawer-identity {
+    flex: 1 1 auto;
+    align-items: flex-start;
+  }
+
+  .sis-mobile-drawer-identity strong,
+  .sis-mobile-drawer-identity small,
+  .sis-mobile-nav-item > span,
+  .sis-mobile-section-title {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  .sis-mobile-drawer-identity small {
+    font-size: 0.74rem !important;
+    line-height: 1.4;
+  }
+
+  .sis-mobile-year-card {
+    display: flex !important;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-inline: 0.75rem;
+  }
+
+  .sis-mobile-year-card > span {
+    font-size: 0.7rem;
+    white-space: nowrap;
+  }
+
+  .sis-mobile-year-card > label {
+    display: block !important;
+    width: min(11.75rem, calc(100% - 5rem));
+    min-width: 0;
+    flex: 0 1 11.75rem !important;
+  }
+
+  .sis-mobile-year-card .sis-field-host.sis-code,
+  .sis-mobile-year-card .sis-field {
+    width: 100%;
+    min-width: 0 !important;
+    max-width: 11.75rem;
+  }
+
+  .sis-mobile-year-card .sis-field-host.sis-code .sis-field {
+    min-height: 2.75rem !important;
+    gap: 0.3rem !important;
+    padding-inline: 0.6rem !important;
+    font-size: clamp(0.625rem, 2.55vw, 0.68rem) !important;
+    letter-spacing: -0.025em !important;
+  }
+
+  .sis-mobile-year-card .sis-field-value {
+    padding-inline: 0 !important;
+    text-overflow: clip !important;
+  }
+
+  .sis-fab-chat {
+    bottom: max(1rem, env(safe-area-inset-bottom)) !important;
+  }
+
+  .sis-fab-chat.is-footer-visible {
+    bottom: calc(3.75rem + max(1rem, env(safe-area-inset-bottom))) !important;
+  }
+
+  html[dir="rtl"] .sis-fab-chat {
+    left: 1rem !important;
+  }
+
+  html[dir="ltr"] .sis-fab-chat {
+    right: 1rem !important;
+  }
+
+  .sis-chat-drawer-backdrop,
+  .sis-chat-drawer-btn.is-expand {
+    display: none !important;
+  }
+
+  html[dir="rtl"] .sis-chat-drawer,
+  html[dir="ltr"] .sis-chat-drawer,
+  .sis-chat-drawer.is-fullscreen {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell:not(.has-active-chat) .sis-chat-sidebar,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell:not(.has-active-chat) .sis-chat-sidebar {
+    display: flex !important;
+    width: 100% !important;
+    border: 0 !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell:not(.has-active-chat) .sis-chat-thread,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell:not(.has-active-chat) .sis-chat-thread {
+    display: none !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell.has-active-chat .sis-chat-sidebar,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell.has-active-chat .sis-chat-sidebar {
+    display: none !important;
+  }
+
+  .sis-chat-drawer .sis-chat-shell.has-active-chat .sis-chat-thread,
+  .sis-chat-drawer.is-fullscreen .sis-chat-shell.has-active-chat .sis-chat-thread {
+    display: grid !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .sis-chat-drawer .sis-chat-back,
+  .sis-chat-drawer.is-fullscreen .sis-chat-back {
+    display: inline-grid !important;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: 0 0 2.75rem;
+    place-items: center;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .sis-chat-drawer.is-fullscreen .sis-chat-messages,
+  .sis-chat-drawer .sis-chat-messages {
+    width: 100% !important;
+    padding: 0.85rem 0.7rem !important;
+  }
+
+  .sis-chat-drawer.is-fullscreen .sis-chat-compose,
+  .sis-chat-drawer .sis-chat-compose {
+    width: calc(100% - 1rem) !important;
+    margin: 0.4rem auto max(0.55rem, env(safe-area-inset-bottom)) !important;
+  }
+
+  .sis-chat-sidebar-head h1 {
+    font-size: 1.25rem !important;
+  }
+
+  .sis-chat-drawer-title,
+  .sis-chat-thread-head h2 {
+    font-size: 0.98rem !important;
+    line-height: 1.35;
+  }
+
+  .sis-chat-sidebar-head p,
+  .sis-chat-thread-head p,
+  .sis-chat-conversation-bottomline {
+    font-size: 0.76rem !important;
+    line-height: 1.45;
+  }
+
+  .sis-chat-message {
+    max-width: 88% !important;
+    padding: 0.65rem 0.78rem !important;
+    font-size: 0.87rem !important;
+    line-height: 1.5;
+  }
+
+  .sis-app :where(h1, h2, h3, h4, h5, h6, p, strong, small, label, legend),
+  .sis-app :where(
+    .sis-field-value,
+    .sis-menu-option-label,
+    .sis-role-line,
+    .sis-nav-label,
+    .sis-chat-conversation-bottomline > span:first-child,
+    .sis-chat-person-title h2,
+    .sis-chat-person-title p,
+    .sis-chat-group-title h2,
+    .sis-chat-group-title p,
+    .sis-chat-sender-block > small,
+    .sis-chat-typing > span:last-child,
+    .sis-chat-selected-files > span
+  ) {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+}
+/* Role permissions: direction-safe controls with compact, scannable groups. */
+.sis-permission-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.sis-permission-toolbar > div { width: min(100%, 28rem); }
+
+.sis-permission-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.sis-permission-group {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface);
+}
+
+.sis-permission-group-head {
+  display: flex;
+  min-height: 4.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-subtle);
+}
+
+.sis-permission-group-head h3 { margin: 0 0 0.15rem; font-size: 1rem; }
+.sis-permission-group-head small { color: var(--ink-faint); }
+
+.sis-permission-list { padding: 0.35rem 0.7rem; }
+
+.sis-permission-option {
+  display: flex;
+  min-height: 3.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0;
+  padding: 0.65rem 0.35rem;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.sis-permission-option:last-child { border-bottom: 0; }
+.sis-permission-option:hover { background: var(--surface-subtle); }
+.sis-permission-copy { min-width: 0; font-weight: 600; line-height: 1.45; }
+
+.sis-permission-option input {
+  position: relative;
+  appearance: none;
+  width: 2.65rem;
+  height: 1.5rem;
+  flex: 0 0 2.65rem;
+  margin: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.sis-permission-option input::after {
+  position: absolute;
+  top: 0.2rem;
+  left: 0.2rem;
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  content: '';
+  transition: transform 160ms ease, background-color 160ms ease;
+}
+
+.sis-permission-option input:checked { border-color: var(--accent-600); background: var(--accent-600); }
+.sis-permission-option input:checked::after { background: #fff; transform: translateX(1.1rem); }
+html[dir="rtl"] .sis-permission-option input::after { right: 0.2rem; left: auto; }
+html[dir="rtl"] .sis-permission-option input:checked::after { transform: translateX(-1.1rem); }
+.sis-permission-option input:focus-visible { outline: 3px solid var(--focus-ring) !important; }
+
+.sis-permission-save {
+  position: sticky;
+  bottom: 0.75rem;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.sis-audit-bell-host { position: fixed; z-index: 1036; bottom: 6rem; }
+.sis-mobile-header-controls { display: contents; }
+.sis-audit-bell-mobile { display: none; }
+.sis-audit-bell-desktop { position: relative; inset: auto !important; }
+.sis-audit-bell-desktop .sis-fab-audit { width: 2.75rem; height: 2.75rem; border-radius: 0.72rem; box-shadow: none; }
+.sis-audit-bell-desktop .sis-audit-popover { top: calc(100% + 0.75rem); bottom: auto; }
+html[dir="rtl"] .sis-audit-bell-host { left: 2rem; }
+html[dir="ltr"] .sis-audit-bell-host { right: 2rem; }
+.sis-fab-audit { position: relative; display: grid; width: 3.15rem; height: 3.15rem; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-lg); cursor: pointer; }
+.sis-fab-audit:hover { border-color: var(--accent-600); color: var(--accent-600); }
+.sis-fab-audit .sis-fab-badge { position: absolute; top: -0.25rem; inset-inline-end: -0.35rem; }
+.sis-audit-popover { position: absolute; bottom: calc(100% + 0.75rem); inset-inline-end: 0; width: min(24rem, calc(100vw - 2rem)); overflow: hidden; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface-raised); box-shadow: var(--shadow-xl); }
+.sis-audit-popover > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.9rem 1rem; border-bottom: 1px solid var(--line); }
+.sis-audit-popover > header small { display: block; margin-top: 0.15rem; color: var(--ink-faint); }
+.sis-audit-popover > header button { display: grid; width: 2.25rem; height: 2.25rem; place-items: center; border: 0; border-radius: 50%; background: transparent; color: inherit; }
+.sis-audit-popover-list { max-height: 24rem; overflow-y: auto; }
+.sis-audit-popover-item { display: grid; gap: 0.2rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--line); }
+.sis-audit-popover-item span, .sis-audit-popover-item small { color: var(--ink-soft); font-size: 0.78rem; }
+.sis-audit-popover-more { display: block; padding: 0.8rem 1rem; text-align: center; font-weight: 700; text-decoration: none; }
+.sis-audit-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.sis-audit-mobile-list { display: grid; gap: 0.75rem; }
+.sis-audit-mobile-card { overflow: hidden; border: 1px solid var(--line); border-radius: 0.9rem; background: var(--surface-subtle); }
+.sis-audit-mobile-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; padding: 0.85rem; border-bottom: 1px solid var(--line); }
+.sis-audit-mobile-actor { display: flex; min-width: 0; align-items: center; gap: 0.65rem; }
+.sis-audit-mobile-actor > div { min-width: 0; }
+.sis-audit-mobile-actor strong, .sis-audit-mobile-actor small { display: block; overflow-wrap: anywhere; }
+.sis-audit-mobile-actor small { margin-top: 0.1rem; color: var(--ink-soft); font-size: 0.76rem; }
+.sis-audit-mobile-avatar { display: grid; width: 2.35rem; height: 2.35rem; flex: 0 0 2.35rem; place-items: center; border-radius: 0.7rem; background: color-mix(in srgb, var(--accent-600) 14%, var(--surface)); color: var(--accent-600); font-weight: 800; }
+.sis-audit-mobile-card time { flex: none; color: var(--ink-soft); font-size: 0.72rem; font-variant-numeric: tabular-nums; direction: ltr; }
+.sis-audit-mobile-summary { display: grid; gap: 0.25rem; padding: 0.85rem; }
+.sis-audit-mobile-summary span, .sis-audit-mobile-meta span { color: var(--ink-soft); font-size: 0.72rem; }
+.sis-audit-mobile-summary strong { line-height: 1.55; overflow-wrap: anywhere; }
+.sis-audit-mobile-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; padding: 0.55rem 0.85rem; border-top: 1px solid var(--line); }
+.sis-audit-mobile-meta b { max-width: 68%; font-size: 0.78rem; text-align: end; overflow-wrap: anywhere; }
+.sis-audit-mobile-card .sis-audit-details { padding: 0.7rem 0.85rem; border-top: 1px solid var(--line); }
+
+@media (max-width: 991.98px) {
+  .sis-audit-bell-mobile { display: block; }
+}
+
+@media (max-width: 767.98px) {
+  .sis-permission-toolbar { align-items: stretch; flex-direction: column; }
+  .sis-permission-grid { grid-template-columns: minmax(0, 1fr); }
+  .sis-permission-group-head { align-items: flex-start; }
+  .sis-permission-save .btn { width: 100%; }
+  .sis-header-brand-group { display: grid !important; grid-template-columns: auto minmax(0, 1fr); gap: 0.5rem !important; }
+  .sis-mobile-header-controls { display: flex; grid-column: 1; grid-row: 1; align-items: center; gap: 0.5rem; direction: ltr; }
+  .sis-mobile-header-controls > button { display: inline-grid !important; width: 2.75rem !important; height: 2.75rem !important; min-width: 2.75rem !important; min-height: 2.75rem !important; place-items: center; padding: 0 !important; border: 1px solid var(--line-strong) !important; border-radius: 0.72rem !important; background: var(--surface-subtle) !important; color: var(--ink) !important; box-shadow: 0 0.15rem 0.45rem color-mix(in srgb, #000 10%, transparent) !important; }
+  .sis-header-brand-group .sis-audit-bell-host { position: relative; inset: auto !important; right: auto !important; left: auto !important; z-index: 5; flex: 0 0 2.75rem; margin: 0 !important; }
+  .sis-header-brand-group .sis-fab-audit { width: 2.75rem; height: 2.75rem; border-radius: 0.72rem; background: var(--surface-subtle); box-shadow: 0 0.15rem 0.45rem color-mix(in srgb, #000 10%, transparent); }
+  .sis-header-brand-group .sis-audit-popover { position: fixed; top: 4.25rem; right: 0.75rem; bottom: auto; left: 0.75rem; width: auto; max-height: calc(100dvh - 5rem); }
+  .sis-header { min-height: 4.25rem !important; height: auto !important; }
+  .sis-header .sis-brand { grid-column: 2; grid-row: 1; width: 100% !important; max-width: none !important; min-width: 0 !important; margin: 0 !important; overflow: visible; }
+  .sis-header .sis-mobile-school-name { display: block !important; min-width: 0 !important; max-width: none !important; overflow: visible !important; font-size: clamp(0.72rem, 3.1vw, 0.82rem) !important; line-height: 1.35 !important; text-overflow: clip !important; white-space: normal !important; overflow-wrap: anywhere; }
+  html[dir="ltr"] .sis-mobile-header-controls { grid-column: 2; }
+  html[dir="ltr"] .sis-header-brand-group { grid-template-columns: minmax(0, 1fr) auto; }
+  html[dir="ltr"] .sis-header .sis-brand { grid-column: 1; }
+  .sis-audit-page { margin-inline: -0.25rem; }
+  .sis-audit-page .card { border-radius: 0.9rem; }
+  .sis-audit-page .card-body { padding: 0.85rem; }
+  .sis-audit-filters { --bs-gutter-y: 0.75rem; }
+  .sis-audit-filters input, .sis-audit-filters button { min-height: 2.75rem; }
+  .sis-audit-pagination { margin-top: 0.85rem; padding: 0.85rem 0 0; }
+  .sis-audit-pagination .btn { min-width: 5rem; min-height: 2.75rem; }
+}
