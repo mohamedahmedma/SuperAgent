@@ -1,8 +1,8 @@
 """What a conversation remembers between turns, and for how long.
 
 The second batch of fixes from the 2026-09-14 review. Each class here is one rule about
-session state — the pending question, the child pin, the persistent note, the hints a
-resumed search runs with — stated small enough that a regression names the rule.
+session state — the pending question, the child pin, the hints a resumed search runs
+with — stated small enough that a regression names the rule.
 """
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -13,7 +13,6 @@ from backend.chat.background import InlineJobs
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.child_context import SESSION_CHILD_KEY
 from backend.chat.clarification import build_pending_hitl, enter_turn
-from backend.chat.persistent_note import NOTE_GUARDIAN_KEY, NOTE_KEY, usable_note
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import unresolved
 from backend.chat.turn_pipeline import TurnCollaborators, TurnPipeline
@@ -42,7 +41,6 @@ def _pipeline(storage, **collaborators) -> TurnPipeline:
         resume_retrieval=None,
         answer_model=None,
         session_title=None,
-        update_note=None,
         context_type=ChatRequestContext,
     )
     return TurnPipeline(TurnCollaborators(**{**defaults, **collaborators}))
@@ -114,80 +112,6 @@ class TheChildPinIsWrittenOnlyWhenItChanged(unittest.TestCase):
 
         pin = pipeline.save_metadata(_turn(pipeline))[SESSION_CHILD_KEY]
         self.assertEqual(("", "G-1"), (pin["student_id"], pin["guardian_id"]))
-
-
-OLD_NOTE = "The parent asks about Omar (Year 6); prefers Arabic."
-
-
-class TheNoteIsReadForTheGuardianItWasWrittenFor(unittest.TestCase):
-    """`usable_note`, and the turn around it.
-
-    The child pin already refuses to outlive the guardian it was resolved under. The
-    persistent note — the assistant's own summary, which names the children — did not:
-    after an administrator rebound the account to a different guardian, the previous
-    family's note kept steering answers for the next. The note is stamped with the
-    guardian it was written for, read only for the same one, and a refused note is
-    cleared rather than left to be consulted again.
-    """
-
-    def test_the_guardian_it_was_written_for_reads_it(self):
-        self.assertEqual((OLD_NOTE, False), usable_note({NOTE_KEY: OLD_NOTE, NOTE_GUARDIAN_KEY: "G-1"}, "G-1"))
-
-    def test_another_guardian_reads_nothing_and_the_note_is_marked_for_clearing(self):
-        self.assertEqual(("", True), usable_note({NOTE_KEY: OLD_NOTE, NOTE_GUARDIAN_KEY: "G-old"}, "G-1"))
-
-    def test_a_note_written_before_the_stamp_is_adopted(self):
-        self.assertEqual((OLD_NOTE, False), usable_note({NOTE_KEY: OLD_NOTE}, "G-1"))
-
-    def test_a_session_with_no_guardian_reads_the_note_as_stored(self):
-        self.assertEqual((OLD_NOTE, False), usable_note({NOTE_KEY: OLD_NOTE, NOTE_GUARDIAN_KEY: "G-1"}, ""))
-
-    def test_a_turn_for_the_new_guardian_neither_reads_nor_keeps_the_old_note(self):
-        storage = FakeStorage(metadata={NOTE_KEY: OLD_NOTE, NOTE_GUARDIAN_KEY: "G-old"})
-        pipeline = _pipeline(storage)
-        turn = _turn(pipeline)
-
-        self.assertEqual("", turn.persistent_note, "the model is never shown another family's summary")
-        patch = pipeline.save_metadata(turn)
-        self.assertEqual(("", None), (patch[NOTE_KEY], patch[NOTE_GUARDIAN_KEY]))
-
-    def test_the_note_update_starts_from_nothing_and_is_stamped_for_the_new_guardian(self):
-        from langchain_core.messages import AIMessage, HumanMessage
-
-        window = get_profile().agent.context_window_messages
-        history = [
-            HumanMessage(content=f"question {i}") if i % 2 == 0 else AIMessage(content=f"answer {i}")
-            for i in range(window + 2)
-        ]
-        storage = FakeStorage(history, metadata={NOTE_KEY: OLD_NOTE, NOTE_GUARDIAN_KEY: "G-old"})
-        update_note = Mock(return_value="The parent asks about Layla (Year 2).")
-        pipeline = _pipeline(storage, update_note=update_note)
-        turn = _turn(pipeline)
-        pipeline.record_question(turn)
-        turn.answer = "Layla is in Year 2."
-
-        self.assertTrue(pipeline.schedule_note(turn))
-
-        self.assertEqual("", update_note.call_args.args[0], "the old note is not offered as a starting point")
-        self.assertEqual(
-            [{NOTE_KEY: "The parent asks about Layla (Year 2).", NOTE_GUARDIAN_KEY: "G-1"}], storage.patches
-        )
-        # The job's write replaces the old note; the save must not clear it afterwards.
-        self.assertNotIn(NOTE_KEY, pipeline.save_metadata(turn))
-
-    def test_the_same_guardians_note_is_read_and_built_on(self):
-        storage = FakeStorage(metadata={NOTE_KEY: OLD_NOTE, NOTE_GUARDIAN_KEY: "G-1"})
-        update_note = Mock(return_value=OLD_NOTE + " Asked about the bus.")
-        pipeline = _pipeline(storage, update_note=update_note)
-        turn = _turn(pipeline)
-        pipeline.record_question(turn)
-        turn.answer = "The bus leaves at 07:30."
-
-        self.assertEqual(OLD_NOTE, turn.persistent_note)
-        pipeline.schedule_note(turn)
-        self.assertEqual(OLD_NOTE, update_note.call_args.args[0])
-        self.assertEqual("G-1", storage.metadata[NOTE_GUARDIAN_KEY])
-        self.assertNotIn(NOTE_KEY, pipeline.save_metadata(turn))
 
 
 class AResumedSearchRunsUnderTheHintsItsQuestionWasAskedWith(unittest.TestCase):

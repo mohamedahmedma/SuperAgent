@@ -275,7 +275,7 @@ def visible_text(msg: Any) -> str:
     Reading the content and cleaning it are one step on purpose. This is the only way a
     direct `model.invoke`/`model.astream` result becomes a string in the chat layer, so
     putting the transcript strip anywhere else would leave the paths that bypass the
-    agent — a resumed clarification's answer, the persistent note — able to put a raw
+    agent — a resumed clarification's answer — able to put a raw
     Harmony envelope in front of a user.
     """
     return finalize_text(message_text(msg))

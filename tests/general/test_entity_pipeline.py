@@ -3,8 +3,11 @@ context-first retrieval.
 
 The heaviest class is `DynamicSchemaTests`. The requirement is that a new domain is a
 YAML block rather than a code change, and the way that is enforced is by building the
-extraction schema, the tool signature, filter validation, and the index from one
+extraction schema, the filter model, filter validation, and the index from one
 declaration — then asserting all four track a vocabulary this file invents at runtime.
+
+No shipped profile turns entity extraction on, so the catalogue these tests index is
+declared below as `SHOP_ENTITIES` and composed onto `base` by `shop_profile()`.
 """
 import io
 import random
@@ -34,6 +37,7 @@ from backend.assets.extractors import ExtractionRequest
 from backend.assets.pipeline import FigurePipeline, ImageInput
 from backend.assets.store import AssetStore
 from backend.profiles.registry import load_profile
+from backend.profiles.schema import DomainProfile, EntityPipelineConfig
 from backend.rag.entity_retrieval import EntityRetriever
 from tests.general.postgres_support import postgres_schema
 
@@ -47,8 +51,43 @@ def make_png(width=400, height=300, seed=1) -> bytes:
     return buffer.getvalue()
 
 
+#: A product catalogue's vocabulary: images that ARE the record, with typed attributes.
+SHOP_ENTITIES = {
+    "enabled": True,
+    "role_strategy": "entity",
+    "vision_enabled": False,
+    "candidate_pool": 200,
+    "max_results": 20,
+    "attributes": [
+        {"name": "category", "type": "string", "description": "What kind of product this is",
+         "values": ["shoe", "sandal", "boot", "shirt", "trousers", "dress", "jacket", "bag", "accessory"]},
+        {"name": "color", "type": "string", "multi": True, "description": "Dominant colours visible on the product",
+         "values": ["black", "white", "grey", "red", "blue", "green", "yellow", "orange", "purple", "pink",
+                    "brown", "beige", "gold", "silver"]},
+        {"name": "material", "type": "string", "multi": True, "description": "Visible materials",
+         "values": ["leather", "suede", "canvas", "cotton", "denim", "wool", "synthetic", "mesh", "rubber"]},
+        {"name": "pattern", "type": "string", "description": "Surface pattern",
+         "values": ["solid", "striped", "checked", "floral", "printed", "embroidered"]},
+        {"name": "gender", "type": "string", "values": ["men", "women", "unisex", "kids"]},
+        {"name": "price", "type": "number", "unit": "EGP", "description": "Listed price, if shown"},
+        {"name": "in_stock", "type": "boolean", "description": "Whether the listing shows it as available"},
+    ],
+}
+
+#: The name `shop_profile()` indexes and caches under.
+SHOP = "shop"
+
+
+def shop_profile() -> DomainProfile:
+    """`base` with entity extraction on and `SHOP_ENTITIES` as its vocabulary."""
+    profile = load_profile("base").model_copy(deep=True)
+    profile.name = SHOP
+    profile.assets.entities = EntityPipelineConfig.model_validate(SHOP_ENTITIES)
+    return profile
+
+
 def shop_schema() -> AttributeSchema:
-    return build_attribute_schema(load_profile("ecommerce").assets.entities)
+    return build_attribute_schema(shop_profile().assets.entities)
 
 
 def custom_schema(*specs) -> AttributeSchema:
@@ -255,7 +294,7 @@ class RoleStrategyTests(unittest.TestCase):
 
 class EntityExtractorTests(unittest.TestCase):
     def setUp(self):
-        self.config = load_profile("ecommerce").assets.entities
+        self.config = shop_profile().assets.entities
         self.schema = shop_schema()
 
     def test_the_heuristic_extractor_invents_no_attributes(self):
@@ -275,7 +314,7 @@ class EntityExtractorTests(unittest.TestCase):
     def _vision(self, result):
         extractor = VisionEntityExtractor(
             self.config, self.schema, model_id="vl", api_key="k", base_url="u",
-            figures_config=load_profile("ecommerce").assets.figures,
+            figures_config=shop_profile().assets.figures,
         )
         structured = Mock()
         structured.invoke.return_value = result
@@ -367,26 +406,26 @@ class IndexTestCase(unittest.TestCase):
             "p4": {"category": "shoe", "color": ["red"], "price": 220.0, "in_stock": True},
         }
         for asset_id, attributes in catalogue.items():
-            self.index.index_asset(asset_id, "ecommerce", attributes, self.schema)
+            self.index.index_asset(asset_id, SHOP, attributes, self.schema)
         return catalogue
 
 
 class EntityIndexTests(IndexTestCase):
     def test_multi_valued_attributes_produce_one_row_per_value(self):
         written = self.index.index_asset(
-            "p1", "ecommerce", {"color": ["red", "white"], "category": "shoe"}, self.schema
+            "p1", SHOP, {"color": ["red", "white"], "category": "shoe"}, self.schema
         )
         self.assertEqual(3, written)
 
     def test_reindexing_replaces_rather_than_accumulates(self):
         """An attribute that disappears on re-extraction must leave the index too."""
-        self.index.index_asset("p1", "ecommerce", {"color": ["red", "blue"]}, self.schema)
-        self.index.index_asset("p1", "ecommerce", {"color": ["green"]}, self.schema)
+        self.index.index_asset("p1", SHOP, {"color": ["red", "blue"]}, self.schema)
+        self.index.index_asset("p1", SHOP, {"color": ["green"]}, self.schema)
         self.assertEqual({"p1"}, self.index.find({"color": ["green"]}, self.schema))
         self.assertEqual(set(), self.index.find({"color": ["red"]}, self.schema))
 
     def test_unknown_attributes_are_not_indexed(self):
-        self.assertEqual(0, self.index.index_asset("p1", "ecommerce", {"bogus": 1}, self.schema))
+        self.assertEqual(0, self.index.index_asset("p1", SHOP, {"bogus": 1}, self.schema))
 
     def test_find_with_no_filters_returns_none_not_empty(self):
         """None means 'no constraint'; an empty set means 'nothing qualifies'."""
@@ -432,9 +471,9 @@ class EntityIndexTests(IndexTestCase):
         self.assertEqual(set(), self.index.find({"color": ["green"]}, self.schema))
 
     def test_profile_scoping_isolates_catalogues(self):
-        self.index.index_asset("p1", "ecommerce", {"color": ["red"]}, self.schema)
+        self.index.index_asset("p1", SHOP, {"color": ["red"]}, self.schema)
         self.index.index_asset("p9", "other_shop", {"color": ["red"]}, self.schema)
-        self.assertEqual({"p1"}, self.index.find({"color": ["red"]}, self.schema, profile="ecommerce"))
+        self.assertEqual({"p1"}, self.index.find({"color": ["red"]}, self.schema, profile=SHOP))
         self.assertEqual({"p1", "p9"}, self.index.find({"color": ["red"]}, self.schema))
 
     def test_narrow_preserves_retrieval_rank(self):
@@ -483,7 +522,7 @@ class EntityIngestTests(IndexTestCase):
         self.blobs = LocalBlobStore(Path(self._tmp.name))
         self.store = AssetStore(unit_of_work=self.unit_of_work, blob_store=self.blobs,
                                 cache_enabled=False)
-        self.profile = load_profile("ecommerce")
+        self.profile = shop_profile()
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -519,7 +558,7 @@ class EntityIngestTests(IndexTestCase):
         pipeline, _ = self._pipeline({"category": "shoe", "color": ["red"], "price": 85.0})
         dossiers, _ = pipeline.process([ImageInput(data=make_png(), index=0)], filename="c.pdf")
         matched = self.index.find(
-            {"color": ["red"], "price": NumberRange(max=100)}, self.schema, profile="ecommerce"
+            {"color": ["red"], "price": NumberRange(max=100)}, self.schema, profile=SHOP
         )
         self.assertEqual({dossiers[0].asset_id}, matched)
 
@@ -582,7 +621,7 @@ class EntityRetrievalTests(IndexTestCase):
         self.store = AssetStore(unit_of_work=self.unit_of_work,
                                 blob_store=LocalBlobStore(Path(self._tmp.name)),
                                 cache_enabled=False)
-        self.profile = load_profile("ecommerce")
+        self.profile = shop_profile()
         self.catalogue = self._seed()
         for asset_id, attributes in self.catalogue.items():
             self.store.record(self._dossier(asset_id, attributes))
@@ -598,7 +637,7 @@ class EntityRetrievalTests(IndexTestCase):
         )
 
         return AssetDossier(
-            asset_id=asset_id, sha256="a" * 64, profile="ecommerce",
+            asset_id=asset_id, sha256="a" * 64, profile=SHOP,
             role=AssetRole.ENTITY, status=ExtractionStatus.EXTRACTED,
             source=SourceRef(filename="catalogue.pdf", page_number=1),
             extraction=ExtractionPayload(
@@ -691,121 +730,7 @@ class EntityRetrievalTests(IndexTestCase):
                           "rejected_filters", "filtered_to_empty"], list(payload))
 
 
-def _use_retriever(retriever):
-    """Serve the product tool this retriever.
-
-    The tool resolves its retriever from the process container, so that is where a
-    stand-in goes; `tearDown` drops the container again.
-    """
-    from backend.composition import Services, set_default_services
-
-    set_default_services(Services(entity_retriever=retriever))
-
-
-class SearchProductsToolTests(unittest.TestCase):
-    def setUp(self):
-        from backend.profiles.registry import set_profile
-
-        set_profile(load_profile("ecommerce"))
-
-    def tearDown(self):
-        from backend.composition import set_default_services
-        from backend.profiles.registry import set_profile
-
-        set_profile(None)
-        set_default_services(None)
-
-    def _tool(self, ctx=None):
-        from backend.chat.request_context import ChatRequestContext
-        from backend.tools.products import make_search_products
-
-        return make_search_products(ctx or ChatRequestContext.for_sync(user_id="u", session_id="s"))
-
-    def test_the_tool_signature_is_generated_from_the_profile(self):
-        """This is what makes filter slot-filling free: the vocabulary is in the schema
-        the model already receives."""
-        schema = self._tool().args_schema.model_json_schema()
-        self.assertEqual({"query", "filters"}, set(schema["properties"]))
-        rendered = str(schema)
-        for name in ("category", "color", "price", "in_stock"):
-            with self.subTest(name=name):
-                self.assertIn(name, rendered)
-
-    def test_the_tool_is_registered(self):
-        from backend.tools import TOOL_BUILDERS
-
-        self.assertIn("search_products", TOOL_BUILDERS)
-
-    def test_results_are_formatted_with_asset_ids_for_display(self):
-        from backend.chat.request_context import ChatRequestContext
-        from backend.rag.entity_retrieval import EntityHit, EntitySearchResult
-
-        retriever = Mock()
-        retriever.search.return_value = EntitySearchResult(
-            hits=[EntityHit(asset_id="p1", caption="RS-200", summary="A red shoe.",
-                            attributes={"color": ["red"], "price": 85.0})],
-            recalled=4, after_filter=1,
-        )
-        _use_retriever(retriever)
-
-        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        output = self._tool(ctx).invoke({"query": "red shoes", "filters": {"color": ["red"]}})
-
-        self.assertIn("RS-200", output)
-        self.assertIn("color=red", output)
-        self.assertIn("asset_id: p1", output)
-        # Surfacing the asset is what lets the response carry the picture.
-        self.assertEqual(["p1"], ctx.surfaced_asset_ids())
-
-    def test_filtering_to_empty_suggests_relaxing_a_constraint(self):
-        from backend.rag.entity_retrieval import EntitySearchResult
-
-        retriever = Mock()
-        retriever.search.return_value = EntitySearchResult(
-            recalled=6, after_filter=0, filtered_to_empty=True, filters_applied={"color": ["green"]}
-        )
-        _use_retriever(retriever)
-        output = self._tool().invoke({"query": "shoes", "filters": {"color": ["green"]}})
-        self.assertIn("NO_PRODUCTS_FOUND", output)
-        self.assertIn("relaxing", output)
-
-    def test_a_profile_without_a_catalogue_says_so(self):
-        from backend.profiles.registry import set_profile
-
-        set_profile(load_profile("base"))
-        self.assertIn("PRODUCT_SEARCH_UNAVAILABLE", self._tool().invoke({"query": "shoes"}))
-
-    def test_a_retrieval_failure_is_reported_not_raised(self):
-        retriever = Mock()
-        retriever.search.side_effect = RuntimeError("milvus down")
-        _use_retriever(retriever)
-        self.assertIn("PRODUCT_SEARCH_ERROR", self._tool().invoke({"query": "shoes"}))
-
-    def test_the_turn_budget_is_enforced(self):
-        from backend.chat.request_context import ChatRequestContext
-        from backend.rag.entity_retrieval import EntitySearchResult
-
-        retriever = Mock()
-        retriever.search.return_value = EntitySearchResult()
-        _use_retriever(retriever)
-
-        ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        tool = self._tool(ctx)
-        tool.invoke({"query": "shoes"})
-        self.assertIn("TOOL_CALL_LIMIT_REACHED", tool.invoke({"query": "boots"}))
-
-    def test_an_invented_filter_key_is_refused_by_the_generated_schema(self):
-        with self.assertRaises(Exception):
-            self._tool().invoke({"query": "shoes", "filters": {"bluetooth": True}})
-
-
 class ProfileIntegrationTests(unittest.TestCase):
-    def test_the_ecommerce_profile_declares_a_real_vocabulary(self):
-        schema = shop_schema()
-        self.assertGreater(len(schema), 5)
-        self.assertIn("color", schema.names())
-        self.assertIn("price", schema.names())
-
     def test_base_ships_with_entities_disabled_and_no_vocabulary(self):
         entities = load_profile("base").assets.entities
         self.assertFalse(entities.enabled)

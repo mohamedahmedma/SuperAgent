@@ -169,7 +169,7 @@ npm run build
   - LangChain Agent + custom tools.
   - Uploaded documents go through three-tier sliding-window chunking; leaf chunks are embedded and written to Milvus, and parent chunks are written to PostgreSQL.
   - User registration/login, JWT authentication, role-based RBAC access control (admin/user).
-  - Session memory and summarization; chat and history persist to PostgreSQL, with Redis caching hot sessions and parent documents.
+  - Session memory: chat and history persist to PostgreSQL, with Redis caching hot sessions and parent documents.
 - **Deployment shape**: four independent FastAPI services + two frontends (Vue 3 for parents, React for registrars) + PostgreSQL, Redis and Milvus.
 
 ## Key Innovations
@@ -181,7 +181,6 @@ npm run build
 - **Streaming output**: the backend streams tokens via `agent.astream(stream_mode="messages")`; the frontend uses SSE + ReadableStream for a typewriter effect.
 - **Real-time RAG process visualization**: retrieval progress starts showing while the model is still "thinking," powered by an `asyncio.Queue` + background-task architecture that pushes updates in real time during tool execution.
 - **Answer cancellation**: the frontend's `AbortController` plus the backend's `StreamingResponse` let users interrupt an in-progress answer at any time.
-- **Session summary memory**: old messages are automatically summarized and injected into the system prompt, preserving context while controlling token usage.
 - **Document ingestion pipeline**: upload -> chunk -> generate dense/sparse vectors together -> write to Milvus, with automatic cleanup of old chunks on re-upload.
 - **Milvus 2.5+ native BM25 hybrid retrieval**: entirely drops the tedious pattern of hand-rolled client-side BM25 serialization and statistics syncing. By binding a `FunctionType.BM25` function to the `text` field in the Milvus collection schema, the vector database extracts sparse features natively on the server side, guaranteeing efficient Dense + Sparse hybrid retrieval with perfectly aligned statistics.
 - **Three-tier chunking + Auto-merging**: three-tier sliding-window splitting (L1/L2/L3); retrieval prioritizes L3 recall and automatically merges up to the parent chunk (L3->L2->L1) once a threshold is met.
@@ -398,7 +397,7 @@ Because the pairing lives in a table rather than on the chunks, pairing or unpai
 
 ### 5) Session memory flow
 1. Each turn is written to PostgreSQL keyed by the logged-in user + `session_id`.
-2. When the message history grows too long, summary compression kicks in to preserve long-term context.
+2. The agent sees the most recent `context_window_messages`; a follow-up is rewritten into a standalone question, with the conditions it inherits, by query resolution, and the child a conversation is about is kept in the session as a guardian-stamped pin.
 3. Redis caches the session list and session messages to reduce load on the database from frequent reads.
 4. The frontend can read and delete the current user's own conversation history via the session API.
 

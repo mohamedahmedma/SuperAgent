@@ -296,9 +296,13 @@ class RequestContextAssetTests(unittest.TestCase):
         self.assertEqual(["a", "b", "c"], ctx.surfaced_asset_ids())
 
     def test_resetting_restores_the_knowledge_budget(self):
+        from backend.profiles import get_profile
+
+        budget = get_profile().agent.max_knowledge_calls_per_turn
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        self.assertTrue(ctx.acquire_knowledge_tool_slot())
-        self.assertFalse(ctx.acquire_knowledge_tool_slot())
+        self.assertEqual(
+            [True] * budget + [False], [ctx.acquire_knowledge_tool_slot() for _ in range(budget + 1)]
+        )
         ctx.reset_knowledge_tool_budget()
         self.assertTrue(ctx.acquire_knowledge_tool_slot())
 
@@ -404,11 +408,11 @@ class AssetsBridgeTests(unittest.TestCase):
         pipeline = TurnPipeline(TurnCollaborators(
             conversations=storage, background=InlineJobs(), profile=None, plan=None,
             resolve_question=None, create_agent=None, resume_retrieval=None, answer_model=None,
-            session_title=None, update_note=None, context_type=None,
+            session_title=None, context_type=None,
         ))
         turn = Turn(
             user_text="show me", user_id="u", session_id="s", caller=CallerIdentity.for_user("u"),
-            messages=[], metadata={}, child_state=SessionChild(), persistent_note="",
+            messages=[], metadata={}, child_state=SessionChild(),
             is_first_message=True, history=[],
         )
         turn.answer = "Here. [1]"

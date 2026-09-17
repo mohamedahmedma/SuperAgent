@@ -1,8 +1,8 @@
 """What the model is shown for a turn.
 
-The agent's context — the persistent note, recent history with rendered records stripped,
-the planner's reading of this message, and the message itself — and the direct-answer
-prompt used when a clarification is resumed without the agent.
+The agent's context — recent history with rendered records stripped, the planner's reading
+of this message, and the message itself — and the direct-answer prompt used when a
+clarification is resumed without the agent.
 
 Moved out of `service.py` with its behaviour unchanged.
 """
@@ -120,22 +120,11 @@ def _turn_context_message(turn_plan) -> SystemMessage | None:
 
 def build_context_messages(
     messages: list,
-    persistent_note: str,
     user_text: str,
     turn_plan=None,
 ) -> list:
     short_term = messages[-get_profile().agent.context_window_messages:] if len(messages) > get_profile().agent.context_window_messages else messages
     context_messages: list = []
-    if persistent_note:
-        context_messages.append(
-            SystemMessage(
-                content=(
-                    "[Persistent conversation note (your working memory)]\n"
-                    f"{persistent_note}\n"
-                    "Refer to the note above to keep the conversation coherent, and avoid re-answering questions that have already been resolved."
-                )
-            )
-        )
     # Same reason `conversation_text` strips them: the agent is deciding what this turn
     # needs, and a previous turn's table is not evidence about this one. The reader keeps
     # the block; the model gets the sentence.

@@ -117,8 +117,8 @@ const createControlledSseFetch = () => {
     },
     // The `[DONE]` sentinel is not JSON, so it cannot go through `pushEvent`. It marks
     // the answer as complete while the connection stays OPEN — which is exactly the
-    // window the server uses for its persistent-note summary, and the state the
-    // composer must already be released in.
+    // window the server uses to confirm the turn is stored, and the state the composer
+    // must already be released in.
     pushDone() {
       resolveNextRead({ done: false, value: encoder.encode('data: [DONE]\n\n') });
     },
@@ -314,9 +314,8 @@ describe('chat store streaming sessions', () => {
   });
 
   it('releases the composer at [DONE] rather than at connection close', async () => {
-    // The server keeps the stream open past `[DONE]` to summarise the conversation into
-    // its persistent note — a further model call. Waiting for the close left the send
-    // button disabled for seconds after the last word had rendered.
+    // The server keeps the stream open past `[DONE]` until the turn is stored. Waiting
+    // for the close left the send button disabled after the last word had rendered.
     const stream = createControlledSseFetch();
     vi.stubGlobal('fetch', stream.fetchMock);
     const { chatStore } = setupStores();

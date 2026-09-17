@@ -17,21 +17,20 @@ re-opens a failure whose symptom is a passing test file.
 
 ## Why it matters
 
-The backend tests assert against the default profile: corpus floors, candidate sections,
-catalogue behaviour. The school profile ships no scope catalogue, so with it active those
-assertions fail — and they fail a long way from anything that mentions a profile.
+The backend tests that do not name a profile assert against the default one, `school`.
+Pinning it here keeps a developer's `.env` from choosing a different one underneath them.
 
-It is an ORDERING failure, which is what makes it worth a comment this long. Every one of
-those tests passes in isolation: `ProfileTestCase` clears the profile cache in its
-teardown, so only the files that run AFTER `test_domain_profiles.py` reload the profile
-from the environment and see the deployment's.
+It is an ORDERING failure when it goes wrong, which is what makes it worth a comment this
+long. Every one of those tests passes in isolation: `ProfileTestCase` clears the profile
+cache in its teardown, so only the files that run AFTER `test_domain_profiles.py` reload
+the profile from the environment and see the deployment's.
 
-The shell still wins — `ACTIVE_PROFILE=school pytest tests/` does what it says — because
+The shell still wins — `ACTIVE_PROFILE=base pytest tests/` does what it says — because
 what the shell set is captured here, before `.env` can be read. A test that needs a
-particular profile should name it (`load_profile("school")`) rather than depend on which
+particular profile should name it (`load_profile("base")`) rather than depend on which
 one happens to be ambient.
 """
 import os
 
 _FROM_SHELL = (os.environ.get("ACTIVE_PROFILE") or "").strip()
-os.environ["ACTIVE_PROFILE"] = _FROM_SHELL or "supermew"
+os.environ["ACTIVE_PROFILE"] = _FROM_SHELL or "school"

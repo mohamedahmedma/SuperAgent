@@ -714,9 +714,8 @@ class ClassifyComplexity:
     def fast_path_reason(self, question: str) -> Optional[str]:
         """Return a reason only when a local rule can confidently classify a simple query.
 
-        The marker vocabulary is language- AND domain-specific, so it is profile data: an
-        e-commerce catalogue needs product-attribute markers where a school corpus needs
-        admissions vocabulary.
+        The marker vocabulary is language- AND domain-specific, so it is profile data: a
+        school corpus needs admissions vocabulary that another corpus would not.
         """
         config = self._deps.config
         simple_override_markers = tuple(config.simple_override_markers)

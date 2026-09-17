@@ -204,7 +204,7 @@ class Services:
 
     @property
     def background_jobs(self) -> BackgroundJobs:
-        """The threads a turn hands its save and its note update to.
+        """The threads a turn hands its save to.
 
         One per process: the ordering it promises — a conversation's writes land in the
         order they were queued — holds only among jobs that share an instance. Drained by

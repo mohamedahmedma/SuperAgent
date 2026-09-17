@@ -217,10 +217,9 @@ credential is `RECORDS_API_KEY` in the environment, the same value the chat back
 ACTIVE_PROFILE=school uvicorn backend.app:app --port 8000
 ```
 
-Every other deployment behaves exactly as before — `base`, `supermew`, `document_kb`
-and `ecommerce` do not bind it, and a test asserts they never start to. Every bound
-tool ships its schema to the model on every call, so a stray binding would cost an
-unrelated deployment tokens per turn and offer the model a capability it cannot serve.
+`base`, the profile `school` extends, does not bind it, and a test asserts it never
+starts to. Every bound tool ships its schema to the model on every call, so a stray
+binding would cost tokens per turn and offer the model a capability it cannot serve.
 
 **Binding grants nothing.** It makes the tool callable; whether anything comes back is
 decided elsewhere and cannot be reached from a profile:

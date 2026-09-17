@@ -61,14 +61,16 @@ class ChatRequestContextTests(unittest.IsolatedAsyncioTestCase):
 
 class KnowledgeToolFactoryTests(unittest.TestCase):
     def test_knowledge_tool_counter_is_per_context(self):
+        from backend.profiles import get_profile
+
+        budget = get_profile().agent.max_knowledge_calls_per_turn
+        spent = [True] * budget + [False]
         ctx_a = ChatRequestContext.for_sync(user_id="a", session_id="s1")
         ctx_b = ChatRequestContext.for_sync(user_id="b", session_id="s2")
 
         try:
-            self.assertTrue(ctx_a.acquire_knowledge_tool_slot())
-            self.assertFalse(ctx_a.acquire_knowledge_tool_slot())
-            self.assertTrue(ctx_b.acquire_knowledge_tool_slot())
-            self.assertFalse(ctx_b.acquire_knowledge_tool_slot())
+            self.assertEqual(spent, [ctx_a.acquire_knowledge_tool_slot() for _ in range(budget + 1)])
+            self.assertEqual(spent, [ctx_b.acquire_knowledge_tool_slot() for _ in range(budget + 1)])
         finally:
             ctx_a.close()
             ctx_b.close()

@@ -1,8 +1,8 @@
 """Domain profile composition, precedence, and no-drift guarantees.
 
-The most important tests here are the drift guards: the `supermew` profile must keep
-reproducing the behaviour the system had when these values were hardcoded, because
-that profile is what every existing deployment loads by default.
+The most important tests here are the drift guards: `base` must keep reproducing the
+behaviour the system had when these values were hardcoded, because `school` — the
+profile the deployment loads by default — inherits everything it does not override.
 """
 import os
 import unittest
@@ -49,14 +49,17 @@ class ShippedProfilesTests(ProfileTestCase):
                 self.assertIsInstance(profile, DomainProfile)
                 self.assertEqual(name, profile.name)
 
-    def test_default_profile_is_supermew(self):
+    def test_default_profile_is_school(self):
         set_profile(None)
         os.environ.pop(registry.PROFILE_ENV_VAR, None)
-        self.assertEqual("supermew", load_profile().name)
+        self.assertEqual("school", load_profile().name)
+
+    def test_the_shipped_profiles_are_school_and_the_base_it_extends(self):
+        self.assertEqual(["base", "school"], available_profiles())
 
     def test_active_profile_env_var_selects_the_profile(self):
-        os.environ[registry.PROFILE_ENV_VAR] = "ecommerce"
-        self.assertEqual("ecommerce", reload_profile().name)
+        os.environ[registry.PROFILE_ENV_VAR] = "base"
+        self.assertEqual("base", reload_profile().name)
 
     def test_the_school_profile_keeps_six_turns_of_conversation(self):
         """Twelve MESSAGES, which is six exchanges — the units are the trap here.
@@ -79,8 +82,8 @@ class ShippedProfilesTests(ProfileTestCase):
 class CompositionTests(ProfileTestCase):
     def test_child_inherits_prompts_from_base(self):
         base = load_profile("base")
-        child = load_profile("document_kb")
-        # document_kb overrides identity only, so RAG prompts must come through intact.
+        child = load_profile("school")
+        # school overrides identity but no RAG prompt, so those must come through intact.
         self.assertEqual(base.rag.evidence_grade_prompt, child.rag.evidence_grade_prompt)
         self.assertEqual(base.rag.complexity_prompt, child.rag.complexity_prompt)
         self.assertNotEqual(base.identity.api_title, child.identity.api_title)
@@ -90,15 +93,15 @@ class CompositionTests(ProfileTestCase):
         would make impossible.
 
         Built on a temporary pair rather than on two shipped profiles. It used to assert
-        that `document_kb` drops base's weather tool, and when that tool was deleted the
-        test kept passing while proving nothing — every shipped profile now only ever
-        ADDS to what base binds, so a loader that merged lists would satisfy all of them.
-        A parent and child written here cannot rot that way.
+        that a shipped profile dropped base's weather tool, and when that tool was deleted
+        the test kept passing while proving nothing — `school` only ever ADDS to what base
+        binds, so a loader that merged lists would satisfy it. A parent and child written
+        here cannot rot that way.
         """
         with TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             (tmp_path / "parent.yaml").write_text(
-                'name: parent\nagent:\n  tools: ["search_knowledge_base", "search_products"]\n',
+                'name: parent\nagent:\n  tools: ["search_knowledge_base", "get_student_grades"]\n',
                 encoding="utf-8",
             )
             (tmp_path / "child.yaml").write_text(
@@ -109,14 +112,9 @@ class CompositionTests(ProfileTestCase):
                 parent = load_profile("parent")
                 child = load_profile("child")
 
-        self.assertIn("search_products", parent.agent.tools)
-        self.assertNotIn("search_products", child.agent.tools)
+        self.assertIn("get_student_grades", parent.agent.tools)
+        self.assertNotIn("get_student_grades", child.agent.tools)
         self.assertEqual(["search_knowledge_base"], child.agent.tools)
-
-    def test_ecommerce_declares_its_extra_indexes(self):
-        profile = load_profile("ecommerce")
-        self.assertEqual(["kb_chunks", "entity_attrs", "entity_images"], profile.ingest.indexes)
-        self.assertEqual(["figure_pipeline", "entity_pipeline"], profile.ingest.asset_pipelines)
 
     def test_circular_inheritance_is_rejected(self):
         with TemporaryDirectory() as tmp:
@@ -148,8 +146,8 @@ class EnvPrecedenceTests(ProfileTestCase):
             self.assertEqual(42, load_profile("base").retrieval.top_k)
 
     def test_profile_value_is_used_when_env_is_absent(self):
-        with patch.dict(os.environ, {"RETRIEVAL_TOP_K": ""}):
-            self.assertEqual(10, load_profile("ecommerce").retrieval.top_k)
+        with patch.dict(os.environ, {"RETRIEVAL_CANDIDATE_K": ""}):
+            self.assertEqual(30, load_profile("school").retrieval.candidate_k)
 
     def test_boolean_env_override_is_coerced(self):
         with patch.dict(os.environ, {"AUTO_MERGE_ENABLED": "false"}):
@@ -281,7 +279,7 @@ class CacheSemanticsTests(ProfileTestCase):
         first = registry.get_profile()
         self.assertIs(first, registry.get_profile())
 
-        replacement = load_profile("ecommerce")
+        replacement = load_profile("base")
         set_profile(replacement)
         self.assertIs(replacement, registry.get_profile())
 
@@ -291,14 +289,14 @@ class CacheSemanticsTests(ProfileTestCase):
         self.assertIsNot(first, registry.get_profile())
 
     def test_reload_profile_switches_the_active_profile_env_var(self):
-        reload_profile("document_kb")
-        self.assertEqual("document_kb", os.environ[registry.PROFILE_ENV_VAR])
-        self.assertEqual("document_kb", registry.get_profile().name)
+        reload_profile("base")
+        self.assertEqual("base", os.environ[registry.PROFILE_ENV_VAR])
+        self.assertEqual("base", registry.get_profile().name)
 
 
 class SystemPromptTests(ProfileTestCase):
     def test_persona_is_substituted(self):
-        profile = load_profile("supermew")
+        profile = load_profile("base")
         rendered = profile.render_system_prompt()
         self.assertTrue(rendered.startswith("You are a helpful knowledge-base assistant."))
         self.assertNotIn("{persona}", rendered)
@@ -317,14 +315,15 @@ class NoDriftTests(ProfileTestCase):
     """Guards against the profile silently changing what the system was doing before
     these values moved out of the code."""
 
-    def test_supermew_reproduces_the_original_identity(self):
+    def test_school_keeps_its_identity(self):
+        """The Redis prefix keys every cached session: changing it strands them."""
         # redis_key_prefix and langsmith_project are env-overridable, and a real .env
         # may well set them, so clear those two to assert the profile's own values.
         with patch.dict(os.environ, {"REDIS_KEY_PREFIX": "", "LANGSMITH_PROJECT": ""}):
-            profile = load_profile("supermew")
-        self.assertEqual("SuperAgent API", profile.identity.api_title)
-        self.assertEqual("superagent", profile.identity.redis_key_prefix)
-        self.assertEqual("superagent-rag", profile.identity.langsmith_project)
+            profile = load_profile("school")
+        self.assertEqual("School Assistant API", profile.identity.api_title)
+        self.assertEqual("school", profile.identity.redis_key_prefix)
+        self.assertEqual("school-assistant", profile.identity.langsmith_project)
 
     def test_original_retrieval_and_chunking_defaults(self):
         # Load `base` with retrieval/chunking env cleared so the profile value shows.
@@ -346,13 +345,12 @@ class NoDriftTests(ProfileTestCase):
         self.assertFalse(profile.chunking.semantic_dedup_enabled)
 
     def test_planner_and_grader_stay_deterministic(self):
-        """FAST_MODEL serves both the 0.2 note summariser and the 0.0 planner; if these
-        collapse to one value, complexity classification stops being reproducible."""
+        """The structured roles run at 0.0; above it, complexity classification and
+        grading stop being reproducible. Only `answer` samples."""
         models = load_profile("base").models
         self.assertEqual(0.0, models.planner_temperature)
         self.assertEqual(0.0, models.grade_temperature)
         self.assertEqual(0.0, models.rewrite_temperature)
-        self.assertEqual(0.2, models.fast_temperature)
         self.assertEqual(0.3, models.answer_temperature)
 
     def test_prompt_placeholders_are_preserved(self):
@@ -384,7 +382,6 @@ class NoDriftTests(ProfileTestCase):
         self.assertEqual("", profile.rag.complexity_prompt)
         self.assertEqual("", profile.rag.rewrite_prompt)
         self.assertEqual("", profile.agent.resume_answer_prompt)
-        self.assertEqual("", profile.agent.persistent_note_prompt)
         self.assertEqual("", profile.assets.figures.extraction_prompt)
 
     def test_arabic_fast_path_markers_survived_the_move_to_yaml(self):
@@ -416,9 +413,9 @@ class ToolRegistryTests(ProfileTestCase):
         from backend.tools import build_tools
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        tools = build_tools(["search_products", "search_knowledge_base"], ctx)
+        tools = build_tools(["get_student_grades", "search_knowledge_base"], ctx)
         self.assertEqual(
-            ["search_products", "search_knowledge_base"],
+            ["get_student_grades", "search_knowledge_base"],
             [tool.name for tool in tools],
         )
 

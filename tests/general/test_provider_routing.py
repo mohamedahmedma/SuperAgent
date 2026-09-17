@@ -206,9 +206,14 @@ class WireTests(unittest.TestCase):
 
     @requires_llm
     def test_each_model_role_uses_the_same_provider(self):
-        """`answer` and `fast` are separate clients built from the same names. A switch
+        """`answer` and `planner` are separate clients built from the same names. A switch
         that reached one and not the other stays invisible until the planner runs."""
-        pairs = (("answer", self.runtime.model), ("fast", self.runtime.fast_model))
+        from backend.llm_models import ChatModelFactory
+
+        planner = ChatModelFactory().planner()
+        if planner is None:
+            self.skipTest("FAST_MODEL is unset; there is no planner client to compare")
+        pairs = (("answer", self.runtime.model), ("planner", planner))
 
         for role, client in pairs:
             with RecordingTransport() as recorded:

@@ -814,7 +814,6 @@ class TurnContextMessageTests(unittest.TestCase):
 
         built = build_context_messages(
             [HumanMessage(content="earlier")],
-            "",
             "and the fees?",
             TurnPlan(resolved_question="what are the school fees up to Year 6"),
         )

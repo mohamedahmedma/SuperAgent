@@ -42,7 +42,7 @@ class DedupeRuleTests(unittest.TestCase):
     def test_the_same_query_to_a_different_tool_is_not_a_duplicate(self):
         calls = [
             _call("مصاريف", "c0"),
-            _call("مصاريف", "c1", name="search_products"),
+            _call("مصاريف", "c1", name="another_tool"),
         ]
         self.assertEqual(len(dedupe_tool_calls(calls)), 2)
 

@@ -58,11 +58,6 @@ class ModelConfig(_Section):
     """
 
     answer_temperature: float = 0.3
-    # FAST_MODEL is used for two different jobs at two different temperatures:
-    # conversational note-keeping (fast_temperature) and deterministic structured
-    # planning (planner_temperature). Collapsing them would silently make complexity
-    # classification and query rewriting non-deterministic.
-    fast_temperature: float = 0.2
     planner_temperature: float = 0.0
     grade_temperature: float = 0.0
     rewrite_temperature: float = 0.0
@@ -85,7 +80,6 @@ class ModelConfig(_Section):
     # and what a non-reasoning model behind BASE_URL requires — providers reject the
     # field rather than ignoring it. The shipped values live in base.yaml.
     answer_reasoning_effort: str = ""
-    fast_reasoning_effort: str = ""
     planner_reasoning_effort: str = ""
     grade_reasoning_effort: str = ""
     rewrite_reasoning_effort: str = ""
@@ -97,7 +91,6 @@ class ModelConfig(_Section):
     # parse failure, so this is a knob to set from an observed p99 output length rather
     # than a value to guess. Suggested starting points are in .env.example.
     answer_max_tokens: int = 0
-    fast_max_tokens: int = 0
     planner_max_tokens: int = 0
     grade_max_tokens: int = 0
     rewrite_max_tokens: int = 0
@@ -106,7 +99,6 @@ class ModelConfig(_Section):
 
     @field_validator(
         "answer_reasoning_effort",
-        "fast_reasoning_effort",
         "planner_reasoning_effort",
         "grade_reasoning_effort",
         "rewrite_reasoning_effort",
@@ -185,8 +177,6 @@ class AgentConfig(_Section):
     # System prompt for the direct-answer path taken when a HITL clarification is
     # resumed — that path bypasses the agent, so it needs its own instructions.
     resume_answer_prompt: str = ""
-    # Prompt for the rolling conversation summary ("persistent note").
-    persistent_note_prompt: str = ""
 
     tools: List[str] = Field(default_factory=lambda: ["search_knowledge_base"])
 
@@ -393,7 +383,6 @@ class AgentConfig(_Section):
 
 
     context_window_messages: int = 6
-    persistent_note_max_chars: int = 500
 
     # Messages that are ENTIRELY one of these are answered without searching anything.
     # Matched whole-message after normalisation, never as a prefix or keyword: "thanks"
@@ -712,9 +701,8 @@ class RagConfig(_Section):
     context_min_chunk_chars: int = 120
 
     # Local fast-path classification rules. These are language- and domain-specific:
-    # an e-commerce profile wants product-attribute markers where the school corpus
-    # wants admissions vocabulary, which is precisely why they are profile data and
-    # not module constants.
+    # the school corpus wants admissions vocabulary that a different corpus would not,
+    # which is precisely why they are profile data and not module constants.
     # Checked BEFORE complex_query_markers. Some single-fact phrasings contain a
     # substring that also opens a genuinely complex question — "how many students"
     # contains "how ". Without this override the complex marker wins, the fast path is
@@ -966,9 +954,9 @@ class FigurePipelineConfig(_Section):
 class EntityPipelineConfig(_Section):
     """Entity (product) extraction: images that ARE the record, not evidence inside one.
 
-    `attributes` is the domain's whole vocabulary. The extraction schema, the
-    `search_products` tool signature, filter validation, and the attribute index are
-    all generated from it, so a new domain is a YAML block rather than a code change.
+    `attributes` is the domain's whole vocabulary. The extraction schema, filter
+    validation, and the attribute index are all generated from it, so a new domain is a
+    YAML block rather than a code change.
     """
 
     enabled: bool = False

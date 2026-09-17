@@ -786,12 +786,18 @@ class TheSeededCallsAreCountedAgainstTheirBudgets(unittest.TestCase):
         script whatever it was offered — so an agent-level assertion here would pass on a
         middleware that had stopped withholding anything at all.
         """
+        from backend.profiles.registry import load_profile, set_profile
+
+        # One knowledge call is the base profile's whole budget for a turn, so one seeded
+        # call is enough to spend it. Named here rather than read from whichever profile
+        # is ambient: school allows two.
+        set_profile(load_profile("base"))
+        self.addCleanup(set_profile, None)
         ctx = _ctx(PLANNED)
         seeded = runtime._dispatch_planned_tools(ctx).before_model(
             {"messages": [HumanMessage(content="q")]}, None
         )
         spent = seeded["tool_calls_made"]
-        # One knowledge call is the base profile's whole budget for a turn.
         self.assertGreaterEqual(spent[KNOWLEDGE_TOOL], runtime.budget_for(KNOWLEDGE_TOOL))
 
         budget = runtime._spend_tool_budgets(ctx)
