@@ -230,6 +230,22 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIn("TOGETHER_API_KEY", line)
         self.assertNotIn("tgp-secret", line)
 
+    def test_it_says_whether_voice_notes_have_a_model(self):
+        """Voice notes are the one feature whose setting an older `.env` cannot have, so
+        the boot line reports it either way rather than only when it is present."""
+        with env(LLM_PROVIDER="together", TOGETHER_API_KEY="k", TOGETHER_MODEL="m",
+                 TOGETHER_TRANSCRIPTION_MODEL="whisper-large-v3"):
+            apply_provider_env()
+            with self.assertLogs("backend.llm_provider", level=logging.INFO) as captured:
+                log_provider_status()
+        self.assertIn("whisper-large-v3", "\n".join(captured.output))
+
+        with env(LLM_PROVIDER="together", TOGETHER_API_KEY="k", TOGETHER_MODEL="m"):
+            apply_provider_env()
+            with self.assertLogs("backend.llm_provider", level=logging.INFO) as captured:
+                log_provider_status()
+        self.assertIn("transcription=unset", "\n".join(captured.output))
+
     def test_an_unset_selector_still_says_so(self):
         with env(MODEL="m", ARK_API_KEY="k"):
             with self.assertLogs("backend.llm_provider", level=logging.INFO) as captured:

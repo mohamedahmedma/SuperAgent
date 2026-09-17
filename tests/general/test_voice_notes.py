@@ -7,6 +7,7 @@ the service that keeps and transcribes a recording, the transcriber over the pro
 Whisper endpoint, the routes, and the message that carries its note through a reload.
 """
 import io
+import logging
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -179,6 +180,28 @@ class WhisperTranscriberTests(unittest.TestCase):
 
         self.assertIsInstance(build_transcriber({"ARK_API_KEY": "k"}), NoTranscriber)
         self.assertIsInstance(build_transcriber({"TRANSCRIPTION_MODEL": "m"}), NoTranscriber)
+
+    def test_a_deployment_with_no_model_says_so_in_the_log(self):
+        """The one signal an operator gets.
+
+        A deployment whose `.env` predates voice notes names no transcription model, so
+        every note comes back `unavailable` and the parent is asked to type instead. That
+        is a supported state, so it is not an error — but it was also completely silent,
+        and the only thing that reported it was a parent reading an alert. The line names
+        the variable to set, because "which one?" is the next question.
+        """
+        with self.assertLogs("backend.chat.transcription", level=logging.WARNING) as captured:
+            self.assertIsInstance(build_transcriber({"ARK_API_KEY": "k"}), NoTranscriber)
+        line = "\n".join(captured.output)
+        self.assertIn("TRANSCRIPTION_MODEL", line)
+        self.assertIn("voice notes", line)
+
+    def test_a_configured_model_is_named_in_the_log_and_the_key_is_not(self):
+        with self.assertLogs("backend.chat.transcription", level=logging.INFO) as captured:
+            build_transcriber({"TRANSCRIPTION_MODEL": "openai/whisper-large-v3", "ARK_API_KEY": "secret-key"})
+        line = "\n".join(captured.output)
+        self.assertIn("openai/whisper-large-v3", line)
+        self.assertNotIn("secret-key", line)
 
     def test_the_provider_block_can_name_the_transcription_model(self):
         from backend.llm_provider import PROVIDERS, resolve
