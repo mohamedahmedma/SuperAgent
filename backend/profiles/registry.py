@@ -24,7 +24,7 @@ from backend.profiles.schema import DomainProfile
 logger = logging.getLogger(__name__)
 
 DEFINITIONS_DIR = Path(__file__).resolve().parent / "definitions"
-DEFAULT_PROFILE = "supermew"
+DEFAULT_PROFILE = "school"
 PROFILE_ENV_VAR = "ACTIVE_PROFILE"
 
 # Environment variable -> dotted path in the profile. The retrieval and chunking rows
@@ -50,21 +50,18 @@ ENV_OVERRIDES: Dict[str, str] = {
     # decide what a turn costs on a reasoning model, so they are dialled per deployment
     # rather than baked into the domain profile.
     "ANSWER_TEMPERATURE": "models.answer_temperature",
-    "FAST_TEMPERATURE": "models.fast_temperature",
     "PLANNER_TEMPERATURE": "models.planner_temperature",
     "GRADE_TEMPERATURE": "models.grade_temperature",
     "REWRITE_TEMPERATURE": "models.rewrite_temperature",
     "SCOPE_TEMPERATURE": "models.scope_temperature",
     "RESOLVE_TEMPERATURE": "models.resolve_temperature",
     "ANSWER_REASONING_EFFORT": "models.answer_reasoning_effort",
-    "FAST_REASONING_EFFORT": "models.fast_reasoning_effort",
     "PLANNER_REASONING_EFFORT": "models.planner_reasoning_effort",
     "GRADE_REASONING_EFFORT": "models.grade_reasoning_effort",
     "REWRITE_REASONING_EFFORT": "models.rewrite_reasoning_effort",
     "SCOPE_REASONING_EFFORT": "models.scope_reasoning_effort",
     "RESOLVE_REASONING_EFFORT": "models.resolve_reasoning_effort",
     "ANSWER_MAX_TOKENS": "models.answer_max_tokens",
-    "FAST_MAX_TOKENS": "models.fast_max_tokens",
     "PLANNER_MAX_TOKENS": "models.planner_max_tokens",
     "GRADE_MAX_TOKENS": "models.grade_max_tokens",
     "REWRITE_MAX_TOKENS": "models.rewrite_max_tokens",

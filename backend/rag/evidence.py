@@ -358,8 +358,7 @@ def _prefer(primary: str, fallback: str, inert: str) -> str:
 def build_ladder(config, extra: Optional[Sequence[Assessor]] = None) -> AssessmentLadder:
     """Assemble the ladder from profile config.
 
-    Which rungs exist is domain data: an e-commerce profile wants attribute matching
-    where a document corpus wants section similarity. Adding a rung is a registration,
+    Which rungs exist is domain data, set per profile. Adding a rung is a registration,
     not a change to any consumer.
     """
     required = parse_certainty(getattr(config, "evidence_required_certainty", "high"))

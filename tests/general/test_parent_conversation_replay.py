@@ -577,7 +577,6 @@ class _Replay:
             patch.object(service, "plan_turn", self._plan),
             patch.object(service, "create_agent_for_request", self._agent),
             patch.object(service, "generate_session_title", Mock(return_value="جدول بنتي")),
-            patch.object(service, "_update_persistent_note_sync", Mock(return_value="")),
         ):
             set_profile(self.profile)
             try:

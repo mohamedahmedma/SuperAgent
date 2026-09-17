@@ -96,7 +96,6 @@ class TheBudgetComesFromOnePlacePerTool(ProfileScopedTest):
                 self.assertEqual(runtime.budget_for(name), 2)
 
     def test_anything_unlisted_may_be_called_once(self):
-        self.assertEqual(runtime.budget_for("search_products"), 1)
         self.assertEqual(runtime.budget_for("a_tool_nobody_has_written_yet"), 1)
 
 
@@ -147,7 +146,7 @@ class ASpentToolIsNotOffered(ProfileScopedTest):
         tool has two, because reading a second child is a legitimate second call."""
         state = {"tool_calls_made": {"get_student_grades": 1}}
         self.assertIn("get_student_grades", _offered(state)["tools"])
-        self.assertEqual(runtime.budget_for("search_products"), 1)
+        self.assertEqual(runtime.budget_for("a_tool_nobody_has_written_yet"), 1)
 
     def test_forcing_a_tool_call_is_dropped_when_none_are_left(self):
         """A request that requires a tool call and offers none is rejected by the
@@ -196,7 +195,7 @@ class TheBudgetsMustFitTheStepLimit(ProfileScopedTest):
     def test_the_resolver_on_the_config_agrees_with_the_one_in_runtime(self):
         """Two implementations of one rule is one implementation and one bug waiting."""
         agent = load_profile("school").agent
-        for name in ("search_knowledge_base", "get_student_grades", "search_products"):
+        for name in ("search_knowledge_base", "get_student_grades", "a_tool_nobody_has_written_yet"):
             with self.subTest(tool=name):
                 self.assertEqual(agent.budget_for_tool(name), runtime.budget_for(name))
 

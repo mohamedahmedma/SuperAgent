@@ -6,9 +6,9 @@ The tool is bound where it should be, and actually builds. A profile naming a to
 that is not registered raises at process start, so a typo here is a failed deployment
 rather than a failing test — unless a test catches it first.
 
-The tool is bound NOWHERE else. Every bound tool ships its schema to the model on
-every call, so a stray binding costs unrelated deployments real tokens per turn and
-offers the model a capability it will occasionally try to use.
+The tool is bound NOWHERE else — not in `base`, which school extends. Every bound tool
+ships its schema to the model on every call, so a stray binding costs real tokens per
+turn and offers the model a capability it will occasionally try to use.
 """
 import os
 import unittest
@@ -17,7 +17,6 @@ import backend.profiles.registry as registry
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.request_context import ChatRequestContext
 from backend.profiles.registry import (
-    DEFAULT_PROFILE,
     available_profiles,
     load_profile,
     set_profile,
@@ -111,11 +110,6 @@ class SchoolProfileTests(ProfileTestCase):
         self.assertEqual(len(profile.agent.tools), len(tools))
         self.assertIn(RECORDS_TOOL, {tool.name for tool in tools})
 
-    def test_it_drops_the_tools_a_school_has_no_use_for(self):
-        """Lists replace rather than merge, so inheriting base must not drag these in."""
-        tools = load_profile("school").agent.tools
-        self.assertNotIn("search_products", tools)
-
     def test_it_still_inherits_from_base(self):
         """It overrides identity, tools and retrieval only — RAG config must survive."""
         school = load_profile("school")
@@ -146,11 +140,11 @@ class NoAccidentalExposureTests(ProfileTestCase):
             with self.subTest(profile=name):
                 self.assertNotIn(RECORDS_TOOL, load_profile(name).agent.tools)
 
-    def test_adding_this_profile_did_not_change_the_default(self):
-        """A new definition file must be inert until something selects it."""
+    def test_it_is_the_default_and_binds_the_records_tool(self):
+        """With no ACTIVE_PROFILE set, the deployment's own profile is what loads."""
         os.environ.pop(registry.PROFILE_ENV_VAR, None)
-        self.assertEqual(DEFAULT_PROFILE, load_profile().name)
-        self.assertNotIn(RECORDS_TOOL, load_profile().agent.tools)
+        self.assertEqual("school", load_profile().name)
+        self.assertIn(RECORDS_TOOL, load_profile().agent.tools)
 
     def test_selecting_it_by_environment_variable_works(self):
         os.environ[registry.PROFILE_ENV_VAR] = "school"

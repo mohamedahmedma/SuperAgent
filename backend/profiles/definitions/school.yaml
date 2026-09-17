@@ -1,14 +1,10 @@
 # School assistant — answers parents about the school, and about their own child.
 #
-# The only profile that binds the student-record tools, and deliberately so. Every bound
-# tool ships its name, description and argument schema to the model on every single
-# call — that is where the cost sits, not in the system prompt, which varies only by
-# whether any bound tool is grounded. Adding student records to `base` would bill every
-# deployment (a document knowledge base, an e-commerce catalogue) on every turn for a
-# capability it can never serve, and would offer the model a tool it will occasionally
-# try to call.
-#
-# Activate with ACTIVE_PROFILE=school. Nothing else changes by adding this file.
+# The deployment's profile, and the default ACTIVE_PROFILE. It binds the student-record
+# tools; `base`, which it extends, does not. Every bound tool ships its name, description
+# and argument schema to the model on every single call — that is where the cost sits,
+# not in the system prompt, which varies only by whether any bound tool is grounded — so
+# `base` stays a plain document knowledge base and the tools are named here.
 #
 # Reading records additionally requires the caller to be a signed-in parent whose
 # account an administrator has bound to a guardian. Binding the tool grants nothing on
@@ -511,8 +507,7 @@ assets:
     # A provider-specific passthrough therefore does not belong in the profile, which is
     # shared across whatever LLM_PROVIDER selects. Set it per deployment instead, in the
     # .env block for the provider it applies to, so switching providers cannot carry a
-    # parameter the new one refuses. supermew.yaml still carries the Groq block because
-    # that profile is pinned to Groq.
+    # parameter the new one refuses.
     vision_extra_params: {}
 
 retrieval:

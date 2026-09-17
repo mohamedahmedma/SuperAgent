@@ -22,7 +22,6 @@ from backend.tools import KNOWLEDGE_TOOL, build_tools
 
 API_KEY = os.getenv("ARK_API_KEY")
 MODEL = os.getenv("MODEL")
-FAST_MODEL = os.getenv("FAST_MODEL")
 BASE_URL = os.getenv("BASE_URL")
 
 logger = logging.getLogger(__name__)
@@ -46,15 +45,6 @@ model = fold_tool_results_into_text(init_chat_model(
     stream_usage=True,
     **sampling("answer"),
 ))
-
-fast_model = init_chat_model(
-    model=FAST_MODEL,
-    model_provider="openai",
-    api_key=API_KEY,
-    base_url=BASE_URL,
-    stream_usage=True,
-    **sampling("fast"),
-)
 
 
 # Tool results whose outcome is already the final answer. The model adds nothing to

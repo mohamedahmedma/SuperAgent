@@ -142,20 +142,6 @@ class ConversationStorage:
         self._cache.delete(self._sessions_cache_key(user_id))
         return ids
 
-    def patch_metadata(self, user_id: str, session_id: str, patch: dict) -> None:
-        """Merge `patch` into the session's metadata. For state that changes between
-        turns rather than with one — the persistent note, written after the turn that
-        prompted it has been answered and stored."""
-        if not patch:
-            return
-        with self._unit_of_work() as uow:
-            session = uow.conversations.open_session(user_id, session_id, {})
-            if session is None:
-                return
-            uow.conversations.patch_session(session, metadata=patch, updated_at=datetime.now(UTC))
-            uow.commit()
-        self._cache.delete(self._sessions_cache_key(user_id))
-
     # -- reads -------------------------------------------------------------------------
 
     def load(self, user_id: str, session_id: str) -> list:
@@ -164,7 +150,7 @@ class ConversationStorage:
         return self._to_langchain_messages(self._read_records(user_id, session_id))
 
     def load_with_meta(self, user_id: str, session_id: str) -> tuple[list, dict]:
-        """Load conversation messages and session metadata (title, persistent note, etc.)."""
+        """Load conversation messages and session metadata (title, pending question, child pin)."""
         with self._unit_of_work() as uow:
             session = uow.conversations.find_session(user_id, session_id)
             if session is None:
@@ -173,11 +159,6 @@ class ConversationStorage:
             metadata = dict(session.metadata)
         self._cache.set_json(self._messages_cache_key(user_id, session_id), records)
         return self._to_langchain_messages(records), metadata
-
-    def session_metadata(self, user_id: str, session_id: str) -> dict:
-        with self._unit_of_work() as uow:
-            session = uow.conversations.find_session(user_id, session_id)
-        return dict(session.metadata) if session is not None else {}
 
     def list_sessions(self, user_id: str) -> list:
         return [item["session_id"] for item in self.list_session_infos(user_id)]

@@ -179,7 +179,6 @@ class _Session(unittest.IsolatedAsyncioTestCase):
             patch.object(service, "resolve_turn_question", self._resolve),
             patch.object(service, "create_agent_for_request", self._agent),
             patch.object(service, "generate_session_title", Mock(return_value="س")),
-            patch.object(service, "_update_persistent_note_sync", Mock(return_value="")),
         ):
             async for chunk in service.chat_with_agent_stream(
                 text,
@@ -387,7 +386,6 @@ class TheSyncPathSpendsItToo(unittest.TestCase):
             patch.object(service, "plan_turn", plan),
             patch.object(service, "create_agent_for_request", lambda ctx, *a, **k: _SyncAgent("بتاخد العربي.")),
             patch.object(service, "generate_session_title", Mock(return_value="س")),
-            patch.object(service, "_update_persistent_note_sync", Mock(return_value="")),
         ):
             service.chat_with_agent(
                 f"{FATMA} — Year 11",

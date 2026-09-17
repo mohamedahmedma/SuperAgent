@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 
-from langchain_core.messages import AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessageChunk, ToolMessage
 
 from backend.assets.delivery import ClientCapabilities
 from backend.chat.caller_identity import CallerIdentity
@@ -22,11 +22,10 @@ from backend.chat.finalize import Finalizer, visible_text
 from backend.chat.orchestrator import plan_turn, resolve_turn_question
 from backend.chat.request_context import ChatRequestContext
 from backend.chat.resolution import ResolvedQuestion
-from backend.chat.runtime import create_agent_for_request, fast_model, model
+from backend.chat.runtime import create_agent_for_request, model
 from backend.chat.turn_pipeline import StreamedAnswer, TurnCollaborators, TurnPipeline, resolve_caller
 from backend.composition import Services, default_services
 from backend.profiles import get_profile
-from backend.prompts import resolve as resolve_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -79,54 +78,6 @@ def generate_session_title(user_text: str) -> str:
     return compact_title[:16] or _COPY.new_session_title
 
 
-def _update_persistent_note_sync(
-    current_note: str,
-    user_text: str,
-    ai_response: str,
-    *,
-    history_messages: list | None = None,
-) -> str:
-    """The rolling conversation summary, rewritten around this turn.
-
-    Runs on a background thread after the turn has been answered and stored — see
-    `TurnPipeline.schedule_note` — so a failure here costs the note an update and nothing
-    else, and is logged rather than raised: the parent it concerned has already gone.
-    """
-    try:
-        history_text = ""
-        if history_messages:
-            history_lines = []
-            for message in history_messages:
-                role = "User" if isinstance(message, HumanMessage) else "AI"
-                history_lines.append(f"{role}: {visible_text(message)}")
-            history_text = (
-                "\n\n▼ Prior conversation to summarize together when the note is first created:\n"
-                + "\n".join(history_lines)
-                + "\n\n"
-            )
-        instructions = resolve_prompt(
-            _PROFILE.agent.persistent_note_prompt,
-            "agent/persistent_note.j2",
-            max_chars=_PROFILE.agent.persistent_note_max_chars,
-        )
-        prompt = (
-            f"{instructions}\n\n"
-            f"▼ Existing note:\n{current_note if current_note else 'None'}\n\n"
-            f"{history_text}"
-            f"▼ Latest turn:\nUser: {user_text}\nAI: {ai_response}\n\n"
-            "Output the updated note directly (plain text, no explanations or Markdown code blocks):"
-        )
-        res = fast_model.invoke([HumanMessage(content=prompt)])
-        # Enforced here, not merely asked for in the prompt. Models cannot count
-        # characters, and this note is injected into the context of every later turn —
-        # so a note that overruns its budget is not a one-off, it is a permanent
-        # per-turn tax for the rest of the session.
-        return (res.content or "").strip()[: _PROFILE.agent.persistent_note_max_chars]
-    except Exception:
-        logger.exception("the persistent note could not be updated; keeping the previous one")
-        return current_note
-
-
 def _pipeline(services: Services | None) -> TurnPipeline:
     """A turn pipeline over this module's collaborators, as they are at call time."""
     container = services or default_services()
@@ -140,7 +91,6 @@ def _pipeline(services: Services | None) -> TurnPipeline:
         resume_retrieval=_resume_rag_from_hitl_sync,
         answer_model=model,
         session_title=generate_session_title,
-        update_note=_update_persistent_note_sync,
         context_type=ChatRequestContext,
     ))
 
@@ -169,7 +119,7 @@ def chat_with_agent(
     and checked to be the caller's own (backend/api/routes/chat.py). It is kept on the
     stored question so the recording comes back with the conversation.
 
-    Returns once the answer is stored. The note update it may owe runs behind it.
+    Returns once the answer is stored.
     """
     caller, user_id = resolve_caller(caller, user_id)
     pipeline = _pipeline(services)
@@ -200,7 +150,6 @@ def chat_with_agent(
         if answered is not None:
             pipeline.record_finalize_stage(turn, answered)
 
-        pipeline.schedule_note(turn)
         pipeline.commit(turn, pipeline.save_metadata(turn))
         pipeline.wait_for_save(turn)
         return pipeline.response(turn)
@@ -233,8 +182,8 @@ async def chat_with_agent_stream(
     request does not own. That is what a browser leaving at `[DONE]` used to cost: the
     save ran after it, on the request, and the disconnect cancelled it — the parent had
     read an answer that was never stored. The connection is then held only until the save
-    has run (milliseconds), never for the note update behind it. A stream cut off before
-    its answer settled stores what had reached the parent, marked interrupted.
+    has run (milliseconds). A stream cut off before its answer settled stores what had
+    reached the parent, marked interrupted.
     """
     caller, user_id = resolve_caller(caller, user_id)
     pipeline = _pipeline(services)
@@ -297,7 +246,6 @@ async def chat_with_agent_stream(
                 yield _event({"type": "trace", "rag_trace": turn.rag_trace})
             if turn.next_pending:
                 yield _event({"type": "hitl_request", "hitl": build_hitl_event(turn.next_pending)})
-            pipeline.schedule_note(turn)
             pipeline.commit(turn, pipeline.save_metadata(turn))
             yield _DONE
             stored = await _hold_until_stored(pipeline, turn)
@@ -326,7 +274,6 @@ async def chat_with_agent_stream(
             if turn.next_pending:
                 yield _event({"type": "hitl_request", "hitl": build_hitl_event(turn.next_pending)})
             yield _event({"type": "trace", "rag_trace": turn.rag_trace})
-            pipeline.schedule_note(turn)
             pipeline.commit(turn, pipeline.save_metadata(turn))
             yield _DONE
             stored = await _hold_until_stored(pipeline, turn)
@@ -420,7 +367,6 @@ async def chat_with_agent_stream(
             yield _event({"type": "trace", "rag_trace": turn.rag_trace})
         if turn.next_pending:
             yield _event({"type": "hitl_request", "hitl": build_hitl_event(turn.next_pending)})
-        pipeline.schedule_note(turn)
         pipeline.commit(turn, pipeline.save_metadata(turn))
         yield _DONE
         stored = await _hold_until_stored(pipeline, turn)
@@ -447,9 +393,8 @@ async def _hold_until_stored(pipeline: TurnPipeline, turn) -> str | None:
 
     Not for the parent's sake — their answer is complete and their composer was released
     at `[DONE]`. It is what makes the close of this connection mean the turn is durable,
-    and it costs the milliseconds the append takes rather than the seconds the note update
-    used to. On a worker thread, so the wait holds no event loop; a browser that leaves
-    first cancels only this wait, never the save.
+    and it costs the milliseconds the append takes. On a worker thread, so the wait holds
+    no event loop; a browser that leaves first cancels only this wait, never the save.
 
     Returns the `stored` event: the row ids the turn's messages now have. With them the
     client can tell its own copy of a message from the server's when it reopens the chat,

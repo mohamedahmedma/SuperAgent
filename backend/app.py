@@ -139,10 +139,10 @@ def create_app(services: Services | None = None) -> FastAPI:
         try:
             yield
         finally:
-            # A turn hands its save and its note update to background threads so the
-            # parent is not kept waiting for them (backend/chat/background.py). A stop
-            # signal arriving seconds after an answer must not lose that save, so the
-            # queue is drained before the process goes. Bounded below the container's
+            # A turn hands its save to background threads so the parent is not kept
+            # waiting for it (backend/chat/background.py). A stop signal arriving seconds
+            # after an answer must not lose that save, so the queue is drained before the
+            # process goes. Bounded below the container's
             # stop grace period (docker-compose.yml), or the drain itself would be what
             # gets killed.
             services.background_jobs.shutdown(timeout=20.0)

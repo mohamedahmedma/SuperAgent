@@ -48,9 +48,10 @@ from backend.chat.turn_policy import (
 from backend.rag.evidence import Certainty
 from backend.tools import build_tools
 
-#: A third registered tool this deployment happens to bind. It exists in this file only
-#: to prove narrowing never drags in a tool the question did not ask for.
-PRODUCTS_TOOL = "search_products"
+#: A tool name neither family claims. It exists in this file only to prove narrowing
+#: never drags in a tool the question did not ask for; narrowing reads names, so it does
+#: not have to be registered.
+UNRELATED_TOOL = "an_unrelated_tool"
 
 LAYLA = ChildOption(student_id="S-1", label="ليلى أحمد", gender="female", year_level="Year 4")
 OMAR = ChildOption(student_id="S-2", label="عمر أحمد", gender="male")
@@ -268,16 +269,16 @@ class TheNarrowedListIsAlwaysASubsetOfTheProfile(unittest.TestCase):
                 self.assertEqual([tool.name for tool in built], list(planned))
 
     def test_an_unrelated_tool_the_profile_binds_is_never_dragged_in(self):
-        """A deployment binding a catalogue tool as well must not have narrowing hand a
-        records question a product search it did not ask for."""
-        agent = _agent([KNOWLEDGE_TOOL, PRODUCTS_TOOL, RECORDS_TOOL])
+        """A deployment binding a tool outside both families must not have narrowing hand
+        a records question a tool it did not ask for."""
+        agent = _agent([KNOWLEDGE_TOOL, UNRELATED_TOOL, RECORDS_TOOL])
         for kind, expected in (("records", [RECORDS_TOOL]),
                                ("school_matter", [KNOWLEDGE_TOOL])):
             with self.subTest(kind=kind):
                 plan = _plan(_resolved_child(), agent=agent, about_child=True,
                              child_question_kind=kind)
                 self.assertEqual(plan.exposed_tools, expected)
-                self.assertNotIn(PRODUCTS_TOOL, plan.exposed_tools)
+                self.assertNotIn(UNRELATED_TOOL, plan.exposed_tools)
 
     def test_the_kept_tools_come_back_in_the_profiles_declaration_order(self):
         """`_tools_for` intersects; it must never reorder to match what was wanted.
@@ -294,7 +295,7 @@ class TheNarrowedListIsAlwaysASubsetOfTheProfile(unittest.TestCase):
         self.assertEqual(_tools_for(backwards, keep=wanted), [RECORDS_TOOL, KNOWLEDGE_TOOL])
 
     def test_a_profile_with_an_unrelated_tool_only_keeps_what_was_wanted(self):
-        agent = _agent([PRODUCTS_TOOL, RECORDS_TOOL, KNOWLEDGE_TOOL])
+        agent = _agent([UNRELATED_TOOL, RECORDS_TOOL, KNOWLEDGE_TOOL])
         self.assertEqual(
             _tools_for(agent, keep=(KNOWLEDGE_TOOL, RECORDS_TOOL)),
             [RECORDS_TOOL, KNOWLEDGE_TOOL],

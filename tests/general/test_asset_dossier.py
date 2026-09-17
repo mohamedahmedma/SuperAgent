@@ -341,7 +341,7 @@ class ExtractionCacheTests(AssetStoreTestCase):
         """The same bytes under a different profile or schema version is a different
         result and must not be served from cache."""
         self.store.save_extraction("a" * 64, "base", make_dossier().extraction)
-        self.assertIsNone(self.store.find_extraction("a" * 64, "ecommerce"))
+        self.assertIsNone(self.store.find_extraction("a" * 64, "school"))
         self.assertIsNone(self.store.find_extraction("a" * 64, "base", dossier_version=99))
 
     def test_save_extraction_upserts(self):

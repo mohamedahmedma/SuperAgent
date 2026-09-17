@@ -182,6 +182,37 @@ class TypeConversionTests(MigrationTestCase):
         self.assertEqual(datetime(2026, 9, 13, 10, 0), created)
 
 
+class PersistentNoteRemovalTests(MigrationTestCase):
+    def test_the_note_keys_are_stripped_and_every_other_key_is_kept(self):
+        self.migrate(command.upgrade, "0004")
+        with self.engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO users (username, password_hash, role, created_at) "
+                "VALUES ('parent', 'x', 'user', '2026-09-13 09:00:00+00')"
+            ))
+            user_id = connection.execute(text("SELECT id FROM users")).scalar_one()
+            for session_id, meta in (
+                ("noted", '{"title": "Fees", "persistent_note": "asked about fees", '
+                          '"persistent_note_guardian": "G-1", "pending_hitl": null}'),
+                ("plain", '{"title": "Bus"}'),
+            ):
+                connection.execute(
+                    text(
+                        "INSERT INTO chat_sessions (user_id, session_id, metadata_json, updated_at, created_at) "
+                        "VALUES (:user_id, :session_id, CAST(:meta AS jsonb), "
+                        "'2026-09-13 10:00:00+00', '2026-09-13 09:00:00+00')"
+                    ),
+                    {"user_id": user_id, "session_id": session_id, "meta": meta},
+                )
+
+        self.migrate(command.upgrade, "head")
+
+        with self.engine.connect() as connection:
+            stored = dict(connection.execute(text("SELECT session_id, metadata_json FROM chat_sessions")).all())
+        self.assertEqual({"title": "Fees", "pending_hitl": None}, stored["noted"])
+        self.assertEqual({"title": "Bus"}, stored["plain"])
+
+
 class ConcurrentUpgradeTests(MigrationTestCase):
     def test_two_processes_upgrading_together_both_succeed(self):
         """Two containers starting at once. Without the advisory lock in env.py the

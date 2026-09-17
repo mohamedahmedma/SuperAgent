@@ -683,11 +683,10 @@ export const useChatStore = defineStore('chat', {
               if (dataStr === '[DONE]') {
                 // The answer is complete. Release the composer HERE rather than in the
                 // `finally` below, which waits for the connection to CLOSE — and the
-                // server keeps it open past this point to summarise the conversation
-                // into its persistent note. That summary is a further model call, so
-                // waiting for the close kept the send button disabled for seconds after
-                // the last word had already been rendered. Reading continues to the
-                // close so a late `trace` or `assets` event is not dropped; the `finally`
+                // server keeps it open past this point until the turn is stored, so
+                // waiting for the close kept the send button disabled after the last
+                // word had already been rendered. Reading continues to the close so a
+                // late `stored`, `trace` or `assets` event is not dropped; the `finally`
                 // sets both of these again, which is idempotent.
                 if (isStillTheLiveRequest()) {
                   this.isLoading = false;

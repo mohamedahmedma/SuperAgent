@@ -34,7 +34,7 @@ SYSTEM_PROMPT_CHAR_BUDGET = 600
 
 class CompositionTests(unittest.TestCase):
     def setUp(self):
-        self.profile = load_profile("supermew")
+        self.profile = load_profile("base")
 
     def test_a_grounded_turn_gets_the_citation_contract(self):
         prompt = self.profile.render_system_prompt(["search_knowledge_base"])
@@ -82,7 +82,7 @@ class CompositionTests(unittest.TestCase):
         )
 
     def test_the_prompt_stays_within_its_per_turn_budget(self):
-        for name in ("base", "supermew", "document_kb", "ecommerce"):
+        for name in ("base",):
             with self.subTest(profile=name):
                 prompt = load_profile(name).render_system_prompt()
                 self.assertLess(len(prompt), SYSTEM_PROMPT_CHAR_BUDGET)
@@ -114,7 +114,7 @@ class OverrideTests(unittest.TestCase):
         an Egyptian-Arabic register that must not leak into the classifier prompts via
         persona. What that costs it is pinned by SchoolOverrideKeepsTheContractTests.
         """
-        for name in ("base", "supermew", "document_kb", "ecommerce"):
+        for name in ("base",):
             with self.subTest(profile=name):
                 self.assertEqual("", load_profile(name).agent.system_prompt)
 
@@ -226,7 +226,6 @@ class MigratedTemplateTests(unittest.TestCase):
          {"question": "Q", "context": "C", "constraints": ["CONDITION"]}),
         ("rag/complexity.j2", {"question": "Q"}),
         ("rag/rewrite.j2", {"query": "Q"}),
-        ("agent/persistent_note.j2", {"max_chars": 500}),
         ("agent/resume_answer.j2", {}),
         ("assets/figure_extraction.j2", {"context": "C"}),
         ("assets/entity_extraction.j2", {"attributes": "A", "context": "C"}),
@@ -264,7 +263,7 @@ class LanguageDirectiveTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.profile = load_profile("supermew")
+        self.profile = load_profile("base")
 
     def test_arabic_is_named_because_it_is_positively_detected(self):
         prompt = self.profile.render_system_prompt(None, "ar")

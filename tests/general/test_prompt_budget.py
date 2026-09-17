@@ -105,7 +105,7 @@ class SchoolPromptBudgetTests(unittest.TestCase):
         """`en` is what the detector returns for anything it could not place as Arabic,
         so naming English is only safe where the set of languages is closed. A profile
         that has not said so keeps the generic directive."""
-        generic = load_profile("supermew").render_system_prompt(
+        generic = load_profile("base").render_system_prompt(
             ["search_knowledge_base"], language="en"
         )
         self.assertIn("Reply in the language the user wrote in.", generic)
@@ -186,7 +186,7 @@ class OtherProfilesStayOnTheTemplateTests(unittest.TestCase):
     """Only school pays this. The others compose per turn and cost far less."""
 
     def test_the_template_profiles_are_cheaper_than_the_override(self):
-        template = load_profile("supermew").render_system_prompt(["search_knowledge_base"])
+        template = load_profile("base").render_system_prompt(["search_knowledge_base"])
         school = load_profile("school").render_system_prompt(["search_knowledge_base"])
         self.assertLess(count(template), count(school))
 

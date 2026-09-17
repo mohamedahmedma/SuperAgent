@@ -253,7 +253,6 @@ class AKnowledgeBaseTurnKeepsItsAnswer(unittest.IsolatedAsyncioTestCase):
             patch.object(runtime, "model", _ObedientModel(ANSWER)),
             patch.object(service, "plan_turn", fake_plan_turn),
             patch.object(service, "generate_session_title", Mock(return_value="t")),
-            patch.object(service, "_update_persistent_note_sync", Mock(return_value="")),
         ):
             async for chunk in service.chat_with_agent_stream(
                 "مين الشركاء بتوع المدرسة",

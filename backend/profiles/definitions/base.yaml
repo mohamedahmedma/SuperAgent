@@ -22,7 +22,6 @@ identity:
 
 models:
   answer_temperature: 0.3     # conversational answering
-  fast_temperature: 0.2       # FAST_MODEL for the persistent-note summariser
   planner_temperature: 0.0    # FAST_MODEL for complexity classification (deterministic)
   grade_temperature: 0.0      # GRADE_MODEL evidence grading (deterministic)
   rewrite_temperature: 0.0    # FAST_MODEL for Step-back / HyDE planning (deterministic)
@@ -42,7 +41,6 @@ models:
   # providers reject the field rather than ignoring it. Overridable per deployment via
   # <ROLE>_REASONING_EFFORT (see .env.example).
   answer_reasoning_effort: medium
-  fast_reasoning_effort: low
   planner_reasoning_effort: low
   grade_reasoning_effort: low
   rewrite_reasoning_effort: low
@@ -126,7 +124,6 @@ agent:
   # Trimming here is also the smallest cost lever available — the window prefills in
   # parallel and is the cheap half of the token bill. Prefer the effort settings above.
   context_window_messages: 14
-  persistent_note_max_chars: 500
 
   # Contextual query resolution: one FAST_MODEL call that rewrites a follow-up into a
   # question standing on its own, and names the conditions carried over from earlier
@@ -184,7 +181,6 @@ agent:
   #
   #   system_prompt          -> agent/system.j2      (composed per turn; see below)
   #   resume_answer_prompt   -> agent/resume_answer.j2
-  #   persistent_note_prompt -> agent/persistent_note.j2
   #
   # system_prompt is the one worth understanding before setting: the template composes
   # it from the tools the turn actually bound, so a turn narrowed to search-only does
@@ -391,8 +387,8 @@ assets:
 
   # Entity (product) extraction. Off in base: a document knowledge base has no
   # catalogue. A domain turns it on and declares its own attribute vocabulary, from
-  # which the extraction schema, the search_products signature, filter validation,
-  # and the attribute index are all generated.
+  # which the extraction schema, filter validation, and the attribute index are all
+  # generated.
   entities:
     enabled: false
     vision_enabled: false

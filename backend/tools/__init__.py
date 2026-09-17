@@ -9,7 +9,6 @@ from typing import Callable, Dict, List
 
 from backend.chat.request_context import ChatRequestContext
 from backend.tools.knowledge import KNOWLEDGE_TOOL, make_search_knowledge_base
-from backend.tools.products import make_search_products
 from backend.tools.records import (
     ATTENDANCE_TOOL,
     CLASS_TOOL,
@@ -32,7 +31,6 @@ from backend.tools.records import (
 # name -> builder(ctx) -> tool
 TOOL_BUILDERS: Dict[str, Callable[[ChatRequestContext], object]] = {
     KNOWLEDGE_TOOL: make_search_knowledge_base,
-    "search_products": make_search_products,
     # One tool per record the facade exposes, rather than one tool with a `record_type`
     # argument. The planner selects tools by NAME, so a capability that is an argument
     # instead of a name is one the planner has to guess at — see backend/tools/records.py.
@@ -73,7 +71,7 @@ RECORDS_TOOLS: tuple = (
 # The citation block is load-bearing for images as well as provenance: which figure a
 # turn attaches is read out of the `[n]` markers (backend/chat/assets_bridge.py), so a
 # grounded tool that drops them silently stops showing pictures.
-GROUNDED_TOOLS: frozenset = frozenset({KNOWLEDGE_TOOL, "search_products"})
+GROUNDED_TOOLS: frozenset = frozenset({KNOWLEDGE_TOOL})
 
 # Tools whose results make the answer's FIGURES checkable. A superset of the citation
 # set above, and the two are separate because they answer different questions:
@@ -132,7 +130,6 @@ __all__ = [
     "UnknownToolError",
     "build_tools",
     "make_search_knowledge_base",
-    "make_search_products",
     "make_get_student_grades",
     "make_get_student_attendance",
     "make_get_student_timetable",

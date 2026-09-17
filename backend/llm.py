@@ -33,7 +33,6 @@ from backend.profiles import get_profile
 # Each entry is a `<role>_*` field group on ModelConfig, and names the node it serves.
 ROLES = (
     "answer",    # the agent's answering call — the only open-ended role
-    "fast",      # rolling persistent-note summariser
     "planner",   # question-complexity classification / decomposition
     "grade",     # evidence grading
     "rewrite",   # step-back / HyDE query planning

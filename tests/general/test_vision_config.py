@@ -207,7 +207,9 @@ class SingleSourceOfTruthTests(unittest.TestCase):
         from backend.assets.entity_extractor import HeuristicEntityExtractor, build_entity_extractor
         from backend.assets.extractors import HeuristicExtractor, build_extractor
 
-        profile = load_profile("ecommerce")
+        from tests.general.test_entity_pipeline import shop_profile
+
+        profile = shop_profile()
         figures = profile.assets.figures.model_copy(update={"vision_enabled": True})
         entities = profile.assets.entities.model_copy(update={"vision_enabled": True})
         from backend.assets.attributes import build_attribute_schema
@@ -223,7 +225,9 @@ class SingleSourceOfTruthTests(unittest.TestCase):
         from backend.assets.extractors import VisionExtractor, build_extractor
         from backend.assets.attributes import build_attribute_schema
 
-        profile = load_profile("ecommerce")
+        from tests.general.test_entity_pipeline import shop_profile
+
+        profile = shop_profile()
         figures = profile.assets.figures.model_copy(update={"vision_enabled": True})
         entities = profile.assets.entities.model_copy(update={"vision_enabled": True})
         schema = build_attribute_schema(profile.assets.entities)

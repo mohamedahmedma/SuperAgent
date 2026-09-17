@@ -82,9 +82,9 @@ class ConversationRepository(Protocol):
         """Merge `metadata` into the stored metadata, key by key, and move `updated_at`.
 
         A merge in the database rather than a replacement from memory: two writers holding
-        the metadata as it was when their turn began — a turn's save and a note update
-        running behind it — each land only the keys they changed, and neither puts the
-        other's back the way it found them. A key mapped to None is stored as null, which
+        the metadata as it was when their turn began — two overlapping turns on one
+        conversation — each land only the keys they changed, and neither puts the other's
+        back the way it found them. A key mapped to None is stored as null, which
         is how a pending question is cleared.
         """
         ...

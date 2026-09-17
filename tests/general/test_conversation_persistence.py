@@ -27,7 +27,7 @@ from unittest.mock import Mock, patch
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from backend.chat.background import MODELS, WRITES, BackgroundJobs, InlineJobs
+from backend.chat.background import WRITES, BackgroundJobs, InlineJobs
 from backend.chat.signals import RequestSignals
 from backend.chat.storage import ConversationStorage, MessageToStore
 from backend.chat.turn_policy import TurnPlan
@@ -41,7 +41,7 @@ service = importlib.import_module("backend.chat.service")
 
 class BackgroundJobsTests(unittest.TestCase):
     def setUp(self):
-        self.jobs = self._runner(lanes={WRITES: 3, MODELS: 1})
+        self.jobs = self._runner(lanes={WRITES: 3})
 
     def _runner(self, **options):
         jobs = BackgroundJobs(name="test-jobs", **options)
@@ -62,11 +62,11 @@ class BackgroundJobsTests(unittest.TestCase):
         self.assertTrue(jobs.flush("conversation:u:a", timeout=5))
         self.assertEqual(["b", "a2"], ran)
 
-    def test_a_slow_model_call_does_not_hold_up_a_save(self):
-        """The note is a model call, seconds long. A save is milliseconds and must not
-        queue behind it — the lanes are separate pools."""
-        jobs, gate, ran = self._runner(lanes={WRITES: 1, MODELS: 1}), threading.Event(), []
-        jobs.submit("note:u:s", lambda: gate.wait(5), lane=MODELS)
+    def test_a_slow_lane_does_not_hold_up_a_save(self):
+        """Work slower than a row insert gets a lane of its own, and a save must not queue
+        behind it — the lanes are separate pools."""
+        jobs, gate, ran = self._runner(lanes={WRITES: 1, "slow": 1}), threading.Event(), []
+        jobs.submit("slow:u:s", lambda: gate.wait(5), lane="slow")
         jobs.submit("conversation:u:s", lambda: ran.append("saved"))
 
         self.assertTrue(jobs.flush("conversation:u:s", timeout=2))
@@ -214,7 +214,7 @@ class AppendOnlyStorageTests(unittest.TestCase):
             [row.content for row in rows],
         )
         self.assertEqual(["uniforms::img1"], rows[1].rag_trace["asset_ids"], "the older answer kept its image")
-        metadata = self.storage.session_metadata("parent", "s")
+        _messages, metadata = self.storage.load_with_meta("parent", "s")
         self.assertEqual("PE uniform", metadata["title"])
         self.assertIsNone(metadata["pending_hitl"])
 
@@ -239,16 +239,16 @@ class AppendOnlyStorageTests(unittest.TestCase):
         self.assertEqual(["uniforms::img1"], rows[1].rag_trace["asset_ids"])
 
     def test_metadata_is_patched_key_by_key(self):
-        """A turn writes the keys it changed. The note, written behind it by another job,
-        survives — and a key set to None is stored as null, which is how a pending
-        question is cleared."""
+        """A turn writes the keys it changed. A key another turn wrote survives — and a
+        key set to None is stored as null, which is how a pending question is cleared."""
         self._append("human", "hello", metadata={"title": "Hello", "pending_hitl": {"id": "q1"}})
-        self.storage.patch_metadata("parent", "s", {"persistent_note": "asked about fees"})
+        self._append("human", "fees?", metadata={"child_context": {"student_id": "S-1"}})
         self._append("ai", "hi", metadata={"pending_hitl": None})
 
+        _messages, metadata = self.storage.load_with_meta("parent", "s")
         self.assertEqual(
-            {"title": "Hello", "pending_hitl": None, "persistent_note": "asked about fees"},
-            self.storage.session_metadata("parent", "s"),
+            {"title": "Hello", "pending_hitl": None, "child_context": {"student_id": "S-1"}},
+            metadata,
         )
 
     def test_a_write_invalidates_the_cached_conversation(self):
@@ -289,17 +289,15 @@ class StreamedTurnStorageTests(unittest.TestCase):
     """The streamed entry point over the real background runner.
 
     Driven the way the production bugs happened: a consumer that stops reading at
-    `[DONE]`, a consumer cancelled mid-answer, and a note update slower than the turn.
+    `[DONE]`, and a consumer cancelled mid-answer.
     """
 
     def setUp(self):
-        self.jobs = BackgroundJobs(lanes={WRITES: 2, MODELS: 1}, name="test-turn-jobs")
+        self.jobs = BackgroundJobs(lanes={WRITES: 2}, name="test-turn-jobs")
         self.addCleanup(self.jobs.shutdown, 5.0)
-        self.note = Mock(return_value="")
         self._patches = [
             patch.object(service, "plan_turn", lambda *a, **k: (TurnPlan(), RequestSignals())),
             patch.object(service, "generate_session_title", Mock(return_value="title")),
-            patch.object(service, "_update_persistent_note_sync", self.note),
         ]
         for item in self._patches:
             item.start()
@@ -374,49 +372,6 @@ class StreamedTurnStorageTests(unittest.TestCase):
         stored = storage.appends[-1]["messages"][-1]
         self.assertEqual("ai", stored.message_type)
         self.assertTrue(stored.rag_trace["turn_interrupted"])
-
-    def test_the_note_runs_behind_the_turn_on_the_note_as_it_is_then(self):
-        """The turn is due a note update (a note exists). The stream must finish without
-        waiting for the model call, and the job must build on the note as stored when it
-        RUNS — not on the copy the turn loaded — because the note job ahead of it in the
-        queue may have rewritten it."""
-        from backend.chat.turn_pipeline import TurnPipeline
-
-        storage = FakeStorage(metadata={"persistent_note": "asked about the uniform"})
-        self._agent(lambda ctx, *a, **k: FakeStreamAgent(ctx, chunks=["07:30."]))
-        seen = {}
-
-        def note(current_note, user_text, ai_response, *, history_messages=None):
-            seen["current"] = current_note
-            return f"{current_note}; the bus leaves at 07:30"
-
-        self.note.side_effect = note
-        # The previous turn's note job, still running: this turn's queues behind it.
-        release = threading.Event()
-        self.jobs.submit(TurnPipeline.note_key("u", "s"), lambda: release.wait(5), lane=MODELS)
-
-        async def whole_stream():
-            return [chunk async for chunk in service.chat_with_agent_stream("bus?", "u", "s", services=self._services(storage))]
-
-        chunks = asyncio.run(whole_stream())
-        self.assertIn(service._DONE, chunks)
-        self.assertEqual("07:30.", storage.messages[-1].content, "the answer is stored when the stream ends")
-        self.assertEqual([], storage.patches, "the note has not been written: the stream did not wait for it")
-
-        # The previous turn's job finishes by folding itself into the note.
-        storage.metadata["persistent_note"] = "asked about the uniform; asked about fees"
-        release.set()
-        self.assertTrue(self.jobs.drain(timeout=5))
-
-        self.assertEqual("asked about the uniform; asked about fees", seen["current"])
-        self.assertEqual(
-            [{
-                "persistent_note": "asked about the uniform; asked about fees; the bus leaves at 07:30",
-                # Stamped with the guardian it was written for; this turn has none.
-                "persistent_note_guardian": None,
-            }],
-            storage.patches,
-        )
 
     def test_the_sync_entry_point_returns_with_the_answer_stored(self):
         storage = FakeStorage()

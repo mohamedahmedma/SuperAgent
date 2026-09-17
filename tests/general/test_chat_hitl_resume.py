@@ -18,7 +18,7 @@ service = importlib.import_module("backend.chat.service")
 
 
 class FakeStorage:
-    """`ConversationStorage` in memory: what a turn appends, and the metadata it patches.
+    """`ConversationStorage` in memory: what a turn appends, and the metadata merged with it.
 
     `messages` are the stored conversation as langchain messages, so a test reads the
     last answer as `storage.messages[-1].content`; `appends` keeps each append as it was
@@ -29,13 +29,9 @@ class FakeStorage:
         self.messages = list(messages or [])
         self.metadata = dict(metadata or {})
         self.appends = []
-        self.patches = []
 
     def load_with_meta(self, user_id, session_id):
         return list(self.messages), dict(self.metadata)
-
-    def session_metadata(self, user_id, session_id):
-        return dict(self.metadata)
 
     def append(self, user_id, session_id, messages, *, metadata=None):
         for message in messages:
@@ -49,10 +45,6 @@ class FakeStorage:
             self.metadata.update(metadata)
         self.appends.append({"messages": list(messages), "metadata": metadata})
         return list(range(len(self.messages) - len(messages) + 1, len(self.messages) + 1))
-
-    def patch_metadata(self, user_id, session_id, patch):
-        self.metadata.update(patch)
-        self.patches.append(dict(patch))
 
 
 class FakeStreamAgent:
@@ -123,30 +115,8 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         self._planner.start()
         self.addCleanup(self._planner.stop)
 
-    def test_first_persistent_note_bootstraps_trimmed_history(self):
-        fake_model = Mock()
-        fake_model.invoke.return_value = Mock(content="summary")
-        history = [
-            HumanMessage(content="first round question"),
-            AIMessage(content="first round answer"),
-        ]
-
-        with patch.object(service, "fast_model", fake_model):
-            note = service._update_persistent_note_sync(
-                "",
-                "latest question",
-                "latest answer",
-                history_messages=history,
-            )
-
-        prompt = fake_model.invoke.call_args.args[0][0].content
-        self.assertEqual("summary", note)
-        self.assertIn("User: first round question", prompt)
-        self.assertIn("AI: first round answer", prompt)
-
-    async def test_stream_immediately_reports_progress_and_skips_note_for_short_chat(self):
+    async def test_stream_immediately_reports_progress(self):
         fake_storage = FakeStorage()
-        update_note = Mock(return_value="updated note")
 
         def make_agent(ctx, tool_names=None, language=None):
             return FakeStreamAgent(ctx, chunks=["direct answer"])
@@ -154,7 +124,6 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(service, "create_agent_for_request", make_agent),
             patch.object(service, "generate_session_title", Mock(return_value="short question")),
-            patch.object(service, "_update_persistent_note_sync", update_note),
         ):
             chunks = await _collect_stream(
                 "Hello", "u", "s", services=Services(conversations=fake_storage, background_jobs=InlineJobs())
@@ -165,7 +134,6 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         # NOTE: this label is a hardcoded string in backend/chat/service.py and must
         # stay in sync with that file.
         self.assertEqual("Request received, preparing response", events[0]["step"]["label"])
-        update_note.assert_not_called()
 
     async def test_stream_hitl_request_persists_pending_state_without_content(self):
         trace = {
@@ -196,7 +164,6 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             "child_names": [],
         }
         fake_storage = FakeStorage()
-        update_note = Mock(return_value="updated note")
 
         def make_agent(ctx, tool_names=None, language=None):
             return FakeStreamAgent(
@@ -209,7 +176,6 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(service, "create_agent_for_request", make_agent),
             patch.object(service, "generate_session_title", Mock(return_value="character question")),
-            patch.object(service, "_update_persistent_note_sync", update_note),
         ):
             chunks = await _collect_stream(
                 "What is this character's element?",
@@ -234,7 +200,6 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             "Please specify the character name\n\nAvailable options:\n- Danjin\n- Dan Heng",
             fake_storage.messages[-1].content,
         )
-        update_note.assert_not_called()
 
     async def test_stream_resume_uses_saved_rag_state_without_reentering_agent(self):
         pending_hitl = {
@@ -276,7 +241,6 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(service, "create_agent_for_request", create_agent_mock),
             patch.object(service, "_resume_rag_from_hitl_sync", resume_mock),
             patch.object(service, "model", fake_model),
-            patch.object(service, "_update_persistent_note_sync", Mock(return_value="updated note")),
         ):
             chunks = await _collect_stream(
                 "Danjin", "u", "s", services=Services(conversations=fake_storage, background_jobs=InlineJobs())

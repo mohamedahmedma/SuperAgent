@@ -19,8 +19,8 @@ UPLOAD_DIR = DATA_DIR / "documents"
 
 
 def is_supported_document(filename: str) -> bool:
-    """Accepted upload extensions come from the profile: an e-commerce catalogue and a
-    document KB do not necessarily ingest the same file types."""
+    """Accepted upload extensions come from the profile: two deployments do not
+    necessarily ingest the same file types."""
     file_lower = filename.lower()
     extensions = tuple(get_profile().ingest.supported_extensions)
     return bool(extensions) and file_lower.endswith(extensions)

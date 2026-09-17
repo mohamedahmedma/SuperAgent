@@ -133,11 +133,13 @@ class UploadPolicyTests(ProfileTestCase):
             self.assertTrue(is_supported_document("legacy.doc"))
             self.assertTrue(is_supported_document("legacy.xls"))
 
-        # ecommerce deliberately omits the legacy binary Office formats.
-        with active_profile("ecommerce"):
+        # A profile that omits the legacy binary Office formats refuses them.
+        narrow = load_profile("base").model_copy(deep=True)
+        narrow.ingest.supported_extensions = [".pdf", ".docx", ".xlsx"]
+        with active_profile(narrow):
             self.assertFalse(is_supported_document("legacy.doc"))
             self.assertFalse(is_supported_document("legacy.xls"))
-            self.assertTrue(is_supported_document("catalogue.pdf"))
+            self.assertTrue(is_supported_document("handbook.pdf"))
 
     def test_extension_matching_is_case_insensitive(self):
         from backend.api.resources import is_supported_document
@@ -210,26 +212,17 @@ class AgentAssemblyTests(ProfileTestCase):
         return create_agent.call_args.kwargs
 
     def test_agent_is_built_with_exactly_the_profile_tools_and_prompt(self):
-        kwargs = self._built_kwargs(active_profile("document_kb"))
+        kwargs = self._built_kwargs(active_profile("base"))
         self.assertEqual(
             ["search_knowledge_base"], [tool.name for tool in kwargs["tools"]]
         )
-        self.assertTrue(kwargs["system_prompt"].startswith("You are a precise document assistant."))
-
-    def test_supermew_profile_keeps_the_full_tool_set(self):
-        """supermew is the full-feature test bed, so it carries every registered tool."""
-        kwargs = self._built_kwargs(active_profile("supermew"))
-        self.assertEqual(
-            ["search_knowledge_base", "search_products"],
-            [tool.name for tool in kwargs["tools"]],
-        )
-        self.assertTrue(kwargs["system_prompt"].startswith("You are a helpful knowledge-base assistant"))
+        self.assertTrue(kwargs["system_prompt"].startswith("You are a helpful knowledge-base assistant."))
 
     def test_tool_order_follows_the_profile_declaration(self):
-        body = 'name: reversed\nagent:\n  tools: ["search_products", "search_knowledge_base"]\n'
+        body = 'name: reversed\nagent:\n  tools: ["get_student_grades", "search_knowledge_base"]\n'
         kwargs = self._built_kwargs(temp_profile(body))
         self.assertEqual(
-            ["search_products", "search_knowledge_base"],
+            ["get_student_grades", "search_knowledge_base"],
             [tool.name for tool in kwargs["tools"]],
         )
 
@@ -239,7 +232,7 @@ class AgentAssemblyTests(ProfileTestCase):
         from backend.tools import UnknownToolError
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        with temp_profile('name: future\nagent:\n  tools: ["compare_products"]\n'):
+        with temp_profile('name: future\nagent:\n  tools: ["a_tool_nobody_has_written_yet"]\n'):
             with self.assertRaises(UnknownToolError):
                 runtime.create_agent_for_request(ctx)
 
@@ -286,16 +279,16 @@ class CacheNamespaceTests(ProfileTestCase):
         from backend.infra.cache import RedisCache
 
         with patch.dict(os.environ, {"REDIS_KEY_PREFIX": ""}):
-            with active_profile("ecommerce"):
-                self.assertEqual("shop", RedisCache().key_prefix)
-            with active_profile("document_kb"):
-                self.assertEqual("dockb", RedisCache().key_prefix)
+            with active_profile("school"):
+                self.assertEqual("school", RedisCache().key_prefix)
+            with active_profile("base"):
+                self.assertEqual("kb", RedisCache().key_prefix)
 
     def test_env_still_overrides_the_profile_prefix(self):
         from backend.infra.cache import RedisCache
 
         with patch.dict(os.environ, {"REDIS_KEY_PREFIX": "pinned"}):
-            with active_profile(load_profile("ecommerce")):
+            with active_profile(load_profile("school")):
                 self.assertEqual("pinned", RedisCache().key_prefix)
 
 
@@ -309,24 +302,29 @@ class PipelineBehaviourTests(ProfileTestCase):
         return reexec_module("backend/rag/pipeline.py", _fake_rag_utils())
 
     def test_fast_path_vocabulary_comes_from_the_active_profile(self):
-        with active_profile("ecommerce"):
+        shop = load_profile("base").model_copy(deep=True)
+        shop.rag.simple_query_markers = [*shop.rag.simple_query_markers, "price of"]
+        shop.rag.complex_query_markers = [*shop.rag.complex_query_markers, "recommend"]
+        with active_profile(shop):
             pipeline = self._pipeline()
 
-        # An ecommerce-specific marker classifies as simple...
+        # A marker only this profile declares classifies as simple...
         self.assertIsNotNone(pipeline.classify_complexity.fast_path_reason("price of the blue shoe"))
-        # ...and an ecommerce comparison marker blocks the fast path.
+        # ...and a comparison marker only this profile declares blocks the fast path.
         self.assertIsNone(pipeline.classify_complexity.fast_path_reason("recommend a running shoe"))
 
-    def test_base_profile_does_not_know_ecommerce_vocabulary(self):
+    def test_base_profile_does_not_know_that_vocabulary(self):
         with active_profile("base"):
             pipeline = self._pipeline()
         self.assertIsNone(pipeline.classify_complexity.fast_path_reason("price of the blue shoe today"))
 
     def test_fast_path_length_limit_is_profile_driven(self):
         question = "what is the refund window for online orders placed abroad"  # 58 chars
+        wide = load_profile("base").model_copy(deep=True)
+        wide.rag.fast_path_max_chars = 64
         with active_profile("base"):  # limit 48
             base_pipeline = self._pipeline()
-        with active_profile("ecommerce"):  # limit 64
+        with active_profile(wide):  # limit 64
             shop_pipeline = self._pipeline()
 
         self.assertIsNone(base_pipeline.classify_complexity.fast_path_reason(question))
@@ -414,7 +412,9 @@ class PipelineBehaviourTests(ProfileTestCase):
         self.assertEqual("clarify", route)
 
     def test_hitl_copy_is_profile_driven(self):
-        with active_profile("ecommerce"):
+        shop = load_profile("base").model_copy(deep=True)
+        shop.user_copy.hitl_scope_default = "I found a few product lines that could match. Which one did you mean?"
+        with active_profile(shop):
             pipeline = self._pipeline()
 
         grade = pipeline.EvidenceGrade(

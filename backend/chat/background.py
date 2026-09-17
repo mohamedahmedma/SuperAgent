@@ -1,10 +1,9 @@
 """Work a turn hands off so the parent is not kept waiting for it.
 
-Saving the turn and updating the persistent note change nothing the parent is shown, and
-both used to run on the request: the save after the last event, the note — a model call —
-after that. The streamed reply held its connection open for both, and a browser that left
-once the answer was on screen cancelled the request before either had run, so the answer
-the parent had just read was never stored.
+Saving the turn changes nothing the parent is shown, and it used to run on the request,
+after the last event. The streamed reply held its connection open for it, and a browser
+that left once the answer was on screen cancelled the request before the save had run, so
+the answer the parent had just read was never stored.
 
 `BackgroundJobs` runs that work on worker threads of its own, detached from the request
 that queued it. Three properties make it safe to hand a conversation's writes to:
@@ -15,10 +14,8 @@ that queued it. Three properties make it safe to hand a conversation's writes to
     turn holds no thread: it is started by the completion of the job before it.
   * **A caller can wait for a key.** The next turn's first step is to load the
     conversation, which must see the previous turn's save — `flush` is that barrier.
-  * **Slow work has its own lane.** A model call takes seconds and a row insert takes
-    milliseconds; run through one pool, a handful of note updates would hold every thread
-    while saves queued behind them. Each lane is its own pool, so one lane's backlog is
-    never another's.
+  * **Each lane is its own pool.** Work that is slower than a row insert gets a lane of
+    its own, so one lane's backlog is never another's.
 
 One instance per process, owned by the composition root, drained at shutdown so a restart
 cannot drop a save that was queued. The ordering is per process: a deployment running
@@ -36,10 +33,8 @@ logger = logging.getLogger(__name__)
 
 #: The lane for database writes — the default, and the one the barrier is usually about.
 WRITES = "writes"
-#: The lane for work that calls a model. Bounded on its own so it cannot starve `WRITES`.
-MODELS = "models"
 
-_DEFAULT_LANES: Mapping[str, int] = {WRITES: 4, MODELS: 2}
+_DEFAULT_LANES: Mapping[str, int] = {WRITES: 4}
 
 
 class JobRunner(Protocol):
@@ -208,4 +203,4 @@ class InlineJobs:
         return None
 
 
-__all__ = ["MODELS", "WRITES", "BackgroundJobs", "InlineJobs", "JobRunner"]
+__all__ = ["WRITES", "BackgroundJobs", "InlineJobs", "JobRunner"]

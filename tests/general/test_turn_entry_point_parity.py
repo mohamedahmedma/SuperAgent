@@ -121,7 +121,6 @@ class AResumedClarificationAfterAnOutage(unittest.TestCase):
             service, "_resume_rag_from_hitl_sync", Mock(return_value=dict(self.OUTAGE)),
         ))
         stack.enter_context(patch.object(service, "model", _ModelThatMustNotAnswer()))
-        stack.enter_context(patch.object(service, "_update_persistent_note_sync", Mock(return_value="")))
         return stack
 
     def test_the_streamed_path_tells_the_parent_to_try_again(self):
@@ -204,7 +203,6 @@ class AKnowledgeSearchThatEndsTheTurn(unittest.TestCase):
             service, "create_agent_for_request",
             lambda ctx, *a, **k: agent_type(ctx, status),
         ))
-        stack.enter_context(patch.object(service, "_update_persistent_note_sync", Mock(return_value="")))
         return stack
 
     def test_the_streamed_path_serves_the_profile_reply(self):
@@ -233,27 +231,19 @@ class AKnowledgeSearchThatEndsTheTurn(unittest.TestCase):
 
 
 class AShortCircuitedTurn(unittest.TestCase):
-    """A turn no agent is built for spends no model call on either path, and records the same trace.
+    """A turn no agent is built for records the same trace on either path.
 
-    The streamed path has always left the persistent note alone here: a canned reply the
-    corpus never saw contributes nothing worth summarising, and updating the note would be
-    the one model call on a path whose point is making none. The sync path never learned
-    that, and folded canned replies into a long conversation's memory at the price of a
-    call. Its trace also dropped the request signals the streamed trace records.
-
-    The note runs as a background job now, so each path is driven through a job runner
-    that is drained before the assertion — "not called" has to mean "not queued either".
+    The sync path's trace used to drop the request signals the streamed trace records.
     """
 
     def _history(self):
-        # Longer than the context window, so the note would otherwise be due.
         window = service._PROFILE.agent.context_window_messages
         return [
             HumanMessage(content=f"question {index}") if index % 2 == 0 else AIMessage(content=f"answer {index}")
             for index in range(window + 2)
         ]
 
-    def _patched(self, note) -> ExitStack:
+    def _patched(self) -> ExitStack:
         plan = TurnPlan(static_reply="That is outside what I can help with.", exposed_tools=[], reasons=["unit"])
         stack = ExitStack()
         stack.enter_context(patch.object(service, "plan_turn", lambda *a, **k: (plan, RequestSignals())))
@@ -261,31 +251,13 @@ class AShortCircuitedTurn(unittest.TestCase):
             service, "create_agent_for_request",
             Mock(side_effect=AssertionError("a short-circuited turn builds no agent")),
         ))
-        stack.enter_context(patch.object(service, "_update_persistent_note_sync", note))
         return stack
-
-    def _services(self):
-        from backend.chat.background import InlineJobs
-
-        return Services(conversations=FakeStorage(self._history()), background_jobs=InlineJobs())
-
-    def test_the_sync_path_spends_no_note_update(self):
-        note = Mock(return_value="note")
-        with self._patched(note):
-            service.chat_with_agent("what is the weather", "u", "s", services=self._services())
-        note.assert_not_called()
-
-    def test_the_streamed_path_spends_no_note_update(self):
-        note = Mock(return_value="note")
-        with self._patched(note):
-            _stream_shown("what is the weather", "u", "s", services=self._services())
-        note.assert_not_called()
 
     def test_both_paths_store_the_request_signals(self):
         for path in ("sync", "stream"):
             with self.subTest(path=path):
                 storage = FakeStorage(self._history())
-                with self._patched(Mock(return_value="")):
+                with self._patched():
                     if path == "sync":
                         service.chat_with_agent("what is the weather", "u", "s", services=Services(conversations=storage))
                     else:
