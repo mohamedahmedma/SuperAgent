@@ -40,6 +40,18 @@ into the grader's view. That percentage is what the image-chunking work has to m
 
 Unanswerable cases are listed but not scored: whether the turn correctly says "I don't
 know" is decided after grading, not by retrieval, and belongs to the answer-level eval.
+
+## Concurrency
+
+Cases run on a thread pool (`--workers`, 8 by default) because a parent is not the only
+one asking: what a single question costs on an idle machine says nothing about what it
+costs when twenty arrive together. Running them in parallel measures the contended path —
+the embedding forward pass, the Milvus round trip, and any remote reranker — and the
+report separates per-question latency from wall-clock throughput so the two cannot be
+confused. `--workers 1` restores the sequential run when a clean p50 is what is wanted.
+
+Scoring is pure once the documents are in hand, so a case's result does not depend on how
+many ran beside it; only its timing does.
 """
 from __future__ import annotations
 
@@ -49,6 +61,7 @@ import os
 import statistics
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -126,6 +139,7 @@ def main() -> int:
     ap.add_argument("--top-k", type=int, default=None, help="default: the profile/env value")
     ap.add_argument("--pool", type=int, default=30, help="depth scored as 'recalled'")
     ap.add_argument("--verbose", action="store_true", help="name the missing evidence per case")
+    ap.add_argument("--workers", type=int, default=8, help="questions in flight at once (1 = sequential)")
     args = ap.parse_args()
 
     top_k = args.top_k or u.RETRIEVAL_TOP_K
@@ -135,7 +149,8 @@ def main() -> int:
 
     print(f"dataset {DATASET_VERSION}  split={args.split}  cases={len(selected)} "
           f"({len(scored)} scored, {len(unanswerable)} unanswerable)")
-    print(f"top_k={top_k}  pool={args.pool}  rerank={'ON' if u.RERANK_ENABLED else 'OFF'}\n")
+    print(f"top_k={top_k}  pool={args.pool}  rerank={'ON' if u.RERANK_ENABLED else 'OFF'}  "
+          f"workers={args.workers}\n")
 
     if not _corpus_is_indexed(CORPUS_FILENAME):
         print(f"!! {CORPUS_FILENAME} is not in the index — ingest it before scoring.")
@@ -145,12 +160,32 @@ def main() -> int:
     hits: dict[str, bool] = {}
     kept: list[float] = []
     lats: list[float] = []
+    errors: dict[str, str] = {}
+    ranked_by_case: dict[str, list[dict]] = {}
 
-    for case in scored:
+    def run(case: Case) -> tuple[Case, list[dict], float, str]:
         started = time.perf_counter()
-        pool_docs = u.retrieve_documents(case.question, top_k=args.pool)["docs"]
-        lats.append((time.perf_counter() - started) * 1000)
+        try:
+            docs = u.retrieve_documents(case.question, top_k=args.pool)["docs"]
+        except Exception as exc:  # noqa: BLE001 — one bad case must not lose the run
+            return case, [], (time.perf_counter() - started) * 1000, f"{type(exc).__name__}: {exc}"
+        return case, docs, (time.perf_counter() - started) * 1000, ""
+
+    wall_started = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+        finished = list(pool.map(run, scored))
+    wall = time.perf_counter() - wall_started
+
+    for case, pool_docs, elapsed, error in finished:
+        lats.append(elapsed)
         ranked = pool_docs[:top_k]
+        ranked_by_case[case.id] = ranked
+        if error:
+            errors[case.id] = error
+            results[case.id] = {stage: False for stage in STAGES}
+            hits[case.id] = False
+            print(f"  ERR   {case.id:<28} {error[:60]}")
+            continue
 
         results[case.id] = {
             "recalled": _passes(case, pool_docs, "recalled"),
@@ -173,12 +208,15 @@ def main() -> int:
             print(f"        missing: {gaps}")
 
     print("\n" + "=" * 70)
-    print(f"{'stage':<12}{'all evidence':>16}{'lost since previous':>22}")
+    print(f"{'stage':<12}{'all evidence':>16}{'change':>22}")
     previous = None
     for stage in STAGES:
         passed = sum(1 for r in results.values() if r[stage])
-        lost = "" if previous is None else f"-{previous - passed}"
-        print(f"{stage:<12}{passed}/{len(scored)} ({passed / len(scored):.0%})".ljust(28) + f"{lost:>22}")
+        # Signed, because the last stage GAINS: `answer` sees the whole chunk the grader
+        # was shown a prefix of, so a positive number there is evidence the grading view
+        # hid rather than evidence retrieval lost.
+        change = "" if previous is None else f"{passed - previous:+d}"
+        print(f"{stage:<12}{passed}/{len(scored)} ({passed / len(scored):.0%})".ljust(28) + f"{change:>22}")
         previous = passed
 
     any_hit = sum(1 for v in hits.values() if v)
@@ -199,9 +237,26 @@ def main() -> int:
         print(f"\nfigure text kept in the grader's view: {statistics.mean(kept):.0%} "
               f"(min {min(kept):.0%})")
 
+    def pct(values: list[float], share: float) -> float:
+        return values[min(int(len(values) * share), len(values) - 1)]
+
     lats.sort()
-    print(f"\nretrieval latency  p50={round(lats[len(lats) // 2])}ms  "
-          f"p95={round(lats[min(int(len(lats) * 0.95), len(lats) - 1)])}ms")
+    print(f"\nretrieval latency per question  p50={round(pct(lats, 0.5))}ms  "
+          f"p95={round(pct(lats, 0.95))}ms  p99={round(pct(lats, 0.99))}ms  max={round(lats[-1])}ms")
+    print(f"wall clock  {wall:.1f}s for {len(scored)} questions at {args.workers} worker(s) "
+          f"= {len(scored) / wall:.1f} q/s  (sum of per-question time {sum(lats) / 1000:.1f}s)")
+    if errors:
+        print(f"!! {len(errors)} question(s) failed to retrieve: "
+              f"{', '.join(f'{cid} ({err[:40]})' for cid, err in errors.items())}")
+
+    # What each stage would COST a model, which is the input half of the grader's latency.
+    grader_chars = [len(format_docs_for_grading(d)) for d in ranked_by_case.values() if d]
+    answer_chars = [len(format_docs(d)) for d in ranked_by_case.values() if d]
+    if grader_chars:
+        grader_chars.sort()
+        answer_chars.sort()
+        print(f"prompt size  grader p50={round(pct(grader_chars, 0.5))} max={grader_chars[-1]} chars  |  "
+              f"answer p50={round(pct(answer_chars, 0.5))} max={answer_chars[-1]} chars")
 
     for stage in STAGES:
         failed = [cid for cid, r in results.items() if not r[stage]]
