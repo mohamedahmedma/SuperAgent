@@ -98,3 +98,11 @@ _ui_deep_navy_backup_*/
 _ui_exact_backup_*/
 _ui_language_backup_*/
 *.bak
+
+# Working notes kept beside the repo rather than in it: a review, a refactor log, and the
+# RAG fix plan. They are edited continuously, carry a notes-app id in their front matter,
+# and their audience is whoever is holding the work — not a reader of this repository.
+# RAG_FIX_PLAN.md was briefly tracked (PR #101) and is untracked again here.
+/RAG_FIX_PLAN.md
+/RAG_BACKEND_REVIEW.md
+/BACKEND_REFACTOR.md
