@@ -1,5 +1,8 @@
 """Session-wide test setup, imported before any test module.
 
+Two variables, both of which have to be set before `backend` is imported: the profile the
+tests run under, and whether the run ships traces to LangSmith.
+
 ## Why this is at the repo root and not under `tests/`
 
 It sets `ACTIVE_PROFILE`, and the only moment that can work is before anything imports
@@ -29,8 +32,29 @@ The shell still wins — `ACTIVE_PROFILE=base pytest tests/` does what it says �
 what the shell set is captured here, before `.env` can be read. A test that needs a
 particular profile should name it (`load_profile("base")`) rather than depend on which
 one happens to be ambient.
+
+## Why tracing is off
+
+A test run is not a conversation worth recording, and `.env` carries the deployment's
+LangSmith settings, so an unguarded run posts every fake turn to the project's traces and
+waits on the network to do it.
+
+It is not only noise. Measured on 2026-09-13 over the whole of `tests/general` in a fixed
+order: 11 failures with tracing on, 5 with it off. The six that go are all in
+`test_forced_tool_middleware.TheStreamedPath`, where `langsmith.run_helpers.async_wrapper`
+drains a fake model's one-message iterator a second time and raises `StopIteration`. That
+file passes in isolation either way, so only a full run shows it — which is exactly the
+kind of failure a developer attributes to their own change.
+
+Same rule as the profile: the shell wins, so `LANGSMITH_TRACING=true pytest tests/` still
+records a run when someone is deliberately debugging one.
 """
 import os
 
 _FROM_SHELL = (os.environ.get("ACTIVE_PROFILE") or "").strip()
 os.environ["ACTIVE_PROFILE"] = _FROM_SHELL or "school"
+
+#: Both spellings: `LANGCHAIN_TRACING_V2` is the older one, and langsmith still reads it.
+for _tracing in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"):
+    if not (os.environ.get(_tracing) or "").strip():
+        os.environ[_tracing] = "false"

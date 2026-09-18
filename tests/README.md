@@ -93,3 +93,22 @@ python tests/evals/retrieval_eval.py
 python tests/evals/retrieval_eval.py --rerank
 python tests/run_regression.py --eval-only
 ```
+
+`evals/school_retrieval_eval.py` is the school one, and it answers a different question:
+not "did a matching chunk come back" but **where** a parent's question loses the evidence
+that answers it. Every case is scored at four depths of the same retrieval — the candidate
+pool, the `top_k` the turn keeps, what the grader can see, and what the answer is written
+from — so a fact that is retrieved and then hidden by the grading view reads as exactly
+that, rather than as a retrieval failure.
+
+Its questions are Egyptian Arabic and its corpus is English, which is the path production
+actually runs. The labelled set lives in `evals/school_dataset.py` (220 cases, a fifth held
+out); `tests/general/test_school_eval_dataset.py` keeps the oracle itself honest and DOES
+run in CI, because a case with no gold, a duplicate id, or a gold span carrying Word's en
+dash all fail silently in the direction of a better score.
+
+```bash
+python tests/evals/school_retrieval_eval.py               # the dev split
+python tests/evals/school_retrieval_eval.py --verbose     # name the missing evidence
+python tests/evals/school_retrieval_eval.py --split holdout
+```
