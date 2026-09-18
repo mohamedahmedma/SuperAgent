@@ -24,7 +24,9 @@ Companion documents:
 ## How to use this file
 
 1. Read "Where things stand" and "Rules".
-2. Take the next phase from "The plan" — one phase, one branch.
+2. Take the next phase from "The plan" — one phase, one branch. Every finding and its fix
+   is spelled out in "Reference: every finding, and the fix for each", so nothing here
+   depends on the conversation this came from.
 3. Measure before and after with the evals named in "How to measure".
 4. Update this file in the same branch: tick the phase, record the numbers, note anything
    the work proved wrong.
@@ -189,17 +191,22 @@ Items not in the original 23, added from measurement:
 
 ### Phase 1 — where the evidence is actually lost ⏳ NEXT
 
-One branch. Measure with `school_retrieval_eval.py` before and after; the target is the
-`grader` row rising toward the `answer` row, and `ranked` rising toward `recalled`.
+One branch, in this order. Measure with `school_retrieval_eval.py` before and after; the
+target is the `grader` row rising toward the `answer` row, and `ranked` rising toward
+`recalled`. Reindex after step 1.
 
-| # | What | Acceptance |
-|---|---|---|
-| 2 | Stop truncating chunks for the grader, or select question-relevant spans instead of a prefix. The grading prompt must stay bounded — that is what `1794762` was protecting | `grader` stage within a few points of `answer` |
-| 8 | Rank child chunks first, then expand; keep the match offset and send the text around it instead of the whole parent | No chunk over the grading budget reaches the grader |
-| 24 | `RETRIEVAL_TOP_K` back to 8 (remove the local `.env` override; check the server's) | `ranked` ≈ `recalled` |
-| 25 | Cap how many of the final slots one document or image may take | No regression in `ranked` |
-| 5 | Select final evidence under a token budget **before** judging sufficiency; never cut an approved set by count. Fix the trace that reports the capped number as the real one | Approved evidence always reaches the answer |
-| 1 | Split image transcriptions into ≤800-char passages (tables as row groups, header repeated, shared `asset_id`), then reindex | Figure questions stay 4/4; needed for calendar-shaped documents even though this corpus does not bind |
+| Order | # | What to do | Acceptance |
+|---|---|---|---|
+| 1 | 1 | **Split image transcriptions into ≤800-character passages.** Tables become row groups with the header repeated in each. Every passage keeps a shared `asset_id`, so the picture is still cited and displayed once. Reindex afterwards | Figure questions stay 4/4 |
+| 2 | 8 | **Limit what parent merging can return.** Two matching children still pull in a 1,600–2,400-character parent, which reintroduces the same oversized chunk. Keep the position of the match and send the text around it, not the whole parent | No chunk over the grading budget reaches the grader |
+| 3 | 2 | **Delete the grader truncation** (`grading_view.py`), so the grader reads whole chunks as it originally did. Safe only once **no oversized chunk can reach it** — which is steps 1 and 2 together, not step 1 alone. That bound is what commit `1794762` was protecting and it must still hold | `grader` stage within a few points of `answer` |
+| 4 | 24 | **`RETRIEVAL_TOP_K` back to 8** — remove the override from `.env` (local, and check the server's). 8 × 800 characters is 6,400, the size the system originally graded successfully | `ranked` ≈ `recalled` |
+| 5 | 25 | **Cap how many of the final 8 slots one document or image may take.** New risk, and it only appears once one calendar can produce ten passages | No regression in `ranked` |
+| 6 | 5 | **Fix the evidence cap**: select the final evidence under a token budget *before* judging sufficiency, so the grader approves exactly what the answer receives and approved chunks are never cut by count. Also fix the trace that reports "4 of 4" | Approved evidence always reaches the answer |
+
+Why images are first even though they do not bind on this corpus: the split is what makes
+step 3 safe for a calendar-shaped document, and doing it after would mean removing the
+truncation twice — once safely here, once again the first time a real calendar is ingested.
 
 ### Phase 2 — the 2-second grader (items 9, 14) ⏸ PARKED
 
@@ -290,6 +297,69 @@ and extractions by content hash).
 Items 18 (cache retrieval by corpus version, language, constraints, access scope), 19 (load a
 bounded history window, trimmed by tokens), 20 (persist the resolver's carried conditions —
 the gap accepted when the persistent note was removed), 21 (durable background writes).
+
+---
+
+## Reference: every finding, and the fix for each
+
+The whole list in one place, so no session has to reconstruct it from the review plus a
+chat log. Numbering is the review's. Status: ✅ done, ⏸ parked, ⬜ open.
+
+### Evidence lost or wrong (originally P1)
+
+| # | What is wrong | The fix | Phase |
+|---|---|---|---|
+| 1 | Image text is cut to about 3,200 characters before indexing, so facts near the end cannot be found. The cap also does not apply to the first line, so a single very long line passes through whole | Keep the full text in the asset store and index it as ≤800-character passages, or table-row groups with the header repeated, all sharing one `asset_id`. Caption and description stay a separate entry for discovery. Enforce the limit on every line. Reindex | 1 ⬜ |
+| 2 | The grader sees only the start of each chunk — 1,200 characters, or 500 for a figure — so it can reject a chunk whose answer it never saw | Once no oversized chunk can reach it (items 1 and 8), delete the truncation and let it read whole chunks. The grading prompt must stay bounded by the retrieval, not by the corpus | 1 ⬜ |
+| 3 | An empty search result goes straight to "no knowledge" without using the one allowed retry | One bounded recovery search first: wider pool, keyword-only variants, neighbouring passages, same access and language filters. Keep technical failure separate from "not found" | 3 ⬜ |
+| 4 | The reranker can deny an answer on its own score: below its floor the turn ends as "no knowledge", with no grader and no retry. Enabling the reranker switches this path on | A score may order or admit, never end a turn. A low score hands over to the grader or the recovery search. Only something that read the chunks may call them off-subject | 3 ⬜ |
+| 5 | The answer can lose evidence the grader approved: the kept set is capped at 4, so an approved 8 after a retry is cut to 4. The trace then reports the count *after* the cap, so it always reads "4 of 4" | Select the final evidence under a token budget before judging sufficiency, so the grader approves exactly what the answer receives. Never cut an approved set by count; if it does not fit, answer partially and say so. Record the count before the cap | 1 ⬜ |
+| 6 | Tables on neighbouring pages are joined whenever their column counts match, even when they are different tables | Require matching normalised headers, the same section, and layout continuity (ends at the page foot, resumes at the head). When unsure keep them separate, and keep the source page per row group | 3 ⬜ |
+| 7 | When the retry search fails, the first search's evidence is thrown away, even when it could have supported a partial answer | Keep the first pass's on-subject evidence and answer partially from it, naming what is missing. Do not invent the rest | 3 ⬜ |
+| 8 | Parent-chunk merging happens before ranking, so the matched passage can land beyond what the grader or reranker reads | Rank the children first, then expand. Keep the match offset and send the text around it; grow within a budget instead of promoting a whole parent on two matching children | 1 ⬜ |
+
+### Grader, ranking and cost (originally P2)
+
+| # | What is wrong | The fix | Phase |
+|---|---|---|---|
+| 9 | Grading has no overall time limit, and a cut-off reply is retried with a larger allowance. No timings, token counts or retry counts are recorded | Instrument first: input, output and reasoning tokens, time, finish reason, retries, per call. Then a turn deadline and explicit HTTP timeouts; never resend a large prompt past the deadline. Keep the 1,536-token floor — that was a separate, real bug | 2 ⏸ |
+| 10 | The local reranker only sees the final 4 chunks, not the 30 candidates, so it cannot recover a good chunk dropped earlier | Rerank the candidate pool, then select the answer set. Separate budgets for retrieval, reranking and answering. Measure p95 on the real hardware before enabling | 4 ⬜ |
+| 11 | The reranker treats "relevant" as "enough to answer", so an on-topic passage passes without the requested fact | Scores order evidence. Check required facts (a year, a fee, a date) separately, and reserve the grader for uncertain or conflicting evidence. Calibrate on Arabic and English questions from this corpus | 4 ⬜ |
+| 12 | `grading_mode` does nothing: it was read by a helper with no production caller while routing used a different setting | One setting, read in one place. Done: the switch is real, the dead `should_grade` helper is gone | 4 ✅ (on `rag/grader-optional`) |
+| 13 | Two latent score problems: the minimum-score check can compare against the retrieval score, which is a different scale, and the score conversion is not monotonic | Make each score type explicit and compare thresholds only against their own kind. Apply one documented monotonic conversion | 4 ⬜ |
+| 14 | There is no fast path: every answerable question pays for the grader, even when the evidence is clear | Answer in one call when hybrid retrieval plus local checks already cover the question; grade only ambiguous, conflicting or incomplete evidence. Compare against `main` on the dataset before shipping | 2 ⏸ |
+
+### Ingestion and chunking (originally P2)
+
+| # | What is wrong | The fix | Phase |
+|---|---|---|---|
+| 15 | A failed image extraction silently indexes text only, with no visible status and no targeted retry | Record per document: complete, partial, or failed images. Show it to operators and retry only the failed images | 5 ⬜ |
+| 16 | The splitter's separators suit CJK punctuation, not English or Arabic, and token budgets are estimated at four characters per token | Split on English and Arabic sentence punctuation; keep tables as row groups; measure with the tokenizer of the models actually in use; choose sizes from retrieval outcomes | 5 ⬜ |
+| 17 | Unchanged documents are re-embedded on reindex, with no cache keyed by content hash | Cache embeddings by content hash plus embedding version, and extractions by image hash plus extractor version. Track text and metadata hashes separately so a metadata-only edit re-embeds nothing | 5 ⬜ |
+
+### Retrieval and conversation infrastructure (originally P2)
+
+| # | What is wrong | The fix | Phase |
+|---|---|---|---|
+| 18 | Search results are not cached across requests; only the last 64 query embeddings are, per process | Cache in Redis keyed by resolved query, carried conditions, language, corpus version, retrieval settings and access scope. Bump the corpus version on ingest or delete | 6 ⬜ |
+| 19 | The whole conversation is loaded every turn, then trimmed by message count rather than tokens | Load a bounded recent window from the database and trim by a token budget | 6 ⬜ |
+| 20 | The conditions the resolver carries forward (campus, document, year) come only from the last 6 messages, so older ones are lost | Persist them in session metadata beside the child pin, with the turn they came from and an expiry; feed them back to the resolver; let newer statements replace older ones. **This is the gap accepted when the persistent note was removed** | 6 ⬜ |
+| 21 | Background saves are lost if the process crashes, and their ordering only holds on one worker | Store the turn before replying; move later work to a durable queue (outbox or Redis); add a session version so concurrent writers cannot overwrite each other. Not RAG — sequence it separately | 6 ⬜ |
+
+### Evaluation
+
+| # | What is wrong | The fix | Phase |
+|---|---|---|---|
+| 22 | The retrieval eval uses GS1 barcode questions, not school content, and reports the first matching snippet — a hit rate, not proof the required evidence arrived | A versioned labelled school set with required evidence spans, Arabic questions, images, tables, follow-ups, comparisons and unanswerables, scored per pipeline stage, with a holdout | 0 ✅ |
+| 23 | Local test runs send traces to LangSmith, which also causes six spurious failures | `conftest.py` and the evals set `LANGSMITH_TRACING=false` / `LANGCHAIN_TRACING_V2=false` unless the shell says otherwise | 0 ✅ |
+
+### Added from measurement
+
+| # | What is wrong | The fix | Phase |
+|---|---|---|---|
+| 24 | `top_k` is 4, set only by the local `.env`; code and profiles say 8. It costs 18 of 176 questions, and splitting images makes 4 slots worse still — one calendar becomes ten passages competing for four slots | Put it back to 8. 8 × 800 characters is the size that originally graded successfully | 1 ⬜ |
+| 25 | Nothing stops one document or image taking every final slot | Cap the slots one source may occupy | 1 ⬜ |
+| 26 | Both grader modes answered "Year 3 fees = 88,000 EGP" — the FS1–FS2 row. Grading neither caused nor prevented it | A local check: every number in the answer must appear in the evidence it cited. No model call | 3 ⬜ |
 
 ---
 
