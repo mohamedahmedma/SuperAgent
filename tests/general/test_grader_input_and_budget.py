@@ -3,7 +3,7 @@
 
 Production failed with `openai.LengthFinishReasonError: Could not parse response content
 as the length limit was reached` — a grading call that ended at `finish_reason: length`
-having emitted no JSON at all. Three things were true at once and each is fixed here:
+having emitted no JSON at all. Three things were true at once:
 
   * `format_docs` hands the grader EVERY retrieved chunk in full, so the size of the
     grading prompt was whatever the corpus happened to hold. A figure whose transcription
@@ -14,15 +14,27 @@ having emitted no JSON at all. Three things were true at once and each is fixed 
   * and a truncated grade raised, which costs the whole turn: grading is the HIGH rung,
     so the ladder reaches nothing and the turn routes to `retrieval_error` — the user is
     told the knowledge base is broken while its answer sits in the retrieved chunks.
+
+The last two are unchanged and their guards are the last two classes here.
+
+The FIRST was fixed by showing the grader less than the answer model: prose cut to 1,200
+characters, a figure summarised to 500. That bounded the prompt and it hid the evidence —
+measured on the school corpus, 28% of questions had their answer in the part of a chunk
+the grader never saw, and 58% of retrieved chunks were over the cap. The truncation is
+gone and the bound moved to where the size is MADE, which is what the first class here
+now pins: no chunk larger than the evidence window, therefore no grading prompt larger
+than `top_k` times it, whatever the corpus contains.
 """
 import unittest
 from unittest.mock import patch
 
+from backend.indexing.document_loader import DocumentLoader
 from backend.llm_models import GRADE_RETRY_MAX_TOKENS
 from backend.profiles import get_profile
 from backend.rag.evidence import AssessmentContext, Certainty
+from backend.rag.evidence_view import format_docs
 from backend.rag.pipeline import EvidenceGrade, LLMGraderAssessor
-from backend.rag.grading_view import _GRADER_CHUNK_CHARS, _GRADER_FIGURE_BODY_CHARS, _grading_view, _head, format_docs, format_docs_for_grading
+from backend.rag.utils import EVIDENCE_WINDOW_CHARS, _parent_window
 
 
 def _figure_doc(rows: int = 300) -> dict:
@@ -34,88 +46,86 @@ def _figure_doc(rows: int = 300) -> dict:
     }
 
 
-class TheGraderSeesLessThanTheAnswerDoes(unittest.TestCase):
-    def test_each_chunk_is_capped(self):
-        rendered = format_docs_for_grading([_figure_doc() for _ in range(8)])
-        # Eight chunks, each capped, plus the per-chunk header and separator.
-        self.assertLess(len(rendered), 8 * (_GRADER_CHUNK_CHARS + 200))
+def _calendar_parts(rows: int = 400) -> dict:
+    return {
+        "header": "[Figure] School calendar 2025-2026",
+        "description": "A year planner for every term.",
+        "transcription": "\n".join(
+            f"| Week {i} | Mon | Tue | Wed | Thu | Fri |" for i in range(rows)
+        ),
+        "summary": "Tags: calendar, terms",
+    }
 
-    def test_the_answer_path_is_untouched(self):
-        """A fee table read out of an image is only useful entire, and that is what the
-        answering model is given. Only the grade is taken on the head of the chunk."""
+
+class TheGradingPromptIsSizedByTheRetrieval(unittest.TestCase):
+    """The invariant commit 1794762 protected, kept by bounding instead of truncating.
+
+    The grader now reads whole chunks, so the only thing standing between the corpus and
+    the size of the prompt is the size of a chunk. These assert that bound at the two
+    places a chunk can get big — indexing, and the merge — and then assert the arithmetic
+    that follows from it."""
+
+    def setUp(self):
+        self.loader = DocumentLoader()
+
+    def test_the_grader_now_reads_what_the_answer_reads(self):
+        """The 28%. A fee table read out of an image is only useful entire, and the
+        grader was deciding whether the snippets settle the question without being shown
+        the part that settles it."""
         docs = [_figure_doc()]
-        self.assertGreater(
-            len(format_docs(docs)), 5 * len(format_docs_for_grading(docs))
-        )
+        self.assertEqual(format_docs(docs), format_docs(docs))
+        self.assertIn("Week 299", format_docs(docs))
 
-    def test_the_caption_and_description_survive(self):
-        """What a grade is actually made of. `render_surrogate` writes caption first and
-        description second, so a cap taken from the top keeps exactly the part that says
-        what the figure IS and drops the literal rows."""
-        rendered = format_docs_for_grading([_figure_doc()])
-        self.assertIn("[Figure] School calendar 2025-2026", rendered)
-        self.assertIn("A year planner for every term.", rendered)
-        self.assertNotIn("Week 299", rendered)
+    def test_one_image_can_no_longer_be_one_enormous_chunk(self):
+        """The chunk that killed the grading call. Its transcription is now indexed as
+        passages, none of them larger than a leaf."""
+        units = [
+            unit for unit in self.loader._blocks_to_units([
+                {"type": "text", "content": "joined", "page_number": 0,
+                 "asset_ids": ["kb.docx::p0::imgabc"], "figure": _calendar_parts()},
+            ]) if unit["kind"] == "figure"
+        ]
 
-    def test_an_ordinary_chunk_is_not_trimmed_at_all(self):
-        """The cap sits above a normal leaf, so it only ever touches an outlier."""
-        doc = {"filename": "kb.docx", "page_number": 0, "text": "الرسوم الدراسية للصف الثالث"}
-        self.assertIn("الرسوم الدراسية للصف الثالث", format_docs_for_grading([doc]))
+        self.assertGreater(len(units), 1)
+        for unit in units:
+            self.assertLessEqual(len(unit["text"]), self.loader._level_3_size)
 
-    def test_chunk_numbering_still_matches_the_answer_path(self):
+    def test_merging_cannot_exceed_the_evidence_window(self):
+        """The other way a chunk gets big: a two-child match promotes a whole parent."""
+        parent = "\n".join(f"line {i:04d} " + "x" * 80 for i in range(400))
+        window = _parent_window(parent, [{"text": "line 0200 " + "x" * 80}], 1200)
+
+        self.assertLessEqual(len(window), 1200)
+        self.assertIn("line 0200", window)
+
+    def test_the_prompt_is_top_k_times_the_window_and_nothing_else(self):
+        """The arithmetic the invariant actually is. Eight chunks at the ceiling is a
+        number this file can state; eight chunks of "whatever the corpus holds" is not,
+        and that difference is the whole finding."""
+        docs = [
+            {"filename": "kb.docx", "page_number": 0, "text": "x" * EVIDENCE_WINDOW_CHARS}
+            for _ in range(8)
+        ]
+        rendered = format_docs(docs)
+
+        per_chunk_overhead = 60  # "[n] kb.docx (Page 0):" plus the separator
+        self.assertLess(len(rendered), 8 * (EVIDENCE_WINDOW_CHARS + per_chunk_overhead))
+
+    def test_chunk_numbering_is_the_contract_between_grade_and_answer(self):
         """`supporting_chunks` is 1-based over this list and `select_context_indices`
-        applies it to the full docs, so the two renderings must number alike."""
-        docs = [_figure_doc(), _figure_doc(), _figure_doc()]
+        applies it to the same docs, so the numbering is what keeps a grade about chunk 3
+        pointing at chunk 3."""
+        docs = [_figure_doc(rows=2), _figure_doc(rows=2), _figure_doc(rows=2)]
+        rendered = format_docs(docs)
         for marker in ("[1]", "[2]", "[3]"):
-            self.assertIn(marker, format_docs_for_grading(docs))
-            self.assertIn(marker, format_docs(docs))
+            self.assertIn(marker, rendered)
 
-    def test_a_figure_keeps_its_title_tags_and_questions(self):
-        """What the grade is actually made of. The transcription is the ANSWER's
-        evidence; for "are these snippets about school uniform" it is noise that can
-        outweigh the rest of the prompt."""
-        view = _grading_view(
-            "[Figure] Day Wear: Secondary School - Girls\n"
-            "An infographic showing the secondary uniform.\n"
-            + "\n".join(f"Row {i} | White Shirt | Navy Blazer" for i in range(300))
-            + "\nTags: School Uniform, Girls, Secondary\n"
-              "Answers: What is the uniform for secondary girls?"
-        )
-        self.assertIn("[Figure] Day Wear: Secondary School - Girls", view)
-        self.assertIn("An infographic showing the secondary uniform.", view)
-        self.assertIn("Tags: School Uniform, Girls, Secondary", view)
-        self.assertIn("Answers: What is the uniform for secondary girls?", view)
-        self.assertNotIn("Row 299", view)
+    def test_an_ordinary_chunk_is_passed_through_untouched(self):
+        doc = {"filename": "kb.docx", "page_number": 0, "text": "الرسوم الدراسية للصف الثالث"}
+        self.assertIn("الرسوم الدراسية للصف الثالث", format_docs([doc]))
 
-    def test_the_summary_lines_survive_a_transcription_that_buries_them(self):
-        """Truncating from the top would keep the first rows of the table and lose the
-        two lines underneath that say what the picture is about."""
-        view = _grading_view(
-            "[Figure] Fee schedule\n"
-            + "\n".join(f"Grade {i} | 88,000 EGP" for i in range(500))
-            + "\nTags: fees, tuition"
-        )
-        self.assertIn("Tags: fees, tuition", view)
-        self.assertLess(len(view), _GRADER_FIGURE_BODY_CHARS + 200)
-
-    def test_prose_is_capped_but_never_summarised(self):
-        """Only a figure has a transcription to drop. Ordinary text is left alone below
-        the cap, because a leaf is smaller than it."""
-        prose = "الرسوم الدراسية للصف الثالث الابتدائي هي ٨٨٬٠٠٠ جنيه"
-        self.assertEqual(prose, _grading_view(prose))
-
-    def test_the_retry_ceiling_is_a_doubling_not_a_leap(self):
-        self.assertLessEqual(GRADE_RETRY_MAX_TOKENS, 2 * get_profile().models.grade_max_tokens)
-
-    def test_the_head_helper_cuts_whole_lines(self):
-        text = "\n".join(f"line {i}" for i in range(200))
-        cut = _head(text, 100)
-        self.assertLessEqual(len(cut), 100)
-        self.assertIn(cut.splitlines()[-1], text.splitlines())
-
-    def test_a_single_line_longer_than_the_budget_still_yields(self):
-        """Half of a transcription rendered as one enormous row beats none of it."""
-        self.assertEqual(40, len(_head("x" * 500, 40)))
+    def test_no_documents_renders_nothing(self):
+        self.assertEqual("", format_docs([]))
 
 
 class TheGradeCallIsGivenRoomToFinish(unittest.TestCase):

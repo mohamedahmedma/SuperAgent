@@ -11,7 +11,7 @@ from backend.rag.evidence import (
     EvidenceReport,
 )
 from backend.prompts import resolve as resolve_prompt
-from backend.rag.grading_view import format_docs_for_grading
+from backend.rag.evidence_view import format_docs
 from backend.rag.graph_nodes import (
     ClassifyComplexity,
     FanOutSubQuestions,
@@ -35,6 +35,7 @@ from backend.profiles import get_profile
 from backend.schemas.chat import HitlResumeState
 from backend.text_normalization import normalize_query
 from backend.rag.utils import (
+    EVIDENCE_WINDOW_CHARS,
     RETRIEVAL_TOP_K,
     retrieve_documents,
     rewrite_query_once,
@@ -246,7 +247,7 @@ class LLMGraderAssessor:
             EVIDENCE_GRADE_PROMPT,
             "rag/evidence_grade.j2",
             question=ctx.question,
-            context=format_docs_for_grading(ctx.docs),
+            context=format_docs(ctx.docs),
             # Alongside the question, never folded into it. See AssessmentContext.
             constraints=list(ctx.constraints),
         )
@@ -322,6 +323,10 @@ class _ModuleDependencies:
     @property
     def top_k(self) -> int:
         return RETRIEVAL_TOP_K
+
+    @property
+    def evidence_window_chars(self) -> int:
+        return EVIDENCE_WINDOW_CHARS
 
     @property
     def complexity_prompt(self) -> str:

@@ -55,6 +55,25 @@ CHUNK_STRATEGIES = ("recursive", "sentence", "token")
 _TOKEN_CHARS_ESTIMATE = 4
 
 
+def cut_to_budget(text: str, budget: int) -> List[str]:
+    """One string as one or more pieces, none of them longer than `budget`.
+
+    The last resort in every splitter here, and deliberately the only one. A limit with
+    an exception is not a limit: a figure cap that cut at line boundaries let a first
+    line of any length through whole, a table row longer than its budget shipped whole,
+    and a sentence longer than `max_chars` did too — each of them a path by which one
+    chunk could reach the 60 KB storage cap, and a handful of those is a prompt whose
+    size the corpus decides rather than the retrieval.
+
+    Cutting inside a line loses a phrase across the boundary, which is a real cost and a
+    far smaller one than the alternative, and it is paid only by input that is already
+    pathological.
+    """
+    if len(text) <= budget:
+        return [text]
+    return [text[index:index + budget] for index in range(0, len(text), budget)]
+
+
 class SentenceSplitter:
     """Sentence-boundary splitter (port of the DataProcessing reference
     SentenceBasedChunker) with two fixes: budgets are in characters, matching every
@@ -72,7 +91,16 @@ class SentenceSplitter:
         self.overlap_sentences = max(int(overlap_sentences), 0)
 
     def split_text(self, text: str) -> List[str]:
-        sentences = [s.strip() for s in self._SENTENCE_RE.split((text or "").strip()) if s.strip()]
+        # A sentence longer than the whole budget is cut, not passed through: without
+        # this the strategy has no upper bound at all, and the legacy loader it is
+        # reachable from applies no byte cap either. Measured before this line, one
+        # 5,001-character sentence produced one 5,001-character chunk at max_chars 800.
+        sentences = [
+            piece
+            for raw in self._SENTENCE_RE.split((text or "").strip())
+            if raw.strip()
+            for piece in cut_to_budget(raw.strip(), self.max_chars)
+        ]
         if not sentences:
             return []
         chunks: List[str] = []
@@ -264,10 +292,31 @@ class DocumentLoader:
     def _render_rows(rows: List[List[str]]) -> str:
         return "\n".join(" | ".join(row) for row in rows if row)
 
+    def _fit_row(self, row: List[str], budget: int) -> List[List[str]]:
+        """One row as one or more rows, none of them rendering longer than `budget`.
+
+        A row larger than the budget used to ship whole, on the reasoning that cutting
+        mid-row is worse than a large chunk. It is not, and the asymmetry is the whole
+        lesson of the incident this work exists to fix: an over-long row made "budget"
+        advisory, so one cell holding a paragraph — a policy note written inside a grid,
+        a calendar row listing every event of a week — produced a leaf bounded by
+        nothing but `_MILVUS_TEXT_CAP_BYTES`, sixty thousand bytes. A handful of those
+        is a grading prompt whose size the CORPUS decides, which is exactly what commit
+        1794762 stopped happening by a different means.
+
+        Cut into continuation rows instead. That one row loses its columns, which is a
+        real loss and a smaller one than the row being unretrievable at a usable size —
+        and every other row in the table keeps its grid.
+        """
+        rendered = " | ".join(row)
+        if len(rendered) <= budget:
+            return [row]
+        return [[piece] for piece in self._cut_line_to_budget(rendered, budget)]
+
     def _split_table_row_groups(self, rows: List[List[str]], budget: int) -> List[List[List[str]]]:
         """Group table rows into budget-sized groups with the header row repeated per
-        group, so every group stays self-describing. A single row larger than the
-        budget still ships (with its header) rather than being cut mid-row."""
+        group, so every group stays self-describing — and so that no group exceeds the
+        budget, which is a property the rest of the pipeline now depends on."""
         rows = [row for row in rows if row]
         if not rows:
             return []
@@ -276,6 +325,22 @@ class DocumentLoader:
 
         header = rows[0]
         header_len = len(" | ".join(header))
+        if header_len + 1 >= budget:
+            # The header alone fills the budget, so there is no room to repeat it and
+            # therefore no grid left to preserve. Bounded lines are what remains, and
+            # bounded is the property that has to hold.
+            return [
+                [[piece]] for piece in self._line_passages(self._render_rows(rows), budget)
+            ]
+
+        # Every body row made to fit BESIDE a repeated header, so a group is the header
+        # plus at least one row and still within budget.
+        rows = [header] + [
+            fitted
+            for row in rows[1:]
+            for fitted in self._fit_row(row, budget - header_len - 1)
+        ]
+
         groups: List[List[List[str]]] = []
         current: List[List[str]] = [header]
         current_len = header_len
@@ -342,28 +407,179 @@ class DocumentLoader:
                 })
         return units
 
-    def _cap_figure_text(self, text: str) -> str:
-        """A figure surrogate, bounded, cut at a line boundary.
+    #: When a transcription is a grid rather than prose. Three is the fewest lines that
+    #: can be a header plus two rows, which is also the fewest worth repeating a header
+    #: for. Shorter runs of pipes are packed as ordinary lines.
+    _FIGURE_TABLE_MIN_ROWS = 3
 
-        `AssetDossier.render_surrogate` writes caption, description, transcription, tags
-        and answerable questions in that order and says why: "so that a truncation at any
-        downstream byte cap drops the least valuable content first". This is that
-        truncation, applied where the size is decided rather than left to the byte cap,
-        and cutting whole lines so a transcription never ends mid-row.
-        """
-        cap = self._level_3_size * self._FIGURE_LEAF_SIZE_MULTIPLIER
-        if len(text) <= cap:
-            return text
-        kept: List[str] = []
+    #: A markdown table's rule row (`---`, `:--`, `--:`). Formatting, not evidence, and
+    #: `_render_rows` re-renders the grid in this loader's own row form anyway.
+    _TABLE_RULE_CELL = re.compile(r"^:?-{3,}:?$")
+
+    #: One line, bounded. The hole the review found in the figure cap this replaces: it
+    #: cut at a LINE boundary and so let a first line of ANY length through whole — a
+    #: synthetic 10,000-character line passed unchanged, which makes the bound neither
+    #: lossless nor actually a bound. A transcription rendered as one enormous row is
+    #: exactly that shape, and it is how one image became one 60 KB chunk. Everything
+    #: downstream — the leaf budget, the merge window, the size of a prompt — is derived
+    #: from this holding for every line.
+    _cut_line_to_budget = staticmethod(cut_to_budget)
+
+    def _line_passages(self, text: str, budget: int) -> List[str]:
+        """`text` as whole lines packed into passages of at most `budget` characters."""
+        passages: List[str] = []
+        current: List[str] = []
         used = 0
-        for line in text.splitlines():
-            if kept and used + len(line) + 1 > cap:
-                break
-            kept.append(line)
-            used += len(line) + 1
-        # A single line longer than the whole budget still has to give: a transcription
-        # rendered as one enormous row is the case, and half of it beats none of it.
-        return "\n".join(kept) if kept else text[:cap]
+        for raw_line in (text or "").splitlines():
+            for line in self._cut_line_to_budget(raw_line, budget):
+                if not current and not line.strip():
+                    continue
+                if current and used + len(line) + 1 > budget:
+                    passages.append("\n".join(current))
+                    current, used = [], 0
+                current.append(line)
+                used += len(line) + (1 if used else 0)
+        if current:
+            passages.append("\n".join(current))
+        return [passage for passage in passages if passage.strip()]
+
+    @classmethod
+    def _table_row(cls, line: str) -> List[str]:
+        """A pipe-delimited line as cells, without the empty ends markdown leaves."""
+        return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+    @classmethod
+    def _is_rule_row(cls, row: List[str]) -> bool:
+        return bool(row) and all(cls._TABLE_RULE_CELL.match(cell or "") for cell in row)
+
+    def _transcription_passages(self, transcription: str, budget: int) -> List[str]:
+        """A transcription as passages, as ROW GROUPS wherever it is a table.
+
+        The extraction prompt asks for "EVERY piece of text visible in the image ... also
+        render the underlying values as a markdown table", so a transcription is often
+        part prose and part grid. Cut a grid at an arbitrary line and the header goes
+        with the first piece only, and a fee row without its column names answers
+        nothing — which is the same reason `_split_table_row_groups` exists for real
+        tables, so it is reused here rather than restated.
+
+        Runs rather than a whole-text verdict, so a transcription that is a paragraph
+        followed by a grid keeps both: nothing is dropped for not matching the shape of
+        its neighbours.
+        """
+        passages: List[str] = []
+        for is_table, lines in self._transcription_runs(transcription):
+            if is_table:
+                rows = [self._table_row(line) for line in lines]
+                rows = [row for row in rows if row and not self._is_rule_row(row)]
+                if rows:
+                    passages.extend(
+                        self._render_rows(group)
+                        for group in self._split_table_row_groups(rows, budget)
+                    )
+                continue
+            passages.extend(self._line_passages("\n".join(lines), budget))
+        return [passage for passage in passages if passage.strip()]
+
+    @classmethod
+    def _transcription_runs(cls, transcription: str) -> List[tuple]:
+        """Consecutive lines grouped into (is_table, lines) runs."""
+        runs: List[tuple] = []
+        for line in (transcription or "").splitlines():
+            if not line.strip():
+                continue
+            piped = "|" in line
+            if runs and runs[-1][0] == piped:
+                runs[-1][1].append(line)
+            else:
+                runs.append((piped, [line]))
+        # A short run of pipes is a sentence containing one, not a grid to regroup.
+        return [
+            (piped and len(lines) >= cls._FIGURE_TABLE_MIN_ROWS, lines)
+            for piped, lines in runs
+        ]
+
+    def _discovery_passages(self, description: str, summary: str, budget: int) -> List[str]:
+        """What the picture IS and what it can answer, with those two never separated.
+
+        `summary` is the `Tags:` and `Answers:` lines, and `Answers:` is made of question
+        phrasings — which is precisely what made the old orphan tail out-retrieve the
+        figure it came from. Packing description and summary as one block is not enough
+        to prevent that: a description longer than a leaf divides, and the summary then
+        lands in a passage of its own carrying nothing else. So the summary is ATTACHED
+        to the first piece of the description rather than flowed after it.
+
+        The one case that cannot be fixed here is a summary longer than a whole leaf on
+        its own, which leaves it nothing to be attached to. It is then packed like any
+        other text — still headed, so still identified, and no worse than the figure it
+        describes having no description at all.
+        """
+        if not (description or summary):
+            return []
+        reserved = len(summary) + 1
+        if summary and description and reserved < budget:
+            pieces = self._line_passages(description, budget - reserved)
+            if pieces:
+                return [f"{pieces[0]}\n{summary}", *pieces[1:]]
+        joined = "\n".join(part for part in (description, summary) if part)
+        return self._line_passages(joined, budget)
+
+    def _figure_passages(self, figure: Dict, content: str, budget: int) -> List[str]:
+        """One image's text as passages that each stand on their own.
+
+        A figure used to be one indivisible unit, capped at four leaves' worth of text.
+        Both halves of that were wrong in the same way: the cap threw evidence away at
+        INDEXING, where nothing can get it back, and being indivisible is what made the
+        cap necessary — a single unit larger than a level's budget is packed alone and
+        unshortened, which is how one transcribed calendar became one 60 KB chunk.
+
+        Divided instead, and divided so that the reason it was made indivisible cannot
+        return. Commit 8b4e367 found that a naively split surrogate leaves a tail of
+        `Tags:` and `Answers:` with no picture, no caption and no description, and that
+        the tail out-retrieves the figure it came from, because it is made of question
+        phrasings and carries no other subject to dilute the match. So:
+
+        - the header is repeated on EVERY passage, so no piece is ever unidentified;
+        - `Tags:` and `Answers:` stay attached to the description, in the passage whose
+          job is already to be matched against a question. There is exactly one of them,
+          and it is the whole discovery surface rather than an orphaned fragment of it;
+        - every passage keeps the same `asset_ids`, so the picture is cited and shown
+          once however many passages of it were retrieved.
+
+        Nothing is dropped: the transcription is divided, not cut, and the full
+        extraction is in the asset store regardless.
+        """
+        header = (figure.get("header") or "").strip()
+        description = (figure.get("description") or "").strip()
+        transcription = (figure.get("transcription") or "").strip()
+        summary = (figure.get("summary") or "").strip()
+        if not figure:
+            # A block written without the structured parts — an older caller, or a test
+            # constructing one by hand. The first line is the header by construction
+            # (`render_surrogate` writes it first when no section path is given) and the
+            # rest is treated as one block, which is bounded and identified even though
+            # it cannot tell description from transcription.
+            lines = (content or "").strip().splitlines()
+            header, rest = (lines[0].strip(), "\n".join(lines[1:])) if lines else ("", "")
+            description, transcription, summary = rest, "", ""
+
+        # Room for the header, which is repeated, plus the newline joining it on.
+        #
+        # The header is cut first, because it is the one input to this bound that is not
+        # itself bounded: a caption comes from a vision model as whatever string it
+        # returned, and only the heuristic extractor caps it. A caption as long as the
+        # leaf budget would otherwise leave a body budget of one character — every
+        # passage over the bound, and one image exploding into hundreds of chunks that
+        # all share an asset_id and compete for the final slots. Capped at a third, the
+        # same shape of rule `_apply_section_prefix` already applies to a section path.
+        header = header[:max(budget // 3, 1)].strip()
+        body_budget = max(budget - len(header) - 1, 1)
+
+        bodies = self._discovery_passages(description, summary, body_budget)
+        bodies.extend(self._transcription_passages(transcription, body_budget))
+
+        if not bodies:
+            return [header] if header else []
+        return [f"{header}\n{body}" if header else body for body in bodies]
 
     def _refine_units(
         self,
@@ -381,26 +597,23 @@ class DocumentLoader:
             if unit["kind"] == "table":
                 refined.extend(self._table_units(unit["rows"], table_budget, sections, page))
             elif unit["kind"] == "figure":
-                # A figure surrogate is refined by NOBODY. `_ATOMIC_LEAF_KINDS` already
-                # keeps it from sharing a leaf with a neighbouring paragraph, but being
-                # isolated is not the same as being whole: put through the splitter it
-                # came apart, and because `AssetDossier.render_surrogate` writes the
-                # caption first and the tags and answerable questions last, the tail
-                # piece was a chunk with no picture, no caption and no description —
-                # nothing but `Tags:` and `Answers: <four questions>`.
+                # A figure passage is refined by NOBODY, and this is still the rule that
+                # commit 8b4e367 wrote — only its reason has moved upstream.
                 #
-                # Those tails retrieved BETTER than the figures they came from, on both
-                # halves: they are made of question phrasings, so a question matches them
-                # closely, and having lost the description they carry no other subject to
-                # dilute the match. One uniform question came back with two of its five
-                # snippets being tails of figures whose actual content never made it into
-                # the same result.
+                # Put through a splitter, a surrogate came apart at whatever character
+                # the budget fell on, and because `render_surrogate` writes the caption
+                # first and `Tags:`/`Answers:` last, the tail was a chunk with no
+                # picture, no caption and no description. Those tails retrieved BETTER
+                # than the figures they came from — they are made of question phrasings,
+                # so a question matches them closely, and having lost the description
+                # they carry no other subject to dilute the match. One uniform question
+                # came back with two of five snippets being tails whose own figures never
+                # reached the same result.
                 #
-                # Whole is also what the surrogate was designed for: its docstring orders
-                # the fields most- to least-specific precisely "so that a truncation at
-                # any downstream byte cap drops the least valuable content first". Let
-                # `fit_utf8_bytes` do that at the cap, rather than a splitter doing it in
-                # the middle and keeping both halves.
+                # `_figure_passages` has now divided the surrogate by its FIELDS, under
+                # the leaf budget, repeating the header on each piece. Every passage
+                # arriving here is therefore already small enough and already identified,
+                # and re-splitting one could only undo both.
                 refined.append(dict(unit))
             else:
                 refined.extend(
@@ -416,26 +629,16 @@ class DocumentLoader:
         return refined
 
     # Unit kinds that must never share a leaf chunk with anything else: a table stays
-    # a pure grid, and a figure surrogate stays attached to exactly its own image
+    # a pure grid, and a figure passage stays attached to exactly its own image
     # rather than diluting an unrelated paragraph's embedding.
+    #
+    # Note what this does NOT bound. An atomic unit is given a window of its own
+    # regardless of size, so isolation was never a size limit — for as long as one image
+    # produced one unit, `_FIGURE_LEAF_SIZE_MULTIPLIER` had to exist to stop a
+    # transcribed calendar reaching 60 KB, and it bought that bound by destroying
+    # evidence at indexing. `_figure_passages` bounds the unit instead, so the cap is
+    # gone and the isolation is back to meaning only what it says.
     _ATOMIC_LEAF_KINDS = ("table", "figure")
-
-    # How much text one figure may bring into a leaf, as a multiple of the leaf size.
-    #
-    # Making a figure atomic removed the splitter, and with it the only size bound a
-    # figure leaf had: until this constant existed the sole remaining limit was
-    # `_MILVUS_TEXT_CAP_BYTES`, which is 60 KB — seventy-five times the leaf budget. That
-    # matters beyond storage, because `rag/grading_view.format_docs` hands the grader every
-    # retrieved chunk in full and nothing trims them: eight figures at that size is a
-    # prompt no grading model can answer inside its output window, and the call comes
-    # back `finish_reason: length` — a priced call turned into a parse failure, which is
-    # the failure `backend/llm.py` warns about from the other end.
-    #
-    # Generous rather than tight, because the whole point of keeping a figure together is
-    # that its transcription IS the evidence — a fee table read out of an image is only
-    # useful entire. Four leaves is roomy for a real infographic and still twenty times
-    # under the byte cap.
-    _FIGURE_LEAF_SIZE_MULTIPLIER = 4
 
     @staticmethod
     def _pack_units(
@@ -574,6 +777,15 @@ class DocumentLoader:
         and the second reads like its continuation."""
         if prev.get("type") != "text" or block.get("type") != "text":
             return False
+        # A figure's surrogate is not a paragraph, and it arrives here as a text block
+        # only so that stitching, section tagging and the hierarchy never had to learn
+        # about images. Stitching is the one stage that WRITES `content`, and a figure
+        # block is now indexed from the structured `figure` parts beside it — so text
+        # appended to its `content` would be indexed nowhere at all. It is also not text
+        # anyone wants joined: a transcription's last row is not a sentence that broke
+        # across a page.
+        if prev.get("asset_ids") or block.get("asset_ids"):
+            return False
         if block.get("page_number") != prev.get("_last_page", prev.get("page_number", 0)) + 1:
             return False
         prev_text = (prev.get("content") or "").rstrip()
@@ -674,25 +886,29 @@ class DocumentLoader:
                     # (an image's text surrogate); it packs as an atomic leaf.
                     asset_ids = tuple(block.get("asset_ids") or ())
                     if asset_ids:
-                        content = self._cap_figure_text(content)
-                        # Entered whole, and `_refine_units` then carries it through
-                        # every level untouched — so one image is one chunk, from here
-                        # to Milvus. Splitting even at this level would reintroduce the
-                        # orphan tail for a figure whose transcription is long enough:
-                        # the piece holding `Tags:` and `Answers:` retrieves better than
-                        # the figure itself, being made of question phrasings, so the
-                        # bug does not announce itself by losing recall.
+                        # Divided HERE, at the leaf budget, and then carried through
+                        # every level untouched. One image is several chunks and one
+                        # asset: each passage names the picture and points at it, so a
+                        # citation still resolves to one image and the answer still
+                        # shows it once.
                         #
-                        # Over-length is handled where the surrogate was built for it —
-                        # `fit_utf8_bytes` at the Milvus cap, dropping the tail that
-                        # `render_surrogate` deliberately ordered last.
-                        units.append({
-                            "kind": "figure",
-                            "text": content,
-                            "sections": sections,
-                            "page": page_number,
-                            "asset_ids": asset_ids,
-                        })
+                        # This is the step that bounds everything downstream. `_pack_units`
+                        # closes a window when the NEXT unit would overflow it, but a
+                        # single unit larger than the budget is packed alone and whole —
+                        # so for as long as one image was one unit, one image could be one
+                        # chunk of any size, and the size of the grading prompt was a
+                        # property of the corpus. Every unit under the leaf budget means
+                        # every chunk under its level's budget.
+                        for passage in self._figure_passages(
+                            block.get("figure") or {}, content, self._level_3_size
+                        ):
+                            units.append({
+                                "kind": "figure",
+                                "text": passage,
+                                "sections": sections,
+                                "page": page_number,
+                                "asset_ids": asset_ids,
+                            })
                     else:
                         units.extend(
                             self._text_units(

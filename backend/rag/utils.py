@@ -61,6 +61,16 @@ RETRIEVAL_CANDIDATE_MULTIPLIER = env_int(
 )
 RETRIEVAL_TOP_K = env_int("RETRIEVAL_TOP_K", _RETRIEVAL.top_k, minimum=1)
 RERANK_MIN_SCORE = env_float("RERANK_MIN_SCORE", _RETRIEVAL.rerank_min_score)
+# The largest text one retrieved chunk may carry — see RetrievalConfig. Leaves are
+# bounded by the chunking budgets; this is what bounds the merge path, and together they
+# are what make the size of a prompt a property of `top_k` rather than of the corpus.
+EVIDENCE_WINDOW_CHARS = env_int(
+    "RETRIEVAL_EVIDENCE_WINDOW_CHARS", _RETRIEVAL.evidence_window_chars, minimum=200
+)
+# How many of the final slots one image may occupy — see `_limit_per_asset`.
+MAX_CHUNKS_PER_ASSET = env_int(
+    "RETRIEVAL_MAX_CHUNKS_PER_ASSET", _RETRIEVAL.max_chunks_per_asset, minimum=1
+)
 
 # An explicit candidate pool size can come from either layer, and the retrieval trace
 # reports WHICH — "env" and "profile" are different operational stories when someone
@@ -95,6 +105,13 @@ RETRIEVAL_TRACE_FIELDS = (
     "auto_merge_figure_threshold",
     "auto_merge_replaced_chunks",
     "auto_merge_steps",
+    "evidence_window_chars",
+    # The largest chunk this retrieval actually returned. Reported so the invariant is
+    # VISIBLE rather than merely intended: a value above `evidence_window_chars` means
+    # something reached the model that the bound says cannot, and on a deployment the
+    # likeliest cause is an index built before figures were split — which a reindex, not
+    # a code change, is what fixes.
+    "max_chunk_chars",
     "rerank_enabled",
     "rerank_applied",
     "rerank_model",
@@ -103,6 +120,8 @@ RETRIEVAL_TRACE_FIELDS = (
     "rerank_timeout_seconds",
     "rerank_min_score",
     "post_rerank_count",
+    "max_chunks_per_asset",
+    "chunks_crowded_out",
     "post_threshold_count",
     "retrieval_empty",
 )
@@ -211,10 +230,177 @@ def _is_figure_chunk(doc: dict) -> bool:
     return doc.get("modality") == "figure" or bool(doc.get("asset_ids"))
 
 
+#: How a figure's text announces itself inside a chunk. Imported rather than spelled
+#: again: it is written by `AssetDossier.surrogate_parts` and read here, and two
+#: spellings would fail silently rather than loudly.
+from backend.assets.dossier import FIGURE_MARKER as _FIGURE_MARKER  # noqa: E402
+
+
+def _block_candidates(child_text: str) -> List[str]:
+    """The child as one block, and the child without the section prefix its level added.
+
+    A leaf is not reliably a substring of its own parent, and the reason is
+    `_apply_section_prefix`: it prepends a SYNTHESISED path ("Fees > Payment") that the
+    parent normally does not contain, because the parent holds those headings as
+    separate block lines. It is applied independently at each level and skipped when the
+    section title already appears near the top, so whether a given child is a substring
+    varies child by child.
+
+    Measured over the whole school corpus, 211 child/parent pairs: the text locates
+    51.7% of them exactly and dropping its first line a further 47.9%, leaving 0.5% to
+    the line strategy below and nothing unlocated. The second is not a fallback nobody
+    expects to run — it carries nearly half the corpus.
+    """
+    text = (child_text or "").strip()
+    if not text:
+        return []
+    lines = text.splitlines()
+    candidates = [text]
+    if len(lines) > 1:
+        candidates.append("\n".join(lines[1:]).strip())
+    return candidates
+
+
+def _parent_line_offsets(parent_text: str) -> Dict[str, List[int]]:
+    """Where each of the parent's lines begins, by the line's own text."""
+    offsets: Dict[str, List[int]] = defaultdict(list)
+    cursor = 0
+    for line in parent_text.split("\n"):
+        offsets[line.strip()].append(cursor)
+        cursor += len(line) + 1
+    return offsets
+
+
+def _match_spans(parent_text: str, child_text: str, budget: int) -> List[Tuple[int, int]]:
+    """Where a matched child sits inside its parent. Empty when it cannot be placed.
+
+    Two strategies, and the second one is why this is not a single `find`.
+
+    As one block, the child either appears once or it does not, and that settles it.
+
+    Line by line, it does not settle anything, because the lines this pipeline repeats
+    are the ones a child shares with its parent's other children:
+    `_split_table_row_groups` re-emits the header row in every group and
+    `_figure_passages` repeats the caption on every passage. Both are usually LONGER
+    than the data rows beneath them, so "anchor on the longest line" anchors on the one
+    line that says nothing about where the child is. A child holding rows 35 to 40 of a
+    fee table anchored at offset 0 and the window came back holding rows 1 to 34 — the
+    parent's own text, none of the child's, and a fee for the wrong year group. That is
+    item 26's failure arriving as a mechanism rather than a model error, and it is
+    silent: the chunk still reports the merge it did and a size inside the bound.
+
+    So the lines are used together rather than one being trusted. Each line that occurs
+    exactly once in the parent is an anchor; the anchors are then taken around their
+    median and any that sit further than a window away are dropped. A repeated header is
+    not an anchor at all, and a unique header pulling towards the top of the table is
+    outvoted by the rows that came with it.
+
+    Whole lines, not substrings: "figure line 2" is a substring of "figure line 20", so
+    substring uniqueness calls an ordinary line ambiguous and refuses a merge that is
+    perfectly locatable.
+    """
+    text = (child_text or "").strip()
+    if not text or not parent_text:
+        return []
+
+    for candidate in _block_candidates(text):
+        start = parent_text.find(candidate)
+        if start >= 0 and parent_text.find(candidate, start + 1) < 0:
+            return [(start, start + len(candidate))]
+
+    offsets = _parent_line_offsets(parent_text)
+    spans: List[Tuple[int, int]] = []
+    for line in (raw.strip() for raw in text.split("\n")):
+        found = offsets.get(line) or []
+        if line and len(found) == 1:
+            spans.append((found[0], found[0] + len(line)))
+    if not spans:
+        return []
+
+    starts = sorted(start for start, _ in spans)
+    median = starts[len(starts) // 2]
+    return [span for span in spans if abs(span[0] - median) <= budget]
+
+
+def _parent_window(parent_text: str, children: List[dict], budget: int) -> Optional[str]:
+    """The parent text around what actually matched, within `budget`. None if unlocatable.
+
+    Auto-merging replaces matched children with their whole parent, and it does that
+    BEFORE ranking, so the passage that earned the hit can end up anywhere inside a much
+    larger chunk. That was survivable while the grader was shown a prefix of each chunk
+    and merely expensive; it is the thing that decides the size of a prompt once the
+    grader reads chunks whole.
+
+    So the merge still gives a hit its surrounding context — which is what it is for —
+    but the context is chosen by where the match IS. Whole lines, grown outward from the
+    match in both directions until the budget is reached, because a line is a table row
+    here and half a row is worse than no row.
+
+    A parent already inside the budget comes back unchanged, which is the common case
+    and byte-identical to the old behaviour.
+
+    Returning None rather than the whole parent is deliberate: a merge that cannot find
+    its own match cannot claim to be sending the text around it, and the children it
+    would have replaced are the passages that actually matched and are leaf-bounded
+    already. Keeping them is both the safer evidence and the safer size.
+    """
+    text = parent_text or ""
+    if len(text) <= budget:
+        return text
+
+    spans = [
+        span
+        for child in children
+        for span in _match_spans(text, child.get("text", ""), budget)
+    ]
+    if not spans:
+        return None
+
+    lines = text.split("\n")
+    bounds: List[Tuple[int, int]] = []
+    cursor = 0
+    for line in lines:
+        bounds.append((cursor, cursor + len(line)))
+        cursor += len(line) + 1
+
+    core = [
+        index for index, (start, end) in enumerate(bounds)
+        if any(start < span_end and end > span_start for span_start, span_end in spans)
+    ]
+    if not core:
+        return None
+
+    first, last = core[0], core[-1]
+    size = sum(len(lines[index]) + 1 for index in range(first, last + 1)) - 1
+    if size > budget:
+        # The match itself is wider than the budget — a single enormous row is the case.
+        # Cut from the EARLIEST match rather than from whichever child came first in the
+        # candidate list, so a second match that sits before it is not cut away. A window
+        # of whole lines is not a bound on its own, because one line can be longer than
+        # the whole window.
+        return text[min(start for start, _ in spans):][:budget]
+
+    before, after = first - 1, last + 1
+    while True:
+        grew = False
+        if before >= 0 and size + len(lines[before]) + 1 <= budget:
+            size += len(lines[before]) + 1
+            before -= 1
+            grew = True
+        if after < len(lines) and size + len(lines[after]) + 1 <= budget:
+            size += len(lines[after]) + 1
+            after += 1
+            grew = True
+        if not grew:
+            break
+    return "\n".join(lines[before + 1:after])
+
+
 def _merge_to_parent_level(
     docs: List[dict],
     threshold: int = 2,
     figure_threshold: Optional[int] = None,
+    window_chars: Optional[int] = None,
 ) -> Tuple[List[dict], int]:
     groups: Dict[str, List[dict]] = defaultdict(list)
     for doc in docs:
@@ -239,12 +425,25 @@ def _merge_to_parent_level(
     parent_docs = _parent_chunks().get_documents_by_ids(merge_parent_ids)
     parent_map = {item.get("chunk_id", ""): item for item in parent_docs if item.get("chunk_id")}
 
+    budget = int(window_chars if window_chars is not None else EVIDENCE_WINDOW_CHARS)
+    windows: Dict[str, str] = {}
+    for parent_id, parent in parent_map.items():
+        window = _parent_window(parent.get("text", ""), groups.get(parent_id, []), budget)
+        if window is None:
+            logger.info(
+                "not merging %s: its matched children could not be located in it; "
+                "keeping the children, which matched and are already leaf-sized",
+                parent_id,
+            )
+            continue
+        windows[parent_id] = window
+
     merged_docs: List[dict] = []
     parent_slot: Dict[str, int] = {}
     merged_count = 0
     for doc in docs:
         parent_id = (doc.get("parent_chunk_id") or "").strip()
-        if not parent_id or parent_id not in parent_map:
+        if not parent_id or parent_id not in windows:
             merged_docs.append(doc)
             continue
 
@@ -255,6 +454,23 @@ def _merge_to_parent_level(
             continue
 
         parent_doc = dict(parent_map[parent_id])
+        window = windows[parent_id]
+        if window != parent_doc.get("text"):
+            parent_doc["text"] = window
+            parent_doc["merged_window_applied"] = True
+            # The picture may have been windowed out. A chunk that no longer contains a
+            # figure must not still claim one: the model is shown `[FIGURE n]` per asset
+            # the chunk carries, so keeping the id here attaches a picture to an answer
+            # written from two paragraphs that do not mention it.
+            #
+            # Presence of the marker, not which asset — a windowed parent holding one of
+            # its two figures still reports both, and that over-reports rather than
+            # inventing. Splitting images makes this path common rather than rare, since
+            # one image now spans several parents.
+            if _FIGURE_MARKER not in window:
+                parent_doc["asset_ids"] = []
+                if parent_doc.get("modality") == "figure":
+                    parent_doc["modality"] = "text"
         _merge_rank_score_into(parent_doc, doc)
         parent_doc["merged_from_children"] = True
         parent_doc["merged_child_count"] = len(groups[parent_id])
@@ -274,6 +490,7 @@ def _empty_merge_meta() -> Dict[str, Any]:
         "auto_merge_replaced_chunks": 0,
         "auto_merge_steps": 0,
         "post_merge_candidate_count": 0,
+        "evidence_window_chars": EVIDENCE_WINDOW_CHARS,
     }
 
 
@@ -321,8 +538,50 @@ def dedupe_documents(docs: List[dict]) -> List[dict]:
     return [by_key[key] for key in order]
 
 
+def _limit_per_asset(docs: List[dict], limit: int, top_k: int) -> Tuple[List[dict], int]:
+    """The best `top_k` chunks, with no single image taking more than `limit` of them.
+
+    A new risk, and one that only exists because images are now split: while an image was
+    one chunk it could occupy one slot, and now a transcribed calendar is ten passages
+    that all match a question about the calendar. Measured on the school corpus after
+    splitting, one image already took 5 of 8 slots on one question and 4 on another —
+    the rest of the corpus was crowded out of a set that is meant to be the whole
+    evidence for an answer.
+
+    Applied to the RANKED order and before the cut, so a capped chunk gives its slot to
+    the next best thing rather than shrinking the set. Per IMAGE, not per document: this
+    corpus is one document, so a per-document cap would be either a no-op or a gag, and
+    the thing that multiplies is passages of one picture.
+
+    A question genuinely answered by an image still gets `limit` of its passages, which
+    is the discovery passage plus the transcription around the match.
+    """
+    if limit <= 0:
+        return docs[:top_k], 0
+    kept: List[dict] = []
+    per_asset: Dict[str, int] = defaultdict(int)
+    dropped = 0
+    for doc in docs:
+        assets = [asset for asset in (doc.get("asset_ids") or []) if asset]
+        if assets and any(per_asset[asset] >= limit for asset in assets):
+            dropped += 1
+            continue
+        for asset in assets:
+            per_asset[asset] += 1
+        kept.append(doc)
+        if len(kept) >= top_k:
+            break
+    return kept, dropped
+
+
 @traceable(name="rerank_documents", run_type="tool")
 def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[dict], Dict[str, Any]]:
+    """The candidates in relevance order. ORDERED, not cut.
+
+    The cut moved to `_finalize_retrieval`, because the per-image cap has to be applied
+    to the ranking before the final slots are handed out — a cap applied after the cut
+    can only shrink the set, never let the next best chunk take the slot.
+    """
     docs_with_rank = [{**doc, "rrf_rank": i} for i, doc in enumerate(docs, 1)]
     meta: Dict[str, Any] = {
         "rerank_enabled": RERANK_ENABLED,
@@ -334,7 +593,7 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
         "candidate_count": len(docs_with_rank),
     }
     if not docs_with_rank or not meta["rerank_enabled"]:
-        return _sort_by_rank_score(docs_with_rank)[:top_k], meta
+        return _sort_by_rank_score(docs_with_rank), meta
 
     payload = {
         "model": RERANK_MODEL,
@@ -342,7 +601,10 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
         # Truncated: rerank providers bill per ~500-token document unit, and the
         # relevance signal sits in the opening span of a chunk anyway.
         "documents": [doc.get("text", "")[:RERANK_DOC_CHAR_LIMIT] for doc in docs_with_rank],
-        "top_n": min(top_k, len(docs_with_rank)),
+        # Every candidate, because the caller cuts. Scores and indices only come back
+        # (`return_documents` is false), so asking for the full ordering costs nothing
+        # and is what lets the per-image cap promote the next best chunk into a slot.
+        "top_n": len(docs_with_rank),
         "return_documents": False,
     }
 
@@ -359,7 +621,7 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
         )
         if response.status_code >= 400:
             meta["rerank_error"] = f"HTTP {response.status_code}: {response.text}"
-            return _sort_by_rank_score(docs_with_rank)[:top_k], meta
+            return _sort_by_rank_score(docs_with_rank), meta
 
         items = response.json().get("results", [])
         reranked = []
@@ -378,13 +640,13 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
             # which stayed true through every failure path below and misreported a
             # silent RRF fallback as a successful rerank.
             meta["rerank_applied"] = True
-            return reranked[:top_k], meta
+            return reranked, meta
 
         meta["rerank_error"] = "empty_rerank_results"
-        return _sort_by_rank_score(docs_with_rank)[:top_k], meta
+        return _sort_by_rank_score(docs_with_rank), meta
     except (requests.RequestException, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
         meta["rerank_error"] = str(e)
-        return _sort_by_rank_score(docs_with_rank)[:top_k], meta
+        return _sort_by_rank_score(docs_with_rank), meta
 
 
 class RewritePlan(BaseModel):
@@ -489,9 +751,22 @@ def _finalize_retrieval(
 ) -> Dict[str, Any]:
     """Production pipeline: recall candidates → Auto-merge → Rerank (top_k) → threshold filtering."""
     candidates, merge_meta = _auto_merge_candidates(retrieved)
-    reranked_docs, rerank_meta = _rerank_documents(query=query, docs=candidates, top_k=top_k)
-    post_rerank_count = len(reranked_docs)
-    final_docs = [d for d in reranked_docs if _meets_rerank_min_score(d)]
+    ranked, rerank_meta = _rerank_documents(query=query, docs=candidates, top_k=top_k)
+    selected, crowded_out = _limit_per_asset(ranked, MAX_CHUNKS_PER_ASSET, top_k)
+    post_rerank_count = len(selected)
+    final_docs = [d for d in selected if _meets_rerank_min_score(d)]
+    oversized = [d for d in final_docs if len(d.get("text") or "") > EVIDENCE_WINDOW_CHARS]
+    if oversized:
+        # Not trimmed here, and deliberately not: trimming at the edge is the grading
+        # view again, one stage later, and it would cost the answer the same evidence.
+        # The bound belongs where the size is made — chunking and the merge window — so
+        # this says so instead of hiding it.
+        logger.warning(
+            "%d retrieved chunk(s) exceed evidence_window_chars=%d (largest %d): the "
+            "index predates figure splitting, so reindex the affected documents",
+            len(oversized), EVIDENCE_WINDOW_CHARS,
+            max(len(d.get("text") or "") for d in oversized),
+        )
     meta = {
         **rerank_meta,
         **merge_meta,
@@ -504,8 +779,11 @@ def _finalize_retrieval(
         "recall_count": len(retrieved),
         "rerank_min_score": RERANK_MIN_SCORE,
         "post_rerank_count": post_rerank_count,
+        "max_chunks_per_asset": MAX_CHUNKS_PER_ASSET,
+        "chunks_crowded_out": crowded_out,
         "post_threshold_count": len(final_docs),
         "retrieval_empty": len(final_docs) == 0,
+        "max_chunk_chars": max((len(d.get("text") or "") for d in final_docs), default=0),
     }
     return {"docs": final_docs, "meta": meta}
 

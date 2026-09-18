@@ -67,6 +67,10 @@ def load_pipeline(
 
     fake_utils = types.ModuleType("backend.rag.utils")
     fake_utils.RETRIEVAL_TOP_K = 5
+    # Wide enough that the evidence budget binds on the CHUNK COUNT here and never on
+    # the size: these fixtures use one-line documents, and a size bound firing on them
+    # would make every graph assertion depend on how long a fixture's text happens to be.
+    fake_utils.EVIDENCE_WINDOW_CHARS = 2600
     fake_utils.retrieve_documents = retrieve_documents
     fake_utils.rewrite_query_once = rewrite_query_once or (lambda query: {
         "rewrite_method": "step_back",

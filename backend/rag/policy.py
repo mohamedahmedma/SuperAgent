@@ -249,12 +249,58 @@ def _answer_from_what_there_is(report, ask_allowed: bool, ask_reason: str, conte
     return "no_knowledge", context
 
 
+def select_evidence(
+    docs: Sequence[dict],
+    *,
+    max_chunks: int,
+    max_chars: int,
+) -> Tuple[List[dict], str]:
+    """The evidence this turn will use, chosen BEFORE anything judges it.
+
+    The bug this exists for: the grader judged one set and the answer received another.
+    A rewrite adds its pass to the first one, so the grader could be handed up to twice
+    `top_k` chunks, approve all of them, and then have the answer capped back to `top_k`
+    afterwards — evidence that an assessment had positively approved, dropped by a count.
+    The trace then read the count AFTER the cap, so it always said "4 of 4" and the loss
+    was invisible in the one place that would have shown it.
+
+    Selecting first makes the two the same set by construction. The grader approves
+    exactly what the answer receives, `select_context_indices` can then only narrow on a
+    judgement, and nothing downstream needs a ceiling at all.
+
+    It is also the last piece of the size bound. Each chunk is at most the evidence
+    window, so `max_chunks` of them is at most `max_chars` — which makes the grading
+    prompt a property of the retrieval on the rewrite path too, and not only on the
+    ordinary one.
+
+    Ranked order, so what is dropped is what ranked worst. Never empty when anything was
+    retrieved: one over-long chunk still goes, because a turn with evidence must not be
+    turned into a turn without any.
+    """
+    if not docs:
+        return [], "nothing retrieved"
+
+    kept: List[dict] = []
+    used = 0
+    for doc in docs:
+        size = len(str(doc.get("text") or ""))
+        if kept and (len(kept) >= max_chunks or used + size > max_chars):
+            break
+        kept.append(doc)
+        used += size
+
+    if len(kept) == len(docs):
+        return kept, f"all {len(docs)} retrieved chunk(s) fit the evidence budget"
+    return kept, (
+        f"{len(kept)} of {len(docs)} chunks, under a budget of "
+        f"{max_chunks} chunks / {max_chars} chars"
+    )
+
+
 def select_context_indices(
     report: EvidenceReport,
     docs: Sequence[dict],
     config,
-    *,
-    answer_ceiling: Optional[int] = None,
 ) -> Tuple[Optional[List[int]], str]:
     """Which chunks (1-based) to send to the answer prompt, or None to send all.
 
@@ -266,11 +312,13 @@ def select_context_indices(
     An empty `supported_indices()` means "nobody judged chunks individually", which must
     read as unknown, never as "none of them".
 
-    `answer_ceiling` is the one bound that does not need a judgement: however the doc set
-    grew, one answer never needs more chunks than a single retrieval would have returned.
-    It only ever engages after a rewrite merged two passes, and it keeps the best-ranked
-    prefix — the grader still judged the whole union, so nothing was hidden from the
-    decision, only from the prompt.
+    There is no ceiling here any more. It used to cap the kept set at `top_k` on the
+    grounds that one answer never needs more chunks than a single retrieval returns —
+    true, and applied in the wrong place: after the grade, so it could drop chunks an
+    assessment had approved, and it reported its own count after its own slice. The
+    budget now applies to what is GRADED (`select_evidence`), so by the time anything
+    gets here the set is already the size the answer can take, and the only thing left
+    that may narrow it is a judgement about the chunks themselves.
     """
     if getattr(config, "context_selection_mode", "off") != "adaptive":
         return None, f"context_selection_mode={getattr(config, 'context_selection_mode', 'off')}"
@@ -281,20 +329,9 @@ def select_context_indices(
             f"{CONTEXT_TRIM_MIN_CERTAINTY.name.lower()} required to trim"
         )
 
-    ceiling = int(answer_ceiling) if answer_ceiling else 0
-
     supported = report.supported_indices()
     if not supported:
-        if ceiling and len(docs) > ceiling:
-            return (
-                list(range(1, ceiling + 1)),
-                f"no per-chunk judgement; kept the top {ceiling} of {len(docs)} by rank",
-            )
         return None, "no per-chunk judgement available"
-
-    if ceiling and len(supported) > ceiling:
-        supported = supported[:ceiling]
-        return supported, f"{len(supported)} chunks carried the evidence, capped at {ceiling}"
 
     floor = max(1, int(getattr(config, "context_min_chunks", 1)))
     if len(supported) < floor:

@@ -40,13 +40,24 @@ def _template(name: str) -> str:
     return (TEMPLATES / name).read_text(encoding="utf-8")
 
 
-class AFigureSurrogateIsNeverCutInHalf(unittest.TestCase):
-    """`_refine_units` re-splits what a coarser level produced. A figure must not be in
-    it: `AssetDossier.render_surrogate` writes caption, description and transcription
-    first and `Tags:`/`Answers:` last, so a split leaves a tail with no picture, no
-    caption and no description — and that tail out-retrieves the figure it came from,
-    because a question matches four question phrasings more closely than it matches an
-    infographic's contents."""
+class AFigureIsDividedButNeverOrphaned(unittest.TestCase):
+    """A figure's text is divided into leaf-sized passages, and no passage is anonymous.
+
+    This class used to assert the opposite — that a surrogate is ONE indivisible unit —
+    and the reason it gave is still true and still enforced here. `render_surrogate`
+    writes caption, description and transcription first and `Tags:`/`Answers:` last, so
+    cutting it at whatever character a budget falls on leaves a tail with no picture, no
+    caption and no description. That tail out-retrieves the figure it came from, because
+    a question matches four question phrasings more closely than it matches an
+    infographic's contents.
+
+    Indivisible was one way to prevent that, and it cost the other half: a unit larger
+    than a level's budget is packed alone and unshortened, so one image could be one
+    chunk of any size, and the cap that held it back destroyed evidence at indexing.
+    `_figure_passages` divides by FIELD instead of by character — the header on every
+    passage, `Tags:`/`Answers:` kept with the description they belong to — so every piece
+    is identified and every piece is bounded.
+    """
 
     def setUp(self):
         self.loader = DocumentLoader()
@@ -55,93 +66,178 @@ class AFigureSurrogateIsNeverCutInHalf(unittest.TestCase):
         return {"kind": "figure", "text": text, "sections": ("Handbook", "Uniform"),
                 "page": 0, "asset_ids": ("kb.docx::p0::imgabc123456789",)}
 
-    def _surrogate(self) -> str:
-        return "\n".join([
-            "[Figure] Day Wear: Secondary School - Girls",
-            "An infographic illustrating the school uniform. " * 30,
-            "White Shirt (long sleeves) Navy Blue Blazer Navy Blue Pleated Skirt " * 10,
-            "Tags: School Uniform, Girls, Secondary, Day Wear, Blazer",
-            "Answers: What is the uniform for secondary girls? What colour is the blazer?",
-        ])
+    def _parts(self, transcription: str = "") -> dict:
+        return {
+            "header": "[Figure] Day Wear: Secondary School - Girls",
+            "description": "An infographic illustrating the school uniform. " * 30,
+            "transcription": transcription or (
+                "White Shirt (long sleeves) Navy Blue Blazer Navy Blue Pleated Skirt " * 10
+            ),
+            "summary": (
+                "Tags: School Uniform, Girls, Secondary, Day Wear, Blazer\n"
+                "Answers: What is the uniform for secondary girls? What colour is the blazer?"
+            ),
+        }
 
-    def test_a_long_surrogate_survives_refinement_as_one_unit(self):
-        surrogate = self._surrogate()
+    def _blocks(self, parts: dict, asset_id: str = "kb.docx::p0::imgabc123456789") -> list:
+        return [
+            {"type": "heading", "content": "School uniform", "level": 3, "page_number": 0},
+            {"type": "text", "content": "the joined surrogate", "page_number": 0,
+             "asset_ids": [asset_id], "figure": parts},
+        ]
+
+    def _figure_units(self, parts: dict) -> list:
+        return [unit for unit in self.loader._blocks_to_units(self._blocks(parts))
+                if unit["kind"] == "figure"]
+
+    def test_every_passage_names_the_picture(self):
+        """The orphan tail, stated as the rule that prevents it."""
+        for unit in self._figure_units(self._parts()):
+            self.assertTrue(
+                unit["text"].startswith("[Figure] Day Wear: Secondary School - Girls"),
+                f"a passage with no caption was produced: {unit['text'][:80]!r}",
+            )
+
+    def test_the_question_phrasings_never_stand_alone(self):
+        """`Answers:` is what made the tail win: it is made of question phrasings, so a
+        question matches it closely and nothing else in the piece dilutes the match. It
+        stays in the passage that also carries the description — the one whose job is
+        already to be matched against a question."""
+        answering = [unit["text"] for unit in self._figure_units(self._parts())
+                     if "Answers:" in unit["text"]]
+        self.assertEqual(1, len(answering))
+        self.assertIn("An infographic illustrating", answering[0])
+
+    def test_a_passage_is_never_re_split_by_refinement(self):
+        """`_refine_units` re-splits what a coarser level produced. A figure passage is
+        already leaf-sized and already headed, so re-splitting could only undo both."""
+        passage = self._figure_units(self._parts())[0]["text"]
         refined = self.loader._refine_units(
-            [self._figure_unit(surrogate)], self.loader._splitter_level_3, 600
+            [self._figure_unit(passage)], self.loader._splitter_level_3, 600
         )
         self.assertEqual(1, len(refined))
-        self.assertEqual(surrogate, refined[0]["text"])
+        self.assertEqual(passage, refined[0]["text"])
 
-    def test_the_tail_never_becomes_a_unit_of_its_own(self):
-        refined = self.loader._refine_units(
-            [self._figure_unit(self._surrogate())], self.loader._splitter_level_3, 600
-        )
-        for unit in refined:
-            self.assertIn("[Figure]", unit["text"], "a piece with no caption was produced")
+    def test_every_passage_keeps_the_asset_reference(self):
+        """One image, several passages, one picture to cite and show."""
+        units = self._figure_units(self._parts())
+        self.assertGreater(len(units), 1, "this fixture is meant to divide")
+        for unit in units:
+            self.assertEqual(("kb.docx::p0::imgabc123456789",), unit["asset_ids"])
+            self.assertEqual("figure", unit["kind"])
 
-    def test_the_asset_reference_survives(self):
-        refined = self.loader._refine_units(
-            [self._figure_unit(self._surrogate())], self.loader._splitter_level_3, 600
-        )
-        self.assertEqual(("kb.docx::p0::imgabc123456789",), refined[0]["asset_ids"])
-        self.assertEqual("figure", refined[0]["kind"])
+    def test_a_figure_is_bounded_by_the_leaf_budget(self):
+        """What `_FIGURE_LEAF_SIZE_MULTIPLIER` used to buy by throwing evidence away.
 
-    def test_a_surrogate_enters_the_unit_stream_whole(self):
-        """The other half of the invariant. `_refine_units` carries a figure through
-        untouched, which is worth nothing if the unit it was handed had already been cut
-        — and the level-1 splitter would cut one whose transcription is long enough.
-
-        Sized under the figure cap, because that is the case this asserts: a surrogate
-        over it is trimmed rather than divided, which the cap tests below cover."""
-        long_surrogate = self._surrogate() + ("\nNavy Blue Trousers " * 40)
-        blocks = [
-            {"type": "heading", "content": "School uniform", "level": 3, "page_number": 0},
-            {"type": "text", "content": long_surrogate, "page_number": 0,
-             "asset_ids": ["kb.docx::p0::imgabc123456789"]},
-        ]
-        figures = [unit for unit in self.loader._blocks_to_units(blocks)
-                   if unit["kind"] == "figure"]
-        self.assertEqual(1, len(figures))
-        self.assertEqual(long_surrogate.strip(), figures[0]["text"])
-
-    def test_a_figure_is_bounded_even_though_it_is_never_split(self):
-        """Atomic is not the same as unlimited, and conflating them cost a production
-        turn. Removing the splitter left `_MILVUS_TEXT_CAP_BYTES` — 60 KB, seventy-five
-        times the leaf budget — as the only bound. `grading_view.format_docs` hands the
-        grader every retrieved chunk in full, so a handful of figures that size is a
-        prompt the grading model cannot answer inside its output window, and the call
-        returns `finish_reason: length`: a priced call turned into a parse failure."""
-        cap = self.loader._level_3_size * self.loader._FIGURE_LEAF_SIZE_MULTIPLIER
-        huge = "[Figure] Day Wear: Secondary School - Girls\n" + "\n".join(
+        Removing the splitter had left `_MILVUS_TEXT_CAP_BYTES` — 60 KB, seventy-five
+        times the leaf budget — as the only bound, and the grader is handed every
+        retrieved chunk in full: a handful of figures that size is a prompt the grading
+        model cannot answer inside its output window, and the call returns
+        `finish_reason: length`, a priced call turned into a parse failure."""
+        calendar = self._parts("\n".join(
             f"Row {i} | White Shirt | Navy Blue Blazer | Navy Blue Pleated Skirt"
             for i in range(400)
-        )
-        blocks = [
-            {"type": "heading", "content": "School uniform", "level": 3, "page_number": 0},
-            {"type": "text", "content": huge, "page_number": 0,
-             "asset_ids": ["kb.docx::p0::imgdeadbeef1234"]},
-        ]
-        figures = [unit for unit in self.loader._blocks_to_units(blocks)
-                   if unit["kind"] == "figure"]
+        ))
+        units = self._figure_units(calendar)
 
-        self.assertEqual(1, len(figures), "still one chunk per image")
-        self.assertLessEqual(len(figures[0]["text"]), cap)
-        self.assertLess(cap, self.loader._MILVUS_TEXT_CAP_BYTES)
+        self.assertGreater(len(units), 1)
+        for unit in units:
+            self.assertLessEqual(len(unit["text"]), self.loader._level_3_size)
 
-    def test_the_cap_keeps_the_caption_and_cuts_whole_lines(self):
-        """`render_surrogate` orders its fields so a truncation drops the least valuable
-        content first. Cutting mid-line would end a transcribed table mid-row."""
-        huge = "[Figure] Day Wear: Secondary School - Girls\n" + "\n".join(
+    def test_nothing_is_dropped_when_a_figure_is_divided(self):
+        """The half the cap got wrong. A transcription is divided, not truncated: the
+        last row of a 400-row calendar is as indexed as the first."""
+        calendar = self._parts("\n".join(
             f"Row {i} | White Shirt | Navy Blue Blazer" for i in range(400)
+        ))
+        indexed = "\n".join(unit["text"] for unit in self._figure_units(calendar))
+        self.assertIn("Row 0 ", indexed)
+        self.assertIn("Row 399 ", indexed)
+
+    def test_a_transcribed_table_repeats_its_header_in_every_group(self):
+        """A fee row without its column names answers nothing, which is why real tables
+        already group this way — `_split_table_row_groups`, reused rather than restated."""
+        fees = self._parts("\n".join(
+            ["| Year | Egyptian | International |", "|---|---|---|"]
+            + [f"| Y{i:02d} | {90 + i},000 EGP | {100 + i},000 EGP |" for i in range(60)]
+        ))
+        groups = [unit["text"] for unit in self._figure_units(fees)
+                  if "EGP" in unit["text"]]
+        self.assertGreater(len(groups), 1, "this fixture is meant to divide")
+        for group in groups:
+            self.assertIn("Year | Egyptian | International", group)
+
+    def test_a_single_enormous_line_is_cut_rather_than_passed_through(self):
+        """The hole the review found in the cap this replaces: it cut at a LINE boundary,
+        so a first line of any length went through whole — a synthetic 10,000-character
+        line passed unchanged, which makes the bound neither lossless nor a bound."""
+        # A character that appears nowhere in the header, description or summary, so
+        # counting it counts the transcription and not the repeated caption.
+        one_line = self._parts("q" * 10_000)
+        units = self._figure_units(one_line)
+
+        for unit in units:
+            self.assertLessEqual(len(unit["text"]), self.loader._level_3_size)
+        self.assertEqual(
+            10_000,
+            sum(unit["text"].count("q") for unit in units),
+            "cutting the line must bound it, not lose it",
         )
-        capped = self.loader._cap_figure_text(huge)
 
-        self.assertTrue(capped.startswith("[Figure] Day Wear: Secondary School - Girls"))
-        self.assertIn(capped.splitlines()[-1], huge.splitlines())
+    def test_an_enormous_caption_cannot_starve_the_passage_budget(self):
+        """The one input to this bound that is not itself bounded: a caption is whatever
+        string the vision model returned, and only the heuristic extractor caps it.
+        Uncut, it leaves a body budget of one character — every passage over the bound,
+        and one image exploding into hundreds of chunks that all share an asset_id and
+        compete for the same final slots."""
+        shouty = self._parts()
+        shouty["header"] = "[Figure] " + ("A very long caption indeed. " * 80)
+        units = self._figure_units(shouty)
 
-    def test_a_figure_within_the_cap_is_untouched(self):
-        surrogate = self._surrogate()
-        self.assertEqual(surrogate, self.loader._cap_figure_text(surrogate))
+        self.assertLess(len(units), 20, "the passage count must not explode")
+        for unit in units:
+            self.assertLessEqual(len(unit["text"]), self.loader._level_3_size)
+
+    def test_a_block_without_the_structured_parts_is_still_bounded_and_headed(self):
+        """An older caller, or a block built by hand, carries only the joined surrogate.
+        Its fields cannot be told apart — but the first line is the header by
+        construction, and both properties this class exists for still hold."""
+        flat = "[Figure] Fee schedule\n" + "\n".join(
+            f"Grade {i} | 88,000 EGP" for i in range(300)
+        )
+        blocks = [{"type": "text", "content": flat, "page_number": 0,
+                   "asset_ids": ["kb.docx::p0::imgdeadbeef1234"]}]
+        units = [unit for unit in self.loader._blocks_to_units(blocks)
+                 if unit["kind"] == "figure"]
+
+        self.assertGreater(len(units), 1)
+        for unit in units:
+            self.assertTrue(unit["text"].startswith("[Figure] Fee schedule"))
+            self.assertLessEqual(len(unit["text"]), self.loader._level_3_size)
+
+    def test_the_whole_hierarchy_stays_within_its_level_budgets(self):
+        """What bounding the UNIT buys, and the reason step 3 of this phase is safe.
+
+        `_pack_units` closes a window when the NEXT unit would overflow it, but a single
+        unit larger than the budget is packed alone and whole. So the level budgets bound
+        a chunk only for as long as every unit is smaller than one — which is exactly
+        what a figure was not."""
+        calendar = self._parts("\n".join(
+            f"Row {i} | White Shirt | Navy Blue Blazer" for i in range(400)
+        ))
+        chunks = self.loader._hierarchy_chunks(
+            self.loader._blocks_to_units(self._blocks(calendar)),
+            {"filename": "kb.docx", "file_path": "kb.docx", "file_type": "Word"},
+        )
+        budgets = {1: self.loader._level_1_size, 2: self.loader._level_2_size,
+                   3: self.loader._level_3_size}
+        # The section prefix is prepended after packing, so it is allowed on top of the
+        # budget; it is itself capped at 150 characters plus its newline.
+        for chunk in chunks:
+            self.assertLessEqual(
+                len(chunk["text"]), budgets[chunk["chunk_level"]] + 151,
+                f"L{chunk['chunk_level']} chunk over budget: {len(chunk['text'])}",
+            )
 
     def test_ordinary_prose_is_still_split(self):
         """The exemption is for figures, not a quiet end to leaf chunking."""

@@ -22,7 +22,12 @@ from backend.rag.evidence import (
     build_ladder,
     parse_certainty,
 )
-from backend.rag.policy import can_ask_human, decide_route, select_context_indices
+from backend.rag.policy import (
+    can_ask_human,
+    decide_route,
+    select_context_indices,
+    select_evidence,
+)
 
 
 def rag_config(**overrides):
@@ -600,3 +605,64 @@ class HumanInTheLoopTests(unittest.TestCase):
         state = HitlResumeState(question="q", route="clarify",
                                 retrieval_status="needs_clarification", hitl_rounds=1)
         self.assertEqual(1, state.model_dump()["hitl_rounds"])
+
+
+class EvidenceIsChosenBeforeItIsJudgedTests(unittest.TestCase):
+    """The grader must approve exactly what the answer receives.
+
+    It did not. A rewrite ADDS its pass to the first one rather than replacing it, so the
+    grader could be handed up to twice `top_k` chunks and approve all of them, and the
+    answer was then capped back to `top_k` afterwards — evidence a judgement had
+    positively approved, dropped by a count. The trace read that count after the cap, so
+    it reported "4 of 4" however many had been dropped, and the loss was invisible in the
+    one place built to show it.
+    """
+
+    @staticmethod
+    def _docs(count, size=100):
+        return [{"text": f"chunk {i} " + "x" * size, "chunk_id": f"c{i}"}
+                for i in range(count)]
+
+    def test_the_graded_set_is_the_answer_set(self):
+        kept, reason = select_evidence(self._docs(16), max_chunks=8, max_chars=100_000)
+        self.assertEqual(8, len(kept))
+        self.assertIn("8 of 16", reason)
+
+    def test_a_set_that_fits_is_untouched(self):
+        docs = self._docs(5)
+        kept, reason = select_evidence(docs, max_chunks=8, max_chars=100_000)
+        self.assertEqual(docs, kept)
+        self.assertIn("fit the evidence budget", reason)
+
+    def test_the_budget_is_a_size_as_well_as_a_count(self):
+        """What makes the grading prompt bounded on the rewrite path too: eight chunks of
+        whatever size is not a bound, and eight chunks under a size budget is."""
+        kept, _ = select_evidence(self._docs(8, size=1000), max_chunks=8, max_chars=2_500)
+        self.assertLess(len(kept), 8)
+        self.assertLessEqual(sum(len(d["text"]) for d in kept), 2_500)
+
+    def test_ranked_order_decides_what_goes(self):
+        docs = self._docs(10)
+        kept, _ = select_evidence(docs, max_chunks=3, max_chars=100_000)
+        self.assertEqual([d["chunk_id"] for d in docs[:3]], [d["chunk_id"] for d in kept])
+
+    def test_one_oversized_chunk_still_travels(self):
+        """A turn that retrieved evidence must not become a turn with none."""
+        kept, _ = select_evidence(self._docs(3, size=9_000), max_chunks=8, max_chars=1_000)
+        self.assertEqual(1, len(kept))
+
+    def test_nothing_retrieved_stays_nothing(self):
+        self.assertEqual(([], "nothing retrieved"), select_evidence([], max_chunks=8, max_chars=10))
+
+    def test_the_answer_ceiling_is_gone_from_the_post_grade_trim(self):
+        """`select_context_indices` may now narrow only on a JUDGEMENT. Eight approved
+        chunks stay eight, where the ceiling used to cut them to four."""
+        docs = [doc()] * 8
+        report = report_at(
+            Certainty.HIGH,
+            chunks=[ChunkAssessment(index=i, supported=True) for i in range(1, 9)],
+        )
+        keep, _ = select_context_indices(
+            report, docs, rag_config(context_selection_mode="adaptive")
+        )
+        self.assertIsNone(keep, "every chunk carried evidence, so nothing is dropped")

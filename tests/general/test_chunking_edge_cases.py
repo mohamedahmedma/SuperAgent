@@ -57,17 +57,42 @@ class TableSplitBoundaryTests(unittest.TestCase):
         self.assertGreater(len(groups), 1)
 
     def test_oversized_header_only_table_is_not_lost(self):
-        # 1-row table whose render exceeds the budget: must still produce a group,
-        # never silently drop the data.
+        # 1-row table whose render exceeds the budget: must still produce groups, never
+        # silently drop the data. It used to come back as the single whole row; it is now
+        # cut to the budget, because a header that fills the budget leaves no room to
+        # repeat it and so no grid to preserve.
         rows = [["A" * 50, "B" * 50]]
         groups = self.loader._split_table_row_groups(rows, budget=60)
-        self.assertEqual([rows], groups)
 
-    def test_single_body_row_larger_than_budget_ships_with_header(self):
+        self.assertTrue(groups)
+        rendered = "".join(self.loader._render_rows(group) for group in groups)
+        self.assertEqual(50, rendered.count("A"))
+        self.assertEqual(50, rendered.count("B"))
+        for group in groups:
+            self.assertLessEqual(len(self.loader._render_rows(group)), 60)
+
+    def test_a_body_row_larger_than_the_budget_is_cut_rather_than_shipped_whole(self):
+        """This used to ship whole, with its header, on the reasoning that cutting
+        mid-row is worse than a large chunk.
+
+        It is not, and that asymmetry is what this phase exists to correct. An over-long
+        row made the budget advisory: one cell holding a paragraph produced a leaf
+        bounded only by `_MILVUS_TEXT_CAP_BYTES`, sixty thousand bytes, and a handful of
+        those is a grading prompt sized by the corpus — the failure commit 1794762
+        stopped by truncating the grader's view instead. Measured end to end before this
+        change, a 40-row fee table with one paragraph-sized cell produced a 3,652-character
+        leaf; after it, 800.
+
+        The row loses its columns. Every other row keeps them, and nothing is lost."""
         rows = [["Grade", "Fee"], ["X" * 100, "Y" * 100]]
         groups = self.loader._split_table_row_groups(rows, budget=50)
-        self.assertEqual(1, len(groups))
-        self.assertEqual(rows, groups[0])
+
+        for group in groups:
+            self.assertLessEqual(len(self.loader._render_rows(group)), 50)
+            self.assertEqual(["Grade", "Fee"], group[0], "every group keeps its header")
+        rendered = "".join(self.loader._render_rows(group) for group in groups)
+        self.assertEqual(100, rendered.count("X"))
+        self.assertEqual(100, rendered.count("Y"))
 
     def test_empty_and_all_empty_rows_yield_no_groups(self):
         self.assertEqual([], self.loader._split_table_row_groups([], budget=100))

@@ -81,6 +81,7 @@ def _fake_rag_utils():
     fake_rag.__path__ = []
     fake_utils = types.ModuleType("backend.rag.utils")
     fake_utils.RETRIEVAL_TOP_K = 5
+    fake_utils.EVIDENCE_WINDOW_CHARS = 2600
     fake_utils.retrieve_documents = lambda *a, **k: {"docs": [], "meta": {}}
     fake_utils.rewrite_query_once = lambda query: {}
     fake_utils.dedupe_documents = lambda docs: docs
