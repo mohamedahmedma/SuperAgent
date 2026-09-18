@@ -35,24 +35,19 @@ Companion documents:
 
 ## Where things stand
 
-| Branch | State | What is on it |
-|---|---|---|
-| `main` | merged through PR #100 | School is the only profile; no persistent note; no products tool |
-| `eval/school-retrieval-dataset` | 2 commits, **not pushed** | Phase 0: the labelled Arabic dataset, the stage-by-stage retrieval eval, tracing off in tests |
-| `rag/grader-optional` | 3 commits on top of the above, **not pushed, parked** | `grading_mode: never` made real, the answer-level eval, and the grader-on/off measurement |
+`main` carries Phase 0 (PR #101): the labelled Arabic dataset, the stage-by-stage retrieval
+eval, and tracing off in tests. Branch Phase 1 from it.
 
-**Do this first:** push `eval/school-retrieval-dataset`, open its PR, merge it. Every later
-phase is judged with the evals it carries, so it belongs on `main` before anything else
-lands. `rag/grader-optional` stays parked by the owner's decision — the grader question is
-deferred, not settled (see Phase 2).
+**The grader is out of scope.** Whether it stays, shrinks, or goes is decided *after* these
+fixes land, on the numbers they produce — nothing in this plan depends on the answer, and no
+phase here changes it. A branch called `rag/grader-optional` exists from that earlier
+investigation; leave it alone.
 
 ### The local environment a session inherits
 
 - **The knowledge base is `Aurexis_Knowledge_Base_Mock_Egypt.docx`** — an English school KB,
   gitignored, at the repo root. Local Milvus holds only this: 153 leaves (139 text, 5 table,
-  9 figure), 50 parents. BHCR and GS1 were removed on 2026-09-18.
-  Re-ingest mirrors `backend/api/routes/documents.py::upload_document`: remove, load, upsert
-  parents, write leaves.
+  9 figure), 50 parents.
 - **The provider is Groq** (`LLM_PROVIDER=groq` in `.env`). Together's
   `openai/gpt-oss-20b` returns `400 model_not_available` — it is no longer serverless — so
   the previous setting is dead. Vision is pinned to Together explicitly on the generic
@@ -102,9 +97,8 @@ the local `.env` overrides it.
 the Aurexis KB and scored each question at four depths of the same retrieval. The images are
 fine on this corpus; the grading view is the biggest single loss. See below.
 
-**5. The grader question was opened, measured, and parked.** Removing the grader looked
-compelling (it sees less than the answer model, and costs the turn's dominant call), but a
-live comparison found the failure that matters is unaffected by it. Deferred by the owner.
+**5. The grader question was deferred.** It is a decision to take on the numbers these
+fixes produce, not before them. The grader stays on and unchanged meanwhile.
 
 ---
 
@@ -132,44 +126,34 @@ live comparison found the failure that matters is unaffected by it. Deferred by 
   4.7× the latency for 1.6× the throughput, because the embedding pass is local and CPU-bound.
 - Prompt sizes: grader p50 3,662 chars (max 4,788); answer p50 5,527 (max 8,896).
 
-### Grader on vs off, live turns, `tests/evals/school_answer_eval.py` (Groq)
+### From live turns, `tests/evals/school_answer_eval.py`
 
-Small sample — 6 questions can be scored for a numeric fact, 9 are unanswerable. Treat
-one-case differences as noise.
+Three defects seen on real turns, kept here because each is a finding in its own right:
 
-| | grader on | grader off |
-|---|---|---|
-| answered | 5/6 | 4/6 |
-| correct fact | 4/6 | 3/6 |
-| **wrong fact** | **1/6** | **1/6** |
-| refused when it should | 8/9 | 9/9 |
-| latency p50 / mean | 2.1 s / 3.3 s | 1.5 s / 1.5 s |
-
-Three defects this exposed, all real and none of them the grader's presence or absence:
-
-1. **The grader fails on its own output**: live `400 json_validate_failed`, JSON cut off
-   mid-`reason`, because the free-text `reason` plus reasoning tokens exhausts the 1,536-token
-   ceiling. When it fails the turn becomes `retrieval_error` on a question the chunks answer.
-2. **One graded turn hung for 3,320 seconds** before returning. There is no deadline anywhere.
-3. **Both modes answered "Year 3 fees = 88,000 EGP"** — the FS1–FS2 row; the right answer is
-   105,000. A confidently wrong fee is worse than any fallback, and grading neither caused
-   nor prevented it.
+1. **A grading call can fail on its own output**: live `400 json_validate_failed`, the JSON
+   cut off mid-`reason`. The turn then becomes `retrieval_error` on a question the chunks
+   answer. (Item 9.)
+2. **One turn hung for 3,320 seconds** before returning. There is no deadline anywhere.
+   (Item 9.)
+3. **The assistant answered "Year 3 fees = 88,000 EGP"** — the FS1–FS2 row; the right answer
+   is 105,000. A confidently wrong fee is worse than any fallback, and it is a retrieval and
+   answer-side failure, not a grading one. (Item 26.)
 
 ---
 
 ## The plan
 
 Item numbers are the review's, so they can be traced back. Status: ✅ done, ⏳ next, ⬜ later,
-⏸ parked. **Phase numbers are fixed** — Phase 2 is parked rather than renumbered, so that
-"Phase 4" means the same thing here as in the conversation this plan came from.
+⏸ out of scope. **Phase numbers are fixed** — Phase 2 keeps its number rather than the
+others shifting up, so "Phase 4" means the same thing here as everywhere else.
 
 | Phase | Items | Status |
 |---|---|---|
 | 0 — Measure first | 22, 23 | ✅ done |
 | 1 — Root cause | 1, 2, 5, 8, **24**, **25** | ⏳ next |
-| 2 — Grader latency | 9, 14 | ⏸ parked by the owner |
+| 2 — Grader | 9, 14 | ⏸ out of scope — decided after the fixes |
 | 3 — Wrong answers | 3, 4, 6, 7, **26** | ⬜ |
-| 4 — Ranking and config | 10, 11, 12, 13 | ⬜ (12 already fixed on the parked branch) |
+| 4 — Ranking and config | 10, 11, 12, 13 | ⬜ |
 | 5 — Ingestion | 15, 16, 17 | ⬜ |
 | 6 — Infrastructure | 18, 19, 20, 21 | ⬜ |
 
@@ -182,7 +166,7 @@ Items not in the original 23, added from measurement:
 - **26** — a local check that every number in the answer appears in the evidence it cited.
   Raised after both grader modes answered "Year 3 fees = 88,000 EGP".
 
-### Phase 0 — measure first ✅ (branch `eval/school-retrieval-dataset`)
+### Phase 0 — measure first ✅ (merged, PR #101)
 
 | # | What | State |
 |---|---|---|
@@ -208,66 +192,12 @@ Why images are first even though they do not bind on this corpus: the split is w
 step 3 safe for a calendar-shaped document, and doing it after would mean removing the
 truncation twice — once safely here, once again the first time a real calendar is ingested.
 
-### Phase 2 — the 2-second grader (items 9, 14) ⏸ PARKED
+### Phase 2 — grader (items 9, 14) ⏸ OUT OF SCOPE
 
-Parked by the owner, with the work already specified. Nothing here is started; the switch
-built while measuring it (`grading_mode: never`, default unchanged) sits on
-`rag/grader-optional`, unpushed.
-
-**Take one thing off the table first: the prompt is not what makes it slow.** The grader
-receives about 4,800 characters today and is still slow. The time goes into the tokens it
-*writes*, one after another, while the prompt is read in one parallel pass.
-
-Where the ~2 seconds has to come from, in order of impact:
-
-1. **Stop paying for reasoning tokens — the single biggest lever.** `gpt-oss-20b` is a
-   reasoning model; its scratchpad is written before the JSON and billed against the same
-   output budget. A few hundred scratchpad tokens are seconds. `low` is already the minimum
-   that parameter offers, and `none` makes it *worse* — it omits the field, so the provider
-   applies its own higher default, which commit `1794762` pinned with a test. The only real
-   fix is a **non-reasoning instruct model** for this role on the same endpoint. Shortlist
-   the provider's small instruct models that support structured output and measure them on
-   the same evidence sets; do not take a model name on trust.
-2. **Shrink what it writes.** The schema returns relevance, answerability, ambiguity, route,
-   confidence, missing slots, supporting chunks, a free-text `reason`, and sometimes a
-   question to ask the user. Cut it to what the code actually branches on: a verdict
-   (`sufficient | partial | uncertain`), the supporting chunk numbers, and missing facts.
-   Drop the free-text `reason`; take clarification wording from profile copy instead of
-   generating it. Aim under ~80 output tokens. *(Measured since: the free-text `reason` is
-   what truncates the JSON — live `400 json_validate_failed` on Groq.)*
-3. **Never retry a big prompt.** A cut-off reply is retried today with double the ceiling,
-   turning one slow call into two. Set the ceiling from the measured p99 output length, and
-   on truncation answer from the evidence instead of paying again.
-4. **Put a hard deadline on the call (~2.5 s)**, and proceed with the retrieved evidence
-   when it passes. *(Measured since: one graded turn hung for 3,320 seconds. There is no
-   deadline anywhere.)*
-5. **Skip the call when the evidence is already clear** (item 14). The fastest grading is
-   none: this moves the median, while 1–4 move the p95.
-6. **Keep the prompt prefix stable and the client warm.** Instructions and schema first,
-   evidence last, so provider caching can apply; confirm nothing builds an HTTP client per
-   call (the model factory already caches them).
-
-The budget that adds up to ~2 s, once reasoning is gone:
-
-| Part | Expected |
-|---|---|
-| Network + queue | 0.1–0.3 s |
-| Reading the prompt (~2k tokens, parallel) | 0.05–0.15 s |
-| Writing ~80 output tokens (serial) | 0.4–0.8 s |
-| **Total** | **~0.6–1.3 s typical, under 2 s at p95** |
-
-That holds only with zero reasoning tokens and no retry. With reasoning left on, no amount
-of prompt trimming reaches 2 seconds.
-
-**Measure before changing the model** (item 9 — a prerequisite, not paperwork): log input
-tokens, output tokens, reasoning tokens, time, finish reason and retry count for every
-grading call. Two or three real turns show immediately whether the scratchpad or the retry
-is the cost. Arabic inflates token counts, so measure on Arabic questions.
-
-**Caveat on the 44 seconds**: grading is one call in a turn that also pays for
-classification, follow-up resolution, retrieval and the answer. A 2-second grader does not
-by itself make the turn fast — the same instrumentation should record every call's share,
-so the next fix targets the real remainder.
+The grader stays ON and unchanged while the fixes land. Whether it then keeps a deadline
+and a smaller schema, gets skipped when the evidence is clear, or goes entirely is a
+decision to take afterwards, on the numbers Phases 1 and 3 produce. Nothing in this plan
+depends on the answer. Do not start it, and do not measure it, as part of these phases.
 
 ### Phase 3 — wrong answers (items 3, 4, 6, 7, 26) ⬜
 
@@ -283,8 +213,9 @@ so the next fix targets the real remainder.
 
 Item 10 (rerank the 30 candidates, not the final 4), 11 (relevance is not sufficiency —
 check required facts separately), 13 (score scales are not interchangeable and the
-conversion is not monotonic). **Item 12 is already done** on `rag/grader-optional`:
-`grading_mode` was a dead switch read by a helper with no caller, and that helper is gone.
+conversion is not monotonic), 12 (`grading_mode` is a dead switch read by a helper with no
+caller — a fix for it exists on the unmerged `rag/grader-optional`, so check there before
+writing it again).
 
 ### Phase 5 — ingestion ⬜
 
@@ -303,7 +234,7 @@ the gap accepted when the persistent note was removed), 21 (durable background w
 ## Reference: every finding, and the fix for each
 
 The whole list in one place, so no session has to reconstruct it from the review plus a
-chat log. Numbering is the review's. Status: ✅ done, ⏸ parked, ⬜ open.
+chat log. Numbering is the review's. Status: ✅ done, ⏸ out of scope, ⬜ open.
 
 ### Evidence lost or wrong (originally P1)
 
@@ -325,7 +256,7 @@ chat log. Numbering is the review's. Status: ✅ done, ⏸ parked, ⬜ open.
 | 9 | Grading has no overall time limit, and a cut-off reply is retried with a larger allowance. No timings, token counts or retry counts are recorded | Instrument first: input, output and reasoning tokens, time, finish reason, retries, per call. Then a turn deadline and explicit HTTP timeouts; never resend a large prompt past the deadline. Keep the 1,536-token floor — that was a separate, real bug | 2 ⏸ |
 | 10 | The local reranker only sees the final 4 chunks, not the 30 candidates, so it cannot recover a good chunk dropped earlier | Rerank the candidate pool, then select the answer set. Separate budgets for retrieval, reranking and answering. Measure p95 on the real hardware before enabling | 4 ⬜ |
 | 11 | The reranker treats "relevant" as "enough to answer", so an on-topic passage passes without the requested fact | Scores order evidence. Check required facts (a year, a fee, a date) separately, and reserve the grader for uncertain or conflicting evidence. Calibrate on Arabic and English questions from this corpus | 4 ⬜ |
-| 12 | `grading_mode` does nothing: it was read by a helper with no production caller while routing used a different setting | One setting, read in one place. Done: the switch is real, the dead `should_grade` helper is gone | 4 ✅ (on `rag/grader-optional`) |
+| 12 | `grading_mode` does nothing: it was read by a helper with no production caller while routing used a different setting | One setting, read in one place, and the dead `should_grade` helper removed. A fix exists on the unmerged `rag/grader-optional` | 4 ⬜ |
 | 13 | Two latent score problems: the minimum-score check can compare against the retrieval score, which is a different scale, and the score conversion is not monotonic | Make each score type explicit and compare thresholds only against their own kind. Apply one documented monotonic conversion | 4 ⬜ |
 | 14 | There is no fast path: every answerable question pays for the grader, even when the evidence is clear | Answer in one call when hybrid retrieval plus local checks already cover the question; grade only ambiguous, conflicting or incomplete evidence. Compare against `main` on the dataset before shipping | 2 ⏸ |
 
@@ -371,7 +302,9 @@ chat log. Numbering is the review's. Status: ✅ done, ⏸ parked, ⬜ open.
 .venv/Scripts/python.exe tests/evals/school_retrieval_eval.py --workers 1   # clean p50
 .venv/Scripts/python.exe tests/evals/school_retrieval_eval.py --split holdout  # only to confirm
 
-# Live turns. Spends real model calls; sequential because of the Groq cap.
+# Live turns — for Phase 3, where the answer's own correctness is what is being fixed.
+# Spends real model calls; sequential because of the Groq cap. NOT on main: the script is
+# on the unmerged rag/grader-optional, so cherry-pick it when Phase 3 starts.
 .venv/Scripts/python.exe tests/evals/school_answer_eval.py --limit 10 --workers 1
 
 # The suites that guard this area
