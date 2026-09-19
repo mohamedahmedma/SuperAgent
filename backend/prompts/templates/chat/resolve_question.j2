@@ -7,15 +7,34 @@
    only; the field descriptions on the pydantic schema define the shape. Stating the
    shape here as well would pay for it twice on every call.
 
+   TWO JOBS, INDEPENDENTLY INCLUDED. A turn may need its references resolved, or its
+   search text written in the corpus's language, or both, or neither — and the caller
+   knows which before the call, from the conversation and from a script count. So each
+   block below is conditional, and a turn pays only for the instructions it needs: an
+   Arabic message that already stands on its own gets the translation half alone, and
+   never sees a word about anaphora. When neither is wanted, backend/chat/resolution.py
+   does not make the call at all.
+
+   The reason it is worth the conditional rather than always sending both: resolving a
+   reference from six messages of context is the hardest thing this small model does, and
+   `followup` is the weakest category in the eval. Loading unrelated instructions onto
+   that call makes the weak part weaker.
+
    Whitespace: trim_blocks is on, so the newline after every {% %} tag is swallowed. #}
+{% if resolving %}
 Rewrite the user's latest message as a question that stands on its own.
+{% else %}
+Read the user's latest message and write it out for searching a knowledge base.
+{% endif %}
 
 {% if persona %}
 The assistant they are talking to: {{ persona }}
 {% endif %}
 
+{% if resolving and history %}
 The conversation so far:
 {{ history }}
+{% endif %}
 {% if hitl_prompt %}
 
 The assistant then asked the user to clarify:
@@ -31,6 +50,7 @@ It offered these options:
 The user's latest message:
 {{ question }}
 
+{% if resolving %}
 Produce a `question` that someone with no access to the conversation above could still search for and answer. Everything the message refers to indirectly — "this", "these years", "it", "the same", a bare "and what about...?" — must be replaced by what it actually points at, taken from the conversation.
 
 Keep the user's own subject. You are resolving references, not improving the question: do not widen it, do not add a topic they did not raise, and do not answer it.
@@ -38,7 +58,26 @@ Keep the user's own subject. You are resolving references, not improving the que
 A person the conversation has named is a reference like any other, and the one that matters most: it is what the rest of the system needs in order to look anything up, and it cannot be recovered once it is gone. When an earlier turn names someone and the latest message points at them instead of naming them — by a pronoun, by a possessive written as a suffix on the end of a word, or by naming nobody at all — write that name into your question, spelled as the conversation spelled it. Never stand a description in its place: "the student", "the child", "the pupil" and the like drop exactly the information you were asked to recover.
 
 Write the question in the same language the user wrote in.
+{% else %}
+Return the user's message unchanged as `question`, and `standalone` as the intent. It already stands on its own; there is nothing to resolve.
+{% endif %}
+{% if translating %}
 
+Also produce `search_text`: the same question written in {{ search_language }}, for searching the knowledge base with. The knowledge base is written in {{ search_language }} and the search matches words literally, so a question in another language matches almost nothing in it.
+
+Rules for `search_text`, all of them checked after you answer:
+- Keep every number, currency amount, year-group code, date, email address and URL EXACTLY as written. "105,000 EGP" stays "105,000 EGP". "Year 3" stays "Year 3". "FS1" stays "FS1". "15/09" stays "15/09".
+- Use Western digits (0-9) only. Never write a number in another numeral system.
+- Translate the question and nothing else. Do not answer it, do not explain it, do not add background the user did not write.
+- Keep it as short as the original, and use plain ASCII punctuation.
+
+This is for searching only. The user is answered in their own language, so `question` keeps the language they wrote in.
+{% else %}
+
+Leave `search_text` as an empty string.
+{% endif %}
+
+{% if resolving %}
 `constraints` are the conditions that carried over from earlier turns and still bind this answer — an age or grade range, a campus, a gender, a year, a document type. List each as a short phrase ("grades up to Year 6", "girls only", "the 2025/2026 year"). These are the difference between an answer about what was asked and an answer about everything the corpus holds, so a condition the user set earlier and has not withdrawn belongs here even when their latest message does not repeat it. Leave the list empty when the question binds nothing.
 
 Classify the message as exactly one `intent`:
@@ -68,3 +107,4 @@ Worked examples, for a school knowledge base:
   -> question: "who is the principal"
      constraints: []
      intent: new_topic
+{% endif %}

@@ -1,0 +1,26 @@
+{# The search text, in the corpus's language. Retrieval only — the grader, the answer and
+   the reply to the user all keep the user's own words.
+
+   Every rule here exists because breaking it costs retrieval something specific:
+
+   - a translated number, code or date is a term the index does not contain, and a fee
+     row is found by "105,000 EGP" and nothing else;
+   - localised digits (١٠٥٬٠٠٠) are a different token to BM25 than 105,000, so the one
+     term that identifies the answer stops matching;
+   - an answered or explained question adds terms the corpus never used, and every term
+     absent from the target passage is dilution on both halves of the retrieval — the
+     same argument `rag/graph_nodes.search_query` makes for cutting the child's name.
+
+   The code does not trust this prompt: `query_translation._usable` rejects a reply that
+   localises its digits, comes back in the wrong language, or runs several times longer
+   than the question, and searches with the original instead. #}
+Translate this school question into {{ language }}, as a parent would ask it.
+
+Rules:
+- Keep every number, currency amount, year-group code, date, email address and URL EXACTLY as written. "105,000 EGP" stays "105,000 EGP". "Year 3" stays "Year 3". "FS1" stays "FS1". "15/09" stays "15/09".
+- Use Western digits (0-9) only. Never convert a number into any other numeral system.
+- Translate the question and nothing else. Do not answer it, do not explain it, do not add background the user did not write.
+- Keep it as short as the original.
+- Reply with the translated question alone, with no quotes, no preamble and no notes.
+
+Question: {{ question }}

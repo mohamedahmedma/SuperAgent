@@ -511,6 +511,20 @@ assets:
     vision_extra_params: {}
 
 retrieval:
+  # Parents write Arabic; the corpus is English. BM25 matches TERMS, so the sparse half of
+  # hybrid retrieval contributes almost nothing cross-language — only the tokens a parent
+  # happens to type in Latin script ("Year 3", "FS1"). Translating the SEARCH text (and
+  # only the search text) wakes it up. Measured on 349 school questions, same index and
+  # same code, changing only the language the question is asked in:
+  #   recalled 337 -> 343, ranked@8 320 -> 338, ranked@4 273 -> 314,
+  # and the recalled-to-ranked loss falls from 17 questions to 5. For comparison, a
+  # cross-encoder over the same pool LOST 25 questions and cost five seconds a turn.
+  #
+  # Costs one short model call on an Arabic turn and nothing on an English one. If the
+  # corpus is ever published in Arabic too, document pairing routes Arabic questions to
+  # the Arabic half and this can be switched back off.
+  query_translation_enabled: true
+  query_translation_language: en
   # School corpora are small and repetitive — fee tables, calendars, policy pages
   # restated per year group — so recall matters more than precision here.
   top_k: 8

@@ -41,11 +41,13 @@ limited, or returning nonsense costs the improvement, never the turn.
 """
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Sequence, Tuple
 
+from backend.rag.query_translation import needs_translation, remember_translation
 from backend.text_normalization import normalize_query
 
 logger = logging.getLogger(__name__)
@@ -77,6 +79,10 @@ class ResolvedQuestion:
     intent: str = STANDALONE
     resolved: bool = False
     reason: str = ""
+    #: The question in the CORPUS's language, when this turn needed translating and the
+    #: translation passed verification. Retrieval reads it; nothing else does. Empty
+    #: whenever translation was not needed, not enabled, or not trustworthy.
+    search_text: str = ""
 
     @property
     def is_followup(self) -> bool:
@@ -103,6 +109,7 @@ class ResolvedQuestion:
             "turn_resolved_question": self.question if self.resolved else None,
             "turn_carried_constraints": list(self.constraints),
             "turn_followup_intent": self.intent,
+            "turn_search_text": self.search_text or None,
         }
 
 
@@ -254,19 +261,31 @@ def resolve_question(
         return unresolved(question, "query resolution disabled")
 
     wanted, reason = needs_resolution(question, history, config)
-    if not wanted and not hitl_prompt:
+    # The gate is a UNION, and the prompt is assembled from whichever half fired. Two jobs
+    # want a small model to read this message: working out what a follow-up refers to, and
+    # writing it in the language the corpus is indexed in. They are independent — an
+    # Arabic message that stands on its own needs only the second, an English follow-up
+    # only the first — so gating one behind the other would either skip most translations
+    # or pay for resolution on every turn. One call does whichever is needed, the template
+    # includes only those instructions, and when neither is wanted there is no call.
+    translating, translation_reason = needs_translation(question)
+    if not wanted and not translating and not hitl_prompt:
         return unresolved(question, reason)
 
     rendered = conversation_text(
         history,
         limit=int(getattr(config, "query_resolution_history_messages", 6) or 6),
     )
-    if not rendered and not hitl_prompt:
+    if not rendered and not hitl_prompt and not translating:
         return unresolved(question, "no usable conversation text to resolve against")
 
     call = invoke or _default_resolve_invoke
     try:
-        result = call(question, rendered, config, hitl_prompt, list(hitl_options or []))
+        result = _call_resolver(
+            call, question, rendered, config, hitl_prompt, list(hitl_options or []),
+            resolving=bool(wanted or hitl_prompt),
+            translating=translating,
+        )
     except Exception:
         logger.warning("query resolution failed; using the message as written", exc_info=True)
         return unresolved(question, "resolver error")
@@ -280,9 +299,13 @@ def resolve_question(
         intent = FOLLOWUP if resolved_text and resolved_text != question else STANDALONE
 
     # A resolver that returns nothing has abstained, whatever else it said. Substituting
-    # an empty question would search for nothing and deny the turn.
+    # an empty question would search for nothing and deny the turn. A translation that
+    # arrived on the same call still stands: it was verified separately and is already in
+    # the memo retrieval reads.
     if not resolved_text:
-        return unresolved(question, "resolver returned an empty question")
+        outcome = unresolved(question, "resolver returned an empty question")
+        outcome.search_text = _accept_translation(question, question, result, translating)
+        return outcome
 
     limit = max(0, int(getattr(config, "carried_constraint_limit", 4) or 0))
     constraints: List[str] = []
@@ -302,12 +325,74 @@ def resolve_question(
         constraints=constraints[:limit],
         intent=intent,
         resolved=True,
-        reason=reason or "resolved against a pending clarification",
+        reason=reason or translation_reason or "resolved against a pending clarification",
+        search_text=_accept_translation(question, resolved_text, result, translating),
     )
 
 
-def _default_resolve_invoke(question, history, config, hitl_prompt, hitl_options):  # pragma: no cover - needs a model
-    """One small structured call on FAST_MODEL."""
+def _accepts_job_flags(call) -> bool:
+    """Whether `call` can be told WHICH jobs this turn needs.
+
+    `invoke` is a documented extension point — "replaceable per deployment" — and it grew
+    two keyword arguments when one call started doing resolution and translation. An older
+    implementation that does not accept them raises `TypeError`, which the caller's broad
+    `except` would swallow as "resolver error": resolution would stop happening, silently,
+    and look like a model that had simply gone quiet. Asking the signature is cheaper than
+    finding that out from a drop in follow-up accuracy.
+    """
+    try:
+        parameters = inspect.signature(call).parameters
+    except (TypeError, ValueError):
+        return True
+    if any(p.kind is p.VAR_KEYWORD for p in parameters.values()):
+        return True
+    return {"resolving", "translating"} <= set(parameters)
+
+
+def _call_resolver(call, question, rendered, config, hitl_prompt, hitl_options, **flags):
+    """The resolver call, with the job flags when the callable can take them."""
+    if _accepts_job_flags(call):
+        return call(question, rendered, config, hitl_prompt, hitl_options, **flags)
+    logger.debug(
+        "resolver callable predates the job flags; calling it the old way (no translation)"
+    )
+    return call(question, rendered, config, hitl_prompt, hitl_options)
+
+
+def _accept_translation(raw: str, resolved: str, result: dict, translating: bool) -> str:
+    """The reply's `search_text`, if it survives the same checks a standalone one faces.
+
+    Validated against the RESOLVED question, because that is what it is a translation of:
+    "وللدولي؟" carries no year group, and the resolution that recovered "Year 3" is what
+    the search has to keep. Checking it against the raw message would let a translation
+    drop the one term that identifies the answer and call it clean.
+
+    Each field stands or falls alone. A translation that fails here is simply not used —
+    the resolution it arrived with is unaffected, and retrieval searches the question as
+    written, which is what it did before any of this existed.
+
+    Remembered under the raw message too when the two differ, so a retrieval that never
+    saw the resolution still finds it: the graph is handed whatever query the agent wrote,
+    and that is as often the user's words as the resolver's.
+    """
+    if not translating:
+        return ""
+    candidate = str(result.get("search_text") or "").strip()
+    if not candidate:
+        return ""
+    if not remember_translation(resolved, candidate):
+        logger.info("resolver's translation failed verification; searching as written")
+        return ""
+    if raw.strip() and raw.strip() != resolved:
+        remember_translation(raw, candidate)
+    return candidate
+
+
+def _default_resolve_invoke(  # pragma: no cover - needs a model
+    question, history, config, hitl_prompt, hitl_options,
+    *, resolving: bool = True, translating: bool = False,
+):
+    """One small structured call on FAST_MODEL, carrying whichever jobs this turn needs."""
     import os
 
     from langchain.chat_models import init_chat_model
@@ -333,6 +418,20 @@ def _default_resolve_invoke(question, history, config, hitl_prompt, hitl_options
             default="followup",
             description="How the latest message relates to the conversation before it",
         )
+        # Always declared, never conditional. Providers enforcing OpenAI-style STRICT
+        # structured output (Groq among them) require every declared property to be
+        # present, and a model told to "leave the unused field empty" tends to omit it
+        # instead — the trap `rewrite_query_once` documents. So the field is always in the
+        # schema and the PROMPT decides whether to fill it; an empty string is the normal
+        # answer on a turn that needs no translation, and the caller only reads it when it
+        # asked for one.
+        search_text: str = Field(
+            default="",
+            description=(
+                "The question translated for SEARCHING only, when asked for; otherwise an "
+                "empty string"
+            ),
+        )
 
     prompt = resolve_prompt(
         getattr(config, "query_resolution_prompt", "") or "",
@@ -342,6 +441,9 @@ def _default_resolve_invoke(question, history, config, hitl_prompt, hitl_options
         persona=profile.identity.persona,
         hitl_prompt=hitl_prompt or "",
         hitl_options=list(hitl_options or []),
+        resolving=resolving,
+        translating=translating,
+        search_language=(profile.retrieval.query_translation_language or "en"),
     )
     model = init_chat_model(
         model=os.getenv("FAST_MODEL"),
