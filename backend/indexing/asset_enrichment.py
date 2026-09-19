@@ -162,6 +162,14 @@ def enrich_image_blocks(
             # Carried through units into chunks so retrieval can surface the image
             # itself alongside the text that made it findable.
             "asset_ids": [dossier.asset_id],
+            # The surrogate again, still divided into the fields it was built from.
+            # `content` is the same text joined, kept because everything between here
+            # and the hierarchy builder reads a block's `content` and should not have
+            # to learn about figures. Chunking reads THIS, because where a figure may
+            # be divided is a question about its fields — the header identifies every
+            # piece, the transcription is the part that can be arbitrarily long — and
+            # the joined string no longer says where one ends and the next begins.
+            "figure": dossier.surrogate_parts(),
         })
 
     return enriched, report

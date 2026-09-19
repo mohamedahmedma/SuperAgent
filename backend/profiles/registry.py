@@ -43,6 +43,8 @@ ENV_OVERRIDES: Dict[str, str] = {
     "LEAF_RETRIEVE_LEVEL": "retrieval.leaf_retrieve_level",
     "AUTO_MERGE_ENABLED": "retrieval.auto_merge_enabled",
     "AUTO_MERGE_THRESHOLD": "retrieval.auto_merge_threshold",
+    "RETRIEVAL_EVIDENCE_WINDOW_CHARS": "retrieval.evidence_window_chars",
+    "RETRIEVAL_MAX_CHUNKS_PER_ASSET": "retrieval.max_chunks_per_asset",
     "RERANK_MIN_SCORE": "retrieval.rerank_min_score",
     "RERANK_DOC_CHAR_LIMIT": "retrieval.rerank_doc_char_limit",
     "RERANK_TIMEOUT_SECONDS": "retrieval.rerank_timeout_seconds",

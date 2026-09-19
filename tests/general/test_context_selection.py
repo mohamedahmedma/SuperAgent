@@ -12,7 +12,7 @@ from backend.rag.context_selection import (
     select_context,
     wants_exhaustive_answer,
 )
-from backend.rag.grading_view import format_docs
+from backend.rag.evidence_view import format_docs
 
 
 def rag_config(**overrides):

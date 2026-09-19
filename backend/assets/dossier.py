@@ -169,6 +169,33 @@ class BlobRef(_Model):
     height: int = 0
 
 
+#: How a figure surrogate announces itself, and therefore how any reader recognises one
+#: without the dossier in scope. Defined once, because the marker is WRITTEN here and
+#: MATCHED during indexing, and two spellings of it would fail silently — a figure would
+#: simply stop being treated as one.
+FIGURE_MARKER = "[Figure]"
+
+
+def figure_header(caption: str) -> str:
+    """The line that names a figure: the marker, and the caption when there is one."""
+    caption = (caption or "").strip()
+    return f"{FIGURE_MARKER} {caption}" if caption else FIGURE_MARKER
+
+
+def tags_line(tags: Optional[List[str]]) -> str:
+    """The `Tags:` line, or "". One line, and close to exactly what a figure is about."""
+    return "Tags: " + ", ".join(tags) if tags else ""
+
+
+def answers_line(questions: Optional[List[str]]) -> str:
+    """The `Answers:` line, or "".
+
+    Question phrasings, so it matches a question closely — which is exactly why it must
+    never become a passage of its own. See `surrogate_parts`.
+    """
+    return "Answers: " + " ".join(questions) if questions else ""
+
+
 class AssetDossier(_Model):
     """One occurrence of one image, with everything known about it."""
 
@@ -206,35 +233,67 @@ class AssetDossier(_Model):
         return self.dossier_version < current_version
 
     def render_surrogate(self, section_path: Optional[List[str]] = None) -> str:
-        """The text that represents this image in the retrieval index.
+        """The text that represents this image in the retrieval index, as one string.
 
         Ordered most- to least-specific so that a truncation at any downstream byte cap
         drops the least valuable content first: caption identifies, description
         explains, transcription supplies the literal tokens, tags round out recall.
+
+        Indexing no longer takes it whole — see `surrogate_parts`, which hands over the
+        same content with the field boundaries still in it.
         """
-        if not self.is_indexable:
+        parts = self.surrogate_parts()
+        if not parts:
             return ""
 
-        text = self.extraction.text
-        parts: List[str] = []
+        blocks: List[str] = []
         if section_path:
-            parts.append(" > ".join(section_path[-3:]))
+            blocks.append(" > ".join(section_path[-3:]))
+        blocks.append(parts["header"])
+        for value in (parts["description"], parts["transcription"], parts["summary"]):
+            if value:
+                blocks.append(value)
+        return "\n".join(blocks).strip()
 
-        header = f"[Figure] {text.caption}".strip() if text.caption else "[Figure]"
-        parts.append(header)
+    def surrogate_parts(self) -> Dict[str, str]:
+        """The same content, with the field boundaries not yet thrown away.
 
-        for value in (text.description, text.transcription):
-            if value and value.strip():
-                parts.append(value.strip())
+        `render_surrogate` joins these with newlines, and once joined they cannot be
+        told apart again: description and transcription are adjacent blocks with no
+        marker between them, so anything downstream that wanted "the part saying what
+        this picture IS" had to guess it from a character budget. The deleted grading
+        view guessed. Indexing asks.
 
-        if text.tags:
-            parts.append("Tags: " + ", ".join(text.tags))
+        Three blocks, because that is how this text divides by what it is FOR:
 
-        questions = self.extraction.answerable_questions
-        if questions:
-            parts.append("Answers: " + " ".join(questions))
+        - `header` names the picture, and indexing repeats it on every passage it cuts,
+          so no piece of a divided figure is left without an identity;
+        - `description` explains the picture and `summary` (the `Tags:` and `Answers:`
+          lines) says what it can answer — together the discovery surface, which is what
+          a question gets matched against;
+        - `transcription` is the literal text printed in the image. It is what an ANSWER
+          is written from, and the only part that can be arbitrarily long: the extraction
+          prompt asks for "EVERY piece of text visible in the image", so a school
+          calendar arrives here as a year of rows.
 
-        return "\n".join(parts).strip()
+        An empty dict when this asset should not be indexed at all, matching the empty
+        string `render_surrogate` returns for the same case.
+        """
+        if not self.is_indexable:
+            return {}
+        text = self.extraction.text
+        summary = [
+            line for line in (
+                tags_line(text.tags),
+                answers_line(self.extraction.answerable_questions),
+            ) if line
+        ]
+        return {
+            "header": figure_header(text.caption),
+            "description": (text.description or "").strip(),
+            "transcription": (text.transcription or "").strip(),
+            "summary": "\n".join(summary),
+        }
 
     def touch(self) -> "AssetDossier":
         self.updated_at = datetime.now(UTC)

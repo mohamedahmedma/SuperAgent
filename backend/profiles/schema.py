@@ -739,6 +739,56 @@ class RetrievalConfig(_Section):
     # prefers it. Text-only groups are unaffected and keep auto_merge_threshold.
     auto_merge_figure_threshold: Optional[int] = None
 
+    # The largest text any ONE retrieved chunk may carry. A merge that would exceed it
+    # returns the text AROUND the match instead of the whole parent; a chunk already
+    # within it is returned untouched.
+    #
+    # It is a CEILING, not a target, and the difference was settled by measurement.
+    #
+    # The intent was to trim merged parents back to two leaves' worth of context, on the
+    # reasoning that merging is the one stage that can hand back a chunk larger than the
+    # chunking budgets produced. Measured on the school corpus, trimming cost evidence at
+    # every budget tried: at 1,600 the retrieval eval lost 13 of 176 questions at the
+    # RECALL stage — not hidden later, gone — because the fact a question needed was in
+    # the part of the parent the window cut. "What bank do I transfer fees to" stopped
+    # finding "National Bank of Egypt" at all: it sat outside the window of a parent
+    # trimmed from 2,400.
+    #
+    # What the measurement showed instead is that merging was never the unbounded path.
+    # A parent is `_pack_units` over units, so it is bounded by `l1_size` for as long as
+    # every UNIT is smaller than the budget — and the paths where one was not are the
+    # real cause: an image indexed as one atomic unit, a table row longer than its
+    # budget, a sentence longer than `max_chars`. With those bounded, 0 of 3,567 chunks
+    # retrieved across the whole question set exceeded `l1_size` plus the section prefix.
+    #
+    # So this is set just above what correct chunking can produce: 2,400 (`l1_size`) plus
+    # the 151-character section prefix applied after packing. It never fires on a healthy
+    # index and it does fire on the two cases that matter — an index built before figures
+    # were split, which is what a deployment has until it reindexes, and a deployment that
+    # widens `chunking.l1_size` without widening this. Keep it above `l1_size` + 151;
+    # `test_modality_aware_merge` asserts the relationship so the two cannot drift.
+    #
+    # The bound it holds is what makes the grading prompt a property of the retrieval:
+    # at top_k 8 the worst case is 8 x this, whatever the corpus contains.
+    evidence_window_chars: int = 2600
+
+    # How many of the final slots one IMAGE may occupy.
+    #
+    # A risk that did not exist while an image was one chunk: it could take one slot.
+    # Its transcription is now indexed as several passages, and they all match a question
+    # about that picture — measured on the school corpus after splitting, one image took
+    # 5 of 8 slots on one question and 4 on another, crowding the rest of the corpus out
+    # of the set that is supposed to be the whole evidence for an answer.
+    #
+    # Three leaves an image enough room to answer a question that is genuinely about it
+    # — the discovery passage naming what it is, plus the transcription around the match
+    # — while leaving five slots for everything else.
+    #
+    # Per image and not per document, deliberately: a school knowledge base is often one
+    # document, so a per-document cap is either a no-op or a gag on the whole corpus. The
+    # thing that multiplies is passages of one picture.
+    max_chunks_per_asset: int = 3
+
     rerank_min_score: float = 0.0
     rerank_doc_char_limit: int = 2000
     rerank_timeout_seconds: float = 5.0

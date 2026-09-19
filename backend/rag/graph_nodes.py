@@ -30,8 +30,13 @@ from backend.rag.evidence import (
     EvidenceReport,
     build_ladder,
 )
-from backend.rag.grading_view import format_docs
-from backend.rag.policy import decide_route, offerable_directions, select_context_indices
+from backend.rag.evidence_view import format_docs
+from backend.rag.policy import (
+    decide_route,
+    offerable_directions,
+    select_context_indices,
+    select_evidence,
+)
 from backend.schemas.chat import normalize_rag_sub_trace
 
 
@@ -108,6 +113,11 @@ class RagDependencies(Protocol):
 
     @property
     def top_k(self) -> int: ...
+
+    @property
+    def evidence_window_chars(self) -> int:
+        """The largest text one retrieved chunk may carry, so the evidence budget can be
+        stated as a size rather than only as a count."""
 
     @property
     def complexity_prompt(self) -> str: ...
@@ -439,7 +449,24 @@ class GradeDocuments:
                 "rag_trace": rag_trace,
             }
 
-        docs = state.get("docs") or []
+        # The evidence is chosen BEFORE anything judges it, so the grader approves
+        # exactly what the answer receives. It used to be the other way round: the
+        # rewrite path graded the union of both passes and the answer was capped back
+        # afterwards, so an approved chunk could be dropped by a count — and the trace
+        # read that count after the cap, so it always said "4 of 4".
+        retrieved = state.get("docs") or []
+        docs, evidence_reason = select_evidence(
+            retrieved,
+            max_chunks=self._deps.top_k,
+            max_chars=self._deps.top_k * self._deps.evidence_window_chars,
+        )
+        if len(docs) != len(retrieved):
+            # A local view, so assessment reads the set it is judging.
+            state = {**state, "docs": docs}
+            emit(
+                state, "\U0001f9ee", f"Judging {len(docs)} of {len(retrieved)} chunks",
+                evidence_reason,
+            )
         if docs:
             emit(state, "\U0001f4ca", "Evaluating evidence quality...")
 
@@ -463,6 +490,11 @@ class GradeDocuments:
         rag_trace = state.get("rag_trace", {}) or {}
         rag_trace.update(report_update)
         rag_trace["route_reason"] = route_reason
+        # BEFORE any cut, which is the half the old trace got wrong: it reported the
+        # count after the slice, so a set capped from 8 to 4 read "4 of 4".
+        rag_trace["evidence_chunks_retrieved"] = len(retrieved)
+        rag_trace["evidence_chunks_graded"] = len(docs)
+        rag_trace["evidence_selection_reason"] = evidence_reason
 
         if route == "answer":
             if report.sufficiency == "partial":
@@ -507,10 +539,14 @@ class GradeDocuments:
             update.update({"docs": [], "context": ""})
             return update
 
+        if len(docs) != len(retrieved):
+            # What the grader judged is what the answer gets, so the state has to carry
+            # the selected set and not the retrieved one.
+            update.update({"docs": docs, "context": format_docs(docs)})
+            rag_trace["retrieved_chunks"] = docs
+
         if route == "answer" and docs:
-            keep, reason = select_context_indices(
-                report, docs, config, answer_ceiling=self._deps.top_k,
-            )
+            keep, reason = select_context_indices(report, docs, config)
             rag_trace["context_selection_reason"] = reason
             rag_trace["context_chunks_available"] = len(docs)
             if keep:

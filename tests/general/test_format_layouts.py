@@ -71,10 +71,26 @@ class SentenceSplitterTests(unittest.TestCase):
         for chunk in chunks:
             self.assertLessEqual(len(chunk), 60 + 40)
 
-    def test_single_oversized_sentence_stays_intact(self):
+    def test_a_single_oversized_sentence_is_cut_rather_than_kept_whole(self):
+        """This used to assert the sentence comes back intact, on the reasoning that a
+        sentence is the unit and half a sentence is worse than a long chunk.
+
+        That made `max_chars` advisory, and this strategy is reachable from the legacy
+        loader, which applies no byte cap at any level — so one long sentence was a chunk
+        bounded by nothing at all. Measured before this change, a 5,001-character sentence
+        produced a 5,001-character chunk at `max_chars` 800. Every chunk being smaller
+        than its budget is what the grading prompt's size is derived from, and a bound
+        with an exception is not a bound.
+
+        Nothing is lost: the sentence is divided, not truncated."""
         splitter = SentenceSplitter(max_chars=20, overlap_sentences=0)
         text = "This single sentence is far longer than the twenty character budget."
-        self.assertEqual([text], splitter.split_text(text))
+        chunks = splitter.split_text(text)
+
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 20)
+        self.assertEqual(text, "".join(chunks))
 
 
 class DocxLayoutTests(unittest.TestCase):

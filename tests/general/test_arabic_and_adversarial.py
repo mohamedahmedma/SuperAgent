@@ -564,7 +564,17 @@ class StorageRoutingInvariantTests(unittest.TestCase):
     with no length bound. This test pins that routing assumption: if a refactor
     ever sends parents to Milvus, the oversized-parent case must be revisited."""
 
-    def test_only_leaves_are_byte_capped_and_parents_may_exceed(self):
+    def test_the_byte_cap_is_applied_to_leaves_and_parents_are_bounded_earlier(self):
+        """This used to assert that a parent DOES exceed the byte cap, from exactly this
+        input: one table row of two 40,000-character cells, shipped whole because a row
+        larger than its budget was never cut.
+
+        That is the path that made a chunk's size a property of the corpus, and it is
+        closed — the row is cut to the budget, so the row cannot produce an oversized
+        anything. A parent is now bounded by its LEVEL's budget rather than by the byte
+        cap, which is a stronger guarantee arrived at earlier, and the routing assumption
+        this class exists for is unchanged: the byte cap is still what protects Milvus,
+        and it is still applied only to what goes there."""
         loader = DocumentLoader()
         rows = [["ق" * 40000, "ب" * 40000]]
         with patch.object(document_loader_module, "parse_pdf_blocks",
@@ -577,8 +587,13 @@ class StorageRoutingInvariantTests(unittest.TestCase):
         self.assertTrue(parents)
         for leaf in leaves:
             self.assertLessEqual(len(leaf["text"].encode("utf-8")), 65535)
-        # Parents intentionally keep full context (Postgres TEXT, unbounded).
-        self.assertTrue(any(len(p["text"].encode("utf-8")) > 65535 for p in parents))
+        # Nothing is lost by the cut: 80,000 characters in, 80,000 characters indexed.
+        indexed = "".join(leaf["text"] for leaf in leaves)
+        self.assertEqual(40000, indexed.count("ق"))
+        self.assertEqual(40000, indexed.count("ب"))
+        # And the parents are bounded by their level budget, not by the byte cap.
+        for parent in parents:
+            self.assertLessEqual(len(parent["text"]), loader._level_1_size + 151)
 
     def test_upload_route_partitioning_matches_this_assumption(self):
         # Mirrors backend/api/routes/documents.py: level 1-2 -> parent store,

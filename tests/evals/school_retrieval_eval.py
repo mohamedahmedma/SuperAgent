@@ -16,8 +16,8 @@ truncated out of it. So each case is scored four times against the SAME retrieva
 
     recalled   the candidate pool             — did retrieval find it at all?
     ranked     the top_k the turn keeps       — did ranking keep it?
-    grader     format_docs_for_grading(...)   — can the grader SEE it?
-    answer     format_docs(...)               — can the answer be written from it?
+    grader     the chunks the grader is shown  — can the grader SEE it?
+    answer     the chunks the answer is given  — can the answer be written from it?
 
 A case that passes `ranked` and fails `grader` is evidence hidden by the grading view,
 not a retrieval failure, and the two want opposite fixes. That distinction is the point
@@ -77,7 +77,8 @@ from backend.env import load_env  # noqa: E402
 load_env()
 
 from backend.rag import utils as u  # noqa: E402
-from backend.rag.grading_view import format_docs, format_docs_for_grading  # noqa: E402
+from backend.rag.evidence_view import format_docs  # noqa: E402
+from backend.rag.utils import EVIDENCE_WINDOW_CHARS  # noqa: E402
 from tests.evals.school_dataset import (  # noqa: E402
     CORPUS_FILENAME,
     DATASET_VERSION,
@@ -106,8 +107,10 @@ def _figure_docs(docs: list[dict]) -> list[dict]:
 def _stage_text(case: Case, docs: list[dict], stage: str) -> str:
     if stage in ("recalled", "ranked"):
         return "\n\n".join(str(d.get("text", "")) for d in docs)
-    if stage == "grader":
-        return format_docs_for_grading(docs)
+    # `grader` and `answer` are the same rendering now that the grading view is gone,
+    # and the row is therefore equal BY CONSTRUCTION rather than by measurement. The
+    # stage is kept because it is still the right question to ask of any future change —
+    # and because a gap reopening here is exactly the regression worth catching.
     return format_docs(docs)
 
 
@@ -116,21 +119,38 @@ def _passes(case: Case, docs: list[dict], stage: str) -> bool:
         figures = _figure_docs(docs)
         if not figures:
             return False
-        # A figure case is about the picture being available at all; at the grader stage it
-        # also has to still carry text, which is what the 500-character view takes away.
+        # A figure case is about the picture being available at all; at the grader stage
+        # it also has to still carry text, which the deleted 500-character view took away.
+        #
+        # KNOWN WEAK: this passes whenever ANY figure chunk is present, never checking
+        # WHICH image — the dataset carries no asset labels for figure cases. Splitting
+        # an image into several passages multiplies figure chunks, so this criterion got
+        # easier for a reason unrelated to the fix. Read "figure questions stay 4/4" as
+        # "no figure question lost its picture", not as proof the right one arrived.
         return bool(_stage_text(case, figures, stage).strip()) if stage == "grader" else True
     return not missing(case, _stage_text(case, docs, stage))
 
 
 def _figure_text_kept(docs: list[dict]) -> float | None:
-    """How much of a retrieved figure's text the grader still sees, 0.0-1.0."""
+    """How much of a retrieved figure's text the grader still sees, 0.0-1.0.
+
+    How much of each figure's OWN text survives — not how long the rendering is, which
+    also carries a `[n] file (Page n):` header per chunk and would read over 100%.
+
+    1.0 by construction since the grading view was deleted, and kept for exactly that
+    reason: a future change that reintroduces a grader-only view cannot do it silently.
+    """
     figures = _figure_docs(docs)
     if not figures:
         return None
     whole = sum(len(str(d.get("text", ""))) for d in figures)
     if not whole:
         return None
-    return len(format_docs_for_grading(figures)) / whole
+    rendered = format_docs(figures)
+    kept = sum(
+        len(str(d.get("text", ""))) for d in figures if str(d.get("text", "")) in rendered
+    )
+    return kept / whole
 
 
 def main() -> int:
@@ -250,13 +270,59 @@ def main() -> int:
               f"{', '.join(f'{cid} ({err[:40]})' for cid, err in errors.items())}")
 
     # What each stage would COST a model, which is the input half of the grader's latency.
-    grader_chars = [len(format_docs_for_grading(d)) for d in ranked_by_case.values() if d]
-    answer_chars = [len(format_docs(d)) for d in ranked_by_case.values() if d]
+    grader_chars = [len(format_docs(d)) for d in ranked_by_case.values() if d]
     if grader_chars:
         grader_chars.sort()
-        answer_chars.sort()
-        print(f"prompt size  grader p50={round(pct(grader_chars, 0.5))} max={grader_chars[-1]} chars  |  "
-              f"answer p50={round(pct(answer_chars, 0.5))} max={answer_chars[-1]} chars")
+        print(f"prompt size  grader = answer, p50={round(pct(grader_chars, 0.5))} "
+              f"max={grader_chars[-1]} chars")
+
+    # The size invariant, which the stage table cannot show: it scores whether evidence
+    # ARRIVED, and a single over-budget chunk is invisible in a joined prompt length.
+    # `no chunk over the grading budget reaches the grader` is this line.
+    widest = max(
+        (len(str(d.get("text", ""))) for docs in ranked_by_case.values() for d in docs),
+        default=0,
+    )
+    over = sum(
+        1 for docs in ranked_by_case.values() for d in docs
+        if len(str(d.get("text", ""))) > EVIDENCE_WINDOW_CHARS
+    )
+    print(f"largest chunk  {widest} chars against a {EVIDENCE_WINDOW_CHARS}-char window"
+          f"  ({over} over)")
+
+    # The turn's OWN retrieval, which the four-stage table above does not perform.
+    #
+    # That table takes one pool-depth call and slices it, which is what makes `recalled`
+    # and `ranked` two depths of the SAME retrieval and is the reason the table can
+    # attribute a loss to ranking rather than recall. It also means anything applied
+    # inside `retrieve_documents` relative to `top_k` is applied at the pool depth and
+    # then re-sliced — so the per-image cap, which exists precisely to decide who gets
+    # the final slots, is invisible to it.
+    #
+    # Reported beside the table rather than folded into it, so the table stays comparable
+    # with the runs recorded before this line existed.
+    def turn(case: Case) -> tuple[Case, list[dict]]:
+        try:
+            return case, u.retrieve_documents(case.question, top_k=top_k)["docs"]
+        except Exception:  # noqa: BLE001 — one bad case must not lose the run
+            return case, []
+
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+        turns = list(pool.map(turn, scored))
+
+    turn_passed = sum(1 for case, docs in turns if _passes(case, docs, "answer"))
+    shares = []
+    for _case, docs in turns:
+        per_asset: dict[str, int] = {}
+        for doc in docs:
+            for asset in doc.get("asset_ids") or []:
+                per_asset[asset] = per_asset.get(asset, 0) + 1
+        shares.append(max(per_asset.values(), default=0))
+    print(f"\nthe turn's own retrieval (top_k={top_k}, not a slice of the pool)")
+    print(f"  all evidence present   {turn_passed}/{len(scored)} "
+          f"({turn_passed / len(scored):.0%})")
+    print(f"  most slots one image took  {max(shares, default=0)}/{top_k} "
+          f"(cap {u.MAX_CHUNKS_PER_ASSET})")
 
     for stage in STAGES:
         failed = [cid for cid, r in results.items() if not r[stage]]

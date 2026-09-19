@@ -28,21 +28,33 @@ def _figure_markers(docs: list) -> tuple:
     `build_asset_id`'s positional instability — one image added to a page shifts every
     later id — and the model never needs to name anything this turn did not retrieve.
 
-    One number per ASSET, not per chunk. `auto_merge_figure_threshold: null` keeps
-    figure-bearing groups unmerged so this is almost always one apiece, but a chunk
-    that does carry two pictures has to let the answer point at one of them.
+    One number per ASSET, not per chunk — so an image retrieved as several chunks is
+    ONE picture with one number, named once however many of its passages came back.
+
+    That distinction used to cost nothing and now carries the whole behaviour. While one
+    image was one chunk, numbering each occurrence and numbering each asset produced the
+    same list, and the two readings could not be told apart. An image is now indexed as
+    several passages sharing an `asset_id`, so numbering occurrences would show the model
+    `[FIGURE 1]`, `[FIGURE 2]` and `[FIGURE 3]` on three passages of one uniform diagram;
+    `tools/knowledge_result.j2` tells it each marker "is a real image", so it reasonably
+    writes two or three of them, and the answer renders the same picture two or three
+    times. A chunk carrying two genuinely different pictures still gets two numbers.
     """
     per_chunk = []
     mapping = {}
-    number = 0
+    by_asset: dict = {}
     for doc in docs:
         numbers = []
         for asset_id in doc.get("asset_ids") or []:
             if not asset_id:
                 continue
-            number += 1
-            mapping[number] = asset_id
-            numbers.append(number)
+            number = by_asset.get(asset_id)
+            if number is None:
+                number = len(by_asset) + 1
+                by_asset[asset_id] = number
+                mapping[number] = asset_id
+            if number not in numbers:
+                numbers.append(number)
         per_chunk.append(numbers)
     return per_chunk, mapping
 
