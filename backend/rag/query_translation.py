@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from threading import Lock
 from typing import Dict, Optional, Tuple
 
@@ -173,12 +174,68 @@ def reset_cache() -> None:
         _cache.clear()
 
 
+#: How long a corpus-coverage answer is trusted before it is asked again.
+#:
+#: Not for the lifetime of a conversation, though that is the obvious choice: an admin
+#: who uploads the Arabic half mid-afternoon should stop being charged for translations
+#: within minutes, not whenever the last long-running session happens to end. Not per
+#: turn either — it is a database read on the critical path of every Arabic question.
+_COVERAGE_TTL_SECONDS = 300.0
+_coverage: Dict[str, Tuple[float, bool]] = {}
+
+
+def reset_coverage() -> None:
+    """Forget what the corpus was last known to cover. For tests, and for an ingest that
+    wants the next question to see a language it has just added."""
+    with _cache_lock:
+        _coverage.clear()
+
+
+def corpus_covers(language: str, *, now: Optional[float] = None) -> bool:
+    """Whether the corpus already holds material in `language`, memoized briefly.
+
+    A translation is a fallback, not the plan. If the knowledge base is published in the
+    language the parent is writing in, document pairing already routes the question to
+    that half and a translation would pay a model to undo it.
+    """
+    code = (language or "").strip()
+    if not code:
+        return False
+    stamp = time.monotonic() if now is None else now
+    with _cache_lock:
+        cached = _coverage.get(code)
+        if cached and stamp - cached[0] < _COVERAGE_TTL_SECONDS:
+            return cached[1]
+    try:
+        from backend.composition import default_services
+
+        covered = bool(default_services().document_pairs.has_language(code))
+    except Exception:
+        # A pairing lookup is an optimisation, not a gate — the same rule
+        # `language_filter_clause` follows. Unknown coverage means "translate if the
+        # languages differ", which is the behaviour that existed before this.
+        logger.exception("could not read document pairs; assuming no %s corpus", code)
+        return False
+    with _cache_lock:
+        _coverage[code] = (stamp, covered)
+    return covered
+
+
 def needs_translation(question: str) -> Tuple[bool, str]:
     """Whether searching for this question needs it translated first.
 
-    Free: a script count, not a model. Exported because the RESOLVER uses the same
-    judgement — when a turn needs resolving and translating, one call does both, and when
-    it needs neither there is no call at all.
+    Two gates, and the ORDER is the point. The first is free — a script count, not a
+    model — and the second is a memoized database read. Neither costs a token, so a turn
+    that needs no translation finds that out for nothing.
+
+    Corpus coverage is checked BEFORE the language comparison is acted on, because a
+    corpus published in the user's language makes the whole question moot: routing sends
+    an Arabic question to the Arabic half, and translating it into English would send it
+    to the half that was just superseded. Translation is what happens when the corpus
+    cannot answer in the language it was asked in.
+
+    Exported because the RESOLVER uses the same judgement — when a turn needs resolving
+    and translating, one call does both, and when it needs neither there is no call.
     """
     target = (getattr(_RETRIEVAL, "query_translation_language", "") or "en").strip()
     if not getattr(_RETRIEVAL, "query_translation_enabled", False):
@@ -189,6 +246,8 @@ def needs_translation(question: str) -> Tuple[bool, str]:
     source = detect_language(text)
     if source == target:
         return False, f"already in {target}"
+    if corpus_covers(source):
+        return False, f"the corpus is published in {source}"
     return True, f"{source} -> {target}"
 
 

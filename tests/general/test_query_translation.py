@@ -314,3 +314,80 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
         )
         self.assertEqual([], calls)
         self.assertFalse(resolved.resolved)
+
+
+class TheCorpusIsAskedBeforeAModelIsTests(unittest.TestCase):
+    """Translation is the FALLBACK. A corpus published in the user's language makes the
+    question moot — pairing already routes an Arabic question to the Arabic half, and
+    translating it into English would send it to the half that was just superseded.
+
+    Both gates are free: a script count and a memoized database read. A turn that needs
+    no translation finds that out without spending a token."""
+
+    def setUp(self):
+        qt.reset_cache()
+        qt.reset_coverage()
+        self.addCleanup(qt.reset_cache)
+        self.addCleanup(qt.reset_coverage)
+
+    def _with_corpus(self, languages):
+        from unittest.mock import MagicMock
+
+        from backend.composition import Services, set_default_services
+
+        pairs = MagicMock()
+        pairs.has_language.side_effect = lambda code: code in languages
+        set_default_services(Services(document_pairs=pairs))
+        self.addCleanup(set_default_services, None)
+        return pairs
+
+    def test_an_arabic_corpus_means_no_translation_and_no_call(self):
+        self._with_corpus({"ar"})
+        called = []
+        with patch.object(qt._RETRIEVAL, "query_translation_enabled", True):
+            text, trace = qt.translate_for_search(
+                "مصاريف Year 3 كام؟", invoke=lambda m: called.append(m) or _Reply("x")
+            )
+        self.assertEqual("مصاريف Year 3 كام؟", text)
+        self.assertFalse(trace["query_translated"])
+        self.assertIn("published in ar", trace["query_translation_reason"])
+        self.assertEqual([], called, "the corpus answered it; no model was needed")
+
+    def test_an_english_only_corpus_falls_back_to_translating(self):
+        self._with_corpus({"en"})
+        with patch.object(qt._RETRIEVAL, "query_translation_enabled", True):
+            text, trace = qt.translate_for_search(
+                "مصاريف Year 3 كام؟", invoke=_invoke("What are the Year 3 fees?")
+            )
+        self.assertTrue(trace["query_translated"])
+        self.assertEqual("What are the Year 3 fees?", text)
+
+    def test_the_corpus_is_not_asked_once_per_question(self):
+        """A database read on the critical path of every Arabic question, answered once."""
+        pairs = self._with_corpus({"ar"})
+        with patch.object(qt._RETRIEVAL, "query_translation_enabled", True):
+            for _ in range(5):
+                qt.translate_for_search("مصاريف Year 3 كام؟")
+        self.assertEqual(1, pairs.has_language.call_count)
+
+    def test_an_uploaded_arabic_corpus_is_noticed_without_a_restart(self):
+        """The reason this is a short-lived memo rather than a per-conversation flag: an
+        admin who uploads the Arabic half should stop being charged for translations
+        within minutes, not whenever the last long session happens to end."""
+        pairs = self._with_corpus(set())
+        self.assertFalse(qt.corpus_covers("ar", now=0.0))
+        pairs.has_language.side_effect = lambda code: code == "ar"
+        self.assertFalse(qt.corpus_covers("ar", now=10.0), "still inside the memo")
+        self.assertTrue(qt.corpus_covers("ar", now=10_000.0), "the memo expired")
+
+    def test_an_unreadable_pair_table_translates_rather_than_guessing(self):
+        from unittest.mock import MagicMock
+
+        from backend.composition import Services, set_default_services
+
+        pairs = MagicMock()
+        pairs.has_language.side_effect = RuntimeError("table is gone")
+        set_default_services(Services(document_pairs=pairs))
+        self.addCleanup(set_default_services, None)
+
+        self.assertFalse(qt.corpus_covers("ar"))
