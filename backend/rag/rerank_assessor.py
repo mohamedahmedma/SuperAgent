@@ -124,8 +124,13 @@ class CrossEncoderAssessor:
 
     It knows whether a passage is about what was asked. It cannot tell that a question is
     under-specified, or that two candidate readings exist — those need the rung above.
-    So it concludes only at the two ends of its range and abstains in the middle, which
-    is exactly where the LLM grader earns its cost.
+
+    So it concludes in one direction only. A pool it scores highly it admits, because the
+    cost of being wrong there is an answer written from weaker evidence than it looked,
+    and the answer prompt already has to say what its sources leave open. A pool it scores
+    at the floor it reports and hands upward, because the cost of being wrong THERE is the
+    user losing the answer entirely to a denial no score is entitled to make. Everything
+    in between is where the LLM grader earns its cost.
     """
 
     name = "cross_encoder"
@@ -160,13 +165,25 @@ class CrossEncoderAssessor:
         )
 
         if best < irrelevant_at:
-            # Nothing in the pool is about this question. That is a conclusion, not a
-            # guess, and it saves the grader a call to say the same thing.
-            report.certainty = Certainty.MEDIUM
-            report.relevance = "none"
-            report.sufficiency = "none"
-            report.preferred_route = "no_knowledge"
-            report.reasons.append(f"best cross-encoder score {best:.3f} < {irrelevant_at}")
+            # Every chunk scored below the floor. Reported, and nothing more.
+            #
+            # This used to conclude `no_knowledge` at MEDIUM, on the reasoning that it
+            # saved the grader a call to say the same thing. The two ends of this range
+            # are not symmetrical, and that is why they are no longer treated as though
+            # they were. Admitting a pool wrongly costs an answer written from weaker
+            # evidence than it looked, and the answer prompt is already required to say
+            # what its sources leave open. Denying one wrongly costs the user the answer
+            # altogether, with "the knowledge base has no reliable information on this"
+            # and no way to recover — and the score cannot tell a pool that is off the
+            # subject from one the model happens to score badly.
+            #
+            # So the bottom of the range hands over rather than concluding. LOW, so no
+            # policy acts on it; the scores stay in the report and in the trace, and the
+            # rung above reads the chunks and decides.
+            report.certainty = Certainty.LOW
+            report.reasons.append(
+                f"best cross-encoder score {best:.3f} < {irrelevant_at}, deferring to the grader"
+            )
             return report
 
         if len(supporting) >= min_supporting:
