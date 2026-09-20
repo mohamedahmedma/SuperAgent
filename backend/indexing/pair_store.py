@@ -128,6 +128,29 @@ class DocumentPairService:
             uow.commit()
         return None if cleared.empty else cleared
 
+    def has_language(self, language: str) -> bool:
+        """Whether the corpus holds any document WRITTEN in `language`.
+
+        The question `superseded_filenames` cannot answer, and a different one: that
+        method decides which half of a PAIR to drop, so it sees only entries with both
+        sides filled. This asks whether the language is represented at all, which
+        includes an entry that exists on one side only — an Arabic handbook with no
+        English twin is Arabic coverage even though it supersedes nothing.
+
+        It is what decides whether a question needs translating before it is searched
+        for. When the corpus already speaks the user's language, routing sends the
+        question to that half and paying a model to rewrite it would buy nothing.
+
+        Nothing records a language on a chunk, so the pair table is the only place the
+        system knows what language anything is written in. A deployment that has never
+        paired anything therefore reports no coverage, which is the safe answer: it means
+        "translate if the languages differ", the behaviour that existed before this.
+        """
+        side = _SIDES.get(language or "")
+        if not side:
+            return False
+        return any((getattr(pair, side, "") or "").strip() for pair in self.list_pairs())
+
     def superseded_filenames(self, language: str) -> list[str]:
         """Files to EXCLUDE when answering in `language`: the other-language half of a
         pair whose `language` half also exists.

@@ -133,7 +133,7 @@ class TheGateTests(unittest.TestCase):
 class ResolutionTests(unittest.TestCase):
     def _resolve(self, question, history, payload, **overrides):
         return resolve_question(
-            question, history, _config(**overrides), invoke=lambda *a: payload
+            question, history, _config(**overrides), invoke=lambda *a, **k: payload
         )
 
     def test_a_follow_up_inherits_its_subject_and_its_conditions(self):
@@ -216,7 +216,7 @@ class ResolutionTests(unittest.TestCase):
         self.assertEqual("and those?", resolved.question)
 
     def test_a_resolver_failure_never_costs_the_turn(self):
-        def boom(*_args):
+        def boom(*_args, **_kwargs):
             raise RuntimeError("provider down")
 
         resolved = resolve_question("and those?", UNIFORM_TURN, _config(), invoke=boom)
@@ -551,7 +551,7 @@ class PlanTurnWiringTests(unittest.TestCase):
             "and what is the fees for this years",
             UNIFORM_TURN,
             ctx,
-            resolve_invoke=lambda *a: {
+            resolve_invoke=lambda *a, **k: {
                 "question": "what are the school fees for the years up to Year 6",
                 "constraints": ["grades up to Year 6"],
                 "intent": "followup",
@@ -570,7 +570,7 @@ class PlanTurnWiringTests(unittest.TestCase):
 
         calls = []
 
-        def spy(*args):
+        def spy(*args, **_kwargs):
             calls.append(args)
             return {"question": "x", "intent": "followup"}
 
@@ -589,7 +589,7 @@ class PlanTurnWiringTests(unittest.TestCase):
     def test_a_resolver_failure_leaves_the_turn_running(self):
         from backend.chat.orchestrator import plan_turn
 
-        def boom(*_args):
+        def boom(*_args, **_kwargs):
             raise RuntimeError("down")
 
         plan, signals = plan_turn("and those?", UNIFORM_TURN, self.Ctx(), resolve_invoke=boom)

@@ -29,6 +29,7 @@ from backend.rag.graph_nodes import (
     route_after_grade,
     route_after_rewrite,
 )
+from backend.rag.query_translation import translate_for_search
 from backend.rag.hitl_resume import build_hitl_resume_state, is_hitl_result, refined_question_for_hitl
 from backend.rag.rerank_assessor import CrossEncoderAssessor
 from backend.profiles import get_profile
@@ -203,6 +204,7 @@ def _initial_state(
         "step_back_question": None,
         "hyde_document": None,
         "rag_trace": None,
+        "search_text": None,
         "complexity": None,
         # Left unset when planning is off, because nothing classified this question and
         # writing "simple" would be the fabricated-grade pattern evidence.py exists to
@@ -338,6 +340,9 @@ class _ModuleDependencies:
 
     def retrieve_documents(self, query: str, *, top_k: int, language: str) -> dict:
         return retrieve_documents(query, top_k=top_k, language=language)
+
+    def translate_for_search(self, query: str) -> tuple:
+        return translate_for_search(query)
 
     def rewrite_query_once(self, question: str) -> dict:
         return rewrite_query_once(question)

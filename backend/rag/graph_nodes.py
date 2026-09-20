@@ -95,6 +95,13 @@ class RAGState(TypedDict):
     # for as long as this line was missing `_initial_state` wrote the language and every
     # node read None — both halves of a paired document competed on every bilingual turn.
     language: Optional[str]
+    # The question as the RETRIEVER should read it: the corpus's language, the child's
+    # name already gone. Written once by whichever node retrieves first and read by every
+    # node after it, so a turn that rewrites pays for one translation and not two.
+    #
+    # Only retrieval reads it. `question` stays exactly as the user wrote it, because the
+    # grader judges that, the answer is written from it, and the reply is in its language.
+    search_text: Optional[str]
     # The year group the school's records put this turn's child in. Beside the question,
     # never appended to it: a year group is absent from every passage the corpus wrote
     # once for everybody, so stapling it to the query dilutes recall exactly as carried
@@ -126,6 +133,9 @@ class RagDependencies(Protocol):
     def complexity_schema(self) -> type: ...
 
     def retrieve_documents(self, query: str, *, top_k: int, language: str) -> dict: ...
+
+    def translate_for_search(self, query: str) -> tuple:
+        """`(text to search with, trace fields)`. The corpus's language, retrieval only."""
 
     def rewrite_query_once(self, question: str) -> dict: ...
 
@@ -228,8 +238,17 @@ class RetrieveInitial:
                 "Applied when the answer is written, not to the search — "
                 + "; ".join(state["carried_constraints"]),
             )
+        search_text, translation = self._deps.translate_for_search(query)
+        if translation.get("query_translated"):
+            # The SEARCH text only. The grader still reads the question as asked, the
+            # answer is still written from it, and the user is still replied to in their
+            # own language — the same split `search_query` makes for the child's name.
+            emit(
+                state, "🌐", "Searching in the corpus's language",
+                translation.get("query_translation_reason", ""),
+            )
         retrieved = self._deps.retrieve_documents(
-            query, top_k=self._deps.top_k, language=str(state.get("language") or "")
+            search_text, top_k=self._deps.top_k, language=str(state.get("language") or "")
         )
         results = retrieved.get("docs", [])
         retrieve_meta = retrieved.get("meta", {})
@@ -273,12 +292,14 @@ class RetrieveInitial:
             "initial_retrieved_chunks": results,
             "retrieval_stage": "initial",
             "child_name_removed": query != state["question"],
+            **translation,
             "complexity": state.get("complexity"),
             "complexity_reason": state.get("complexity_reason"),
             **self._deps.retrieval_trace_fields(retrieve_meta),
         }
         return {
             "query": query,
+            "search_text": search_text,
             "docs": results,
             "context": context,
             "retrieval_failed": retrieval_failed,
@@ -605,7 +626,10 @@ class RewriteQuestion:
         }
 
     def __call__(self, state: RAGState) -> RAGState:
-        question = search_query(state)
+        # The text retrieval SEARCHED with, not the raw question: it is already in the
+        # corpus's language, so the rewrite it plans is too and the second retrieval needs
+        # no second translation. Falls back to the question when nothing translated it.
+        question = state.get("search_text") or search_query(state)
         emit(state, "✏️", "Rewriting the query...")
 
         rewrite_count = int(state.get("rewrite_count") or 0)
@@ -675,6 +699,8 @@ class RetrieveRewritten:
         rewritten_query, _cuts = strip_child_names(rewritten_query, child_names(state))
         method_label = "Step-back" if rewrite_method == "step_back" else "HyDE"
         emit(state, "🔄", f"Re-retrieving with the {method_label} query...")
+        # No translation here: the rewrite was planned from `search_text`, which is
+        # already the corpus's language. Translating a translation would only add error.
         retrieved = self._deps.retrieve_documents(
             rewritten_query, top_k=self._deps.top_k, language=str(state.get("language") or "")
         )
@@ -1057,8 +1083,9 @@ class ResumeRetrieval:
     def __call__(self, state: dict) -> dict:
         emit(state, "🔎", "Running targeted retrieval using the HITL follow-up", "Skipping complexity classification and sub-question decomposition")
         query = search_query(state)
+        search_text, translation = self._deps.translate_for_search(query)
         retrieved = self._deps.retrieve_documents(
-            query, top_k=self._deps.top_k, language=str(state.get("language") or "")
+            search_text, top_k=self._deps.top_k, language=str(state.get("language") or "")
         )
         results = retrieved.get("docs", [])
         retrieve_meta = retrieved.get("meta", {})
@@ -1102,10 +1129,12 @@ class ResumeRetrieval:
             "hitl_resumed": True,
             "hitl_resume_strategy": "targeted_retrieval",
             "retrieval_stage": "hitl_targeted_retrieval",
+            **translation,
             **self._deps.retrieval_trace_fields(retrieve_meta),
         })
         state.update({
             "query": query,
+            "search_text": search_text,
             "docs": results,
             "context": context,
             "retrieval_failed": retrieval_failed,

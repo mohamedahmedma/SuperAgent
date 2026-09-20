@@ -1,4 +1,5 @@
 from collections import defaultdict
+import math
 from typing import List, Tuple, Dict, Any, Literal, Optional
 import logging
 import os
@@ -7,6 +8,7 @@ import requests
 from langsmith import traceable
 
 from backend.indexing.embedding import embed_query
+from backend.rag.rerank_assessor import CrossEncoderProvider
 from backend.env import env_bool, env_float, env_int, env_value
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
@@ -70,6 +72,18 @@ EVIDENCE_WINDOW_CHARS = env_int(
 # How many of the final slots one image may occupy — see `_limit_per_asset`.
 MAX_CHUNKS_PER_ASSET = env_int(
     "RETRIEVAL_MAX_CHUNKS_PER_ASSET", _RETRIEVAL.max_chunks_per_asset, minimum=1
+)
+# A local cross-encoder over the candidate pool — see `_local_rerank`.
+RERANK_LOCAL_ENABLED = env_bool("RERANK_LOCAL_ENABLED", _RETRIEVAL.rerank_local_enabled)
+RERANK_LOCAL_MODEL = (os.getenv("RERANK_LOCAL_MODEL") or _RETRIEVAL.rerank_local_model).strip()
+RERANK_LOCAL_DEVICE = (os.getenv("RERANK_LOCAL_DEVICE") or _RETRIEVAL.rerank_local_device).strip()
+RERANK_LOCAL_BATCH_SIZE = env_int(
+    "RERANK_LOCAL_BATCH_SIZE", _RETRIEVAL.rerank_local_batch_size, minimum=1
+)
+# How many fused candidates the cross-encoder scores — the whole cost of reranking, and
+# the ceiling on what it can rescue. See RetrievalConfig.
+RERANK_LOCAL_TOP_N = env_int(
+    "RERANK_LOCAL_TOP_N", _RETRIEVAL.rerank_local_top_n, minimum=0
 )
 
 # An explicit candidate pool size can come from either layer, and the retrieval trace
@@ -574,6 +588,55 @@ def _limit_per_asset(docs: List[dict], limit: int, top_k: int) -> Tuple[List[dic
     return kept, dropped
 
 
+def _sigmoid(value: float) -> float:
+    return 1.0 / (1.0 + math.exp(-value)) if -30.0 < value < 30.0 else (0.0 if value <= 0 else 1.0)
+
+
+#: The local cross-encoder, loaded once per process including its failure. Its own
+#: instance rather than the assessor's, so the two cannot silently share a model name.
+_local_reranker = CrossEncoderProvider()
+
+
+def _local_rerank(query: str, docs: List[dict]) -> Optional[List[dict]]:
+    """The candidates ordered by a cross-encoder, or None if it is not available here.
+
+    A cross-encoder reads the question and the chunk TOGETHER, which is the thing neither
+    half of hybrid retrieval does: dense compares two independent embeddings and BM25
+    compares terms, and on a corpus written in one language and questioned in another the
+    sparse half contributes almost nothing. RRF then fuses two rank lists without anything
+    ever having judged a pair.
+
+    Scores are squashed to (0, 1). The raw output of a one-label cross-encoder is a logit
+    and can be negative, and `_meets_rerank_min_score` compares it against
+    `RERANK_MIN_SCORE`, which is 0.0 — so passing logits through would silently drop every
+    chunk the model was unsure about, and at a threshold that was written for a different
+    scale entirely. Squashing keeps the ORDER identical (sigmoid is monotonic) and makes
+    the number mean the same kind of thing the threshold does.
+    """
+    model = _local_reranker.model(RERANK_LOCAL_MODEL, RERANK_LOCAL_DEVICE)
+    if model is None:
+        return None
+
+    # Only the head of the fused order is scored, because a forward pass per pair is the
+    # whole cost of this and it is paid on every turn. The tail keeps its fused order and
+    # stays BELOW everything scored — a chunk RRF placed 13th cannot be promoted, which is
+    # the ceiling `rerank_local_top_n` documents, but it is not discarded either.
+    depth = RERANK_LOCAL_TOP_N if RERANK_LOCAL_TOP_N > 0 else len(docs)
+    head, tail = docs[:depth], docs[depth:]
+    pairs = [(query, str(doc.get("text") or "")[:RERANK_DOC_CHAR_LIMIT]) for doc in head]
+    try:
+        scores = model.predict(pairs, batch_size=RERANK_LOCAL_BATCH_SIZE, show_progress_bar=False)
+    except Exception:
+        logger.exception("local rerank failed; falling back to the fused retrieval order")
+        return None
+    scored = []
+    for doc, score in zip(head, scores):
+        value = float(score)
+        scored.append({**doc, "rerank_score": value if 0.0 <= value <= 1.0 else _sigmoid(value)})
+    scored.sort(key=lambda item: item["rerank_score"], reverse=True)
+    return scored + list(tail)
+
+
 @traceable(name="rerank_documents", run_type="tool")
 def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[dict], Dict[str, Any]]:
     """The candidates in relevance order. ORDERED, not cut.
@@ -584,7 +647,7 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
     """
     docs_with_rank = [{**doc, "rrf_rank": i} for i, doc in enumerate(docs, 1)]
     meta: Dict[str, Any] = {
-        "rerank_enabled": RERANK_ENABLED,
+        "rerank_enabled": RERANK_ENABLED or RERANK_LOCAL_ENABLED,
         "rerank_applied": False,
         "rerank_model": RERANK_MODEL,
         "rerank_endpoint": _get_rerank_endpoint(),
@@ -592,7 +655,28 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
         "rerank_timeout_seconds": RERANK_TIMEOUT_SECONDS,
         "candidate_count": len(docs_with_rank),
     }
-    if not docs_with_rank or not meta["rerank_enabled"]:
+    if not docs_with_rank:
+        return docs_with_rank, meta
+
+    # The LOCAL cross-encoder first when it is configured. Each branch is gated on its own
+    # flag, and deliberately: `rerank_enabled` in the meta means "something reranked this",
+    # which is what a trace wants to say, and reading it back as "the REMOTE one is on" is
+    # a bug this function already had — with the local reranker enabled and no endpoint
+    # configured it fell straight through to an HTTP POST at an empty URL, failed, and
+    # reported a silent RRF fallback in 118 ms.
+    if RERANK_LOCAL_ENABLED and not RERANK_ENABLED:
+        scored = _local_rerank(query, docs_with_rank)
+        if scored is not None:
+            meta.update({
+                "rerank_applied": True,
+                "rerank_model": RERANK_LOCAL_MODEL,
+                "rerank_endpoint": f"local:{RERANK_LOCAL_DEVICE}",
+            })
+            return scored, meta
+        meta["rerank_error"] = "local_cross_encoder_unavailable"
+        return _sort_by_rank_score(docs_with_rank), meta
+
+    if not RERANK_ENABLED:
         return _sort_by_rank_score(docs_with_rank), meta
 
     payload = {

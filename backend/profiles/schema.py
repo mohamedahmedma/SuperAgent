@@ -517,6 +517,8 @@ class RagConfig(_Section):
     evidence_grade_prompt: str = ""
     complexity_prompt: str = ""
     rewrite_prompt: str = ""
+    # Empty uses rag/translate_query.j2. See retrieval.query_translation_enabled.
+    query_translation_prompt: str = ""
 
     max_rewrites: int = 1
     max_sub_questions: int = 4
@@ -788,6 +790,54 @@ class RetrievalConfig(_Section):
     # document, so a per-document cap is either a no-op or a gag on the whole corpus. The
     # thing that multiplies is passages of one picture.
     max_chunks_per_asset: int = 3
+
+    # A LOCAL cross-encoder reranking the candidate pool, before the final slots are cut.
+    #
+    # Not the same thing as `rag.rerank_cross_encoder_enabled`, and the difference is the
+    # whole point. That one is a rung of the evidence ladder: it runs on the chunks that
+    # already won, so it can reorder the answer set but can never recover a chunk that
+    # ranking dropped — and switching it on also arms the path where a bare score ends a
+    # turn in a denial. This runs where the ordering is still being decided, scores every
+    # candidate, and only ever orders.
+    #
+    # RRF alone decides the final slots today: hybrid fuses two rank lists and nothing
+    # reads the query and the chunk together. That is the single biggest missing piece for
+    # the `recalled` to `ranked` gap, and it costs compute rather than tokens.
+    rerank_local_enabled: bool = False
+    # Same family as the bge-m3 embedder and strong on Arabic, which matters when the
+    # questions and the corpus are in different languages. `-base` is roughly half the
+    # parameters if CPU latency is the constraint.
+    rerank_local_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_local_device: str = "cpu"
+    rerank_local_batch_size: int = 32
+    # How many of the FUSED candidates the cross-encoder scores, best-first.
+    #
+    # A cross-encoder is one forward pass per (question, chunk) pair, so this is the whole
+    # cost of reranking and it is paid on every turn. Scoring the full pool of 30 measured
+    # 13 seconds a question on this project's CPU, which is not a latency anyone would
+    # ship; 12 is a working compromise.
+    #
+    # It also sets a ceiling, and that is the part worth understanding before tuning it:
+    # a chunk that RRF placed 13th can never be rescued, however relevant it is, so the
+    # best `ranked` this can reach is recall@12 and not recall@30. Widening it buys back
+    # that headroom at a linear cost in latency. 0 means the whole pool.
+    rerank_local_top_n: int = 12
+
+    # Search in the corpus's language, whatever language the question was asked in.
+    #
+    # Hybrid retrieval fuses a dense list and a sparse one, and the sparse half is BM25,
+    # which matches TERMS. An Arabic question against an English corpus shares almost no
+    # terms with it, so RRF fuses one useful ranking with one close to noise. Measured on
+    # 349 school questions, changing only the language the question is asked in:
+    # recalled 337 -> 343, ranked@8 320 -> 338, ranked@4 273 -> 314, and the
+    # recalled-to-ranked loss falls from 17 questions to 5.
+    #
+    # It costs one small model call on a turn whose language differs from the corpus, and
+    # nothing at all otherwise — the check is a script count, not a model. Retrieval only:
+    # the grader, the answer and the user's reply all keep the user's own words.
+    query_translation_enabled: bool = False
+    # The language the CORPUS is written in, which is what a query is translated into.
+    query_translation_language: str = "en"
 
     rerank_min_score: float = 0.0
     rerank_doc_char_limit: int = 2000

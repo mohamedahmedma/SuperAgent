@@ -78,12 +78,11 @@ load_env()
 
 from backend.rag import utils as u  # noqa: E402
 from backend.rag.evidence_view import format_docs  # noqa: E402
+from backend.rag.query_translation import translate_for_search  # noqa: E402
 from backend.rag.utils import EVIDENCE_WINDOW_CHARS  # noqa: E402
 from tests.evals.school_dataset import (  # noqa: E402
     CORPUS_FILENAME,
-    DATASET_VERSION,
     Case,
-    cases,
     missing,
 )
 
@@ -98,6 +97,30 @@ def _corpus_is_indexed(filename: str) -> bool:
         print(f"!! retrieval is not available: {exc}")
         return False
     return any(filename.lower() in str(doc.get("filename", "")).lower() for doc in probe["docs"])
+
+
+def _spans_the_corpus_does_not_contain(selected: list[Case]) -> list[tuple[str, str]]:
+    """Gold spans that no indexed chunk carries, so no retrieval could ever satisfy them.
+
+    Read out of the index rather than the source file, because what the oracle has to
+    agree with is the text retrieval can actually return — after the parser, after
+    `sanitize_text`, after chunking.
+    """
+    try:
+        indexed = u._milvus().query_all(output_fields=["text"])
+    except Exception as exc:  # noqa: BLE001 — a probe must not fail the run
+        print(f"!! could not read the index to check the gold ({exc})")
+        return []
+    corpus = "\n".join(str(row.get("text", "")) for row in indexed).lower()
+    if not corpus:
+        return []
+    absent = []
+    for case in selected:
+        for item in case.required:
+            for span in (item if isinstance(item, tuple) else (item,)):
+                if span.lower() not in corpus:
+                    absent.append((case.id, span))
+    return absent
 
 
 def _figure_docs(docs: list[dict]) -> list[dict]:
@@ -156,24 +179,66 @@ def _figure_text_kept(docs: list[dict]) -> float | None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", default="dev", choices=("dev", "holdout", "all"))
+    ap.add_argument(
+        "--lang", default="ar", choices=("ar", "en"),
+        help="which question set: ar is what parents actually write, en is the same cases "
+             "translated, for measuring what the sparse half contributes cross-language",
+    )
     ap.add_argument("--top-k", type=int, default=None, help="default: the profile/env value")
     ap.add_argument("--pool", type=int, default=30, help="depth scored as 'recalled'")
     ap.add_argument("--verbose", action="store_true", help="name the missing evidence per case")
     ap.add_argument("--workers", type=int, default=8, help="questions in flight at once (1 = sequential)")
+    ap.add_argument(
+        "--translate", action="store_true",
+        help="translate each question with the LIVE query-translation path before "
+             "retrieving. `--lang en` is the ceiling that a perfect offline translation "
+             "reaches; this is what the product actually delivers, verification and all",
+    )
+    ap.add_argument(
+        "--sweep", default="", metavar="4,8",
+        help="also score these top_k depths from the SAME pool, so comparing depths costs "
+             "one retrieval rather than one per depth — which matters when a reranker is on "
+             "and the pool is what it pays for",
+    )
     args = ap.parse_args()
+    sweep = [int(k) for k in args.sweep.split(",") if k.strip()]
+
+    if args.lang == "en":
+        from tests.evals import school_dataset_en as dataset
+    else:
+        from tests.evals import school_dataset as dataset
+    cases, DATASET_VERSION = dataset.cases, dataset.DATASET_VERSION
 
     top_k = args.top_k or u.RETRIEVAL_TOP_K
     selected = cases(args.split)
     scored = [c for c in selected if c.kind != "unanswerable"]
     unanswerable = [c for c in selected if c.kind == "unanswerable"]
 
-    print(f"dataset {DATASET_VERSION}  split={args.split}  cases={len(selected)} "
+    print(f"dataset {DATASET_VERSION} [{args.lang}]  split={args.split}  cases={len(selected)} "
           f"({len(scored)} scored, {len(unanswerable)} unanswerable)")
-    print(f"top_k={top_k}  pool={args.pool}  rerank={'ON' if u.RERANK_ENABLED else 'OFF'}  "
+    if args.translate:
+        print("translating each question with the live path before retrieving")
+    print(f"top_k={top_k}  pool={args.pool}  "
+          f"rerank={'remote' if u.RERANK_ENABLED else ('local:' + u.RERANK_LOCAL_MODEL if u.RERANK_LOCAL_ENABLED else 'OFF')}  "
           f"workers={args.workers}\n")
 
     if not _corpus_is_indexed(CORPUS_FILENAME):
         print(f"!! {CORPUS_FILENAME} is not in the index — ingest it before scoring.")
+        return 2
+
+    unreachable = _spans_the_corpus_does_not_contain(scored)
+    if unreachable:
+        # A gold span that is not in the corpus scores as a retrieval failure for ever,
+        # and it makes the system look worse rather than better — which is the direction
+        # `test_school_eval_dataset` says a measurement must never rot in. That test
+        # cannot catch this one: it checks the SPAN's own characters, and the mismatch
+        # here is between the span and the document. Two cases carried it from the day
+        # the dataset was written — the corpus writes "7:45 AM" with a non-breaking
+        # space, so a span spelled with an ordinary one never matched.
+        print(f"!! {len(unreachable)} gold span(s) are not in the indexed corpus. Fix the "
+              f"span — do not loosen the check:")
+        for case_id, span in unreachable:
+            print(f"     {case_id}: {span!r}")
         return 2
 
     results: dict[str, dict[str, bool]] = {}
@@ -182,11 +247,19 @@ def main() -> int:
     lats: list[float] = []
     errors: dict[str, str] = {}
     ranked_by_case: dict[str, list[dict]] = {}
+    pool_by_case: dict[str, list[dict]] = {}
+
+    translated = {"n": 0}
 
     def run(case: Case) -> tuple[Case, list[dict], float, str]:
         started = time.perf_counter()
         try:
-            docs = u.retrieve_documents(case.question, top_k=args.pool)["docs"]
+            question = case.question
+            if args.translate:
+                question, meta = translate_for_search(question)
+                if meta.get("query_translated"):
+                    translated["n"] += 1
+            docs = u.retrieve_documents(question, top_k=args.pool)["docs"]
         except Exception as exc:  # noqa: BLE001 — one bad case must not lose the run
             return case, [], (time.perf_counter() - started) * 1000, f"{type(exc).__name__}: {exc}"
         return case, docs, (time.perf_counter() - started) * 1000, ""
@@ -200,6 +273,7 @@ def main() -> int:
         lats.append(elapsed)
         ranked = pool_docs[:top_k]
         ranked_by_case[case.id] = ranked
+        pool_by_case[case.id] = pool_docs
         if error:
             errors[case.id] = error
             results[case.id] = {stage: False for stage in STAGES}
@@ -289,6 +363,27 @@ def main() -> int:
     )
     print(f"largest chunk  {widest} chars against a {EVIDENCE_WINDOW_CHARS}-char window"
           f"  ({over} over)")
+
+    if args.translate:
+        print(f"\nquestions actually translated: {translated['n']}/{len(scored)} "
+              f"(the rest were refused by verification or already in the corpus language)")
+
+    if sweep:
+        # The same pool, cut at several depths. `recalled` does not move — it is the pool —
+        # so only the three stages below it are reported.
+        print(f"\ntop_k sweep over the same pool of {args.pool}")
+        print(f"  {'top_k':<8}{'ranked':>12}{'grader':>12}{'answer':>12}")
+        pooled = {cid: docs for cid, docs in pool_by_case.items()}
+        for depth in sweep:
+            row = {}
+            for stage in ("ranked", "grader", "answer"):
+                row[stage] = sum(
+                    1 for case in scored
+                    if not errors.get(case.id)
+                    and _passes(case, pooled.get(case.id, [])[:depth], stage)
+                )
+            print(f"  {depth:<8}"
+                  + "".join(f"{row[s]}/{len(scored)}".rjust(12) for s in ("ranked", "grader", "answer")))
 
     # The turn's OWN retrieval, which the four-stage table above does not perform.
     #

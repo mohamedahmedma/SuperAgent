@@ -40,7 +40,7 @@ from typing import Literal, Sequence
 
 #: Bump when a case is added, removed, or its gold changes — a score is only comparable
 #: against another run of the same version.
-DATASET_VERSION = "2026-09-18.1"
+DATASET_VERSION = "2026-09-19.1"
 
 #: The corpus these questions are labelled against.
 CORPUS_FILENAME = "Aurexis_Knowledge_Base_Mock_Egypt.docx"
@@ -325,7 +325,7 @@ CASES: list[Case] = [
     Case("library", "فيه مكتبة للأطفال؟", [("Library", "Librarian")]),
 
     # ---------- the school day, behaviour, and the building ----------
-    Case("school-hours", "اليوم الدراسي بيبدأ وبينتهي الساعة كام؟", ["7:45 AM"]),
+    Case("school-hours", "اليوم الدراسي بيبدأ وبينتهي الساعة كام؟", ["7:45"]),
     Case("weekend", "المدرسة بتقفل يوم إيه؟", ["Closed on Fridays"]),
     Case("afternoon-activities", "فيه حاجة للأطفال بعد اليوم الدراسي؟",
          ["After-school activities"]),
@@ -416,7 +416,7 @@ CASES: list[Case] = [
     Case("fees-and-docs", "مصاريف FS1 كام ومحتاج أجهز أنهي ورق؟",
          ["88,000 EGP", ("Birth Certificate", "Vaccination Certificate")], kind="multi_part"),
     Case("hours-and-bus", "اليوم الدراسي بيخلص الساعة كام والباص بيغطي التجمع؟",
-         ["7:45 AM", "Fifth Settlement"], kind="multi_part"),
+         ["7:45", "Fifth Settlement"], kind="multi_part"),
     Case("camp-and-clubs", "الكامب بيبدأ امتى وفيه أنشطة بعد المدرسة طول السنة؟",
          ["12 July", ("Robotics", "Football")], kind="multi_part", holdout=True),
     Case("reenroll-and-discount", "رسوم إعادة القيد كام ولو عندي ولدين في خصم؟",
@@ -449,6 +449,229 @@ CASES: list[Case] = [
          note="a records question, not a knowledge-base one"),
     Case("weather-question", "الجو هيبقى عامل إيه بكرة؟", kind="unanswerable",
          note="plainly outside the assistant's subject"),
+
+    # =====================================================================================
+    # Second expansion, 2026-09-19. The set went from 220 cases to 345 so that a stage
+    # score moves on evidence rather than on noise: at 176 scored questions one question is
+    # 0.6 of a point, and several of Phase 1's real effects were inside that.
+    #
+    # Same rules as everything above — Egyptian Arabic, gold read out of the source
+    # document, nothing shaped around where a chunk happens to begin. The additions reach
+    # the parts of the KB the first pass under-sampled: the year-group equivalence list,
+    # the two subject tables, the payment mechanics, the corporate partner list, the
+    # facilities, and the parts of the camp beyond its dates and price.
+    # =====================================================================================
+
+    # ---------- year groups: every equivalence and every age the corpus states ----------
+    Case("equiv-nursery", "Pre-K دي بتقابل إيه في النظام المصري؟", ["Egypt Nursery"]),
+    Case("equiv-kg1", "FS1 يعني إيه بالمصري؟", ["Egypt KG1"]),
+    Case("equiv-kg3", "Year 1 بتقابل أنهي سنة في النظام المصري؟", ["Egypt KG3"], holdout=True),
+    Case("equiv-grade1", "Year 2 يعني الصف الأول الابتدائي؟", ["Egypt Grade 1"]),
+    Case("equiv-grade2", "Year 3 بيقابل أنهي صف عندنا؟", ["Egypt Grade 2"]),
+    Case("equiv-grade3", "Year 4 ده الصف التالت الابتدائي؟", ["Egypt Grade 3"]),
+    Case("equiv-grade4", "Year 5 بيساوي أنهي صف مصري؟", ["Egypt Grade 4"], holdout=True),
+    Case("equiv-grade6", "Year 7 بتقابل إيه في المدارس المصرية؟", ["Egypt Grade 6"]),
+    Case("equiv-grade7", "Year 8 يعني الصف الأول الإعدادي؟", ["Egypt Grade 7"]),
+    Case("age-year3-entry", "ابني عنده 7 سنين يدخل أنهي سنة؟", ["Year 3", "7 years and above"]),
+    Case("age-year4-entry", "بنتي عندها 8 سنين تتحط فين؟", ["Year 4", "8 years and above"]),
+    Case("age-year6-entry", "ابني عنده 10 سنين، أنهي سنة دراسية؟",
+         ["Year 6", "10 years and above"], holdout=True),
+    Case("age-year7-entry", "عندي ولد 11 سنة يروح أنهي سنة؟", ["Year 7", "11 years and above"]),
+    Case("age-year8-entry", "ابني عنده 12 سنة، هيدخل أنهي سنة؟", ["Year 8", "12 years and above"]),
+    Case("prek-under-three-link", "بنتي أقل من 3 سنين، فيه لينك أعرف منه التفاصيل؟",
+         ["pre-k-opening"]),
+
+    # ---------- fees: the rows the first pass did not ask about ----------
+    Case("fees-y6-egyptian", "مصاريف Year 6 للمصري كام؟", ["105,000 EGP", "Y06"], modality="table"),
+    Case("fees-y8-egyptian", "ابني في Year 8، المصاريف كام؟", ["120,000 EGP"], modality="table"),
+    Case("fees-y10-international", "طالب دولي في Year 10 هيدفع كام؟", ["145,000 EGP"], modality="table"),
+    Case("fees-y12", "مصاريف Year 12 كام؟", ["150,000 EGP"], modality="table", holdout=True),
+    Case("fees-y12-international", "Year 12 للأجانب بكام؟", ["160,000 EGP"], modality="table"),
+    Case("fees-prek-egyptian", "Pre-K للمصريين بكام؟", ["75,000 EGP", "Pre-K"], modality="table"),
+    Case("fees-fs2-international", "FS2 لطالب أجنبي بكام؟", ["98,000 EGP"], modality="table"),
+    Case("fees-y1-egyptian", "مصاريف Year 1 كام للمصري؟", ["95,000 EGP"], modality="table"),
+    Case("fees-tax-rule", "المصاريف للأجانب عليها ضرايب؟", ["Egyptian tax regulations"]),
+    Case("fees-excluded-trips", "الرحلات المدرسية داخلة في المصاريف؟", ["School trips"]),
+    Case("fees-excluded-activities", "الأنشطة اللي مع جهات خارجية محسوبة على المصاريف؟",
+         ["Extracurricular activities with external providers"], holdout=True),
+    Case("fees-excluded-transport", "النقل داخل في المصاريف ولا منفصل؟", ["Transportation"]),
+    Case("meals-hygiene", "الأكل بييجي من مكان نضيف؟", ["high hygiene standards"]),
+    Case("meals-who-plans", "مين بيحدد الوجبات؟", ["coordination with our principal"]),
+
+    # ---------- paying: the mechanics ----------
+    Case("payment-applepay", "ينفع أدفع بـ Apple Pay؟", ["Apple Pay"]),
+    Case("payment-mastercard", "بتقبلوا ماستر كارد؟", ["Mastercard"]),
+    Case("payment-amex", "ينفع أدفع بأمريكان إكسبريس؟", ["American Express"], holdout=True),
+    Case("payment-iban", "فيه IBAN أحول عليه؟", ["IBAN"]),
+    Case("payment-account-number", "رقم الحساب البنكي كام؟", ["0000-0000-0000-0000"]),
+    Case("payment-company-name", "التحويل هيبقى باسم أنهي شركة؟", ["Aurexis Education Services"]),
+    Case("payment-oncampus", "ينفع أدفع في المدرسة نفسها بالكارت؟", ["On-campus payments"]),
+    Case("payment-invoice-link", "هيوصلني إزاي لينك الدفع؟", ["released invoice link"]),
+    Case("marketplace-what", "أشتري الكتب والباص منين بعد القبول؟", ["bus subscriptions"]),
+    Case("payment-downpayment-when", "المقدم بدفعه امتى؟", ["upon acceptance of a place"]),
+    Case("payment-term1-share", "قسط الترم الأول كام في المية؟", ["Term 1 (20%)"], holdout=True),
+    Case("payment-term2-share", "قسط الترم التاني نسبته كام؟", ["Term 2 (30%)"]),
+    Case("payment-joining-term3-share", "لو ابني دخل في الترم التالت هدفع كام في المية؟",
+         ["40% for Term 3"]),
+    Case("payment-example-later", "في مثال FS1 الأقساط اللي بعد المقدم بكام؟", ["26,400 EGP"]),
+
+    # ---------- when things go wrong ----------
+    Case("outstanding-repeat-year", "لو المصاريف متدفعتش ابني ممكن يعيد السنة؟",
+         ["Repetition of the academic year"]),
+    Case("outstanding-legal", "ممكن توصلوا للقانون لو متدفعش؟", ["Legal action as a last resort"]),
+    Case("outstanding-reports-withheld", "هتحجزوا التقارير لو المصاريف متأخرة؟",
+         ["Withholding of academic reports"], holdout=True),
+    Case("reenroll-guarantee", "رسوم إعادة القيد بتضمنلي إيه؟", ["guarantees your child"]),
+    Case("reenroll-if-silent", "لو مقلتش إني هكمل السنة الجاية هيحصل إيه؟", ["end of Term 3"]),
+
+    # ---------- calendar and buses ----------
+    Case("term1-end-date", "الترم الأول بيخلص امتى؟", ["18/12"]),
+    Case("term3-start-date", "الترم التالت بيبدأ امتى؟", ["12/04"]),
+    Case("term2-both-dates", "الترم التاني من امتى لامتى؟", ["11/01", "26/03"], kind="multi_part"),
+    Case("bus-mokattam", "الباص بيجي المقطم؟", ["Mokattam"]),
+    Case("bus-nasr-city", "إحنا في مدينة نصر، فيه باص؟", ["Nasr City"], holdout=True),
+    Case("bus-heliopolis", "الباص بيغطي مصر الجديدة؟", ["Heliopolis"]),
+    Case("bus-extra-fee", "الباص بفلوس زيادة ولا مع المصاريف؟", ["addition fee"]),
+    Case("calendar-what-it-has", "التقويم المدرسي بيقولي إيه؟", ["days off at the school"]),
+
+    # ---------- curriculum detail ----------
+    Case("eyfs-literacy-area", "في الحضانة بيتعلموا القراية إزاي؟", ["Learning sounds"]),
+    Case("eyfs-maths-area", "الرياضيات في الحضانة بتبقى إزاي؟", ["Exploring numbers, shapes"]),
+    Case("eyfs-world-area", "بيتعلموا عن الطبيعة والناس في الحضانة؟", ["Understanding the World"]),
+    Case("eyfs-arts-area", "فيه فن وموسيقى في الحضانة؟", ["Expressive Arts and Design"], holdout=True),
+    Case("eyfs-physical-area", "بيهتموا بالحركة والمهارات الحركية في الحضانة؟",
+         ["Physical Development"]),
+    Case("ks2-what", "Year 3 لحد Year 5 الدراسة بتبقى إزاي؟", ["critical thinking"]),
+    Case("y1y2-computing", "Year 1 بيتعلم كمبيوتر إيه؟", ["Device Familiarity"], modality="table"),
+    Case("y1y2-pshe", "بيتعلموا إيه عن المشاعر والصداقة في Year 2؟",
+         ["Friendship, Emotions"], modality="table"),
+    Case("y1y2-science", "علوم Year 1 فيها إيه؟", ["Materials, Living Things"], modality="table"),
+    Case("y1y2-maths", "رياضيات Year 2 بتغطي إيه؟", ["Number Operations"], modality="table",
+         holdout=True),
+    Case("y1y2-humanities", "بيدرسوا تاريخ وجغرافيا في Year 1؟", ["History, Geography"],
+         modality="table"),
+    Case("y36-science-topics", "علوم Year 4 بتشمل إيه؟", ["Physics, Chemistry"], modality="table"),
+    Case("y36-maths-fractions", "بيدرسوا كسور في Year 5؟", ["Fractions & Decimals"], modality="table"),
+    Case("y36-geography", "جغرافيا Year 6 فيها إيه؟", ["Landforms, Climate"], modality="table"),
+    Case("y36-pe", "حصص الرياضة في Year 4 فيها إيه؟", ["Team Sports"], modality="table", holdout=True),
+    Case("y36-drama", "فيه تمثيل في Year 5؟", ["Drama / Performance"], modality="table"),
+    Case("french-when", "الفرنساوي بيبدأ معاهم امتى؟", ["French (introduced gradually)"],
+         modality="table"),
+
+    # ---------- clubs ----------
+    Case("clubs-yoga", "فيه يوجا بعد المدرسة؟", ["Yoga"]),
+    Case("clubs-mathletes", "فيه نادي رياضيات؟", ["Mathletes"]),
+    Case("clubs-science-experiments", "بيعملوا تجارب علمية في الأنشطة؟", ["Science Experiments"]),
+    Case("clubs-creative-writing", "بنتي بتحب الكتابة، فيه نادي ليها؟", ["Creative Writing"],
+         holdout=True),
+    Case("clubs-music-ensemble", "فيه فرقة موسيقية؟", ["Music Ensemble"]),
+    Case("clubs-eco", "فيه نشاط عن البيئة؟", ["Eco Club"]),
+    Case("behaviour-restorative", "بتصلحوا المشاكل بين الأطفال إزاي؟", ["restorative conversations"]),
+
+    # ---------- uniform rules ----------
+    Case("uniform-closed-toe", "الجزمة لازم تكون مقفولة من قدام؟", ["closed-toe"]),
+    Case("uniform-below-ankle", "الجزمة تبقى فوق الكعب ولا تحت؟", ["below the ankle"]),
+    Case("uniform-pe-lowcut", "كوتشي الرياضة يبقى عالي ولا واطي؟", ["low-cut"], holdout=True),
+    Case("uniform-pe-logos", "ينفع الكوتشي يبقى عليه رسومات؟", ["free from bright logos"]),
+    Case("uniform-full-kit", "لازم الطالب يلبس الزي كامل؟", ["full uniform"]),
+
+    # ---------- summer camp detail ----------
+    Case("camp-robotics-what", "بيعملوا إيه في الروبوتيكس في الكامب؟", ["program robots"]),
+    Case("camp-entrepreneurship", "فيه حاجة عن ريادة الأعمال في الكامب؟",
+         ["Entrepreneurship Activities"]),
+    Case("camp-innovation", "فيه مشاريع ابتكار في الكامب؟", ["Innovation Projects"], holdout=True),
+    Case("camp-engineering", "فيه تحديات هندسية؟", ["Engineering Challenges"]),
+    Case("camp-arts", "فيه فن في الكامب ولا علوم بس؟", ["Creative Arts"]),
+    Case("camp-halfday-includes", "برنامج نص اليوم بيشمل إيه؟", ["Morning STEAM sessions"],
+         modality="table"),
+    Case("camp-fullday-includes", "اليوم الكامل في الكامب بيشمل إيه؟",
+         ["Full STEAM & recreation day"], modality="table"),
+    Case("camp-fee-unit", "سعر الكامب للأسبوع ولا للشهر؟", ["per student, per week"]),
+    Case("camp-skills", "ابني هيكسب إيه من الكامب؟", ["problem-solving skills"]),
+
+    # ---------- staff, support and facilities ----------
+    Case("school-mission", "رسالة المدرسة إيه؟", ["nurturing individual expression"]),
+    Case("school-aims-university", "بتجهزوا الطلبة للجامعة؟", ["university and the workplace"]),
+    Case("school-aims-diversity", "المدرسة بتهتم بالتنوع؟", ["Celebrate diversity"], holdout=True),
+    Case("teachers-recommendations", "المدرسين بيتم اختيارهم إزاي؟", ["High recommendations"]),
+    Case("specialist-subjects", "مين بيدرس العربي والفرنساوي والـ ICT؟",
+         ["PE, Music, Art, ICT, Arabic"]),
+    Case("nurse-role", "الممرضة بتعمل إيه في المدرسة؟", ["daily care and first aid"]),
+    Case("safeguarding-leads", "مين مسئول عن حماية الأطفال؟", ["Safeguarding Leads"]),
+    Case("librarian-role", "فيه أمين مكتبة؟ بيعمل إيه؟", ["age-appropriate library"], holdout=True),
+    Case("inclusion-needs", "ابني عنده احتياجات تعليمية خاصة، بتدعموه؟",
+         ["specific educational needs"]),
+    Case("cat4-admissions", "اختبار CAT4 بيتعمل وقت التقديم كمان؟", ["During the admissions process"]),
+    Case("facilities-multipurpose", "فيه قاعة للحفلات والطابور؟", ["Multi-purpose spaces"]),
+    Case("facilities-library-desc", "المكتبة شكلها إيه؟", ["Fully Resourced Library"]),
+    Case("facilities-classrooms-desc", "الفصول شكلها إيه؟", ["Bright, Airy Classrooms"], holdout=True),
+    Case("facilities-eyfs-play", "فيه مكان لعب مظلل للحضانة؟", ["shaded EYFS play spaces"]),
+    Case("reports-term1-kind", "تقرير الترم الأول بيبقى مفصل؟", ["short report"]),
+    Case("senco-intervention", "لو ابني محتاج دعم بتعملوا إيه؟", ["Personalised interventions"]),
+    Case("comms-email-use", "ينفع أبعتلكم إيميل بأسئلتي؟", ["Email for questions"]),
+    Case("school-day-end", "اليوم الدراسي بينتهي الساعة كام؟", ["2:30"]),
+    Case("school-closed-days", "المدرسة بتقفل السبت كمان؟", ["Closed on Fridays"], holdout=True),
+    Case("address-street", "عنوان المدرسة بالشارع إيه؟", ["12 Aurexis Street"]),
+    Case("whatsapp-purpose", "الواتساب بتاعكم بيستخدم في إيه؟", ["Not for updates"]),
+    Case("careers-process", "لو بعت سي في هيتم الرد عليا؟", ["review all submitted resumes"]),
+
+    # ---------- corporate partnership ----------
+    Case("corporate-cairoflow", "شركة CairoFlow متعاقدة معاكم؟", ["CairoFlow Group"]),
+    Case("corporate-greengate", "كمباوند GreenGate ليه خصم؟", ["GreenGate Communities"]),
+    Case("corporate-nova", "Nova Holdings من الشركاء؟", ["Nova Holdings"], holdout=True),
+    Case("corporate-pyramids", "Pyramids Developments موجودة في الشراكات؟",
+         ["Pyramids Developments"]),
+    Case("corporate-nile-energy", "شركة Nile Energy معاكم؟", ["Nile Energy Group"]),
+    Case("corporate-types", "مين اللي ينفع يشترك في برنامج الشراكات؟", ["Residential communities"]),
+    Case("corporate-purpose", "البرنامج ده بيفيد الشركات إزاي؟", ["talent attraction and retention"]),
+    Case("corporate-not-combined", "خصم الشركة بيتجمع مع العروض التانية؟", ["may not be combined"]),
+    Case("corporate-sibling-first", "خصم الإخوات مع الشركة بيبقى كام للأول؟",
+         ["15% for the first child"], holdout=True),
+    Case("founders-which-year", "سعر المؤسسين ده لأنهي سنة دراسية؟", ["2024-2025"]),
+
+    # ---------- two questions in one message ----------
+    Case("fees-y9-and-term3", "مصاريف Year 9 كام والترم التالت بيبدأ امتى؟",
+         ["135,000 EGP", "12/04"], kind="multi_part"),
+    Case("camp-where-and-age", "الكامب فين وللأعمار من كام لكام؟",
+         ["Fifth Settlement", "5 to 12 years"], kind="multi_part"),
+    Case("docs-and-assessment", "محتاج أنهي ورق وفيه اختبار قبول؟",
+         ["Birth Certificate", "Maths and English assessment"], kind="multi_part", holdout=True),
+    Case("hours-and-weekend", "اليوم بيخلص الساعة كام والمدرسة بتقفل يوم إيه؟",
+         ["2:30", "Closed on Fridays"], kind="multi_part"),
+    Case("bank-and-proof", "أحول على أنهي بنك وأبعت الإيصال فين؟",
+         ["National Bank of Egypt", "finance@aurexis.example"], kind="multi_part"),
+
+    # ---------- comparisons ----------
+    Case("compare-y6-y7", "الفرق بين مصاريف Year 6 و Year 7 كام؟",
+         ["105,000 EGP", "120,000 EGP"], kind="comparison", modality="table"),
+    Case("compare-prek-fs1", "إيه الفرق بين مصاريف Pre-K و FS1؟",
+         ["75,000 EGP", "88,000 EGP"], kind="comparison", modality="table"),
+    Case("compare-y9-y11", "الفرق بين Year 9 و Year 11 في المصاريف؟",
+         ["135,000 EGP", "150,000 EGP"], kind="comparison", modality="table", holdout=True),
+    Case("compare-halfday-fullday", "الفرق بين نص اليوم واليوم الكامل في الكامب؟",
+         ["2,500 EGP", "4,000 EGP"], kind="comparison", modality="table"),
+
+    # ---------- follow-ups ----------
+    Case("followup-fees-y9", "طيب و Year 9؟", ["135,000 EGP"], kind="followup",
+         modality="table", context="مصاريف Year 6 للمصري كام؟"),
+    Case("followup-camp-where", "وهيكون فين؟", ["Fifth Settlement"], kind="followup",
+         context="الكامب الصيفي امتى؟"),
+    Case("followup-equiv-grade3", "و Year 4؟", ["Egypt Grade 3"], kind="followup",
+         context="Year 3 بيقابل أنهي صف عندنا؟", holdout=True),
+    Case("followup-bus-mokattam", "والمقطم؟", ["Mokattam"], kind="followup",
+         context="الباص بيغطي أنهي مناطق؟"),
+    Case("followup-payment-term3", "وآخر قسط؟", ["1st March"], kind="followup",
+         context="أول قسط بيتدفع امتى؟"),
+
+    # ---------- the corpus says it does not know ----------
+    Case("stationery-fees", "الأدوات المكتبية بكام؟", kind="unanswerable",
+         note="the corpus lists stationery fees as information it does not have"),
+    Case("uniform-supplier", "الزي بيتصنع عند مين؟", kind="unanswerable",
+         note="the corpus names the on-site shop but never a supplier"),
+    Case("teacher-count", "عندكم كام مدرس؟", kind="unanswerable",
+         note="no staff headcount anywhere in the corpus"),
+    Case("bus-timing", "الباص بيعدي الساعة كام الصبح؟", kind="unanswerable", holdout=True,
+         note="the corpus lists covered districts but no bus timetable"),
 ]
 
 

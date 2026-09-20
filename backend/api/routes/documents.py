@@ -222,6 +222,14 @@ def _process_pair_upload_job(
                 pair_id, language, filename, title=title
             ).pair_id
 
+        # Pairing is what tells retrieval which languages the corpus speaks, and that
+        # answer is memoized for a few minutes so it is not re-read on every question.
+        # Clearing it here means an admin who has just uploaded the Arabic half sees
+        # translations stop immediately, rather than wondering for five minutes whether
+        # the upload worked. Invalidated from the ROUTE because the store must not import
+        # retrieval — indexing does not depend on rag anywhere else either.
+        _forget_corpus_languages()
+
         names = ", ".join(filename for _, filename, _ in parsed)
         jobs.complete_job(job_id, f"Successfully uploaded and processed {names}")
     except Exception as e:
@@ -239,8 +247,19 @@ def _detach_from_pair(document_pairs, filename: str) -> None:
     """
     try:
         document_pairs.detach(filename)
+        _forget_corpus_languages()
     except Exception:  # pragma: no cover - a bookkeeping failure must not fail a delete
         logger.exception("could not detach %s from its document pair", filename)
+
+
+def _forget_corpus_languages() -> None:
+    """Make the next question re-ask which languages the corpus is published in."""
+    try:
+        from backend.rag.query_translation import reset_coverage
+
+        reset_coverage()
+    except Exception:  # pragma: no cover - a cache hint must never fail an upload
+        logger.exception("could not clear the corpus-language memo")
 
 
 def _process_delete_job(services: Services, job_id: str, filename: str) -> None:
