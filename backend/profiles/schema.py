@@ -306,6 +306,19 @@ class AgentConfig(_Section):
     # correct answer. Observing writes the disagreement into the trace and the log, which
     # is what tells a deployment whether its own phrases are safe to enforce.
     records_denial_mode: Literal["off", "observe", "enforce"] = "off"
+
+    # Whether an answer may state an amount its retrieved evidence does not contain.
+    #
+    # The incident: asked for Year 3 fees, the assistant answered 88,000 EGP — the
+    # FS1-FS2 row. The grader had approved the evidence and the evidence was right; the
+    # answer read the wrong line of it, and nothing in the system looks at that.
+    #
+    # `observe` for the same reason `records_denial_mode` is: this cannot tell an
+    # invented figure from a legitimately derived one — an answer that sums two rows or
+    # converts a percentage states a figure the evidence does not spell — so a deployment
+    # reads its own false-positive rate out of the trace before letting it replace an
+    # answer. Off costs nothing at all; nothing here calls a model.
+    answer_figures_mode: Literal["off", "observe", "enforce"] = "observe"
     # Wordings that assert no record was found, in every language the deployment answers
     # in. Matched on a folded substring, so orthography does not defeat them. Deliberately
     # empty here: these are copy, they belong to a deployment, and a default list written

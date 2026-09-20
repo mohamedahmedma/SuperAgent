@@ -10,6 +10,7 @@ Moved out of `service.py` with its behaviour unchanged. Copy is read from the ac
 profile per call rather than captured at import.
 """
 import logging
+import re
 
 from backend.chat.finalize import Finalizer
 from backend.profiles import get_profile
@@ -217,3 +218,96 @@ def resumed_static_reply(rag_result: dict | None) -> str | None:
     if status == "no_knowledge" or route == "no_knowledge" or not (rag_result.get("docs") or []):
         return _no_knowledge_response()
     return None
+
+
+#: The fewest digits a figure must have for this check to look at it.
+#:
+#: Three, and the number is the whole design. The grounding check this replaces was
+#: retired (commit f40f8c2) for two extractor faults, and both of them live below three
+#: digits: "45 حصة" passed as verified because 45 appears inside "07:45", and a correct
+#: timetable was withdrawn because "10:00" read as 10,000. Ignoring one- and two-digit
+#: figures removes times, dates, ordinals, small counts and percentages from the check in
+#: one stroke — and leaves exactly the class that caused the incident this exists for: an
+#: amount. "88,000" is five digits, and it was the wrong year group's fee.
+#:
+#: So it is deliberately narrow rather than thorough. A check that fires on a correct
+#: answer is worse than one that stays quiet on a wrong one, because the first teaches a
+#: deployment to switch it off.
+_FIGURE_MIN_DIGITS = 3
+
+#: Digits in the scripts this deployment sees, folded to Western before comparison: a
+#: model may write ١٠٥٬٠٠٠ where the corpus wrote 105,000, and they are the same figure.
+_DIGIT_FOLD = {ord(c): str(i % 10) for i, c in enumerate("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹")}
+
+#: Separators inside a figure. Stripped so "105,000", "105 000" and "105٬000" compare
+#: equal, and NOT interpreted — the retired check parsed the Arabic multiplier "ألف" as
+#: a thousand and turned a clock into a price. Nothing here reads a figure's meaning; it
+#: compares the digits as written.
+_FIGURE = re.compile(r"\d[\d,\u066c\u00a0\u202f ]*\d|\d")
+
+
+def _figures(text: str) -> set:
+    """Every figure in `text` with at least `_FIGURE_MIN_DIGITS` digits, as bare digits.
+
+    Bare digits, so "105,000 EGP" and "105000" are one figure, and so a figure is
+    compared as a WHOLE token — the substring match is what let 45 be satisfied by 07:45.
+    """
+    folded = (text or "").translate(_DIGIT_FOLD)
+    found = set()
+    for match in _FIGURE.finditer(folded):
+        digits = "".join(ch for ch in match.group(0) if ch.isdigit())
+        if len(digits) >= _FIGURE_MIN_DIGITS:
+            found.add(digits)
+    return found
+
+
+def ungrounded_figures(answer: str, evidence: str) -> list:
+    """Figures the answer states that the evidence it was given does not contain.
+
+    The failure, verbatim from the deployment: asked for Year 3 fees, both grader modes
+    answered 88,000 EGP — the FS1-FS2 row. Nothing caught it. The grader had approved the
+    evidence, the evidence was right, and the answer read the wrong line of it.
+
+    This asks the one question no model call can be trusted with and no prompt can
+    enforce: is every amount in this sentence actually in the material it was written
+    from? It costs no tokens and it cannot hallucinate, because it only ever compares
+    digits that are already on the page.
+
+    What it does NOT do is judge. A figure absent from the evidence is reported, not
+    corrected — the answer may have summed two rows or converted a percentage, both of
+    which are legitimate and neither of which this can tell apart from an invention. That
+    is why it ships in `observe`: the trace says what it found, and a deployment reads its
+    own false-positive rate before it lets this replace an answer.
+    """
+    stated = _figures(answer)
+    if not stated:
+        return []
+    return sorted(stated - _figures(evidence))
+
+
+def enforce_answer_figures(finalizer: Finalizer, turn_plan, rag_trace) -> str:
+    """Replacement copy for an answer stating an amount its evidence does not contain.
+
+    Scoped to the knowledge-base path, and that scope is the other half of why this can
+    exist again. Records no longer carry a model-written figure at all — the tool renders
+    the grid and the model writes only the sentence beside it (commit 79d2810) — so the
+    prose worth checking is what a turn wrote FROM RETRIEVED CHUNKS, which is where the
+    fee incident happened and where nothing else looks.
+
+    Same contract as its siblings: "" when there is nothing to do.
+    """
+    mode = getattr(get_profile().agent, "answer_figures_mode", "off")
+    if mode == "off" or turn_plan is None or getattr(turn_plan, "short_circuit", False):
+        return ""
+    chunks = (rag_trace or {}).get("retrieved_chunks") or []
+    if not chunks:
+        return ""
+    evidence = "\n".join(str(chunk.get("text", "")) for chunk in chunks)
+    missing = ungrounded_figures(finalizer.answer or "", evidence)
+    if not missing:
+        return ""
+    logger.warning(
+        "the answer states %s, which its evidence does not contain; mode=%s",
+        missing[:4], mode,
+    )
+    return get_profile().user_copy.unverified_answer if mode == "enforce" else ""
