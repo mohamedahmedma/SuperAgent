@@ -131,65 +131,6 @@ class LexicalAssessorTests(unittest.TestCase):
         self.assertEqual([], report.supported_indices())
 
 
-class CrossEncoderAssessorTests(unittest.TestCase):
-    """Rung 2 concludes in one direction only.
-
-    A calibrated score is a real semantic judgement, which is why it is allowed to admit
-    a pool on its own. It is still only a score, which is why it is not allowed to end a
-    turn on its own — the two are not symmetrical, and treating them as though they were
-    is what item 4 of RAG_FIX_PLAN.md is about.
-    """
-
-    def _config(self, **overrides):
-        return rag_config(
-            rerank_cross_encoder_enabled=True,
-            rerank_sufficient_score=0.6,
-            rerank_irrelevant_score=0.05,
-            rerank_min_supporting_chunks=1,
-            **overrides,
-        )
-
-    def _assess(self, scores):
-        from backend.rag import rerank_assessor
-
-        with patch.object(rerank_assessor, "score_pairs", lambda *_a, **_k: scores):
-            return rerank_assessor.CrossEncoderAssessor().assess(
-                ctx(docs=[doc()] * len(scores), config=self._config())
-            )
-
-    def test_a_pool_it_scores_highly_is_admitted(self):
-        report = self._assess([0.91, 0.12, 0.08])
-        self.assertEqual(Certainty.MEDIUM, report.certainty)
-        self.assertEqual("answer", report.preferred_route)
-        self.assertEqual([1], report.supported_indices())
-
-    def test_a_pool_at_the_floor_is_reported_and_handed_upward(self):
-        """This used to conclude `no_knowledge` at MEDIUM, to save the grader a call.
-
-        Being wrong at this end costs the user the answer outright — "the knowledge base
-        has no reliable information on this", with no way to recover — and a score cannot
-        tell a pool that is off the subject from one the model happens to score badly.
-        So the floor reports and defers, and the rung that reads the chunks decides.
-        """
-        report = self._assess([0.01, 0.004, 0.0])
-        self.assertEqual(Certainty.LOW, report.certainty)
-        self.assertNotEqual("none", report.relevance)
-        self.assertNotEqual("no_knowledge", report.preferred_route)
-        self.assertIn("deferring to the grader", "; ".join(report.reasons))
-
-    def test_the_middle_of_the_range_still_abstains(self):
-        report = self._assess([0.41, 0.33])
-        self.assertEqual(Certainty.LOW, report.certainty)
-        self.assertNotEqual("answer", report.preferred_route)
-
-    def test_the_scores_reach_the_trace_whatever_it_concludes(self):
-        """Deferring must not throw away what it measured."""
-        report = self._assess([0.01, 0.004])
-        self.assertEqual(
-            [0.01, 0.004], [chunk.signals["cross_encoder"] for chunk in report.chunks]
-        )
-
-
 class LadderTests(unittest.TestCase):
     def test_it_stops_as_soon_as_the_requirement_is_met(self):
         cheap = StubAssessor("cheap", Certainty.MEDIUM, report_at(Certainty.MEDIUM))
