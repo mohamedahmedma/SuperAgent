@@ -67,7 +67,26 @@ class RetrievalOutageTests(unittest.TestCase):
         self.assertNotIn("no_knowledge", (trace.get("retrieval_status"), result.get("route")))
         self.assertIsNone(result.get("hitl_resume_state"))
 
-    def test_outage_during_rewritten_retrieval_short_circuits_second_grade(self):
+    def test_an_outage_during_the_retry_answers_from_the_first_pass(self):
+        """An outage on the RETRY is not an outage of the turn.
+
+        This test asserted the opposite until item 7 of RAG_FIX_PLAN.md: that the turn
+        ended as `retrieval_error` with `docs: []`. That was the bug, not the contract.
+        The first pass had retrieved evidence the grader placed on the subject — weak,
+        but on it — and that judgement is the only reason a rewrite was planned at all.
+        Dropping it meant the turn threw away the very thing that sent it down this path
+        and asked the user to try again for a question it could already answer in part.
+
+        The file's rule is unchanged and still holds above: an outage must never be read
+        as corpus coverage. It applies to a turn left with NO evidence, which is the
+        first-pass outage and the nothing-behind-it guard below — not to one holding a
+        graded first pass.
+
+        So the second grade now runs, and it should: a retry that failed and a retry that
+        returned nothing new leave the graph in the same place, holding the same
+        documents, and giving them one state to reason about instead of two is what makes
+        this correct rather than special-cased.
+        """
         calls = {"retrieve": [], "rewrite": 0, "grade": 0}
 
         def retrieve(query, top_k=5, language=""):
@@ -109,9 +128,56 @@ class RetrievalOutageTests(unittest.TestCase):
 
         self.assertEqual(2, len(calls["retrieve"]))
         self.assertEqual(1, calls["rewrite"])
-        self.assertEqual(1, calls["grade"])
-        self.assertEqual("retrieval_error", result.get("retrieval_status"))
-        self.assertEqual([], result.get("docs"))
+        self.assertEqual(2, calls["grade"], "the first pass is real evidence and is judged")
+        self.assertEqual("answer", result.get("route"))
+        self.assertEqual("partial", result.get("retrieval_status"))
+        self.assertEqual(
+            ["weak evidence"], [d["text"] for d in result.get("docs")],
+            "the evidence the first pass found survived the retry's outage",
+        )
+        self.assertTrue(
+            result["rag_trace"]["rewrite_retrieval_failed"],
+            "answering from the first pass because the retry could not run is a "
+            "different fact from answering because it found nothing new",
+        )
+
+    def test_a_retry_outage_with_nothing_behind_it_is_still_an_outage(self):
+        """The one case that does leave the turn empty-handed, and the guard that keeps
+        the fix above from swallowing a real outage.
+
+        Unreachable through the graph — routing denies before rewriting when the first
+        pass is empty — so the node is called directly.
+        """
+        from backend.rag.graph_nodes import RetrieveRewritten
+
+        class _Deps:
+            top_k = 5
+
+            @staticmethod
+            def retrieve_documents(query, top_k=5, language=""):
+                return {"docs": [], "meta": _failed_meta()}
+
+            @staticmethod
+            def dedupe_documents(docs):
+                return list(docs)
+
+            retrieval_trace_fields = staticmethod(dict)
+
+        ctx = self._ctx()
+        try:
+            result = RetrieveRewritten(_Deps())({
+                "question": "question with flaky backend",
+                "request_context": ctx,
+                "rewrite_method": "step_back",
+                "rewritten_query": "broader question",
+                "docs": [],
+                "rag_trace": {},
+            })
+        finally:
+            ctx.close()
+
+        self.assertTrue(result["retrieval_failed"])
+        self.assertEqual([], result["docs"])
 
     def test_complex_all_subs_outage_synthesizes_retrieval_error(self):
         def retrieve(query, top_k=5, language=""):

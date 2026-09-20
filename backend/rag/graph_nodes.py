@@ -719,12 +719,30 @@ class RetrieveRewritten:
         # whatever they did not rediscover. The graded set can reach 2 x top_k on the
         # minority of turns that rewrite at all, and adaptive context selection trims it
         # back to the chunks the grader cites before any of it reaches the answer prompt.
-        first_pass = [] if retrieval_failed else list(state.get("docs") or [])
+        # A backend failure HERE is not a failure of the turn. The first pass retrieved
+        # evidence an assessor placed on the subject — that judgement is the only reason
+        # this branch is running — so a blip during the RETRY must not throw it away and
+        # answer "try again" to a question the turn could already answer in part. The
+        # retry is an improvement that did not arrive, not a turn without evidence.
+        #
+        # Only a rewrite that fails with nothing behind it leaves the turn empty-handed,
+        # and that is the one case still reported as an outage.
+        rewrite_failed = retrieval_failed
+        first_pass = list(state.get("docs") or [])
+        retrieval_failed = rewrite_failed and not first_pass
         merged = self._deps.dedupe_documents(results + first_pass)
         for index, item in enumerate(merged, 1):
             item["rrf_rank"] = index
         context = format_docs(merged)
-        if retrieval_failed:
+        if rewrite_failed and first_pass:
+            emit(
+                state,
+                "🚧",
+                "The retry search could not reach the knowledge base",
+                f"Keeping the {len(first_pass)} snippet(s) the first search found: "
+                + (retrieve_meta.get("retrieval_error") or "retrieval backend error"),
+            )
+        elif retrieval_failed:
             emit(
                 state,
                 "🚧",
@@ -757,6 +775,10 @@ class RetrieveRewritten:
             # The rewritten pass ALONE, so a trace still shows what the rewrite itself
             # found rather than the union it was folded into.
             "rewrite_retrieved_chunks": results,
+            # Recorded even though the turn carries on, because "answered from the first
+            # pass because the retry could not run" is a different fact from "answered
+            # from the first pass because the retry found nothing new".
+            "rewrite_retrieval_failed": rewrite_failed,
             "retrieval_stage": "rewritten",
             **self._deps.retrieval_trace_fields(retrieve_meta),
         })
