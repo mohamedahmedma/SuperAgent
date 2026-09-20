@@ -34,15 +34,17 @@ def _text_block(content, page, top):
     return {"type": "text", "content": content, "page_number": page, "top": top}
 
 
-def _table_block(rows, page, top, bottom=None, page_height=None):
-    """A table block. `bottom`/`page_height` are the geometry pdf_layout carries so the
-    stitcher can ask whether a break fell at the page edges; omitting them is the older
-    shape, and every caller that omits them is asserting the no-geometry path."""
+def _table_block(rows, page, top, bottom=None, page_height=None,
+                 page_top=None, page_bottom=None, x0=None, x1=None):
+    """A table block. The geometry is what pdf_layout carries so the stitcher can ask
+    whether a break fell at the page edges; omitting it is the older shape, and every
+    caller that omits it is asserting the no-geometry path."""
     block = {"type": "table", "content": "", "rows": rows, "page_number": page, "top": top}
-    if bottom is not None:
-        block["bottom"] = bottom
-    if page_height is not None:
-        block["page_height"] = page_height
+    for key, value in (("bottom", bottom), ("page_height", page_height),
+                       ("page_top", page_top), ("page_bottom", page_bottom),
+                       ("x0", x0), ("x1", x1)):
+        if value is not None:
+            block[key] = value
     return block
 
 
@@ -339,6 +341,23 @@ class StitchingDecisionTableTests(unittest.TestCase):
         self.assertEqual(4, len(blocks[0]["rows"]))
 
 
+#: A4 at 72dpi, the page these cases are laid out on. The edge band is 22% of it, so a
+#: table is at the foot past 656.8 and at the head before 185.2.
+A4 = 842.0
+FOOT = 780.0          # a table running to the bottom text margin
+HEAD = 70.0           # a table starting at the top text margin
+MIDDLE = 400.0        # neither
+
+
+#: A4 at 72dpi, the page these cases are laid out on. The edge band is 22% of it, so a
+#: table is at the foot past 656.8 and at the head before 185.2.
+A4 = 842.0
+FOOT = 780.0          # a table running to the bottom text margin
+HEAD = 70.0           # a table starting at the top text margin
+MIDDLE = 400.0        # neither
+LEFT, RIGHT = 72.0, 523.0     # the text column, edge to edge
+
+
 class CrossPageTableJoinTests(unittest.TestCase):
     """Which two tables are ONE table, and which are two.
 
@@ -346,101 +365,620 @@ class CrossPageTableJoinTests(unittest.TestCase):
     unrelated three-column tables that land either side of a break. Joining them makes
     one grid out of two, and a row from the second then answers a question asked about
     the first — the wrong-line failure, built in at indexing time where nothing
-    downstream can see it. Item 6 of RAG_FIX_PLAN.md.
+    downstream can see it, because by then there is only one table. Item 6.
 
-    A4 at 72dpi is 842 points tall, and the edge band is 12% of that, so a table is at
-    the foot past ~741 and at the head before ~101.
+    Both directions are enumerated, because both are bugs and they are not equally cheap.
+    A wrong JOIN corrupts a grid. A wrong SPLIT strands a continuation from its header —
+    still indexed, still retrievable, but answering with a column it can no longer name.
+    Neither is acceptable and the second is by far the easier to cause, which is why
+    every refusal here is structural. Nothing about what the cells SAY may refuse a join;
+    two content rules were tried and both split real tables (see `_is_table_continuation`).
     """
-
-    PAGE = 842.0
 
     def setUp(self):
         self.loader = DocumentLoader()
 
-    def _stitch(self, first, second):
-        return self.loader._stitch_cross_page_blocks([first, second])
+    def _stitch(self, *blocks):
+        return self.loader._stitch_cross_page_blocks(list(blocks))
 
-    def test_a_table_that_runs_to_the_foot_and_resumes_at_the_head_is_one_table(self):
+    def _rows(self, blocks):
+        return blocks[0]["rows"]
+
+    def _cut(self, rows, page, **kw):
+        """A table running to the foot of its page — the shape of one about to be cut."""
+        return _table_block(rows, page, kw.pop("top", 500.0), kw.pop("bottom", FOOT),
+                            A4, x0=kw.pop("x0", LEFT), x1=kw.pop("x1", RIGHT), **kw)
+
+    def _resumed(self, rows, page, **kw):
+        """A table starting at the head of its page — the shape of one resuming."""
+        return _table_block(rows, page, kw.pop("top", HEAD), kw.pop("bottom", MIDDLE),
+                            A4, x0=kw.pop("x0", LEFT), x1=kw.pop("x1", RIGHT), **kw)
+
+    # =================================================================================
+    # ONE table, split by the break. Every one of these must JOIN.
+    # =================================================================================
+
+    def test_numeric_rows_with_the_header_repeated(self):
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
-            _table_block([["2", "200"], ["3", "300"]], 1, 40.0, 300.0, self.PAGE),
+            self._cut([["Grade", "Fee"], ["Y01", "95,000"]], 0),
+            self._resumed([["Grade", "Fee"], ["Y03", "105,000"]], 1),
         )
         self.assertEqual(1, len(blocks))
-        self.assertEqual(4, len(blocks[0]["rows"]))
+        self.assertEqual([["Grade", "Fee"], ["Y01", "95,000"], ["Y03", "105,000"]],
+                         self._rows(blocks), "the repeated header is dropped exactly once")
 
-    def test_a_table_starting_mid_page_was_not_split_by_the_break(self):
-        """Something is above it — a heading, a lead-in line — so the break is not why
-        it starts there. This is the shape of two different tables."""
+    def test_numeric_rows_carrying_straight_on(self):
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
-            _table_block([["2", "200"], ["3", "300"]], 1, 300.0, 560.0, self.PAGE),
+            self._cut([["Grade", "Fee"], ["Y01", "95,000"]], 0),
+            self._resumed([["Y03", "105,000"]], 1),
         )
-        self.assertEqual(2, len(blocks))
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)))
+
+    def test_prose_rows_carrying_straight_on(self):
+        """The corpus's curriculum tables, verbatim. 19 of its 30 table rows carry no
+        digit at all, so a rule reading a digit as proof of a data row split every one of
+        these. Measured only after that rule shipped, which is why no content test may
+        refuse a join now."""
+        blocks = self._stitch(
+            self._cut([["Subject Group", "Subjects Taught"],
+                       ["Mathematics", "Counting, Place Value, Time & Money"]], 0),
+            self._resumed([["Humanities", "History, Geography and Egyptian Social Studies"],
+                           ["Languages", "Arabic Language, Islamic Education, French"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(4, len(self._rows(blocks)))
+
+    def test_arabic_prose_rows(self):
+        blocks = self._stitch(
+            self._cut([["المادة", "المحتوى"], ["الرياضيات", "العد والقياس"]], 0),
+            self._resumed([["العلوم", "التجارب والمواد"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)))
+
+    def test_a_table_mixing_arabic_and_latin_cells(self):
+        blocks = self._stitch(
+            self._cut([["الصف", "Fee"], ["الحضانة", "75,000 EGP"]], 0),
+            self._resumed([["Year 3", "105,000 جنيه"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)))
+
+    def test_a_cjk_table(self):
+        blocks = self._stitch(
+            self._cut([["年级", "学费"], ["一年级", "95,000"]], 0),
+            self._resumed([["三年级", "105,000"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_header_the_break_respaced_and_recased(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee (EGP)"], ["Y01", "95,000"]], 0),
+            self._resumed([[" grade ", "FEE  (egp)"], ["Y03", "105,000"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)), "the copy goes, not a data row")
+
+    def test_a_header_differing_only_in_punctuation(self):
+        blocks = self._stitch(
+            self._cut([["Grade:", "Fee -"], ["Y01", "1"]], 0),
+            self._resumed([["Grade", "Fee"], ["Y03", "3"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)))
+
+    def test_a_header_repeated_on_every_page_of_a_chain(self):
+        """Three pages, three copies of the header, one header in the result."""
+        header = ["Grade", "Fee"]
+        blocks = self._stitch(
+            self._cut([header, ["Y01", "1"]], 0),
+            self._cut([header, ["Y03", "3"]], 1, top=HEAD),
+            self._resumed([header, ["Y11", "11"]], 2),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual([header, ["Y01", "1"], ["Y03", "3"], ["Y11", "11"]],
+                         self._rows(blocks))
+
+    def test_a_table_spanning_three_pages(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "95,000"]], 0),
+            self._cut([["Y03", "105,000"]], 1, top=HEAD),
+            self._resumed([["Y11", "150,000"]], 2),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(4, len(self._rows(blocks)))
+
+    def test_a_table_spanning_ten_pages(self):
+        blocks = self._stitch(
+            self._cut([["n", "v"], ["0", "0"]], 0),
+            *[self._cut([[str(page), str(page)]], page, top=HEAD) for page in range(1, 9)],
+            self._resumed([["9", "9"]], 9),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(11, len(self._rows(blocks)))
+        self.assertEqual(9, blocks[0]["_last_page"])
+
+    def test_the_last_page_of_a_chain_may_end_anywhere(self):
+        """Only the page being LEFT has to be full. The page arriving does not."""
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            self._resumed([["Y03", "3"]], 1, bottom=120.0),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_generous_bottom_margin(self):
+        """1.5 inches of margin. At the old 12% band this genuine continuation split."""
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0, bottom=A4 - 108),
+            self._resumed([["Y03", "3"]], 1, top=108.0),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_two_inch_margin_with_a_footer_below_the_table(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0, bottom=A4 - 144),
+            self._resumed([["Y03", "3"]], 1, top=144.0),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_exactly_on_the_edge_band(self):
+        """BVA: the last position that still counts as cut off, and as resumed."""
+        band = A4 * 0.22
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0, bottom=A4 - band),
+            self._resumed([["Y03", "3"]], 1, top=band),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_cropped_page_whose_coordinates_do_not_start_at_zero(self):
+        """page_height is an extent; a cropped page's ink is measured from bbox[1]. Both
+        edges travel with the block so the comparison cannot drift."""
+        offset = 200.0
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, offset + 300, offset + FOOT,
+                         page_top=offset, page_bottom=offset + A4, x0=LEFT, x1=RIGHT),
+            _table_block([["Y03", "3"]], 1, offset + HEAD, offset + MIDDLE,
+                         page_top=offset, page_bottom=offset + A4, x0=LEFT, x1=RIGHT),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_landscape_page_after_a_portrait_one(self):
+        """Each side is judged against its own page, so a rotated page still works."""
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 500.0, FOOT, A4,
+                         x0=LEFT, x1=RIGHT),
+            _table_block([["Y03", "3"]], 1, 40.0, 300.0, 595.0, x0=LEFT, x1=RIGHT),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_parser_reporting_no_geometry_at_all(self):
+        """DOCX and XLSX report none, and DOCX never reaches here anyway — its pages are
+        all numbered 0 and the rule needs page + 1. The question cannot be asked, so it is
+        not held against them."""
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 700.0),
+            _table_block([["Y03", "3"]], 1, 30.0),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)))
+
+    def test_vertical_geometry_on_only_one_side(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            _table_block([["Y03", "3"]], 1, 30.0),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_horizontal_span_reported_on_only_one_side(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            _table_block([["Y03", "3"]], 1, HEAD, MIDDLE, A4),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_span_that_shifted_slightly_between_pages(self):
+        """A borderless grid's detected edge moves with its content. Well inside the
+        tolerance, and a continuation must not be split over a few points."""
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0, x0=LEFT, x1=RIGHT),
+            self._resumed([["Y03", "3"]], 1, x0=LEFT + 12, x1=RIGHT - 9),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_span_exactly_at_the_overlap_threshold(self):
+        """BVA on the horizontal rule: 70% of the wider span shared."""
+        width = RIGHT - LEFT
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0, x0=LEFT, x1=RIGHT),
+            self._resumed([["Y03", "3"]], 1, x0=LEFT + width * 0.3, x1=RIGHT),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_single_column_table(self):
+        blocks = self._stitch(
+            self._cut([["Policy"], ["No phones"]], 0),
+            self._resumed([["No jewellery"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)))
+
+    def test_a_ten_column_table(self):
+        header = [f"c{i}" for i in range(10)]
+        blocks = self._stitch(
+            self._cut([header, ["x"] * 10], 0),
+            self._resumed([["y"] * 10], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)))
+
+    def test_a_header_with_a_merged_cell_over_a_wider_body(self):
+        """The header spans two columns and the body has three. Counting columns from
+        the first row alone refused this join over a difference only in the heading."""
+        blocks = self._stitch(
+            self._cut([["Fees", "EGP"], ["Y01", "95,000", "Egyptian"],
+                       ["Y03", "105,000", "Egyptian"]], 0),
+            self._resumed([["Y11", "150,000", "Egyptian"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(4, len(self._rows(blocks)))
+
+    def test_a_continuation_of_one_row(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            self._resumed([["Y03", "3"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_continuation_of_many_rows(self):
+        blocks = self._stitch(
+            self._cut([["n", "v"]] + [[str(i), str(i)] for i in range(40)], 0),
+            self._resumed([[str(i), str(i)] for i in range(40, 90)], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(91, len(self._rows(blocks)))
+
+    def test_a_continuation_whose_first_row_has_empty_cells(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            self._resumed([["", "3"], ["Y11", "11"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(4, len(self._rows(blocks)))
+
+    def test_a_continuation_repeating_a_DATA_row_keeps_it(self):
+        """Only the header is a duplicate worth dropping. A data row that happens to
+        equal one already seen is data, and losing it loses a fact."""
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "95,000"]], 0),
+            self._resumed([["Y01", "95,000"], ["Y03", "105,000"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(4, len(self._rows(blocks)))
+
+    def test_a_totals_row_opening_the_continuation(self):
+        """"Total | 500,000" reads like a heading and is not one."""
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "95,000"]], 0),
+            self._resumed([["Total", "500,000"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)))
+
+    def test_a_table_of_only_numbers(self):
+        blocks = self._stitch(
+            self._cut([["1", "2"], ["3", "4"]], 0),
+            self._resumed([["5", "6"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(self._rows(blocks)))
+
+    # =================================================================================
+    # Two tables. Every one of these must stay SEPARATE.
+    # =================================================================================
 
     def test_a_table_that_stopped_mid_page_was_not_cut_off(self):
+        """The load-bearing refusal. Nothing cut this table short, so what follows on the
+        next page is a different table."""
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 200.0, 400.0, self.PAGE),
-            _table_block([["2", "200"], ["3", "300"]], 1, 40.0, 300.0, self.PAGE),
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 200.0, MIDDLE, A4,
+                         x0=LEFT, x1=RIGHT),
+            self._resumed([["Programme", "Cost"], ["Half-Day", "2,500"]], 1),
         )
         self.assertEqual(2, len(blocks))
 
-    def test_a_second_table_that_opens_its_own_header_is_not_joined(self):
-        """Both at the page edges and both two columns — the geometry alone would join
-        them. The first row is column NAMES, and not the names already in hand."""
+    def test_a_table_starting_mid_page_had_something_above_it(self):
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
-            _table_block([["Programme", "Includes"], ["Half-Day", "STEAM"]],
-                         1, 40.0, 300.0, self.PAGE),
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            _table_block([["Programme", "Cost"], ["Half-Day", "2,500"]], 1, MIDDLE, 700.0,
+                         A4, x0=LEFT, x1=RIGHT),
         )
         self.assertEqual(2, len(blocks))
 
-    def test_a_repeated_header_is_kept_once(self):
+    def test_neither_one_at_an_edge(self):
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
-            _table_block([["Grade", "Fee"], ["2", "200"]], 1, 40.0, 300.0, self.PAGE),
-        )
-        self.assertEqual(1, len(blocks))
-        self.assertEqual([["Grade", "Fee"], ["1", "100"], ["2", "200"]], blocks[0]["rows"])
-
-    def test_a_repeated_header_is_recognised_through_its_typesetting(self):
-        """The break re-wrapped the header. It is the same header, and the copy still
-        goes — the old exact-match test kept it as a data row in the middle of the
-        grid."""
-        blocks = self._stitch(
-            _table_block([["Grade", "Fee (EGP)"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
-            _table_block([[" grade ", "FEE  (egp)"], ["2", "200"]], 1, 40.0, 300.0, self.PAGE),
-        )
-        self.assertEqual(1, len(blocks))
-        self.assertEqual(3, len(blocks[0]["rows"]))
-
-    def test_a_data_row_carrying_words_is_still_data(self):
-        """"Pre-K | 75,000 EGP" is a row, not a header. A figure anywhere in the row is
-        what says so."""
-        blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["Pre-K", "75,000 EGP"]],
-                         0, 500.0, 800.0, self.PAGE),
-            _table_block([["FS1–FS2", "88,000 EGP"]], 1, 40.0, 300.0, self.PAGE),
-        )
-        self.assertEqual(1, len(blocks))
-        self.assertEqual(3, len(blocks[0]["rows"]))
-
-    def test_a_different_column_count_is_still_refused(self):
-        blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
-            _table_block([["2", "200", "extra"]], 1, 40.0, 300.0, self.PAGE),
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 200.0, MIDDLE, A4,
+                         x0=LEFT, x1=RIGHT),
+            _table_block([["Programme", "Cost"], ["Half-Day", "2"]], 1, MIDDLE, 600.0, A4,
+                         x0=LEFT, x1=RIGHT),
         )
         self.assertEqual(2, len(blocks))
 
-    def test_a_parser_that_reports_no_geometry_falls_back_to_the_older_signals(self):
-        """DOCX and XLSX carry no page geometry at all. The question cannot be asked, so
-        it is not held against them — and DOCX never reaches here anyway, its pages all
-        being numbered 0."""
+    def test_one_point_past_the_edge_band(self):
+        """BVA: the first position that no longer counts as cut off."""
+        band = A4 * 0.22
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 700.0),
-            _table_block([["2", "200"]], 1, 30.0),
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0, bottom=A4 - band - 1),
+            self._resumed([["Y03", "3"]], 1),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_one_point_past_the_head_band(self):
+        band = A4 * 0.22
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            self._resumed([["Y03", "3"]], 1, top=band + 1),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_narrow_table_below_a_wide_one(self):
+        """Both meet at the page edges and both have two columns, so only the horizontal
+        span tells them apart — a sidebar grid under a full-width one."""
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0, x0=LEFT, x1=RIGHT),
+            self._resumed([["Note", "See above"]], 1, x0=LEFT, x1=LEFT + 120),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_table_in_the_other_column_of_the_page(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0, x0=LEFT, x1=LEFT + 200),
+            self._resumed([["Programme", "Cost"]], 1, x0=RIGHT - 200, x1=RIGHT),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_different_column_count(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            self._resumed([["Y03", "3", "extra"]], 1),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_body_whose_width_differs_from_the_previous_body(self):
+        """Counting columns by the width most rows share, not the first row's."""
+        blocks = self._stitch(
+            self._cut([["Fees", "EGP"], ["Y01", "1", "Egyptian"], ["Y03", "3", "Egyptian"]], 0),
+            self._resumed([["Half-Day", "2,500"], ["Full-Day", "4,000"]], 1),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_page_gap_of_two(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            self._resumed([["Y03", "3"]], 2),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_page_gap_of_ten(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            self._resumed([["Y03", "3"]], 10),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_two_tables_on_the_same_page(self):
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 100.0, MIDDLE, A4,
+                         x0=LEFT, x1=RIGHT),
+            self._cut([["Y03", "3"]], 0),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_table_on_an_earlier_page(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 1),
+            self._resumed([["Y03", "3"]], 0),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_heading_between_them(self):
+        """"The same section" needs no test of its own: the heading becomes `prev`."""
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            {"type": "heading", "content": "Summer Camp", "level": 1,
+             "page_number": 1, "top": 40.0},
+            self._resumed([["Programme", "Cost"], ["Half-Day", "2,500"]], 1, top=120.0),
+        )
+        self.assertEqual(3, len(blocks))
+
+    def test_a_paragraph_between_them(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            _text_block("The camp is priced separately.", 1, 40.0),
+            self._resumed([["Programme", "Cost"], ["Half-Day", "2,500"]], 1, top=120.0),
+        )
+        self.assertEqual(3, len(blocks))
+
+    def test_a_chain_does_not_swallow_a_new_table_after_it_ends(self):
+        """Page two finishes the table half way down; page three starts a different one.
+        Judged against page ONE's geometry the run still looked cut off, so all three
+        merged into a single grid — the worse of the two failures, and invisible after."""
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            self._resumed([["Y03", "3"]], 1, bottom=200.0),
+            self._resumed([["Programme", "Cost"], ["Half-Day", "2,500"]], 2),
+        )
+        self.assertEqual(2, len(blocks))
+        self.assertEqual(3, len(blocks[0]["rows"]), "pages one and two are one table")
+        self.assertEqual(2, len(blocks[1]["rows"]))
+
+    def test_a_chain_does_not_swallow_a_headerless_new_table_either(self):
+        """The same stale-geometry bug with nothing in the content to mask it: page three
+        opens with a plain data row, so only where the ink sits can refuse it."""
+        blocks = self._stitch(
+            self._cut([["n", "v"], ["1", "100"]], 0),
+            self._resumed([["2", "200"]], 1, bottom=200.0),
+            self._resumed([["3", "300"]], 2),
+        )
+        self.assertEqual(2, len(blocks))
+        self.assertEqual(3, len(blocks[0]["rows"]))
+
+    def test_a_chain_does_not_swallow_a_table_of_a_different_width(self):
+        blocks = self._stitch(
+            self._cut([["n", "v"], ["1", "100"]], 0),
+            self._cut([["2", "200"]], 1, top=HEAD),
+            self._resumed([["3", "300"]], 2, x0=LEFT, x1=LEFT + 100),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_an_empty_table_before(self):
+        blocks = self._stitch(
+            self._cut([], 0),
+            self._resumed([["Y03", "3"]], 1),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_an_empty_table_after(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"]], 0),
+            self._resumed([], 1),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_text_block_before_a_table(self):
+        blocks = self._stitch(
+            _text_block("Fees are reviewed annually", 0, 700.0),
+            self._resumed([["Grade", "Fee"]], 1),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_table_before_a_text_block(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            _text_block("Fees are reviewed annually.", 1, 40.0),
+        )
+        self.assertEqual(2, len(blocks))
+
+    # =================================================================================
+    # What the merged block looks like afterwards.
+    # =================================================================================
+
+    def test_the_merged_block_cites_the_page_it_started_on(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 3),
+            self._resumed([["Y03", "3"]], 4),
+        )
+        self.assertEqual(3, blocks[0]["page_number"])
+        self.assertEqual(4, blocks[0]["_last_page"])
+
+    def test_the_merged_content_is_rendered_from_the_merged_rows(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "95,000"]], 0),
+            self._resumed([["Y03", "105,000"]], 1),
+        )
+        self.assertIn("Y01 | 95,000", blocks[0]["content"])
+        self.assertIn("Y03 | 105,000", blocks[0]["content"])
+
+    def test_row_order_survives_the_join(self):
+        blocks = self._stitch(
+            self._cut([["n"], ["1"], ["2"]], 0),
+            self._resumed([["3"], ["4"]], 1),
+        )
+        self.assertEqual([["n"], ["1"], ["2"], ["3"], ["4"]], self._rows(blocks))
+
+    def test_the_merged_block_carries_the_geometry_it_ended_on(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
+            self._resumed([["Y03", "3"]], 1, bottom=321.0),
+        )
+        self.assertEqual(321.0, blocks[0]["_last_bottom"])
+
+    def test_the_input_blocks_are_not_mutated(self):
+        """The caller's list is parsed data, not scratch space."""
+        first = self._cut([["Grade", "Fee"], ["Y01", "1"]], 0)
+        second = self._resumed([["Y03", "3"]], 1)
+        self._stitch(first, second)
+        self.assertEqual([["Grade", "Fee"], ["Y01", "1"]], first["rows"])
+        self.assertNotIn("_last_page", first)
+
+    def test_blocks_that_never_join_pass_through_unchanged(self):
+        heading = {"type": "heading", "content": "Fees", "level": 1,
+                   "page_number": 0, "top": 10.0}
+        blocks = self._stitch(heading, self._cut([["Grade", "Fee"], ["Y01", "1"]], 0))
+        self.assertEqual(heading, blocks[0])
+
+    def test_an_empty_block_stream(self):
+        self.assertEqual([], self._stitch())
+
+    def test_a_single_block(self):
+        blocks = self._stitch(self._cut([["Grade", "Fee"]], 0))
+        self.assertEqual(1, len(blocks))
+
+    # =================================================================================
+    # Malformed input. None of it may raise.
+    # =================================================================================
+
+    def test_rows_holding_none_cells(self):
+        """Depth, not a live bug: every parser routes its table through
+        `normalize_table_rows` first, so a None cell does not reach the stitcher today.
+        It is asserted because rendering is where one WOULD raise, and raising there
+        fails the whole document's ingest rather than the row."""
+        blocks = self._stitch(
+            self._cut([["Grade", None], ["Y01", "1"]], 0),
+            self._resumed([["Grade", None], ["Y03", "3"]], 1),
         )
         self.assertEqual(1, len(blocks))
-        self.assertEqual(3, len(blocks[0]["rows"]))
+        self.assertEqual(3, len(self._rows(blocks)), "the header still matches through None")
+
+    def test_rows_holding_numbers_rather_than_strings(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", 95000]], 0),
+            self._resumed([["Y03", 105000]], 1),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_block_with_no_rows_key(self):
+        first = self._cut([["Grade", "Fee"]], 0)
+        second = self._resumed([["Y03", "3"]], 1)
+        del second["rows"]
+        self.assertEqual(2, len(self._stitch(first, second)))
+
+    def test_a_block_with_no_page_number(self):
+        second = self._resumed([["Y03", "3"]], 1)
+        del second["page_number"]
+        self.assertEqual(2, len(self._stitch(self._cut([["Grade", "Fee"]], 0), second)))
+
+    def test_a_page_of_zero_height(self):
+        """Degenerate geometry is unanswerable, not a refusal."""
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 0.0, 0.0,
+                         page_top=0.0, page_bottom=0.0),
+            _table_block([["Y03", "3"]], 1, 0.0, 0.0, page_top=0.0, page_bottom=0.0),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_negative_page_coordinates(self):
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, -500.0, -70.0,
+                         page_top=-842.0, page_bottom=0.0, x0=LEFT, x1=RIGHT),
+            _table_block([["Y03", "3"]], 1, -800.0, -600.0,
+                         page_top=-842.0, page_bottom=0.0, x0=LEFT, x1=RIGHT),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_a_zero_width_horizontal_span(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"]], 0, x0=100.0, x1=100.0),
+            self._resumed([["Y03", "3"]], 1, x0=100.0, x1=100.0),
+        )
+        self.assertEqual(1, len(blocks))
+
+    def test_rows_of_uneven_width_on_both_sides(self):
+        blocks = self._stitch(
+            self._cut([["Grade", "Fee"], ["Y01", "1"], ["note"]], 0),
+            self._resumed([["Y03", "3"], ["Y11", "11"], ["note"]], 1),
+        )
+        self.assertEqual(1, len(blocks))
 
 
 class RobustnessTests(unittest.TestCase):

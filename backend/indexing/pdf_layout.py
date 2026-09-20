@@ -4,7 +4,7 @@ Produces an ordered list of blocks per document:
     {"type": "heading", "content": str, "level": int | None, "page_number": int, "top": float}
     {"type": "text",    "content": str, "page_number": int, "top": float}
     {"type": "table",   "content": str, "rows": list[list[str]], "page_number": int, "top": float,
-                        "bottom": float, "page_height": float | None}
+                        "bottom": float, "page_top": float, "page_bottom": float | None}
 
 Tables are detected with pdfplumber's table finder and validated with a structural
 heuristic (real data grids have short cells in consistently multi-column rows) so
@@ -291,6 +291,7 @@ def build_blocks_from_pages(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     """Pure block builder over pre-collected page data (unit-testable without I/O).
 
     Each page dict: {"page_number": int, "height": float | None,
+                     "page_top": float, "page_bottom": float | None,
                      "tables": [{"bbox": (x0, top, x1, bottom), "rows": [[cell, ...]]}],
                      "lines": [{"text", "top", "bottom", "x0", "x1", "size", "bold"}]}
     """
@@ -347,8 +348,21 @@ def build_blocks_from_pages(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]
                     # of the next; two different tables that happen to share a shape do
                     # not. Without the geometry that test cannot run at all, so it is
                     # carried here rather than recovered later.
+                    #
+                    # The page's own edges, not its height: a cropped page's coordinates
+                    # start at bbox[1] rather than 0, and comparing a bottom measured in
+                    # that space against a height measured as an extent is off by the
+                    # offset. Both edges travel, so the comparison cannot drift.
                     "bottom": float(table["bbox"][3]),
-                    "page_height": float(page_height) if page_height else None,
+                    # The horizontal span too: a continuation is laid out with the
+                    # columns it is continuing, so it occupies the same span. A different
+                    # grid that happens to meet it at the page edges usually does not.
+                    "x0": float(table["bbox"][0]),
+                    "x1": float(table["bbox"][2]),
+                    "page_top": page.get("page_top", 0.0),
+                    "page_bottom": page.get("page_bottom") or (
+                        float(page_height) if page_height else None
+                    ),
                 })
             else:
                 page_blocks.append({
@@ -502,9 +516,15 @@ def parse_pdf_blocks(file_path: str) -> List[Dict[str, Any]]:
     with pdfplumber.open(file_path) as pdf:
         for page_number, page in enumerate(pdf.pages):
             found_tables = page.find_tables()
+            page_box = getattr(page, "bbox", None)
             pages.append({
                 "page_number": page_number,
                 "height": float(page.height) if getattr(page, "height", None) else None,
+                # The page's own top and bottom in the coordinate space its tables are
+                # measured in. A cropped page starts at bbox[1], not 0, so its height is
+                # an extent and cannot be compared against a bottom directly.
+                "page_top": float(page_box[1]) if page_box else 0.0,
+                "page_bottom": float(page_box[3]) if page_box else None,
                 "tables": [
                     {"bbox": table.bbox, "rows": table.extract()}
                     for table in found_tables

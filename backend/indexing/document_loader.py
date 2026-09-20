@@ -290,7 +290,12 @@ class DocumentLoader:
 
     @staticmethod
     def _render_rows(rows: List[List[str]]) -> str:
-        return "\n".join(" | ".join(row) for row in rows if row)
+        # Cells are coerced rather than assumed. Every parser routes its table through
+        # `normalize_table_rows`, so a None or a number does not reach here today — but
+        # this is the one place a stray cell would raise, and raising here fails the
+        # whole document's ingest, not the row. `_header_key` beside it already coerces;
+        # the two disagreeing about their own contract is the part worth fixing.
+        return "\n".join(" | ".join(str(cell or "") for cell in row) for row in rows if row)
 
     def _fit_row(self, row: List[str], budget: int) -> List[List[str]]:
         """One row as one or more rows, none of them rendering longer than `budget`.
@@ -797,8 +802,16 @@ class DocumentLoader:
         return cls._starts_like_continuation(next_text)
 
     #: How near a page edge a table must sit for the break to look like the reason it
-    #: stopped. A fraction of the page height, so it does not depend on the paper size.
-    _PAGE_EDGE_FRACTION = 0.12
+    #: stopped. A fraction of the page, so it does not depend on the paper size.
+    #:
+    #: Wide, and deliberately. A table cut off by a page break stops above whatever the
+    #: page keeps below it — the bottom margin, and the footer, whose band pdf_layout
+    #: already reckons at 15% of the page. At 12% an ordinary 1.5-inch margin put a
+    #: genuine continuation outside the band and split it. Being too wide costs a join
+    #: between two tables that really do meet at the page edges with nothing between
+    #: them; being too narrow costs a split down the middle of one table, which is the
+    #: failure that cannot be recovered downstream.
+    _PAGE_EDGE_FRACTION = 0.22
 
     @staticmethod
     def _header_key(row) -> tuple:
@@ -807,41 +820,105 @@ class DocumentLoader:
             re.sub(r"\W+", "", str(cell or ""), flags=re.UNICODE).casefold() for cell in row
         )
 
+    #: How much of the wider span the two tables must share to be one table. A
+    #: continuation is laid out with the columns it is continuing, so it occupies the
+    #: same span; a different grid beside it on the page usually does not. Tolerant,
+    #: because a borderless grid's detected edge moves a little with its content — it
+    #: takes a third of the width to disagree before this refuses anything.
+    _HORIZONTAL_OVERLAP_MIN = 0.7
+
+    @staticmethod
+    def _column_count(rows) -> int:
+        """How many columns a grid has: the width most of its rows share.
+
+        Not the first row's width. A header with a merged cell is narrower than the body
+        beneath it, and comparing that against a continuation's data row — which has the
+        body's width — refuses a join over a difference that exists only in the heading.
+        Ties go to the wider count, since a row is more often short than long.
+        """
+        widths = [len(row) for row in rows if row]
+        if not widths:
+            return 0
+        return max(set(widths), key=lambda width: (widths.count(width), width))
+
+    @classmethod
+    def _spans_the_same_columns(cls, prev: Dict, block: Dict) -> bool:
+        """Whether the two tables occupy the same horizontal band of the page.
+
+        Not reported means not asked: only the PDF parser measures this, and a parser
+        that cannot is not held to it.
+        """
+        left = prev.get("_last_x0", prev.get("x0"))
+        right = prev.get("_last_x1", prev.get("x1"))
+        if left is None or right is None or block.get("x0") is None or block.get("x1") is None:
+            return True
+        left, right = float(left), float(right)
+        other_left, other_right = float(block["x0"]), float(block["x1"])
+        widest = max(right, other_right) - min(left, other_left)
+        if widest <= 0:
+            return True
+        shared = min(right, other_right) - max(left, other_left)
+        return shared / widest >= cls._HORIZONTAL_OVERLAP_MIN
+
+    @staticmethod
+    def _page_edges(block: Dict, trailing: bool = False) -> Optional[tuple]:
+        """The top and bottom of the page a block sits on, in the block's own units.
+
+        `page_height` is accepted as a fallback for a parser that reports only an extent,
+        and read as a page running from 0 to that height.
+        """
+        prefix = "_last_" if trailing and "_last_bottom" in block else ""
+        bottom = block.get(prefix + "page_bottom")
+        top = block.get(prefix + "page_top")
+        if bottom is None:
+            height = block.get(prefix + "page_height") if prefix else block.get("page_height")
+            if not height:
+                return None
+            top, bottom = 0.0, float(height)
+        return float(top or 0.0), float(bottom)
+
+    @classmethod
+    def _ends_at_the_page_foot(cls, block: Dict) -> Optional[bool]:
+        """Whether a block runs to the foot of the page it ENDS on.
+
+        The page it ends on, not the one it started on: a run already stitched across two
+        pages is judged on where it actually stopped, so a three-page chain asks whether
+        page two ran to its foot rather than re-asking about page one. Without that a
+        table ending mid-way down page two still looked cut off, and a different table at
+        the head of page three was pulled into it.
+        """
+        edges = cls._page_edges(block, trailing=True)
+        bottom = block.get("_last_bottom", block.get("bottom"))
+        if edges is None or bottom is None:
+            return None
+        page_top, page_bottom = edges
+        if page_bottom <= page_top:
+            return None
+        return float(bottom) >= page_bottom - (page_bottom - page_top) * cls._PAGE_EDGE_FRACTION
+
+    @classmethod
+    def _starts_at_the_page_head(cls, block: Dict) -> Optional[bool]:
+        edges = cls._page_edges(block)
+        top = block.get("top")
+        if edges is None or top is None:
+            return None
+        page_top, page_bottom = edges
+        if page_bottom <= page_top:
+            return None
+        return float(top) <= page_top + (page_bottom - page_top) * cls._PAGE_EDGE_FRACTION
+
     @classmethod
     def _breaks_at_a_page_edge(cls, prev: Dict, block: Dict) -> bool:
         """Whether the first table runs to the foot of its page and the second starts at
         the head of the next — which is what a page break actually does to one table.
 
-        Unknown geometry passes. The only parser that reaches this carries it (pdfplumber
-        reports a page height and a table bbox), so the unknown case is a caller that
-        cannot be asked the question, and the header match below is what stands in.
+        Unknown geometry passes. DOCX and XLSX report none at all (and DOCX never reaches
+        here anyway, its pages all being numbered 0), so the unknown case is a caller that
+        cannot be asked the question rather than one that answered no.
         """
-        height = prev.get("page_height") or block.get("page_height")
-        if not height:
-            return True
-        band = float(height) * cls._PAGE_EDGE_FRACTION
-        prev_bottom = prev.get("bottom")
-        next_top = block.get("top")
-        if prev_bottom is None or next_top is None:
-            return True
-        return float(prev_bottom) >= float(height) - band and float(next_top) <= band
-
-    @classmethod
-    def _opens_a_different_table(cls, header, candidate) -> bool:
-        """Whether a continuation's first row is another table's header rather than data.
-
-        A continuation either repeats the header it is continuing or gets straight on
-        with the rows; both are ordinary and both are joined. What is not a continuation
-        is a row of column NAMES that are not the names already in hand.
-
-        Digits are what tell those apart, and the test is deliberately blunt: a data row
-        in any of this corpus's tables carries a figure somewhere — a fee, a year group, a
-        percentage — while a header row is words. "Pre-K | 75,000 EGP" is data on that
-        rule, and "Programme | Fee | Includes" is a header.
-        """
-        if cls._header_key(header) == cls._header_key(candidate):
-            return False
-        return not any(char.isdigit() for cell in candidate for char in str(cell or ""))
+        foot = cls._ends_at_the_page_foot(prev)
+        head = cls._starts_at_the_page_head(block)
+        return (foot is None or foot) and (head is None or head)
 
     @classmethod
     def _is_table_continuation(cls, prev: Dict, block: Dict) -> bool:
@@ -854,21 +931,38 @@ class DocumentLoader:
         same shape of failure as reading the wrong line of the right table, except built
         in at indexing time where nothing downstream can see it.
 
-        Two signals are added rather than one, because neither alone is enough:
+        What is added is LAYOUT, and only layout. Every test below asks where the ink is,
+        never what the cells say:
 
-          * the break falls at the page EDGES. One table split by a page break runs to
-            the foot of one page and resumes at the head of the next. A different table
-            almost always has something above it — a heading, a lead-in line — and so
-            does not start at the head.
-          * the continuation does not open a DIFFERENT table's header.
+          * the break falls at the page edges. One table split by a break runs to the
+            foot of its page and resumes at the head of the next; a table that merely
+            happened to be last on its page, and stopped half way down it, was not cut
+            off by anything. This is the load-bearing one.
+          * the two occupy the same horizontal band. A continuation is laid out with the
+            columns it is continuing, so it spans what they span.
+          * they have the same number of columns — counted as the width most rows share,
+            not the first row's, so a merged heading cell does not refuse a join over a
+            difference that exists only in the heading.
 
-        The third signal the review asked for, "the same section", needs no test: a
-        heading between the two tables becomes `prev` and fails the very first check, so
-        a join can never cross one.
+        Each is measured from what the parser reports and skipped where it reports
+        nothing, so a format carrying no geometry is never refused for failing a question
+        it was not asked.
 
-        Requiring a MATCHING header was tried and rejected: it refuses the ordinary
-        continuation that simply carries on with its rows, which
-        `test_table_continuation_without_repeated_header_keeps_all_rows` exists to keep.
+        The other two signals the review asked for need no test of their own. "The same
+        section" is already carried by adjacency: a heading between the two tables
+        becomes `prev` and fails the very first check, so a join can never cross one. And
+        a matching header is used where it is safe — to drop the duplicate copy — never
+        to refuse, for the reason below.
+
+        NO CONTENT TEST MAY REFUSE A JOIN. Two were tried and both were wrong. Requiring
+        a matching header refuses the ordinary continuation that simply carries on with
+        its rows, which `test_table_continuation_without_repeated_header_keeps_all_rows`
+        exists to keep. Reading a digit in the first row as proof it is data — and its
+        absence as proof it is a new header — was measured against the shipped corpus
+        afterwards: 19 of its 30 table rows contain no digit at all, the whole of both
+        curriculum tables being prose, so that rule would have split every continuation
+        of them. Table content varies more than any such rule survives, and the cost of
+        being wrong falls at indexing time where nothing downstream can see it.
         """
         if prev.get("type") != "table" or block.get("type") != "table":
             return False
@@ -878,11 +972,11 @@ class DocumentLoader:
         next_rows = block.get("rows") or []
         if not prev_rows or not next_rows:
             return False
-        if len(prev_rows[0]) != len(next_rows[0]):
+        if cls._column_count(prev_rows) != cls._column_count(next_rows):
             return False
-        if not cls._breaks_at_a_page_edge(prev, block):
+        if not cls._spans_the_same_columns(prev, block):
             return False
-        return not cls._opens_a_different_table(prev_rows[0], next_rows[0])
+        return cls._breaks_at_a_page_edge(prev, block)
 
     def _stitch_cross_page_blocks(self, blocks: List[Dict]) -> List[Dict]:
         """Stitching stage: rejoin paragraphs and tables that the page break split.
@@ -911,6 +1005,17 @@ class DocumentLoader:
                 prev["rows"] = list(prev.get("rows") or []) + next_rows
                 prev["content"] = self._render_rows(prev["rows"])
                 prev["_last_page"] = block.get("page_number", 0)
+                # Where the run now ENDS, alongside the page it ends on. A chain is
+                # judged page by page: without this the next candidate was still being
+                # measured against the first page's geometry, so a table that finished
+                # half way down page two still read as cut off and pulled in whatever
+                # started page three.
+                prev["_last_bottom"] = block.get("bottom")
+                prev["_last_page_top"] = block.get("page_top")
+                prev["_last_page_bottom"] = block.get("page_bottom")
+                prev["_last_page_height"] = block.get("page_height")
+                prev["_last_x0"] = block.get("x0")
+                prev["_last_x1"] = block.get("x1")
                 continue
             stitched.append(dict(block))
         return stitched
