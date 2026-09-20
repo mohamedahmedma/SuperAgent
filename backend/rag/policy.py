@@ -154,6 +154,14 @@ def decide_route(
     )
 
     if not has_docs:
+        # Denied without spending the rewrite, deliberately. The review (item 3) reads
+        # this as the retry going unused, and the retry is the wrong instrument for it:
+        # a hybrid retriever returns its top_k whenever the index holds anything at all,
+        # so a genuinely empty result is structural — an empty index, a filter that
+        # excluded everything, an access scope with no documents — and no step-back or
+        # HyDE phrasing of the question can reach past that. What could is a second
+        # RETRIEVAL with a wider pool and keyword-only matching under the same filters,
+        # which is what the review actually asks for and what is not built here.
         return "no_knowledge", "no evidence retrieved"
 
     # Assessment could not reach the standard this profile requires. Retrieval worked,
