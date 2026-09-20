@@ -34,8 +34,16 @@ def _text_block(content, page, top):
     return {"type": "text", "content": content, "page_number": page, "top": top}
 
 
-def _table_block(rows, page, top):
-    return {"type": "table", "content": "", "rows": rows, "page_number": page, "top": top}
+def _table_block(rows, page, top, bottom=None, page_height=None):
+    """A table block. `bottom`/`page_height` are the geometry pdf_layout carries so the
+    stitcher can ask whether a break fell at the page edges; omitting them is the older
+    shape, and every caller that omits them is asserting the no-geometry path."""
+    block = {"type": "table", "content": "", "rows": rows, "page_number": page, "top": top}
+    if bottom is not None:
+        block["bottom"] = bottom
+    if page_height is not None:
+        block["page_height"] = page_height
+    return block
 
 
 class TableSplitBoundaryTests(unittest.TestCase):
@@ -329,6 +337,110 @@ class StitchingDecisionTableTests(unittest.TestCase):
         ])
         self.assertEqual(1, len(blocks))
         self.assertEqual(4, len(blocks[0]["rows"]))
+
+
+class CrossPageTableJoinTests(unittest.TestCase):
+    """Which two tables are ONE table, and which are two.
+
+    The rule used to be "same column count, next page", which is true of any two
+    unrelated three-column tables that land either side of a break. Joining them makes
+    one grid out of two, and a row from the second then answers a question asked about
+    the first — the wrong-line failure, built in at indexing time where nothing
+    downstream can see it. Item 6 of RAG_FIX_PLAN.md.
+
+    A4 at 72dpi is 842 points tall, and the edge band is 12% of that, so a table is at
+    the foot past ~741 and at the head before ~101.
+    """
+
+    PAGE = 842.0
+
+    def setUp(self):
+        self.loader = DocumentLoader()
+
+    def _stitch(self, first, second):
+        return self.loader._stitch_cross_page_blocks([first, second])
+
+    def test_a_table_that_runs_to_the_foot_and_resumes_at_the_head_is_one_table(self):
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
+            _table_block([["2", "200"], ["3", "300"]], 1, 40.0, 300.0, self.PAGE),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(4, len(blocks[0]["rows"]))
+
+    def test_a_table_starting_mid_page_was_not_split_by_the_break(self):
+        """Something is above it — a heading, a lead-in line — so the break is not why
+        it starts there. This is the shape of two different tables."""
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
+            _table_block([["2", "200"], ["3", "300"]], 1, 300.0, 560.0, self.PAGE),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_table_that_stopped_mid_page_was_not_cut_off(self):
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 200.0, 400.0, self.PAGE),
+            _table_block([["2", "200"], ["3", "300"]], 1, 40.0, 300.0, self.PAGE),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_second_table_that_opens_its_own_header_is_not_joined(self):
+        """Both at the page edges and both two columns — the geometry alone would join
+        them. The first row is column NAMES, and not the names already in hand."""
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
+            _table_block([["Programme", "Includes"], ["Half-Day", "STEAM"]],
+                         1, 40.0, 300.0, self.PAGE),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_repeated_header_is_kept_once(self):
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
+            _table_block([["Grade", "Fee"], ["2", "200"]], 1, 40.0, 300.0, self.PAGE),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual([["Grade", "Fee"], ["1", "100"], ["2", "200"]], blocks[0]["rows"])
+
+    def test_a_repeated_header_is_recognised_through_its_typesetting(self):
+        """The break re-wrapped the header. It is the same header, and the copy still
+        goes — the old exact-match test kept it as a data row in the middle of the
+        grid."""
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee (EGP)"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
+            _table_block([[" grade ", "FEE  (egp)"], ["2", "200"]], 1, 40.0, 300.0, self.PAGE),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(blocks[0]["rows"]))
+
+    def test_a_data_row_carrying_words_is_still_data(self):
+        """"Pre-K | 75,000 EGP" is a row, not a header. A figure anywhere in the row is
+        what says so."""
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["Pre-K", "75,000 EGP"]],
+                         0, 500.0, 800.0, self.PAGE),
+            _table_block([["FS1–FS2", "88,000 EGP"]], 1, 40.0, 300.0, self.PAGE),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(blocks[0]["rows"]))
+
+    def test_a_different_column_count_is_still_refused(self):
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 500.0, 800.0, self.PAGE),
+            _table_block([["2", "200", "extra"]], 1, 40.0, 300.0, self.PAGE),
+        )
+        self.assertEqual(2, len(blocks))
+
+    def test_a_parser_that_reports_no_geometry_falls_back_to_the_older_signals(self):
+        """DOCX and XLSX carry no page geometry at all. The question cannot be asked, so
+        it is not held against them — and DOCX never reaches here anyway, its pages all
+        being numbered 0."""
+        blocks = self._stitch(
+            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 700.0),
+            _table_block([["2", "200"]], 1, 30.0),
+        )
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(3, len(blocks[0]["rows"]))
 
 
 class RobustnessTests(unittest.TestCase):

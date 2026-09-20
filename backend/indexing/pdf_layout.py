@@ -3,7 +3,8 @@
 Produces an ordered list of blocks per document:
     {"type": "heading", "content": str, "level": int | None, "page_number": int, "top": float}
     {"type": "text",    "content": str, "page_number": int, "top": float}
-    {"type": "table",   "content": str, "rows": list[list[str]], "page_number": int, "top": float}
+    {"type": "table",   "content": str, "rows": list[list[str]], "page_number": int, "top": float,
+                        "bottom": float, "page_height": float | None}
 
 Tables are detected with pdfplumber's table finder and validated with a structural
 heuristic (real data grids have short cells in consistently multi-column rows) so
@@ -333,6 +334,7 @@ def build_blocks_from_pages(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             if not rows:
                 continue
             top = float(table["bbox"][1])
+            page_height = page.get("height")
             if looks_like_real_table(rows):
                 page_blocks.append({
                     "type": "table",
@@ -340,6 +342,13 @@ def build_blocks_from_pages(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]
                     "rows": rows,
                     "page_number": page_number,
                     "top": top,
+                    # For the cross-page stitcher in document_loader. One table split by
+                    # a page break ends at the foot of one page and resumes at the head
+                    # of the next; two different tables that happen to share a shape do
+                    # not. Without the geometry that test cannot run at all, so it is
+                    # carried here rather than recovered later.
+                    "bottom": float(table["bbox"][3]),
+                    "page_height": float(page_height) if page_height else None,
                 })
             else:
                 page_blocks.append({

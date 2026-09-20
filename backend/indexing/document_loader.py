@@ -796,10 +796,80 @@ class DocumentLoader:
             return False
         return cls._starts_like_continuation(next_text)
 
+    #: How near a page edge a table must sit for the break to look like the reason it
+    #: stopped. A fraction of the page height, so it does not depend on the paper size.
+    _PAGE_EDGE_FRACTION = 0.12
+
     @staticmethod
-    def _is_table_continuation(prev: Dict, block: Dict) -> bool:
-        """Adjacent table blocks across a page break with the same column count are
-        one table split by the break (conservative structural heuristic)."""
+    def _header_key(row) -> tuple:
+        """A header row reduced to what it says, not how it was typeset."""
+        return tuple(
+            re.sub(r"\W+", "", str(cell or ""), flags=re.UNICODE).casefold() for cell in row
+        )
+
+    @classmethod
+    def _breaks_at_a_page_edge(cls, prev: Dict, block: Dict) -> bool:
+        """Whether the first table runs to the foot of its page and the second starts at
+        the head of the next — which is what a page break actually does to one table.
+
+        Unknown geometry passes. The only parser that reaches this carries it (pdfplumber
+        reports a page height and a table bbox), so the unknown case is a caller that
+        cannot be asked the question, and the header match below is what stands in.
+        """
+        height = prev.get("page_height") or block.get("page_height")
+        if not height:
+            return True
+        band = float(height) * cls._PAGE_EDGE_FRACTION
+        prev_bottom = prev.get("bottom")
+        next_top = block.get("top")
+        if prev_bottom is None or next_top is None:
+            return True
+        return float(prev_bottom) >= float(height) - band and float(next_top) <= band
+
+    @classmethod
+    def _opens_a_different_table(cls, header, candidate) -> bool:
+        """Whether a continuation's first row is another table's header rather than data.
+
+        A continuation either repeats the header it is continuing or gets straight on
+        with the rows; both are ordinary and both are joined. What is not a continuation
+        is a row of column NAMES that are not the names already in hand.
+
+        Digits are what tell those apart, and the test is deliberately blunt: a data row
+        in any of this corpus's tables carries a figure somewhere — a fee, a year group, a
+        percentage — while a header row is words. "Pre-K | 75,000 EGP" is data on that
+        rule, and "Programme | Fee | Includes" is a header.
+        """
+        if cls._header_key(header) == cls._header_key(candidate):
+            return False
+        return not any(char.isdigit() for cell in candidate for char in str(cell or ""))
+
+    @classmethod
+    def _is_table_continuation(cls, prev: Dict, block: Dict) -> bool:
+        """Whether two adjacent table blocks are ONE table that a page break split.
+
+        This used to ask only whether both were tables on consecutive pages with the same
+        number of columns, which is true of any two unrelated three-column tables that
+        happen to land either side of a break. Joining them makes one grid out of two,
+        and a row from the second then answers a question asked about the first — the
+        same shape of failure as reading the wrong line of the right table, except built
+        in at indexing time where nothing downstream can see it.
+
+        Two signals are added rather than one, because neither alone is enough:
+
+          * the break falls at the page EDGES. One table split by a page break runs to
+            the foot of one page and resumes at the head of the next. A different table
+            almost always has something above it — a heading, a lead-in line — and so
+            does not start at the head.
+          * the continuation does not open a DIFFERENT table's header.
+
+        The third signal the review asked for, "the same section", needs no test: a
+        heading between the two tables becomes `prev` and fails the very first check, so
+        a join can never cross one.
+
+        Requiring a MATCHING header was tried and rejected: it refuses the ordinary
+        continuation that simply carries on with its rows, which
+        `test_table_continuation_without_repeated_header_keeps_all_rows` exists to keep.
+        """
         if prev.get("type") != "table" or block.get("type") != "table":
             return False
         if block.get("page_number") != prev.get("_last_page", prev.get("page_number", 0)) + 1:
@@ -808,7 +878,11 @@ class DocumentLoader:
         next_rows = block.get("rows") or []
         if not prev_rows or not next_rows:
             return False
-        return len(prev_rows[0]) == len(next_rows[0])
+        if len(prev_rows[0]) != len(next_rows[0]):
+            return False
+        if not cls._breaks_at_a_page_edge(prev, block):
+            return False
+        return not cls._opens_a_different_table(prev_rows[0], next_rows[0])
 
     def _stitch_cross_page_blocks(self, blocks: List[Dict]) -> List[Dict]:
         """Stitching stage: rejoin paragraphs and tables that the page break split.
@@ -828,7 +902,11 @@ class DocumentLoader:
                 continue
             if prev is not None and self._is_table_continuation(prev, block):
                 next_rows = list(block.get("rows") or [])
-                if next_rows and next_rows[0] == (prev.get("rows") or [[]])[0]:
+                # Normalised, so a header the break re-typeset — a wrapped cell, a
+                # different space — is still recognised as the copy it is.
+                if next_rows and self._header_key(next_rows[0]) == self._header_key(
+                    (prev.get("rows") or [[]])[0]
+                ):
                     next_rows = next_rows[1:]
                 prev["rows"] = list(prev.get("rows") or []) + next_rows
                 prev["content"] = self._render_rows(prev["rows"])
