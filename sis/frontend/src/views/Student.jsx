@@ -233,17 +233,17 @@ function Finder({ initial }) {
 function Identity({ student }) {
   const state = useStore();
   const rows = [
-    { label: 'Student number', value: student.student_number, mono: true },
-    { label: 'Name (English)', value: student.full_name_en },
-    { label: 'Name (Arabic)', value: student.full_name_ar, ar: true },
-    { label: 'Date of birth', value: student.date_of_birth, mono: true },
+    { label: t('Student number'), value: student.student_number, mono: true },
+    { label: t('Name (English)'), value: student.full_name_en },
+    { label: t('Name (Arabic)'), value: student.full_name_ar, ar: true },
+    { label: t('Date of birth'), value: student.date_of_birth, mono: true },
     {
-      label: 'Age',
+      label: t('Age'),
       value:
-        student.age === null || student.age === undefined ? null : `${student.age} years`,
-      note: 'Read from her date of birth, never stored beside it.'
+        student.age === null || student.age === undefined ? null : t('{0} years', [student.age]),
+      note: t('Read from her date of birth, never stored beside it.')
     },
-    { label: 'Address', value: student.address }
+    { label: t('Address'), value: student.address }
   ];
 
   return (
@@ -262,7 +262,7 @@ function Identity({ student }) {
                   ) : (
                     /* Blank is "nobody has stated this", and it says so rather than showing an
                        empty cell a registrar cannot tell apart from a rendering bug. */
-                    <span className="sis-ungraded">{DASH} not on file</span>
+                    <span className="sis-ungraded">{DASH} {t('not on file')}</span>
                   )}
                   {row.note ? (
                     <div className="sis-xs text-body-tertiary">{row.note}</div>
@@ -667,7 +667,7 @@ function Attendance({ studentNumber, academicYear }) {
             className: 'sis-num',
             cell: (row) => <span className="font-monospace small">{dateText(row.on_date)}</span>
           },
-          { key: 'state', header: 'Marked', cell: (row) => row.state },
+          { key: 'state', header: t('Marked'), cell: (row) => t(row.state) },
           {
             key: 'class',
             header: t('In class'),
@@ -697,7 +697,8 @@ function Attendance({ studentNumber, academicYear }) {
 function Timeline({ studentNumber }) {
   const events = useResource(`student-timeline:${studentNumber}`, () => api.studentTimeline(studentNumber), !!studentNumber);
   return <Card title={t('Student Timeline')} subtitle={t('Recorded history from the audit log.')} tight>
-    {events.loading ? <Skeleton rows={4} /> : !events.value?.length ? <Empty title={t('No timeline events yet')} /> :
+    <ErrorNote error={!events.value ? events.error : null} onRetry={events.reload} />
+    {events.loading ? <Skeleton rows={4} /> : events.error && !events.value ? null : !events.value?.length ? <Empty title={t('No timeline events yet')} /> :
       <ol className="list-group list-group-flush">{events.value.map((event) => <li className="list-group-item px-0" key={event.id}>
         <div className="d-flex justify-content-between gap-2"><strong>{event.action.replaceAll('_', ' ')}</strong><span className="small text-body-secondary">{dateText(event.at)}</span></div>
         <div className="small text-body-secondary">{event.entity_type} · {event.actor}</div>
@@ -773,37 +774,37 @@ const contacts = (guardians.value && guardians.value.guardians) || [];
   const facts = [
     counts
       ? {
-          label: 'Days marked in this school year so far',
+          label: t('Days marked in this school year so far'),
           value: `${counts.recorded}`,
-          note: `${dateText(range.from)} to ${dateText(range.to)}`
+          note: t('{0} to {1}', [dateText(range.from), dateText(range.to)])
         }
       : null,
     counts
       ? {
-          label: 'Days present or late',
+          label: t('Days present or late'),
           value: `${counts.in_the_room}`,
-          note: `${counts.present} present, ${counts.late} late.`
+          note: t('{0} present, {1} late.', [counts.present, counts.late])
         }
       : null,
     counts
       ? {
-          label: 'Days absent or excused',
+          label: t('Days absent or excused'),
           value: `${counts.away}`,
-          note: `${counts.absent} absent, ${counts.excused} excused.`
+          note: t('{0} absent, {1} excused.', [counts.absent, counts.excused])
         }
       : null,
     {
-      label: 'Adults on contact list',
+      label: t('Adults on contact list'),
       value: `${contacts.length}`,
-      note: `${readers.length} may read the student record.`
+      note: t('{0} may read the student record.', [readers.length])
     },
     {
-      label: 'Date of birth',
-      value: student.date_of_birth ? dateText(student.date_of_birth) : 'not on file',
+      label: t('Date of birth'),
+      value: student.date_of_birth ? dateText(student.date_of_birth) : t('not on file'),
       note:
         student.age === null || student.age === undefined
           ? null
-          : `${student.age} years old today.`
+          : t('{0} years old today.', [student.age])
     }
   ].filter(Boolean);
 
@@ -889,8 +890,8 @@ export function Student({ params = {} }) {
     <>
       <Breadcrumbs
         trail={[
-          { label: 'Schools', to: 'school' },
-          { label: 'Find a child', to: 'student' },
+          { label: t('Schools'), to: 'school' },
+          { label: t('Find a child'), to: 'student' },
           { label: number }
         ]}
       />
@@ -898,7 +899,7 @@ export function Student({ params = {} }) {
         title={name || number}
         lede={
           name
-            ? `Student number ${student.student_number}.`
+            ? t('Student number {0}.', [student.student_number])
             : t('No name is on file for her, which is a gap in the record rather than a rendering fault.')
         }
         actions={
