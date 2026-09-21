@@ -575,7 +575,7 @@ function Register({ classCode, year, yearLevel }) {
         title={t('On the register')}
         subtitle={
           roster.value
-            ? `${students.length} child(ren) as of ${dateText(roster.value.as_of)}`
+            ? t('{0} child(ren) as of {1}', [students.length, dateText(roster.value.as_of)])
             : null
         }
         actions={
@@ -677,7 +677,7 @@ function Register({ classCode, year, yearLevel }) {
                     href={Router.href('student', { number: row.student_number })}
                   >
                     {pickName(row, state.lang) || (
-                      <span className="sis-ungraded">{DASH} name not on file</span>
+                      <span className="sis-ungraded">{DASH} {t('name not on file')}</span>
                     )}
                   </a>
                   {/* The number rides under the name on a phone, where its own column is gone. */}
@@ -905,7 +905,7 @@ export function Klass({ params = {} }) {
   }
 
   const trail = [
-    { label: 'Schools', to: 'school' },
+    { label: t('Schools'), to: 'school' },
     school ? { label: school, to: 'school', params: { code: school } } : null,
     section && section.year_level_code
       ? {
@@ -978,7 +978,7 @@ export function Klass({ params = {} }) {
                  from the URL — no second copy of "which tab is open" to fall out of step. */
               onClick={() => Router.setParams({ tab: item.key })}
             >
-              {item.label}
+              {t(item.label)}
             </button>
           </li>
         ))}

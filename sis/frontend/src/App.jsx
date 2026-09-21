@@ -423,7 +423,7 @@ function Account({ onSignIn }) {
 
 /* -- Header ---------------------------------------------------------------------- */
 
-function Header({ onOpenSettings, onSignIn, onToggleMenu }) {
+function Header({ onOpenSettings, onSignIn, onToggleMenu, onOpenChat, showMobileChat, unreadChatCount }) {
   const state = useStore();
   const auditNotifications = useAuditNotifications();
   const schools = useResource(Store.keys.schools(false), () => api.schools(false));
@@ -446,6 +446,20 @@ function Header({ onOpenSettings, onSignIn, onToggleMenu }) {
             >
               <Icon name="menu" size={20} />
             </button>
+            {showMobileChat ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-quiet d-md-none sis-mobile-chat-trigger"
+                onClick={onOpenChat}
+                aria-label={unreadChatCount ? t('{0} unread messages', [unreadChatCount]) : t('Open chat')}
+                title={t('Open chat')}
+              >
+                <Icon name="chat" size={20} />
+                {unreadChatCount > 0 ? (
+                  <span className="sis-fab-badge">{unreadChatCount > 99 ? '99+' : unreadChatCount}</span>
+                ) : null}
+              </button>
+            ) : null}
             <AuditBell notifications={auditNotifications} placement="mobile" />
           </div>
           <a
@@ -998,6 +1012,9 @@ export function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onSignIn={() => {}}
         onToggleMenu={() => setMobileMenuOpen((prev) => !prev)}
+        onOpenChat={() => setChatDrawerOpen(true)}
+        showMobileChat={canChat && !chatDrawerOpen && route.route.name !== 'chat'}
+        unreadChatCount={unreadChatCount}
       />
       <SchoolTabs />
       <Nav active={route.route.name} />

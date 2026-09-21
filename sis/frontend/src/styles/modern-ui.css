@@ -3160,6 +3160,15 @@ html[dir="ltr"] .sis-audit-bell-host { right: 2rem; }
 }
 
 @media (max-width: 767.98px) {
+  /* A floating control covered register rows and their actions on phones. Chat stays
+     immediately reachable in the header without sitting over scrollable work. */
+  .sis-fab-chat { display: none !important; }
+  .sis-mobile-chat-trigger { position: relative !important; }
+  .sis-mobile-chat-trigger .sis-fab-badge {
+    position: absolute !important;
+    top: -0.25rem !important;
+    inset-inline-end: -0.35rem !important;
+  }
   .sis-permission-toolbar { align-items: stretch; flex-direction: column; }
   .sis-permission-grid { grid-template-columns: minmax(0, 1fr); }
   .sis-permission-group-head { align-items: flex-start; }
