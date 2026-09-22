@@ -46,7 +46,11 @@ jobs:
           all=false; backend=false; frontend=false; identity=false; records=false; sis=false
           while IFS= read -r file; do
             case "$file" in
-              .github/workflows/deploy.yml|docker-compose*.yml|Dockerfile|pyproject.toml|uv.lock) all=true ;;
+              # A CI-policy change commonly follows a failed release (for example, a
+              # dependency-download timeout). Rebuild every image in that recovery run;
+              # otherwise the pipeline can go green while silently skipping the app
+              # commit whose previous production run never published its image.
+              .github/workflows/ci.yml|.github/workflows/deploy.yml|docker-compose*.yml|Dockerfile|pyproject.toml|uv.lock) all=true ;;
               backend/*) backend=true ;;
               frontend/*) frontend=true ;;
               identity/*) identity=true ;;
