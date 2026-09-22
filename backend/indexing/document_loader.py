@@ -390,6 +390,7 @@ class DocumentLoader:
         page: int = 0,
         asset_ids: tuple = (),
         kind: str = "text",
+        list_group: int = 0,
     ) -> List[Dict]:
         """`kind="figure"` marks a unit built from an image's text surrogate.
 
@@ -409,6 +410,7 @@ class DocumentLoader:
                     "sections": sections,
                     "page": page,
                     "asset_ids": tuple(asset_ids),
+                    "list_group": list_group,
                 })
         return units
 
@@ -629,6 +631,7 @@ class DocumentLoader:
                         page,
                         asset_ids=unit.get("asset_ids", ()),
                         kind=unit.get("kind", "text"),
+                        list_group=unit.get("list_group", 0),
                     )
                 )
         return refined
@@ -665,6 +668,23 @@ class DocumentLoader:
         keeping leaves citable under one topic.
         """
         effective_target = target or budget
+
+        # How big each list is, so one can be moved WHOLE rather than broken.
+        # Keeping a list together is not enough on its own: a window that has already
+        # filled with preceding prose has no room left, the hard budget wins, and the
+        # list breaks exactly where it would have broken anyway. Measured on the bus
+        # districts, that is precisely what happened — the list stayed intact through
+        # the level-1 pass and then split at level 2 with five items in one window and
+        # two in the next.
+        # Switchable so the two builds can be compared on the same corpus rather than
+        # argued about. `1` (the default) keeps lists whole.
+        cohesion = (os.getenv("CHUNK_LIST_COHESION") or "1").strip() not in ("0", "false", "no")
+        list_sizes: Dict[int, int] = {}
+        for item in units if cohesion else ():
+            group = item.get("list_group")
+            if group:
+                list_sizes[group] = list_sizes.get(group, 0) + len(item["text"]) + 2
+
         windows: List[List[Dict]] = []
         current: List[Dict] = []
         current_len = 0
@@ -684,8 +704,35 @@ class DocumentLoader:
                 continue
             if split_on_section_change and current and unit.get("sections", ()) != current[0].get("sections", ()):
                 close()
-            if current and (current_len >= effective_target or current_len + 2 + unit_len > budget):
+            # A list is one thing. Word says so in the paragraph style, and the parser
+            # now carries it here. Closing a window between "Maadi" and "Mokattam"
+            # leaves a run of bare place names in one chunk with nothing saying what
+            # they are, and the previous chunk promising a list it does not contain.
+            # Measured before this rule: 22 of the corpus's 36 lists were cut this way.
+            #
+            # The TARGET yields to a list; the hard budget never does. A list longer
+            # than a whole window still has to break somewhere, and breaking it is
+            # better than an unbounded chunk — the bound is what every other rule here
+            # exists to keep.
+            group = unit.get("list_group") if cohesion else 0
+            continues_list = bool(current and group and group == current[-1].get("list_group"))
+            fits = current_len + 2 + unit_len <= budget
+
+            # A list that is ABOUT to start and cannot fit in what is left of this
+            # window begins a new one, so it arrives whole instead of straddling the
+            # boundary. Only when it would actually fit somewhere: a list longer than a
+            # whole window has to break, and moving it would just break it later.
+            starts_list = bool(group and not continues_list)
+            if (
+                starts_list
+                and current
+                and list_sizes.get(group, 0) <= budget
+                and current_len + list_sizes.get(group, 0) > budget
+            ):
                 close()
+            elif current and (current_len >= effective_target or not fits):
+                if not (continues_list and fits):
+                    close()
             current.append(unit)
             current_len += unit_len + (2 if current_len else 0)
         close()
@@ -723,15 +770,60 @@ class DocumentLoader:
         return seen
 
     @staticmethod
-    def _apply_section_prefix(text: str, sections: List[str]) -> str:
-        """Prepend the section path ("Admissions > Fees") so the chunk carries its
-        topic into the embedding and citations. Skipped when the chunk already
-        contains its own heading near the top."""
+    def _apply_section_prefix(text: str, sections: List[str], modality: str = "text") -> str:
+        """The section path a chunk carries into its embedding, and when it earns it.
+
+        Measured over 349 questions, three ways, each a full reindex (arm A = the old
+        behaviour, B = title dropped, C = no prefix at all):
+
+            stage       A full    B specific    C none
+            recalled      337         340         341
+            ranked        320         319         322
+
+        So the path as it was written cost recall rather than adding it — but the loss is
+        not spread evenly. Broken out by what the chunk IS:
+
+            text    274 -> 278   (+4 without the prefix)
+            table    40 ->  38   (-2 without it)
+
+        Both halves of that make sense, and together they are the rule below. A prose
+        chunk already says what it is about, so a path repeated across 118 of 175 leaves
+        from a vocabulary of only 34 distinct strings is 18% of the text saying nothing
+        new — and it pulls the corpus together in embedding space, mean pairwise cosine
+        0.4518 -> 0.5156, which is the same complaint `_apply_bm25_section_prefix` makes
+        about the sparse lane. A TABLE has no such prose. "Grade | Fee | 105,000" carries
+        no topic at all, and the path is the only thing that says which table it is.
+
+        So the path goes on tables and figures and nowhere else, and it never carries the
+        document's own title, which by definition repeats on every chunk in the document.
+
+        Measured again on ENGLISH queries — the language retrieval actually runs in,
+        since an Arabic question is translated before it reaches the index — the path
+        earns nothing there either. So `none` is the default, and `full`, `specific` and
+        `structured` stay reachable through `CHUNK_SECTION_PREFIX` for re-measurement.
+        """
         if not text or not sections:
             return text
-        if sections[-1] in text[:200]:
+        mode = (os.getenv("CHUNK_SECTION_PREFIX") or "none").strip().lower()
+        if mode == "none":
             return text
-        prefix = " > ".join(sections[-3:])[:150].strip()
+        if mode == "structured" and modality not in ("table", "figure"):
+            return text
+        # The title repeats on every chunk of the document, so it is signal in none of
+        # them. Only `full` — the measured-worse arm — still carries it.
+        #
+        # Dropped only when something is left underneath. `sections[0]` is the document's
+        # own title in THIS corpus, where one Heading 1 wraps everything; it is not a
+        # title in a document whose top level is topical, and stripping it there throws
+        # away the only context a table has. `test_loader_end_to_end_word_table_is_row_
+        # safe_and_topic_prefixed` is that document, and it caught this.
+        levels = list(sections) if mode == "full" or len(sections) < 2 else list(sections[1:])
+        if not levels:
+            return text
+        if levels[-1] in text[:200]:
+            return text
+        keep = 3 if mode == "full" else 2
+        prefix = " > ".join(levels[-keep:])[:150].strip()
         return f"{prefix}\n{text}" if prefix else text
 
     @staticmethod
@@ -1052,6 +1144,8 @@ class DocumentLoader:
                     units.append({
                         "kind": "text",
                         "text": title,
+                        # Carried so a heading is never separated from the list it heads.
+                        "list_group": block.get("list_group", 0),
                         "sections": tuple(entry["title"] for entry in section_stack),
                         "page": page_number,
                     })
@@ -1099,6 +1193,7 @@ class DocumentLoader:
                                 self._splitter_level_1,
                                 sections,
                                 page_number,
+                                list_group=block.get("list_group", 0),
                             )
                         )
         return units
@@ -1133,7 +1228,9 @@ class DocumentLoader:
         for window_1 in self._pack_units(units, self._level_1_size):
             level_1_body = sanitize_text(self._window_text(window_1)).strip()
             level_1_sections = self._window_sections(window_1)
-            level_1_text = self._apply_section_prefix(level_1_body, level_1_sections)
+            level_1_text = self._apply_section_prefix(
+                    level_1_body, level_1_sections, self._window_modality(window_1)
+                )
             level_1_bm25 = self._apply_bm25_section_prefix(level_1_body, level_1_sections)
             if not level_1_text:
                 continue
@@ -1159,7 +1256,9 @@ class DocumentLoader:
             for window_2 in self._pack_units(units_2, self._level_2_size):
                 level_2_body = sanitize_text(self._window_text(window_2)).strip()
                 level_2_sections = self._window_sections(window_2)
-                level_2_text = self._apply_section_prefix(level_2_body, level_2_sections)
+                level_2_text = self._apply_section_prefix(
+                    level_2_body, level_2_sections, self._window_modality(window_2)
+                )
                 level_2_bm25 = self._apply_bm25_section_prefix(level_2_body, level_2_sections)
                 if not level_2_text:
                     continue
@@ -1191,7 +1290,9 @@ class DocumentLoader:
                 ):
                     level_3_body = sanitize_text(self._window_text(window_3)).strip()
                     level_3_sections = self._window_sections(window_3)
-                    level_3_text = self._apply_section_prefix(level_3_body, level_3_sections)
+                    level_3_text = self._apply_section_prefix(
+                    level_3_body, level_3_sections, self._window_modality(window_3)
+                )
                     level_3_text = fit_utf8_bytes(level_3_text, self._MILVUS_TEXT_CAP_BYTES).strip()
                     level_3_bm25 = fit_utf8_bytes(
                         self._apply_bm25_section_prefix(level_3_body, level_3_sections),

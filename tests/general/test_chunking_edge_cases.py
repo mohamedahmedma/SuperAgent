@@ -1127,7 +1127,18 @@ class WriterDedupBoundaryTests(unittest.TestCase):
 
 class SectionPrefixBoundaryTests(unittest.TestCase):
     """BVA for _apply_section_prefix: the 200-char heading-lookback window,
-    the 150-char prefix cap, and the depth-3 path truncation."""
+    the 150-char prefix cap, and the depth-3 path truncation.
+
+    Run under `full` EXPLICITLY. The shipped default is now `none` — five reindexed arms
+    measured the path costing recall rather than adding it, in Arabic and in English — but
+    the other modes remain selectable and their mechanics are still worth pinning. What
+    ships is asserted by `TheShippedPrefixDefaultTests` below.
+    """
+
+    def setUp(self):
+        patcher = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_heading_inside_lookback_window_skips_prefix(self):
         text = "Fees\n" + "body " * 20
@@ -1154,6 +1165,38 @@ class SectionPrefixBoundaryTests(unittest.TestCase):
     def test_empty_sections_or_text_are_untouched(self):
         self.assertEqual("body", DocumentLoader._apply_section_prefix("body", []))
         self.assertEqual("", DocumentLoader._apply_section_prefix("", ["Fees"]))
+
+
+class TheShippedPrefixDefaultTests(unittest.TestCase):
+    """What a chunk carries when nobody sets anything.
+
+    The section path was measured five ways, each a full reindex over 349 questions:
+    with the document title and three levels (the old default) scored 320 ranked, without
+    the title 319, and with no path at all 322. Re-measured on English queries — the
+    language retrieval actually runs in, since an Arabic question is translated before it
+    reaches the index — the path earned nothing there either. Only 34 distinct strings
+    covered 118 of 175 leaves, 18% of their text, and embedding them raised mean pairwise
+    cosine from 0.4518 to 0.5156: every chunk looking more like every other one.
+    """
+
+    def test_a_chunk_carries_no_section_path_by_default(self):
+        self.assertEqual(
+            "body", DocumentLoader._apply_section_prefix("body", ["Doc", "Section", "Sub"])
+        )
+
+    def test_not_even_a_table(self):
+        """`structured` — the path on tables and figures only — was measured too, and
+        came last of the five at 317."""
+        self.assertEqual(
+            "body",
+            DocumentLoader._apply_section_prefix("body", ["Doc", "Section"], "table"),
+        )
+
+    def test_the_other_modes_are_still_reachable(self):
+        with patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"}):
+            self.assertTrue(
+                DocumentLoader._apply_section_prefix("body", ["Doc"]).startswith("Doc\n")
+            )
 
 
 class HierarchyInvariantTests(unittest.TestCase):

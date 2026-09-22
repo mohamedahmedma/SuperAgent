@@ -4,6 +4,7 @@ Covers the pure logic (table heuristic, paragraph merging, header-repeated table
 splitting) and the loader integration (atomic table leaf chunks interleaved with
 three-level text hierarchy, unique IDs, legacy fallback) without real PDFs.
 """
+import os
 import unittest
 from unittest.mock import Mock, patch
 
@@ -222,6 +223,14 @@ SAMPLE_BLOCKS = [
 
 class LayoutLoaderIntegrationTests(unittest.TestCase):
     def setUp(self):
+        # The section path is off by default now: five reindexed arms measured it
+        # costing recall rather than adding it, in Arabic and in English alike.
+        # These tests are about the path being EXPRESSED correctly when a
+        # deployment asks for it, so they ask. What ships is asserted by
+        # `TheShippedPrefixDefaultTests` in test_chunking_edge_cases.py.
+        prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
+        prefix.start()
+        self.addCleanup(prefix.stop)
         self.loader = DocumentLoader()
 
     def _load(self, blocks):
