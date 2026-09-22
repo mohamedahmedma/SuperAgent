@@ -88,6 +88,14 @@ class SqlAlchemyParentChunkRepository:
         )
         return [_record(row) for row in rows]
 
+    def by_filename(self, filename: str) -> Sequence[ParentChunkRecord]:
+        rows = self._session.execute(
+            select(*_RECORD_COLUMNS)
+            .where(ParentChunk.filename == filename)
+            .order_by(ParentChunk.chunk_level, ParentChunk.chunk_idx)
+        )
+        return [_record(row) for row in rows]
+
 
 def _values(chunk: ParentChunkRecord, updated_at: datetime) -> dict:
     return {

@@ -76,6 +76,10 @@
 
       <UploadSection />
     </div>
+
+    <!-- Mounted here rather than inside the row so the panel is not clipped by the
+         row's own overflow, and so only one can ever be open. -->
+    <ChunkInspector v-if="documentStore.inspecting" />
   </div>
 </template>
 
@@ -83,6 +87,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import UploadSection from './UploadSection.vue';
 import DocumentPairItem from './DocumentPairItem.vue';
+import ChunkInspector from './ChunkInspector.vue';
 import { useDocumentStore } from '@/stores/documents';
 
 const documentStore = useDocumentStore();

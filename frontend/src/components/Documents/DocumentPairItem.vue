@@ -23,6 +23,16 @@
         <template v-if="side.filename">
           <strong class="pair-item-file">{{ side.filename }}</strong>
           <small>{{ side.chunks.toLocaleString() }} chunks</small>
+          <!-- Per FILE, not per entry: the two languages are chunked separately, so
+               "the chunks of this entry" is not a thing that exists. -->
+          <button
+            type="button"
+            class="pair-item-inspect"
+            title="Inspect the chunks this file was indexed into"
+            @click="documentStore.openInspector(side.filename)"
+          >
+            <i class="fa-solid fa-sitemap"></i>
+          </button>
           <button
             type="button"
             class="btn-danger pair-item-delete"
@@ -254,6 +264,23 @@ const onDelete = async (filename: string) => {
 .pair-item-delete {
   justify-self: start;
   margin-top: 4px;
+}
+
+.pair-item-inspect {
+  justify-self: start;
+  margin-top: 4px;
+  border: 1px solid var(--border, #e6e9f0);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.pair-item-inspect:hover {
+  opacity: 1;
+  background: var(--surface-muted, #f2f4f9);
 }
 
 .pair-item-note {

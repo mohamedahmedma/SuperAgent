@@ -1,3 +1,4 @@
+import json
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
@@ -15,8 +16,11 @@ from backend.db.models import User
 import backend.indexing.language_check as language_check
 from backend.infra.auth import require_admin
 from backend.profiles import get_profile
+from backend.text_matching import fold
 from backend.jobs import DELETE_STEPS
 from backend.schemas import (
+    ChunkInfo,
+    DocumentChunkListResponse,
     DocumentDeleteJobResponse,
     DocumentDeleteResponse,
     DocumentDeleteStartResponse,
@@ -307,6 +311,118 @@ async def list_documents(
         return DocumentListResponse(documents=documents)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve document list: {str(e)}")
+
+
+#: One response may not carry more than this many chunks. A document is normally a few
+#: hundred; the ceiling is here so a pathological one cannot build a response large
+#: enough to matter, and `total` still reports the truth so the UI can say it was cut.
+_CHUNK_PAGE_LIMIT = 2000
+
+#: What the inspector reads. `dense_embedding` and `sparse_embedding` are deliberately
+#: absent — they are most of a chunk's bytes and none of its meaning.
+_CHUNK_FIELDS = [
+    "chunk_id", "parent_chunk_id", "root_chunk_id", "chunk_level", "chunk_idx",
+    "page_number", "modality", "text", "asset_ids",
+]
+
+
+def _chunk_asset_ids(raw) -> list:
+    """`asset_ids` is stored as a JSON array in a VARCHAR. A malformed one is not worth
+    failing a whole inspection over, so it reads as no assets."""
+    if isinstance(raw, list):
+        return [str(item) for item in raw]
+    try:
+        parsed = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+
+def _chunk_info(row: dict) -> ChunkInfo:
+    text = str(row.get("text") or "")
+    return ChunkInfo(
+        chunk_id=str(row.get("chunk_id") or ""),
+        parent_chunk_id=str(row.get("parent_chunk_id") or ""),
+        root_chunk_id=str(row.get("root_chunk_id") or ""),
+        chunk_level=int(row.get("chunk_level") or 0),
+        chunk_idx=int(row.get("chunk_idx") or 0),
+        page_number=int(row.get("page_number") or 0),
+        modality=str(row.get("modality") or "text"),
+        text=text,
+        char_count=len(text),
+        asset_ids=_chunk_asset_ids(row.get("asset_ids")),
+    )
+
+
+@router.get("/documents/{filename}/chunks", response_model=DocumentChunkListResponse)
+async def list_document_chunks(
+    filename: str,
+    q: str = "",
+    _: User = Depends(require_admin),
+    services: Services = Depends(get_services),
+):
+    """Every chunk a document was indexed into, for the admin inspector.
+
+    The corpus as retrieval sees it, which is the one thing no other view shows. The
+    document list gives a count; this gives the chunks themselves, their hierarchy
+    (`chunk_level` with `parent_chunk_id`/`root_chunk_id`) and the metadata a developer
+    needs to explain why a question did or did not find something.
+
+    `q` MARKS rather than removes. Each chunk comes back with `matched`, and the document
+    stays whole: the view that draws the corpus as a bordered document needs the whole
+    structure to draw, and a response filtered down to the hits would have it rendering
+    fragments of a document and calling them the document. The list view narrows itself
+    on the flag.
+
+    Matching is on FOLDED text — `text_matching.fold`, the same folding the sparse
+    retrieval lane keys on. That is what makes it usable on this corpus: an admin typing
+    مدرسة finds مدرسه, typing without diacritics finds text with them, and case never
+    matters. Folding on the server rather than in the browser keeps one implementation of
+    it; a second one in TypeScript would drift from this one the first time either was
+    edited, and the filter would quietly stop agreeing with retrieval.
+
+    BOTH stores are read, and that is not an optimisation. Only leaf chunks are
+    vectorised: `_process_upload_job` writes levels 1 and 2 to `parent_chunks` and level 3
+    to Milvus. Reading Milvus alone returns every leaf with a `parent_chunk_id` naming a
+    chunk that is not in the response — measured on the shipped corpus, 175 of 175 — so
+    the tree would be 175 orphans and the view would be lying about the structure it
+    claims to show.
+
+    Ordered by level then index, so the flat list reads the way the document does and the
+    tree can be built from it without a second pass.
+    """
+    try:
+        services.milvus.init_collection()
+        rows = services.milvus.query_all(
+            filter_expr=f"filename == {json.dumps(filename, ensure_ascii=False)}",
+            output_fields=_CHUNK_FIELDS,
+        )
+        rows = list(rows) + services.parent_chunks.documents_by_filename(filename)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read chunks: {exc}")
+
+    chunks = sorted(
+        (_chunk_info(row) for row in rows),
+        key=lambda chunk: (chunk.chunk_level, chunk.chunk_idx, chunk.chunk_id),
+    )
+    total = len(chunks)
+
+    needle = fold(q)
+    if needle:
+        for chunk in chunks:
+            chunk.matched = needle in fold(chunk.text)
+
+    truncated = total > _CHUNK_PAGE_LIMIT
+    shown = chunks[:_CHUNK_PAGE_LIMIT]
+    return DocumentChunkListResponse(
+        filename=filename,
+        total=total,
+        returned=len(shown),
+        match_count=sum(1 for chunk in shown if chunk.matched),
+        query=q,
+        truncated=truncated,
+        chunks=shown,
+    )
 
 
 @router.post("/documents/upload/async", response_model=DocumentUploadStartResponse)

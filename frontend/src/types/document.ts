@@ -25,6 +25,48 @@ export interface DocumentPair {
   unassigned: boolean;
 }
 
+/**
+ * One indexed chunk, as the admin inspector shows it.
+ *
+ * Mirrors `backend/schemas/documents.py:ChunkInfo` field for field. Everything is read
+ * out of the stores rather than recomputed, because the point of the view is to show
+ * what retrieval will actually see.
+ */
+export interface ChunkInfo {
+  chunk_id: string;
+  /** Empty on a level-1 chunk, which is how the tree finds its roots. */
+  parent_chunk_id: string;
+  root_chunk_id: string;
+  /** 1 and 2 come from Postgres, 3 from Milvus — only leaves are vectorised. */
+  chunk_level: number;
+  chunk_idx: number;
+  page_number: number;
+  modality: string;
+  text: string;
+  char_count: number;
+  asset_ids: string[];
+  /** Whether the filter matched this chunk. The server MARKS rather than removes, so the
+   *  document view keeps its whole structure while the hits light up inside it. */
+  matched: boolean;
+}
+
+export interface DocumentChunkList {
+  filename: string;
+  /** Chunks the document has, and how many are in this response. */
+  total: number;
+  returned: number;
+  /** How many of the returned chunks the filter matched. */
+  match_count: number;
+  query: string;
+  truncated: boolean;
+  chunks: ChunkInfo[];
+}
+
+/** A chunk with its children attached, for the tree view. */
+export interface ChunkNode extends ChunkInfo {
+  children: ChunkNode[];
+}
+
 export interface UploadStep {
   key: string;
   label: string;
