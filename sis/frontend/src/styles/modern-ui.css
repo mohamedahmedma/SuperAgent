@@ -3163,6 +3163,15 @@ html[dir="ltr"] .sis-audit-bell-host { right: 2rem; }
   /* A floating control covered register rows and their actions on phones. Chat stays
      immediately reachable in the header without sitting over scrollable work. */
   .sis-fab-chat { display: none !important; }
+
+  /* WebKit does not consistently establish an absolute-positioning containing block on a
+     table row. The stretched row link can consequently cover other rows and swallow every
+     button beneath it. Explicit cell links remain available, while Table's row click handler
+     makes the rest of the row tappable without any overlay. */
+  .sis-row-target { display: none !important; }
+  .sis-row-open td a,
+  .sis-row-open td button { pointer-events: auto !important; }
+
   .sis-mobile-chat-trigger { position: relative !important; }
   .sis-mobile-chat-trigger .sis-fab-badge {
     position: absolute !important;
