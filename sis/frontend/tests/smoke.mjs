@@ -326,9 +326,14 @@ async function main() {
   const schoolRungs = [...window.document.querySelectorAll('.sis-rung')];
   assert.ok(schoolRungs.length > 0, 'the school ladder rendered no grade rows');
   schoolRungs.forEach((rung) => {
+    assert.equal(rung.tagName, 'A', 'a grade card is not itself a native link');
+    assert.ok(rung.getAttribute('href')?.startsWith('#/level?'), 'a grade card has no level route');
     assert.ok(!rung.querySelector('.sis-row-actions'), 'an existing grade still exposes structure-changing actions');
     assert.ok(!rung.textContent.includes('Remove'), 'an existing grade still offers the unsupported remove action');
   });
+  schoolRungs[0].click();
+  await settle(window, 80);
+  assert.ok(window.location.hash.startsWith('#/level?'), 'tapping a grade card did not open its classes');
 
   const settingsButton = window.document.querySelector('button[title="Settings — appearance and language"]');
   assert.ok(settingsButton, 'the shell has no settings trigger');

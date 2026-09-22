@@ -398,20 +398,17 @@ function LevelForm({ school, schoolConfig, track, count, onSaved }) {
 /* -- One rung -------------------------------------------------------------------- */
 
 function Rung({ level, school, year, lang, classCount }) {
+  const href = Router.href('level', { school, code: level.code, year });
   return (
-    <div className="card mb-2 sis-row-open sis-rung">
-      {/*
-        * The whole rung opens, not the words on it.
-        *
-        * This used to be an anchor wrapped around the code and the name, so the target was the
-        * text and everything to the right of it — most of a very wide row — was dead. The
-        * stretched anchor now covers the full card.
-        */}
-      <a
-        className="sis-row-target"
-        href={Router.href('level', { school, code: level.code, year })}
-        aria-label={t('Open {0} {1}', [level.code, pickName(level, lang)]).join('')}
-      />
+    /* The card is the link. Phones deliberately disable stretched row overlays because mobile
+       WebKit can position them over neighbouring table controls; this card used the same class
+       as its only route and consequently became inert there. A native block anchor keeps the
+       full 44px+ card as one predictable touch target without any overlay. */
+    <a
+      className="card mb-2 sis-row-open sis-rung text-decoration-none text-body"
+      href={href}
+      aria-label={t('Open {0} {1}', [level.code, pickName(level, lang)]).join('')}
+    >
       <div className="card-body d-flex flex-column flex-md-row align-items-md-center gap-2 gap-md-3">
         <span className="d-flex align-items-center gap-3 flex-grow-1">
           <span className="sis-rung-code">{level.code}</span>
@@ -423,7 +420,7 @@ function Rung({ level, school, year, lang, classCount }) {
           </span>
         </span>
       </div>
-    </div>
+    </a>
   );
 }
 
