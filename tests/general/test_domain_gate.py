@@ -232,11 +232,31 @@ class CrossEncoderAssessorTests(unittest.TestCase):
         report = self._assess([0.91, 0.72, 0.11, 0.04])
         self.assertEqual([1, 2], report.supported_indices())
 
-    def test_a_uniformly_irrelevant_pool_concludes_no_knowledge(self):
+    def test_a_uniformly_irrelevant_pool_defers_rather_than_denying(self):
+        """This asserted `no_knowledge` at MEDIUM until item 4 of RAG_FIX_PLAN.md, on the
+        reasoning that it saved the grader a call to say the same thing.
+
+        The two ends of this range are not symmetrical. Admitting a pool wrongly costs an
+        answer written from weaker evidence than it looked, and the answer prompt already
+        has to say what its sources leave open — so the top of the range still concludes.
+        Denying one wrongly costs the user the answer outright, with no way to recover,
+        and a score cannot tell a pool that is off the subject from one this model happens
+        to score badly. Reachable whenever the grader above is unconfigured or its call
+        fails: the score was then the only thing left, and it ended the turn.
+        """
         report = self._assess([0.02, 0.01, 0.004, 0.0])
-        self.assertEqual(Certainty.MEDIUM, report.certainty)
-        self.assertEqual("none", report.relevance)
-        self.assertEqual("no_knowledge", report.preferred_route)
+        self.assertEqual(Certainty.LOW, report.certainty)
+        self.assertNotEqual("none", report.relevance)
+        self.assertIsNone(report.preferred_route)
+        self.assertIn("deferring to the grader", "; ".join(report.reasons))
+
+    def test_deferring_still_reports_every_score_it_measured(self):
+        """Handing over is not throwing away: the trace keeps what the rung found."""
+        report = self._assess([0.02, 0.01, 0.004, 0.0])
+        self.assertEqual(
+            [0.02, 0.01, 0.004, 0.0],
+            [chunk.signals["cross_encoder"] for chunk in report.chunks],
+        )
 
     def test_the_middle_band_abstains_and_leaves_it_to_the_grader(self):
         """Relevant enough not to dismiss, not clearly sufficient — exactly where an LLM

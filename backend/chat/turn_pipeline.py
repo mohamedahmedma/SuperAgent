@@ -31,6 +31,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from backend.chat.answer_blocks import attach_answer_blocks, resolve_figure_markers, settle_answer_blocks
 from backend.chat.answer_checks import (
+    enforce_answer_figures,
     enforce_forced_tool_ran,
     enforce_records_agreement,
     nothing_usable_reply,
@@ -498,6 +499,10 @@ class TurnPipeline:
         replacement = (
             enforce_records_agreement(finalizer, turn.ctx, turn.plan)
             or enforce_forced_tool_ran(finalizer, turn.ctx, turn.plan)
+            # Last of the three, and it needs the trace the two above do not: it compares
+            # the answer against the chunks the turn retrieved, which are only settled
+            # once `take_rag_trace` has run above.
+            or enforce_answer_figures(finalizer, turn.plan, turn.rag_trace)
         )
         if not replacement and not answer.text.strip():
             replacement = answer.nothing_usable(turn, self._c.profile.user_copy)

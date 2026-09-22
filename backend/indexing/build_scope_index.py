@@ -415,6 +415,21 @@ def main(argv=None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(message)s",
     )
+
+    # Every other entry point does this — `app.py`, `assets/backfill.py`,
+    # `indexing/reindex.py`, `migrations/env.py` — and this one did not, which is not a
+    # tidiness point: without it `DATABASE_URL` is unset, the unit of work falls back to
+    # its default DSN, and the CLI silently builds the catalogue against a DIFFERENT
+    # database from the one the application reads.
+    #
+    # It fails as an authentication error against a host nobody configured, which is a
+    # confusing way to be told that the environment was never read. On the machine this
+    # was found on it resolved `localhost` to ::1 and reached an empty container, while
+    # the application was using 127.0.0.1 and a populated one.
+    from backend.env import load_env
+
+    load_env()
+
     if args.check:
         stored = _catalogue().load_records(get_profile().name)
         expected = len(load_sections(int(getattr(get_profile().rag, "scope_section_level", 1))))

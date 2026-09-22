@@ -154,21 +154,38 @@ def decide_route(
     )
 
     if not has_docs:
+        # Denied without spending the rewrite, deliberately. The review (item 3) reads
+        # this as the retry going unused, and the retry is the wrong instrument for it:
+        # a hybrid retriever returns its top_k whenever the index holds anything at all,
+        # so a genuinely empty result is structural — an empty index, a filter that
+        # excluded everything, an access scope with no documents — and no step-back or
+        # HyDE phrasing of the question can reach past that. What could is a second
+        # RETRIEVAL with a wider pool and keyword-only matching under the same filters,
+        # which is what the review actually asks for and what is not built here.
         return "no_knowledge", "no evidence retrieved"
-    # The only judgement that may end a turn in a denial: an assessor read the snippets
-    # and placed them on a different subject.
-    if report.relevance == "none":
-        return "no_knowledge", "retrieved evidence is about a different subject"
 
     # Assessment could not reach the standard this profile requires. Retrieval worked,
     # so this is neither missing knowledge nor a bad question — it is a technical
     # failure, and saying "try again" is honest where answering or denying would not be.
+    #
+    # This is ABOVE the denial below, and the order is the point. It used to be the other
+    # way round, so a report too uncertain to be allowed to answer was still allowed to
+    # deny — the one outcome the user cannot recover from, taken on the weaker evidence.
+    # A cross-encoder scoring every chunk below its floor reports that at MEDIUM, and
+    # whenever the grader above it was unreachable or unconfigured that score alone ended
+    # the turn in "the knowledge base has no reliable information on this". A score may
+    # order the pool or admit it. Ending a turn is held to the same standard as answering.
     if not report.meets(required):
         return (
             "retrieval_error",
             f"assessment reached {report.certainty.name.lower()}, "
             f"profile requires {required.name.lower()}",
         )
+
+    # The only judgement that may end a turn in a denial: an assessor that meets this
+    # profile's standard read the snippets and placed them on a different subject.
+    if report.relevance == "none":
+        return "no_knowledge", "retrieved evidence is about a different subject"
 
     # Only a language model sets these, so a cheap rung can never route to a human.
     if ask_allowed and report.ambiguity == "missing_slot":

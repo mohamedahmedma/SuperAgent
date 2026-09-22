@@ -273,6 +273,31 @@ class RoutePolicyTests(unittest.TestCase):
         route, _ = decide_route(report, **{**self.kwargs, "is_sub_agent": True})
         self.assertEqual("no_knowledge", route)
 
+    def test_a_denial_is_held_to_the_same_standard_as_an_answer(self):
+        """A report too uncertain to answer from is too uncertain to deny from.
+
+        These two branches used to run in the other order, so a MEDIUM report saying
+        "none" ended the turn under a profile requiring HIGH — while the very same report
+        saying "strong, sufficient" was refused and sent to "try again". The denial is
+        the outcome the user cannot recover from, so it is the one that must not be taken
+        on the weaker evidence. Reachable whenever the cross-encoder is on and the grader
+        above it is unconfigured or unreachable: its score alone ended the turn.
+        """
+        report = report_at(Certainty.MEDIUM, relevance="none", sufficiency="none",
+                           preferred_route="no_knowledge")
+        route, reason = decide_route(report, **self.kwargs)
+        self.assertEqual("retrieval_error", route)
+        self.assertIn("medium", reason)
+
+    def test_a_profile_that_trusts_medium_still_lets_it_deny(self):
+        """Where the line sits is the profile's to set. This moves the line, it does not
+        remove it."""
+        config = rag_config(evidence_required_certainty="medium")
+        report = report_at(Certainty.MEDIUM, relevance="none", sufficiency="none",
+                           preferred_route="no_knowledge")
+        route, _ = decide_route(report, **{**self.kwargs, "config": config})
+        self.assertEqual("no_knowledge", route)
+
     def test_relevance_none_overrides_a_route_the_grader_asked_for(self):
         report = report_at(Certainty.HIGH, relevance="none", preferred_route="answer")
         route, reason = decide_route(report, **self.kwargs)

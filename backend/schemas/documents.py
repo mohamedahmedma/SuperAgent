@@ -39,6 +39,54 @@ class DocumentPairListResponse(BaseModel):
     pairs: List[DocumentPairInfo]
 
 
+class ChunkInfo(BaseModel):
+    """One indexed chunk, as the admin inspector shows it.
+
+    Everything here is read straight out of Milvus rather than recomputed, because the
+    point of the inspector is to show what retrieval will actually see. A field that
+    disagreed with the index would be worse than not showing it.
+    """
+
+    chunk_id: str
+    #: The hierarchy. A leaf names its parent and its root; an L1 chunk has neither, and
+    #: that absence is what the tree uses to find its roots.
+    parent_chunk_id: str = ""
+    root_chunk_id: str = ""
+    chunk_level: int = 0
+    chunk_idx: int = 0
+    page_number: int = 0
+    #: "text" | "figure" | "table" — what the chunk was made from.
+    modality: str = "text"
+    text: str = ""
+    #: Counted server side so the UI never has to agree with Python about what a
+    #: character is: the size bound this corpus is chunked against is in characters.
+    char_count: int = 0
+    asset_ids: List[str] = []
+    #: Whether the filter matched this chunk. The filter MARKS rather than removes, so
+    #: the document view can show the whole document with the hits lit up inside it —
+    #: filtering the response down to the hits would leave that view rendering fragments
+    #: of a structure and calling it the document.
+    matched: bool = False
+
+
+class DocumentChunkListResponse(BaseModel):
+    filename: str
+    #: Chunks the document has, and how many are in this response — they differ only when
+    #: the document is larger than one response may carry.
+    total: int = 0
+    returned: int = 0
+    #: How many chunks the filter matched, so the UI can say "12 of 229 match" without
+    #: counting flags itself.
+    match_count: int = 0
+    #: The filter as asked, echoed back. The server folds it before matching and the UI
+    #: shows what the user typed, so the two must not be confused for each other.
+    query: str = ""
+    #: True when the document has more chunks than one response may carry. The count
+    #: above is still the real total, so the UI can say so rather than quietly show less.
+    truncated: bool = False
+    chunks: List[ChunkInfo] = []
+
+
 class DocumentUploadResponse(BaseModel):
     filename: str
     chunks_processed: int

@@ -10,6 +10,7 @@ Moved out of `service.py` with its behaviour unchanged. Copy is read from the ac
 profile per call rather than captured at import.
 """
 import logging
+import re
 
 from backend.chat.finalize import Finalizer
 from backend.profiles import get_profile
@@ -217,3 +218,178 @@ def resumed_static_reply(rag_result: dict | None) -> str | None:
     if status == "no_knowledge" or route == "no_knowledge" or not (rag_result.get("docs") or []):
         return _no_knowledge_response()
     return None
+
+
+#: The fewest digits a figure must have for this check to look at it, and the most.
+#:
+#: Three, and the number is the whole design. The grounding check this replaces was
+#: retired (commit f40f8c2) for two extractor faults, and both of them live below three
+#: digits: "45 حصة" passed as verified because 45 appears inside "07:45", and a correct
+#: timetable was withdrawn because "10:00" read as 10,000. Ignoring one- and two-digit
+#: figures removes times, dates, ordinals, small counts and percentages from the check in
+#: one stroke — and leaves exactly the class that caused the incident this exists for: an
+#: amount. "88,000" is five digits, and it was the wrong year group's fee.
+#:
+#: Seven is the other end of the same argument, measured the same way. Everything this
+#: corpus writes longer than that is an identifier — its phone numbers, its IBAN, its
+#: account number — and it writes the same mobile as "(+20) 100 000 0000" and as
+#: "+201000000000" within one contact block, so reading either as an amount accuses an
+#: answer that quoted the corpus correctly. The largest amount it states is 160,000.
+#:
+#: So it is deliberately narrow rather than thorough. A check that fires on a correct
+#: answer is worse than one that stays quiet on a wrong one, because the first teaches a
+#: deployment to switch it off.
+_FIGURE_MIN_DIGITS = 3
+_FIGURE_MAX_DIGITS = 7
+
+#: An UNGROUPED four-digit number in this band is a year, and a year is not an amount.
+#: The corpus writes 2024, 2025 and 2026 as plain years, and a model that adds "2026" to
+#: a sentence whose evidence did not spell the year is the largest remaining source of
+#: false alarms. Grouping is what tells the two apart: an amount in this corpus is always
+#: written 2,500 and a year is never written 2,026, so "1,950 EGP" is still checked while
+#: "1950" is not. This declines to CHECK a token; it does not reinterpret one, which is
+#: the thing that retired the previous check.
+_YEAR_BAND = (1900, 2099)
+
+#: Digits in the scripts this deployment sees, folded to Western before comparison: a
+#: model may write ١٠٥٬٠٠٠ where the corpus wrote 105,000, and they are the same figure.
+_DIGIT_FOLD = {ord(c): str(i % 10) for i, c in enumerate("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹")}
+
+#: Characters that may sit inside one figure. Deliberately not "." (87.5 is a grade, not
+#: 875), not ":" (7:45), not "-" and not "/" (15/09, 2024-2025) — each of those separates
+#: two figures in this corpus, and joining them invents a third. The Arabic comma IS
+#: here, because Arabic prose uses it for both of the jobs the Western comma does: it
+#: groups the thousands of one amount, and it separates the members of a list. The rule
+#: below is what tells those two apart, and it does not care which comma it is reading.
+_SEPARATORS = ",\u060c\u066c\u00a0\u202f\u2009 "
+
+#: Formatting characters with no width, removed before anything is read. A bidi mark or a
+#: zero-width space between a figure's digits is invisible in the answer and splits it in
+#: two, which reports both halves against an answer that stated neither.
+_INVISIBLE = dict.fromkeys(
+    ord(c) for c in "\u200b\u200c\u200d\u200e\u200f\u2066\u2067\u2068\u2069\ufeff"
+)
+
+#: A figure a percent sign touches is a rate, not an amount. The corpus states 7%, 30%
+#: and 40%, all of which the lower bound already drops; "100%" does not, and an answer
+#: saying 100% of anything must not be accused of inventing the amount one hundred. On
+#: either side, because Arabic is written both ways.
+_PERCENT_AFTER = re.compile(r"[ \u00a0]?[%\u066a]")
+_PERCENT_BEFORE = re.compile(r"[%\u066a][ \u00a0]?\Z")
+
+#: A maximal run of digits and separators, the one grouping that makes a run a single
+#: figure, and the separator that means a run holds SEVERAL figures. A separator joins
+#: digits only when exactly three of them follow, so "105,000" and "105 000" are one
+#: figure; two or more separators together end a figure and begin the next, so the
+#: corpus's own "17,600 EGP, 26,400 EGP" survives a model dropping the currency from
+#: between them, and "Years 4, 7 and 9" stays three small figures rather than becoming
+#: the amount 479. Manufacturing a figure out of a list is how a wrong one gets reported
+#: against an answer that never stated it.
+_RUN = re.compile(r"\d[\d%s]*\d|\d" % re.escape(_SEPARATORS))
+_GROUPED = re.compile(r"\d{1,3}(?:[%s]\d{3})+" % re.escape(_SEPARATORS))
+_LIST = re.compile(r"[%s]{2,}" % re.escape(_SEPARATORS))
+
+
+def _is_amount(digits: str, grouped: bool) -> bool:
+    if not _FIGURE_MIN_DIGITS <= len(digits) <= _FIGURE_MAX_DIGITS:
+        return False
+    if grouped:
+        return True
+    return not (len(digits) == 4 and _YEAR_BAND[0] <= int(digits) <= _YEAR_BAND[1])
+
+
+def _is_rate(text: str, match) -> bool:
+    return bool(
+        _PERCENT_AFTER.match(text, match.end())
+        or _PERCENT_BEFORE.search(text, max(0, match.start() - 2), match.start())
+    )
+
+
+def _run_figures(run: str) -> list:
+    """The figures one run of digits and separators states — nothing more.
+
+    A segment longer than any amount is an identifier, and yields nothing at all, so no
+    part of a phone number or an IBAN is read as a price: the corpus writes the same
+    mobile as "(+20) 100 000 0000" and as "+201000000000", and an answer that picks the
+    other form than its evidence must not be accused of inventing a figure.
+
+    A segment whose separators do not group it into thousands yields nothing either. Both
+    silences are deliberate. Every way this can be wrong should be a figure it declines
+    to check, never a figure it reports against an answer that is correct.
+    """
+    found = []
+    for segment in _LIST.split(run):
+        digits = "".join(ch for ch in segment if ch.isdigit())
+        if not digits or len(digits) > _FIGURE_MAX_DIGITS:
+            continue
+        grouped = digits != segment
+        if (not grouped or _GROUPED.fullmatch(segment)) and _is_amount(digits, grouped):
+            found.append(digits)
+    return found
+
+
+def _figures(text: str) -> set:
+    """Every amount `text` states, as bare digits.
+
+    Bare digits, so "105,000 EGP" and "105000" are one figure, and so a figure is
+    compared as a WHOLE token — the substring match is what let 45 be satisfied by 07:45.
+    """
+    folded = (text or "").translate(_INVISIBLE).translate(_DIGIT_FOLD)
+    return {
+        digits
+        for match in _RUN.finditer(folded)
+        if not _is_rate(folded, match)
+        for digits in _run_figures(match.group(0))
+    }
+
+
+def ungrounded_figures(answer: str, evidence: str) -> list:
+    """Figures the answer states that the evidence it was given does not contain.
+
+    The failure, verbatim from the deployment: asked for Year 3 fees, both grader modes
+    answered 88,000 EGP — the FS1-FS2 row. Nothing caught it. The grader had approved the
+    evidence, the evidence was right, and the answer read the wrong line of it.
+
+    This asks the one question no model call can be trusted with and no prompt can
+    enforce: is every amount in this sentence actually in the material it was written
+    from? It costs no tokens and it cannot hallucinate, because it only ever compares
+    digits that are already on the page.
+
+    What it does NOT do is judge. A figure absent from the evidence is reported, not
+    corrected — the answer may have summed two rows or converted a percentage, both of
+    which are legitimate and neither of which this can tell apart from an invention. That
+    is why it ships in `observe`: the trace says what it found, and a deployment reads its
+    own false-positive rate before it lets this replace an answer.
+    """
+    stated = _figures(answer)
+    if not stated:
+        return []
+    return sorted(stated - _figures(evidence))
+
+
+def enforce_answer_figures(finalizer: Finalizer, turn_plan, rag_trace) -> str:
+    """Replacement copy for an answer stating an amount its evidence does not contain.
+
+    Scoped to the knowledge-base path, and that scope is the other half of why this can
+    exist again. Records no longer carry a model-written figure at all — the tool renders
+    the grid and the model writes only the sentence beside it (commit 79d2810) — so the
+    prose worth checking is what a turn wrote FROM RETRIEVED CHUNKS, which is where the
+    fee incident happened and where nothing else looks.
+
+    Same contract as its siblings: "" when there is nothing to do.
+    """
+    mode = getattr(get_profile().agent, "answer_figures_mode", "off")
+    if mode == "off" or turn_plan is None or getattr(turn_plan, "short_circuit", False):
+        return ""
+    chunks = (rag_trace or {}).get("retrieved_chunks") or []
+    if not chunks:
+        return ""
+    evidence = "\n".join(str(chunk.get("text", "")) for chunk in chunks)
+    missing = ungrounded_figures(finalizer.answer or "", evidence)
+    if not missing:
+        return ""
+    logger.warning(
+        "the answer states %s, which its evidence does not contain; mode=%s",
+        missing[:4], mode,
+    )
+    return get_profile().user_copy.unverified_answer if mode == "enforce" else ""

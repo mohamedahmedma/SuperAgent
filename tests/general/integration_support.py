@@ -120,6 +120,34 @@ def corpus_indexed() -> int:
 
 
 @lru_cache(maxsize=1)
+def scope_catalogue_built() -> bool:
+    """Whether the scope catalogue has been built for the corpus currently indexed.
+
+    A dependency like any other here, and an easy one to mistake for a code fault. It is
+    produced by a separate CLI (`python -m backend.indexing.build_scope_index`), stored
+    beside the corpus rather than in it, and keyed on chunk ids — so ANY reindex empties
+    it. The gate then abstains on every question, and a test that asserts on matching
+    reports "the gate abstained entirely", which reads as a broken gate.
+
+    That is the failure this module exists to prevent: an absent dependency is a skip
+    with a reason, not a red build. The reason names the command, because the fix is an
+    operator action and nobody should have to find that out from a stack trace.
+    """
+    if not (postgres_available() and embedder_available()):
+        return False
+    try:
+        # The module-level store, which is the one carrying the real builder. A bare
+        # `ScopeIndexStore()` has no builder and `get()` returns an empty index for it
+        # unconditionally — so probing with one reports "no catalogue" however healthy
+        # the catalogue is, and every guarded test skips for a reason that is not true.
+        from backend.rag.scope_detector import index_store
+
+        return bool(index_store.get().ready)
+    except Exception:
+        return False
+
+
+@lru_cache(maxsize=1)
 def embedder_available() -> bool:
     try:
         from backend.composition import default_services
@@ -162,6 +190,13 @@ requires_postgres = unittest.skipUnless(postgres_available(), "no reachable Post
 requires_redis = unittest.skipUnless(redis_available(), "no reachable Redis")
 requires_milvus = unittest.skipUnless(milvus_available(), "no reachable Milvus collection")
 requires_embedder = unittest.skipUnless(embedder_available(), "embedder unavailable")
+
+
+requires_scope_catalogue = unittest.skipUnless(
+    scope_catalogue_built(),
+    "the scope catalogue is empty — run `python -m backend.indexing.build_scope_index` "
+    "(it is keyed on chunk ids, so any reindex invalidates it)",
+)
 
 
 def requires_corpus(minimum: int = 1):

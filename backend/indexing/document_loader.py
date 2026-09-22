@@ -290,7 +290,12 @@ class DocumentLoader:
 
     @staticmethod
     def _render_rows(rows: List[List[str]]) -> str:
-        return "\n".join(" | ".join(row) for row in rows if row)
+        # Cells are coerced rather than assumed. Every parser routes its table through
+        # `normalize_table_rows`, so a None or a number does not reach here today — but
+        # this is the one place a stray cell would raise, and raising here fails the
+        # whole document's ingest, not the row. `_header_key` beside it already coerces;
+        # the two disagreeing about their own contract is the part worth fixing.
+        return "\n".join(" | ".join(str(cell or "") for cell in row) for row in rows if row)
 
     def _fit_row(self, row: List[str], budget: int) -> List[List[str]]:
         """One row as one or more rows, none of them rendering longer than `budget`.
@@ -385,6 +390,7 @@ class DocumentLoader:
         page: int = 0,
         asset_ids: tuple = (),
         kind: str = "text",
+        list_group: int = 0,
     ) -> List[Dict]:
         """`kind="figure"` marks a unit built from an image's text surrogate.
 
@@ -404,6 +410,7 @@ class DocumentLoader:
                     "sections": sections,
                     "page": page,
                     "asset_ids": tuple(asset_ids),
+                    "list_group": list_group,
                 })
         return units
 
@@ -624,6 +631,7 @@ class DocumentLoader:
                         page,
                         asset_ids=unit.get("asset_ids", ()),
                         kind=unit.get("kind", "text"),
+                        list_group=unit.get("list_group", 0),
                     )
                 )
         return refined
@@ -660,6 +668,23 @@ class DocumentLoader:
         keeping leaves citable under one topic.
         """
         effective_target = target or budget
+
+        # How big each list is, so one can be moved WHOLE rather than broken.
+        # Keeping a list together is not enough on its own: a window that has already
+        # filled with preceding prose has no room left, the hard budget wins, and the
+        # list breaks exactly where it would have broken anyway. Measured on the bus
+        # districts, that is precisely what happened — the list stayed intact through
+        # the level-1 pass and then split at level 2 with five items in one window and
+        # two in the next.
+        # Switchable so the two builds can be compared on the same corpus rather than
+        # argued about. `1` (the default) keeps lists whole.
+        cohesion = (os.getenv("CHUNK_LIST_COHESION") or "1").strip() not in ("0", "false", "no")
+        list_sizes: Dict[int, int] = {}
+        for item in units if cohesion else ():
+            group = item.get("list_group")
+            if group:
+                list_sizes[group] = list_sizes.get(group, 0) + len(item["text"]) + 2
+
         windows: List[List[Dict]] = []
         current: List[Dict] = []
         current_len = 0
@@ -679,8 +704,35 @@ class DocumentLoader:
                 continue
             if split_on_section_change and current and unit.get("sections", ()) != current[0].get("sections", ()):
                 close()
-            if current and (current_len >= effective_target or current_len + 2 + unit_len > budget):
+            # A list is one thing. Word says so in the paragraph style, and the parser
+            # now carries it here. Closing a window between "Maadi" and "Mokattam"
+            # leaves a run of bare place names in one chunk with nothing saying what
+            # they are, and the previous chunk promising a list it does not contain.
+            # Measured before this rule: 22 of the corpus's 36 lists were cut this way.
+            #
+            # The TARGET yields to a list; the hard budget never does. A list longer
+            # than a whole window still has to break somewhere, and breaking it is
+            # better than an unbounded chunk — the bound is what every other rule here
+            # exists to keep.
+            group = unit.get("list_group") if cohesion else 0
+            continues_list = bool(current and group and group == current[-1].get("list_group"))
+            fits = current_len + 2 + unit_len <= budget
+
+            # A list that is ABOUT to start and cannot fit in what is left of this
+            # window begins a new one, so it arrives whole instead of straddling the
+            # boundary. Only when it would actually fit somewhere: a list longer than a
+            # whole window has to break, and moving it would just break it later.
+            starts_list = bool(group and not continues_list)
+            if (
+                starts_list
+                and current
+                and list_sizes.get(group, 0) <= budget
+                and current_len + list_sizes.get(group, 0) > budget
+            ):
                 close()
+            elif current and (current_len >= effective_target or not fits):
+                if not (continues_list and fits):
+                    close()
             current.append(unit)
             current_len += unit_len + (2 if current_len else 0)
         close()
@@ -718,15 +770,60 @@ class DocumentLoader:
         return seen
 
     @staticmethod
-    def _apply_section_prefix(text: str, sections: List[str]) -> str:
-        """Prepend the section path ("Admissions > Fees") so the chunk carries its
-        topic into the embedding and citations. Skipped when the chunk already
-        contains its own heading near the top."""
+    def _apply_section_prefix(text: str, sections: List[str], modality: str = "text") -> str:
+        """The section path a chunk carries into its embedding, and when it earns it.
+
+        Measured over 349 questions, three ways, each a full reindex (arm A = the old
+        behaviour, B = title dropped, C = no prefix at all):
+
+            stage       A full    B specific    C none
+            recalled      337         340         341
+            ranked        320         319         322
+
+        So the path as it was written cost recall rather than adding it — but the loss is
+        not spread evenly. Broken out by what the chunk IS:
+
+            text    274 -> 278   (+4 without the prefix)
+            table    40 ->  38   (-2 without it)
+
+        Both halves of that make sense, and together they are the rule below. A prose
+        chunk already says what it is about, so a path repeated across 118 of 175 leaves
+        from a vocabulary of only 34 distinct strings is 18% of the text saying nothing
+        new — and it pulls the corpus together in embedding space, mean pairwise cosine
+        0.4518 -> 0.5156, which is the same complaint `_apply_bm25_section_prefix` makes
+        about the sparse lane. A TABLE has no such prose. "Grade | Fee | 105,000" carries
+        no topic at all, and the path is the only thing that says which table it is.
+
+        So the path goes on tables and figures and nowhere else, and it never carries the
+        document's own title, which by definition repeats on every chunk in the document.
+
+        Measured again on ENGLISH queries — the language retrieval actually runs in,
+        since an Arabic question is translated before it reaches the index — the path
+        earns nothing there either. So `none` is the default, and `full`, `specific` and
+        `structured` stay reachable through `CHUNK_SECTION_PREFIX` for re-measurement.
+        """
         if not text or not sections:
             return text
-        if sections[-1] in text[:200]:
+        mode = (os.getenv("CHUNK_SECTION_PREFIX") or "none").strip().lower()
+        if mode == "none":
             return text
-        prefix = " > ".join(sections[-3:])[:150].strip()
+        if mode == "structured" and modality not in ("table", "figure"):
+            return text
+        # The title repeats on every chunk of the document, so it is signal in none of
+        # them. Only `full` — the measured-worse arm — still carries it.
+        #
+        # Dropped only when something is left underneath. `sections[0]` is the document's
+        # own title in THIS corpus, where one Heading 1 wraps everything; it is not a
+        # title in a document whose top level is topical, and stripping it there throws
+        # away the only context a table has. `test_loader_end_to_end_word_table_is_row_
+        # safe_and_topic_prefixed` is that document, and it caught this.
+        levels = list(sections) if mode == "full" or len(sections) < 2 else list(sections[1:])
+        if not levels:
+            return text
+        if levels[-1] in text[:200]:
+            return text
+        keep = 3 if mode == "full" else 2
+        prefix = " > ".join(levels[-keep:])[:150].strip()
         return f"{prefix}\n{text}" if prefix else text
 
     @staticmethod
@@ -796,10 +893,169 @@ class DocumentLoader:
             return False
         return cls._starts_like_continuation(next_text)
 
+    #: How near a page edge a table must sit for the break to look like the reason it
+    #: stopped. A fraction of the page, so it does not depend on the paper size.
+    #:
+    #: Wide, and deliberately. A table cut off by a page break stops above whatever the
+    #: page keeps below it — the bottom margin, and the footer, whose band pdf_layout
+    #: already reckons at 15% of the page. At 12% an ordinary 1.5-inch margin put a
+    #: genuine continuation outside the band and split it. Being too wide costs a join
+    #: between two tables that really do meet at the page edges with nothing between
+    #: them; being too narrow costs a split down the middle of one table, which is the
+    #: failure that cannot be recovered downstream.
+    _PAGE_EDGE_FRACTION = 0.22
+
     @staticmethod
-    def _is_table_continuation(prev: Dict, block: Dict) -> bool:
-        """Adjacent table blocks across a page break with the same column count are
-        one table split by the break (conservative structural heuristic)."""
+    def _header_key(row) -> tuple:
+        """A header row reduced to what it says, not how it was typeset."""
+        return tuple(
+            re.sub(r"\W+", "", str(cell or ""), flags=re.UNICODE).casefold() for cell in row
+        )
+
+    #: How much of the wider span the two tables must share to be one table. A
+    #: continuation is laid out with the columns it is continuing, so it occupies the
+    #: same span; a different grid beside it on the page usually does not. Tolerant,
+    #: because a borderless grid's detected edge moves a little with its content — it
+    #: takes a third of the width to disagree before this refuses anything.
+    _HORIZONTAL_OVERLAP_MIN = 0.7
+
+    @staticmethod
+    def _column_count(rows) -> int:
+        """How many columns a grid has: the width most of its rows share.
+
+        Not the first row's width. A header with a merged cell is narrower than the body
+        beneath it, and comparing that against a continuation's data row — which has the
+        body's width — refuses a join over a difference that exists only in the heading.
+        Ties go to the wider count, since a row is more often short than long.
+        """
+        widths = [len(row) for row in rows if row]
+        if not widths:
+            return 0
+        return max(set(widths), key=lambda width: (widths.count(width), width))
+
+    @classmethod
+    def _spans_the_same_columns(cls, prev: Dict, block: Dict) -> bool:
+        """Whether the two tables occupy the same horizontal band of the page.
+
+        Not reported means not asked: only the PDF parser measures this, and a parser
+        that cannot is not held to it.
+        """
+        left = prev.get("_last_x0", prev.get("x0"))
+        right = prev.get("_last_x1", prev.get("x1"))
+        if left is None or right is None or block.get("x0") is None or block.get("x1") is None:
+            return True
+        left, right = float(left), float(right)
+        other_left, other_right = float(block["x0"]), float(block["x1"])
+        widest = max(right, other_right) - min(left, other_left)
+        if widest <= 0:
+            return True
+        shared = min(right, other_right) - max(left, other_left)
+        return shared / widest >= cls._HORIZONTAL_OVERLAP_MIN
+
+    @staticmethod
+    def _page_edges(block: Dict, trailing: bool = False) -> Optional[tuple]:
+        """The top and bottom of the page a block sits on, in the block's own units.
+
+        `page_height` is accepted as a fallback for a parser that reports only an extent,
+        and read as a page running from 0 to that height.
+        """
+        prefix = "_last_" if trailing and "_last_bottom" in block else ""
+        bottom = block.get(prefix + "page_bottom")
+        top = block.get(prefix + "page_top")
+        if bottom is None:
+            height = block.get(prefix + "page_height") if prefix else block.get("page_height")
+            if not height:
+                return None
+            top, bottom = 0.0, float(height)
+        return float(top or 0.0), float(bottom)
+
+    @classmethod
+    def _ends_at_the_page_foot(cls, block: Dict) -> Optional[bool]:
+        """Whether a block runs to the foot of the page it ENDS on.
+
+        The page it ends on, not the one it started on: a run already stitched across two
+        pages is judged on where it actually stopped, so a three-page chain asks whether
+        page two ran to its foot rather than re-asking about page one. Without that a
+        table ending mid-way down page two still looked cut off, and a different table at
+        the head of page three was pulled into it.
+        """
+        edges = cls._page_edges(block, trailing=True)
+        bottom = block.get("_last_bottom", block.get("bottom"))
+        if edges is None or bottom is None:
+            return None
+        page_top, page_bottom = edges
+        if page_bottom <= page_top:
+            return None
+        return float(bottom) >= page_bottom - (page_bottom - page_top) * cls._PAGE_EDGE_FRACTION
+
+    @classmethod
+    def _starts_at_the_page_head(cls, block: Dict) -> Optional[bool]:
+        edges = cls._page_edges(block)
+        top = block.get("top")
+        if edges is None or top is None:
+            return None
+        page_top, page_bottom = edges
+        if page_bottom <= page_top:
+            return None
+        return float(top) <= page_top + (page_bottom - page_top) * cls._PAGE_EDGE_FRACTION
+
+    @classmethod
+    def _breaks_at_a_page_edge(cls, prev: Dict, block: Dict) -> bool:
+        """Whether the first table runs to the foot of its page and the second starts at
+        the head of the next — which is what a page break actually does to one table.
+
+        Unknown geometry passes. DOCX and XLSX report none at all (and DOCX never reaches
+        here anyway, its pages all being numbered 0), so the unknown case is a caller that
+        cannot be asked the question rather than one that answered no.
+        """
+        foot = cls._ends_at_the_page_foot(prev)
+        head = cls._starts_at_the_page_head(block)
+        return (foot is None or foot) and (head is None or head)
+
+    @classmethod
+    def _is_table_continuation(cls, prev: Dict, block: Dict) -> bool:
+        """Whether two adjacent table blocks are ONE table that a page break split.
+
+        This used to ask only whether both were tables on consecutive pages with the same
+        number of columns, which is true of any two unrelated three-column tables that
+        happen to land either side of a break. Joining them makes one grid out of two,
+        and a row from the second then answers a question asked about the first — the
+        same shape of failure as reading the wrong line of the right table, except built
+        in at indexing time where nothing downstream can see it.
+
+        What is added is LAYOUT, and only layout. Every test below asks where the ink is,
+        never what the cells say:
+
+          * the break falls at the page edges. One table split by a break runs to the
+            foot of its page and resumes at the head of the next; a table that merely
+            happened to be last on its page, and stopped half way down it, was not cut
+            off by anything. This is the load-bearing one.
+          * the two occupy the same horizontal band. A continuation is laid out with the
+            columns it is continuing, so it spans what they span.
+          * they have the same number of columns — counted as the width most rows share,
+            not the first row's, so a merged heading cell does not refuse a join over a
+            difference that exists only in the heading.
+
+        Each is measured from what the parser reports and skipped where it reports
+        nothing, so a format carrying no geometry is never refused for failing a question
+        it was not asked.
+
+        The other two signals the review asked for need no test of their own. "The same
+        section" is already carried by adjacency: a heading between the two tables
+        becomes `prev` and fails the very first check, so a join can never cross one. And
+        a matching header is used where it is safe — to drop the duplicate copy — never
+        to refuse, for the reason below.
+
+        NO CONTENT TEST MAY REFUSE A JOIN. Two were tried and both were wrong. Requiring
+        a matching header refuses the ordinary continuation that simply carries on with
+        its rows, which `test_table_continuation_without_repeated_header_keeps_all_rows`
+        exists to keep. Reading a digit in the first row as proof it is data — and its
+        absence as proof it is a new header — was measured against the shipped corpus
+        afterwards: 19 of its 30 table rows contain no digit at all, the whole of both
+        curriculum tables being prose, so that rule would have split every continuation
+        of them. Table content varies more than any such rule survives, and the cost of
+        being wrong falls at indexing time where nothing downstream can see it.
+        """
         if prev.get("type") != "table" or block.get("type") != "table":
             return False
         if block.get("page_number") != prev.get("_last_page", prev.get("page_number", 0)) + 1:
@@ -808,7 +1064,11 @@ class DocumentLoader:
         next_rows = block.get("rows") or []
         if not prev_rows or not next_rows:
             return False
-        return len(prev_rows[0]) == len(next_rows[0])
+        if cls._column_count(prev_rows) != cls._column_count(next_rows):
+            return False
+        if not cls._spans_the_same_columns(prev, block):
+            return False
+        return cls._breaks_at_a_page_edge(prev, block)
 
     def _stitch_cross_page_blocks(self, blocks: List[Dict]) -> List[Dict]:
         """Stitching stage: rejoin paragraphs and tables that the page break split.
@@ -828,11 +1088,26 @@ class DocumentLoader:
                 continue
             if prev is not None and self._is_table_continuation(prev, block):
                 next_rows = list(block.get("rows") or [])
-                if next_rows and next_rows[0] == (prev.get("rows") or [[]])[0]:
+                # Normalised, so a header the break re-typeset — a wrapped cell, a
+                # different space — is still recognised as the copy it is.
+                if next_rows and self._header_key(next_rows[0]) == self._header_key(
+                    (prev.get("rows") or [[]])[0]
+                ):
                     next_rows = next_rows[1:]
                 prev["rows"] = list(prev.get("rows") or []) + next_rows
                 prev["content"] = self._render_rows(prev["rows"])
                 prev["_last_page"] = block.get("page_number", 0)
+                # Where the run now ENDS, alongside the page it ends on. A chain is
+                # judged page by page: without this the next candidate was still being
+                # measured against the first page's geometry, so a table that finished
+                # half way down page two still read as cut off and pulled in whatever
+                # started page three.
+                prev["_last_bottom"] = block.get("bottom")
+                prev["_last_page_top"] = block.get("page_top")
+                prev["_last_page_bottom"] = block.get("page_bottom")
+                prev["_last_page_height"] = block.get("page_height")
+                prev["_last_x0"] = block.get("x0")
+                prev["_last_x1"] = block.get("x1")
                 continue
             stitched.append(dict(block))
         return stitched
@@ -869,6 +1144,8 @@ class DocumentLoader:
                     units.append({
                         "kind": "text",
                         "text": title,
+                        # Carried so a heading is never separated from the list it heads.
+                        "list_group": block.get("list_group", 0),
                         "sections": tuple(entry["title"] for entry in section_stack),
                         "page": page_number,
                     })
@@ -916,6 +1193,7 @@ class DocumentLoader:
                                 self._splitter_level_1,
                                 sections,
                                 page_number,
+                                list_group=block.get("list_group", 0),
                             )
                         )
         return units
@@ -950,7 +1228,9 @@ class DocumentLoader:
         for window_1 in self._pack_units(units, self._level_1_size):
             level_1_body = sanitize_text(self._window_text(window_1)).strip()
             level_1_sections = self._window_sections(window_1)
-            level_1_text = self._apply_section_prefix(level_1_body, level_1_sections)
+            level_1_text = self._apply_section_prefix(
+                    level_1_body, level_1_sections, self._window_modality(window_1)
+                )
             level_1_bm25 = self._apply_bm25_section_prefix(level_1_body, level_1_sections)
             if not level_1_text:
                 continue
@@ -976,7 +1256,9 @@ class DocumentLoader:
             for window_2 in self._pack_units(units_2, self._level_2_size):
                 level_2_body = sanitize_text(self._window_text(window_2)).strip()
                 level_2_sections = self._window_sections(window_2)
-                level_2_text = self._apply_section_prefix(level_2_body, level_2_sections)
+                level_2_text = self._apply_section_prefix(
+                    level_2_body, level_2_sections, self._window_modality(window_2)
+                )
                 level_2_bm25 = self._apply_bm25_section_prefix(level_2_body, level_2_sections)
                 if not level_2_text:
                     continue
@@ -1008,7 +1290,9 @@ class DocumentLoader:
                 ):
                     level_3_body = sanitize_text(self._window_text(window_3)).strip()
                     level_3_sections = self._window_sections(window_3)
-                    level_3_text = self._apply_section_prefix(level_3_body, level_3_sections)
+                    level_3_text = self._apply_section_prefix(
+                    level_3_body, level_3_sections, self._window_modality(window_3)
+                )
                     level_3_text = fit_utf8_bytes(level_3_text, self._MILVUS_TEXT_CAP_BYTES).strip()
                     level_3_bm25 = fit_utf8_bytes(
                         self._apply_bm25_section_prefix(level_3_body, level_3_sections),

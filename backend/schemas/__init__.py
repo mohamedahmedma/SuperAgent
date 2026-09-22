@@ -14,6 +14,8 @@ from backend.schemas.chat import (
     SessionMessagesResponse,
 )
 from backend.schemas.documents import (
+    ChunkInfo,
+    DocumentChunkListResponse,
     DocumentDeleteJobResponse,
     DocumentDeleteResponse,
     DocumentDeleteStartResponse,
@@ -43,6 +45,8 @@ __all__ = [
     "SessionInfo",
     "SessionListResponse",
     "SessionDeleteResponse",
+    "ChunkInfo",
+    "DocumentChunkListResponse",
     "DocumentInfo",
     "DocumentListResponse",
     "DocumentPairInfo",

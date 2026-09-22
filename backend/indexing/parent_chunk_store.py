@@ -120,3 +120,16 @@ class ParentChunkStore:
         build reads it, and it wants the database's view rather than the cache's."""
         with self._unit_of_work() as uow:
             return list(uow.parent_chunks.sections(level))
+
+    def documents_by_filename(self, filename: str) -> List[dict]:
+        """One document's parent chunks, as documents, in level and position order.
+
+        For the admin inspector, which needs the levels Milvus does not hold: only leaves
+        are vectorised, so a tree drawn from Milvus alone is every leaf orphaned from the
+        L1 and L2 it belongs under. Uncached for the same reason `sections` is — an
+        inspector exists to show what the database actually contains.
+        """
+        if not filename:
+            return []
+        with self._unit_of_work() as uow:
+            return [self._to_dict(chunk) for chunk in uow.parent_chunks.by_filename(filename)]

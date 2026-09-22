@@ -12,6 +12,7 @@ Arabic is the highest-risk input for this code because:
 Tests assert the CORRECT behavior. A failure here is a defect in the pipeline,
 not in the test.
 """
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -200,6 +201,14 @@ class ArabicTableTests(unittest.TestCase):
     cells, and section prefixing of an Arabic table."""
 
     def setUp(self):
+        # The section path is off by default now: five reindexed arms measured it
+        # costing recall rather than adding it, in Arabic and in English alike.
+        # These tests are about the path being EXPRESSED correctly when a
+        # deployment asks for it, so they ask. What ships is asserted by
+        # `TheShippedPrefixDefaultTests` in test_chunking_edge_cases.py.
+        prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
+        prefix.start()
+        self.addCleanup(prefix.stop)
         self.loader = DocumentLoader()
 
     def _load(self, blocks):
@@ -324,6 +333,14 @@ class MixedDirectionTests(unittest.TestCase):
     this domain and mix both code paths in one stream."""
 
     def setUp(self):
+        # The section path is off by default now: five reindexed arms measured it
+        # costing recall rather than adding it, in Arabic and in English alike.
+        # These tests are about the path being EXPRESSED correctly when a
+        # deployment asks for it, so they ask. What ships is asserted by
+        # `TheShippedPrefixDefaultTests` in test_chunking_edge_cases.py.
+        prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
+        prefix.start()
+        self.addCleanup(prefix.stop)
         self.loader = DocumentLoader()
 
     def _load(self, blocks):

@@ -94,6 +94,16 @@ class SentenceSplitterTests(unittest.TestCase):
 
 
 class DocxLayoutTests(unittest.TestCase):
+
+    def setUp(self):
+        # The section path is off by default now: five reindexed arms measured it
+        # costing recall rather than adding it, in Arabic and in English alike.
+        # These tests are about the path being EXPRESSED correctly when a
+        # deployment asks for it, so they ask. What ships is asserted by
+        # `TheShippedPrefixDefaultTests` in test_chunking_edge_cases.py.
+        prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
+        prefix.start()
+        self.addCleanup(prefix.stop)
     @classmethod
     def setUpClass(cls):
         import docx as docx_lib
@@ -161,6 +171,16 @@ class DocxLayoutTests(unittest.TestCase):
 
 
 class XlsxLayoutTests(unittest.TestCase):
+
+    def setUp(self):
+        # The section path is off by default now: five reindexed arms measured it
+        # costing recall rather than adding it, in Arabic and in English alike.
+        # These tests are about the path being EXPRESSED correctly when a
+        # deployment asks for it, so they ask. What ships is asserted by
+        # `TheShippedPrefixDefaultTests` in test_chunking_edge_cases.py.
+        prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
+        prefix.start()
+        self.addCleanup(prefix.stop)
     @classmethod
     def setUpClass(cls):
         from openpyxl import Workbook
@@ -194,6 +214,16 @@ class XlsxLayoutTests(unittest.TestCase):
 
 
 class HtmlLayoutTests(unittest.TestCase):
+
+    def setUp(self):
+        # The section path is off by default now: five reindexed arms measured it
+        # costing recall rather than adding it, in Arabic and in English alike.
+        # These tests are about the path being EXPRESSED correctly when a
+        # deployment asks for it, so they ask. What ships is asserted by
+        # `TheShippedPrefixDefaultTests` in test_chunking_edge_cases.py.
+        prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
+        prefix.start()
+        self.addCleanup(prefix.stop)
     @classmethod
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
@@ -280,6 +310,16 @@ class HtmlEdgeCaseTests(unittest.TestCase):
 
 class XlsxEdgeCaseTests(unittest.TestCase):
     """EP: multi-sheet isolation and empty-sheet partition."""
+
+    def setUp(self):
+        # The section path is off by default now: five reindexed arms measured it
+        # costing recall rather than adding it, in Arabic and in English alike.
+        # These tests are about the path being EXPRESSED correctly when a
+        # deployment asks for it, so they ask. What ships is asserted by
+        # `TheShippedPrefixDefaultTests` in test_chunking_edge_cases.py.
+        prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
+        prefix.start()
+        self.addCleanup(prefix.stop)
 
     @classmethod
     def setUpClass(cls):

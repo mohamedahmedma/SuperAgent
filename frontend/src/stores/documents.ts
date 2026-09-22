@@ -1,6 +1,13 @@
 import { defineStore } from 'pinia';
 import api from '@/utils/api';
-import type { DocumentItem, DocumentPair, UploadStep, ActiveDeleteJob, DeleteStep } from '@/types/document';
+import type {
+  DocumentItem,
+  DocumentPair,
+  UploadStep,
+  ActiveDeleteJob,
+  DeleteStep,
+  DocumentChunkList,
+} from '@/types/document';
 
 export const useDocumentStore = defineStore('documents', {
   state: () => ({
@@ -27,6 +34,14 @@ export const useDocumentStore = defineStore('documents', {
     deleteJobs: {} as Record<string, ActiveDeleteJob>,
     deletePollTimers: {} as Record<string, any>,
     deleteRemoveTimers: {} as Record<string, any>,
+    // The chunk inspector. `inspecting` is the filename whose chunks are on screen, and
+    // empty means the panel is closed — one value rather than a filename plus a boolean,
+    // which cannot disagree with itself.
+    inspecting: '',
+    chunkList: null as DocumentChunkList | null,
+    chunksLoading: false,
+    chunksError: '',
+    chunkQuery: '',
   }),
 
   actions: {
@@ -102,6 +117,63 @@ export const useDocumentStore = defineStore('documents', {
         throw new Error(errMsg);
       } finally {
         this.pairsLoading = false;
+      }
+    },
+
+    /**
+     * Open the inspector on one FILE — not on a pair.
+     *
+     * A row is one entry in up to two languages and the two are chunked separately, so
+     * "the chunks of this entry" is not a thing that exists. The Arabic half and the
+     * English half are different corpora and the inspector shows one of them.
+     */
+    openInspector(filename: string) {
+      this.inspecting = filename;
+      this.chunkQuery = '';
+      this.chunkList = null;
+      this.chunksError = '';
+      return this.loadChunks();
+    },
+
+    closeInspector() {
+      this.inspecting = '';
+      this.chunkList = null;
+      this.chunksError = '';
+      this.chunkQuery = '';
+    },
+
+    /**
+     * Fetch the open document's chunks, filtered by `chunkQuery`.
+     *
+     * The filter is applied on the SERVER. It folds Arabic — diacritics, alef and teh
+     * marbuta variants — with the same `fold` the sparse retrieval lane keys on, and
+     * doing that here in TypeScript would be a second implementation that drifts from
+     * the first time either is edited. A stale response is dropped rather than rendered:
+     * typing produces overlapping requests and the last one typed must win, not the last
+     * one to arrive.
+     */
+    async loadChunks() {
+      const filename = this.inspecting;
+      if (!filename) return;
+      const asked = this.chunkQuery;
+      this.chunksLoading = true;
+      this.chunksError = '';
+      try {
+        const response = await api.get(
+          `/documents/${encodeURIComponent(filename)}/chunks`,
+          { params: asked ? { q: asked } : {} },
+        );
+        if (this.inspecting !== filename || this.chunkQuery !== asked) return;
+        this.chunkList = response.data;
+      } catch (error: any) {
+        if (this.inspecting !== filename || this.chunkQuery !== asked) return;
+        this.chunksError =
+          error.response?.data?.detail || error.message || 'Failed to load chunks';
+        this.chunkList = null;
+      } finally {
+        if (this.inspecting === filename && this.chunkQuery === asked) {
+          this.chunksLoading = false;
+        }
       }
     },
 

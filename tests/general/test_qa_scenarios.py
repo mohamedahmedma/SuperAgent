@@ -24,6 +24,7 @@ from tests.general.integration_support import (
     requires_embedder,
     requires_llm,
     requires_postgres,
+    requires_scope_catalogue,
 )
 
 # Questions a school knowledge base plainly covers, in both languages it serves.
@@ -144,6 +145,7 @@ class ScopeIndexHealthTests(unittest.TestCase):
 
 @requires_postgres
 @requires_embedder
+@requires_scope_catalogue
 class ScopeGateRecallTests(unittest.TestCase):
     """Rung 1 against the real index. It may admit; it may never refuse."""
 
@@ -151,7 +153,37 @@ class ScopeGateRecallTests(unittest.TestCase):
     def setUpClass(cls):
         cls.detector = CatalogueScopeDetector()
         cls.profile = get_profile()
-        cls.config = LadderConfig(cls.profile.agent, cls.profile.rag)
+        # The rung is ENABLED here rather than taken from the shipped profile, which is
+        # the same thing `config()` above does and this class used not to.
+        #
+        # `scope_index_enabled` is false in base.yaml, and `CatalogueScopeDetector.detect`
+        # returns None on the first line when it is. So every assertion below read
+        # "the gate abstained entirely" — twenty failures that look like a broken gate and
+        # are a switched-off one. A test of what rung 1 DOES has to turn rung 1 on;
+        # whether a deployment ships it on is a different question, and
+        # `test_the_shipped_profile_decides_whether_this_rung_runs` is where that is
+        # pinned so it is stated once and loudly instead of twenty times and misleadingly.
+        cls.config = LadderConfig(
+            cls.profile.agent, cls.profile.rag.model_copy(update={"scope_index_enabled": True})
+        )
+
+    def test_the_shipped_profile_decides_whether_this_rung_runs(self):
+        """What the class above deliberately overrides, stated once.
+
+        Rung 1 is off in the shipped profile, so none of the behaviour tested here is
+        reached in production today. That is a real fact about the deployment and it
+        belongs in exactly one assertion — not spread across every test in the class as
+        an abstention nobody reads as configuration."""
+        self.assertIn(getattr(self.profile.rag, "scope_index_enabled"), (True, False))
+        if not self.profile.rag.scope_index_enabled:
+            signals = RequestSignals(question=IN_DOMAIN[0])
+            shipped = LadderConfig(self.profile.agent, self.profile.rag)
+            self.assertIsNone(
+                self.detector.detect(
+                    SignalContext(question=IN_DOMAIN[0], history=[], config=shipped), signals
+                ),
+                "rung 1 is off in the profile, so it must abstain rather than act",
+            )
 
     def judge(self, question):
         signals = RequestSignals(question=question)
@@ -386,25 +418,27 @@ class ScopeIndexRebuildTests(unittest.TestCase):
 
 @requires_postgres
 @requires_embedder
+@requires_scope_catalogue
 class SignalLadderTests(unittest.TestCase):
     """The assembled ladder, running the real rungs, with the model rung disabled so
     the cheap path is measured on its own."""
 
-    def ladder(self):
+    #: The model rung off so the cheap path is measured on its own, and the cheap path
+    #: ON so there is one to measure. `scope_index_enabled` is false in the shipped
+    #: profile, so taking it from there switched off BOTH rungs and the ladder reached no
+    #: conclusion — which read as "no rung concluded" and was "no rung ran".
+    _RUNGS = {"request_envelope_enabled": False, "scope_index_enabled": True}
+
+    def _config(self):
         profile = get_profile()
-        return build_ladder(
-            LadderConfig(profile.agent, profile.rag.model_copy(
-                update={"request_envelope_enabled": False}
-            ))
-        )
+        return LadderConfig(profile.agent, profile.rag.model_copy(update=self._RUNGS))
+
+    def ladder(self):
+        return build_ladder(self._config())
 
     def context(self, question, history=()):
-        profile = get_profile()
         return SignalContext(
-            question=question, history=list(history),
-            config=LadderConfig(profile.agent, profile.rag.model_copy(
-                update={"request_envelope_enabled": False}
-            )),
+            question=question, history=list(history), config=self._config()
         )
 
     def test_the_ladder_reaches_a_conclusion_for_an_in_domain_question(self):
@@ -456,7 +490,12 @@ class LiveScopeModelTests(unittest.TestCase):
         from backend.rag.scope_detector import ScopeModelDetector
 
         profile = get_profile()
-        config = LadderConfig(profile.agent, profile.rag)
+        # Rung 1 enabled for the same reason as in ScopeGateRecallTests: this asks what
+        # the LADDER concludes, and a ladder whose first rung is switched off in the
+        # profile hands rung 2 no matches to escalate from.
+        config = LadderConfig(
+            profile.agent, profile.rag.model_copy(update={"scope_index_enabled": True})
+        )
         signals = RequestSignals(question=question)
         CatalogueScopeDetector().detect(
             SignalContext(question=question, history=[], config=config), signals

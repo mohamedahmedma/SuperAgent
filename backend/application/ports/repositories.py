@@ -249,6 +249,10 @@ class ParentChunkRepository(Protocol):
         """Every chunk at `level`, in file and position order."""
         ...
 
+    def by_filename(self, filename: str) -> Sequence[ParentChunkRecord]:
+        """Every parent chunk of one document, in level and position order."""
+        ...
+
 
 # -- the scope catalogue --------------------------------------------------------------
 
