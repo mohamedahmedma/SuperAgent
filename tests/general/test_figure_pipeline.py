@@ -7,6 +7,7 @@ still points at the image that produced it.
 import base64
 import io
 import random
+import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -828,3 +829,167 @@ class HtmlImageParsingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _TrackingExtractor:
+    """A real extractor that records how many calls were in flight at once.
+
+    Wraps `HeuristicExtractor` rather than inventing a payload, so what the pipeline
+    stores is exactly what it stores in every other test. `name` is deliberately a
+    model-free one: `_cache_is_weaker` then leaves the cache alone, keeping these tests
+    about concurrency and nothing else.
+    """
+
+    name = "heuristic"
+
+    def __init__(self, inner, parties=0, timeout=10.0):
+        self._inner = inner
+        self._lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.digests = []
+        self.paired = False
+        self._barrier = threading.Barrier(parties, timeout=timeout) if parties else None
+
+    def extract(self, request):
+        with self._lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.digests.append(compute_sha256(request.data))
+        try:
+            if self._barrier is not None:
+                # Every party has to arrive before any may leave. Serial extraction can
+                # never satisfy it, so `paired` is proof of genuine overlap rather than
+                # of a sleep that happened to interleave.
+                try:
+                    self._barrier.wait()
+                    self.paired = True
+                except threading.BrokenBarrierError:
+                    pass
+            return self._inner.extract(request)
+        finally:
+            with self._lock:
+                self.active -= 1
+
+
+class ExtractionConcurrencyTests(PipelineTestCase):
+    """Item 29: a document's images are extracted together, not one at a time."""
+
+    def _profile(self, workers):
+        assets = self.profile.assets.model_copy(update={"extraction_workers": workers})
+        return self.profile.model_copy(update={"assets": assets})
+
+    def _pipeline(self, workers, parties=0):
+        tracker = _TrackingExtractor(
+            HeuristicExtractor(self.profile.assets.figures), parties=parties
+        )
+        pipeline = FigurePipeline(
+            profile=self._profile(workers),
+            store=self.store,
+            blob_store=self.blobs,
+            extractor=tracker,
+            fallback_extractor=HeuristicExtractor(self.profile.assets.figures),
+        )
+        return pipeline, tracker
+
+    def _images(self, count, start=0):
+        return [self.image(index=i, page=i) for i in range(start, start + count)]
+
+    def test_images_are_extracted_at_the_same_time(self):
+        """The finding itself: two images were never in flight together."""
+        pipeline, tracker = self._pipeline(workers=4, parties=4)
+        dossiers, report = pipeline.process(self._images(4), filename="doc.pdf")
+
+        self.assertTrue(tracker.paired, "four extractions never overlapped")
+        self.assertEqual(4, tracker.max_active)
+        self.assertEqual(4, report.extracted)
+        self.assertEqual(4, len(dossiers))
+
+    def test_one_worker_keeps_the_serial_path(self):
+        """The off switch has to be a real off switch: no pool, no overlap."""
+        pipeline, tracker = self._pipeline(workers=1, parties=0)
+        _dossiers, report = pipeline.process(self._images(4), filename="doc.pdf")
+
+        self.assertEqual(1, tracker.max_active)
+        self.assertEqual(4, report.extracted)
+
+    def test_concurrency_is_bounded_by_the_configured_worker_count(self):
+        """Unbounded fan-out would be rate-limited into being slower than serial."""
+        pipeline, tracker = self._pipeline(workers=2, parties=2)
+        pipeline.process(self._images(8), filename="doc.pdf")
+
+        self.assertTrue(tracker.paired)
+        self.assertLessEqual(tracker.max_active, 2)
+
+    def test_results_stay_in_the_order_the_images_arrived(self):
+        """Completion order is not input order, and the caller zips dossiers back onto
+        the blocks they came from."""
+        pipeline, _tracker = self._pipeline(workers=4)
+        images = self._images(6)
+        dossiers, _report = pipeline.process(images, filename="doc.pdf")
+
+        self.assertEqual(
+            [compute_sha256(image.data) for image in images],
+            [dossier.sha256 for dossier in dossiers],
+        )
+
+    def test_the_same_image_twice_is_still_extracted_once(self):
+        """What the serial loop got for free by writing its own result into the cache as
+        it went. Two copies in flight together would both miss it."""
+        pipeline, tracker = self._pipeline(workers=4)
+        images = self._images(4, start=1)
+        # Same bytes as the first image, a page later: one digest, two occurrences.
+        images.insert(1, self.image(index=1, page=99))
+
+        _dossiers, report = pipeline.process(images, filename="doc.pdf")
+
+        self.assertEqual(1, len([d for d in tracker.digests if d == tracker.digests[0]]))
+        self.assertEqual(5, len(set(d.asset_id for d in _dossiers)))
+        self.assertEqual(4, report.extracted)
+        self.assertEqual(1, report.cached)
+
+    def test_one_failing_extraction_does_not_cost_the_others_theirs(self):
+        class Exploding(_TrackingExtractor):
+            def extract(self, request):
+                if compute_sha256(request.data) == self.doomed:
+                    raise RuntimeError("provider said no")
+                return super().extract(request)
+
+        inner = HeuristicExtractor(self.profile.assets.figures)
+        tracker = Exploding(inner)
+        images = self._images(4)
+        tracker.doomed = compute_sha256(images[2].data)
+        pipeline = FigurePipeline(
+            profile=self._profile(4), store=self.store, blob_store=self.blobs,
+            extractor=tracker, fallback_extractor=inner,
+        )
+
+        dossiers, report = pipeline.process(images, filename="doc.pdf")
+
+        self.assertEqual(4, len(dossiers))
+        # The failure falls back to the heuristic extractor rather than losing the asset,
+        # which is the behaviour the serial path already had.
+        self.assertEqual(4, report.extracted)
+        self.assertEqual(0, report.failed)
+
+    def test_a_triaged_out_image_never_reaches_the_extractor(self):
+        pipeline, tracker = self._pipeline(workers=4)
+        images = self._images(2) + [self.image(index=9, page=9, width=10, height=10)]
+
+        _dossiers, report = pipeline.process(images, filename="doc.pdf")
+
+        self.assertEqual(1, report.dropped)
+        self.assertEqual(2, len(tracker.digests))
+
+    def test_a_cached_extraction_never_reaches_the_extractor(self):
+        first, tracker_one = self._pipeline(workers=4)
+        images = self._images(3)
+        first.process(images, filename="doc.pdf")
+        self.assertEqual(3, len(tracker_one.digests))
+
+        second, tracker_two = self._pipeline(workers=4)
+        _dossiers, report = second.process(images, filename="again.pdf")
+
+        self.assertEqual([], tracker_two.digests)
+        self.assertEqual(3, report.cached)
+        self.assertEqual(0, report.extracted)

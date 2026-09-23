@@ -91,6 +91,9 @@ ENV_OVERRIDES: Dict[str, str] = {
     # To actually turn a scratchpad off, set assets.figures.vision_extra_params in the
     # profile — see school.yaml.
     "VISION_REASONING_EFFORT": "assets.figures.vision_reasoning_effort",
+    # How many images a document extracts at once. Bounded by what the vision provider
+    # allows concurrently, not by this machine — see AssetsConfig.extraction_workers.
+    "ASSET_EXTRACTION_WORKERS": "assets.extraction_workers",
     # Chunking
     "CHUNK_STRATEGY": "chunking.strategy",
     "CHUNK_SIZE": "chunking.chunk_size",
