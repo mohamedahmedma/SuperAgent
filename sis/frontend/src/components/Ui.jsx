@@ -443,14 +443,19 @@ export function Table({
                     live && 'sis-row-open'
                   )}
                   style={{ '--i': step }}
-                  /* A single click anywhere that is not itself a control. `href` handles the
-                     ordinary case through the stretched anchor below; this covers the rows whose
-                     target is an action rather than an address. */
+                  /* On desktop the stretched anchor below handles the row. Mobile WebKit does
+                     not reliably use a positioned <tr> as the containing block for an absolute
+                     child, so CSS removes that overlay on phones and this handler becomes the
+                     row-sized fallback. Real controls always keep their own action. */
                   onClick={
-                    onRowActivate && !href
+                    live
                       ? (event) => {
                           if (event.target.closest('a,button,input,select,label')) return;
-                          onRowActivate(row, index);
+                          if (href) {
+                            window.location.hash = href;
+                          } else {
+                            onRowActivate(row, index);
+                          }
                         }
                       : undefined
                   }

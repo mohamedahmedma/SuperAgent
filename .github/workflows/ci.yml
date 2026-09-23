@@ -14,6 +14,15 @@ on:
 permissions:
   contents: read
 
+# A post-merge run starts on `main`, where a pull-request cache is not guaranteed to be
+# available. Several backend jobs can therefore download the same large ML dependency set at
+# once. Give slow PyPI responses enough time to make progress, retry transient failures, and
+# keep each runner from starving its smaller wheels behind too many concurrent downloads.
+env:
+  UV_HTTP_TIMEOUT: "120"
+  UV_HTTP_RETRIES: "10"
+  UV_CONCURRENT_DOWNLOADS: "8"
+
 jobs:
   backend-dependencies:
     name: CI - Backend dependencies and lockfile

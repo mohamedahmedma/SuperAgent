@@ -82,14 +82,26 @@ def student_timeline(student_number: str, caller: Reader, uow_factory: UowFactor
         # JSON filtering differs between SQLite and Postgres, so retain one portable audit
         # query and filter its bounded newest-first window in Python.
         rows = uow._session.scalars(select(m.AuditLog).order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc()).limit(1000)).all()
-    def belongs(row) -> bool:
-        values = (row.old_values or {}, row.new_values or {})
-        return (row.entity_type == "Student" and row.entity_id == str(student.id)) or any(
-            str(value.get("student_id", "")) == str(student.id) for value in values
-        )
-    return [StudentTimelineEventOut(id=row.id, action=row.action, entity_type=row.entity_type,
-        entity_id=row.entity_id, actor=row.actor, at=row.created_at,
-        old_values=row.old_values, new_values=row.new_values) for row in rows if belongs(row)][:200]
+
+        # Materialise the response while the ORM rows are still attached. The unit of work
+        # expires instances when it commits on exit, so touching their JSON fields afterwards
+        # raises DetachedInstanceError and turns every populated timeline into a 500.
+        def belongs(row: m.AuditLog) -> bool:
+            values = (row.old_values or {}, row.new_values or {})
+            return (row.entity_type == "Student" and row.entity_id == str(student.id)) or any(
+                str(value.get("student_id", "")) == str(student.id) for value in values
+            )
+
+        return [StudentTimelineEventOut(
+            id=row.id,
+            action=row.action,
+            entity_type=row.entity_type,
+            entity_id=row.entity_id,
+            actor=row.actor,
+            at=row.created_at,
+            old_values=row.old_values,
+            new_values=row.new_values,
+        ) for row in rows if belongs(row)][:200]
 
 
 class RosterEntryOut(BaseModel):

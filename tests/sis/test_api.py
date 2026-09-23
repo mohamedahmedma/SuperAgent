@@ -25,6 +25,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from sis.app import create_app
 from sis.config import reset_settings_cache
@@ -32,6 +33,7 @@ from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.domain.auth import ApiKey, Scope
 from sis.api.deps import hash_api_key, key_prefix
 from sis.infrastructure.db.session import reset_engine
+from sis.infrastructure.db import models as m
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[2] / "sis" / "alembic.ini"
@@ -402,6 +404,29 @@ def test_registrar_imports_a_roster_then_marks_and_reads_back_the_report_card(
     roll = register.json()
     assert roll["count"] == 2
     assert {entry["student_number"] for entry in roll["students"]} == {"S001", "S002"}
+
+    # The timeline must serialise audit rows before its read-only unit of work closes.
+    # Accessing ORM fields afterwards raises DetachedInstanceError and used to make the
+    # student screen report an empty history while this request actually returned 500.
+    with SqlAlchemyUnitOfWork() as uow:
+        student_row = uow._session.scalar(
+            select(m.Student).where(m.Student.student_number == "S001")
+        )
+        assert student_row is not None
+        uow._session.add(m.AuditLog(
+            actor="api-test",
+            action="update",
+            entity_type="Student",
+            entity_id=str(student_row.id),
+            old_values=None,
+            new_values={"student_id": student_row.id},
+            created_at=datetime.now(UTC),
+        ))
+        uow.commit()
+
+    timeline = client.get("/v1/students/S001/timeline", headers=registrar)
+    assert timeline.status_code == 200, timeline.text
+    assert timeline.json(), "the roster import should leave an audit event for this student"
 
     # -- grades -------------------------------------------------------------
     marks_preview = client.post(
