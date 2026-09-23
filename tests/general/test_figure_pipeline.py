@@ -1078,11 +1078,25 @@ class FigureProgressStepTests(unittest.TestCase):
 
         self.calls = []
 
+        self.sub_args = []
+
         class Jobs:
-            def update_step(_self, job_id, key, percent, status, message):
+            def update_step(_self, job_id, key, percent, status, message, **kwargs):
                 self.calls.append((key, percent, status, message))
+                self.sub_args.append(kwargs)
 
         self.progress = _FigureProgress(Jobs(), "job-1")
+
+    def test_progress_drives_a_nested_bar_rather_than_a_number_in_prose(self):
+        """The sub-bar the UI draws: a percentage buried in `message` cannot be drawn,
+        and a step of its own would finish while `parse` was still running."""
+        self.progress.figures_progress(3, 12)
+
+        _key, _percent, _status, _message = self.calls[0]
+        self.assertEqual(
+            {"sub_label": "Extracting images", "sub_done": 3, "sub_total": 12},
+            self.sub_args[0],
+        )
 
     def test_progress_moves_the_parse_step_it_belongs_to(self):
         self.progress.figures_progress(0, 4)

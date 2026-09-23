@@ -155,3 +155,48 @@ class ConcurrencyTests(IngestJobTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SubProgressTests(IngestJobTestCase):
+    """A stage that runs INSIDE a step, drawn as a nested bar under it."""
+
+    def _parse_step(self, job):
+        return next(step for step in job["steps"] if step["key"] == "parse")
+
+    def test_a_step_carries_no_sub_stage_until_one_reports(self):
+        job = self.uploads.create_job("fees.pdf")
+        self.assertEqual(0, self._parse_step(job)["sub_total"])
+
+    def test_sub_progress_is_stored_and_read_back_by_another_worker(self):
+        job = self.uploads.create_job("fees.pdf")
+        self.uploads.update_step(
+            job["job_id"], "parse", 25, message="Extracting images: 3 of 12",
+            sub_label="Extracting images", sub_done=3, sub_total=12,
+        )
+
+        step = self._parse_step(self.tracker("upload").get_job(job["job_id"]))
+        self.assertEqual(("Extracting images", 3, 12),
+                         (step["sub_label"], step["sub_done"], step["sub_total"]))
+
+    def test_an_ordinary_update_leaves_a_running_sub_stage_alone(self):
+        """The nested bar is driven by one caller and the step by another. Defaulting
+        the sub-fields to zero would have any other update erase the bar mid-extraction.
+        """
+        job = self.uploads.create_job("fees.pdf")
+        self.uploads.update_step(
+            job["job_id"], "parse", 25, sub_label="Extracting images", sub_done=3, sub_total=12,
+        )
+        self.uploads.update_step(job["job_id"], "parse", 30, message="still going")
+
+        step = self._parse_step(self.uploads.get_job(job["job_id"]))
+        self.assertEqual((3, 12), (step["sub_done"], step["sub_total"]))
+        self.assertEqual("still going", step["message"])
+
+    def test_sub_progress_on_one_step_never_touches_another(self):
+        job = self.uploads.create_job("fees.pdf")
+        self.uploads.update_step(
+            job["job_id"], "parse", 25, sub_label="Extracting images", sub_done=1, sub_total=4,
+        )
+        steps = {s["key"]: s for s in self.uploads.get_job(job["job_id"])["steps"]}
+        self.assertEqual(0, steps["vector_store"]["sub_total"])
+        self.assertEqual(0, steps["upload"]["sub_total"])

@@ -129,8 +129,24 @@ class IngestJobTracker:
         *,
         total_chunks: int | None = None,
         processed_chunks: int | None = None,
+        sub_label: str | None = None,
+        sub_done: int | None = None,
+        sub_total: int | None = None,
     ) -> dict | None:
+        """Move a step, and optionally the nested bar inside it.
+
+        The sub-stage fields are None-means-leave-alone rather than defaulting to zero:
+        an ordinary `update_step` during a sub-stage must not erase the nested bar that
+        another caller is driving.
+        """
         percent = max(0, min(100, int(percent)))
+        sub = {
+            name: value
+            for name, value in (
+                ("sub_label", sub_label), ("sub_done", sub_done), ("sub_total", sub_total)
+            )
+            if value is not None
+        }
 
         def change(job: IngestJobRecord) -> IngestJobRecord | None:
             if not any(step.key == step_key for step in job.steps):
@@ -138,7 +154,7 @@ class IngestJobTracker:
             return replace(
                 job,
                 steps=tuple(
-                    replace(step, percent=percent, status=status, message=message)
+                    replace(step, percent=percent, status=status, message=message, **sub)
                     if step.key == step_key
                     else step
                     for step in job.steps

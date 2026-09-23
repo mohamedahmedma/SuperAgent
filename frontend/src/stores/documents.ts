@@ -70,6 +70,8 @@ export const useDocumentStore = defineStore('documents', {
       }
       const idx = this.uploadSteps.findIndex((step) => step.key === key);
       if (idx === -1) return;
+      // Spread first: the sub-bar is driven by the job poll, and a local step update
+      // (the browser's own upload progress) must leave it where the server put it.
       this.uploadSteps[idx] = {
         ...this.uploadSteps[idx],
         percent: Math.max(0, Math.min(100, Math.round(percent || 0))),
@@ -295,6 +297,9 @@ export const useDocumentStore = defineStore('documents', {
           percent: step.percent,
           status: step.status,
           message: step.message || '',
+          subLabel: step.sub_label || '',
+          subDone: step.sub_done || 0,
+          subTotal: step.sub_total || 0,
         }));
       }
       if (job.status === 'completed') {

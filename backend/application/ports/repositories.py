@@ -451,6 +451,15 @@ class JobStep:
     status: str = "pending"
     message: str = ""
 
+    #: A sub-stage of this step, drawn as a nested bar beneath it. Figure extraction is
+    #: the first: it is minutes of work INSIDE `parse`, so it cannot be a step of its own
+    #: without claiming to finish while its parent is still running, and a percentage
+    #: buried in `message` is a number the UI cannot draw. `sub_total` of 0 means there
+    #: is no sub-stage and nothing is drawn.
+    sub_label: str = ""
+    sub_done: int = 0
+    sub_total: int = 0
+
 
 @dataclass(frozen=True, slots=True)
 class IngestJobRecord:

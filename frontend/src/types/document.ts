@@ -73,6 +73,14 @@ export interface UploadStep {
   percent: number;
   status: 'pending' | 'running' | 'completed' | 'failed';
   message: string;
+  /**
+   * A nested bar inside this step. Figure extraction reports here: it runs inside the
+   * `parse` step, so it cannot be a step of its own without appearing to finish while
+   * its parent is still going. `subTotal` of 0 means there is nothing to draw.
+   */
+  subLabel?: string;
+  subDone?: number;
+  subTotal?: number;
 }
 
 export interface UploadJob {

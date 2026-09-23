@@ -106,6 +106,20 @@
           <div class="upload-step-bar">
             <div class="upload-step-fill" :style="{ width: step.percent + '%' }"></div>
           </div>
+          <!--
+            The nested bar. Only while the parent step is RUNNING: extraction happens
+            inside parsing, so once parse has finished the sub-bar is describing
+            something that is over, and its closing counts are in the step message.
+          -->
+          <div v-if="step.subTotal && step.status === 'running'" class="upload-substep">
+            <div class="upload-substep-header">
+              <span class="upload-substep-label">{{ step.subLabel }}</span>
+              <span class="upload-substep-count">{{ step.subDone }} / {{ step.subTotal }}</span>
+            </div>
+            <div class="upload-substep-bar">
+              <div class="upload-substep-fill" :style="{ width: subPercent(step) + '%' }"></div>
+            </div>
+          </div>
           <div v-if="step.message" class="upload-step-message">{{ step.message }}</div>
         </div>
       </div>
@@ -203,6 +217,10 @@ const formatFileSize = (bytes: number) => {
   if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024)) + ' KB';
   return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 };
+
+/** How far the nested bar has got. 0 rather than NaN when there is nothing to divide by. */
+const subPercent = (step: UploadStep) =>
+  step.subTotal ? Math.round((100 * (step.subDone || 0)) / step.subTotal) : 0;
 
 const stepIcon = (status: UploadStep['status']) => {
   if (status === 'completed') return 'fa-solid fa-check';

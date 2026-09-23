@@ -106,6 +106,13 @@ class UploadStepInfo(BaseModel):
     status: str
     message: str = ""
 
+    #: A nested bar inside this step. Figure extraction reports here: it runs INSIDE
+    #: `parse`, so it cannot be a step of its own without appearing to finish while its
+    #: parent is still going. `sub_total` of 0 means draw nothing.
+    sub_label: str = ""
+    sub_done: int = 0
+    sub_total: int = 0
+
 
 class DocumentUploadJobResponse(BaseModel):
     job_id: str
@@ -135,3 +142,63 @@ class DocumentDeleteResponse(BaseModel):
     filename: str
     chunks_deleted: int
     message: str
+
+
+class AssetInfo(BaseModel):
+    """One image of a document, as the admin review view shows it.
+
+    This is deliberately NOT `AssetReference`. That one is the public asset contract a
+    chat client consumes — caption, alt text, tags — and widening it to carry a model's
+    confidence and its error text would put an operational detail on a surface parents
+    read. This is the other half of the dossier, for the admin who has to decide whether
+    an extraction is good enough to leave in the index.
+    """
+
+    asset_id: str
+    sha256: str = ""
+    page_number: int = 0
+    #: "extracted" | "failed" | "skipped" | "pending" | "stale".
+    status: str = ""
+    #: "figure" | "entity" | "decorative".
+    role: str = ""
+    #: What extraction was ASKED for: "simple" | "complex" | "layout" | "drop".
+    tier: str = ""
+    #: Whether this asset produces a retrievable chunk at all. A decorative image or a
+    #: failed extraction is stored and visible here, but is not in the index.
+    indexable: bool = False
+
+    # -- the retrieval surface, which is the thing actually being reviewed -------
+    caption: str = ""
+    description: str = ""
+    transcription: str = ""
+    tags: List[str] = []
+
+    # -- how it was produced, which is how an admin judges it --------------------
+    model_used: str = ""
+    confidence: float = 0.0
+    #: Already set on every extraction, by the extractor: a vision confidence below the
+    #: profile's `escalate_below_confidence`, or a heuristic run that recovered no text.
+    needs_review: bool = False
+    #: Why an extraction failed, when it did. Empty otherwise.
+    error: str = ""
+
+    width: int = 0
+    height: int = 0
+    byte_size: int = 0
+    content_type: str = ""
+    #: Authenticated GET returns the image itself, so the reviewer can compare the
+    #: transcription against the picture it claims to describe.
+    url: str = ""
+
+    #: The chunks this image produced, filled by the caller. Empty when the document's
+    #: chunks could not be read — an asset list is still worth showing without them.
+    chunk_ids: List[str] = []
+
+
+class DocumentAssetListResponse(BaseModel):
+    filename: str
+    assets: List[AssetInfo]
+    total: int = 0
+    #: How many carry `needs_review`, so the UI can lead with the number that matters
+    #: without counting a list it may have truncated.
+    needs_review_count: int = 0

@@ -3,6 +3,7 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
+from backend.assets.delivery import asset_url_path
 from backend.indexing.ingest_progress import IngestProgress
 from backend.api.deps import get_services
 from backend.api.resources import (
@@ -20,7 +21,9 @@ from backend.profiles import get_profile
 from backend.text_matching import fold
 from backend.jobs import DELETE_STEPS
 from backend.schemas import (
+    AssetInfo,
     ChunkInfo,
+    DocumentAssetListResponse,
     DocumentChunkListResponse,
     DocumentDeleteJobResponse,
     DocumentDeleteResponse,
@@ -63,6 +66,7 @@ class _FigureProgress(IngestProgress):
         self._jobs.update_step(
             self._job_id, "parse", percent, "running",
             f"Extracting images: {done} of {total}",
+            sub_label="Extracting images", sub_done=done, sub_total=total,
         )
 
     def figures_finished(self, report) -> None:
@@ -576,6 +580,99 @@ async def upload_document_pair(
         job_id=job["job_id"],
         filename=", ".join(names),
         message="Files uploaded, parsing and vectorization in progress in the background",
+    )
+
+
+def _asset_info(dossier, chunk_ids_by_asset) -> AssetInfo:
+    """One dossier, flattened for review.
+
+    The nesting is real — text surface, provenance, blob, source are separate objects —
+    but a reviewer reads one image at a time, and a shape that mirrored the storage
+    would make the UI walk four objects to render one row.
+    """
+    extraction = dossier.extraction
+    text = extraction.text if extraction else None
+    provenance = extraction.provenance if extraction else None
+    return AssetInfo(
+        asset_id=dossier.asset_id,
+        sha256=dossier.sha256,
+        page_number=dossier.source.page_number,
+        status=dossier.status.value,
+        role=dossier.role.value,
+        tier=dossier.tier.value,
+        indexable=dossier.is_indexable,
+        caption=(text.caption if text else ""),
+        description=(text.description if text else ""),
+        transcription=(text.transcription if text else ""),
+        tags=list(text.tags) if text else [],
+        model_used=(provenance.model_used if provenance else ""),
+        confidence=(provenance.confidence if provenance else 0.0),
+        needs_review=bool(provenance.needs_review) if provenance else False,
+        error=(provenance.error if provenance else ""),
+        width=dossier.blob.width,
+        height=dossier.blob.height,
+        byte_size=dossier.blob.byte_size,
+        content_type=dossier.blob.content_type,
+        url=asset_url_path(dossier.asset_id),
+        chunk_ids=chunk_ids_by_asset.get(dossier.asset_id, []),
+    )
+
+
+@router.get("/documents/{filename}/assets", response_model=DocumentAssetListResponse)
+async def list_document_assets(
+    filename: str,
+    _: User = Depends(require_admin),
+    services: Services = Depends(get_services),
+):
+    """Every image of a document with what extraction made of it, for manual review.
+
+    The counterpart to `/documents/{filename}/chunks`: that view shows the corpus as
+    retrieval holds it, this one shows where a figure chunk's text CAME FROM, which is
+    the one thing a reviewer needs and no other view has ever had. Until now the whole
+    of it — the description, the transcription, the model, its confidence, the error
+    that explains a failure — existed only on the dossier and was returned by nothing.
+    The only asset routes answer with `AssetReference`, the public contract a chat
+    client consumes, which carries none of it and should not.
+
+    `needs_review` is not computed here. Every extraction has been setting it since the
+    pipeline was written — a vision confidence under the profile's
+    `escalate_below_confidence`, or a heuristic run that recovered no text at all — and
+    storing it in its own column. Nothing had ever read it back.
+
+    Each asset carries the ids of the chunks it produced. The link is only ever written
+    the other way (a chunk names its `asset_ids`; `SourceRef.doc_chunk_id` is never
+    filled, because enrichment runs before chunking assigns an id), so the reverse is
+    built here by inverting it. Chunks are read best-effort: a document's images are
+    still worth reviewing when the vector store cannot be reached, so an unreadable
+    index costs the `chunk_ids` and nothing else.
+    """
+    try:
+        dossiers = services.asset_store.list_by_filename(filename)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read assets: {exc}")
+
+    chunk_ids_by_asset: dict[str, list[str]] = {}
+    try:
+        services.milvus.init_collection()
+        rows = services.milvus.query_all(
+            filter_expr=f"filename == {json.dumps(filename, ensure_ascii=False)}",
+            output_fields=_CHUNK_FIELDS,
+        )
+        for row in sorted(rows, key=lambda r: (r.get("chunk_level", 0), r.get("chunk_idx", 0))):
+            for asset_id in _chunk_asset_ids(row.get("asset_ids")):
+                chunk_ids_by_asset.setdefault(asset_id, []).append(row.get("chunk_id", ""))
+    except Exception:
+        logger.exception("Could not read chunks for %s; listing assets without them", filename)
+
+    assets = sorted(
+        (_asset_info(dossier, chunk_ids_by_asset) for dossier in dossiers),
+        key=lambda asset: (asset.page_number, asset.asset_id),
+    )
+    return DocumentAssetListResponse(
+        filename=filename,
+        assets=assets,
+        total=len(assets),
+        needs_review_count=sum(1 for asset in assets if asset.needs_review),
     )
 
 
