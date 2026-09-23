@@ -92,7 +92,7 @@
       </div>
 
       <!-- LIST: every chunk flat, narrowed to the matches while a filter is running -->
-      <div v-else class="cx-body">
+      <div v-else-if="view === 'list'" class="cx-body">
         <!-- A narrowed list must say so. Without this the view is a short document. -->
         <p v-if="assetChunkIds.length" class="cx-note cx-note-pin">
           <i class="fa-regular fa-image"></i>
