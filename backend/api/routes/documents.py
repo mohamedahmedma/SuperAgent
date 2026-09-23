@@ -3,6 +3,7 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
+from backend.indexing.ingest_progress import IngestProgress
 from backend.api.deps import get_services
 from backend.api.resources import (
     UPLOAD_DIR,
@@ -38,6 +39,54 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["documents"])
 
 
+class _FigureProgress(IngestProgress):
+    """Figure extraction, reported into the upload job the admin UI polls.
+
+    Without this the `parse` step reports 5% once and then nothing at all until every
+    image in the document has been through a vision model — minutes of a frozen bar on
+    an illustrated document, which the job tracker's own docstring describes as the
+    reason it cannot tell a slow ingest from a dead one.
+    """
+
+    #: `parse` is at 5% when extraction starts and needs room afterwards for chunking,
+    #: so extraction owns the span between. Both ends are reported: 5% the moment the
+    #: image count is known, which is itself news.
+    START, END = 5, 85
+
+    def __init__(self, jobs, job_id: str) -> None:
+        self._jobs = jobs
+        self._job_id = job_id
+        self._report = None
+
+    def figures_progress(self, done: int, total: int) -> None:
+        percent = self.START + int((self.END - self.START) * done / total) if total else self.START
+        self._jobs.update_step(
+            self._job_id, "parse", percent, "running",
+            f"Extracting images: {done} of {total}",
+        )
+
+    def figures_finished(self, report) -> None:
+        self._report = report
+
+    def summary(self) -> str:
+        """What extraction produced, for the step's closing message.
+
+        Empty when the document had no images, so a text-only document reads exactly as
+        it did before. `failed` is named even at zero once anything was extracted: "0
+        failed" is the sentence an admin needs to see to stop wondering.
+        """
+        report = self._report
+        if report is None or not report.total:
+            return ""
+        parts = [f"{report.extracted} extracted"]
+        if report.cached:
+            parts.append(f"{report.cached} already known")
+        if report.dropped:
+            parts.append(f"{report.dropped} skipped")
+        parts.append(f"{report.failed} failed")
+        return f". Images: {report.total} ({', '.join(parts)})"
+
+
 def _process_upload_job(services: Services, job_id: str, file_path: str, filename: str) -> None:
     jobs = services.upload_jobs
     failed_step = "cleanup"
@@ -51,7 +100,12 @@ def _process_upload_job(services: Services, job_id: str, file_path: str, filenam
 
         failed_step = "parse"
         jobs.update_step(job_id, "parse", 5, "running", "Parsing document and performing three-level chunking")
-        new_docs = services.document_loader.load_document(file_path, filename)
+        # Extraction reports INTO `parse` rather than as a step of its own. It is part of
+        # parsing, and a new step key would have to be added to the frontend store's
+        # `createUploadSteps()` as well — `updateUploadStep` drops an unknown key with
+        # `if (idx === -1) return`, so half the change would show nothing and log nothing.
+        progress = _FigureProgress(jobs, job_id)
+        new_docs = services.document_loader.load_document(file_path, filename, progress=progress)
         if not new_docs:
             raise ValueError("Document processing failed: could not extract content")
 
@@ -67,7 +121,8 @@ def _process_upload_job(services: Services, job_id: str, file_path: str, filenam
         jobs.complete_step(
             job_id,
             "parse",
-            f"Parsing complete: {len(parent_docs)} parent chunks, {len(leaf_docs)} leaf chunks{figure_note}",
+            f"Parsing complete: {len(parent_docs)} parent chunks, "
+            f"{len(leaf_docs)} leaf chunks{figure_note}{progress.summary()}",
         )
 
         failed_step = "parent_store"

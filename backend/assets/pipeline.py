@@ -35,6 +35,11 @@ from backend.assets.dossier import (
     build_asset_id,
     compute_sha256,
 )
+from backend.indexing.ingest_progress import (
+    IngestProgress,
+    report_finished,
+    report_progress,
+)
 from backend.assets.attributes import AttributeSchema, build_attribute_schema
 from backend.assets.entity_extractor import build_entity_extractor, resolve_role
 from backend.assets.extractors import (
@@ -248,6 +253,7 @@ class FigurePipeline:
         images: List[ImageInput],
         filename: str,
         file_path: str = "",
+        progress: Optional["IngestProgress"] = None,
     ) -> tuple[List[AssetDossier], FigureReport]:
         report = FigureReport(total=len(images))
         if not images:
@@ -285,7 +291,7 @@ class FigurePipeline:
         # below, on one thread, so none of them needs a lock.
         extracted_by_digest = self._extract_many(
             images, digests, filename, assets_config, pages_by_digest, total_pages,
-            cached_by_digest,
+            cached_by_digest, progress,
         )
 
         dossiers: List[AssetDossier] = []
@@ -299,6 +305,7 @@ class FigurePipeline:
 
         self.store.record_many(dossiers)
         report.indexable = sum(1 for dossier in dossiers if dossier.is_indexable)
+        report_finished(progress, report)
         return dossiers, report
 
     # -- concurrent extraction --------------------------------------------------
@@ -365,6 +372,7 @@ class FigurePipeline:
         pages_by_digest: Dict[str, int],
         total_pages: int,
         cached_by_digest: Dict[str, ExtractionPayload],
+        progress: Optional["IngestProgress"] = None,
     ) -> Dict[str, Optional[ExtractionPayload]]:
         """Every extraction this document owes, `extraction_workers` at a time.
 
@@ -399,6 +407,7 @@ class FigurePipeline:
         logger.info(
             "Extracting %d image(s) for %s, %d at a time", len(plan), filename, workers
         )
+        report_progress(progress, 0, len(plan))
         with ThreadPoolExecutor(
             max_workers=min(workers, len(plan)), thread_name_prefix="figure-extract"
         ) as pool:
@@ -417,6 +426,7 @@ class FigurePipeline:
                         "Extraction thread failed for %s in %s", digest[:12], filename
                     )
                     results[digest] = None
+                report_progress(progress, len(results), len(plan))
         return results
 
     # -- per-image --------------------------------------------------------------

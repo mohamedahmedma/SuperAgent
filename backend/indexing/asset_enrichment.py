@@ -18,6 +18,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.assets.pipeline import FigureReport, ImageInput
+from backend.indexing.ingest_progress import IngestProgress
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ def enrich_image_blocks(
     filename: str,
     file_path: str = "",
     pipeline=None,
+    progress: Optional[IngestProgress] = None,
 ) -> Tuple[List[Dict[str, Any]], FigureReport]:
     """Replace image blocks with their text surrogates.
 
@@ -132,7 +134,9 @@ def enrich_image_blocks(
         pipeline = default_services().figure_pipeline
 
     try:
-        dossiers, report = pipeline.process(inputs, filename=filename, file_path=file_path)
+        dossiers, report = pipeline.process(
+            inputs, filename=filename, file_path=file_path, progress=progress
+        )
     except Exception:
         # Asset enrichment is additive. If it fails wholesale, the document must still
         # index its text — losing figures is far better than losing the document.

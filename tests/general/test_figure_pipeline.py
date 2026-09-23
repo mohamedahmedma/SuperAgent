@@ -28,6 +28,7 @@ from backend.assets.pipeline import FigurePipeline, ImageInput
 from backend.assets.store import AssetStore
 from backend.assets.triage import ImageFacts, count_digest_pages, probe_dimensions, triage_image
 from backend.indexing.asset_enrichment import enrich_image_blocks
+from backend.indexing.ingest_progress import IngestProgress
 from backend.profiles.registry import load_profile
 from tests.general.postgres_support import postgres_schema
 
@@ -726,8 +727,9 @@ class ChunkIntegrationTests(PipelineTestCase):
         ]
         loader = DocumentLoader()
         with patch.object(DocumentLoader, "_enrich_assets", staticmethod(
-            lambda blocks, filename, file_path: enrich_image_blocks(
-                blocks, filename=filename, file_path=file_path, pipeline=self.pipeline()
+            lambda blocks, filename, file_path, progress=None: enrich_image_blocks(
+                blocks, filename=filename, file_path=file_path, pipeline=self.pipeline(),
+                progress=progress,
             )[0]
         )):
             return loader._load_blocks_with_layout(blocks, "/data/doc.pdf", "doc.pdf", "PDF")
@@ -993,3 +995,129 @@ class ExtractionConcurrencyTests(PipelineTestCase):
         self.assertEqual([], tracker_two.digests)
         self.assertEqual(3, report.cached)
         self.assertEqual(0, report.extracted)
+
+
+class _RecordingProgress(IngestProgress):
+    def __init__(self):
+        self.updates = []
+        self.report = None
+
+    def figures_progress(self, done, total):
+        self.updates.append((done, total))
+
+    def figures_finished(self, report):
+        self.report = report
+
+
+class ExtractionProgressTests(PipelineTestCase):
+    """Item 30: extraction says how far it has got, and what it produced."""
+
+    def _pipeline(self, workers=4):
+        inner = HeuristicExtractor(self.profile.assets.figures)
+        assets = self.profile.assets.model_copy(update={"extraction_workers": workers})
+        return FigurePipeline(
+            profile=self.profile.model_copy(update={"assets": assets}),
+            store=self.store, blob_store=self.blobs,
+            extractor=inner, fallback_extractor=inner,
+        )
+
+    def _images(self, count):
+        return [self.image(index=i, page=i) for i in range(count)]
+
+    def test_progress_is_reported_as_each_image_lands(self):
+        progress = _RecordingProgress()
+        self._pipeline().process(self._images(4), filename="doc.pdf", progress=progress)
+
+        # The count is news before the first extraction finishes: it is what turns a
+        # frozen bar into "this document has four images".
+        self.assertEqual((0, 4), progress.updates[0])
+        self.assertEqual((4, 4), progress.updates[-1])
+        self.assertEqual([1, 2, 3, 4], sorted(done for done, _ in progress.updates[1:]))
+
+    def test_the_outcome_is_reported_once_when_extraction_is_over(self):
+        progress = _RecordingProgress()
+        _dossiers, report = self._pipeline().process(
+            self._images(3), filename="doc.pdf", progress=progress
+        )
+        self.assertIs(report, progress.report)
+        self.assertEqual(3, progress.report.extracted)
+        self.assertEqual(3, progress.report.total)
+
+    def test_a_document_with_no_images_still_reports_its_outcome(self):
+        progress = _RecordingProgress()
+        self._pipeline().process([], filename="doc.pdf", progress=progress)
+        self.assertEqual([], progress.updates)
+
+    def test_a_sink_that_raises_cannot_fail_the_ingest(self):
+        """The progress bar describes the document; it must never cost it."""
+
+        class Broken(IngestProgress):
+            def figures_progress(self, done, total):
+                raise RuntimeError("progress store is down")
+
+            def figures_finished(self, report):
+                raise RuntimeError("still down")
+
+        dossiers, report = self._pipeline().process(
+            self._images(3), filename="doc.pdf", progress=Broken()
+        )
+        self.assertEqual(3, len(dossiers))
+        self.assertEqual(3, report.extracted)
+
+    def test_no_sink_is_the_normal_case_and_changes_nothing(self):
+        dossiers, report = self._pipeline().process(self._images(2), filename="doc.pdf")
+        self.assertEqual(2, len(dossiers))
+        self.assertEqual(2, report.extracted)
+
+
+class FigureProgressStepTests(unittest.TestCase):
+    """What the admin actually sees, in the step the upload job already has."""
+
+    def setUp(self):
+        from backend.api.routes.documents import _FigureProgress
+
+        self.calls = []
+
+        class Jobs:
+            def update_step(_self, job_id, key, percent, status, message):
+                self.calls.append((key, percent, status, message))
+
+        self.progress = _FigureProgress(Jobs(), "job-1")
+
+    def test_progress_moves_the_parse_step_it_belongs_to(self):
+        self.progress.figures_progress(0, 4)
+        self.progress.figures_progress(2, 4)
+        self.progress.figures_progress(4, 4)
+
+        keys = {key for key, _p, _s, _m in self.calls}
+        self.assertEqual({"parse"}, keys, "extraction is part of parsing, not a new step")
+        self.assertEqual([5, 45, 85], [percent for _k, percent, _s, _m in self.calls])
+        self.assertIn("2 of 4", self.calls[1][3])
+
+    def test_a_document_with_no_images_adds_nothing_to_the_message(self):
+        from backend.assets.pipeline import FigureReport
+
+        self.progress.figures_finished(FigureReport(total=0))
+        self.assertEqual("", self.progress.summary())
+
+    def test_the_summary_names_every_outcome_including_none_failed(self):
+        from backend.assets.pipeline import FigureReport
+
+        self.progress.figures_finished(
+            FigureReport(total=12, extracted=9, cached=2, dropped=1, failed=0)
+        )
+        summary = self.progress.summary()
+        self.assertIn("12", summary)
+        self.assertIn("9 extracted", summary)
+        self.assertIn("2 already known", summary)
+        self.assertIn("1 skipped", summary)
+        self.assertIn("0 failed", summary)
+
+    def test_a_failure_is_named_so_it_cannot_pass_as_a_clean_ingest(self):
+        from backend.assets.pipeline import FigureReport
+
+        self.progress.figures_finished(FigureReport(total=4, extracted=1, failed=3))
+        self.assertIn("3 failed", self.progress.summary())
+
+    def test_no_report_means_no_summary_rather_than_a_crash(self):
+        self.assertEqual("", self.progress.summary())
