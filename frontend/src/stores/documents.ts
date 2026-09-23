@@ -6,6 +6,7 @@ import type {
   UploadStep,
   ActiveDeleteJob,
   DeleteStep,
+  DocumentAssetList,
   DocumentChunkList,
 } from '@/types/document';
 
@@ -42,6 +43,11 @@ export const useDocumentStore = defineStore('documents', {
     chunksLoading: false,
     chunksError: '',
     chunkQuery: '',
+    // The image review half of the same panel. Loaded alongside the chunks, because a
+    // figure chunk's text is only judgeable next to the picture it was read from.
+    assetList: null as DocumentAssetList | null,
+    assetsLoading: false,
+    assetsError: '',
   }),
 
   actions: {
@@ -134,7 +140,11 @@ export const useDocumentStore = defineStore('documents', {
       this.chunkQuery = '';
       this.chunkList = null;
       this.chunksError = '';
-      return this.loadChunks();
+      this.assetList = null;
+      this.assetsError = '';
+      // Both halves at once, and independently: a document with no images still shows
+      // its chunks, and an unreadable asset store still leaves the chunks readable.
+      return Promise.all([this.loadChunks(), this.loadAssets()]);
     },
 
     closeInspector() {
@@ -142,6 +152,34 @@ export const useDocumentStore = defineStore('documents', {
       this.chunkList = null;
       this.chunksError = '';
       this.chunkQuery = '';
+      this.assetList = null;
+      this.assetsError = '';
+    },
+
+    /**
+     * Fetch the open document's images and what extraction made of them.
+     *
+     * Not filtered by `chunkQuery`: the query searches chunk TEXT, and an image whose
+     * transcription does not match is still the image an admin may be looking for. A
+     * stale response is dropped for the same reason it is on the chunk side.
+     */
+    async loadAssets() {
+      const filename = this.inspecting;
+      if (!filename) return;
+      this.assetsLoading = true;
+      this.assetsError = '';
+      try {
+        const response = await api.get(`/documents/${encodeURIComponent(filename)}/assets`);
+        if (this.inspecting !== filename) return;
+        this.assetList = response.data;
+      } catch (error: any) {
+        if (this.inspecting !== filename) return;
+        this.assetsError =
+          error.response?.data?.detail || error.message || 'Failed to load images';
+        this.assetList = null;
+      } finally {
+        if (this.inspecting === filename) this.assetsLoading = false;
+      }
     },
 
     /**
