@@ -346,6 +346,10 @@ class DocumentAssetRepository(Protocol):
         """The digests among `digests` that some remaining occurrence still uses."""
         ...
 
+    def clear_needs_review(self, sha256: str) -> int:
+        """Clear the review flag on every occurrence of these bytes; returns how many."""
+        ...
+
     def older_than(self, dossier_version: int, *, after_asset_id: str, limit: int) -> Sequence[AssetDossier]:
         """The next page of occurrences below `dossier_version`, keyset-paginated by id."""
         ...
@@ -380,6 +384,10 @@ class AssetExtractionRepository(Protocol):
         needs_review: bool,
     ) -> None:
         """Insert the extraction, or replace the stored one for the same key."""
+        ...
+
+    def clear_needs_review(self, sha256: str, profile: str, dossier_version: int) -> bool:
+        """Record that a human accepted this extraction. False if there is no such row."""
         ...
 
     def count(self) -> int:

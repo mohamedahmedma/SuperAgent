@@ -183,6 +183,42 @@ export const useDocumentStore = defineStore('documents', {
     },
 
     /**
+     * Record that an admin accepted one image's extraction.
+     *
+     * The accepted row is replaced by what the SERVER returned rather than by a local
+     * flag flip, so the card shows what was actually stored.
+     *
+     * Its twins are cleared too, and that is not an optimisation. The flag lives on the
+     * extraction, which is keyed by DIGEST: one row shared by every occurrence of the
+     * same bytes. The server has therefore just cleared it for all of them, and a page
+     * that updated only the card that was clicked would leave an identical image two
+     * pages down still asking to be reviewed — and a count that disagreed with both.
+     */
+    async markAssetReviewed(assetId: string) {
+      const filename = this.inspecting;
+      try {
+        const { data } = await api.post(
+          `/documents/assets/${encodeURIComponent(assetId)}/reviewed`,
+        );
+        if (this.inspecting !== filename || !this.assetList) return;
+        const assets = this.assetList.assets.map((asset) => {
+          if (asset.asset_id === assetId) return data;
+          return asset.sha256 && asset.sha256 === data.sha256
+            ? { ...asset, needs_review: data.needs_review }
+            : asset;
+        });
+        this.assetList = {
+          ...this.assetList,
+          assets,
+          needs_review_count: assets.filter((asset) => asset.needs_review).length,
+        };
+      } catch (error: any) {
+        this.assetsError =
+          error.response?.data?.detail || error.message || 'Failed to record the review';
+      }
+    },
+
+    /**
      * Fetch the open document's chunks, filtered by `chunkQuery`.
      *
      * The filter is applied on the SERVER. It folds Arabic — diacritics, alef and teh

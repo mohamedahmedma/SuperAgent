@@ -45,6 +45,17 @@
           <i class="fa-solid fa-diagram-project"></i>
           {{ asset.chunk_ids.length }} chunk{{ asset.chunk_ids.length === 1 ? '' : 's' }}
         </button>
+        <button
+          v-if="asset.needs_review"
+          type="button"
+          class="ar-accept"
+          :disabled="accepting"
+          title="Record that you have read this and it is good enough to keep"
+          @click="accept"
+        >
+          <i :class="accepting ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-check'"></i>
+          Accept
+        </button>
         <span class="ar-dims">{{ asset.width }}×{{ asset.height }} · {{ kb }} KB</span>
       </footer>
     </div>
@@ -68,6 +79,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { useAuthStore } from '../../stores/auth';
+import { useDocumentStore } from '../../stores/documents';
 import type { AssetInfo } from '../../types/document';
 import { apiUrl } from '../../utils/api';
 
@@ -75,6 +87,7 @@ const props = defineProps<{ asset: AssetInfo }>();
 const emit = defineEmits<{ (event: 'show-chunks', asset: AssetInfo): void }>();
 
 const authStore = useAuthStore();
+const documentStore = useDocumentStore();
 const source = ref('');
 const failed = ref(false);
 let objectUrl = '';
@@ -91,6 +104,23 @@ const fields = computed(() =>
 
 const openFull = () => {
   if (source.value) window.open(source.value, '_blank', 'noopener');
+};
+
+const accepting = ref(false);
+
+/**
+ * Accepting clears the flag and changes nothing else — not the text, not whether the
+ * asset is indexed. The store replaces this card from what the server returns rather
+ * than flipping a local flag, because the flag is stored per digest and this card may
+ * not be the only one it belongs to.
+ */
+const accept = async () => {
+  accepting.value = true;
+  try {
+    await documentStore.markAssetReviewed(props.asset.asset_id);
+  } finally {
+    accepting.value = false;
+  }
 };
 
 onMounted(async () => {
@@ -300,6 +330,21 @@ onBeforeUnmount(() => {
   cursor: default;
 }
 
+.ar-accept {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 11px;
+  border: 1px solid rgba(67, 211, 158, 0.4);
+  border-radius: 999px;
+  background: rgba(67, 211, 158, 0.15);
+  color: #8ce6c4;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ar-accept:disabled { cursor: default; opacity: 0.6; }
+
 .ar-dims {
   margin-inline-start: auto;
   color: var(--ar-dim);
@@ -323,6 +368,7 @@ html[data-theme='light'] .ar-page { color: #157a57; }
 html[data-theme='light'] .ar-flag { color: #8a5a06; }
 html[data-theme='light'] .ar-error { color: #98243f; }
 html[data-theme='light'] .ar-chunks { color: #0d6b83; }
+html[data-theme='light'] .ar-accept { color: #157a57; }
 
 @media (max-width: 640px) {
   .ar { grid-template-columns: minmax(0, 1fr); }

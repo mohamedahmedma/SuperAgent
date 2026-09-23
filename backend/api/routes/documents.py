@@ -583,6 +583,12 @@ async def upload_document_pair(
     )
 
 
+def _require_assets_enabled_for_review() -> None:
+    """A deployment with assets off has no extractions to accept."""
+    if not get_profile().assets.enabled:
+        raise HTTPException(status_code=404, detail="Asset support is disabled for this deployment.")
+
+
 def _asset_info(dossier, chunk_ids_by_asset) -> AssetInfo:
     """One dossier, flattened for review.
 
@@ -674,6 +680,39 @@ async def list_document_assets(
         total=len(assets),
         needs_review_count=sum(1 for asset in assets if asset.needs_review),
     )
+
+
+@router.post("/documents/assets/{asset_id:path}/reviewed", response_model=AssetInfo)
+async def mark_asset_reviewed(
+    asset_id: str,
+    _: User = Depends(require_admin),
+    services: Services = Depends(get_services),
+):
+    """Record that an admin looked at this extraction and accepted it.
+
+    `needs_review` is raised by the extractor — a vision confidence under the profile's
+    threshold, or a heuristic run that recovered no text — and until now nothing could
+    lower it. A flag that only ever goes up is not a queue; it is a permanent label, and
+    an admin who has checked every image would still see the same count tomorrow.
+
+    This clears the flag and nothing else. It does not re-extract, does not edit the
+    text, and does not change whether the asset is indexed: it records a judgement about
+    an extraction that stays exactly as it is. Correcting a wrong transcription is a
+    different action and is not built.
+
+    Accepting is keyed by DIGEST, because the extraction is: the same bytes have one
+    extraction shared by every occurrence, so a letterhead accepted on page 1 does not
+    ask again on page 40. The response is the asset as it now reads, so the caller
+    updates from what was stored rather than assuming the write did what it asked.
+    """
+    _require_assets_enabled_for_review()
+    try:
+        dossier = services.asset_store.mark_reviewed(asset_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to record the review: {exc}")
+    if dossier is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return _asset_info(dossier, {})
 
 
 @router.get("/documents/pairs", response_model=DocumentPairListResponse)

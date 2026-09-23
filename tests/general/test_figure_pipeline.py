@@ -1135,3 +1135,73 @@ class FigureProgressStepTests(unittest.TestCase):
 
     def test_no_report_means_no_summary_rather_than_a_crash(self):
         self.assertEqual("", self.progress.summary())
+
+
+class MarkReviewedStoreTests(PipelineTestCase):
+    """Accepting an extraction, against a real database.
+
+    The route tests stub the store; these check what the store actually writes — both
+    copies of the flag, and the per-digest reach that the UI models.
+    """
+
+    def _extracted(self, needs_review=True):
+        class Flagging:
+            name = "heuristic"
+
+            def __init__(self, inner):
+                self._inner = inner
+
+            def extract(self, request):
+                payload = self._inner.extract(request)
+                payload.provenance.needs_review = needs_review
+                return payload
+
+        inner = HeuristicExtractor(self.profile.assets.figures)
+        return FigurePipeline(
+            profile=self.profile, store=self.store, blob_store=self.blobs,
+            extractor=Flagging(inner), fallback_extractor=inner,
+        )
+
+    def test_accepting_clears_the_flag_that_is_read_back(self):
+        dossiers, _report = self._extracted().process(
+            [self.image(index=1, text_after="Figure 1")], filename="doc.pdf"
+        )
+        asset_id = dossiers[0].asset_id
+        self.assertTrue(self.store.get(asset_id).extraction.provenance.needs_review)
+
+        returned = self.store.mark_reviewed(asset_id)
+
+        self.assertFalse(returned.extraction.provenance.needs_review)
+        self.assertFalse(self.store.get(asset_id).extraction.provenance.needs_review)
+
+    def test_accepting_reaches_every_occurrence_of_the_same_bytes(self):
+        """The flag is on the EXTRACTION, which is keyed by digest. A letterhead
+        accepted on one page must not ask again on the next."""
+        pipeline = self._extracted()
+        first, _ = pipeline.process([self.image(index=2, page=0)], filename="a.pdf")
+        second, _ = pipeline.process([self.image(index=2, page=0)], filename="b.pdf")
+        self.assertEqual(first[0].sha256, second[0].sha256)
+        self.assertNotEqual(first[0].asset_id, second[0].asset_id)
+
+        self.store.mark_reviewed(first[0].asset_id)
+
+        other = self.store.get(second[0].asset_id)
+        self.assertFalse(other.extraction.provenance.needs_review)
+
+    def test_an_unknown_asset_reports_that_rather_than_claiming_success(self):
+        self.assertIsNone(self.store.mark_reviewed("no-such-asset"))
+
+    def test_accepting_changes_nothing_but_the_flag(self):
+        dossiers, _ = self._extracted().process(
+            [self.image(index=3, text_after="Figure 3: Term dates")], filename="doc.pdf"
+        )
+        before = self.store.get(dossiers[0].asset_id)
+
+        self.store.mark_reviewed(dossiers[0].asset_id)
+        after = self.store.get(dossiers[0].asset_id)
+
+        self.assertEqual(before.extraction.text.caption, after.extraction.text.caption)
+        self.assertEqual(before.extraction.text.transcription,
+                         after.extraction.text.transcription)
+        self.assertEqual(before.status, after.status)
+        self.assertEqual(before.is_indexable, after.is_indexable)

@@ -248,6 +248,32 @@ class AssetStore:
             )
             uow.commit()
 
+    def mark_reviewed(self, asset_id: str) -> Optional[AssetDossier]:
+        """Record that a human accepted this asset's extraction.
+
+        Keyed by the extraction, which is keyed by DIGEST — so accepting one occurrence
+        accepts the same bytes wherever else they appear. That is the intended meaning
+        rather than a shortcut: the extraction being judged is the same extraction, and
+        a logo reviewed on page 1 should not queue itself again on page 40.
+
+        Returns the asset as it now reads, or None if there is no such asset.
+        """
+        dossier = self.get(asset_id)
+        if dossier is None or not dossier.sha256:
+            return None
+        with self._unit_of_work() as uow:
+            # BOTH stores. The extraction is the shared, content-addressed copy; each
+            # occurrence keeps its own dossier JSON and that is what `get` hydrates
+            # from, so clearing only the extraction leaves every read still flagged.
+            uow.asset_extractions.clear_needs_review(
+                dossier.sha256, dossier.profile, dossier.dossier_version
+            )
+            uow.document_assets.clear_needs_review(dossier.sha256)
+            uow.commit()
+        if dossier.extraction is not None:
+            dossier.extraction.provenance.needs_review = False
+        return dossier
+
     def attach_cached_extraction(self, dossier: AssetDossier) -> bool:
         """Populate a pending dossier from the cache. True when the caller can skip
         extraction entirely — the single most valuable branch in the ingest path."""

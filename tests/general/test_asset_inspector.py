@@ -11,7 +11,7 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from backend.api.routes.documents import list_document_assets
+from backend.api.routes.documents import list_document_assets, mark_asset_reviewed
 from backend.assets.dossier import (
     AssetDossier,
     AssetRole,
@@ -213,3 +213,83 @@ class WhoMayReadItTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MarkReviewedTests(unittest.TestCase):
+    """Clearing the flag. Until this existed `needs_review` only ever went up, which
+    makes it a permanent label rather than a queue."""
+
+    def _services(self, dossier_out=None, error=None):
+        calls = []
+
+        class Store:
+            def mark_reviewed(_self, asset_id):
+                calls.append(asset_id)
+                if error:
+                    raise error
+                return dossier_out
+
+        return SimpleNamespace(asset_store=Store()), calls
+
+    def test_it_returns_the_asset_as_it_now_reads(self):
+        accepted = dossier(needs_review=False)
+        services, _calls = self._services(accepted)
+        result = asyncio.run(mark_asset_reviewed("kb.docx#p1#a", _=None, services=services))
+        self.assertFalse(result.needs_review)
+        self.assertEqual("kb.docx#p1#a", result.asset_id)
+
+    def test_an_unknown_asset_is_a_404_rather_than_a_silent_success(self):
+        from fastapi import HTTPException
+
+        services, _calls = self._services(None)
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(mark_asset_reviewed("nope", _=None, services=services))
+        self.assertEqual(404, caught.exception.status_code)
+
+    def test_a_write_failure_is_reported_rather_than_read_as_accepted(self):
+        from fastapi import HTTPException
+
+        services, _calls = self._services(error=RuntimeError("postgres is down"))
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(mark_asset_reviewed("a", _=None, services=services))
+        self.assertEqual(500, caught.exception.status_code)
+
+    def test_the_route_is_admin_only(self):
+        from backend.api.routes import documents
+        from backend.infra.auth import require_admin
+
+        route = next(
+            r for r in documents.router.routes
+            if getattr(r, "path", "") == "/documents/assets/{asset_id:path}/reviewed"
+        )
+        guards = [dependency.call for dependency in route.dependant.dependencies]
+        self.assertIn(require_admin, guards)
+
+
+class AssetIdRoutingTests(unittest.TestCase):
+    """An asset id embeds a filename and a '#', and `:path` is greedy. The sibling
+    media routes already carry a comment about exactly this hazard."""
+
+    def _match(self, path):
+        from backend.api.routes import documents
+
+        route = next(
+            r for r in documents.router.routes
+            if getattr(r, "path", "") == "/documents/assets/{asset_id:path}/reviewed"
+        )
+        scope = {"type": "http", "method": "POST", "path": path, "headers": []}
+        _match, child = route.matches(scope)
+        return child.get("path_params", {}).get("asset_id")
+
+    def test_a_plain_id_is_captured(self):
+        self.assertEqual("abc", self._match("/documents/assets/abc/reviewed"))
+
+    def test_an_id_holding_slashes_is_captured_whole(self):
+        """`:path` is greedy, and must still stop at the suffix rather than eat it."""
+        self.assertEqual("kb/fees.docx#p1#a",
+                         self._match("/documents/assets/kb/fees.docx#p1#a/reviewed"))
+
+    def test_the_suffix_is_never_swallowed_into_the_id(self):
+        captured = self._match("/documents/assets/a/b/reviewed")
+        self.assertEqual("a/b", captured)
+        self.assertNotIn("reviewed", captured)
