@@ -7,6 +7,7 @@ still points at the image that produced it.
 import base64
 import io
 import random
+import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -27,6 +28,7 @@ from backend.assets.pipeline import FigurePipeline, ImageInput
 from backend.assets.store import AssetStore
 from backend.assets.triage import ImageFacts, count_digest_pages, probe_dimensions, triage_image
 from backend.indexing.asset_enrichment import enrich_image_blocks
+from backend.indexing.ingest_progress import IngestProgress
 from backend.profiles.registry import load_profile
 from tests.general.postgres_support import postgres_schema
 
@@ -725,8 +727,9 @@ class ChunkIntegrationTests(PipelineTestCase):
         ]
         loader = DocumentLoader()
         with patch.object(DocumentLoader, "_enrich_assets", staticmethod(
-            lambda blocks, filename, file_path: enrich_image_blocks(
-                blocks, filename=filename, file_path=file_path, pipeline=self.pipeline()
+            lambda blocks, filename, file_path, progress=None: enrich_image_blocks(
+                blocks, filename=filename, file_path=file_path, pipeline=self.pipeline(),
+                progress=progress,
             )[0]
         )):
             return loader._load_blocks_with_layout(blocks, "/data/doc.pdf", "doc.pdf", "PDF")
@@ -828,3 +831,377 @@ class HtmlImageParsingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _TrackingExtractor:
+    """A real extractor that records how many calls were in flight at once.
+
+    Wraps `HeuristicExtractor` rather than inventing a payload, so what the pipeline
+    stores is exactly what it stores in every other test. `name` is deliberately a
+    model-free one: `_cache_is_weaker` then leaves the cache alone, keeping these tests
+    about concurrency and nothing else.
+    """
+
+    name = "heuristic"
+
+    def __init__(self, inner, parties=0, timeout=10.0):
+        self._inner = inner
+        self._lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.digests = []
+        self.paired = False
+        self._barrier = threading.Barrier(parties, timeout=timeout) if parties else None
+
+    def extract(self, request):
+        with self._lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.digests.append(compute_sha256(request.data))
+        try:
+            if self._barrier is not None:
+                # Every party has to arrive before any may leave. Serial extraction can
+                # never satisfy it, so `paired` is proof of genuine overlap rather than
+                # of a sleep that happened to interleave.
+                try:
+                    self._barrier.wait()
+                    self.paired = True
+                except threading.BrokenBarrierError:
+                    pass
+            return self._inner.extract(request)
+        finally:
+            with self._lock:
+                self.active -= 1
+
+
+class ExtractionConcurrencyTests(PipelineTestCase):
+    """Item 29: a document's images are extracted together, not one at a time."""
+
+    def _profile(self, workers):
+        assets = self.profile.assets.model_copy(update={"extraction_workers": workers})
+        return self.profile.model_copy(update={"assets": assets})
+
+    def _pipeline(self, workers, parties=0):
+        tracker = _TrackingExtractor(
+            HeuristicExtractor(self.profile.assets.figures), parties=parties
+        )
+        pipeline = FigurePipeline(
+            profile=self._profile(workers),
+            store=self.store,
+            blob_store=self.blobs,
+            extractor=tracker,
+            fallback_extractor=HeuristicExtractor(self.profile.assets.figures),
+        )
+        return pipeline, tracker
+
+    def _images(self, count, start=0):
+        return [self.image(index=i, page=i) for i in range(start, start + count)]
+
+    def test_images_are_extracted_at_the_same_time(self):
+        """The finding itself: two images were never in flight together."""
+        pipeline, tracker = self._pipeline(workers=4, parties=4)
+        dossiers, report = pipeline.process(self._images(4), filename="doc.pdf")
+
+        self.assertTrue(tracker.paired, "four extractions never overlapped")
+        self.assertEqual(4, tracker.max_active)
+        self.assertEqual(4, report.extracted)
+        self.assertEqual(4, len(dossiers))
+
+    def test_one_worker_keeps_the_serial_path(self):
+        """The off switch has to be a real off switch: no pool, no overlap."""
+        pipeline, tracker = self._pipeline(workers=1, parties=0)
+        _dossiers, report = pipeline.process(self._images(4), filename="doc.pdf")
+
+        self.assertEqual(1, tracker.max_active)
+        self.assertEqual(4, report.extracted)
+
+    def test_concurrency_is_bounded_by_the_configured_worker_count(self):
+        """Unbounded fan-out would be rate-limited into being slower than serial."""
+        pipeline, tracker = self._pipeline(workers=2, parties=2)
+        pipeline.process(self._images(8), filename="doc.pdf")
+
+        self.assertTrue(tracker.paired)
+        self.assertLessEqual(tracker.max_active, 2)
+
+    def test_results_stay_in_the_order_the_images_arrived(self):
+        """Completion order is not input order, and the caller zips dossiers back onto
+        the blocks they came from."""
+        pipeline, _tracker = self._pipeline(workers=4)
+        images = self._images(6)
+        dossiers, _report = pipeline.process(images, filename="doc.pdf")
+
+        self.assertEqual(
+            [compute_sha256(image.data) for image in images],
+            [dossier.sha256 for dossier in dossiers],
+        )
+
+    def test_the_same_image_twice_is_still_extracted_once(self):
+        """What the serial loop got for free by writing its own result into the cache as
+        it went. Two copies in flight together would both miss it."""
+        pipeline, tracker = self._pipeline(workers=4)
+        images = self._images(4, start=1)
+        # Same bytes as the first image, a page later: one digest, two occurrences.
+        images.insert(1, self.image(index=1, page=99))
+
+        _dossiers, report = pipeline.process(images, filename="doc.pdf")
+
+        self.assertEqual(1, len([d for d in tracker.digests if d == tracker.digests[0]]))
+        self.assertEqual(5, len(set(d.asset_id for d in _dossiers)))
+        self.assertEqual(4, report.extracted)
+        self.assertEqual(1, report.cached)
+
+    def test_one_failing_extraction_does_not_cost_the_others_theirs(self):
+        class Exploding(_TrackingExtractor):
+            def extract(self, request):
+                if compute_sha256(request.data) == self.doomed:
+                    raise RuntimeError("provider said no")
+                return super().extract(request)
+
+        inner = HeuristicExtractor(self.profile.assets.figures)
+        tracker = Exploding(inner)
+        images = self._images(4)
+        tracker.doomed = compute_sha256(images[2].data)
+        pipeline = FigurePipeline(
+            profile=self._profile(4), store=self.store, blob_store=self.blobs,
+            extractor=tracker, fallback_extractor=inner,
+        )
+
+        dossiers, report = pipeline.process(images, filename="doc.pdf")
+
+        self.assertEqual(4, len(dossiers))
+        # The failure falls back to the heuristic extractor rather than losing the asset,
+        # which is the behaviour the serial path already had.
+        self.assertEqual(4, report.extracted)
+        self.assertEqual(0, report.failed)
+
+    def test_a_triaged_out_image_never_reaches_the_extractor(self):
+        pipeline, tracker = self._pipeline(workers=4)
+        images = self._images(2) + [self.image(index=9, page=9, width=10, height=10)]
+
+        _dossiers, report = pipeline.process(images, filename="doc.pdf")
+
+        self.assertEqual(1, report.dropped)
+        self.assertEqual(2, len(tracker.digests))
+
+    def test_a_cached_extraction_never_reaches_the_extractor(self):
+        first, tracker_one = self._pipeline(workers=4)
+        images = self._images(3)
+        first.process(images, filename="doc.pdf")
+        self.assertEqual(3, len(tracker_one.digests))
+
+        second, tracker_two = self._pipeline(workers=4)
+        _dossiers, report = second.process(images, filename="again.pdf")
+
+        self.assertEqual([], tracker_two.digests)
+        self.assertEqual(3, report.cached)
+        self.assertEqual(0, report.extracted)
+
+
+class _RecordingProgress(IngestProgress):
+    def __init__(self):
+        self.updates = []
+        self.report = None
+
+    def figures_progress(self, done, total):
+        self.updates.append((done, total))
+
+    def figures_finished(self, report):
+        self.report = report
+
+
+class ExtractionProgressTests(PipelineTestCase):
+    """Item 30: extraction says how far it has got, and what it produced."""
+
+    def _pipeline(self, workers=4):
+        inner = HeuristicExtractor(self.profile.assets.figures)
+        assets = self.profile.assets.model_copy(update={"extraction_workers": workers})
+        return FigurePipeline(
+            profile=self.profile.model_copy(update={"assets": assets}),
+            store=self.store, blob_store=self.blobs,
+            extractor=inner, fallback_extractor=inner,
+        )
+
+    def _images(self, count):
+        return [self.image(index=i, page=i) for i in range(count)]
+
+    def test_progress_is_reported_as_each_image_lands(self):
+        progress = _RecordingProgress()
+        self._pipeline().process(self._images(4), filename="doc.pdf", progress=progress)
+
+        # The count is news before the first extraction finishes: it is what turns a
+        # frozen bar into "this document has four images".
+        self.assertEqual((0, 4), progress.updates[0])
+        self.assertEqual((4, 4), progress.updates[-1])
+        self.assertEqual([1, 2, 3, 4], sorted(done for done, _ in progress.updates[1:]))
+
+    def test_the_outcome_is_reported_once_when_extraction_is_over(self):
+        progress = _RecordingProgress()
+        _dossiers, report = self._pipeline().process(
+            self._images(3), filename="doc.pdf", progress=progress
+        )
+        self.assertIs(report, progress.report)
+        self.assertEqual(3, progress.report.extracted)
+        self.assertEqual(3, progress.report.total)
+
+    def test_a_document_with_no_images_still_reports_its_outcome(self):
+        progress = _RecordingProgress()
+        self._pipeline().process([], filename="doc.pdf", progress=progress)
+        self.assertEqual([], progress.updates)
+
+    def test_a_sink_that_raises_cannot_fail_the_ingest(self):
+        """The progress bar describes the document; it must never cost it."""
+
+        class Broken(IngestProgress):
+            def figures_progress(self, done, total):
+                raise RuntimeError("progress store is down")
+
+            def figures_finished(self, report):
+                raise RuntimeError("still down")
+
+        dossiers, report = self._pipeline().process(
+            self._images(3), filename="doc.pdf", progress=Broken()
+        )
+        self.assertEqual(3, len(dossiers))
+        self.assertEqual(3, report.extracted)
+
+    def test_no_sink_is_the_normal_case_and_changes_nothing(self):
+        dossiers, report = self._pipeline().process(self._images(2), filename="doc.pdf")
+        self.assertEqual(2, len(dossiers))
+        self.assertEqual(2, report.extracted)
+
+
+class FigureProgressStepTests(unittest.TestCase):
+    """What the admin actually sees, in the step the upload job already has."""
+
+    def setUp(self):
+        from backend.api.routes.documents import _FigureProgress
+
+        self.calls = []
+
+        self.sub_args = []
+
+        class Jobs:
+            def update_step(_self, job_id, key, percent, status, message, **kwargs):
+                self.calls.append((key, percent, status, message))
+                self.sub_args.append(kwargs)
+
+        self.progress = _FigureProgress(Jobs(), "job-1")
+
+    def test_progress_drives_a_nested_bar_rather_than_a_number_in_prose(self):
+        """The sub-bar the UI draws: a percentage buried in `message` cannot be drawn,
+        and a step of its own would finish while `parse` was still running."""
+        self.progress.figures_progress(3, 12)
+
+        _key, _percent, _status, _message = self.calls[0]
+        self.assertEqual(
+            {"sub_label": "Extracting images", "sub_done": 3, "sub_total": 12},
+            self.sub_args[0],
+        )
+
+    def test_progress_moves_the_parse_step_it_belongs_to(self):
+        self.progress.figures_progress(0, 4)
+        self.progress.figures_progress(2, 4)
+        self.progress.figures_progress(4, 4)
+
+        keys = {key for key, _p, _s, _m in self.calls}
+        self.assertEqual({"parse"}, keys, "extraction is part of parsing, not a new step")
+        self.assertEqual([5, 45, 85], [percent for _k, percent, _s, _m in self.calls])
+        self.assertIn("2 of 4", self.calls[1][3])
+
+    def test_a_document_with_no_images_adds_nothing_to_the_message(self):
+        from backend.assets.pipeline import FigureReport
+
+        self.progress.figures_finished(FigureReport(total=0))
+        self.assertEqual("", self.progress.summary())
+
+    def test_the_summary_names_every_outcome_including_none_failed(self):
+        from backend.assets.pipeline import FigureReport
+
+        self.progress.figures_finished(
+            FigureReport(total=12, extracted=9, cached=2, dropped=1, failed=0)
+        )
+        summary = self.progress.summary()
+        self.assertIn("12", summary)
+        self.assertIn("9 extracted", summary)
+        self.assertIn("2 already known", summary)
+        self.assertIn("1 skipped", summary)
+        self.assertIn("0 failed", summary)
+
+    def test_a_failure_is_named_so_it_cannot_pass_as_a_clean_ingest(self):
+        from backend.assets.pipeline import FigureReport
+
+        self.progress.figures_finished(FigureReport(total=4, extracted=1, failed=3))
+        self.assertIn("3 failed", self.progress.summary())
+
+    def test_no_report_means_no_summary_rather_than_a_crash(self):
+        self.assertEqual("", self.progress.summary())
+
+
+class MarkReviewedStoreTests(PipelineTestCase):
+    """Accepting an extraction, against a real database.
+
+    The route tests stub the store; these check what the store actually writes — both
+    copies of the flag, and the per-digest reach that the UI models.
+    """
+
+    def _extracted(self, needs_review=True):
+        class Flagging:
+            name = "heuristic"
+
+            def __init__(self, inner):
+                self._inner = inner
+
+            def extract(self, request):
+                payload = self._inner.extract(request)
+                payload.provenance.needs_review = needs_review
+                return payload
+
+        inner = HeuristicExtractor(self.profile.assets.figures)
+        return FigurePipeline(
+            profile=self.profile, store=self.store, blob_store=self.blobs,
+            extractor=Flagging(inner), fallback_extractor=inner,
+        )
+
+    def test_accepting_clears_the_flag_that_is_read_back(self):
+        dossiers, _report = self._extracted().process(
+            [self.image(index=1, text_after="Figure 1")], filename="doc.pdf"
+        )
+        asset_id = dossiers[0].asset_id
+        self.assertTrue(self.store.get(asset_id).extraction.provenance.needs_review)
+
+        returned = self.store.mark_reviewed(asset_id)
+
+        self.assertFalse(returned.extraction.provenance.needs_review)
+        self.assertFalse(self.store.get(asset_id).extraction.provenance.needs_review)
+
+    def test_accepting_reaches_every_occurrence_of_the_same_bytes(self):
+        """The flag is on the EXTRACTION, which is keyed by digest. A letterhead
+        accepted on one page must not ask again on the next."""
+        pipeline = self._extracted()
+        first, _ = pipeline.process([self.image(index=2, page=0)], filename="a.pdf")
+        second, _ = pipeline.process([self.image(index=2, page=0)], filename="b.pdf")
+        self.assertEqual(first[0].sha256, second[0].sha256)
+        self.assertNotEqual(first[0].asset_id, second[0].asset_id)
+
+        self.store.mark_reviewed(first[0].asset_id)
+
+        other = self.store.get(second[0].asset_id)
+        self.assertFalse(other.extraction.provenance.needs_review)
+
+    def test_an_unknown_asset_reports_that_rather_than_claiming_success(self):
+        self.assertIsNone(self.store.mark_reviewed("no-such-asset"))
+
+    def test_accepting_changes_nothing_but_the_flag(self):
+        dossiers, _ = self._extracted().process(
+            [self.image(index=3, text_after="Figure 3: Term dates")], filename="doc.pdf"
+        )
+        before = self.store.get(dossiers[0].asset_id)
+
+        self.store.mark_reviewed(dossiers[0].asset_id)
+        after = self.store.get(dossiers[0].asset_id)
+
+        self.assertEqual(before.extraction.text.caption, after.extraction.text.caption)
+        self.assertEqual(before.extraction.text.transcription,
+                         after.extraction.text.transcription)
+        self.assertEqual(before.status, after.status)
+        self.assertEqual(before.is_indexable, after.is_indexable)

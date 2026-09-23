@@ -16,6 +16,7 @@ backfill queue rather than silently absent.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -33,6 +34,11 @@ from backend.assets.dossier import (
     SourceRef,
     build_asset_id,
     compute_sha256,
+)
+from backend.indexing.ingest_progress import (
+    IngestProgress,
+    report_finished,
+    report_progress,
 )
 from backend.assets.attributes import AttributeSchema, build_attribute_schema
 from backend.assets.entity_extractor import build_entity_extractor, resolve_role
@@ -66,6 +72,16 @@ class ImageInput:
     # Set by a caller that already knows what this image is (a direct product upload).
     # Overrides the profile's role_strategy.
     declared_role: Optional[AssetRole] = None
+
+
+@dataclass
+class _PlannedExtraction:
+    """One model call owed: which bytes, and what to ask of them."""
+
+    digest: str
+    image: "ImageInput"
+    tier: AssetTier
+    role: AssetRole
 
 
 @dataclass
@@ -237,6 +253,7 @@ class FigurePipeline:
         images: List[ImageInput],
         filename: str,
         file_path: str = "",
+        progress: Optional["IngestProgress"] = None,
     ) -> tuple[List[AssetDossier], FigureReport]:
         report = FigureReport(total=len(images))
         if not images:
@@ -268,18 +285,149 @@ class FigurePipeline:
             digests, profile_name, DOSSIER_VERSION
         )
 
+        # Extraction is one network round trip per image, and no image's result informs
+        # another's, so they are run together instead of in series. Only the model calls
+        # move: every counter, cache write and store write still happens in the loop
+        # below, on one thread, so none of them needs a lock.
+        extracted_by_digest = self._extract_many(
+            images, digests, filename, assets_config, pages_by_digest, total_pages,
+            cached_by_digest, progress,
+        )
+
         dossiers: List[AssetDossier] = []
         for image, digest in zip(images, digests):
             dossier = self._process_one(
                 image, digest, filename, file_path, profile_name,
                 assets_config, pages_by_digest, total_pages, report,
-                cached_by_digest,
+                cached_by_digest, extracted_by_digest,
             )
             dossiers.append(dossier)
 
         self.store.record_many(dossiers)
         report.indexable = sum(1 for dossier in dossiers if dossier.is_indexable)
+        report_finished(progress, report)
         return dossiers, report
+
+    # -- concurrent extraction --------------------------------------------------
+
+    def _plan_extractions(
+        self,
+        images: List[ImageInput],
+        digests: List[str],
+        assets_config,
+        pages_by_digest: Dict[str, int],
+        total_pages: int,
+        cached_by_digest: Dict[str, ExtractionPayload],
+    ) -> List["_PlannedExtraction"]:
+        """Which extractions this document still owes a model call for.
+
+        Triage and the cache decide, exactly as they do in `_process_one` — this asks the
+        same questions ahead of time so the answers can be fetched together. Recomputing
+        triage costs a header probe per image against a network round trip per image, so
+        the duplication is not worth removing.
+
+        ONE plan entry per digest, decided by the image's FIRST occurrence. That is what
+        the serial loop did implicitly: the first copy extracted and wrote the payload
+        into `cached_by_digest`, and every later copy read it. Deciding per occurrence
+        instead would let a repeat of the same bytes queue a second call for them.
+        """
+        plan: List[_PlannedExtraction] = []
+        seen: set[str] = set()
+        for image, digest in zip(images, digests):
+            if digest in seen:
+                continue
+            seen.add(digest)
+
+            dimensions = probe_dimensions(image.data) or (0, 0)
+            facts = ImageFacts(
+                sha256=digest,
+                byte_size=len(image.data),
+                width=dimensions[0],
+                height=dimensions[1],
+                pages_with_digest=pages_by_digest.get(digest, 1),
+                total_pages=total_pages,
+                declared_decorative=image.declared_decorative,
+                has_alt_text=bool(image.alt_text.strip()),
+            )
+            verdict = triage_image(facts, assets_config.triage)
+            if verdict.is_dropped:
+                continue
+
+            role = resolve_role(assets_config.entities.role_strategy, image.declared_role)
+            cached = cached_by_digest.get(digest)
+            if cached is not None and not self._cache_is_weaker(cached, role, verdict.tier):
+                continue
+
+            plan.append(_PlannedExtraction(
+                digest=digest, image=image, tier=verdict.tier, role=role
+            ))
+        return plan
+
+    def _extract_many(
+        self,
+        images: List[ImageInput],
+        digests: List[str],
+        filename: str,
+        assets_config,
+        pages_by_digest: Dict[str, int],
+        total_pages: int,
+        cached_by_digest: Dict[str, ExtractionPayload],
+        progress: Optional["IngestProgress"] = None,
+    ) -> Dict[str, Optional[ExtractionPayload]]:
+        """Every extraction this document owes, `extraction_workers` at a time.
+
+        Returns digest → payload, with None where the extraction failed, for the loop in
+        `process` to consume. An empty result is not a failure: it means there was nothing
+        to do, or that concurrency is off, and the loop then extracts inline as before.
+
+        The pool is sized by the VISION PROVIDER's concurrency allowance rather than by
+        this machine — these threads spend their lives blocked on a socket. Past that
+        allowance the calls come back 429 and `call_with_rate_limit_retry` turns them into
+        waiting again, so a number larger than the provider grants buys nothing.
+        """
+        workers = max(int(getattr(assets_config, "extraction_workers", 1) or 1), 1)
+        if workers == 1:
+            return {}
+
+        plan = self._plan_extractions(
+            images, digests, assets_config, pages_by_digest, total_pages, cached_by_digest
+        )
+        if not plan:
+            return {}
+
+        # Every extractor is built on first use. Building one inside the pool would race
+        # several threads to build the same one, so they are all warmed here — including
+        # the fallback, which only the failure path reaches and would therefore be built
+        # for the first time exactly when several calls are failing at once.
+        for role in {item.role for item in plan}:
+            self._extractor_for(role)
+        _ = self.fallback
+
+        results: Dict[str, Optional[ExtractionPayload]] = {}
+        logger.info(
+            "Extracting %d image(s) for %s, %d at a time", len(plan), filename, workers
+        )
+        report_progress(progress, 0, len(plan))
+        with ThreadPoolExecutor(
+            max_workers=min(workers, len(plan)), thread_name_prefix="figure-extract"
+        ) as pool:
+            futures = {
+                pool.submit(self._extract, item.image, item.tier, filename, item.role): item.digest
+                for item in plan
+            }
+            for future in as_completed(futures):
+                digest = futures[future]
+                try:
+                    results[digest] = future.result()
+                except Exception:
+                    # `_extract` catches its own failures and falls back; this is the
+                    # belt to that brace, so one thread cannot cost the others theirs.
+                    logger.exception(
+                        "Extraction thread failed for %s in %s", digest[:12], filename
+                    )
+                    results[digest] = None
+                report_progress(progress, len(results), len(plan))
+        return results
 
     # -- per-image --------------------------------------------------------------
 
@@ -295,6 +443,7 @@ class FigurePipeline:
         total_pages: int,
         report: FigureReport,
         cached_by_digest: Optional[Dict[str, ExtractionPayload]] = None,
+        extracted_by_digest: Optional[Dict[str, Optional[ExtractionPayload]]] = None,
     ) -> AssetDossier:
         asset_id = build_asset_id(filename, image.page_number, image.data)
 
@@ -387,7 +536,14 @@ class FigurePipeline:
             self._index_entity(dossier, profile_name, report)
             return dossier
 
-        payload = self._extract(image, verdict.tier, filename, role)
+        # Already run by `_extract_many`, unless concurrency is off or this image was
+        # not in its plan — then it is extracted here exactly as it always was. Membership
+        # is the test, not truthiness: a planned extraction that FAILED is recorded as
+        # None and must not be retried serially on top of its own failure.
+        if extracted_by_digest is not None and digest in extracted_by_digest:
+            payload = extracted_by_digest[digest]
+        else:
+            payload = self._extract(image, verdict.tier, filename, role)
         if payload is None:
             dossier.status = ExtractionStatus.FAILED
             report.failed += 1

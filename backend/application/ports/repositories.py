@@ -346,6 +346,10 @@ class DocumentAssetRepository(Protocol):
         """The digests among `digests` that some remaining occurrence still uses."""
         ...
 
+    def clear_needs_review(self, sha256: str) -> int:
+        """Clear the review flag on every occurrence of these bytes; returns how many."""
+        ...
+
     def older_than(self, dossier_version: int, *, after_asset_id: str, limit: int) -> Sequence[AssetDossier]:
         """The next page of occurrences below `dossier_version`, keyset-paginated by id."""
         ...
@@ -380,6 +384,10 @@ class AssetExtractionRepository(Protocol):
         needs_review: bool,
     ) -> None:
         """Insert the extraction, or replace the stored one for the same key."""
+        ...
+
+    def clear_needs_review(self, sha256: str, profile: str, dossier_version: int) -> bool:
+        """Record that a human accepted this extraction. False if there is no such row."""
         ...
 
     def count(self) -> int:
@@ -450,6 +458,15 @@ class JobStep:
     percent: int = 0
     status: str = "pending"
     message: str = ""
+
+    #: A sub-stage of this step, drawn as a nested bar beneath it. Figure extraction is
+    #: the first: it is minutes of work INSIDE `parse`, so it cannot be a step of its own
+    #: without claiming to finish while its parent is still running, and a percentage
+    #: buried in `message` is a number the UI cannot draw. `sub_total` of 0 means there
+    #: is no sub-stage and nothing is drawn.
+    sub_label: str = ""
+    sub_done: int = 0
+    sub_total: int = 0
 
 
 @dataclass(frozen=True, slots=True)

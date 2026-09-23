@@ -118,6 +118,42 @@ class SqlAlchemyDocumentAssetRepository:
             )
         )
 
+    def clear_needs_review(self, sha256: str) -> int:
+        """Clear the review flag on EVERY occurrence of these bytes. Returns how many.
+
+        An occurrence keeps its own copy of the whole dossier — the JSON is the source
+        of truth that `get` hydrates from, and the scalar columns beside it are the
+        duplicate. Clearing the flag on the shared extraction alone is therefore
+        invisible: the extraction is keyed by digest and the read path never consults
+        it, so the asset comes back still asking to be reviewed.
+
+        By digest rather than by asset id, because the flag belongs to the extraction
+        and one extraction is shared by every occurrence of the same bytes. Clearing
+        one and leaving its twins is a state the storage cannot mean.
+        """
+        if not sha256:
+            return 0
+        # Imported here rather than at the top, for the reason the module docstring
+        # gives: opening a unit of work must not load the assets package.
+        from backend.assets.dossier import AssetDossier
+
+        rows = list(self._session.scalars(
+            select(DocumentAsset).where(DocumentAsset.sha256 == sha256)
+        ))
+        now = datetime.now(UTC)
+        changed = 0
+        for row in rows:
+            # The column is JSONB, so this is a dict rather than the text the read path
+            # casts it to. Written back the same way `_occurrence_values` writes it.
+            dossier = AssetDossier.model_validate(row.dossier)
+            if dossier.extraction is None or not dossier.extraction.provenance.needs_review:
+                continue
+            dossier.extraction.provenance.needs_review = False
+            row.dossier = dossier.model_dump(mode="json")
+            row.updated_at = now
+            changed += 1
+        return changed
+
     def older_than(self, dossier_version: int, *, after_asset_id: str, limit: int) -> Sequence[AssetDossier]:
         payloads = self._session.scalars(
             select(_DOSSIER_JSON)
@@ -192,6 +228,31 @@ class SqlAlchemyAssetExtractionRepository:
                 },
             )
         )
+
+    def clear_needs_review(self, sha256: str, profile: str, dossier_version: int) -> bool:
+        """Mark one extraction as reviewed. False when there was no such row.
+
+        BOTH copies are cleared. `needs_review` is a scalar column so it can be filtered
+        and joined on, and it is also inside `payload`, which the dossier is rebuilt
+        from — updating one would leave the API reading a flag the queue no longer
+        agrees with. The comment on `DocumentAsset` calls the columns a duplicate of the
+        JSON, and a duplicate only stays true if both are written together.
+        """
+        row = self._session.get(AssetExtraction, (sha256, profile, dossier_version))
+        if row is None:
+            return False
+
+        payload = dict(row.payload or {})
+        provenance = dict(payload.get("provenance") or {})
+        provenance["needs_review"] = False
+        payload["provenance"] = provenance
+
+        row.payload = payload
+        row.needs_review = False
+        row.updated_at = datetime.now(UTC)
+        # JSONB is mutable-tracked by identity, and the dict above is a new object, so
+        # the assignment is what marks it dirty. Reassigning is deliberate, not a style.
+        return True
 
     def count(self) -> int:
         return int(self._session.scalar(select(func.count()).select_from(AssetExtraction)) or 0)

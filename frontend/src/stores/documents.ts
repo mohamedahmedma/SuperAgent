@@ -6,6 +6,7 @@ import type {
   UploadStep,
   ActiveDeleteJob,
   DeleteStep,
+  DocumentAssetList,
   DocumentChunkList,
 } from '@/types/document';
 
@@ -42,6 +43,11 @@ export const useDocumentStore = defineStore('documents', {
     chunksLoading: false,
     chunksError: '',
     chunkQuery: '',
+    // The image review half of the same panel. Loaded alongside the chunks, because a
+    // figure chunk's text is only judgeable next to the picture it was read from.
+    assetList: null as DocumentAssetList | null,
+    assetsLoading: false,
+    assetsError: '',
   }),
 
   actions: {
@@ -70,6 +76,8 @@ export const useDocumentStore = defineStore('documents', {
       }
       const idx = this.uploadSteps.findIndex((step) => step.key === key);
       if (idx === -1) return;
+      // Spread first: the sub-bar is driven by the job poll, and a local step update
+      // (the browser's own upload progress) must leave it where the server put it.
       this.uploadSteps[idx] = {
         ...this.uploadSteps[idx],
         percent: Math.max(0, Math.min(100, Math.round(percent || 0))),
@@ -132,7 +140,11 @@ export const useDocumentStore = defineStore('documents', {
       this.chunkQuery = '';
       this.chunkList = null;
       this.chunksError = '';
-      return this.loadChunks();
+      this.assetList = null;
+      this.assetsError = '';
+      // Both halves at once, and independently: a document with no images still shows
+      // its chunks, and an unreadable asset store still leaves the chunks readable.
+      return Promise.all([this.loadChunks(), this.loadAssets()]);
     },
 
     closeInspector() {
@@ -140,6 +152,70 @@ export const useDocumentStore = defineStore('documents', {
       this.chunkList = null;
       this.chunksError = '';
       this.chunkQuery = '';
+      this.assetList = null;
+      this.assetsError = '';
+    },
+
+    /**
+     * Fetch the open document's images and what extraction made of them.
+     *
+     * Not filtered by `chunkQuery`: the query searches chunk TEXT, and an image whose
+     * transcription does not match is still the image an admin may be looking for. A
+     * stale response is dropped for the same reason it is on the chunk side.
+     */
+    async loadAssets() {
+      const filename = this.inspecting;
+      if (!filename) return;
+      this.assetsLoading = true;
+      this.assetsError = '';
+      try {
+        const response = await api.get(`/documents/${encodeURIComponent(filename)}/assets`);
+        if (this.inspecting !== filename) return;
+        this.assetList = response.data;
+      } catch (error: any) {
+        if (this.inspecting !== filename) return;
+        this.assetsError =
+          error.response?.data?.detail || error.message || 'Failed to load images';
+        this.assetList = null;
+      } finally {
+        if (this.inspecting === filename) this.assetsLoading = false;
+      }
+    },
+
+    /**
+     * Record that an admin accepted one image's extraction.
+     *
+     * The accepted row is replaced by what the SERVER returned rather than by a local
+     * flag flip, so the card shows what was actually stored.
+     *
+     * Its twins are cleared too, and that is not an optimisation. The flag lives on the
+     * extraction, which is keyed by DIGEST: one row shared by every occurrence of the
+     * same bytes. The server has therefore just cleared it for all of them, and a page
+     * that updated only the card that was clicked would leave an identical image two
+     * pages down still asking to be reviewed — and a count that disagreed with both.
+     */
+    async markAssetReviewed(assetId: string) {
+      const filename = this.inspecting;
+      try {
+        const { data } = await api.post(
+          `/documents/assets/${encodeURIComponent(assetId)}/reviewed`,
+        );
+        if (this.inspecting !== filename || !this.assetList) return;
+        const assets = this.assetList.assets.map((asset) => {
+          if (asset.asset_id === assetId) return data;
+          return asset.sha256 && asset.sha256 === data.sha256
+            ? { ...asset, needs_review: data.needs_review }
+            : asset;
+        });
+        this.assetList = {
+          ...this.assetList,
+          assets,
+          needs_review_count: assets.filter((asset) => asset.needs_review).length,
+        };
+      } catch (error: any) {
+        this.assetsError =
+          error.response?.data?.detail || error.message || 'Failed to record the review';
+      }
     },
 
     /**
@@ -295,6 +371,9 @@ export const useDocumentStore = defineStore('documents', {
           percent: step.percent,
           status: step.status,
           message: step.message || '',
+          subLabel: step.sub_label || '',
+          subDone: step.sub_done || 0,
+          subTotal: step.sub_total || 0,
         }));
       }
       if (job.status === 'completed') {

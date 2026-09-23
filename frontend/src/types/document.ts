@@ -67,12 +67,65 @@ export interface ChunkNode extends ChunkInfo {
   children: ChunkNode[];
 }
 
+/**
+ * One image of a document and what extraction made of it.
+ *
+ * Mirrors `backend/schemas/documents.py:AssetInfo`. Deliberately NOT `AssetReference`,
+ * which is the public contract a chat client consumes: this carries the model, its
+ * confidence and the error behind a failure, which is what an admin needs to judge an
+ * extraction and what a parent should never be shown.
+ */
+export interface AssetInfo {
+  asset_id: string;
+  sha256: string;
+  page_number: number;
+  status: string;
+  role: string;
+  tier: string;
+  /** Whether this image produces a retrievable chunk at all. */
+  indexable: boolean;
+  caption: string;
+  description: string;
+  transcription: string;
+  tags: string[];
+  model_used: string;
+  confidence: number;
+  /** Set by the extractor on every run — a low vision confidence, or no text at all. */
+  needs_review: boolean;
+  error: string;
+  width: number;
+  height: number;
+  byte_size: number;
+  content_type: string;
+  /** Authenticated GET returns the bytes, so the reviewer can compare what was read
+   *  against the picture it claims to describe. */
+  url: string;
+  /** The chunks this image produced. The link is stored the other way round and
+   *  inverted by the server. */
+  chunk_ids: string[];
+}
+
+export interface DocumentAssetList {
+  filename: string;
+  assets: AssetInfo[];
+  total: number;
+  needs_review_count: number;
+}
+
 export interface UploadStep {
   key: string;
   label: string;
   percent: number;
   status: 'pending' | 'running' | 'completed' | 'failed';
   message: string;
+  /**
+   * A nested bar inside this step. Figure extraction reports here: it runs inside the
+   * `parse` step, so it cannot be a step of its own without appearing to finish while
+   * its parent is still going. `subTotal` of 0 means there is nothing to draw.
+   */
+  subLabel?: string;
+  subDone?: number;
+  subTotal?: number;
 }
 
 export interface UploadJob {

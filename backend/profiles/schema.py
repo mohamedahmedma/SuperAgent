@@ -1147,6 +1147,15 @@ class AssetsConfig(_Section):
     gc_orphan_blobs: bool = True
 
     max_images_per_document: int = 500
+
+    # How many images may be extracted at once. Every extraction is an independent
+    # network round trip to a vision model, so 1 spends a document's whole ingest
+    # waiting in series. The ceiling is the PROVIDER's concurrency allowance, not this
+    # machine's cores: past it the calls are rejected and `call_with_rate_limit_retry`
+    # turns the excess back into waiting, so raising this beyond what the provider
+    # grants buys nothing. Tune per deployment via ASSET_EXTRACTION_WORKERS.
+    extraction_workers: int = 4
+
     triage: TriageConfig = Field(default_factory=TriageConfig)
     figures: FigurePipelineConfig = Field(default_factory=FigurePipelineConfig)
     entities: EntityPipelineConfig = Field(default_factory=EntityPipelineConfig)

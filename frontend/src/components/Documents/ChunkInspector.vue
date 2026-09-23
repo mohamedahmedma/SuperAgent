@@ -92,12 +92,21 @@
       </div>
 
       <!-- LIST: every chunk flat, narrowed to the matches while a filter is running -->
-      <div v-else class="cx-body">
-        <p v-if="isFiltered" class="cx-note">
+      <div v-else-if="view === 'list'" class="cx-body">
+        <!-- A narrowed list must say so. Without this the view is a short document. -->
+        <p v-if="assetChunkIds.length" class="cx-note cx-note-pin">
+          <i class="fa-regular fa-image"></i>
+          The {{ assetChunkIds.length }} chunk{{ assetChunkIds.length === 1 ? '' : 's' }}
+          from one image.
+          <button type="button" class="cx-clear" @click="assetChunkIds = []">
+            Show the whole document
+          </button>
+        </p>
+        <p v-else-if="isFiltered" class="cx-note">
           {{ visible.length.toLocaleString() }} of {{ list!.returned.toLocaleString() }} chunks
           contain “{{ list!.query.trim() }}”.
         </p>
-        <div v-if="isFiltered && !visible.length" class="cx-empty">
+        <div v-if="isFiltered && !assetChunkIds.length && !visible.length" class="cx-empty">
           <i class="fa-regular fa-face-frown"></i>
           <strong>Nothing matches “{{ list!.query.trim() }}”</strong>
         </div>
@@ -107,6 +116,35 @@
           :chunk="chunk"
           :pins="showPins"
         />
+      </div>
+
+      <!-- IMAGES: what a vision model made of each picture, beside the picture -->
+      <div v-else class="cx-body">
+        <p v-if="documentStore.assetsError" class="cx-note cx-note-bad">
+          {{ documentStore.assetsError }}
+        </p>
+        <div v-else-if="documentStore.assetsLoading" class="cx-empty">
+          <i class="fa-solid fa-spinner fa-spin"></i>
+          <strong>Reading this document's images…</strong>
+        </div>
+        <div v-else-if="!assets.length" class="cx-empty">
+          <i class="fa-regular fa-image"></i>
+          <strong>This document has no images</strong>
+          <span>Only documents with figures have anything to review here.</span>
+        </div>
+        <template v-else>
+          <p class="cx-note">
+            {{ assets.length.toLocaleString() }} image{{ assets.length === 1 ? '' : 's' }}<template
+              v-if="needsReview"
+            >, <strong>{{ needsReview }} flagged for review</strong></template>.
+          </p>
+          <AssetReviewCard
+            v-for="asset in assets"
+            :key="asset.asset_id"
+            :asset="asset"
+            @show-chunks="showAssetChunks"
+          />
+        </template>
       </div>
     </section>
   </div>
@@ -119,17 +157,37 @@ import type { ChunkNode } from '@/types/document';
 import { buildChunkTree, levelSummary } from '@/utils/chunkTree';
 import ChunkDocumentNode from './ChunkDocumentNode.vue';
 import ChunkCard from './ChunkCard.vue';
+import AssetReviewCard from './AssetReviewCard.vue';
 
 const documentStore = useDocumentStore();
 
 const tabs = [
   { key: 'document' as const, label: 'Document', icon: 'fa-solid fa-file-lines' },
   { key: 'list' as const, label: 'All chunks', icon: 'fa-solid fa-list' },
+  { key: 'images' as const, label: 'Images', icon: 'fa-regular fa-image' },
 ];
-const view = ref<'document' | 'list'>('document');
+const view = ref<'document' | 'list' | 'images'>('document');
 const showPins = ref(true);
 
 const list = computed(() => documentStore.chunkList);
+const assets = computed(() => documentStore.assetList?.assets || []);
+const needsReview = computed(() => documentStore.assetList?.needs_review_count || 0);
+
+/**
+ * Jump from an image to the chunks it produced.
+ *
+ * The filter searches chunk TEXT and cannot express "belongs to this asset", so this
+ * does not reuse it: `assetChunkIds` narrows the list view by id instead, and is
+ * cleared the moment the admin types a text filter or changes tab away.
+ */
+const assetChunkIds = ref<string[]>([]);
+const showAssetChunks = (asset: { chunk_ids: string[] }) => {
+  assetChunkIds.value = [...asset.chunk_ids];
+  // A text filter still running would narrow the asset's chunks to those that also
+  // match it, and the result would silently be fewer chunks than the image produced.
+  if (documentStore.chunkQuery) documentStore.chunkQuery = '';
+  view.value = 'list';
+};
 const isFiltered = computed(() => Boolean(list.value?.query.trim()));
 const tree = computed<ChunkNode[]>(() => buildChunkTree(list.value?.chunks || []));
 const levels = computed(() => levelSummary(list.value?.chunks || []));
@@ -143,6 +201,13 @@ const levels = computed(() => levelSummary(list.value?.chunks || []));
  */
 const visible = computed(() => {
   const chunks = list.value?.chunks || [];
+  // An asset narrowing is an explicit set of ids and wins over the text filter, which
+  // cannot express "came from this image" at all. Only one is ever active: typing
+  // clears the asset narrowing, and choosing an image clears the query.
+  if (assetChunkIds.value.length) {
+    const wanted = new Set(assetChunkIds.value);
+    return chunks.filter((chunk) => wanted.has(chunk.chunk_id));
+  }
   return isFiltered.value ? chunks.filter((chunk) => chunk.matched) : chunks;
 });
 
@@ -154,6 +219,9 @@ const query = computed({
   get: () => documentStore.chunkQuery,
   set: (value: string) => {
     documentStore.chunkQuery = value;
+    // Typing is a new question. Leaving an image's narrowing on would search inside it
+    // and report a count of the whole document's matches beside it.
+    assetChunkIds.value = [];
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => documentStore.loadChunks(), DEBOUNCE_MS);
   },
@@ -420,6 +488,34 @@ onBeforeUnmount(() => {
   font-size: 0.76rem;
   color: #8fb4d0;
 }
+
+.cx-note-bad {
+  background: rgba(242, 112, 143, 0.14);
+  color: #ffb3c4;
+}
+
+.cx-note-pin {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  background: rgba(34, 200, 238, 0.12);
+  color: #8fe3f5;
+}
+
+.cx-clear {
+  margin-inline-start: auto;
+  padding: 2px 9px;
+  border: 1px solid rgba(72, 160, 200, 0.35);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+html[data-theme='light'] .cx-note-bad { color: #98243f; }
+html[data-theme='light'] .cx-note-pin { color: #0d6b83; }
 
 /* ---- light theme ------------------------------------------------------------ */
 html[data-theme='light'] .cx {

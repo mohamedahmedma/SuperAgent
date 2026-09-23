@@ -3,6 +3,8 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
+from backend.assets.delivery import asset_url_path
+from backend.indexing.ingest_progress import IngestProgress
 from backend.api.deps import get_services
 from backend.api.resources import (
     UPLOAD_DIR,
@@ -19,7 +21,9 @@ from backend.profiles import get_profile
 from backend.text_matching import fold
 from backend.jobs import DELETE_STEPS
 from backend.schemas import (
+    AssetInfo,
     ChunkInfo,
+    DocumentAssetListResponse,
     DocumentChunkListResponse,
     DocumentDeleteJobResponse,
     DocumentDeleteResponse,
@@ -38,6 +42,55 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["documents"])
 
 
+class _FigureProgress(IngestProgress):
+    """Figure extraction, reported into the upload job the admin UI polls.
+
+    Without this the `parse` step reports 5% once and then nothing at all until every
+    image in the document has been through a vision model — minutes of a frozen bar on
+    an illustrated document, which the job tracker's own docstring describes as the
+    reason it cannot tell a slow ingest from a dead one.
+    """
+
+    #: `parse` is at 5% when extraction starts and needs room afterwards for chunking,
+    #: so extraction owns the span between. Both ends are reported: 5% the moment the
+    #: image count is known, which is itself news.
+    START, END = 5, 85
+
+    def __init__(self, jobs, job_id: str) -> None:
+        self._jobs = jobs
+        self._job_id = job_id
+        self._report = None
+
+    def figures_progress(self, done: int, total: int) -> None:
+        percent = self.START + int((self.END - self.START) * done / total) if total else self.START
+        self._jobs.update_step(
+            self._job_id, "parse", percent, "running",
+            f"Extracting images: {done} of {total}",
+            sub_label="Extracting images", sub_done=done, sub_total=total,
+        )
+
+    def figures_finished(self, report) -> None:
+        self._report = report
+
+    def summary(self) -> str:
+        """What extraction produced, for the step's closing message.
+
+        Empty when the document had no images, so a text-only document reads exactly as
+        it did before. `failed` is named even at zero once anything was extracted: "0
+        failed" is the sentence an admin needs to see to stop wondering.
+        """
+        report = self._report
+        if report is None or not report.total:
+            return ""
+        parts = [f"{report.extracted} extracted"]
+        if report.cached:
+            parts.append(f"{report.cached} already known")
+        if report.dropped:
+            parts.append(f"{report.dropped} skipped")
+        parts.append(f"{report.failed} failed")
+        return f". Images: {report.total} ({', '.join(parts)})"
+
+
 def _process_upload_job(services: Services, job_id: str, file_path: str, filename: str) -> None:
     jobs = services.upload_jobs
     failed_step = "cleanup"
@@ -51,7 +104,12 @@ def _process_upload_job(services: Services, job_id: str, file_path: str, filenam
 
         failed_step = "parse"
         jobs.update_step(job_id, "parse", 5, "running", "Parsing document and performing three-level chunking")
-        new_docs = services.document_loader.load_document(file_path, filename)
+        # Extraction reports INTO `parse` rather than as a step of its own. It is part of
+        # parsing, and a new step key would have to be added to the frontend store's
+        # `createUploadSteps()` as well — `updateUploadStep` drops an unknown key with
+        # `if (idx === -1) return`, so half the change would show nothing and log nothing.
+        progress = _FigureProgress(jobs, job_id)
+        new_docs = services.document_loader.load_document(file_path, filename, progress=progress)
         if not new_docs:
             raise ValueError("Document processing failed: could not extract content")
 
@@ -67,7 +125,8 @@ def _process_upload_job(services: Services, job_id: str, file_path: str, filenam
         jobs.complete_step(
             job_id,
             "parse",
-            f"Parsing complete: {len(parent_docs)} parent chunks, {len(leaf_docs)} leaf chunks{figure_note}",
+            f"Parsing complete: {len(parent_docs)} parent chunks, "
+            f"{len(leaf_docs)} leaf chunks{figure_note}{progress.summary()}",
         )
 
         failed_step = "parent_store"
@@ -522,6 +581,138 @@ async def upload_document_pair(
         filename=", ".join(names),
         message="Files uploaded, parsing and vectorization in progress in the background",
     )
+
+
+def _require_assets_enabled_for_review() -> None:
+    """A deployment with assets off has no extractions to accept."""
+    if not get_profile().assets.enabled:
+        raise HTTPException(status_code=404, detail="Asset support is disabled for this deployment.")
+
+
+def _asset_info(dossier, chunk_ids_by_asset) -> AssetInfo:
+    """One dossier, flattened for review.
+
+    The nesting is real — text surface, provenance, blob, source are separate objects —
+    but a reviewer reads one image at a time, and a shape that mirrored the storage
+    would make the UI walk four objects to render one row.
+    """
+    extraction = dossier.extraction
+    text = extraction.text if extraction else None
+    provenance = extraction.provenance if extraction else None
+    return AssetInfo(
+        asset_id=dossier.asset_id,
+        sha256=dossier.sha256,
+        page_number=dossier.source.page_number,
+        status=dossier.status.value,
+        role=dossier.role.value,
+        tier=dossier.tier.value,
+        indexable=dossier.is_indexable,
+        caption=(text.caption if text else ""),
+        description=(text.description if text else ""),
+        transcription=(text.transcription if text else ""),
+        tags=list(text.tags) if text else [],
+        model_used=(provenance.model_used if provenance else ""),
+        confidence=(provenance.confidence if provenance else 0.0),
+        needs_review=bool(provenance.needs_review) if provenance else False,
+        error=(provenance.error if provenance else ""),
+        width=dossier.blob.width,
+        height=dossier.blob.height,
+        byte_size=dossier.blob.byte_size,
+        content_type=dossier.blob.content_type,
+        url=asset_url_path(dossier.asset_id),
+        chunk_ids=chunk_ids_by_asset.get(dossier.asset_id, []),
+    )
+
+
+@router.get("/documents/{filename}/assets", response_model=DocumentAssetListResponse)
+async def list_document_assets(
+    filename: str,
+    _: User = Depends(require_admin),
+    services: Services = Depends(get_services),
+):
+    """Every image of a document with what extraction made of it, for manual review.
+
+    The counterpart to `/documents/{filename}/chunks`: that view shows the corpus as
+    retrieval holds it, this one shows where a figure chunk's text CAME FROM, which is
+    the one thing a reviewer needs and no other view has ever had. Until now the whole
+    of it — the description, the transcription, the model, its confidence, the error
+    that explains a failure — existed only on the dossier and was returned by nothing.
+    The only asset routes answer with `AssetReference`, the public contract a chat
+    client consumes, which carries none of it and should not.
+
+    `needs_review` is not computed here. Every extraction has been setting it since the
+    pipeline was written — a vision confidence under the profile's
+    `escalate_below_confidence`, or a heuristic run that recovered no text at all — and
+    storing it in its own column. Nothing had ever read it back.
+
+    Each asset carries the ids of the chunks it produced. The link is only ever written
+    the other way (a chunk names its `asset_ids`; `SourceRef.doc_chunk_id` is never
+    filled, because enrichment runs before chunking assigns an id), so the reverse is
+    built here by inverting it. Chunks are read best-effort: a document's images are
+    still worth reviewing when the vector store cannot be reached, so an unreadable
+    index costs the `chunk_ids` and nothing else.
+    """
+    try:
+        dossiers = services.asset_store.list_by_filename(filename)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read assets: {exc}")
+
+    chunk_ids_by_asset: dict[str, list[str]] = {}
+    try:
+        services.milvus.init_collection()
+        rows = services.milvus.query_all(
+            filter_expr=f"filename == {json.dumps(filename, ensure_ascii=False)}",
+            output_fields=_CHUNK_FIELDS,
+        )
+        for row in sorted(rows, key=lambda r: (r.get("chunk_level", 0), r.get("chunk_idx", 0))):
+            for asset_id in _chunk_asset_ids(row.get("asset_ids")):
+                chunk_ids_by_asset.setdefault(asset_id, []).append(row.get("chunk_id", ""))
+    except Exception:
+        logger.exception("Could not read chunks for %s; listing assets without them", filename)
+
+    assets = sorted(
+        (_asset_info(dossier, chunk_ids_by_asset) for dossier in dossiers),
+        key=lambda asset: (asset.page_number, asset.asset_id),
+    )
+    return DocumentAssetListResponse(
+        filename=filename,
+        assets=assets,
+        total=len(assets),
+        needs_review_count=sum(1 for asset in assets if asset.needs_review),
+    )
+
+
+@router.post("/documents/assets/{asset_id:path}/reviewed", response_model=AssetInfo)
+async def mark_asset_reviewed(
+    asset_id: str,
+    _: User = Depends(require_admin),
+    services: Services = Depends(get_services),
+):
+    """Record that an admin looked at this extraction and accepted it.
+
+    `needs_review` is raised by the extractor — a vision confidence under the profile's
+    threshold, or a heuristic run that recovered no text — and until now nothing could
+    lower it. A flag that only ever goes up is not a queue; it is a permanent label, and
+    an admin who has checked every image would still see the same count tomorrow.
+
+    This clears the flag and nothing else. It does not re-extract, does not edit the
+    text, and does not change whether the asset is indexed: it records a judgement about
+    an extraction that stays exactly as it is. Correcting a wrong transcription is a
+    different action and is not built.
+
+    Accepting is keyed by DIGEST, because the extraction is: the same bytes have one
+    extraction shared by every occurrence, so a letterhead accepted on page 1 does not
+    ask again on page 40. The response is the asset as it now reads, so the caller
+    updates from what was stored rather than assuming the write did what it asked.
+    """
+    _require_assets_enabled_for_review()
+    try:
+        dossier = services.asset_store.mark_reviewed(asset_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to record the review: {exc}")
+    if dossier is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return _asset_info(dossier, {})
 
 
 @router.get("/documents/pairs", response_model=DocumentPairListResponse)

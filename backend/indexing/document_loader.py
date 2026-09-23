@@ -10,6 +10,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from backend.env import env_bool
 from backend.indexing.docx_layout import parse_docx_blocks
+from backend.indexing.ingest_progress import IngestProgress
 from backend.indexing.html_layout import parse_html_blocks
 from backend.indexing.pdf_layout import parse_pdf_blocks
 from backend.indexing.xlsx_layout import parse_xlsx_blocks
@@ -1326,6 +1327,7 @@ class DocumentLoader:
         file_path: str,
         filename: str,
         doc_type: str,
+        progress: Optional[IngestProgress] = None,
     ) -> list[dict]:
         """Shared layout pipeline (pipes-and-filters) behind every format parser:
 
@@ -1343,7 +1345,7 @@ class DocumentLoader:
         blocks. That is what let image support land without touching stitching,
         section tagging, or the hierarchy builder.
         """
-        blocks = self._enrich_assets(blocks, filename, file_path)
+        blocks = self._enrich_assets(blocks, filename, file_path, progress)
         blocks = self._stitch_cross_page_blocks(blocks)
         units = self._blocks_to_units(blocks)
         doc_info = {
@@ -1354,7 +1356,10 @@ class DocumentLoader:
         return self._hierarchy_chunks(units, doc_info)
 
     @staticmethod
-    def _enrich_assets(blocks: List[Dict], filename: str, file_path: str) -> List[Dict]:
+    def _enrich_assets(
+        blocks: List[Dict], filename: str, file_path: str,
+        progress: Optional[IngestProgress] = None,
+    ) -> List[Dict]:
         """Turn image blocks into retrievable text, or drop them.
 
         Disabled by profile (or absent of any images) this is a no-op, and a failure
@@ -1366,16 +1371,23 @@ class DocumentLoader:
 
         from backend.indexing.asset_enrichment import enrich_image_blocks
 
-        enriched, report = enrich_image_blocks(blocks, filename=filename, file_path=file_path)
+        enriched, report = enrich_image_blocks(
+            blocks, filename=filename, file_path=file_path, progress=progress
+        )
         if report.total:
             logger.info("Figure enrichment for %s: %s", filename, report.summary())
         return enriched
 
-    def _try_layout_path(self, parse_blocks, file_path: str, filename: str, doc_type: str):
+    def _try_layout_path(
+        self, parse_blocks, file_path: str, filename: str, doc_type: str,
+        progress: Optional[IngestProgress] = None,
+    ):
         """Run a format's block parser through the shared pipeline; None means the
         caller should fall back to its legacy flat loader (failure or empty result)."""
         try:
-            documents = self._load_blocks_with_layout(parse_blocks(file_path), file_path, filename, doc_type)
+            documents = self._load_blocks_with_layout(
+                parse_blocks(file_path), file_path, filename, doc_type, progress
+            )
             if documents:
                 return documents
             logger.warning(
@@ -1446,14 +1458,16 @@ class DocumentLoader:
                     f"Please shorten it and upload again."
                 )
 
-    def load_document(self, file_path: str, filename: str) -> list[dict]:
+    def load_document(
+        self, file_path: str, filename: str, progress: Optional[IngestProgress] = None
+    ) -> list[dict]:
         self._validate_identifiers(file_path, filename)
         file_lower = filename.lower()
 
         if file_lower.endswith(".pdf"):
             doc_type = "PDF"
             if PDF_LAYOUT_PARSER_ENABLED:
-                documents = self._try_layout_path(parse_pdf_blocks, file_path, filename, doc_type)
+                documents = self._try_layout_path(parse_pdf_blocks, file_path, filename, doc_type, progress)
                 if documents:
                     return documents
             loader = PyPDFLoader(file_path)
@@ -1461,7 +1475,7 @@ class DocumentLoader:
             doc_type = "Word"
             # python-docx reads only .docx; legacy .doc always uses the flat loader.
             if LAYOUT_PARSER_ENABLED and file_lower.endswith(".docx"):
-                documents = self._try_layout_path(parse_docx_blocks, file_path, filename, doc_type)
+                documents = self._try_layout_path(parse_docx_blocks, file_path, filename, doc_type, progress)
                 if documents:
                     return documents
             loader = Docx2txtLoader(file_path)
@@ -1469,14 +1483,14 @@ class DocumentLoader:
             doc_type = "Excel"
             # openpyxl reads only .xlsx; legacy .xls always uses the flat loader.
             if LAYOUT_PARSER_ENABLED and file_lower.endswith(".xlsx"):
-                documents = self._try_layout_path(parse_xlsx_blocks, file_path, filename, doc_type)
+                documents = self._try_layout_path(parse_xlsx_blocks, file_path, filename, doc_type, progress)
                 if documents:
                     return documents
             loader = UnstructuredExcelLoader(file_path)
         elif file_lower.endswith((".html", ".htm")):
             doc_type = "HTML"
             if LAYOUT_PARSER_ENABLED:
-                documents = self._try_layout_path(parse_html_blocks, file_path, filename, doc_type)
+                documents = self._try_layout_path(parse_html_blocks, file_path, filename, doc_type, progress)
                 if documents:
                     return documents
             from backend.indexing.html_processor import load_html_for_document_loader

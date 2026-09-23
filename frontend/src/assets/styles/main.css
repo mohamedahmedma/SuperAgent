@@ -3307,6 +3307,46 @@ html[data-theme="light"] .btn-primary {
   line-height: 1.45;
 }
 
+/* The nested bar inside a step — figure extraction inside `parse`. Indented and
+   thinner than its parent so it reads as part of that step rather than as another
+   one, which is the whole reason it is not a step. */
+.upload-substep {
+  display: grid;
+  gap: 3px;
+  margin-left: 10px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
+.upload-substep-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.4;
+}
+
+.upload-substep-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-substep-bar {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.upload-substep-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--lilac);
+  transition: width 240ms ease;
+}
+
 .upload-pipeline-note {
   display: grid;
   gap: 8px;
