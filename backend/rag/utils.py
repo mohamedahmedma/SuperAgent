@@ -248,6 +248,7 @@ def _is_figure_chunk(doc: dict) -> bool:
 #: again: it is written by `AssetDossier.surrogate_parts` and read here, and two
 #: spellings would fail silently rather than loudly.
 from backend.assets.dossier import FIGURE_MARKER as _FIGURE_MARKER  # noqa: E402
+from backend.structured_output import StructuredOutput
 
 
 def _block_candidates(child_text: str) -> List[str]:
@@ -733,7 +734,7 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
         return _sort_by_rank_score(docs_with_rank), meta
 
 
-class RewritePlan(BaseModel):
+class RewritePlan(StructuredOutput):
     method: Literal["step_back", "hyde"] = Field(
         description="The single query-rewrite method used this round"
     )

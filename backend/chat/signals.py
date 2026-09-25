@@ -33,6 +33,10 @@ from backend.rag.evidence import Certainty
 from backend.chat.child_names import is_also_an_ordinary_word, occurs_as_written
 from backend.text_matching import name_key
 from backend.text_normalization import normalize_query
+from typing import List as _List, Literal as _Literal
+from pydantic import Field
+
+from backend.structured_output import StructuredOutput
 
 logger = logging.getLogger(__name__)
 
@@ -580,6 +584,63 @@ def _names_the_child(text: str, name: str) -> bool:
     return True
 
 
+# Defined once, at import, rather than inside `_default_envelope_invoke` on every call: a class built
+# per call is a pydantic model built per call, and its JSON schema regenerated with
+# it — measured at 4.5% and 10.4% of the serving process's CPU (RAG_FIX_PLAN item 47).
+class RequestEnvelope(StructuredOutput):
+    """Every field is declared and every field is required.
+
+    Providers enforcing OpenAI-style strict structured output reject a schema whose
+    properties are optional, and a model told to "omit the field when it does not
+    apply" omits it rather than sending the empty value. Defaults here mean a
+    missing field is read as its safe value instead of failing the call — the same
+    arrangement `RewritePlan` documents in rag/rewrite.j2.
+    """
+
+    scope: _Literal["in_domain", "out_of_domain"] = Field(
+        description="Whether the message is this assistant's subject"
+    )
+    reason: str = Field(default="", description="One short sentence")
+    personal_data: _List[str] = Field(
+        default_factory=list,
+        description="Field names from the supplied list that the message discloses",
+    )
+    # Declared unconditionally, like every other field here, because the schema is
+    # what a strict provider validates against and a schema that changes shape per
+    # deployment is a schema that gets cached wrong. It is only ever POPULATED on a
+    # deployment that ships a catalogue: with none, the prompt asks for nothing, the
+    # model returns the empty list, and `_read_needed_tools` returns immediately.
+    needed_tools: _List[str] = Field(
+        default_factory=list,
+        description=(
+            "Names from the supplied tool list that answering this message needs; "
+            "empty when no list was supplied or none of them apply"
+        ),
+    )
+    about_child: bool = Field(
+        default=False,
+        description=(
+            "True when the message asks about a particular child's own situation "
+            "rather than about the school in general"
+        ),
+    )
+    child_reference: _Literal[
+        "none", "son", "daughter", "child", "plural", "named", "context"
+    ] = Field(default="none", description="How the child was referred to")
+    child_name: str = Field(
+        default="",
+        description="A name the message actually contained; empty otherwise",
+    )
+    child_question_kind: _Literal["both", "records", "school_matter"] = Field(
+        default="both",
+        description=(
+            "What answering needs to read: 'records' for the child's own marks, "
+            "attendance or report; 'school_matter' for the school's own material "
+            "asked about this child; 'both' when it needs each, or when unsure"
+        ),
+    )
+
+
 def _default_envelope_invoke(question, history, config):  # pragma: no cover - needs a model
     """One structured call on FAST_MODEL. The classification node's only I/O.
 
@@ -595,8 +656,6 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
     import os
 
     from langchain.chat_models import init_chat_model
-    from pydantic import BaseModel, Field
-    from typing import List as _List, Literal as _Literal
 
     from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
     from backend.llm import sampling
@@ -608,58 +667,6 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
     child_context = bool(getattr(config, "child_context_enabled", False))
     tool_catalogue = dict(getattr(config, "tool_selection", None) or {})
 
-    class RequestEnvelope(BaseModel):
-        """Every field is declared and every field is required.
-
-        Providers enforcing OpenAI-style strict structured output reject a schema whose
-        properties are optional, and a model told to "omit the field when it does not
-        apply" omits it rather than sending the empty value. Defaults here mean a
-        missing field is read as its safe value instead of failing the call — the same
-        arrangement `RewritePlan` documents in rag/rewrite.j2.
-        """
-
-        scope: _Literal["in_domain", "out_of_domain"] = Field(
-            description="Whether the message is this assistant's subject"
-        )
-        reason: str = Field(default="", description="One short sentence")
-        personal_data: _List[str] = Field(
-            default_factory=list,
-            description="Field names from the supplied list that the message discloses",
-        )
-        # Declared unconditionally, like every other field here, because the schema is
-        # what a strict provider validates against and a schema that changes shape per
-        # deployment is a schema that gets cached wrong. It is only ever POPULATED on a
-        # deployment that ships a catalogue: with none, the prompt asks for nothing, the
-        # model returns the empty list, and `_read_needed_tools` returns immediately.
-        needed_tools: _List[str] = Field(
-            default_factory=list,
-            description=(
-                "Names from the supplied tool list that answering this message needs; "
-                "empty when no list was supplied or none of them apply"
-            ),
-        )
-        about_child: bool = Field(
-            default=False,
-            description=(
-                "True when the message asks about a particular child's own situation "
-                "rather than about the school in general"
-            ),
-        )
-        child_reference: _Literal[
-            "none", "son", "daughter", "child", "plural", "named", "context"
-        ] = Field(default="none", description="How the child was referred to")
-        child_name: str = Field(
-            default="",
-            description="A name the message actually contained; empty otherwise",
-        )
-        child_question_kind: _Literal["both", "records", "school_matter"] = Field(
-            default="both",
-            description=(
-                "What answering needs to read: 'records' for the child's own marks, "
-                "attendance or report; 'school_matter' for the school's own material "
-                "asked about this child; 'both' when it needs each, or when unsure"
-            ),
-        )
 
     prompt = render(
         "chat/request_envelope.j2",

@@ -43,6 +43,7 @@ from backend.rag.utils import (
     dedupe_documents,
     retrieval_trace_fields,
 )
+from backend.structured_output import StructuredOutput
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ COMPLEXITY_PROMPT = _RAG.complexity_prompt
 COMPLEXITY_PLANNING_ENABLED = _RAG.complexity_planning_enabled
 
 
-class EvidenceGrade(BaseModel):
+class EvidenceGrade(StructuredOutput):
     """Structured evidence grade: judges relevance, answerability, and the next routing step together.
 
     These descriptions are the ONLY definition of what each value means. They are
@@ -160,7 +161,7 @@ class EvidenceGrade(BaseModel):
     )
 
 
-class ComplexityResult(BaseModel):
+class ComplexityResult(StructuredOutput):
     """Question complexity classification result."""
 
     complexity: Literal["simple", "complex"] = Field(

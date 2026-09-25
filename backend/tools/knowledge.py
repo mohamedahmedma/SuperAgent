@@ -13,6 +13,7 @@ from langchain_core.tools import tool
 
 from backend.chat.request_context import ChatRequestContext
 from backend.prompts import render as render_prompt
+from pydantic import BaseModel
 
 #: The name the model calls, the planner forces, and the turn records. One spelling,
 #: so the three cannot drift apart.
@@ -92,6 +93,18 @@ def _format_chunk(index: int, doc: dict, figure_numbers=()) -> str:
     return entry
 
 
+class KnowledgeQuery(BaseModel):
+    """The knowledge tool's arguments, declared once.
+
+    The tool is built per request — it closes over that request's context — and `@tool`
+    left to itself infers an argument model from the function's signature every time it
+    is built: a new pydantic class, and its schema, per turn (RAG_FIX_PLAN item 47).
+    The model sees exactly the same schema either way; this only stops rebuilding it.
+    """
+
+    query: str
+
+
 def make_search_knowledge_base(ctx: ChatRequestContext):
     def _result(outcome: str, **context) -> str:
         """Render one outcome, and tell the turn which one it was.
@@ -114,7 +127,7 @@ def make_search_knowledge_base(ctx: ChatRequestContext):
         ctx.note_tool_outcome(KNOWLEDGE_TOOL, outcome)
         return render_prompt("tools/knowledge_result.j2", outcome=outcome, **context)
 
-    @tool(KNOWLEDGE_TOOL)
+    @tool(KNOWLEDGE_TOOL, args_schema=KnowledgeQuery)
     def search_knowledge_base(query: str) -> str:
         """Search the knowledge base for documents that answer the user's question.
 
