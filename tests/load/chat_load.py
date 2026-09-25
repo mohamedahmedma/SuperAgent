@@ -222,7 +222,7 @@ async def one_parent(client: httpx.AsyncClient, url: str, token: str, asks: list
 
 
 async def run_level(url: str, token: str, parents: int, turns: int, pool: list[str],
-                    database_url: str, timeout: float) -> Level:
+                    database_url: str, timeout: float, offset: int = 0) -> Level:
     level = Level(parents)
     limits = httpx.Limits(max_connections=parents * 2 + 10, max_keepalive_connections=parents * 2 + 10)
     async with httpx.AsyncClient(limits=limits) as client:
@@ -230,7 +230,8 @@ async def run_level(url: str, token: str, parents: int, turns: int, pool: list[s
             started = time.perf_counter()
             await asyncio.gather(*(
                 one_parent(client, url, token,
-                           [pool[(p * turns + t) % len(pool)] for t in range(turns)], level, timeout)
+                           [pool[(offset + p * turns + t) % len(pool)] for t in range(turns)],
+                           level, timeout)
                 for p in range(parents)
             ))
             level.wall = time.perf_counter() - started
@@ -259,6 +260,8 @@ def main() -> int:
     parser.add_argument("--levels", default="1,5,10,20,40")
     parser.add_argument("--turns", type=int, default=3, help="questions per parent per level")
     parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument("--warmup", type=int, default=5,
+                        help="parents who each take one unmeasured turn before the first level")
     parser.add_argument("--label", default="run")
     parser.add_argument("--out", default="")
     args = parser.parse_args()
@@ -270,9 +273,21 @@ def main() -> int:
     print(f"{args.label}: {args.url}, {args.turns} turn(s) per parent")
     print(f"{'parents':>7} {'ttft p50':>9} {'ttft p95':>9} {'turn p50':>9} {'turn p95':>9} "
           f"{'turns/s':>8} {'ok':>5} {'pg conns':>9} {'idle tx':>8}  errors")
+    if args.warmup:
+        # A freshly started backend pays its cold starts — model clients, the scope index,
+        # the first Milvus and Postgres connections — on its first turns. Measured, they
+        # would land in whichever level runs first and make two runs incomparable. Warmed
+        # from the END of the pool, so no measured level asks a question it has seen.
+        asyncio.run(run_level(args.url, token, args.warmup, 1, pool, "", args.timeout,
+                              offset=len(pool) - args.warmup))
+    # Every level asks questions no earlier level asked. The backend remembers recent
+    # query embeddings; a level that repeated its predecessor's questions would skip that
+    # call and look faster than it is — which is how an early baseline row read 2.7 s.
+    offset = 0
     for parents in [int(x) for x in args.levels.split(",")]:
         level = asyncio.run(run_level(args.url, token, parents, args.turns, pool,
-                                      database_url, args.timeout))
+                                      database_url, args.timeout, offset=offset))
+        offset += parents * args.turns
         row = level.row()
         rows.append(row)
         shown = {k: ("-" if v is None else v) for k, v in row.items()}
