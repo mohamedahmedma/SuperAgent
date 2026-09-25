@@ -289,11 +289,15 @@ def main() -> None:
         parser.add_argument("--" + name.replace("_", "-"), type=float, default=getattr(Latency, name))
     parser.add_argument("--tokens", type=int, default=Latency.tokens)
     parser.add_argument("--embed-dim", type=int, default=Latency.embed_dim)
+    parser.add_argument("--keep-alive", type=float, default=5.0,
+                        help="seconds an idle connection is kept open (uvicorn's default is 5); "
+                             "set low to make the client's stale-socket handling earn its keep")
     args = parser.parse_args()
     for name in ("structured_ms", "toolcall_ms", "ttft_ms", "token_ms", "embed_ms", "jitter",
                  "tokens", "embed_dim"):
         setattr(Latency, name, getattr(args, name))
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning", access_log=False)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning", access_log=False,
+                timeout_keep_alive=args.keep_alive)
 
 
 if __name__ == "__main__":

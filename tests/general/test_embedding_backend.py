@@ -277,3 +277,130 @@ class RemoteForServingTests(unittest.TestCase):
         with patch.object(remote, "prewarm", side_effect=RuntimeError("no network")):
             with patch.object(embedding_module, "_create_dense_embedder", return_value=remote):
                 EmbeddingService().warm_up()  # must not raise
+
+
+class _FlakyServer:
+    """An embeddings endpoint on a real socket that mistreats its first N connections.
+
+    `drop`: close the connection without a word, as a server reaping an idle keep-alive
+    socket does. `stall`: read the request and never answer, the other face of the same
+    race. Every later connection gets a proper 200.
+    """
+
+    def __init__(self, bad=1, mode="drop"):
+        import socket
+        import threading
+
+        self.bad, self.mode, self.seen = bad, mode, 0
+        self._sock = socket.socket()
+        self._sock.bind(("127.0.0.1", 0))
+        self._sock.listen(16)
+        self.url = f"http://127.0.0.1:{self._sock.getsockname()[1]}/v1"
+        self._held = []
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        import json as _json
+
+        while True:
+            try:
+                conn, _ = self._sock.accept()
+            except OSError:
+                return
+            self.seen += 1
+            request = self._read_request(conn)
+            if self.seen <= self.bad:
+                if self.mode == "drop":
+                    conn.close()
+                else:
+                    self._held.append(conn)  # never answered
+                continue
+            body = _json.dumps({"data": [{"index": 0, "embedding": [0.6, 0.8]}]}).encode()
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                         b"Content-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+            conn.close()
+            del request
+
+    @staticmethod
+    def _read_request(conn):
+        """The WHOLE request - headers, then Content-Length bytes of body. Answering after
+        one recv() and closing with body still unread makes Windows reset the connection,
+        which would fail a good request and make this server lie about what it did."""
+        blank_line, crlf = b"\r\n\r\n", b"\r\n"
+        data = b""
+        while blank_line not in data:
+            chunk = conn.recv(65536)
+            if not chunk:
+                return data
+            data += chunk
+        head, _, body = data.partition(blank_line)
+        length = next((int(line.split(b":", 1)[1]) for line in head.split(crlf)
+                       if line.lower().startswith(b"content-length:")), 0)
+        while len(body) < length:
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            body += chunk
+        return head + blank_line + body
+
+    def close(self):
+        self._sock.close()
+        for conn in self._held:
+            conn.close()
+
+
+class ConnectionFailureTests(unittest.TestCase):
+    """RAG_FIX_PLAN item 39: one failed connection must not end a turn."""
+
+    def remote(self, url, **env):
+        settings = {"EMBEDDING_BACKEND": "openai", "EMBEDDING_BASE_URL": url, "EMBEDDING_MODEL": "m"}
+        settings.update(env)
+        with patch.dict("os.environ", settings, clear=False):
+            return _RemoteEmbedder()
+
+    def test_a_dropped_connection_is_retried_on_a_fresh_one(self):
+        server = _FlakyServer(bad=1, mode="drop")
+        try:
+            self.assertEqual([[0.6, 0.8]], self.remote(server.url).embed_documents(["q"]))
+            self.assertEqual(2, server.seen)
+        finally:
+            server.close()
+
+    def test_a_request_that_is_never_answered_is_retried_after_the_query_timeout(self):
+        import time as _time
+
+        server = _FlakyServer(bad=1, mode="stall")
+        try:
+            remote = self.remote(server.url, EMBEDDING_QUERY_TIMEOUT_SECONDS="0.5")
+            started = _time.perf_counter()
+            self.assertEqual([[0.6, 0.8]], remote.embed_documents(["q"]))
+            self.assertLess(_time.perf_counter() - started, 5.0, "waited out more than the query timeout")
+        finally:
+            server.close()
+
+    def test_a_server_that_keeps_failing_still_surfaces_an_error(self):
+        """Retries are bounded: a dead endpoint is an error, not a hang."""
+        import requests
+
+        server = _FlakyServer(bad=10, mode="drop")
+        try:
+            with self.assertRaises(requests.exceptions.ConnectionError):
+                self.remote(server.url).embed_documents(["q"])
+            self.assertEqual(3, server.seen)  # the first try and two retries
+        finally:
+            server.close()
+
+    def test_a_batch_keeps_the_longer_ingest_timeout(self):
+        captured = {}
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            captured["timeout"] = timeout
+            return FakeResponse([{"index": i, "embedding": [1.0]} for i in range(len(json["input"]))])
+
+        remote = self.remote("http://e/v1", EMBEDDING_TIMEOUT_SECONDS="30",
+                             EMBEDDING_QUERY_TIMEOUT_SECONDS="10", EMBEDDING_CONNECT_TIMEOUT_SECONDS="5")
+        with patch("requests.Session.post", side_effect=fake_post):
+            remote.embed_documents(["one question"])
+            self.assertEqual((5.0, 10.0), captured["timeout"])
+            remote.embed_documents(["chunk a", "chunk b"])
+            self.assertEqual((5.0, 30.0), captured["timeout"])

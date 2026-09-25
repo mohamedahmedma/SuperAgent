@@ -85,6 +85,12 @@ class _RemoteEmbedder:
         self.model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
         self.api_key = (os.getenv("EMBEDDING_API_KEY") or "").strip()
         self.timeout = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS") or 30.0)
+        # A QUERY embeds one short text on the path to a parent's first word; a batch is
+        # ingest. They get different read timeouts, because a request that is never
+        # answered waits out the whole timeout (measured: twice under load) — and 30 s is
+        # right for a 64-chunk batch but not for one question (single calls: p99 ~1.5 s).
+        self.query_timeout = float(os.getenv("EMBEDDING_QUERY_TIMEOUT_SECONDS") or 10.0)
+        self.connect_timeout = float(os.getenv("EMBEDDING_CONNECT_TIMEOUT_SECONDS") or 5.0)
         self.batch_size = max(1, int(os.getenv("EMBEDDING_BATCH_SIZE") or 64))
         self.pool_size = max(10, int(os.getenv("EMBEDDING_POOL_SIZE") or 32))
         self._session = None
@@ -108,7 +114,9 @@ class _RemoteEmbedder:
 
                     pool = self.pool_size
                     session = requests.Session()
-                    adapter = HTTPAdapter(pool_connections=pool, pool_maxsize=pool)
+                    adapter = HTTPAdapter(
+                        pool_connections=pool, pool_maxsize=pool, max_retries=_connection_retry()
+                    )
                     session.mount("http://", adapter)
                     session.mount("https://", adapter)
                     self._session = session
@@ -124,11 +132,12 @@ class _RemoteEmbedder:
 
         for start in range(0, len(texts), self.batch_size):
             batch = texts[start : start + self.batch_size]
+            read_timeout = self.query_timeout if len(texts) == 1 else self.timeout
             response = session.post(
                 f"{self.base_url}/embeddings",
                 json={"model": self.model, "input": batch},
                 headers=headers,
-                timeout=self.timeout,
+                timeout=(self.connect_timeout, read_timeout),
             )
             response.raise_for_status()
             payload = response.json()
@@ -170,6 +179,33 @@ class _RemoteEmbedder:
 
         with ThreadPoolExecutor(connections, thread_name_prefix="embedder-prewarm") as pool:
             return sum(pool.map(one, range(connections)))
+
+
+def _connection_retry():
+    """Retry a request whose connection failed, up to twice.
+
+    What was measured, under load against the stub: three turns in ~1,300 ended in "a
+    temporary technical issue" because an embedding call failed at the connection — once
+    at once (`ConnectionAbortedError 10053`), and twice after waiting out the whole 30 s
+    read timeout. The model calls in the same turns never failed this way, because the
+    OpenAI SDK retries connection errors; this client did not retry at all
+    (`Retry(total=0)`). WHY the connections failed was not established: the likeliest
+    cause, reusing a pooled socket the server had just closed, did not reproduce when
+    forced, because urllib3 already replaces an idle socket the server closed cleanly.
+    So this is the standard defence, not a fix for a diagnosed cause.
+
+    Retrying is safe here for a reason that is specific to embedding: it is a pure
+    function of its input, so sending the same texts twice cannot change anything.
+    Connection and read failures only — an HTTP error status is an answer, not a failed
+    connection, and is raised as before.
+    """
+    from urllib3.util.retry import Retry
+
+    return Retry(
+        total=2, connect=2, read=2, status=0, other=0, redirect=0,
+        allowed_methods=None,  # POST included: see above
+        backoff_factor=0, raise_on_status=False,
+    )
 
 
 def _unit(vector: List[float]) -> List[float]:
