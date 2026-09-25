@@ -15,12 +15,35 @@ class RedisCache:
         # profiles/registry.py ENV_OVERRIDES).
         self.key_prefix = get_profile().identity.redis_key_prefix
         self.default_ttl = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "300"))
+        # How long a stalled Redis may hold a caller before the call becomes a miss
+        # (RAG_FIX_PLAN item 44). Stated rather than inherited: redis-py 8's default is
+        # 5 s per call, and a turn makes several cache calls before its first word, so
+        # a stalled Redis cost a turn that many times 5 s. The cache is an optimisation,
+        # and the database answers in well under a second.
+        self.socket_timeout = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS") or 1.0)
+        self.connect_timeout = float(os.getenv("REDIS_CONNECT_TIMEOUT_SECONDS") or 1.0)
         self._client = None
 
     def _get_client(self):
         if self._client is None:
-            self._client = redis.Redis.from_url(self.redis_url, decode_responses=True)
+            self._client = redis.Redis.from_url(
+                self.redis_url,
+                decode_responses=True,
+                socket_timeout=self.socket_timeout,
+                socket_connect_timeout=self.connect_timeout,
+                # A pooled connection idle this long is checked before use, so one the
+                # server or a proxy dropped is replaced rather than failing a call.
+                health_check_interval=30,
+            )
         return self._client
+
+    def client(self):
+        """The shared client, for callers that need more than get/set (the turn limits)."""
+        return self._get_client()
+
+    def key(self, key: str) -> str:
+        """`key` in this profile's namespace."""
+        return self._key(key)
 
     def _key(self, key: str) -> str:
         return f"{self.key_prefix}:{key}"
@@ -48,11 +71,17 @@ class RedisCache:
             return
 
     def delete_pattern(self, pattern: str) -> None:
+        # SCAN, not KEYS: KEYS walks the whole keyspace in one command and blocks every
+        # other client of the server until it finishes.
         try:
-            full_pattern = self._key(pattern)
-            keys = self._get_client().keys(full_pattern)
-            if keys:
-                self._get_client().delete(*keys)
+            client = self._get_client()
+            batch = []
+            for key in client.scan_iter(match=self._key(pattern), count=500):
+                batch.append(key)
+                if len(batch) >= 500:
+                    client.delete(*batch)
+                    batch = []
+            if batch:
+                client.delete(*batch)
         except Exception:
             return
-
