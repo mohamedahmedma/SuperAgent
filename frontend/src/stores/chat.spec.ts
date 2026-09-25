@@ -219,6 +219,41 @@ describe('chat store streaming sessions', () => {
     await sendPromise;
   });
 
+  const refused = (body: () => Promise<unknown>, retryAfter = '7') =>
+    vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'Retry-After': retryAfter }),
+        json: body,
+      } as unknown as Response),
+    );
+
+  it('shows a refused turn in the server\'s words and puts the question back', async () => {
+    vi.stubGlobal('fetch', refused(() => Promise.resolve({ detail: 'Please wait 7 seconds and try again.' })));
+    const { chatStore } = setupStores();
+
+    chatStore.userInput = 'What are the fees?';
+    await chatStore.handleSend();
+
+    const [question, reply] = chatStore.messagesBySession.session_current;
+    expect(question).toMatchObject({ text: 'What are the fees?', isUser: true });
+    expect(reply).toMatchObject({ text: 'Please wait 7 seconds and try again.', isThinking: false });
+    expect(reply.text).not.toContain('went wrong');
+    expect(chatStore.userInput).toBe('What are the fees?');
+    expect(chatStore.isLoading).toBe(false);
+  });
+
+  it('falls back to Retry-After when a refusal is not the server\'s JSON', async () => {
+    vi.stubGlobal('fetch', refused(() => Promise.reject(new SyntaxError('not JSON')), '12'));
+    const { chatStore } = setupStores();
+
+    chatStore.userInput = 'What are the fees?';
+    await chatStore.handleSend();
+
+    expect(chatStore.messagesBySession.session_current[1].text).toContain('12 seconds');
+  });
+
   it('keeps streaming chunks on the originating session after viewing another history session', async () => {
     const stream = createControlledSseFetch();
     vi.stubGlobal('fetch', stream.fetchMock);

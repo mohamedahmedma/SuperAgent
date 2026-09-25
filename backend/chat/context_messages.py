@@ -118,6 +118,34 @@ def _turn_context_message(turn_plan) -> SystemMessage | None:
     return SystemMessage(content=rendered) if rendered else None
 
 
+#: The fewest messages loaded however the profile is set. The scoring fallback reads the
+#: latest user message, which in an alternating conversation is at most two back.
+_MIN_HISTORY_WINDOW = 2
+
+
+def history_window(agent_config=None) -> int:
+    """How many of the latest messages a turn reads: the most it needs loaded.
+
+    Every reader of a turn's history takes a tail of it:
+
+      * the agent's context, the last `context_window_messages` (`build_context_messages`);
+      * the resolver, the classifier, a clarification's entry and a resumed answer, the
+        last `query_resolution_history_messages` (`conversation_text`);
+      * the scoring fallback, the latest user message (`signals._last_user_text`);
+      * naming the session, whether the conversation has any message at all.
+
+    So the largest of those tails is the whole of what a turn has to load (RAG_FIX_PLAN
+    item 19). A reader that ever looks further back has to be counted here, and
+    `tests/general/test_history_window.py` fails until it is.
+    """
+    agent = agent_config if agent_config is not None else get_profile().agent
+    return max(
+        int(agent.context_window_messages),
+        int(agent.query_resolution_history_messages),
+        _MIN_HISTORY_WINDOW,
+    )
+
+
 def build_context_messages(
     messages: list,
     user_text: str,

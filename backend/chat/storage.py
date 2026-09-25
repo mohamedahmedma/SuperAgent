@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Sequence
 
@@ -15,12 +16,18 @@ from backend.schemas.chat import normalize_rag_trace
 class MessageToStore:
     """One message a turn adds to its conversation: the role, the text, and — on an
     answer — the trace it should be stored with; on a question, the recording it was
-    spoken as."""
+    spoken as.
+
+    `key` makes storing it idempotent. A save that is retried after its connection was
+    lost cannot tell whether the first attempt committed; with the key, a message that
+    already landed is found instead of stored twice (RAG_FIX_PLAN item 21).
+    """
 
     message_type: str
     content: str
     rag_trace: dict | None = None
     attachment_id: str | None = None
+    key: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 class ConversationStorage:
@@ -131,6 +138,7 @@ class ConversationStorage:
                         timestamp=now,
                         rag_trace=normalize_rag_trace(message.rag_trace),
                         attachment_id=message.attachment_id or None,
+                        client_key=message.key,
                     )
                     for message in messages
                 ],
@@ -149,16 +157,30 @@ class ConversationStorage:
         turn is shown must be what is stored, not what a cache held a moment ago."""
         return self._to_langchain_messages(self._read_records(user_id, session_id))
 
-    def load_with_meta(self, user_id: str, session_id: str) -> tuple[list, dict]:
-        """Load conversation messages and session metadata (title, pending question, child pin)."""
+    def load_for_turn(self, user_id: str, session_id: str, *, window: int) -> tuple[list, dict]:
+        """What a turn reads: the latest `window` messages, oldest first, and the metadata.
+
+        RAG_FIX_PLAN item 19. A turn used to load EVERY message, each with its trace, and
+        then read only a short tail of them (see `backend.chat.context_messages.
+        history_window`). Measured on a 100-message conversation: 6.5 -> 1.3 ms p50 in the
+        database alone, and the traces are most of a stored answer's size, which the
+        Python side then parsed and normalised for nothing. So it asks for the window, and
+        for who said what, not the traces.
+
+        Read from the database, which is the authority. And nothing is cached: the
+        whole-conversation key must never hold a slice, or the web app would page through
+        a chat that looks `window` messages long. Writing the full conversation there, as
+        this used to, was pure cost: the turn's own save deletes it moments later.
+        """
         with self._unit_of_work() as uow:
             session = uow.conversations.find_session(user_id, session_id)
             if session is None:
                 return [], {}
-            records = [self._record(message) for message in uow.conversations.messages(session)]
+            lines = uow.conversations.recent_dialogue(session, limit=max(1, int(window)))
             metadata = dict(session.metadata)
-        self._cache.set_json(self._messages_cache_key(user_id, session_id), records)
-        return self._to_langchain_messages(records), metadata
+        return self._to_langchain_messages(
+            [{"type": line.message_type, "content": line.content} for line in lines]
+        ), metadata
 
     def list_sessions(self, user_id: str) -> list:
         return [item["session_id"] for item in self.list_session_infos(user_id)]

@@ -214,7 +214,7 @@ class AppendOnlyStorageTests(unittest.TestCase):
             [row.content for row in rows],
         )
         self.assertEqual(["uniforms::img1"], rows[1].rag_trace["asset_ids"], "the older answer kept its image")
-        _messages, metadata = self.storage.load_with_meta("parent", "s")
+        _messages, metadata = self.storage.load_for_turn("parent", "s", window=6)
         self.assertEqual("PE uniform", metadata["title"])
         self.assertIsNone(metadata["pending_hitl"])
 
@@ -223,14 +223,14 @@ class AppendOnlyStorageTests(unittest.TestCase):
         the save then deleted the rows the copy did not know about."""
         self._append("human", "Show me the PE uniform")
         self._append("ai", "Here is the PE kit", trace={"tool_used": True, "asset_ids": ["uniforms::img1"]})
-        self.storage.load_with_meta("parent", "s")  # warms the cache with two messages
+        self.storage.get_session_messages("parent", "s")  # warms the cache with two messages
 
         self.cache.writes_fail = True
         self._append("human", "What are the bus fees?")
         self._append("ai", "The documents do not cover bus fees.")
         self.cache.writes_fail = False
 
-        messages, _metadata = self.storage.load_with_meta("parent", "s")
+        messages, _metadata = self.storage.load_for_turn("parent", "s", window=10)
         self.assertEqual(4, len(messages), "a turn reads what is stored, not what the cache held")
         self._append("human", "OK, what about the canteen menu?")
 
@@ -245,11 +245,31 @@ class AppendOnlyStorageTests(unittest.TestCase):
         self._append("human", "fees?", metadata={"child_context": {"student_id": "S-1"}})
         self._append("ai", "hi", metadata={"pending_hitl": None})
 
-        _messages, metadata = self.storage.load_with_meta("parent", "s")
+        _messages, metadata = self.storage.load_for_turn("parent", "s", window=6)
         self.assertEqual(
             {"title": "Hello", "pending_hitl": None, "child_context": {"student_id": "S-1"}},
             metadata,
         )
+
+    def test_a_turn_loads_only_the_latest_window_oldest_first_and_caches_nothing(self):
+        """RAG_FIX_PLAN item 19: a turn reads a tail of its conversation, so that is all it
+        loads. And a slice must never be cached under the whole-conversation key, or the
+        web app would page through a chat that looks `window` messages long."""
+        for number in range(10):
+            self._append("human" if number % 2 == 0 else "ai", f"message {number}",
+                         trace={"retrieved_chunks": [{"text": "x" * 500}]})
+
+        messages, _metadata = self.storage.load_for_turn("parent", "s", window=4)
+
+        self.assertEqual(["message 6", "message 7", "message 8", "message 9"],
+                         [message.content for message in messages])
+        self.assertEqual([HumanMessage, AIMessage, HumanMessage, AIMessage],
+                         [type(message) for message in messages])
+        self.assertIsNone(self.cache.get_json(ConversationStorage._messages_cache_key("parent", "s")))
+        self.assertEqual(10, len(self.storage.get_session_messages("parent", "s")))
+
+    def test_a_turn_in_a_new_conversation_loads_nothing(self):
+        self.assertEqual(([], {}), self.storage.load_for_turn("parent", "new", window=6))
 
     def test_a_write_invalidates_the_cached_conversation(self):
         self._append("human", "first")

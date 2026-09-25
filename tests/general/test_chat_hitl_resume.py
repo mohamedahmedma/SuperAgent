@@ -30,8 +30,8 @@ class FakeStorage:
         self.metadata = dict(metadata or {})
         self.appends = []
 
-    def load_with_meta(self, user_id, session_id):
-        return list(self.messages), dict(self.metadata)
+    def load_for_turn(self, user_id, session_id, *, window):
+        return list(self.messages)[-window:], dict(self.metadata)
 
     def append(self, user_id, session_id, messages, *, metadata=None):
         for message in messages:

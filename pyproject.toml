@@ -10,6 +10,16 @@ dependencies = [
     "uvicorn>=0.30.0",
     "python-dotenv>=1.0.1",
     "requests>=2.32.0",
+    # Imported directly, so declared directly rather than trusted to arrive with something
+    # else. The model provider clients (backend/llm_http.py) are transports for the SAME
+    # HTTP library the OpenAI SDK is built on, so the two are pinned together: openai 3.x
+    # moves to its `httpx2` fork, and those transports would have to follow it.
+    "openai>=2.29,<3",
+    "httpx>=0.28.1,<1",
+    "anyio>=4.12",
+    # The streamed chat route's BackgroundTask, and the embedding client's Retry.
+    "starlette>=0.52",
+    "urllib3>=2.6",
     "pymilvus>=2.5.0",
     "python-multipart>=0.0.9",
     "pydantic>=2.8.0",

@@ -45,8 +45,9 @@ if TYPE_CHECKING:
     from backend.assets.entity_store import EntityAttributeIndex
     from backend.assets.pipeline import FigurePipeline
     from backend.assets.store import AssetStore
+    from backend.chat.admission import TurnAdmission
     from backend.chat.attachments import ChatAttachments
-    from backend.chat.background import BackgroundJobs
+    from backend.chat.background import JobRunner
     from backend.chat.storage import ConversationStorage
     from backend.chat.transcription import Transcriber
     from backend.indexing.document_loader import DocumentLoader
@@ -55,12 +56,15 @@ if TYPE_CHECKING:
     from backend.indexing.milvus_writer import MilvusWriter
     from backend.indexing.pair_store import DocumentPairService
     from backend.indexing.parent_chunk_store import ParentChunkStore
+    from backend.indexing.query_vectors import QueryVectorCache
     from backend.indexing.removal import DocumentRemover
     from backend.indexing.summary_store import SectionCatalogueStore
     from backend.infra.cache import RedisCache
     from backend.jobs.upload_jobs import IngestJobTracker
+    from backend.llm_http import ProviderHttpClients
     from backend.llm_models import ChatModelFactory
     from backend.rag.entity_retrieval import EntityRetriever
+    from backend.rag.retrieval_cache import CorpusVersion, RetrievalCache
 
 T = TypeVar("T")
 
@@ -79,7 +83,7 @@ class Services:
         unit_of_work: UnitOfWorkFactory | None = None,
         cache: RedisCache | None = None,
         conversations: ConversationStorage | None = None,
-        background_jobs: BackgroundJobs | None = None,
+        background_jobs: JobRunner | None = None,
         attachments: ChatAttachments | None = None,
         transcriber: Transcriber | None = None,
         document_pairs: DocumentPairService | None = None,
@@ -203,18 +207,39 @@ class Services:
         return self._singleton("conversations", build)
 
     @property
-    def background_jobs(self) -> BackgroundJobs:
+    def turn_admission(self) -> TurnAdmission:
+        """The door every chat turn passes: provider busy, and each user's turn limits.
+
+        Over the process's provider quotas and the shared Redis, so the per-user counts
+        hold across workers and replicas (backend/chat/admission.py, items 37 and 38).
+        """
+
+        def build() -> TurnAdmission:
+            from backend.chat.admission import TurnAdmission
+
+            return TurnAdmission.from_environment(self.cache, self.provider_http.quotas)
+
+        return self._singleton("turn_admission", build)
+
+    @property
+    def background_jobs(self) -> JobRunner:
         """The threads a turn hands its save to.
 
         One per process: the ordering it promises — a conversation's writes land in the
         order they were queued — holds only among jobs that share an instance. Drained by
         `create_app()`'s lifespan on the way down, so a stop cannot lose a queued save.
+        Wrapped so that waiting for a conversation's saves waits for them in every worker,
+        through Redis (`SharedWriteBarrier`, RAG_FIX_PLAN item 21).
         """
 
-        def build() -> BackgroundJobs:
-            from backend.chat.background import BackgroundJobs
+        def build() -> JobRunner:
+            from backend.chat.background import BackgroundJobs, SharedWriteBarrier
 
-            return BackgroundJobs()
+            return SharedWriteBarrier(
+                BackgroundJobs(),
+                redis=getattr(self.cache, "client", None),
+                key=getattr(self.cache, "key", lambda name: name),
+            )
 
         return self._singleton("background_jobs", build)
 
@@ -261,7 +286,11 @@ class Services:
         def build() -> ParentChunkStore:
             from backend.indexing.parent_chunk_store import ParentChunkStore
 
-            return ParentChunkStore(unit_of_work=self.unit_of_work, cache=self.cache)
+            return ParentChunkStore(
+                unit_of_work=self.unit_of_work,
+                cache=self.cache,
+                on_change=self.corpus_version.bump,
+            )
 
         return self._singleton("parent_chunks", build)
 
@@ -287,9 +316,50 @@ class Services:
         def build() -> MilvusStore:
             from backend.indexing.milvus_client import MilvusStore
 
-            return MilvusStore()
+            return MilvusStore(on_change=self.corpus_version.bump)
 
         return self._singleton("milvus", build)
+
+    @property
+    def corpus_version(self) -> CorpusVersion:
+        """The counter every write to the searchable corpus moves forward.
+
+        Bumped by the vector store and the parent-chunk store, the two things a retrieval
+        reads, and read with every cached retrieval (backend/rag/retrieval_cache.py).
+        """
+
+        def build() -> CorpusVersion:
+            from backend.rag.retrieval_cache import CorpusVersion
+
+            return CorpusVersion.for_cache(self.cache)
+
+        return self._singleton("corpus_version", build)
+
+    @property
+    def retrieval_cache(self) -> RetrievalCache:
+        """Retrieval results shared by every worker, valid for one corpus version (item 18)."""
+
+        def build() -> RetrievalCache:
+            from backend.rag.retrieval_cache import RetrievalCache
+            from backend.rag.utils import retrieval_settings
+
+            return RetrievalCache.from_environment(self.cache, self.corpus_version, retrieval_settings())
+
+        return self._singleton("retrieval_cache", build)
+
+    @property
+    def query_vectors(self) -> QueryVectorCache:
+        """Query text to vector, through this process, Redis, then the embedder (item 18)."""
+
+        def build() -> QueryVectorCache:
+            from backend.indexing.query_vectors import QueryVectorCache
+
+            # Resolved per call, so a test that replaces the embedder is embedding with it.
+            return QueryVectorCache.from_environment(
+                lambda text: self.embedder.get_embeddings([text])[0], self.cache
+            )
+
+        return self._singleton("query_vectors", build)
 
     @property
     def embedder(self) -> EmbeddingService:
@@ -444,9 +514,25 @@ class Services:
         def build() -> ChatModelFactory:
             from backend.llm_models import ChatModelFactory
 
-            return ChatModelFactory()
+            return ChatModelFactory(http_kwargs=self.provider_http.model_kwargs())
 
         return self._singleton("models", build)
+
+    @property
+    def provider_http(self) -> ProviderHttpClients:
+        """The HTTP clients every chat model reaches its provider through.
+
+        One per process, so every model object shares one connection pool per provider —
+        and one whose streamed responses go back to it instead of being closed
+        (backend/llm_http.py, RAG_FIX_PLAN item 48).
+        """
+
+        def build() -> ProviderHttpClients:
+            from backend.llm_http import ProviderHttpClients
+
+            return ProviderHttpClients()
+
+        return self._singleton("provider_http", build)
 
     # -- ingest jobs ------------------------------------------------------------
     # Two trackers over one table, distinguished by the kind of job they own. Separate

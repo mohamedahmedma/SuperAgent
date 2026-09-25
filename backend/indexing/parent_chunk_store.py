@@ -1,7 +1,7 @@
 """Parent chunks for the auto-merging retriever: Postgres through a unit of work, Redis in front."""
 from __future__ import annotations
 
-from typing import List
+from typing import Callable, List
 
 from backend.application.ports.repositories import ParentChunkRecord
 from backend.application.ports.unit_of_work import UnitOfWorkFactory
@@ -10,12 +10,19 @@ from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 
 
 class ParentChunkStore:
-    """Parent chunks by id: read through the cache, written through a unit of work."""
+    """Parent chunks by id: read through the cache, written through a unit of work.
+
+    `on_change` is called after every committed write. A retrieval merges these chunks
+    into its result, so a write here changes what a search returns just as a write to
+    the vector store does (see `MilvusStore`).
+    """
 
     def __init__(
         self,
         unit_of_work: UnitOfWorkFactory = SqlAlchemyUnitOfWork,
         cache: RedisCache | None = None,
+        *,
+        on_change: Callable[[], None] | None = None,
     ) -> None:
         self._unit_of_work = unit_of_work
         if cache is None:
@@ -23,6 +30,11 @@ class ParentChunkStore:
 
             cache = default_services().cache
         self._cache = cache
+        self._on_change = on_change
+
+    def _changed(self) -> None:
+        if self._on_change is not None:
+            self._on_change()
 
     @staticmethod
     def _cache_key(chunk_id: str) -> str:
@@ -76,6 +88,7 @@ class ParentChunkStore:
         # After the commit, so the cache never serves a chunk the database rolled back.
         for chunk in chunks:
             self._cache.set_json(self._cache_key(chunk.chunk_id), self._to_dict(chunk))
+        self._changed()
         return len(chunks)
 
     def get_documents_by_ids(self, chunk_ids: List[str]) -> List[dict]:
@@ -113,6 +126,8 @@ class ParentChunkStore:
             uow.commit()
         for chunk_id in removed:
             self._cache.delete(self._cache_key(chunk_id))
+        if removed:
+            self._changed()
         return len(removed)
 
     def sections(self, level: int) -> List[ParentChunkRecord]:

@@ -556,6 +556,15 @@ class RagConfig(_Section):
     # minutes to avoid a message that says "try again". Short retries absorb a
     # per-minute spike; anything longer is a quota problem that waiting cannot fix, and
     # failing fast is the better answer.
+    #
+    # Enforced in ONE place, the HTTP clients every chat-path model shares
+    # (backend/llm_http.py, backend/provider_quota.py — RAG_FIX_PLAN item 37), and by
+    # the embedding client for its own provider. `attempts` counts the first try.
+    # `max_seconds` is the longest a stated Retry-After is waited; past it the call
+    # fails at once, and so do the calls after it until the provider's stated time,
+    # without being sent. `base_seconds` is the pause after a 429 that states no delay.
+    # Before, the SDK's own retries (2, honouring waits up to 60 s) sat under a
+    # retry here: 6 requests and 126 s for one call at `retry-after: 30`.
     model_retry_attempts: int = 2
     model_retry_base_seconds: float = 2.0
     model_retry_max_seconds: float = 6.0
@@ -921,6 +930,33 @@ class CopyConfig(_Section):
         default_factory=lambda: LocalizedText(
             en="Which child do you mean?",
             ar="أي طفل تقصد؟",
+        )
+    )
+
+    # A turn refused or cut short by a limit: the model provider's rate limit (RAG_FIX_PLAN
+    # item 37), or this user's own turn limits (item 38). Shown instead of an exception
+    # text, which named the provider and the model. `{seconds}` is filled with how long
+    # to wait, from the provider's or the limiter's own figure.
+    provider_busy: LocalizedText = Field(
+        default_factory=lambda: LocalizedText(
+            en="I'm getting more questions than I can answer right now. "
+               "Please try again in {seconds} seconds.",
+            ar="تصلني أسئلة أكثر مما أستطيع الإجابة عنه الآن. "
+               "يُرجى المحاولة مرة أخرى بعد {seconds} ثانية.",
+        )
+    )
+    too_many_turns: LocalizedText = Field(
+        default_factory=lambda: LocalizedText(
+            en="You're sending messages faster than I can answer them. "
+               "Please wait {seconds} seconds and try again.",
+            ar="أنت ترسل الرسائل أسرع مما أستطيع الرد عليها. "
+               "يُرجى الانتظار {seconds} ثانية ثم المحاولة مرة أخرى.",
+        )
+    )
+    turn_in_progress: LocalizedText = Field(
+        default_factory=lambda: LocalizedText(
+            en="I'm still answering your earlier messages. Please wait for them to finish.",
+            ar="ما زلت أجيب عن رسائلك السابقة. يُرجى الانتظار حتى تكتمل.",
         )
     )
 

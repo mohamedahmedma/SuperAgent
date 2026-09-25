@@ -174,7 +174,7 @@ class _Session(unittest.IsolatedAsyncioTestCase):
         caller = CallerIdentity(user_id=USER, guardian_id=GUARDIAN, guardian_token=TOKEN)
         chunks = []
         with (
-            patch("backend.chat.child_roster.requests.get", _roster(self.roster)),
+            patch("backend.records_http.get", _roster(self.roster)),
             patch.object(service, "plan_turn", self._plan),
             patch.object(service, "resolve_turn_question", self._resolve),
             patch.object(service, "create_agent_for_request", self._agent),
@@ -382,7 +382,7 @@ class TheSyncPathSpendsItToo(unittest.TestCase):
 
         caller = CallerIdentity(user_id=USER, guardian_id=GUARDIAN, guardian_token=TOKEN)
         with (
-            patch("backend.chat.child_roster.requests.get", _roster([DAUGHTER, NAMESAKE])),
+            patch("backend.records_http.get", _roster([DAUGHTER, NAMESAKE])),
             patch.object(service, "plan_turn", plan),
             patch.object(service, "create_agent_for_request", lambda ctx, *a, **k: _SyncAgent("بتاخد العربي.")),
             patch.object(service, "generate_session_title", Mock(return_value="س")),
@@ -658,7 +658,7 @@ class TappingAnOfferedOptionPinsThatChild(unittest.TestCase):
         self.addCleanup(self.ctx.close)
 
     def _pin(self, chosen, rows=(DAUGHTER, NAMESAKE)):
-        with patch("backend.chat.child_roster.requests.get", _roster(list(rows))):
+        with patch("backend.records_http.get", _roster(list(rows))):
             return pin_the_child_the_parent_named(self.ctx, chosen)
 
     def test_the_tapped_option_pins_exactly_that_child(self):

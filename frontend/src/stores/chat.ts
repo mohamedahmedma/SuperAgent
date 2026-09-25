@@ -35,6 +35,24 @@ function replacedAClarification(reply: any): boolean {
   return !!reply && reply.type !== 'human' && reply.rag_trace?.turn_clarification === 'replaced';
 }
 
+/** A turn the server refused to start: the parent's own limits, or a provider that is
+ *  refusing calls. Its message is the server's copy, already in the parent's language
+ *  and naming how long to wait (backend/chat/admission.py, RAG_FIX_PLAN items 37-38). */
+class TurnRefusedError extends Error {}
+
+async function refusalMessage(response: Response): Promise<string> {
+  try {
+    const body = await response.json();
+    if (typeof body?.detail === 'string' && body.detail) return body.detail;
+  } catch {
+    // Not the server's JSON — a proxy's page, say. The header still says how long.
+  }
+  const seconds = response.headers?.get('Retry-After');
+  return seconds
+    ? `Too many messages right now. Please try again in ${seconds} seconds.`
+    : 'Too many messages right now. Please try again shortly.';
+}
+
 /** The player for a note the server holds. Its URL is a path; `apiUrl` sends it where the
  *  API lives, and the player fetches it with the bearer token. */
 function voiceFromAttachment(attachment: AttachmentInfo | null | undefined): VoiceMessage | undefined {
@@ -658,6 +676,9 @@ export const useChatStore = defineStore('chat', {
             authStore.handleLogout();
             throw new Error('Your session has expired, please log in again');
           }
+          if (response.status === 429) {
+            throw new TurnRefusedError(await refusalMessage(response));
+          }
           throw new Error(`HTTP ${response.status}`);
         }
 
@@ -818,6 +839,12 @@ export const useChatStore = defineStore('chat', {
         if (error.name === 'AbortError') {
           botMsg.isThinking = false;
           botMsg.text = stoppedText(botMsg.text);
+        } else if (error instanceof TurnRefusedError) {
+          // Nothing went wrong, so nothing says it did: the server's words, as they are.
+          // The question goes back in the composer, so asking again is one press.
+          botMsg.isThinking = false;
+          botMsg.text = error.message;
+          if (!this.userInput) this.userInput = text;
         } else {
           botMsg.isThinking = false;
           botMsg.text = `Meow... something went wrong: ${error.message}`;

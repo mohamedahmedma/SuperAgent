@@ -32,6 +32,10 @@ from backend.llm import sampling
 from backend.rag.evidence import Certainty
 from backend.rag.scope_index import ScopeIndex, ScopeMatch, build_index
 from backend.text_normalization import normalize_query
+from typing import List as _List, Literal as _Literal
+from pydantic import Field
+
+from backend.structured_output import StructuredOutput
 
 logger = logging.getLogger(__name__)
 
@@ -219,27 +223,31 @@ class ScopeModelDetector:
         return signals
 
 
+# Defined once, at import, rather than inside `_default_scope_invoke` on every call: a class built
+# per call is a pydantic model built per call, and its JSON schema regenerated with
+# it — measured at 4.5% and 10.4% of the serving process's CPU (RAG_FIX_PLAN item 47).
+class ScopeVerdict(StructuredOutput):
+    scope: _Literal["in_domain", "out_of_domain"] = Field(
+        description="Whether the message is this knowledge base's subject"
+    )
+    reason: str = Field(default="", description="One short sentence")
+    personal_data: _List[str] = Field(default_factory=list)
+
+
 def _default_scope_invoke(ctx, signals: RequestSignals) -> Optional[Dict[str, Any]]:
     """One structured call, prompted with rung 1's evidence."""
     import os
 
     from langchain.chat_models import init_chat_model
-    from pydantic import BaseModel, Field
-    from typing import List as _List, Literal as _Literal
 
-    from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
+    from backend.assets.vision import invoke_structured
     from backend.prompts import render
     from backend.profiles import get_profile
+    from backend.composition import default_services
 
     profile = get_profile()
     personal_fields = list(getattr(ctx.config, "personal_data_fields", None) or [])
 
-    class ScopeVerdict(BaseModel):
-        scope: _Literal["in_domain", "out_of_domain"] = Field(
-            description="Whether the message is this knowledge base's subject"
-        )
-        reason: str = Field(default="", description="One short sentence")
-        personal_data: _List[str] = Field(default_factory=list)
 
     index = index_store.get()
     prompt = render(
@@ -271,22 +279,15 @@ def _default_scope_invoke(ctx, signals: RequestSignals) -> Optional[Dict[str, An
         model_provider="openai",
         api_key=os.getenv("ARK_API_KEY"),
         base_url=os.getenv("BASE_URL"),
+        **default_services().provider_http.model_kwargs(),
         **sampling("scope"),
     )
-    # Same quota as everything else in the turn, so the same treatment: a 429 here
-    # would make this rung abstain, and abstaining leaves the tentative rejection from
-    # the rung below — which cannot end a turn, so the question proceeds. Safe, but it
-    # spends the search this rung existed to avoid.
-    class _Retry:
-        vision_retry_attempts = int(getattr(ctx.config, "model_retry_attempts", 3))
-        vision_retry_base_seconds = float(getattr(ctx.config, "model_retry_base_seconds", 5.0))
-        vision_retry_max_seconds = float(getattr(ctx.config, "model_retry_max_seconds", 60.0))
-
-    result = call_with_rate_limit_retry(
-        lambda: invoke_structured(model, ScopeVerdict, [{"role": "user", "content": prompt}]),
-        config=_Retry(),
-        description="scope check",
-    )
+    # A 429 is retried in the client, under the turn's rate-limit policy
+    # (backend/llm_http.py, item 37). One that still fails makes this rung abstain, and
+    # abstaining leaves the tentative rejection from the rung below — which cannot end a
+    # turn, so the question proceeds. Safe, but it spends the search this rung existed
+    # to avoid.
+    result = invoke_structured(model, ScopeVerdict, [{"role": "user", "content": prompt}])
     return result if isinstance(result, dict) else result.model_dump()
 
 

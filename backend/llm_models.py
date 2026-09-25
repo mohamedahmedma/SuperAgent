@@ -71,6 +71,7 @@ class ChatModelFactory:
         *,
         environ: Optional[Mapping[str, str]] = None,
         build: Optional[Callable[..., Any]] = None,
+        http_kwargs: Optional[Mapping[str, Any]] = None,
     ) -> None:
         source = environ if environ is not None else os.environ
         self._api_key = source.get("ARK_API_KEY")
@@ -79,6 +80,9 @@ class ChatModelFactory:
             role: source.get(variable) for role, variable in _MODEL_VARIABLE.items()
         }
         self._build = build
+        # The shared provider clients (backend/llm_http.py), when the composition root
+        # supplies them. Empty in a factory built on its own, which then behaves as before.
+        self._http_kwargs = dict(http_kwargs or {})
         self._models: Dict[tuple, Any] = {}
         self._lock = threading.RLock()
 
@@ -120,6 +124,7 @@ class ChatModelFactory:
                     api_key=self._api_key,
                     base_url=self._base_url,
                     stream_usage=True,
+                    **self._http_kwargs,
                     **settings,
                 )
             return self._models[key]

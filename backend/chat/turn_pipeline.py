@@ -57,10 +57,15 @@ from backend.chat.clarification import (
     is_hitl_trace,
     pin_the_child_the_parent_named,
 )
-from backend.chat.context_messages import build_context_messages, build_resume_answer_messages
+from backend.chat.context_messages import (
+    build_context_messages,
+    build_resume_answer_messages,
+    history_window,
+)
 from backend.chat.background import JobRunner
 from backend.chat.finalize import Finalizer, finalize_text, message_text
 from backend.chat.storage import MessageToStore
+from backend.infra.retry import retry_transient
 from backend.schemas.chat import normalize_rag_trace
 
 logger = logging.getLogger(__name__)
@@ -220,7 +225,9 @@ class TurnPipeline:
                 "continuing with what is stored",
                 user_id, session_id, self.SAVE_WAIT_SECONDS,
             )
-        messages, metadata = self._c.conversations.load_with_meta(user_id, session_id)
+        messages, metadata = self._c.conversations.load_for_turn(
+            user_id, session_id, window=history_window(self._c.profile.agent)
+        )
         guardian_id = caller.guardian_id if caller else ""
         return Turn(
             user_text=user_text,
@@ -324,15 +331,24 @@ class TurnPipeline:
         )
 
     def _store(self, turn: Turn, messages: list, *, metadata: dict | None = None, describe: str) -> None:
-        """Queue an append to this conversation, behind whatever it already has queued."""
+        """Queue an append to this conversation, behind whatever it already has queued.
+
+        Retried through a transient database failure, where it used to be logged and
+        dropped with the answer the parent had just read (RAG_FIX_PLAN item 21). Safe to
+        repeat because each message carries its idempotency key.
+        """
         conversations = self._c.conversations
         user_id, session_id = turn.user_id, turn.session_id
+        label = f"{describe} ({user_id}/{session_id})"
 
         def work():
-            return conversations.append(user_id, session_id, messages, metadata=metadata)
+            return retry_transient(
+                lambda: conversations.append(user_id, session_id, messages, metadata=metadata),
+                describe=label,
+            )
 
         turn.writes.append(self._c.background.submit(
-            self.conversation_key(user_id, session_id), work, describe=f"{describe} ({user_id}/{session_id})"
+            self.conversation_key(user_id, session_id), work, describe=label
         ))
 
     # -- a resumed search --------------------------------------------------------------

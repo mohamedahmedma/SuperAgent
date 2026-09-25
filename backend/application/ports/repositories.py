@@ -49,12 +49,22 @@ class StoredMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class DialogueLine:
+    """One message as a turn's history reads it: who said what, and nothing else."""
+
+    message_type: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
 class NewMessage:
     message_type: str
     content: str
     timestamp: datetime
     rag_trace: dict | None
     attachment_id: str | None = None
+    #: The writer's idempotency key: a message with a key already stored is not stored again.
+    client_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +100,11 @@ class ConversationRepository(Protocol):
         ...
 
     def add_messages(self, session: StoredSession, messages: Sequence[NewMessage]) -> Sequence[int]:
-        """Stage the messages in order and return the ids they were given, in that order."""
+        """Stage the messages in order and return the ids they were given, in that order.
+
+        Idempotent by `client_key`: a message whose key is already stored is not stored
+        again, and its existing id is returned in its place.
+        """
         ...
 
     def messages(self, session: StoredSession) -> Sequence[StoredMessage]:
@@ -101,6 +115,14 @@ class ConversationRepository(Protocol):
         self, session: StoredSession, *, limit: int, before_id: int | None
     ) -> Sequence[StoredMessage]:
         """Up to `limit` messages older than `before_id` (or the newest), newest first."""
+        ...
+
+    def recent_dialogue(self, session: StoredSession, *, limit: int) -> Sequence[DialogueLine]:
+        """The latest `limit` messages as who-said-what, oldest first.
+
+        For a turn's history, which reads nothing else. The trace a stored answer carries
+        is most of its size (p95 17 KB, measured), and a turn has no use for it.
+        """
         ...
 
     def summaries(self, username: str) -> Sequence[SessionSummary]:

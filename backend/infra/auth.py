@@ -23,6 +23,10 @@ session ownership work unchanged. Its `password_hash` column now holds a sentine
 matches no hash format, and nothing in this codebase reads it any more.
 """
 import logging
+import os
+import threading
+import time
+from collections import OrderedDict
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -179,6 +183,66 @@ def _children_from(claims: dict) -> tuple:
 
 
 
+class KnownUsers:
+    """Usernames whose projection row is known to exist, so a request need not ask again.
+
+    Every authenticated request used to run a `SELECT` on `users` to ensure a row that
+    has existed since the parent's first request — a pool checkout and a round trip on
+    every stream, every session list, every image fetch (RAG_FIX_PLAN item 34). The fact
+    being checked only ever turns from false to true: nothing in this codebase deletes a
+    projection row. So it is remembered.
+
+    Bounded twice, because a cache of a database fact must not outlive what it caches:
+      * by size (least recently seen first) — one entry per active user is a few dozen
+        bytes, but an unbounded map is a leak in a process that runs for months;
+      * by age — an operator deleting a row by hand is re-checked within `ttl_seconds`
+        instead of never.
+
+    Per process. With several workers each learns the fact once, which is the point: the
+    query moves from once per request to once per user per worker per TTL.
+    """
+
+    def __init__(self, capacity: int = 50_000, ttl_seconds: float = 600.0, clock=time.monotonic) -> None:
+        self._capacity = max(1, int(capacity))
+        self._ttl = float(ttl_seconds)
+        self._clock = clock
+        self._entries: "OrderedDict[str, float]" = OrderedDict()
+        self._lock = threading.Lock()
+
+    def __contains__(self, username: str) -> bool:
+        with self._lock:
+            expires = self._entries.get(username)
+            if expires is None:
+                return False
+            if expires <= self._clock():
+                del self._entries[username]
+                return False
+            self._entries.move_to_end(username)
+            return True
+
+    def add(self, username: str) -> None:
+        with self._lock:
+            self._entries[username] = self._clock() + self._ttl
+            self._entries.move_to_end(username)
+            while len(self._entries) > self._capacity:
+                self._entries.popitem(last=False)
+
+    def clear(self) -> None:
+        """Forget everything — for a test that hands the process a fresh database."""
+        with self._lock:
+            self._entries.clear()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+
+known_users = KnownUsers(
+    capacity=int(os.getenv("AUTH_KNOWN_USER_CAPACITY") or 50_000),
+    ttl_seconds=float(os.getenv("AUTH_KNOWN_USER_TTL_SECONDS") or 600),
+)
+
+
 def _ensure_projection_row(db: Session, username: str) -> None:
     """Make sure a `users` row exists for this username.
 
@@ -190,17 +254,38 @@ def _ensure_projection_row(db: Session, username: str) -> None:
 
     A concurrent duplicate insert is caught and ignored: the unique constraint on
     username is the real guard, and losing a race means the row exists, which is the
-    outcome wanted anyway.
+    outcome wanted anyway. Only a row this call SAW exist, or itself committed, is
+    remembered in `known_users` — a failed insert may have failed for another reason, and
+    the next request asks again rather than trusting a guess.
+
+    The transaction is always ended before returning (RAG_FIX_PLAN item 33). The
+    `SELECT` opens one, and FastAPI closes this request's session only after a streaming
+    response has FINISHED — measured: the stream's last event at 627 ms, the session's
+    close at 628 ms. Left open, the connection sat `idle in transaction` for the whole
+    answer, one of the pool's forty per parent chatting. Ending the transaction returns
+    it the moment the check is done; the session object itself holds nothing after that.
     """
-    if db.query(User.id).filter(User.username == username).first() is not None:
+    if username in known_users:
         return
 
-    db.add(User(username=username, password_hash=EXTERNAL_CREDENTIAL_SENTINEL, role="user"))
+    confirmed = False
     try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        logger.debug("Projection row for %s already existed", username)
+        if db.query(User.id).filter(User.username == username).first() is not None:
+            confirmed = True
+        else:
+            db.add(User(username=username, password_hash=EXTERNAL_CREDENTIAL_SENTINEL, role="user"))
+            try:
+                db.commit()
+                confirmed = True
+            except Exception:
+                db.rollback()
+                logger.debug("Projection row for %s already existed", username)
+    finally:
+        if db.in_transaction():
+            db.rollback()
+
+    if confirmed:
+        known_users.add(username)
 
 
 def get_current_user(

@@ -158,6 +158,59 @@ class BackendAuthTests(unittest.TestCase):
             backend_auth.get_current_user(token=mint(), db=self.db)
         self.assertEqual(1, self.db.query(User).filter(User.username == "parent-one").count())
 
+    # -- RAG_FIX_PLAN item 33: nothing request-scoped outlives the check -------------
+
+    def test_the_check_leaves_no_transaction_open_when_the_row_exists(self):
+        """FastAPI closes this session only after a streaming response FINISHES. A
+        transaction left open here pinned a pooled connection, idle in transaction, for
+        the whole answer."""
+        backend_auth.get_current_user(token=mint(), db=self.db)
+        backend_auth.known_users.clear()  # force the SELECT path on the next call
+
+        backend_auth.get_current_user(token=mint(), db=self.db)
+        self.assertFalse(self.db.in_transaction())
+
+    def test_the_check_leaves_no_transaction_open_after_creating_the_row(self):
+        backend_auth.get_current_user(token=mint(username="new-parent"), db=self.db)
+        self.assertFalse(self.db.in_transaction())
+
+    # -- RAG_FIX_PLAN item 34: a known user costs no query --------------------------
+
+    def test_a_user_seen_before_costs_no_database_round_trip(self):
+        backend_auth.get_current_user(token=mint(), db=self.db)
+
+        statements = []
+        from sqlalchemy import event
+
+        bind = self.db.get_bind()
+        record = lambda *args, **kwargs: statements.append(args[2])
+        event.listen(bind, "before_cursor_execute", record)
+        try:
+            for _ in range(5):
+                backend_auth.get_current_user(token=mint(), db=self.db)
+        finally:
+            event.remove(bind, "before_cursor_execute", record)
+        self.assertEqual([], statements)
+
+    def test_a_forgotten_user_is_checked_again_rather_than_assumed(self):
+        """An operator deleting a projection row by hand must be noticed eventually."""
+        backend_auth.get_current_user(token=mint(), db=self.db)
+        self.db.query(User).filter(User.username == "parent-one").delete()
+        self.db.commit()
+        backend_auth.known_users.clear()  # what the TTL does on its own, sooner
+
+        backend_auth.get_current_user(token=mint(), db=self.db)
+        self.assertEqual(1, self.db.query(User).filter(User.username == "parent-one").count())
+
+    def test_a_failed_insert_is_not_remembered_as_a_row(self):
+        """A commit can fail for reasons other than losing a race. Only a row this call
+        saw exist, or itself committed, is trusted."""
+        from unittest.mock import patch
+
+        with patch.object(self.db, "commit", side_effect=RuntimeError("database went away")):
+            backend_auth.get_current_user(token=mint(username="unlucky"), db=self.db)
+        self.assertNotIn("unlucky", backend_auth.known_users)
+
     def test_authority_comes_from_the_token_not_the_local_row(self):
         """The projection is written with role "user" and never updated.
 

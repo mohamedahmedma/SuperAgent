@@ -44,6 +44,7 @@ from urllib.parse import quote
 
 import requests
 
+import backend.records_http as records_http
 from backend.env import records_api_key, records_base_url
 
 logger = logging.getLogger(__name__)
@@ -140,7 +141,7 @@ def _cache_key(guardian_id: str) -> str:
 def _fetch(guardian_id: str, token: str, request_id: str) -> Tuple[str, list]:
     """One GET against the facade. Never raises."""
     try:
-        response = requests.get(
+        response = records_http.get(
             f"{BASE_URL}/v1/guardians/{quote(guardian_id, safe='')}/students",
             headers={
                 "X-API-Key": API_KEY,

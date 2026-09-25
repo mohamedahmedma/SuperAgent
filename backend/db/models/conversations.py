@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +28,7 @@ class ChatSession(Base):
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
+    __table_args__ = (Index("ix_chat_messages_client_key", "client_key", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     session_ref_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -42,6 +43,10 @@ class ChatMessage(Base):
     attachment_id: Mapped[str | None] = mapped_column(
         ForeignKey("chat_attachments.id", ondelete="SET NULL"), nullable=True
     )
+    #: The writer's idempotency key (`MessageToStore.key`). Unique, so a save retried after
+    #: a commit whose acknowledgement was lost finds the row instead of adding a second
+    #: one. NULL on rows stored before it existed; Postgres never counts two NULLs equal.
+    client_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     session = relationship("ChatSession", back_populates="messages")
 

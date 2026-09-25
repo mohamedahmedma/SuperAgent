@@ -36,8 +36,9 @@ configured to use a remote backend. It loads on first use instead.
 """
 import logging
 import os
+import random
 import threading
-from functools import lru_cache
+import time
 from typing import List, Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -70,9 +71,11 @@ class _RemoteEmbedder:
     """An OpenAI-compatible /v1/embeddings client.
 
     Batched, because one request per text turns a 200-chunk write into 200 round trips.
-    Not retried here: the callers that must not lose a vector (the catalogue build, the
-    Milvus writer) already check the returned count and refuse to store a short or
-    misaligned result, which is the failure that actually matters.
+    A failed connection is retried in the adapter (`_connection_retry`), and a throttled
+    or failed answer once, under the provider's quota (`_post`). Beyond that, the callers
+    that must not lose a vector (the catalogue build, the Milvus writer) check the
+    returned count and refuse to store a short or misaligned result, which is the
+    failure that actually matters.
     """
 
     def __init__(self):
@@ -85,9 +88,26 @@ class _RemoteEmbedder:
         self.model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
         self.api_key = (os.getenv("EMBEDDING_API_KEY") or "").strip()
         self.timeout = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS") or 30.0)
+        # A QUERY embeds one short text on the path to a parent's first word; a batch is
+        # ingest. They get different read timeouts, because a request that is never
+        # answered waits out the whole timeout (measured: twice under load) — and 30 s is
+        # right for a 64-chunk batch but not for one question (single calls: p99 ~1.5 s).
+        self.query_timeout = float(os.getenv("EMBEDDING_QUERY_TIMEOUT_SECONDS") or 10.0)
+        self.connect_timeout = float(os.getenv("EMBEDDING_CONNECT_TIMEOUT_SECONDS") or 5.0)
         self.batch_size = max(1, int(os.getenv("EMBEDDING_BATCH_SIZE") or 64))
+        self.pool_size = max(10, int(os.getenv("EMBEDDING_POOL_SIZE") or 32))
         self._session = None
         self._session_lock = threading.Lock()
+        # The embedding provider's own quota, separate from the chat models' (item 37).
+        from backend.profiles import get_profile
+        from backend.provider_quota import ProviderGate
+
+        rag = get_profile().rag
+        self.gate = ProviderGate(
+            f"{self.base_url}/{self.model}",
+            max_wait=float(rag.model_retry_max_seconds),
+            default_cooldown=float(rag.model_retry_base_seconds),
+        )
         logger.info("embedding via %s (model %s)", self.base_url, self.model)
 
     def _get_session(self):
@@ -105,9 +125,11 @@ class _RemoteEmbedder:
                     import requests
                     from requests.adapters import HTTPAdapter
 
-                    pool = max(10, int(os.getenv("EMBEDDING_POOL_SIZE") or 32))
+                    pool = self.pool_size
                     session = requests.Session()
-                    adapter = HTTPAdapter(pool_connections=pool, pool_maxsize=pool)
+                    adapter = HTTPAdapter(
+                        pool_connections=pool, pool_maxsize=pool, max_retries=_connection_retry()
+                    )
                     session.mount("http://", adapter)
                     session.mount("https://", adapter)
                     self._session = session
@@ -123,12 +145,8 @@ class _RemoteEmbedder:
 
         for start in range(0, len(texts), self.batch_size):
             batch = texts[start : start + self.batch_size]
-            response = session.post(
-                f"{self.base_url}/embeddings",
-                json={"model": self.model, "input": batch},
-                headers=headers,
-                timeout=self.timeout,
-            )
+            read_timeout = self.query_timeout if len(texts) == 1 else self.timeout
+            response = self._post(session, batch, headers, (self.connect_timeout, read_timeout))
             response.raise_for_status()
             payload = response.json()
             # Sorted by index rather than trusted in arrival order: the OpenAI schema
@@ -139,17 +157,134 @@ class _RemoteEmbedder:
                 raise ValueError(
                     f"embedding endpoint returned {len(items)} vectors for {len(batch)} inputs"
                 )
-            vectors.extend([float(value) for value in item["embedding"]] for item in items)
+            vectors.extend(_unit([float(value) for value in item["embedding"]]) for item in items)
         return vectors
+
+    def _post(self, session, batch: List[str], headers: dict, timeout):
+        """One batch, under the embedding provider's quota (`backend/provider_quota.py`).
+
+        Held or refused while the provider has said it would reject the call; a
+        throttled or failed answer is retried once, when the policy allows it. The wait
+        before that retry is the provider's stated delay, which the gate turned into a
+        cooldown, or a jittered moment when it stated none.
+        """
+        import requests
+
+        from backend.provider_quota import RETRYABLE_STATUSES
+
+        for attempt in (1, 2):
+            wait = self.gate.wait_before_sending()  # raises QuotaExhausted past the budget
+            if wait:
+                time.sleep(wait)
+            try:
+                response = session.post(
+                    f"{self.base_url}/embeddings",
+                    json={"model": self.model, "input": batch},
+                    headers=headers,
+                    timeout=timeout,
+                )
+            except requests.RequestException:
+                self.gate.observe_failure()
+                raise
+            self.gate.observe(response.status_code, response.headers)
+            if (
+                attempt == 1
+                and response.status_code in RETRYABLE_STATUSES
+                and self.gate.should_retry(response.headers)
+            ):
+                if response.status_code != 429:
+                    time.sleep(random.uniform(0.0, self.gate.default_cooldown))
+                continue
+            return response
+        return response
+
+    def prewarm(self, connections: int) -> int:
+        """Open `connections` sockets now, so the first burst of real traffic finds them.
+
+        A pool that fills lazily makes whoever finds it empty pay a TCP+TLS handshake.
+        Measured against a hosted bge-m3, 32 calls arriving together: p95 3.9 s when the
+        pool had to open its sockets, 0.78 s when they were already open — the whole of
+        what first read as the provider's tail was our own cold connections
+        (RAG_FIX_PLAN item 39). After a deploy, that burst is the first minute of traffic.
+
+        Opened by making real, tiny embedding calls concurrently: the only way to be sure a
+        socket reached the endpoint is to have used it, and it costs a few tokens. Returns
+        how many succeeded; a failure here is logged by the caller and never fatal.
+        """
+        connections = max(0, min(int(connections), self.pool_size))
+        if connections == 0:
+            return 0
+        from concurrent.futures import ThreadPoolExecutor
+
+        def one(_):
+            try:
+                self.embed_documents(["warm-up"])
+                return True
+            except Exception:
+                return False
+
+        with ThreadPoolExecutor(connections, thread_name_prefix="embedder-prewarm") as pool:
+            return sum(pool.map(one, range(connections)))
+
+
+def _connection_retry():
+    """Retry a request whose connection failed, up to twice.
+
+    What was measured, under load against the stub: three turns in ~1,300 ended in "a
+    temporary technical issue" because an embedding call failed at the connection — once
+    at once (`ConnectionAbortedError 10053`), and twice after waiting out the whole 30 s
+    read timeout. The model calls in the same turns never failed this way, because the
+    OpenAI SDK retries connection errors; this client did not retry at all
+    (`Retry(total=0)`). WHY the connections failed was not established: the likeliest
+    cause, reusing a pooled socket the server had just closed, did not reproduce when
+    forced, because urllib3 already replaces an idle socket the server closed cleanly.
+    So this is the standard defence, not a fix for a diagnosed cause.
+
+    Retrying is safe here for a reason that is specific to embedding: it is a pure
+    function of its input, so sending the same texts twice cannot change anything.
+    Connection and read failures only — an HTTP error status is an answer, not a failed
+    connection, and is raised as before.
+    """
+    from urllib3.util.retry import Retry
+
+    return Retry(
+        total=2, connect=2, read=2, status=0, other=0, redirect=0,
+        allowed_methods=None,  # POST included: see above
+        backoff_factor=0, raise_on_status=False,
+    )
+
+
+def _unit(vector: List[float]) -> List[float]:
+    """`vector` scaled to length 1.
+
+    The dense lane is searched by INNER PRODUCT, which equals cosine only for unit
+    vectors, and the local model normalises (`normalize_embeddings=True`). A provider is
+    not obliged to: an unnormalised query vector leaves ranking intact but moves every
+    absolute score — the domain gate compares one to a fixed 0.35 — and a reindex through
+    such a provider would store vectors whose lengths bias the ranking. A no-op on a vector
+    that is already unit length.
+    """
+    norm = sum(value * value for value in vector) ** 0.5
+    return [value / norm for value in vector] if norm > 0 else vector
 
 
 def _wrap(embedder: "_Embedder") -> "_Embedder":
-    """Apply request coalescing, unless it is switched off.
+    """Apply request coalescing where it helps — the local model — unless switched off.
 
-    On by default because it has no cost when idle — see CoalescingEmbedder — and it is
-    the difference between per-query cost falling under load and rising under load.
+    On by default for the LOCAL model, because it has no cost when idle — see
+    CoalescingEmbedder — and it is the difference between per-query cost falling under
+    load and rising under load: one forward pass over sixteen queries costs far less than
+    sixteen passes.
+
+    OFF by default for a REMOTE endpoint, because the same design hurts there. Coalescing
+    keeps one batch in flight, so every caller waits out someone else's round trip before
+    its own starts. Measured against a hosted bge-m3 with 32 concurrent callers: p50
+    2,445 ms coalesced, 631 ms without (RAG_FIX_PLAN item 39). A provider serves
+    concurrent requests concurrently; there is nothing to gain by queueing for it.
+    `EMBEDDING_COALESCE_MAX_BATCH` still overrides either default.
     """
-    size = int(os.getenv("EMBEDDING_COALESCE_MAX_BATCH") or 16)
+    configured = (os.getenv("EMBEDDING_COALESCE_MAX_BATCH") or "").strip()
+    size = int(configured) if configured else (1 if isinstance(embedder, _RemoteEmbedder) else 16)
     if size <= 1:
         logger.info("embedding request coalescing disabled")
         return embedder
@@ -289,12 +424,27 @@ class EmbeddingService:
         """Build the embedder now rather than on the first user's request.
 
         Worth calling at startup: on the local backend the first call pays the model
-        load, and a request that arrives during it waits it out.
+        load, and a request that arrives during it waits it out. On a remote backend
+        there is no model, but there is a connection pool, and it is opened here too —
+        `EMBEDDING_PREWARM_CONNECTIONS` sockets, the pool size by default — so the
+        first burst after a deploy does not pay a handshake per caller.
         """
         try:
-            self._get_embedder()
+            embedder = self._get_embedder()
         except Exception:
             logger.warning("embedder could not be warmed up", exc_info=True)
+            return
+        # A remote embedder has no model to load; what it has to warm is its sockets.
+        inner = getattr(embedder, "_inner", embedder)
+        prewarm = getattr(inner, "prewarm", None)
+        if prewarm is None:
+            return
+        wanted = int(os.getenv("EMBEDDING_PREWARM_CONNECTIONS") or getattr(inner, "pool_size", 0))
+        try:
+            opened = prewarm(wanted)
+            logger.info("embedding connection pool warmed: %d of %d sockets", opened, wanted)
+        except Exception:
+            logger.warning("embedding connection pool could not be warmed", exc_info=True)
 
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         if not texts:
@@ -305,31 +455,44 @@ class EmbeddingService:
             raise Exception(f"Local dense embedding model call failed: {str(e)}") from e
 
 
-# A turn can need the query vector more than once — the domain gate classifies with it
-# before retrieval searches with it. A bge-m3 forward pass on CPU is the most expensive
-# non-network step in a turn, so the second caller must not pay for it again.
-#
-# Keyed on the already-normalized query text, which is what both callers hold. Small and
-# bounded: this is a within-turn memo, not a semantic cache, and stale entries are
-# harmless because the same text always embeds to the same vector for a fixed model.
-_QUERY_VECTOR_CACHE_SIZE = 64
+def warn_if_every_worker_loads_the_model() -> bool:
+    """One line at boot when several workers would each hold the local model.
 
-
-@lru_cache(maxsize=_QUERY_VECTOR_CACHE_SIZE)
-def _embed_query_cached(text: str) -> tuple:
-    from backend.composition import default_services
-
-    return tuple(default_services().embedder.get_embeddings([text])[0])
+    Workers are the way past the GIL (RAG_FIX_PLAN item 35: 4.6 -> 10.1 turns/s with four),
+    but they are separate processes, and the local backend loads bge-m3 into each of them,
+    ~2 GB apiece. With a hosted or shared endpoint (`EMBEDDING_BACKEND=openai`) a worker
+    holds no model at all. Returns whether it warned.
+    """
+    workers = int(os.getenv("WEB_CONCURRENCY") or 1)
+    backend = (os.getenv("EMBEDDING_BACKEND") or "local").strip().lower()
+    if workers > 1 and backend == "local":
+        logger.warning(
+            "WEB_CONCURRENCY=%d with EMBEDDING_BACKEND=local: every worker loads its own copy "
+            "of the embedding model (~2 GB each). Point EMBEDDING_BACKEND at a hosted or shared "
+            "endpoint before running several workers.",
+            workers,
+        )
+        return True
+    return False
 
 
 def embed_query(text: str) -> list[float]:
     """The query's dense vector, computed at most once per distinct text.
 
-    Returns a fresh list each call so a caller mutating it cannot corrupt the memo.
+    A turn can need it more than once (the domain gate classifies with it before
+    retrieval searches with it), and with a hosted embedder each computation is a paid
+    round trip. So it goes through the process's memo, then the vectors every worker
+    shares in Redis, then the embedder: `backend/indexing/query_vectors.py`. Keyed on
+    the already-normalised text, which is what every caller holds. Returns a fresh list
+    each call, so a caller changing it cannot corrupt the cache.
     """
-    return list(_embed_query_cached(text))
+    from backend.composition import default_services
+
+    return default_services().query_vectors.vector(text)
 
 
 def reset_query_vector_cache() -> None:
-    """For tests and for re-indexing with a different embedding model."""
-    _embed_query_cached.cache_clear()
+    """Forget this process's memo; for tests. The shared layer is keyed by model."""
+    from backend.composition import default_services
+
+    default_services().query_vectors.clear()

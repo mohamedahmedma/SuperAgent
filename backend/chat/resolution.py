@@ -49,6 +49,10 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 from backend.rag.query_translation import needs_translation, remember_translation
 from backend.text_normalization import normalize_query
+from typing import List as _List, Literal as _Literal
+from pydantic import Field
+
+from backend.structured_output import StructuredOutput
 
 logger = logging.getLogger(__name__)
 
@@ -388,6 +392,37 @@ def _accept_translation(raw: str, resolved: str, result: dict, translating: bool
     return candidate
 
 
+# Defined once, at import, rather than inside `_default_resolve_invoke` on every call: a class built
+# per call is a pydantic model built per call, and its JSON schema regenerated with
+# it — measured at 4.5% and 10.4% of the serving process's CPU (RAG_FIX_PLAN item 47).
+class ResolvedQuery(StructuredOutput):
+    question: str = Field(
+        description="The user's latest message rewritten so it stands on its own, in their language"
+    )
+    constraints: _List[str] = Field(
+        default_factory=list,
+        description="Conditions carried over from earlier turns that still bind the answer",
+    )
+    intent: _Literal["standalone", "followup", "correction", "new_topic"] = Field(
+        default="followup",
+        description="How the latest message relates to the conversation before it",
+    )
+    # Always declared, never conditional. Providers enforcing OpenAI-style STRICT
+    # structured output (Groq among them) require every declared property to be
+    # present, and a model told to "leave the unused field empty" tends to omit it
+    # instead — the trap `rewrite_query_once` documents. So the field is always in the
+    # schema and the PROMPT decides whether to fill it; an empty string is the normal
+    # answer on a turn that needs no translation, and the caller only reads it when it
+    # asked for one.
+    search_text: str = Field(
+        default="",
+        description=(
+            "The question translated for SEARCHING only, when asked for; otherwise an "
+            "empty string"
+        ),
+    )
+
+
 def _default_resolve_invoke(  # pragma: no cover - needs a model
     question, history, config, hitl_prompt, hitl_options,
     *, resolving: bool = True, translating: bool = False,
@@ -396,42 +431,15 @@ def _default_resolve_invoke(  # pragma: no cover - needs a model
     import os
 
     from langchain.chat_models import init_chat_model
-    from pydantic import BaseModel, Field
-    from typing import List as _List, Literal as _Literal
 
-    from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
+    from backend.assets.vision import invoke_structured
     from backend.llm import sampling
     from backend.profiles import get_profile
     from backend.prompts import resolve as resolve_prompt
+    from backend.composition import default_services
 
     profile = get_profile()
 
-    class ResolvedQuery(BaseModel):
-        question: str = Field(
-            description="The user's latest message rewritten so it stands on its own, in their language"
-        )
-        constraints: _List[str] = Field(
-            default_factory=list,
-            description="Conditions carried over from earlier turns that still bind the answer",
-        )
-        intent: _Literal["standalone", "followup", "correction", "new_topic"] = Field(
-            default="followup",
-            description="How the latest message relates to the conversation before it",
-        )
-        # Always declared, never conditional. Providers enforcing OpenAI-style STRICT
-        # structured output (Groq among them) require every declared property to be
-        # present, and a model told to "leave the unused field empty" tends to omit it
-        # instead — the trap `rewrite_query_once` documents. So the field is always in the
-        # schema and the PROMPT decides whether to fill it; an empty string is the normal
-        # answer on a turn that needs no translation, and the caller only reads it when it
-        # asked for one.
-        search_text: str = Field(
-            default="",
-            description=(
-                "The question translated for SEARCHING only, when asked for; otherwise an "
-                "empty string"
-            ),
-        )
 
     prompt = resolve_prompt(
         getattr(config, "query_resolution_prompt", "") or "",
@@ -450,22 +458,15 @@ def _default_resolve_invoke(  # pragma: no cover - needs a model
         model_provider="openai",
         api_key=os.getenv("ARK_API_KEY"),
         base_url=os.getenv("BASE_URL"),
+        **default_services().provider_http.model_kwargs(),
         **sampling("resolve"),
     )
 
-    # Same quota as every other call in the turn, so the same treatment. A 429 here
-    # would make the resolver abstain, which is safe but spends the clarification
-    # round-trip this call exists to avoid.
-    class _Retry:
-        vision_retry_attempts = int(getattr(config, "model_retry_attempts", 2))
-        vision_retry_base_seconds = float(getattr(config, "model_retry_base_seconds", 2.0))
-        vision_retry_max_seconds = float(getattr(config, "model_retry_max_seconds", 6.0))
-
-    result = call_with_rate_limit_retry(
-        lambda: invoke_structured(model, ResolvedQuery, [{"role": "user", "content": prompt}]),
-        config=_Retry(),
-        description="query resolution",
-    )
+    # A 429 is retried in the client, under the turn's rate-limit policy
+    # (backend/llm_http.py). Retrying here as well multiplied the attempts (item 37).
+    # One that still fails makes the resolver abstain: safe, but it spends the
+    # clarification round trip this call exists to avoid.
+    result = invoke_structured(model, ResolvedQuery, [{"role": "user", "content": prompt}])
     return result if isinstance(result, dict) else result.model_dump()
 
 

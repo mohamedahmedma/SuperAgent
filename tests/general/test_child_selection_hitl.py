@@ -102,7 +102,7 @@ class _Response:
 
 
 def _serves(rows):
-    """A `requests.get` that answers the roster route with these rows."""
+    """A `records_http.get` that answers the roster route with these rows."""
 
     def fake_get(url, headers=None, params=None, timeout=None):
         return _Response(200, {"guardian_id": "G-1", "students": rows})
@@ -401,7 +401,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         way round. Matching on raw strings fails this, which in practice means the parent
         is asked the same question again immediately after answering it correctly."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)):
+        with patch("backend.records_http.get", _serves(ROSTER_ROWS)):
             pinned = pin_the_child_the_parent_named(ctx, "سارة احمد")
 
         self.assertTrue(pinned)
@@ -411,7 +411,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
     def test_a_latin_spelling_of_an_arabic_row_pins(self):
         """A parent on an English keyboard answering a question rendered in Arabic."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)):
+        with patch("backend.records_http.get", _serves(ROSTER_ROWS)):
             self.assertTrue(pin_the_child_the_parent_named(ctx, "Sara"))
 
         self.assertEqual(ctx.child.student_id, "S-3")
@@ -420,7 +420,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         """One display name per child, chosen where the roster was read. A pin holding the
         parent's spelling would let the same child be named two ways in one turn."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)):
+        with patch("backend.records_http.get", _serves(ROSTER_ROWS)):
             pin_the_child_the_parent_named(ctx, "سارة احمد")
 
         self.assertEqual(ctx.child.label, "سارة أحمد")
@@ -433,7 +433,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
             with self.subTest(reply=reply):
                 ctx = _ctx()
                 with patch(
-                    "backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)
+                    "backend.records_http.get", _serves(ROSTER_ROWS)
                 ):
                     pinned = pin_the_child_the_parent_named(ctx, reply)
 
@@ -444,7 +444,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         """A shared first name is inside two rows. Picking the first would show one
         brother's marks while the parent watched, asking about the other."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(SAME_NAME_ROWS)):
+        with patch("backend.records_http.get", _serves(SAME_NAME_ROWS)):
             pinned = pin_the_child_the_parent_named(ctx, "أحمد")
 
         self.assertFalse(pinned)
@@ -453,7 +453,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
     def test_a_fuller_name_disambiguates_where_the_shared_one_does_not(self):
         """The other half of the rule above: the parent CAN settle it, by saying more."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(SAME_NAME_ROWS)):
+        with patch("backend.records_http.get", _serves(SAME_NAME_ROWS)):
             self.assertTrue(pin_the_child_the_parent_named(ctx, "أحمد عمر"))
 
         self.assertEqual(ctx.child.student_id, "S-2")
@@ -461,7 +461,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
     def test_an_empty_reply_pins_nothing_and_does_not_read_the_roster(self):
         ctx = _ctx()
         with patch(
-            "backend.chat.child_roster.requests.get", side_effect=_refuses(500)
+            "backend.records_http.get", side_effect=_refuses(500)
         ) as spy:
             self.assertFalse(pin_the_child_the_parent_named(ctx, ""))
 
@@ -471,7 +471,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         """A blip between the question and the answer. The parent typed a real name and it
         cannot be checked — which is one repeated question, never a guess."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _refuses(500)):
+        with patch("backend.records_http.get", _refuses(500)):
             pinned = pin_the_child_the_parent_named(ctx, "سارة")
 
         self.assertFalse(pinned)
@@ -484,7 +484,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
             raise requests_module.ConnectionError("no route to host")
 
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", explode):
+        with patch("backend.records_http.get", explode):
             self.assertFalse(pin_the_child_the_parent_named(ctx, "سارة"))
 
         self.assertEqual(ctx.child.student_id, "")
@@ -492,7 +492,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
     def test_a_rejected_identity_pins_nothing(self):
         """An expired sign-in between the question and the reply."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _refuses(401)):
+        with patch("backend.records_http.get", _refuses(401)):
             self.assertFalse(pin_the_child_the_parent_named(ctx, "سارة"))
 
         self.assertEqual(ctx.child.student_id, "")
@@ -501,7 +501,7 @@ class TheChosenChildIsSettledAgainstTheRoster(_NoRosterCache):
         """Staff, a background job, a test. Nobody to ask a roster about."""
         ctx = ChatRequestContext(user_id="staff-1", session_id="s")
         with patch(
-            "backend.chat.child_roster.requests.get", side_effect=_serves(ROSTER_ROWS)
+            "backend.records_http.get", side_effect=_serves(ROSTER_ROWS)
         ) as spy:
             self.assertFalse(pin_the_child_the_parent_named(ctx, "سارة"))
 
@@ -526,7 +526,7 @@ class TheNextPlanUsesWhateverWasPinned(_NoRosterCache):
 
     def test_a_settled_reply_answers_the_original_question_without_asking_again(self):
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(TWO_SONS_ROWS)):
+        with patch("backend.records_http.get", _serves(TWO_SONS_ROWS)):
             pin_the_child_the_parent_named(ctx, "علي")
 
         plan = self._replan(ctx)
@@ -541,7 +541,7 @@ class TheNextPlanUsesWhateverWasPinned(_NoRosterCache):
         leave a stale or arbitrary child pinned, and the turn has to end on the question
         again rather than on an answer about somebody."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(TWO_SONS_ROWS)):
+        with patch("backend.records_http.get", _serves(TWO_SONS_ROWS)):
             pin_the_child_the_parent_named(ctx, "الكبير")
 
         plan = self._replan(ctx)
@@ -556,7 +556,7 @@ class TheNextPlanUsesWhateverWasPinned(_NoRosterCache):
         the third message is read as a fresh one and the loop is broken in the worst
         possible place."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(TWO_SONS_ROWS)):
+        with patch("backend.records_http.get", _serves(TWO_SONS_ROWS)):
             pin_the_child_the_parent_named(ctx, "asdf")
 
         pending = child_choice_pending(self._replan(ctx), QUESTION)
@@ -570,7 +570,7 @@ class TheNextPlanUsesWhateverWasPinned(_NoRosterCache):
         consulted among the candidates the stated sex allows, so this moves on rather than
         answering about the brother."""
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(ROSTER_ROWS)):
+        with patch("backend.records_http.get", _serves(ROSTER_ROWS)):
             pin_the_child_the_parent_named(ctx, "علي")
 
         plan = _plan(
@@ -598,7 +598,7 @@ class TheWholeRoundTrip(_NoRosterCache):
         resolver.assert_not_called()
 
         ctx = _ctx()
-        with patch("backend.chat.child_roster.requests.get", _serves(TWO_SONS_ROWS)):
+        with patch("backend.records_http.get", _serves(TWO_SONS_ROWS)):
             self.assertTrue(pin_the_child_the_parent_named(ctx, entry.child_choice))
 
         replanned = _plan(
