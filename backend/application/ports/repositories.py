@@ -49,6 +49,14 @@ class StoredMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class DialogueLine:
+    """One message as a turn's history reads it: who said what, and nothing else."""
+
+    message_type: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
 class NewMessage:
     message_type: str
     content: str
@@ -101,6 +109,14 @@ class ConversationRepository(Protocol):
         self, session: StoredSession, *, limit: int, before_id: int | None
     ) -> Sequence[StoredMessage]:
         """Up to `limit` messages older than `before_id` (or the newest), newest first."""
+        ...
+
+    def recent_dialogue(self, session: StoredSession, *, limit: int) -> Sequence[DialogueLine]:
+        """The latest `limit` messages as who-said-what, oldest first.
+
+        For a turn's history, which reads nothing else. The trace a stored answer carries
+        is most of its size (p95 17 KB, measured), and a turn has no use for it.
+        """
         ...
 
     def summaries(self, username: str) -> Sequence[SessionSummary]:

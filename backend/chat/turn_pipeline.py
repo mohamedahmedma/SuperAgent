@@ -57,7 +57,11 @@ from backend.chat.clarification import (
     is_hitl_trace,
     pin_the_child_the_parent_named,
 )
-from backend.chat.context_messages import build_context_messages, build_resume_answer_messages
+from backend.chat.context_messages import (
+    build_context_messages,
+    build_resume_answer_messages,
+    history_window,
+)
 from backend.chat.background import JobRunner
 from backend.chat.finalize import Finalizer, finalize_text, message_text
 from backend.chat.storage import MessageToStore
@@ -220,7 +224,9 @@ class TurnPipeline:
                 "continuing with what is stored",
                 user_id, session_id, self.SAVE_WAIT_SECONDS,
             )
-        messages, metadata = self._c.conversations.load_with_meta(user_id, session_id)
+        messages, metadata = self._c.conversations.load_for_turn(
+            user_id, session_id, window=history_window(self._c.profile.agent)
+        )
         guardian_id = caller.guardian_id if caller else ""
         return Turn(
             user_text=user_text,

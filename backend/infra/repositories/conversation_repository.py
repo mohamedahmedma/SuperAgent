@@ -22,6 +22,7 @@ from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 from backend.application.ports.repositories import (
+    DialogueLine,
     NewMessage,
     SessionSummary,
     StoredMessage,
@@ -108,6 +109,15 @@ class SqlAlchemyConversationRepository:
             statement = statement.where(ChatMessage.id < before_id)
         rows = self._session.execute(statement.order_by(ChatMessage.id.desc()).limit(limit))
         return [_message(row) for row in rows]
+
+    def recent_dialogue(self, session: StoredSession, *, limit: int) -> Sequence[DialogueLine]:
+        rows = self._session.execute(
+            select(ChatMessage.message_type, ChatMessage.content)
+            .where(ChatMessage.session_ref_id == session.id)
+            .order_by(ChatMessage.id.desc())
+            .limit(limit)
+        ).all()
+        return [DialogueLine(row.message_type, row.content) for row in reversed(rows)]
 
     def summaries(self, username: str) -> Sequence[SessionSummary]:
         rows = self._session.execute(

@@ -29,7 +29,7 @@ class ForgetfulStorage:
     history goes in and every save is discarded.
     """
 
-    def load_with_meta(self, user_id, session_id):
+    def load_for_turn(self, user_id, session_id, *, window):
         return [], {}
 
     def save(self, *args, **kwargs):
