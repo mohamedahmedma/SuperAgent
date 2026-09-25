@@ -16,7 +16,12 @@ import unittest
 from unittest.mock import patch
 
 import backend.indexing.embedding as embedding_module
-from backend.indexing.embedding import EmbeddingService, _RemoteEmbedder, _create_dense_embedder
+from backend.indexing.embedding import (
+    CoalescingEmbedder,
+    EmbeddingService,
+    _RemoteEmbedder,
+    _create_dense_embedder,
+)
 
 
 class Sentinel:
@@ -121,13 +126,16 @@ class RemoteEmbedderTests(unittest.TestCase):
         would attach every vector to the wrong chunk — corruption with no symptom until
         someone notices retrieval has quietly stopped working."""
         remote = self.remote()
+        # Unit vectors pointing different ways: told apart by DIRECTION, because returned
+        # vectors are normalised and would no longer be told apart by length.
         shuffled = [
-            {"index": 2, "embedding": [3.0]},
-            {"index": 0, "embedding": [1.0]},
-            {"index": 1, "embedding": [2.0]},
+            {"index": 2, "embedding": [0.0, 0.0, 1.0]},
+            {"index": 0, "embedding": [1.0, 0.0, 0.0]},
+            {"index": 1, "embedding": [0.0, 1.0, 0.0]},
         ]
         with patch("requests.Session.post", return_value=FakeResponse(shuffled)):
-            self.assertEqual([[1.0], [2.0], [3.0]], remote.embed_documents(["a", "b", "c"]))
+            self.assertEqual([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                             remote.embed_documents(["a", "b", "c"]))
 
     def test_a_short_response_raises_rather_than_misaligning(self):
         remote = self.remote()
@@ -181,3 +189,91 @@ class RemoteEmbedderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemoteForServingTests(unittest.TestCase):
+    """RAG_FIX_PLAN item 39: what a hosted embedder needs that the local model does not."""
+
+    def remote(self, **env):
+        settings = {"EMBEDDING_BACKEND": "openai", "EMBEDDING_BASE_URL": "http://e/v1",
+                    "EMBEDDING_MODEL": "BAAI/bge-m3"}
+        settings.update(env)
+        with patch.dict("os.environ", settings, clear=False):
+            return _RemoteEmbedder()
+
+    def test_a_provider_vector_comes_back_unit_length(self):
+        """The dense lane searches by inner product, which is cosine only for unit
+        vectors, and the stored ones are unit length."""
+        with patch("requests.Session.post",
+                   return_value=FakeResponse([{"index": 0, "embedding": [3.0, 4.0]}])):
+            self.assertEqual([[0.6, 0.8]], self.remote().embed_documents(["a"]))
+
+    def test_an_already_unit_vector_is_left_as_it_is(self):
+        with patch("requests.Session.post",
+                   return_value=FakeResponse([{"index": 0, "embedding": [0.6, 0.8]}])):
+            self.assertEqual([[0.6, 0.8]], self.remote().embed_documents(["a"]))
+
+    def test_a_remote_embedder_is_not_coalesced_by_default(self):
+        """One batch in flight made every caller wait out another's round trip:
+        p50 2,445 ms coalesced vs 631 ms not, at 32 concurrent callers."""
+        with patch.dict("os.environ", {"EMBEDDING_COALESCE_MAX_BATCH": ""}, clear=False):
+            remote = self.remote()
+            self.assertIs(remote, embedding_module._wrap(remote))
+
+    def test_coalescing_a_remote_embedder_is_still_possible_on_request(self):
+        with patch.dict("os.environ", {"EMBEDDING_COALESCE_MAX_BATCH": "8"}, clear=False):
+            self.assertIsInstance(embedding_module._wrap(self.remote()), CoalescingEmbedder)
+
+    def test_prewarm_opens_the_requested_sockets_concurrently(self):
+        import threading
+        import time as _time
+
+        active, peak, lock = [0], [0], threading.Lock()
+
+        def slow_post(url, json=None, headers=None, timeout=None):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+            _time.sleep(0.05)
+            with lock:
+                active[0] -= 1
+            return FakeResponse([{"index": 0, "embedding": [1.0]}])
+
+        with patch("requests.Session.post", side_effect=slow_post):
+            opened = self.remote().prewarm(8)
+        self.assertEqual(8, opened)
+        self.assertGreater(peak[0], 1, "prewarm made its calls one at a time")
+
+    def test_prewarm_never_opens_more_than_the_pool_holds(self):
+        remote = self.remote(EMBEDDING_POOL_SIZE="12")
+        with patch("requests.Session.post",
+                   return_value=FakeResponse([{"index": 0, "embedding": [1.0]}])) as post:
+            self.assertEqual(12, remote.prewarm(500))
+        self.assertEqual(12, post.call_count)
+
+    def test_a_failed_prewarm_call_is_counted_not_raised(self):
+        with patch("requests.Session.post", side_effect=ConnectionError("provider down")):
+            self.assertEqual(0, self.remote().prewarm(4))
+
+    def test_warm_up_opens_the_pool_of_a_remote_embedder(self):
+        remote = self.remote()
+        with patch.object(remote, "prewarm", return_value=32) as prewarm:
+            with patch.object(embedding_module, "_create_dense_embedder", return_value=remote):
+                with patch.dict("os.environ", {"EMBEDDING_PREWARM_CONNECTIONS": "",
+                                               "EMBEDDING_COALESCE_MAX_BATCH": ""}, clear=False):
+                    EmbeddingService().warm_up()
+        prewarm.assert_called_once_with(remote.pool_size)
+
+    def test_warm_up_can_be_told_not_to_open_the_pool(self):
+        remote = self.remote()
+        with patch.object(remote, "prewarm", return_value=0) as prewarm:
+            with patch.object(embedding_module, "_create_dense_embedder", return_value=remote):
+                with patch.dict("os.environ", {"EMBEDDING_PREWARM_CONNECTIONS": "0"}, clear=False):
+                    EmbeddingService().warm_up()
+        prewarm.assert_called_once_with(0)
+
+    def test_a_prewarm_that_raises_does_not_take_startup_down(self):
+        remote = self.remote()
+        with patch.object(remote, "prewarm", side_effect=RuntimeError("no network")):
+            with patch.object(embedding_module, "_create_dense_embedder", return_value=remote):
+                EmbeddingService().warm_up()  # must not raise

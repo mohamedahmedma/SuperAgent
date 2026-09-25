@@ -86,6 +86,7 @@ class _RemoteEmbedder:
         self.api_key = (os.getenv("EMBEDDING_API_KEY") or "").strip()
         self.timeout = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS") or 30.0)
         self.batch_size = max(1, int(os.getenv("EMBEDDING_BATCH_SIZE") or 64))
+        self.pool_size = max(10, int(os.getenv("EMBEDDING_POOL_SIZE") or 32))
         self._session = None
         self._session_lock = threading.Lock()
         logger.info("embedding via %s (model %s)", self.base_url, self.model)
@@ -105,7 +106,7 @@ class _RemoteEmbedder:
                     import requests
                     from requests.adapters import HTTPAdapter
 
-                    pool = max(10, int(os.getenv("EMBEDDING_POOL_SIZE") or 32))
+                    pool = self.pool_size
                     session = requests.Session()
                     adapter = HTTPAdapter(pool_connections=pool, pool_maxsize=pool)
                     session.mount("http://", adapter)
@@ -139,17 +140,69 @@ class _RemoteEmbedder:
                 raise ValueError(
                     f"embedding endpoint returned {len(items)} vectors for {len(batch)} inputs"
                 )
-            vectors.extend([float(value) for value in item["embedding"]] for item in items)
+            vectors.extend(_unit([float(value) for value in item["embedding"]]) for item in items)
         return vectors
+
+    def prewarm(self, connections: int) -> int:
+        """Open `connections` sockets now, so the first burst of real traffic finds them.
+
+        A pool that fills lazily makes whoever finds it empty pay a TCP+TLS handshake.
+        Measured against a hosted bge-m3, 32 calls arriving together: p95 3.9 s when the
+        pool had to open its sockets, 0.78 s when they were already open — the whole of
+        what first read as the provider's tail was our own cold connections
+        (RAG_FIX_PLAN item 39). After a deploy, that burst is the first minute of traffic.
+
+        Opened by making real, tiny embedding calls concurrently: the only way to be sure a
+        socket reached the endpoint is to have used it, and it costs a few tokens. Returns
+        how many succeeded; a failure here is logged by the caller and never fatal.
+        """
+        connections = max(0, min(int(connections), self.pool_size))
+        if connections == 0:
+            return 0
+        from concurrent.futures import ThreadPoolExecutor
+
+        def one(_):
+            try:
+                self.embed_documents(["warm-up"])
+                return True
+            except Exception:
+                return False
+
+        with ThreadPoolExecutor(connections, thread_name_prefix="embedder-prewarm") as pool:
+            return sum(pool.map(one, range(connections)))
+
+
+def _unit(vector: List[float]) -> List[float]:
+    """`vector` scaled to length 1.
+
+    The dense lane is searched by INNER PRODUCT, which equals cosine only for unit
+    vectors, and the local model normalises (`normalize_embeddings=True`). A provider is
+    not obliged to: an unnormalised query vector leaves ranking intact but moves every
+    absolute score — the domain gate compares one to a fixed 0.35 — and a reindex through
+    such a provider would store vectors whose lengths bias the ranking. A no-op on a vector
+    that is already unit length.
+    """
+    norm = sum(value * value for value in vector) ** 0.5
+    return [value / norm for value in vector] if norm > 0 else vector
 
 
 def _wrap(embedder: "_Embedder") -> "_Embedder":
-    """Apply request coalescing, unless it is switched off.
+    """Apply request coalescing where it helps — the local model — unless switched off.
 
-    On by default because it has no cost when idle — see CoalescingEmbedder — and it is
-    the difference between per-query cost falling under load and rising under load.
+    On by default for the LOCAL model, because it has no cost when idle — see
+    CoalescingEmbedder — and it is the difference between per-query cost falling under
+    load and rising under load: one forward pass over sixteen queries costs far less than
+    sixteen passes.
+
+    OFF by default for a REMOTE endpoint, because the same design hurts there. Coalescing
+    keeps one batch in flight, so every caller waits out someone else's round trip before
+    its own starts. Measured against a hosted bge-m3 with 32 concurrent callers: p50
+    2,445 ms coalesced, 631 ms without (RAG_FIX_PLAN item 39). A provider serves
+    concurrent requests concurrently; there is nothing to gain by queueing for it.
+    `EMBEDDING_COALESCE_MAX_BATCH` still overrides either default.
     """
-    size = int(os.getenv("EMBEDDING_COALESCE_MAX_BATCH") or 16)
+    configured = (os.getenv("EMBEDDING_COALESCE_MAX_BATCH") or "").strip()
+    size = int(configured) if configured else (1 if isinstance(embedder, _RemoteEmbedder) else 16)
     if size <= 1:
         logger.info("embedding request coalescing disabled")
         return embedder
@@ -289,12 +342,27 @@ class EmbeddingService:
         """Build the embedder now rather than on the first user's request.
 
         Worth calling at startup: on the local backend the first call pays the model
-        load, and a request that arrives during it waits it out.
+        load, and a request that arrives during it waits it out. On a remote backend
+        there is no model, but there is a connection pool, and it is opened here too —
+        `EMBEDDING_PREWARM_CONNECTIONS` sockets, the pool size by default — so the
+        first burst after a deploy does not pay a handshake per caller.
         """
         try:
-            self._get_embedder()
+            embedder = self._get_embedder()
         except Exception:
             logger.warning("embedder could not be warmed up", exc_info=True)
+            return
+        # A remote embedder has no model to load; what it has to warm is its sockets.
+        inner = getattr(embedder, "_inner", embedder)
+        prewarm = getattr(inner, "prewarm", None)
+        if prewarm is None:
+            return
+        wanted = int(os.getenv("EMBEDDING_PREWARM_CONNECTIONS") or getattr(inner, "pool_size", 0))
+        try:
+            opened = prewarm(wanted)
+            logger.info("embedding connection pool warmed: %d of %d sockets", opened, wanted)
+        except Exception:
+            logger.warning("embedding connection pool could not be warmed", exc_info=True)
 
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         if not texts:
