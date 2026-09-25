@@ -99,6 +99,12 @@ def create_app(services: Services | None = None) -> FastAPI:
         from backend.llm_provider import log_provider_status
 
         log_provider_status()
+        # Before anything can hand work to a thread: every `to_thread` in a streamed turn
+        # and every sync agent tool runs on the loop's default executor, which nothing had
+        # ever sized (backend/infra/executor.py, RAG_FIX_PLAN item 36).
+        from backend.infra.executor import install_turn_executor
+
+        install_turn_executor()
         # Which database, with whose credentials, and can we actually authenticate —
         # before anything downstream depends on the answer. A rotated POSTGRES_PASSWORD
         # on an estate whose postgres_data volume predates it is refused here by name,
