@@ -96,9 +96,11 @@ def create_app(services: Services | None = None) -> FastAPI:
         # Which provider every model call in the request path is about to go to. With
         # two credential blocks in .env and a single word selecting between them, the
         # failure worth catching at boot is a deployment that believes it switched.
+        from backend.indexing.embedding import warn_if_every_worker_loads_the_model
         from backend.llm_provider import log_provider_status
 
         log_provider_status()
+        warn_if_every_worker_loads_the_model()
         # Before anything can hand work to a thread: every `to_thread` in a streamed turn
         # and every sync agent tool runs on the loop's default executor, which nothing had
         # ever sized (backend/infra/executor.py, RAG_FIX_PLAN item 36).

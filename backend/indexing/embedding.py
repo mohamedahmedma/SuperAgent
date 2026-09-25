@@ -455,6 +455,27 @@ class EmbeddingService:
             raise Exception(f"Local dense embedding model call failed: {str(e)}") from e
 
 
+def warn_if_every_worker_loads_the_model() -> bool:
+    """One line at boot when several workers would each hold the local model.
+
+    Workers are the way past the GIL (RAG_FIX_PLAN item 35: 4.6 -> 10.1 turns/s with four),
+    but they are separate processes, and the local backend loads bge-m3 into each of them,
+    ~2 GB apiece. With a hosted or shared endpoint (`EMBEDDING_BACKEND=openai`) a worker
+    holds no model at all. Returns whether it warned.
+    """
+    workers = int(os.getenv("WEB_CONCURRENCY") or 1)
+    backend = (os.getenv("EMBEDDING_BACKEND") or "local").strip().lower()
+    if workers > 1 and backend == "local":
+        logger.warning(
+            "WEB_CONCURRENCY=%d with EMBEDDING_BACKEND=local: every worker loads its own copy "
+            "of the embedding model (~2 GB each). Point EMBEDDING_BACKEND at a hosted or shared "
+            "endpoint before running several workers.",
+            workers,
+        )
+        return True
+    return False
+
+
 def embed_query(text: str) -> list[float]:
     """The query's dense vector, computed at most once per distinct text.
 

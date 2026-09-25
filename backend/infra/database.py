@@ -26,11 +26,28 @@ DATABASE_URL = os.getenv(
 # slow rather than the client refusing to open connections.
 #
 # Overshooting is not free either: every connection is a backend process on the server,
-# and `max_connections` is shared by every replica. Total across the fleet is what has
-# to fit — replicas x (POOL_SIZE + MAX_OVERFLOW) under Postgres's limit.
+# and `max_connections` is shared by every process of every service. Total across the
+# fleet is what has to fit: replicas x workers x (POOL_SIZE + MAX_OVERFLOW).
+#
+# So a pool is sized from a budget for the whole backend, not per process
+# (RAG_FIX_PLAN item 35). `DB_CONNECTION_BUDGET` (40) is split across the
+# `WEB_CONCURRENCY` workers uvicorn runs: one worker keeps 20 + 20, as before, and four
+# get 5 + 5 each. Adding workers then spreads the connections it already had instead of
+# multiplying them, which is what keeps a second worker from being the change that
+# exhausts Postgres. Measured, 4 workers serving 80 parents peaked at 40 connections in
+# all. `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` still set one process's pool outright.
+
+
+def _pool_share() -> int:
+    """This process's half of the connection budget: its pool size, and its overflow."""
+    budget = int(os.getenv("DB_CONNECTION_BUDGET") or 40)
+    workers = max(1, int(os.getenv("WEB_CONCURRENCY") or 1))
+    return max(5, budget // workers // 2)
+
+
 _POOL_OPTIONS = {
-    "pool_size": int(os.getenv("DB_POOL_SIZE") or 20),
-    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW") or 20),
+    "pool_size": int(os.getenv("DB_POOL_SIZE") or _pool_share()),
+    "max_overflow": int(os.getenv("DB_MAX_OVERFLOW") or _pool_share()),
     # Recycle below the typical idle timeout of a proxy or managed Postgres, so a
     # connection is retired by us rather than discovered dead by a user's request.
     "pool_recycle": int(os.getenv("DB_POOL_RECYCLE_SECONDS") or 1800),
