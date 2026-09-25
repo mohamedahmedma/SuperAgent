@@ -266,7 +266,7 @@ def main() -> int:
     parser.add_argument("--out", default="")
     args = parser.parse_args()
 
-    token = get_token(args.identity)
+    token = get_token(args.identity)  # fails fast on bad credentials, before any load
     pool = questions()
     database_url = os.getenv("LOAD_DATABASE_URL", "")
     rows = []
@@ -285,6 +285,10 @@ def main() -> int:
     # call and look faster than it is — which is how an early baseline row read 2.7 s.
     offset = 0
     for parents in [int(x) for x in args.levels.split(",")]:
+        # A fresh token per level. Access tokens are short-lived, and a level that stalls
+        # can outlive one — after which every turn is a 401 and the report blames auth
+        # for what was a hang.
+        token = get_token(args.identity)
         level = asyncio.run(run_level(args.url, token, parents, args.turns, pool,
                                       database_url, args.timeout, offset=offset))
         offset += parents * args.turns
