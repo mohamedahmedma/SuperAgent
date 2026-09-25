@@ -129,7 +129,17 @@ def _with_referenced_tables(tables) -> list:
 
 
 def postgres_schema(test: unittest.TestCase, *tables) -> PostgresSchema:
-    """A fresh schema holding `tables`, dropped when `test` finishes."""
+    """A fresh schema holding `tables`, dropped when `test` finishes.
+
+    A fresh database also means nothing in it is known yet, so the auth layer's memory of
+    which users have a projection row is cleared on the way in and on the way out. Kept,
+    it would carry a username confirmed against an earlier test's schema into this one —
+    skipping the insert, and failing the first foreign key that needed the row.
+    """
+    from backend.infra.auth import known_users
+
+    known_users.clear()
+    test.addCleanup(known_users.clear)
     schema = PostgresSchema(*tables)
     test.addCleanup(schema.drop)
     return schema
