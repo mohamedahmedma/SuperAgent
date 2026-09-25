@@ -8,6 +8,7 @@ covers the relay and the wording it hands back to the model.
 import pytest
 import requests
 
+import backend.records_http as records_http
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.request_context import ChatRequestContext
 from backend.tools.records import (
@@ -24,7 +25,7 @@ PARENT_TOKEN = "signed.identity.token"
 
 @pytest.fixture(autouse=True)
 def no_roster_cache(monkeypatch):
-    """Every case in this file drives the facade through a canned `requests.get`.
+    """Every case in this file drives the facade through a canned `records_http.get`.
 
     The roster now sits behind a short cache, and a cache shared with whatever Redis
     happens to be running on the machine would carry one case's children into the next
@@ -109,7 +110,7 @@ def test_unreachable_facade_forbids_inventing_a_figure(monkeypatch):
     def boom(*args, **kwargs):
         raise requests.ConnectionError("refused")
 
-    monkeypatch.setattr(requests, "get", boom)
+    monkeypatch.setattr(records_http, "get", boom)
     result = make_get_student_grades(_ctx()).invoke({})
 
     assert "RECORDS_UNAVAILABLE" in result
@@ -118,7 +119,7 @@ def test_unreachable_facade_forbids_inventing_a_figure(monkeypatch):
 
 def test_server_error_is_unavailable_not_no_records(monkeypatch):
     """A 500 must never render as "your child has no grades"."""
-    monkeypatch.setattr(requests, "get", _route({"/students": _Response(503)}))
+    monkeypatch.setattr(records_http, "get", _route({"/students": _Response(503)}))
     result = make_get_student_grades(_ctx()).invoke({})
 
     assert "RECORDS_UNAVAILABLE" in result
@@ -126,7 +127,7 @@ def test_server_error_is_unavailable_not_no_records(monkeypatch):
 
 
 def test_expired_identity_is_not_reported_as_missing_records(monkeypatch):
-    monkeypatch.setattr(requests, "get", _route({"/students": _Response(401)}))
+    monkeypatch.setattr(records_http, "get", _route({"/students": _Response(401)}))
     result = make_get_student_grades(_ctx()).invoke({})
 
     assert "NOT_AUTHORIZED" in result
@@ -135,7 +136,7 @@ def test_expired_identity_is_not_reported_as_missing_records(monkeypatch):
 
 def test_no_linked_students_does_not_name_anyone(monkeypatch):
     monkeypatch.setattr(
-        requests, "get", _route({"/students": _Response(200, {"guardian_id": "G-1", "students": []})})
+        records_http, "get", _route({"/students": _Response(200, {"guardian_id": "G-1", "students": []})})
     )
     result = make_get_student_grades(_ctx()).invoke({})
 
@@ -144,7 +145,7 @@ def test_no_linked_students_does_not_name_anyone(monkeypatch):
 
 def test_two_children_and_no_name_asks_which(monkeypatch):
     """Guessing here means showing one child's grades while naming another."""
-    monkeypatch.setattr(requests, "get", _route({"/students": TWO_CHILDREN}))
+    monkeypatch.setattr(records_http, "get", _route({"/students": TWO_CHILDREN}))
     result = make_get_student_grades(_ctx()).invoke({})
 
     assert "NEEDS_STUDENT_CHOICE" in result
@@ -153,7 +154,7 @@ def test_two_children_and_no_name_asks_which(monkeypatch):
 
 def test_a_named_child_is_matched_in_arabic(monkeypatch):
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _route(
             {
@@ -188,7 +189,7 @@ def test_a_named_child_is_matched_in_arabic(monkeypatch):
 def test_grades_forbid_recalculation_and_explain_excused(monkeypatch):
     """The model must not average subjects or call excused work a bad mark."""
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _route(
             {
@@ -221,7 +222,7 @@ def test_grades_forbid_recalculation_and_explain_excused(monkeypatch):
 
 def test_in_progress_subject_is_flagged_as_not_final(monkeypatch):
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _route(
             {
@@ -254,7 +255,7 @@ def test_in_progress_subject_is_flagged_as_not_final(monkeypatch):
 
 def test_empty_term_is_not_reported_as_failing(monkeypatch):
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _route(
             {
@@ -271,7 +272,7 @@ def test_empty_term_is_not_reported_as_failing(monkeypatch):
 
 def test_attendance_separates_excused_from_unexcused(monkeypatch):
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _route(
             {
@@ -365,7 +366,7 @@ def test_the_week_is_reported_day_by_day_in_the_school_s_own_order(monkeypatch):
     would be describing a week the school does not run.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     result = make_get_student_timetable(_ctx()).invoke({})
 
@@ -387,7 +388,7 @@ def test_a_break_is_not_reported_as_a_lesson(monkeypatch):
     cannot answer "when is her break", which is a question parents actually ask.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     result = make_get_student_timetable(_ctx()).invoke({})
 
@@ -426,7 +427,7 @@ def a_thursday(monkeypatch):
 def test_a_named_day_is_answered_with_that_day_alone(monkeypatch):
     """The narrowing this feature is: one day back, not a week to read through."""
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     result = make_get_student_timetable(_ctx()).invoke({"day": "السبت"})
 
@@ -448,7 +449,7 @@ def test_tomorrow_is_resolved_from_the_school_s_clock_and_stated_as_settled(
     also proves the resolution is real arithmetic and not a passthrough.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     result = make_get_student_timetable(_ctx()).invoke({"day": "بكره"})
 
@@ -463,7 +464,7 @@ def test_a_day_the_school_does_not_open_is_not_reported_as_having_no_lessons(mon
     with an empty grid. This school's week is Saturday to Monday, so Friday is not one.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     result = make_get_student_timetable(_ctx()).invoke({"day": "الجمعة"})
 
@@ -480,7 +481,7 @@ def test_a_school_day_with_nothing_timetabled_is_not_a_day_off(monkeypatch):
     Reported as "no school that day" it would tell a parent to keep their child home.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     result = make_get_student_timetable(_ctx()).invoke({"day": "monday"})
 
@@ -495,7 +496,7 @@ def test_a_narrowed_day_says_the_week_is_a_plan_and_not_a_calendar(monkeypatch):
     public holiday, and "he has maths first thing" is then a sentence a parent acts on.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     result = make_get_student_timetable(_ctx()).invoke({"day": "saturday"})
 
@@ -512,7 +513,7 @@ def test_a_day_that_matches_nothing_falls_back_to_the_whole_week(monkeypatch):
     contains their answer.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     result = make_get_student_timetable(_ctx()).invoke({"day": "عيد ميلاده"})
 
@@ -528,7 +529,7 @@ def test_an_unpublished_week_stays_unpublished_when_a_day_is_asked_for(monkeypat
     — which says the school planned an empty day rather than that it has published none.
     """
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _route(
             {"/students": ONE_CHILD, "/timetable": _week(status="no_timetable", lessons=[])}
@@ -547,7 +548,7 @@ def test_the_narrowed_day_is_drawn_as_an_ordinary_timetable_block(monkeypatch):
     back to the markdown, for a payload identical in shape to the one it draws.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     ctx = _ctx()
     make_get_student_timetable(ctx).invoke({"day": "السبت"})
@@ -571,7 +572,7 @@ def test_a_day_with_no_lessons_draws_no_block_at_all(monkeypatch):
     The sentence is where that answer belongs, and `records_result.j2` supplies it.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     ctx = _ctx()
     make_get_student_timetable(ctx).invoke({"day": "monday"})
@@ -586,7 +587,7 @@ def test_the_block_names_the_day_in_the_parent_s_own_words(monkeypatch, a_thursd
     check, which is the work this feature removes.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     ctx = _ctx()
     ctx.note_turn_plan([], [], language="ar")
@@ -605,7 +606,7 @@ def test_the_narrowed_outcome_counts_as_a_record_that_came_back(monkeypatch):
     from backend.chat.answer_checks import RECORDS_RETRIEVED
 
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     ctx = _ctx()
     make_get_student_timetable(ctx).invoke({"day": "السبت"})
@@ -636,7 +637,7 @@ def _passes_the_contract(kind: str, data: dict) -> bool:
 
 def test_the_week_also_travels_as_data_a_client_can_draw(monkeypatch):
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     ctx = _ctx()
     make_get_student_timetable(ctx).invoke({})
@@ -665,7 +666,7 @@ def test_the_drawn_week_rings_at_the_minute_and_speaks_the_turn_s_language(monke
          "starts_at": "07:45:00", "ends_at": "08:30:00", "is_teaching": True},
     ]
     monkeypatch.setattr(
-        requests, "get",
+        records_http, "get",
         _route({"/students": ONE_CHILD, "/timetable": _week(periods=periods)}),
     )
     ctx = _ctx()
@@ -684,7 +685,7 @@ def test_the_drawn_week_rings_at_the_minute_and_speaks_the_turn_s_language(monke
 def test_no_week_means_no_table_to_draw(monkeypatch):
     """`no_class` arrives through the timetable outcome, and its empty grid is not a table."""
     monkeypatch.setattr(
-        requests, "get",
+        records_http, "get",
         _route({
             "/students": ONE_CHILD,
             "/timetable": _week(status="no_class", class_code="", lessons=[], days=[]),
@@ -707,7 +708,7 @@ def test_the_marks_also_travel_as_data_and_a_blank_grade_stays_blank(monkeypatch
              "missing_count": 2, "is_complete": False},
         ],
     })
-    monkeypatch.setattr(requests, "get", _route({"/students": ONE_CHILD, "/grades": grades}))
+    monkeypatch.setattr(records_http, "get", _route({"/students": ONE_CHILD, "/grades": grades}))
     ctx = _ctx()
     make_get_student_grades(ctx).invoke({})
     block = _the_block(ctx)
@@ -730,7 +731,7 @@ def test_no_class_this_term_is_not_reported_as_having_no_lessons(monkeypatch):
     sentences, and only one of them is true here.
     """
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _route(
             {
@@ -753,7 +754,7 @@ def test_an_unpublished_timetable_names_the_class_and_blames_nobody(monkeypatch)
     the false sentence the whole three-way status exists to prevent.
     """
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _route(
             {
@@ -782,7 +783,7 @@ def test_the_request_never_names_a_class(monkeypatch):
         seen.append((url, params or {}))
         return ONE_CHILD if url.endswith("/students") else _week()
 
-    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(records_http, "get", fake_get)
     make_get_student_timetable(_ctx()).invoke({})
 
     url, params = seen[-1]
@@ -798,7 +799,7 @@ def test_an_unreachable_facade_forbids_inventing_a_week(monkeypatch):
     handles wrong.
     """
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _Response(503)})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _Response(503)})
     )
     ctx = _ctx()
     result = make_get_student_timetable(ctx).invoke({})
@@ -810,7 +811,7 @@ def test_an_unreachable_facade_forbids_inventing_a_week(monkeypatch):
 def test_the_timetable_tool_reports_its_own_outcome(monkeypatch):
     """So the turn can tell that a record WAS retrieved — see `note_tool_outcome`."""
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
+        records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
     )
     ctx = _ctx()
     make_get_student_timetable(ctx).invoke({})
@@ -820,7 +821,7 @@ def test_the_timetable_tool_reports_its_own_outcome(monkeypatch):
 
 def test_the_timetable_cannot_be_read_without_a_parent_session(monkeypatch):
     """Same gate as every other record tool: no verified guardian, no read."""
-    monkeypatch.setattr(requests, "get", _route({}))
+    monkeypatch.setattr(records_http, "get", _route({}))
     result = make_get_student_timetable(_ctx(token="")).invoke({})
 
     assert "NOT_A_PARENT_SESSION" in result
@@ -829,7 +830,7 @@ def test_the_timetable_cannot_be_read_without_a_parent_session(monkeypatch):
 def test_two_children_and_no_name_asks_which_before_showing_a_week(monkeypatch):
     """A timetable names a child as surely as a mark does, so the same question comes first."""
     monkeypatch.setattr(
-        requests, "get", _route({"/students": TWO_CHILDREN, "/timetable": _week()})
+        records_http, "get", _route({"/students": TWO_CHILDREN, "/timetable": _week()})
     )
     result = make_get_student_timetable(_ctx()).invoke({})
 
@@ -909,7 +910,7 @@ def test_the_class_answer_is_the_name_and_not_the_code(monkeypatch):
     The model is also told not to reformat it: "Primary 3 Class 1" and "3/1" are whatever
     the registrar typed, and a helpful renumbering would be a different class.
     """
-    monkeypatch.setattr(requests, "get", _rooms())
+    monkeypatch.setattr(records_http, "get", _rooms())
     result = make_get_student_class(_ctx()).invoke({})
 
     assert "CLASS for" in result
@@ -921,7 +922,7 @@ def test_the_class_answer_is_the_name_and_not_the_code(monkeypatch):
 
 def test_a_child_with_no_placement_is_not_given_a_guessed_class(monkeypatch):
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _rooms(status="no_class", class_code="", class_name_ar="", class_name_en=""),
     )
@@ -932,7 +933,7 @@ def test_a_child_with_no_placement_is_not_given_a_guessed_class(monkeypatch):
 
 
 def test_the_subject_list_is_reported_in_the_school_s_order(monkeypatch):
-    monkeypatch.setattr(requests, "get", _rooms())
+    monkeypatch.setattr(records_http, "get", _rooms())
     result = make_get_student_subjects(_ctx()).invoke({})
 
     assert "SUBJECTS for" in result
@@ -946,7 +947,7 @@ def test_an_uncurated_subject_board_is_not_a_child_who_studies_nothing(monkeypat
     Reported as "she studies no subjects" this is false and alarming; the branch names the
     class and says the list is not published.
     """
-    monkeypatch.setattr(requests, "get", _rooms(subjects=[]))
+    monkeypatch.setattr(records_http, "get", _rooms(subjects=[]))
     result = make_get_student_subjects(_ctx()).invoke({})
 
     assert "SUBJECTS_NOT_PUBLISHED" in result
@@ -961,7 +962,7 @@ def test_teachers_are_grouped_by_subject_and_none_is_dropped(monkeypatch):
     separate facts and a model may summarise it to one name — which is the person who
     disappears.
     """
-    monkeypatch.setattr(requests, "get", _rooms())
+    monkeypatch.setattr(records_http, "get", _rooms())
     result = make_get_student_teachers(_ctx()).invoke({})
 
     assert "TEACHERS for" in result
@@ -972,7 +973,7 @@ def test_teachers_are_grouped_by_subject_and_none_is_dropped(monkeypatch):
 
 def test_a_class_with_no_staffing_recorded_is_not_a_child_with_no_teachers(monkeypatch):
     """The third empty. Same shape of lie as the subjects one, same fix."""
-    monkeypatch.setattr(requests, "get", _rooms(teachers=[]))
+    monkeypatch.setattr(records_http, "get", _rooms(teachers=[]))
     result = make_get_student_teachers(_ctx()).invoke({})
 
     assert "TEACHERS_NOT_ASSIGNED" in result
@@ -987,7 +988,7 @@ def test_a_teacher_with_no_name_on_file_is_not_rendered_as_a_blank(monkeypatch):
     Dropping the row leaves the honest "not recorded yet" answer instead.
     """
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _rooms(
             teachers=[
@@ -1012,7 +1013,7 @@ def test_no_teacher_contact_details_are_ever_offered(monkeypatch):
     Without that instruction a helpful model invents an email from the school's domain,
     which is worse than saying it does not have one.
     """
-    monkeypatch.setattr(requests, "get", _rooms())
+    monkeypatch.setattr(records_http, "get", _rooms())
     listed = make_get_student_teachers(_ctx()).invoke({})
     one = make_get_student_teachers(_ctx()).invoke({"subject": "العلوم"})
 
@@ -1026,7 +1027,7 @@ def test_a_named_subject_returns_only_that_subject_s_teachers(monkeypatch):
 
     And every teacher of it — science has two, and both are named.
     """
-    monkeypatch.setattr(requests, "get", _rooms())
+    monkeypatch.setattr(records_http, "get", _rooms())
     result = make_get_student_teachers(_ctx()).invoke({"subject": "العلوم"})
 
     assert "SUBJECT_TEACHER" in result
@@ -1038,7 +1039,7 @@ def test_a_named_subject_returns_only_that_subject_s_teachers(monkeypatch):
 
 def test_a_subject_named_in_english_matches_the_arabic_board(monkeypatch):
     """A parent writes in either language and the board spells it one fixed way."""
-    monkeypatch.setattr(requests, "get", _rooms())
+    monkeypatch.setattr(records_http, "get", _rooms())
     result = make_get_student_teachers(_ctx()).invoke({"subject": "Science"})
 
     assert "SUBJECT_TEACHER" in result
@@ -1047,7 +1048,7 @@ def test_a_subject_named_in_english_matches_the_arabic_board(monkeypatch):
 
 def test_a_subject_nobody_teaches_her_asks_rather_than_guessing(monkeypatch):
     """Answered with the subjects she actually has a teacher for, never a nearest guess."""
-    monkeypatch.setattr(requests, "get", _rooms())
+    monkeypatch.setattr(records_http, "get", _rooms())
     result = make_get_student_teachers(_ctx()).invoke({"subject": "الموسيقى"})
 
     assert "NEEDS_SUBJECT_CHOICE" in result
@@ -1066,7 +1067,7 @@ def test_the_classroom_tools_never_name_a_class_in_the_request(monkeypatch):
         seen.append((url, params or {}))
         return ONE_CHILD if url.endswith("/students") else _room()
 
-    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(records_http, "get", fake_get)
     make_get_student_class(_ctx()).invoke({})
     make_get_student_subjects(_ctx()).invoke({})
     make_get_student_teachers(_ctx()).invoke({})
@@ -1105,7 +1106,7 @@ def test_each_classroom_tool_reports_its_own_outcome(
     or the check that catches an answer denying the record it just read cannot fire — which
     is exactly how `timetable` was missed.
     """
-    monkeypatch.setattr(requests, "get", _rooms())
+    monkeypatch.setattr(records_http, "get", _rooms())
     ctx = _ctx()
     builder(ctx).invoke(args)
 
@@ -1128,7 +1129,7 @@ def test_each_classroom_tool_reports_its_own_outcome(
 def test_an_unreachable_facade_forbids_inventing_a_room(monkeypatch, builder, args):
     """Shares the `unavailable` branch with every other record tool, deliberately."""
     monkeypatch.setattr(
-        requests,
+        records_http,
         "get",
         _route(
             {
@@ -1146,7 +1147,7 @@ def test_an_unreachable_facade_forbids_inventing_a_room(monkeypatch, builder, ar
 
 def test_the_turn_budget_stops_a_loop(monkeypatch):
     monkeypatch.setenv("RECORDS_MAX_CALLS_PER_TURN", "2")
-    monkeypatch.setattr(requests, "get", _route({"/students": ONE_CHILD}))
+    monkeypatch.setattr(records_http, "get", _route({"/students": ONE_CHILD}))
 
     ctx = _ctx()
     tool = make_get_student_grades(ctx)
@@ -1163,7 +1164,7 @@ def test_session_id_is_sent_so_the_facade_can_correlate_its_audit(monkeypatch):
         seen.update(headers or {})
         return ONE_CHILD if url.endswith("/students") else _Response(404)
 
-    monkeypatch.setattr(requests, "get", capture)
+    monkeypatch.setattr(records_http, "get", capture)
     make_get_student_grades(_ctx()).invoke({})
 
     assert seen.get("X-Request-Id") == "turn-1"
@@ -1172,7 +1173,7 @@ def test_session_id_is_sent_so_the_facade_can_correlate_its_audit(monkeypatch):
 
 @pytest.mark.parametrize("status", [500, 502, 504])
 def test_all_server_errors_collapse_to_unavailable(monkeypatch, status):
-    monkeypatch.setattr(requests, "get", _route({"/students": _Response(status)}))
+    monkeypatch.setattr(records_http, "get", _route({"/students": _Response(status)}))
     result = make_get_student_grades(_ctx()).invoke({})
     assert "RECORDS_UNAVAILABLE" in result
 
@@ -1220,7 +1221,7 @@ def test_the_planners_child_is_read_and_not_the_name_the_model_typed(monkeypatch
         read["url"] = url
         return _grades_for()
 
-    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(records_http, "get", fake_get)
     ctx = _ctx()
     ctx.note_turn_plan([], [], child_id="S-1", child_label="ليلى")
     result = make_get_student_grades(ctx).invoke({"student_name": "عمر"})
@@ -1234,7 +1235,7 @@ def test_a_planner_child_no_longer_on_the_roster_falls_back_to_resolving(monkeyp
 
     Answering about nobody would be worse than asking, so the ordinary resolver runs.
     """
-    monkeypatch.setattr(requests, "get", _route({"/students": TWO_CHILDREN}))
+    monkeypatch.setattr(records_http, "get", _route({"/students": TWO_CHILDREN}))
     ctx = _ctx()
     ctx.note_turn_plan([], [], child_id="S-99", child_label="مين ده")
     result = make_get_student_grades(ctx).invoke({})
@@ -1257,7 +1258,7 @@ def test_the_tool_reports_which_outcome_it_produced(monkeypatch):
     """A call count says the tool ran. Only the outcome says it found anything, and only
     that can contradict an answer claiming it did not."""
     monkeypatch.setattr(
-        requests, "get", _route({"/students": ONE_CHILD, "/grades": _grades_for(87.5)})
+        records_http, "get", _route({"/students": ONE_CHILD, "/grades": _grades_for(87.5)})
     )
     ctx = _ctx()
     make_get_student_grades(ctx).invoke({})
@@ -1266,7 +1267,7 @@ def test_the_tool_reports_which_outcome_it_produced(monkeypatch):
 
 
 def test_a_failure_reports_its_own_outcome_too(monkeypatch):
-    monkeypatch.setattr(requests, "get", _route({"/students": _Response(503)}))
+    monkeypatch.setattr(records_http, "get", _route({"/students": _Response(503)}))
     ctx = _ctx()
     make_get_student_grades(ctx).invoke({})
 

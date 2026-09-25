@@ -29,6 +29,7 @@ from unittest.mock import patch
 import requests
 
 import backend.chat.child_roster as child_roster
+import backend.records_http as records_http
 from backend.chat.caller_identity import CallerIdentity
 from backend.chat.child_resolution import resolve_child
 from backend.chat.child_roster import ChildOption
@@ -276,7 +277,7 @@ class ASessionThatIsNotAParent(_SchoolTurn):
             raise AssertionError("a session with no guardian must not call the facade")
 
         ctx = _staff_ctx()
-        with patch.object(requests, "get", forbidden):
+        with patch.object(records_http, "get", forbidden):
             result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("NOT_A_PARENT_SESSION", result)
@@ -380,7 +381,7 @@ class WhenTheRosterCannotBeRead(_SchoolTurn):
         would re-ask the parent which child for a reason they could never see."""
         ctx = _parent_ctx()
         ctx.remember_child("S-1", label="ليلى أحمد")
-        with patch.object(requests, "get", _route({"/students": _Response(503)})):
+        with patch.object(records_http, "get", _route({"/students": _Response(503)})):
             result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("RECORDS_UNAVAILABLE", result)
@@ -392,7 +393,7 @@ class WhenTheRosterCannotBeRead(_SchoolTurn):
         the conversation settled on may no longer be readable."""
         ctx = _parent_ctx()
         ctx.remember_child("S-1", label="ليلى أحمد")
-        with patch.object(requests, "get", _route({"/students": _Response(403)})):
+        with patch.object(records_http, "get", _route({"/students": _Response(403)})):
             result = make_get_student_grades(ctx).invoke({})
 
         self.assertIn("NOT_AUTHORIZED", result)
@@ -402,7 +403,7 @@ class WhenTheRosterCannotBeRead(_SchoolTurn):
         """The sentence this whole three-valued outcome exists to prevent."""
         for status, marker in ((503, "RECORDS_UNAVAILABLE"), (401, "NOT_AUTHORIZED")):
             with self.subTest(status=status):
-                with patch.object(requests, "get", _route({"/students": _Response(status)})):
+                with patch.object(records_http, "get", _route({"/students": _Response(status)})):
                     result = make_get_student_grades(_parent_ctx()).invoke({})
 
                 self.assertIn(marker, result)
@@ -446,7 +447,7 @@ class AGuardianWithNoChildrenOnFile(_SchoolTurn):
     def test_only_the_tool_words_it_and_it_names_nobody(self):
         ctx = _parent_ctx()
         with patch.object(
-            requests,
+            records_http,
             "get",
             _route({"/students": _Response(200, {"guardian_id": GUARDIAN, "students": []})}),
         ):
@@ -568,7 +569,7 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
         the same bearer token, the same guardian in the path, the same audit id."""
         seen = []
         with patch.object(
-            requests, "get", _route({"/students": TWO_CHILDREN, "/grades": GRADES}, seen=seen)
+            records_http, "get", _route({"/students": TWO_CHILDREN, "/grades": GRADES}, seen=seen)
         ):
             ctx = _parent_ctx()
             ctx.note_turn_plan([], [], child_id="S-1", child_label="ليلى أحمد")
@@ -618,7 +619,7 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
         """
         seen = []
         with patch.object(
-            requests, "get", _route({"/students": ONE_CHILD, "/grades": GRADES}, seen=seen)
+            records_http, "get", _route({"/students": ONE_CHILD, "/grades": GRADES}, seen=seen)
         ):
             ctx = _parent_ctx()
             ctx.note_turn_plan([], [], child_id="S-404", child_label="طفل غير موجود")
@@ -632,7 +633,7 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
 
     def test_a_planned_child_missing_from_a_family_of_two_asks_rather_than_guessing(self):
         ctx = _parent_ctx()
-        with patch.object(requests, "get", _route({"/students": TWO_CHILDREN})):
+        with patch.object(records_http, "get", _route({"/students": TWO_CHILDREN})):
             ctx.note_turn_plan([], [], child_id="S-404", child_label="طفل غير موجود")
             result = make_get_student_grades(ctx).invoke({})
 

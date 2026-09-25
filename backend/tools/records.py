@@ -61,6 +61,7 @@ import os
 import requests
 from langchain_core.tools import tool
 
+import backend.records_http as records_http
 from backend.chat.child_resolution import resolve_child
 from backend.chat.child_roster import ChildOption, forget, load_roster
 from backend.chat.request_context import ChatRequestContext
@@ -100,7 +101,7 @@ def _get(path: str, ctx: ChatRequestContext, params: dict | None = None) -> tupl
     }
 
     try:
-        response = requests.get(
+        response = records_http.get(
             f"{BASE_URL}{path}", headers=headers, params=params or {}, timeout=TIMEOUT_SECONDS
         )
     except requests.RequestException as exc:

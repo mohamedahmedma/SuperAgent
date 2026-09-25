@@ -571,7 +571,7 @@ class _Replay:
         with (
             patch.dict(os.environ, {"CHILD_ROSTER_TTL_SECONDS": "0"}),
             patch.dict(sys.modules, {"backend.rag.pipeline": fake_rag}),
-            patch("requests.get", self.facade),
+            patch("backend.records_http.get", self.facade),
             patch.object(service, "_PROFILE", self.profile),
             patch.object(service, "_COPY", self.profile.user_copy),
             patch.object(service, "plan_turn", self._plan),
