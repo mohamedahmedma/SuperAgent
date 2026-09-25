@@ -563,7 +563,7 @@ class RagConfig(_Section):
     # `max_seconds` is the longest a stated Retry-After is waited; past it the call
     # fails at once, and so do the calls after it until the provider's stated time,
     # without being sent. `base_seconds` is the pause after a 429 that states no delay.
-    # Before, the SDK's own retries (2, honouring waits up to 2 minutes) sat under a
+    # Before, the SDK's own retries (2, honouring waits up to 60 s) sat under a
     # retry here: 6 requests and 126 s for one call at `retry-after: 30`.
     model_retry_attempts: int = 2
     model_retry_base_seconds: float = 2.0

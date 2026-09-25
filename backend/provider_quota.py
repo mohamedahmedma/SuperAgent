@@ -3,8 +3,8 @@
 RAG_FIX_PLAN item 37. A provider's rate limit was handled by retrying, at two layers
 that did not know about each other, on threads a turn cannot spare:
 
-  * the OpenAI SDK retries a 429 twice and sleeps whatever `Retry-After` says, up to two
-    minutes, on the calling thread;
+  * the OpenAI SDK retries a 429 twice and sleeps whatever `Retry-After` says, up to 60 s
+    in the locked openai 2.x (two minutes in 3.x), on the calling thread;
   * three chat-path calls wrapped that in a retry of their own.
 
 Measured against a provider answering 429 with `retry-after: 3`, one resolver call sent

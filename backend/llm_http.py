@@ -38,7 +38,7 @@ import time
 from typing import Any
 
 import anyio
-import httpx2
+import httpx
 import openai
 
 from backend.provider_quota import (
@@ -55,7 +55,7 @@ DRAIN_MAX_BYTES = 64 * 1024
 DRAIN_MAX_SECONDS = 0.25
 
 
-class _DrainOnClose(httpx2.AsyncByteStream):
+class _DrainOnClose(httpx.AsyncByteStream):
     """The response body, with a close that first reads what is left of it.
 
     A plain iterator over the inner stream rather than an async generator of its own: a
@@ -64,7 +64,7 @@ class _DrainOnClose(httpx2.AsyncByteStream):
     scope, the cancellation httpcore is written for, and in bytes.
     """
 
-    def __init__(self, inner: httpx2.AsyncByteStream) -> None:
+    def __init__(self, inner: httpx.AsyncByteStream) -> None:
         self._inner = inner
         self._iterator = None
 
@@ -82,7 +82,7 @@ class _DrainOnClose(httpx2.AsyncByteStream):
                     read = 0
                     while read <= DRAIN_MAX_BYTES:
                         read += len(await self._iterator.__anext__())
-        except (StopAsyncIteration, httpx2.HTTPError, OSError, RuntimeError):
+        except (StopAsyncIteration, httpx.HTTPError, OSError, RuntimeError):
             # Finished (the tail was read), or the stream could not be finished cleanly:
             # either way the close below decides whether the connection is reused.
             pass
@@ -91,13 +91,13 @@ class _DrainOnClose(httpx2.AsyncByteStream):
             await self._inner.aclose()
 
 
-class DrainOnCloseTransport(httpx2.AsyncBaseTransport):
+class DrainOnCloseTransport(httpx.AsyncBaseTransport):
     """An async transport whose responses finish reading before they close."""
 
-    def __init__(self, inner: httpx2.AsyncBaseTransport) -> None:
+    def __init__(self, inner: httpx.AsyncBaseTransport) -> None:
         self._inner = inner
 
-    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         response = await self._inner.handle_async_request(request)
         response.stream = _DrainOnClose(response.stream)
         return response
@@ -106,26 +106,26 @@ class DrainOnCloseTransport(httpx2.AsyncBaseTransport):
         await self._inner.aclose()
 
 
-def _quota_key(request: httpx2.Request) -> str:
+def _quota_key(request: httpx.Request) -> str:
     """Which quota a request counts against: the provider's host, and the model."""
     model = "*"
     try:
         body = json.loads(request.content or b"{}")
         if isinstance(body, dict) and body.get("model"):
             model = str(body["model"])
-    except (httpx2.RequestNotRead, ValueError, TypeError):
+    except (httpx.RequestNotRead, ValueError, TypeError):
         pass
     return f"{request.url.host}/{model}"
 
 
-def _refusal(request: httpx2.Request, exc: QuotaExhausted) -> httpx2.Response:
+def _refusal(request: httpx.Request, exc: QuotaExhausted) -> httpx.Response:
     """The 429 the provider would have sent, made here instead of on the wire.
 
     Shaped like the provider's, so the SDK raises the same `RateLimitError` and every
     caller's existing rate-limit handling applies unchanged. `x-should-retry: false`,
     because the wait is already known to be longer than a turn may spend.
     """
-    return httpx2.Response(
+    return httpx.Response(
         429,
         headers={"retry-after": f"{exc.retry_after:.3f}", "x-should-retry": "false"},
         json={"error": {"message": str(exc), "type": "rate_limit", "code": "quota_cooldown"}},
@@ -133,24 +133,24 @@ def _refusal(request: httpx2.Request, exc: QuotaExhausted) -> httpx2.Response:
     )
 
 
-def _judge(gate: ProviderGate, response: httpx2.Response) -> None:
+def _judge(gate: ProviderGate, response: httpx.Response) -> None:
     gate.observe(response.status_code, response.headers)
     if response.status_code in RETRYABLE_STATUSES:
         response.headers["x-should-retry"] = "true" if gate.should_retry(response.headers) else "false"
 
 
-class GatedTransport(httpx2.BaseTransport):
+class GatedTransport(httpx.BaseTransport):
     """A sync transport that applies the provider's quota before and after each call.
 
     The hold is bounded by the gate's `max_wait`, so a pool thread waits a few seconds
     at most, and only when the provider has said the call would fail sooner.
     """
 
-    def __init__(self, inner: httpx2.BaseTransport, quotas: ProviderQuotas) -> None:
+    def __init__(self, inner: httpx.BaseTransport, quotas: ProviderQuotas) -> None:
         self._inner = inner
         self._quotas = quotas
 
-    def handle_request(self, request: httpx2.Request) -> httpx2.Response:
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
         gate = self._quotas.gate(_quota_key(request))
         try:
             wait = gate.wait_before_sending()
@@ -160,7 +160,7 @@ class GatedTransport(httpx2.BaseTransport):
             time.sleep(wait)
         try:
             response = self._inner.handle_request(request)
-        except httpx2.TransportError:
+        except httpx.TransportError:
             gate.observe_failure()
             raise
         _judge(gate, response)
@@ -170,14 +170,14 @@ class GatedTransport(httpx2.BaseTransport):
         self._inner.close()
 
 
-class AsyncGatedTransport(httpx2.AsyncBaseTransport):
+class AsyncGatedTransport(httpx.AsyncBaseTransport):
     """The same, for the async client: a hold here costs no thread at all."""
 
-    def __init__(self, inner: httpx2.AsyncBaseTransport, quotas: ProviderQuotas) -> None:
+    def __init__(self, inner: httpx.AsyncBaseTransport, quotas: ProviderQuotas) -> None:
         self._inner = inner
         self._quotas = quotas
 
-    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         gate = self._quotas.gate(_quota_key(request))
         try:
             wait = gate.wait_before_sending()
@@ -187,7 +187,7 @@ class AsyncGatedTransport(httpx2.AsyncBaseTransport):
             await anyio.sleep(wait)
         try:
             response = await self._inner.handle_async_request(request)
-        except httpx2.TransportError:
+        except httpx.TransportError:
             gate.observe_failure()
             raise
         _judge(gate, response)
@@ -197,28 +197,28 @@ class AsyncGatedTransport(httpx2.AsyncBaseTransport):
         await self._inner.aclose()
 
 
-def _limits() -> httpx2.Limits:
+def _limits() -> httpx.Limits:
     """The SDK's own pool sizes, with idle connections kept longer than its 5 seconds.
 
     Between one parent's turns a connection sits idle for longer than five seconds, and
     each expiry is another handshake. Providers keep idle connections open for far longer
     than that; `LLM_KEEPALIVE_SECONDS` tunes it.
     """
-    return httpx2.Limits(
+    return httpx.Limits(
         max_connections=int(os.getenv("LLM_MAX_CONNECTIONS") or 1000),
         max_keepalive_connections=int(os.getenv("LLM_MAX_KEEPALIVE_CONNECTIONS") or 100),
         keepalive_expiry=float(os.getenv("LLM_KEEPALIVE_SECONDS") or 30.0),
     )
 
 
-def _timeout() -> httpx2.Timeout:
+def _timeout() -> httpx.Timeout:
     """How long a model call may wait on the provider, stated rather than inherited.
 
     Unstated, the SDK's default applies: 600 s to read, so a provider that stalls holds
     a parent's turn, and a thread, for ten minutes. The read timeout bounds each wait
     for data, which on a stream is the gap between two chunks, not the whole answer.
     """
-    return httpx2.Timeout(
+    return httpx.Timeout(
         float(os.getenv("LLM_READ_TIMEOUT_SECONDS") or 60.0),
         connect=float(os.getenv("LLM_CONNECT_TIMEOUT_SECONDS") or 5.0),
     )
@@ -242,11 +242,11 @@ class ProviderHttpClients:
             default_cooldown=float(rag.model_retry_base_seconds),
         )
         self.sync_client = openai.DefaultHttpxClient(
-            transport=GatedTransport(httpx2.HTTPTransport(limits=_limits()), self.quotas)
+            transport=GatedTransport(httpx.HTTPTransport(limits=_limits()), self.quotas)
         )
         self.async_client = openai.DefaultAsyncHttpxClient(
             transport=AsyncGatedTransport(
-                DrainOnCloseTransport(httpx2.AsyncHTTPTransport(limits=_limits())), self.quotas
+                DrainOnCloseTransport(httpx.AsyncHTTPTransport(limits=_limits())), self.quotas
             )
         )
 

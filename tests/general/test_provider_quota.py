@@ -301,10 +301,10 @@ class BusyCopyTests(unittest.TestCase):
     """A rate-limited answer is shown as the profile's copy, not as the exception."""
 
     def rate_limited(self, seconds):
-        import httpx2
+        import httpx
 
-        response = httpx2.Response(429, headers={"retry-after": seconds},
-                                   request=httpx2.Request("POST", "http://provider/v1/chat/completions"))
+        response = httpx.Response(429, headers={"retry-after": seconds},
+                                   request=httpx.Request("POST", "http://provider/v1/chat/completions"))
         return openai.RateLimitError("rate limit: holding calls to provider/stub-model", response=response,
                                      body=None)
 

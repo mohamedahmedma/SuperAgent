@@ -16,10 +16,11 @@ class RedisCache:
         self.key_prefix = get_profile().identity.redis_key_prefix
         self.default_ttl = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "300"))
         # How long a stalled Redis may hold a caller before the call becomes a miss
-        # (RAG_FIX_PLAN item 44). Stated rather than inherited: redis-py 8's default is
-        # 5 s per call, and a turn makes several cache calls before its first word, so
-        # a stalled Redis cost a turn that many times 5 s. The cache is an optimisation,
-        # and the database answers in well under a second.
+        # (RAG_FIX_PLAN item 44). Unstated, the locked redis-py (7.3) waits FOREVER:
+        # measured against a server that accepts and never answers, the call was still
+        # waiting after 12 s, so a stalled Redis held every thread that touched the cache.
+        # (redis-py 8 defaults to 5 s, which is what an unlocked environment showed.) The
+        # cache is an optimisation, and the database answers in well under a second.
         self.socket_timeout = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS") or 1.0)
         self.connect_timeout = float(os.getenv("REDIS_CONNECT_TIMEOUT_SECONDS") or 1.0)
         self._client = None

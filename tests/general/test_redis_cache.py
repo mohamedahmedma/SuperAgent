@@ -1,9 +1,11 @@
 """RAG_FIX_PLAN item 44: a Redis that stalls costs a caller a short wait and a miss.
 
-Unstated, redis-py 8 waits 5 s per call (measured against the server below: 5.0 s, then
-TimeoutError), and a turn makes several cache calls before its first word: the
-conversation's messages, the session list, parent chunks, asset dossiers. These run the
-real client against a socket that accepts and never answers.
+Unstated, the locked redis-py (7.3) waits forever: against the server below, a call was
+still waiting after 12 s (redis-py 8 gives up after 5 s). A turn makes several cache
+calls before its first word — the conversation's messages, the session list, parent
+chunks, asset dossiers — so every thread that touched the cache was held for as long as
+Redis stayed stalled. These run the real client against a socket that accepts and never
+answers.
 """
 import socket
 import threading
