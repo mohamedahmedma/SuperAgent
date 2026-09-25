@@ -661,6 +661,7 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
     from backend.llm import sampling
     from backend.profiles import get_profile
     from backend.prompts import render
+    from backend.composition import default_services
 
     profile = get_profile()
     personal_fields = list(getattr(config, "personal_data_fields", None) or [])
@@ -683,6 +684,7 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
         model_provider="openai",
         api_key=os.getenv("ARK_API_KEY"),
         base_url=os.getenv("BASE_URL"),
+        **default_services().provider_http.model_kwargs(),
         **sampling("scope"),
     )
 

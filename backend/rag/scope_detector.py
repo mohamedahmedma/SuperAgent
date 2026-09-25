@@ -243,6 +243,7 @@ def _default_scope_invoke(ctx, signals: RequestSignals) -> Optional[Dict[str, An
     from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
     from backend.prompts import render
     from backend.profiles import get_profile
+    from backend.composition import default_services
 
     profile = get_profile()
     personal_fields = list(getattr(ctx.config, "personal_data_fields", None) or [])
@@ -278,6 +279,7 @@ def _default_scope_invoke(ctx, signals: RequestSignals) -> Optional[Dict[str, An
         model_provider="openai",
         api_key=os.getenv("ARK_API_KEY"),
         base_url=os.getenv("BASE_URL"),
+        **default_services().provider_http.model_kwargs(),
         **sampling("scope"),
     )
     # Same quota as everything else in the turn, so the same treatment: a 429 here

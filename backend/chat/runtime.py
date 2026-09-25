@@ -15,6 +15,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import ToolMessage
 
 from backend.chat.request_context import ChatRequestContext
+from backend.composition import default_services
 from backend.llm import sampling
 from backend.provider_compat import fold_tool_results_into_text
 from backend.profiles import get_profile
@@ -37,12 +38,16 @@ _UNHONOURED_TOOL_CHOICE_PARTS = (
 
 # The agent's model is the one that replays tool results, and this endpoint stops
 # parsing its own transcript format the moment it sees one. See backend/provider_compat.py.
+#
+# Both of a turn's streamed calls — the tool decision and the answer — go through it, so it
+# is the model whose connections matter most to reuse (backend/llm_http.py, item 48).
 model = fold_tool_results_into_text(init_chat_model(
     model=MODEL,
     model_provider="openai",
     api_key=API_KEY,
     base_url=BASE_URL,
     stream_usage=True,
+    **default_services().provider_http.model_kwargs(),
     **sampling("answer"),
 ))
 

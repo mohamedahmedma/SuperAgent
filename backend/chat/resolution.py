@@ -436,6 +436,7 @@ def _default_resolve_invoke(  # pragma: no cover - needs a model
     from backend.llm import sampling
     from backend.profiles import get_profile
     from backend.prompts import resolve as resolve_prompt
+    from backend.composition import default_services
 
     profile = get_profile()
 
@@ -457,6 +458,7 @@ def _default_resolve_invoke(  # pragma: no cover - needs a model
         model_provider="openai",
         api_key=os.getenv("ARK_API_KEY"),
         base_url=os.getenv("BASE_URL"),
+        **default_services().provider_http.model_kwargs(),
         **sampling("resolve"),
     )
 

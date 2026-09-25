@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from backend.indexing.summary_store import SectionCatalogueStore
     from backend.infra.cache import RedisCache
     from backend.jobs.upload_jobs import IngestJobTracker
+    from backend.llm_http import ProviderHttpClients
     from backend.llm_models import ChatModelFactory
     from backend.rag.entity_retrieval import EntityRetriever
 
@@ -444,9 +445,25 @@ class Services:
         def build() -> ChatModelFactory:
             from backend.llm_models import ChatModelFactory
 
-            return ChatModelFactory()
+            return ChatModelFactory(http_kwargs=self.provider_http.model_kwargs())
 
         return self._singleton("models", build)
+
+    @property
+    def provider_http(self) -> ProviderHttpClients:
+        """The HTTP clients every chat model reaches its provider through.
+
+        One per process, so every model object shares one connection pool per provider —
+        and one whose streamed responses go back to it instead of being closed
+        (backend/llm_http.py, RAG_FIX_PLAN item 48).
+        """
+
+        def build() -> ProviderHttpClients:
+            from backend.llm_http import ProviderHttpClients
+
+            return ProviderHttpClients()
+
+        return self._singleton("provider_http", build)
 
     # -- ingest jobs ------------------------------------------------------------
     # Two trackers over one table, distinguished by the kind of job they own. Separate
