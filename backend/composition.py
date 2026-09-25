@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from backend.indexing.milvus_writer import MilvusWriter
     from backend.indexing.pair_store import DocumentPairService
     from backend.indexing.parent_chunk_store import ParentChunkStore
+    from backend.indexing.query_vectors import QueryVectorCache
     from backend.indexing.removal import DocumentRemover
     from backend.indexing.summary_store import SectionCatalogueStore
     from backend.infra.cache import RedisCache
@@ -63,6 +64,7 @@ if TYPE_CHECKING:
     from backend.llm_http import ProviderHttpClients
     from backend.llm_models import ChatModelFactory
     from backend.rag.entity_retrieval import EntityRetriever
+    from backend.rag.retrieval_cache import CorpusVersion, RetrievalCache
 
 T = TypeVar("T")
 
@@ -278,7 +280,11 @@ class Services:
         def build() -> ParentChunkStore:
             from backend.indexing.parent_chunk_store import ParentChunkStore
 
-            return ParentChunkStore(unit_of_work=self.unit_of_work, cache=self.cache)
+            return ParentChunkStore(
+                unit_of_work=self.unit_of_work,
+                cache=self.cache,
+                on_change=self.corpus_version.bump,
+            )
 
         return self._singleton("parent_chunks", build)
 
@@ -304,9 +310,50 @@ class Services:
         def build() -> MilvusStore:
             from backend.indexing.milvus_client import MilvusStore
 
-            return MilvusStore()
+            return MilvusStore(on_change=self.corpus_version.bump)
 
         return self._singleton("milvus", build)
+
+    @property
+    def corpus_version(self) -> CorpusVersion:
+        """The counter every write to the searchable corpus moves forward.
+
+        Bumped by the vector store and the parent-chunk store, the two things a retrieval
+        reads, and read with every cached retrieval (backend/rag/retrieval_cache.py).
+        """
+
+        def build() -> CorpusVersion:
+            from backend.rag.retrieval_cache import CorpusVersion
+
+            return CorpusVersion.for_cache(self.cache)
+
+        return self._singleton("corpus_version", build)
+
+    @property
+    def retrieval_cache(self) -> RetrievalCache:
+        """Retrieval results shared by every worker, valid for one corpus version (item 18)."""
+
+        def build() -> RetrievalCache:
+            from backend.rag.retrieval_cache import RetrievalCache
+            from backend.rag.utils import retrieval_settings
+
+            return RetrievalCache.from_environment(self.cache, self.corpus_version, retrieval_settings())
+
+        return self._singleton("retrieval_cache", build)
+
+    @property
+    def query_vectors(self) -> QueryVectorCache:
+        """Query text to vector, through this process, Redis, then the embedder (item 18)."""
+
+        def build() -> QueryVectorCache:
+            from backend.indexing.query_vectors import QueryVectorCache
+
+            # Resolved per call, so a test that replaces the embedder is embedding with it.
+            return QueryVectorCache.from_environment(
+                lambda text: self.embedder.get_embeddings([text])[0], self.cache
+            )
+
+        return self._singleton("query_vectors", build)
 
     @property
     def embedder(self) -> EmbeddingService:

@@ -39,7 +39,6 @@ import os
 import random
 import threading
 import time
-from functools import lru_cache
 from typing import List, Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -456,31 +455,23 @@ class EmbeddingService:
             raise Exception(f"Local dense embedding model call failed: {str(e)}") from e
 
 
-# A turn can need the query vector more than once — the domain gate classifies with it
-# before retrieval searches with it. A bge-m3 forward pass on CPU is the most expensive
-# non-network step in a turn, so the second caller must not pay for it again.
-#
-# Keyed on the already-normalized query text, which is what both callers hold. Small and
-# bounded: this is a within-turn memo, not a semantic cache, and stale entries are
-# harmless because the same text always embeds to the same vector for a fixed model.
-_QUERY_VECTOR_CACHE_SIZE = 64
-
-
-@lru_cache(maxsize=_QUERY_VECTOR_CACHE_SIZE)
-def _embed_query_cached(text: str) -> tuple:
-    from backend.composition import default_services
-
-    return tuple(default_services().embedder.get_embeddings([text])[0])
-
-
 def embed_query(text: str) -> list[float]:
     """The query's dense vector, computed at most once per distinct text.
 
-    Returns a fresh list each call so a caller mutating it cannot corrupt the memo.
+    A turn can need it more than once (the domain gate classifies with it before
+    retrieval searches with it), and with a hosted embedder each computation is a paid
+    round trip. So it goes through the process's memo, then the vectors every worker
+    shares in Redis, then the embedder: `backend/indexing/query_vectors.py`. Keyed on
+    the already-normalised text, which is what every caller holds. Returns a fresh list
+    each call, so a caller changing it cannot corrupt the cache.
     """
-    return list(_embed_query_cached(text))
+    from backend.composition import default_services
+
+    return default_services().query_vectors.vector(text)
 
 
 def reset_query_vector_cache() -> None:
-    """For tests and for re-indexing with a different embedding model."""
-    _embed_query_cached.cache_clear()
+    """Forget this process's memo; for tests. The shared layer is keyed by model."""
+    from backend.composition import default_services
+
+    default_services().query_vectors.clear()

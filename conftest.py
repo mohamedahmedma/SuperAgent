@@ -56,6 +56,14 @@ With the limits on (`backend/chat/admission.py`), which tests got a 429 would de
 the order they ran in, and on a developer's machine the counts would be written into the
 local Redis. The limits are tested directly, against their own Redis keys, in
 `tests/general/test_turn_admission.py`. The shell wins here too.
+
+## Why the shared retrieval caches are off
+
+Query vectors and retrieval results are shared through Redis (RAG_FIX_PLAN item 18). In a
+test run that would let one test's fake embedder, or one test's stub corpus, answer
+another test's question, and on a developer's machine it would carry answers across runs.
+Both caches are tested directly, against their own keys, in `test_query_vectors.py` and
+`test_retrieval_cache.py`.
 """
 import os
 
@@ -67,6 +75,7 @@ for _tracing in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"):
     if not (os.environ.get(_tracing) or "").strip():
         os.environ[_tracing] = "false"
 
-for _limit in ("CHAT_TURNS_PER_MINUTE", "CHAT_CONCURRENT_TURNS"):
-    if not (os.environ.get(_limit) or "").strip():
-        os.environ[_limit] = "0"
+for _off in ("CHAT_TURNS_PER_MINUTE", "CHAT_CONCURRENT_TURNS",
+             "QUERY_VECTOR_CACHE_TTL_SECONDS", "RETRIEVAL_CACHE_TTL_SECONDS"):
+    if not (os.environ.get(_off) or "").strip():
+        os.environ[_off] = "0"

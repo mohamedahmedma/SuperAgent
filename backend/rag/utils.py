@@ -138,6 +138,8 @@ RETRIEVAL_TRACE_FIELDS = (
     "chunks_crowded_out",
     "post_threshold_count",
     "retrieval_empty",
+    # "hit" when this result was served from the shared cache (backend/rag/retrieval_cache.py).
+    "retrieval_cache",
 )
 
 def _milvus():
@@ -151,6 +153,52 @@ def _milvus():
     from backend.composition import default_services
 
     return default_services().milvus
+
+
+def _retrieval_cache():
+    """Cached retrievals, from the process container (backend/rag/retrieval_cache.py)."""
+    from backend.composition import default_services
+
+    return default_services().retrieval_cache
+
+
+def retrieval_settings() -> dict:
+    """Everything a retrieval's result depends on besides the question and the corpus.
+
+    Its fingerprint is part of every cached retrieval's key (RAG_FIX_PLAN item 18). A
+    deployment that changes any of these therefore starts from an empty cache, and so
+    does one that ships a change to the code that computes a retrieval: the source of
+    the modules below is hashed in, so a code change never serves results computed the
+    old way, and nobody has to remember to bump a version.
+    """
+    import hashlib
+    from pathlib import Path
+
+    import backend.indexing.milvus_client as milvus_client
+    import backend.text_matching as text_matching
+    import backend.text_normalization as text_normalization
+
+    code = hashlib.sha256()
+    for module in (__file__, milvus_client.__file__, text_matching.__file__, text_normalization.__file__):
+        code.update(Path(module).read_bytes())
+    return {
+        "profile": _RETRIEVAL.model_dump(mode="json"),
+        "resolved": {
+            "top_k": RETRIEVAL_TOP_K,
+            "candidate_k": _RETRIEVAL_CANDIDATE_K_RAW,
+            "candidate_multiplier": RETRIEVAL_CANDIDATE_MULTIPLIER,
+            "leaf_level": LEAF_RETRIEVE_LEVEL,
+            "auto_merge": [AUTO_MERGE_ENABLED, AUTO_MERGE_THRESHOLD, AUTO_MERGE_FIGURE_THRESHOLD],
+            "evidence_window_chars": EVIDENCE_WINDOW_CHARS,
+            "max_chunks_per_asset": MAX_CHUNKS_PER_ASSET,
+            "rerank": [RERANK_ENABLED, RERANK_MODEL, RERANK_BINDING_HOST, RERANK_DOC_CHAR_LIMIT, RERANK_MIN_SCORE],
+            "rerank_local": [RERANK_LOCAL_ENABLED, RERANK_LOCAL_MODEL, RERANK_LOCAL_TOP_N],
+        },
+        "embedding": [os.getenv(name) for name in (
+            "EMBEDDING_BACKEND", "EMBEDDING_BASE_URL", "EMBEDDING_MODEL", "DENSE_EMBEDDING_DIM")],
+        "collection": os.getenv("MILVUS_COLLECTION", "embeddings_collection"),
+        "code": code.hexdigest(),
+    }
 
 
 def _parent_chunks():
@@ -918,12 +966,28 @@ def retrieve_documents(
     # marks, which is a different character sequence from the indexed chunk —
     # without this the BM25 side cannot match and the dense side degrades.
     query = normalize_query(query) or query
-    candidate_k, candidate_config = resolve_candidate_k(top_k)
     # Defaulted to "" so every existing caller — a test, a sub-agent, the entity
     # retriever — keeps searching the whole corpus. Language routing is opt-in per
     # call, and a caller that does not know the turn's language must not silently get
     # a narrowed corpus.
     filter_expr = f"chunk_level == {LEAF_RETRIEVE_LEVEL}" + language_filter_clause(language)
+
+    # Cache-aside, keyed on what can change the result and valid for one corpus version
+    # (backend/rag/retrieval_cache.py). The filter is in the key, so pairing documents
+    # changes it without an invalidation.
+    cache = _retrieval_cache()
+    cached, ticket = cache.lookup(query, top_k, filter_expr)
+    if cached is not None:
+        cached.setdefault("meta", {})["retrieval_cache"] = "hit"
+        return cached
+    result = _search(query, top_k, filter_expr)
+    cache.store(ticket, result)
+    return result
+
+
+def _search(query: str, top_k: int, filter_expr: str) -> Dict[str, Any]:
+    """The retrieval itself: embed, search both lanes, merge, filter. Never raises."""
+    candidate_k, candidate_config = resolve_candidate_k(top_k)
     try:
         # Memoized: the domain gate has usually already embedded this exact normalized
         # text, so this is a dictionary hit rather than a second forward pass.

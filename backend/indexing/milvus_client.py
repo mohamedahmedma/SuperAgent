@@ -129,10 +129,25 @@ def _normalize_filter(filter_expr: str) -> str:
 
 
 class MilvusStore:
-    """Milvus collection read/write; holds no connection itself -- all IO goes through milvus_client_session."""
+    """Milvus collection read/write; holds no connection itself -- all IO goes through milvus_client_session.
 
-    def __init__(self, settings: MilvusSettings | None = None):
+    `on_change` is called after every write that changes what a search can return (an
+    insert, a delete, dropping the collection). The composition root points it at the
+    corpus version, which is what retires cached retrievals (backend/rag/retrieval_cache.py).
+    """
+
+    def __init__(
+        self,
+        settings: MilvusSettings | None = None,
+        *,
+        on_change: Callable[[], None] | None = None,
+    ):
         self._settings = settings or MilvusSettings.from_env()
+        self._on_change = on_change
+
+    def _changed(self) -> None:
+        if self._on_change is not None:
+            self._on_change()
 
     @property
     def collection_name(self) -> str:
@@ -226,7 +241,9 @@ class MilvusStore:
         self._run(_init)
 
     def insert(self, data: list[dict]):
-        return self._run(lambda client: client.insert(self.collection_name, data))
+        result = self._run(lambda client: client.insert(self.collection_name, data))
+        self._changed()
+        return result
 
     def query(
         self,
@@ -418,9 +435,11 @@ class MilvusStore:
         return formatted_results
 
     def delete(self, filter_expr: str):
-        return self._run(
+        result = self._run(
             lambda client: client.delete(collection_name=self.collection_name, filter=filter_expr)
         )
+        self._changed()
+        return result
 
     def has_collection(self) -> bool:
         return self._run(lambda client: client.has_collection(self.collection_name))
@@ -431,4 +450,5 @@ class MilvusStore:
                 client.drop_collection(self.collection_name)
 
         self._run(_drop)
+        self._changed()
 

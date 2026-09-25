@@ -66,6 +66,11 @@ def backend_env(stub: str = "http://127.0.0.1:8900/v1") -> dict:
     The per-user turn limits are off: every simulated parent signs in as the ONE load
     account, so the limits would measure themselves and nothing else. The door's provider
     check stays on (backend/chat/admission.py).
+
+    The shared query-vector and retrieval caches are off too. Runs repeat the same
+    question pool, so with them on the second run of anything would be served from the
+    first run's cache and read as a speed-up. Every figure here is the all-miss case,
+    which is the one capacity has to be planned for.
     """
     return {
         "LLM_PROVIDER": "",
@@ -75,6 +80,7 @@ def backend_env(stub: str = "http://127.0.0.1:8900/v1") -> dict:
         "EMBEDDING_API_KEY": "stub", "EMBEDDING_MODEL": "stub-embed",
         "LANGSMITH_TRACING": "false", "LANGCHAIN_TRACING_V2": "false",
         "CHAT_TURNS_PER_MINUTE": "0", "CHAT_CONCURRENT_TURNS": "0",
+        "QUERY_VECTOR_CACHE_TTL_SECONDS": "0", "RETRIEVAL_CACHE_TTL_SECONDS": "0",
     }
 
 
