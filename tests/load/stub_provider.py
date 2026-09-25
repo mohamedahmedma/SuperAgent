@@ -47,6 +47,8 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from backend.provider_compat import CONTEXT_HEADING
+
 KNOWLEDGE_TOOL = "search_knowledge_base"
 
 # The fields that decide which way a turn goes, pinned so every turn takes the ordinary
@@ -185,9 +187,30 @@ def _text(content: Any) -> str:
     return ""
 
 
+#: How the backend writes a tool result it folded into the transcript as text
+#: (backend/provider_compat.py): a user message opening with this.
+_FOLDED_RESULT = CONTEXT_HEADING.split("{", 1)[0]
+
+
+def is_tool_result(message: dict) -> bool:
+    """A tool's result, in either form the backend sends one.
+
+    A `tool` message, or, on the path that folds tool results into text so the provider
+    keeps parsing its own format, a USER message opening with the result heading. Reading
+    only the first form made the stub ask for the tool again after every planned
+    dispatch: every load-test knowledge turn paid a model call, a search and a grade that
+    production does not (RAG_FIX_PLAN item 43).
+    """
+    role = message.get("role")
+    if role == "tool":
+        return True
+    return role == "user" and _text(message.get("content")).startswith(_FOLDED_RESULT)
+
+
 def last_user_text(messages: list) -> str:
+    """What the parent last asked. A folded tool result is not the parent speaking."""
     for message in reversed(messages):
-        if message.get("role") == "user":
+        if message.get("role") == "user" and not is_tool_result(message):
             return _text(message.get("content"))[-300:]
     return ""
 
@@ -252,7 +275,7 @@ async def _chat_completion(body: dict, model: str):
     question = last_user_text(messages)
     tools = body.get("tools") or []
     stream = bool(body.get("stream"))
-    tool_ran = any(m.get("role") == "tool" for m in messages)
+    tool_ran = any(is_tool_result(m) for m in messages)
 
     # 1. structured output
     fmt = body.get("response_format") or {}

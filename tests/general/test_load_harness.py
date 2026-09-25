@@ -95,6 +95,25 @@ class StubEndpointTests(unittest.TestCase):
         self.assertTrue(message["content"])
         self.assertNotIn("tool_calls", message)
 
+    def test_a_result_folded_into_the_transcript_counts_as_a_tool_that_ran(self):
+        """The backend folds tool results into text for its provider (provider_compat).
+        Missed, the stub asked for the tool again after every planned dispatch, and every
+        load-test knowledge turn paid a model call, a search and a grade production does not."""
+        from backend.provider_compat import fold_messages
+
+        folded = fold_messages([
+            {"role": "user", "content": "What are the fees?"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": stub.KNOWLEDGE_TOOL, "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "Fees are reviewed each year."}])
+        self.assertFalse(any(message.get("role") == "tool" for message in folded))
+        message = self.client.post("/v1/chat/completions", json={
+            "model": "m", "tools": self._tools(), "messages": folded}).json()["choices"][0]["message"]
+        self.assertTrue(message["content"])
+        self.assertNotIn("tool_calls", message)
+        self.assertEqual("What are the fees?", stub.last_user_text(folded))
+
     def test_a_streamed_answer_arrives_in_chunks_and_ends(self):
         body = {"model": "m", "stream": True, "messages": [{"role": "user", "content": "hi"}]}
         with self.client.stream("POST", "/v1/chat/completions", json=body) as response:
