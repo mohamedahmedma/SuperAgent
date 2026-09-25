@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from backend.assets.store import AssetStore
     from backend.chat.admission import TurnAdmission
     from backend.chat.attachments import ChatAttachments
-    from backend.chat.background import BackgroundJobs
+    from backend.chat.background import JobRunner
     from backend.chat.storage import ConversationStorage
     from backend.chat.transcription import Transcriber
     from backend.indexing.document_loader import DocumentLoader
@@ -83,7 +83,7 @@ class Services:
         unit_of_work: UnitOfWorkFactory | None = None,
         cache: RedisCache | None = None,
         conversations: ConversationStorage | None = None,
-        background_jobs: BackgroundJobs | None = None,
+        background_jobs: JobRunner | None = None,
         attachments: ChatAttachments | None = None,
         transcriber: Transcriber | None = None,
         document_pairs: DocumentPairService | None = None,
@@ -222,18 +222,24 @@ class Services:
         return self._singleton("turn_admission", build)
 
     @property
-    def background_jobs(self) -> BackgroundJobs:
+    def background_jobs(self) -> JobRunner:
         """The threads a turn hands its save to.
 
         One per process: the ordering it promises — a conversation's writes land in the
         order they were queued — holds only among jobs that share an instance. Drained by
         `create_app()`'s lifespan on the way down, so a stop cannot lose a queued save.
+        Wrapped so that waiting for a conversation's saves waits for them in every worker,
+        through Redis (`SharedWriteBarrier`, RAG_FIX_PLAN item 21).
         """
 
-        def build() -> BackgroundJobs:
-            from backend.chat.background import BackgroundJobs
+        def build() -> JobRunner:
+            from backend.chat.background import BackgroundJobs, SharedWriteBarrier
 
-            return BackgroundJobs()
+            return SharedWriteBarrier(
+                BackgroundJobs(),
+                redis=getattr(self.cache, "client", None),
+                key=getattr(self.cache, "key", lambda name: name),
+            )
 
         return self._singleton("background_jobs", build)
 

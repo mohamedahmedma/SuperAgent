@@ -113,6 +113,10 @@ class Level:
     # columns above time answers only, so a backend that holds failing turns for minutes
     # and one that fails them at once would otherwise read the same.
     settled: list[float] = field(default_factory=list)
+    # From `[DONE]` to the connection closing, for an answered turn: what the stream held
+    # the connection open for after the parent's composer was released, which is the
+    # wait for the turn's save.
+    save_hold: list[float] = field(default_factory=list)
     errors: dict[str, int] = field(default_factory=dict)
     wall: float = 0.0
     pg_peak_total: int = 0
@@ -136,6 +140,8 @@ class Level:
             "turn_p50_ms": ms(self.turn, 50), "turn_p95_ms": ms(self.turn, 95),
             "closed_p95_ms": ms(self.closed, 95),
             "settled_p95_ms": ms(self.settled, 95), "settled_max_ms": ms(self.settled, 100),
+            "save_hold_p50_ms": ms(self.save_hold, 50), "save_hold_p95_ms": ms(self.save_hold, 95),
+            "save_hold_max_ms": ms(self.save_hold, 100),
             "turns_per_s": round(done / self.wall, 2) if self.wall else 0.0,
             "completed": done, "errors": dict(self.errors),
             "pg_peak_connections": self.pg_peak_total,
@@ -251,6 +257,7 @@ async def _one_turn(client: httpx.AsyncClient, url: str, headers: dict, session:
         level.ttft.append((first - started) * 1000)
     level.turn.append((done - started) * 1000)
     level.closed.append((closed - started) * 1000)
+    level.save_hold.append((closed - done) * 1000)
 
 
 async def run_level(url: str, token: str, parents: int, turns: int, pool: list[str],

@@ -13,11 +13,13 @@ missing from conversations that were merely being continued.
 """
 from __future__ import annotations
 
+import uuid
 from collections.abc import Sequence
 from datetime import datetime
 
 from sqlalchemy import bindparam, delete, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
@@ -76,22 +78,38 @@ class SqlAlchemyConversationRepository:
     def add_messages(self, session: StoredSession, messages: Sequence[NewMessage]) -> Sequence[int]:
         if not messages:
             return []
-        rows = [
-            ChatMessage(
-                session_ref_id=session.id,
-                message_type=message.message_type,
-                content=message.content,
-                timestamp=message.timestamp,
-                rag_trace=message.rag_trace,
-                attachment_id=message.attachment_id,
+        # Every message carries a key. One the caller did not name gets its own, which
+        # stores it as before; only a caller's key can make a repeat recognisable.
+        keys = [message.client_key or uuid.uuid4().hex for message in messages]
+        # One statement for the batch: the rows go in the order given, which is the order
+        # the conversation is read back in. A row whose key is already stored (a retried
+        # save whose first attempt had committed) is skipped rather than stored twice.
+        inserted = {
+            row.client_key: row.id
+            for row in self._session.execute(
+                pg_insert(ChatMessage)
+                .values([
+                    {
+                        "session_ref_id": session.id,
+                        "message_type": message.message_type,
+                        "content": message.content,
+                        "timestamp": message.timestamp,
+                        "rag_trace": message.rag_trace,
+                        "attachment_id": message.attachment_id,
+                        "client_key": key,
+                    }
+                    for message, key in zip(messages, keys)
+                ])
+                .on_conflict_do_nothing(index_elements=[ChatMessage.client_key])
+                .returning(ChatMessage.id, ChatMessage.client_key)
             )
-            for message in messages
-        ]
-        self._session.add_all(rows)
-        # One flush for the batch: ids are assigned in the order the rows were added,
-        # which is the order the conversation is read back in.
-        self._session.flush()
-        return [row.id for row in rows]
+        }
+        repeated = [key for key in keys if key not in inserted]
+        if repeated:
+            inserted.update(self._session.execute(
+                select(ChatMessage.client_key, ChatMessage.id).where(ChatMessage.client_key.in_(repeated))
+            ).tuples().all())
+        return [inserted[key] for key in keys]
 
     def messages(self, session: StoredSession) -> Sequence[StoredMessage]:
         rows = self._session.execute(

@@ -18,13 +18,20 @@ that queued it. Three properties make it safe to hand a conversation's writes to
     its own, so one lane's backlog is never another's.
 
 One instance per process, owned by the composition root, drained at shutdown so a restart
-cannot drop a save that was queued. The ordering is per process: a deployment running
-several workers behind one address would need the barrier in Redis. Today there is one.
+cannot drop a save that was queued.
+
+The ordering and the barrier are per process, and a deployment running several workers
+needs the barrier across them: the parent's next message may reach another worker while
+this one is still saving the answer they just read. `SharedWriteBarrier` wraps the runner
+and makes a key's pending work visible in Redis, so `flush` waits for it wherever it was
+queued (RAG_FIX_PLAN item 21). It costs the save two Redis round trips, in the
+background, and the next turn one read. The reply is not held back at all.
 """
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
 from typing import Protocol
@@ -173,6 +180,118 @@ class BackgroundJobs:
         with self._lock:
             for future in self._tails.values():
                 future.cancel()
+
+
+#: Decrement a key's pending count, and delete it at zero so an idle conversation keeps
+#: no key in Redis. Atomic, so two jobs finishing together cannot both miss the zero.
+_FINISH_SCRIPT = """
+local left = redis.call('DECR', KEYS[1])
+if left <= 0 then redis.call('DEL', KEYS[1]) end
+return left
+"""
+
+
+class SharedWriteBarrier:
+    """A job runner whose `flush` waits for a key's work in EVERY process, not just this one.
+
+    A decorator over any `JobRunner`: `submit` counts the job in Redis under its key before
+    handing it on, and uncounts it when it finishes, failed or not. `flush` first waits
+    for this process's jobs, as before, then for the count to reach zero.
+
+    A process that dies with a job counted leaves the count to expire with the key
+    (`ttl_seconds`), so a crash costs the conversation's next turn one bounded wait,
+    never a hang. It fails open: when Redis cannot be reached, jobs still run and `flush`
+    waits for this process only, which is how every deployment behaved before.
+    """
+
+    def __init__(
+        self,
+        inner: "JobRunner",
+        *,
+        redis: Callable[[], object] | None = None,
+        key: Callable[[str], str] = lambda name: name,
+        ttl_seconds: float = 30.0,
+        poll_seconds: float = 0.02,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self._inner = inner
+        self._redis = redis
+        self._key = key
+        self._ttl = max(1, int(ttl_seconds))
+        self._poll = poll_seconds
+        self._clock = clock
+        self._sleep = sleep
+        self._script = None
+
+    def _counter(self, key: str) -> str:
+        return self._key(f"pending_writes:{key}")
+
+    def _begin(self, key: str) -> bool:
+        if self._redis is None:
+            return False
+        try:
+            pipe = self._redis().pipeline(transaction=False)
+            pipe.incr(self._counter(key))
+            pipe.expire(self._counter(key), self._ttl)
+            pipe.execute()
+            return True
+        except Exception:
+            logger.debug("shared write barrier unavailable; %s is visible to this process only",
+                         key, exc_info=True)
+            return False
+
+    def _end(self, key: str) -> None:
+        try:
+            client = self._redis()
+            if self._script is None:
+                self._script = client.register_script(_FINISH_SCRIPT)
+            self._script(keys=[self._counter(key)])
+        except Exception:
+            logger.debug("could not uncount %s; the count expires by itself", key, exc_info=True)
+
+    def submit(
+        self, key: str, work: Callable[[], object], *, lane: str = WRITES, describe: str = ""
+    ) -> Future:
+        counted = self._begin(key)
+
+        def tracked() -> object:
+            try:
+                return work()
+            finally:
+                if counted:
+                    self._end(key)
+
+        return self._inner.submit(key, tracked, lane=lane, describe=describe)
+
+    def flush(self, key: str, timeout: float | None = None) -> bool:
+        started = self._clock()
+        if not self._inner.flush(key, timeout=timeout):
+            return False
+        if self._redis is None:
+            return True
+        budget = self._ttl if timeout is None else max(0.0, timeout - (self._clock() - started))
+        deadline = self._clock() + budget
+        while True:
+            try:
+                pending = int(self._redis().get(self._counter(key)) or 0)
+            except Exception:
+                return True  # fail open: this process's work is done
+            if pending <= 0:
+                return True
+            if self._clock() >= deadline:
+                return False
+            self._sleep(self._poll)
+
+    def drain(self, timeout: float | None = None) -> bool:
+        return self._inner.drain(timeout=timeout)
+
+    @property
+    def pending(self) -> int:
+        return self._inner.pending
+
+    def shutdown(self, timeout: float = 30.0) -> None:
+        self._inner.shutdown(timeout=timeout)
 
 
 class InlineJobs:

@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Sequence
 
@@ -15,12 +16,18 @@ from backend.schemas.chat import normalize_rag_trace
 class MessageToStore:
     """One message a turn adds to its conversation: the role, the text, and — on an
     answer — the trace it should be stored with; on a question, the recording it was
-    spoken as."""
+    spoken as.
+
+    `key` makes storing it idempotent. A save that is retried after its connection was
+    lost cannot tell whether the first attempt committed; with the key, a message that
+    already landed is found instead of stored twice (RAG_FIX_PLAN item 21).
+    """
 
     message_type: str
     content: str
     rag_trace: dict | None = None
     attachment_id: str | None = None
+    key: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 class ConversationStorage:
@@ -131,6 +138,7 @@ class ConversationStorage:
                         timestamp=now,
                         rag_trace=normalize_rag_trace(message.rag_trace),
                         attachment_id=message.attachment_id or None,
+                        client_key=message.key,
                     )
                     for message in messages
                 ],
