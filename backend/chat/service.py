@@ -256,8 +256,10 @@ async def chat_with_agent_stream(
                             yield _event({"type": "content", "content": content})
 
             # Assets get their own event, ahead of the trace, so a client can render images
-            # without parsing the trace — which is diagnostic and may change.
-            pipeline.attach_assets(turn, client_capabilities)
+            # without parsing the trace — which is diagnostic and may change. Off the loop:
+            # it reads the asset store, and while it did, every other stream stood still
+            # (RAG_FIX_PLAN item 42).
+            await asyncio.to_thread(pipeline.attach_assets, turn, client_capabilities)
             if turn.asset_references:
                 yield _event({"type": "assets", "assets": turn.asset_payload()})
             if turn.rag_trace:
@@ -377,8 +379,11 @@ async def chat_with_agent_stream(
                 yield _event({"type": "answer_blocks", "answer_blocks": settlement.blocks})
             yield _event({"type": "content_replace", "content": settlement.settled})
 
-        pipeline.attach_assets(
-            turn, client_capabilities, answer=full_response if settlement.asking else None
+        await asyncio.to_thread(
+            pipeline.attach_assets,
+            turn,
+            client_capabilities,
+            answer=full_response if settlement.asking else None,
         )
         if turn.asset_references:
             yield _event({"type": "assets", "assets": turn.asset_payload()})

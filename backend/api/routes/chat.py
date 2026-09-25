@@ -165,8 +165,14 @@ async def chat_stream_endpoint(
     # request-scoped dependencies. The attachment check is also what turns an unknown
     # note into a 404 here, while a status can still be sent.
     session_id = _thread_id(x_thread_id, request.session_id)
-    attachment_id = _attachment_id(request, current_user.username, services)
-    lease = _admit(request.message, current_user, services)
+    # Both off the loop: one is a Postgres lookup, the other a Redis round trip, and this
+    # handler runs ON the event loop, where either held every other stream in the process
+    # still for its duration — half a second for a lookup that had to open a connection
+    # (RAG_FIX_PLAN item 42).
+    attachment_id = await asyncio.to_thread(
+        _attachment_id, request, current_user.username, services
+    )
+    lease = await asyncio.to_thread(_admit, request.message, current_user, services)
 
     async def event_generator():
         try:
