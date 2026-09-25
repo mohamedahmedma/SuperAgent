@@ -48,6 +48,14 @@ kind of failure a developer attributes to their own change.
 
 Same rule as the profile: the shell wins, so `LANGSMITH_TRACING=true pytest tests/` still
 records a run when someone is deliberately debugging one.
+
+## Why the per-user turn limits are off
+
+Chat tests sign in as a handful of users and send turns far faster than a parent would.
+With the limits on (`backend/chat/admission.py`), which tests got a 429 would depend on
+the order they ran in, and on a developer's machine the counts would be written into the
+local Redis. The limits are tested directly, against their own Redis keys, in
+`tests/general/test_turn_admission.py`. The shell wins here too.
 """
 import os
 
@@ -58,3 +66,7 @@ os.environ["ACTIVE_PROFILE"] = _FROM_SHELL or "school"
 for _tracing in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"):
     if not (os.environ.get(_tracing) or "").strip():
         os.environ[_tracing] = "false"
+
+for _limit in ("CHAT_TURNS_PER_MINUTE", "CHAT_CONCURRENT_TURNS"):
+    if not (os.environ.get(_limit) or "").strip():
+        os.environ[_limit] = "0"

@@ -62,6 +62,10 @@ def backend_env(stub: str = "http://127.0.0.1:8900/v1") -> dict:
     Every chat role resolves `MODEL`/`FAST_MODEL`/`GRADE_MODEL`/`BASE_URL`/`ARK_API_KEY` unless an
     `LLM_PROVIDER` block overrides them, so the provider selector is emptied here — the
     process environment wins over both `.env` files (backend/env.py).
+
+    The per-user turn limits are off: every simulated parent signs in as the ONE load
+    account, so the limits would measure themselves and nothing else. The door's provider
+    check stays on (backend/chat/admission.py).
     """
     return {
         "LLM_PROVIDER": "",
@@ -70,6 +74,7 @@ def backend_env(stub: str = "http://127.0.0.1:8900/v1") -> dict:
         "EMBEDDING_BACKEND": "openai", "EMBEDDING_BASE_URL": stub,
         "EMBEDDING_API_KEY": "stub", "EMBEDDING_MODEL": "stub-embed",
         "LANGSMITH_TRACING": "false", "LANGCHAIN_TRACING_V2": "false",
+        "CHAT_TURNS_PER_MINUTE": "0", "CHAT_CONCURRENT_TURNS": "0",
     }
 
 

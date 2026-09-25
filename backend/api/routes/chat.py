@@ -1,14 +1,19 @@
+import asyncio
 import json
 import re
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from backend.api.deps import get_services
 from backend.chat import chat_with_agent, chat_with_agent_stream
+from backend.chat.admission import Refusal, TurnLease
 from backend.chat.caller_identity import CallerIdentity
+from backend.chat.language import detect_language
 from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
+from backend.profiles import get_profile
 from backend.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(tags=["chat"])
@@ -63,6 +68,24 @@ def _thread_id(header_value: str | None, body_value: str | None) -> str:
     return cleaned or DEFAULT_THREAD
 
 
+def _admit(message: str, user: AuthenticatedUser, services: Services) -> TurnLease:
+    """The turn's place at the door, or the 429 that says why it has none.
+
+    Asked after the request is known to be valid and before any work is spent on it
+    (backend/chat/admission.py, RAG_FIX_PLAN items 37 and 38). The refusal is the
+    profile's copy in the language of the message, with `Retry-After`, so the web app
+    can show it as it is.
+    """
+    decision = services.turn_admission.admit(user.username)
+    if isinstance(decision, Refusal):
+        raise HTTPException(
+            status_code=429,
+            detail=decision.message(get_profile().user_copy, detect_language(message)),
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+        )
+    return decision
+
+
 
 # Deliberately `def`, not `async def`. `chat_with_agent` is synchronous from end to
 # end — the embedder's forward pass, the scope model call, retrieval, and every LLM
@@ -83,18 +106,22 @@ def chat_endpoint(
     try:
         session_id = _thread_id(x_thread_id, request.session_id)
         attachment_id = _attachment_id(request, current_user.username, services)
-        resp = chat_with_agent(
-            request.message,
-            current_user.username,
-            session_id,
-            client_capabilities=request.client_capabilities,
-            # Identity is assembled HERE, at the HTTP boundary, from a token whose
-            # signature has been verified — and nowhere else. Everything downstream
-            # receives it and cannot change it.
-            caller=CallerIdentity.from_principal(current_user),
-            services=services,
-            attachment_id=attachment_id,
-        )
+        lease = _admit(request.message, current_user, services)
+        try:
+            resp = chat_with_agent(
+                request.message,
+                current_user.username,
+                session_id,
+                client_capabilities=request.client_capabilities,
+                # Identity is assembled HERE, at the HTTP boundary, from a token whose
+                # signature has been verified — and nowhere else. Everything downstream
+                # receives it and cannot change it.
+                caller=CallerIdentity.from_principal(current_user),
+                services=services,
+                attachment_id=attachment_id,
+            )
+        finally:
+            lease.release()
         if isinstance(resp, dict):
             return ChatResponse(**resp)
         return ChatResponse(response=resp)
@@ -139,6 +166,7 @@ async def chat_stream_endpoint(
     # note into a 404 here, while a status can still be sent.
     session_id = _thread_id(x_thread_id, request.session_id)
     attachment_id = _attachment_id(request, current_user.username, services)
+    lease = _admit(request.message, current_user, services)
 
     async def event_generator():
         try:
@@ -155,6 +183,11 @@ async def chat_stream_endpoint(
         except Exception as e:
             error_data = {"type": "error", "content": str(e)}
             yield f"data: {json.dumps(error_data)}\n\n"
+        finally:
+            # However the stream ended — finished, or the parent went away and it was
+            # cancelled. Handed to a thread rather than awaited: releasing is a Redis
+            # call, and an await here would itself be cancelled.
+            asyncio.get_running_loop().run_in_executor(None, lease.release)
 
     return StreamingResponse(
         event_generator(),
@@ -164,4 +197,7 @@ async def chat_stream_endpoint(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+        # Also after the response, for a stream that never started: its `finally` never
+        # runs. Releasing is idempotent, and an unreleased lease expires by itself.
+        background=BackgroundTask(lease.release),
     )

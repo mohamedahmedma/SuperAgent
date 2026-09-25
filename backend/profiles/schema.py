@@ -933,15 +933,30 @@ class CopyConfig(_Section):
         )
     )
 
-    # A turn cut short by the model provider's rate limit (RAG_FIX_PLAN item 37). Shown
-    # instead of the exception text, which named the provider and the model.
-    # `{seconds}` is filled with how long to wait, from the provider's own figure.
+    # A turn refused or cut short by a limit: the model provider's rate limit (RAG_FIX_PLAN
+    # item 37), or this user's own turn limits (item 38). Shown instead of an exception
+    # text, which named the provider and the model. `{seconds}` is filled with how long
+    # to wait, from the provider's or the limiter's own figure.
     provider_busy: LocalizedText = Field(
         default_factory=lambda: LocalizedText(
             en="I'm getting more questions than I can answer right now. "
                "Please try again in {seconds} seconds.",
             ar="تصلني أسئلة أكثر مما أستطيع الإجابة عنه الآن. "
                "يُرجى المحاولة مرة أخرى بعد {seconds} ثانية.",
+        )
+    )
+    too_many_turns: LocalizedText = Field(
+        default_factory=lambda: LocalizedText(
+            en="You're sending messages faster than I can answer them. "
+               "Please wait {seconds} seconds and try again.",
+            ar="أنت ترسل الرسائل أسرع مما أستطيع الرد عليها. "
+               "يُرجى الانتظار {seconds} ثانية ثم المحاولة مرة أخرى.",
+        )
+    )
+    turn_in_progress: LocalizedText = Field(
+        default_factory=lambda: LocalizedText(
+            en="I'm still answering your earlier messages. Please wait for them to finish.",
+            ar="ما زلت أجيب عن رسائلك السابقة. يُرجى الانتظار حتى تكتمل.",
         )
     )
 

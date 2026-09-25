@@ -178,6 +178,11 @@ class ProviderGate:
         self._blocked_until = 0.0
         self._lock = threading.Lock()
 
+    def remaining(self) -> float:
+        """Seconds left in the current cooldown; 0 when there is none."""
+        with self._lock:
+            return max(0.0, self._blocked_until - self._clock())
+
     def wait_before_sending(self) -> float:
         """Seconds to hold this call before sending it; raises when longer than allowed.
 
@@ -249,6 +254,18 @@ class ProviderQuotas:
                     )
                     self._gates[key] = gate
         return gate
+
+    def refusing_for(self) -> float:
+        """How long some model's calls will be refused: the longest cooldown past `max_wait`.
+
+        0 when every model can be called now or within the budget. The turn limits ask
+        this before starting a turn (`backend/chat/admission.py`): a turn started while
+        one of its models refuses calls fails partway, having spent the calls before it.
+        """
+        with self._lock:
+            gates = list(self._gates.values())
+        longest = max((gate.remaining() for gate in gates), default=0.0)
+        return longest if longest > self.max_wait else 0.0
 
 
 __all__ = [

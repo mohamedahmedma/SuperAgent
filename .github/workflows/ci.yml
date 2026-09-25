@@ -61,8 +61,18 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres -d superagent_test"
           --health-interval 2s --health-timeout 5s --health-retries 30
+      # The per-user turn limits are Lua scripts, which only a real Redis can run
+      # (tests/general/test_turn_admission.py). Reached through TEST_REDIS_URL alone, so
+      # no other test's environment changes. Same image as docker-compose.yml.
+      redis:
+        image: redis:7.4.1-alpine
+        ports: ["56379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 5s --health-retries 30
     env:
       TEST_DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:55432/superagent_test
+      TEST_REDIS_URL: redis://localhost:56379/15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from backend.assets.entity_store import EntityAttributeIndex
     from backend.assets.pipeline import FigurePipeline
     from backend.assets.store import AssetStore
+    from backend.chat.admission import TurnAdmission
     from backend.chat.attachments import ChatAttachments
     from backend.chat.background import BackgroundJobs
     from backend.chat.storage import ConversationStorage
@@ -202,6 +203,21 @@ class Services:
             return ConversationStorage(unit_of_work=self.unit_of_work, cache=self.cache)
 
         return self._singleton("conversations", build)
+
+    @property
+    def turn_admission(self) -> TurnAdmission:
+        """The door every chat turn passes: provider busy, and each user's turn limits.
+
+        Over the process's provider quotas and the shared Redis, so the per-user counts
+        hold across workers and replicas (backend/chat/admission.py, items 37 and 38).
+        """
+
+        def build() -> TurnAdmission:
+            from backend.chat.admission import TurnAdmission
+
+            return TurnAdmission.from_environment(self.cache, self.provider_http.quotas)
+
+        return self._singleton("turn_admission", build)
 
     @property
     def background_jobs(self) -> BackgroundJobs:
