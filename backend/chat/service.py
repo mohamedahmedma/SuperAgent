@@ -12,6 +12,7 @@ the agent factory, a model — still reaches the turn it drives.
 import asyncio
 import json
 import logging
+import math
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
@@ -48,6 +49,23 @@ _DONE = "data: [DONE]\n\n"
 
 def _event(payload) -> str:
     return f"data: {json.dumps(payload)}\n\n"
+
+
+def _agent_failure_text(exc: BaseException, language: str) -> str:
+    """What a parent is shown when the agent's model call fails.
+
+    A rate limit gets the profile's busy copy, in the turn's language, with how long to
+    wait. Its exception text named the provider and the model, and under a quota wall
+    it reached one parent in three (RAG_FIX_PLAN item 37). Anything else is shown as
+    before.
+    """
+    from backend.assets.vision import is_rate_limit_error, retry_after_seconds
+    from backend.chat.turn_policy import localized
+
+    if not is_rate_limit_error(exc):
+        return str(exc)
+    seconds = max(1, math.ceil(retry_after_seconds(exc, 5.0)))
+    return localized(_COPY.provider_busy, language).format(seconds=seconds)
 
 
 def _resume_rag_from_hitl_sync(
@@ -326,7 +344,9 @@ async def chat_with_agent_stream(
                     await output_queue.put({"type": "content", "content": tail})
             except Exception as e:
                 turn.agent_error = str(e)
-                await output_queue.put({"type": "error", "content": str(e)})
+                await output_queue.put(
+                    {"type": "error", "content": _agent_failure_text(e, turn.plan.language)}
+                )
             finally:
                 # The graph ends itself on a terminal tool result rather than spending a model
                 # call to reword profile copy, leaving no assistant content behind, so the copy

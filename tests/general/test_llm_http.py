@@ -229,8 +229,7 @@ def _model(server, clients, role):
     from langchain.chat_models import init_chat_model
 
     return init_chat_model(model="m", model_provider="openai", api_key="x",
-                           base_url=server.url, max_retries=0,
-                           **clients.model_kwargs(), **sampling(role))
+                           base_url=server.url, **clients.model_kwargs(), **sampling(role))
 
 
 class InternalCallsDoNotStreamTests(unittest.TestCase):

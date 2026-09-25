@@ -100,8 +100,11 @@ class BackendSelectionTests(unittest.TestCase):
 
 
 class FakeResponse:
+    status_code = 200
+
     def __init__(self, data):
         self._data = data
+        self.headers = {}
 
     def raise_for_status(self):
         pass

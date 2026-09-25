@@ -657,7 +657,7 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
 
     from langchain.chat_models import init_chat_model
 
-    from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
+    from backend.assets.vision import invoke_structured
     from backend.llm import sampling
     from backend.profiles import get_profile
     from backend.prompts import render
@@ -688,20 +688,12 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
         **sampling("scope"),
     )
 
-    # Same quota as everything else in the turn, so the same treatment. A 429 here makes
-    # this node abstain, which leaves scope UNKNOWN — safe, since nothing may end a turn
-    # on an unsettled scope, but it spends the search this node existed to avoid and it
-    # loses the child signal for the turn.
-    class _Retry:
-        vision_retry_attempts = int(getattr(config, "model_retry_attempts", 3))
-        vision_retry_base_seconds = float(getattr(config, "model_retry_base_seconds", 5.0))
-        vision_retry_max_seconds = float(getattr(config, "model_retry_max_seconds", 60.0))
-
-    result = call_with_rate_limit_retry(
-        lambda: invoke_structured(model, RequestEnvelope, [{"role": "user", "content": prompt}]),
-        config=_Retry(),
-        description="request classifier",
-    )
+    # A 429 is retried in the client, under the turn's rate-limit policy
+    # (backend/llm_http.py, item 37). One that still fails makes this node abstain,
+    # which leaves scope UNKNOWN — safe, since nothing may end a turn on an unsettled
+    # scope, but it spends the search this node existed to avoid and it loses the child
+    # signal for the turn.
+    result = invoke_structured(model, RequestEnvelope, [{"role": "user", "content": prompt}])
     return result if isinstance(result, dict) else result.model_dump()
 
 

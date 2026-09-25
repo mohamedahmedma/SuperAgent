@@ -36,7 +36,9 @@ configured to use a remote backend. It loads on first use instead.
 """
 import logging
 import os
+import random
 import threading
+import time
 from functools import lru_cache
 from typing import List, Optional, Protocol
 
@@ -70,9 +72,11 @@ class _RemoteEmbedder:
     """An OpenAI-compatible /v1/embeddings client.
 
     Batched, because one request per text turns a 200-chunk write into 200 round trips.
-    Not retried here: the callers that must not lose a vector (the catalogue build, the
-    Milvus writer) already check the returned count and refuse to store a short or
-    misaligned result, which is the failure that actually matters.
+    A failed connection is retried in the adapter (`_connection_retry`), and a throttled
+    or failed answer once, under the provider's quota (`_post`). Beyond that, the callers
+    that must not lose a vector (the catalogue build, the Milvus writer) check the
+    returned count and refuse to store a short or misaligned result, which is the
+    failure that actually matters.
     """
 
     def __init__(self):
@@ -95,6 +99,16 @@ class _RemoteEmbedder:
         self.pool_size = max(10, int(os.getenv("EMBEDDING_POOL_SIZE") or 32))
         self._session = None
         self._session_lock = threading.Lock()
+        # The embedding provider's own quota, separate from the chat models' (item 37).
+        from backend.profiles import get_profile
+        from backend.provider_quota import ProviderGate
+
+        rag = get_profile().rag
+        self.gate = ProviderGate(
+            f"{self.base_url}/{self.model}",
+            max_wait=float(rag.model_retry_max_seconds),
+            default_cooldown=float(rag.model_retry_base_seconds),
+        )
         logger.info("embedding via %s (model %s)", self.base_url, self.model)
 
     def _get_session(self):
@@ -133,12 +147,7 @@ class _RemoteEmbedder:
         for start in range(0, len(texts), self.batch_size):
             batch = texts[start : start + self.batch_size]
             read_timeout = self.query_timeout if len(texts) == 1 else self.timeout
-            response = session.post(
-                f"{self.base_url}/embeddings",
-                json={"model": self.model, "input": batch},
-                headers=headers,
-                timeout=(self.connect_timeout, read_timeout),
-            )
+            response = self._post(session, batch, headers, (self.connect_timeout, read_timeout))
             response.raise_for_status()
             payload = response.json()
             # Sorted by index rather than trusted in arrival order: the OpenAI schema
@@ -151,6 +160,44 @@ class _RemoteEmbedder:
                 )
             vectors.extend(_unit([float(value) for value in item["embedding"]]) for item in items)
         return vectors
+
+    def _post(self, session, batch: List[str], headers: dict, timeout):
+        """One batch, under the embedding provider's quota (`backend/provider_quota.py`).
+
+        Held or refused while the provider has said it would reject the call; a
+        throttled or failed answer is retried once, when the policy allows it. The wait
+        before that retry is the provider's stated delay, which the gate turned into a
+        cooldown, or a jittered moment when it stated none.
+        """
+        import requests
+
+        from backend.provider_quota import RETRYABLE_STATUSES
+
+        for attempt in (1, 2):
+            wait = self.gate.wait_before_sending()  # raises QuotaExhausted past the budget
+            if wait:
+                time.sleep(wait)
+            try:
+                response = session.post(
+                    f"{self.base_url}/embeddings",
+                    json={"model": self.model, "input": batch},
+                    headers=headers,
+                    timeout=timeout,
+                )
+            except requests.RequestException:
+                self.gate.observe_failure()
+                raise
+            self.gate.observe(response.status_code, response.headers)
+            if (
+                attempt == 1
+                and response.status_code in RETRYABLE_STATUSES
+                and self.gate.should_retry(response.headers)
+            ):
+                if response.status_code != 429:
+                    time.sleep(random.uniform(0.0, self.gate.default_cooldown))
+                continue
+            return response
+        return response
 
     def prewarm(self, connections: int) -> int:
         """Open `connections` sockets now, so the first burst of real traffic finds them.

@@ -9,6 +9,8 @@ through rising numbers of parents at once, and for each level reports:
   * TTFT       — request sent to the first answer word on the wire; what a parent feels
   * turn       — request sent to `[DONE]`
   * closed     — request sent to the connection closing, which waits for the save
+  * any        — request sent to the turn ending HOWEVER it ended, failures included: how
+                 long a parent waits to be told anything
   * errors     — non-200s, `error` events, timeouts, streams that never reached `[DONE]`
   * turns/s    — completed turns per second across all parents
   * pg peak    — the most Postgres connections the backend held at once, and how many of
@@ -96,6 +98,10 @@ class Level:
     ttft: list[float] = field(default_factory=list)
     turn: list[float] = field(default_factory=list)
     closed: list[float] = field(default_factory=list)
+    # Every turn, however it ended: how long a parent waited to be told SOMETHING. The
+    # columns above time answers only, so a backend that holds failing turns for minutes
+    # and one that fails them at once would otherwise read the same.
+    settled: list[float] = field(default_factory=list)
     errors: dict[str, int] = field(default_factory=dict)
     wall: float = 0.0
     pg_peak_total: int = 0
@@ -118,6 +124,7 @@ class Level:
             "ttft_p50_ms": ms(self.ttft, 50), "ttft_p95_ms": ms(self.ttft, 95),
             "turn_p50_ms": ms(self.turn, 50), "turn_p95_ms": ms(self.turn, 95),
             "closed_p95_ms": ms(self.closed, 95),
+            "settled_p95_ms": ms(self.settled, 95), "settled_max_ms": ms(self.settled, 100),
             "turns_per_s": round(done / self.wall, 2) if self.wall else 0.0,
             "completed": done, "errors": dict(self.errors),
             "pg_peak_connections": self.pg_peak_total,
@@ -173,52 +180,66 @@ async def one_parent(client: httpx.AsyncClient, url: str, token: str, asks: list
     headers = {"Authorization": f"Bearer {token}", "X-Thread-ID": session}
     for question in asks:
         started = time.perf_counter()
-        first = done = None
-        route = ""
         try:
-            async with client.stream("POST", f"{url}/chat/stream", headers=headers, timeout=timeout,
-                                     json={"message": question, "session_id": session}) as response:
-                if response.status_code != 200:
-                    level.fail(f"http_{response.status_code}")
-                    await response.aread()
+            await _one_turn(client, url, headers, session, question, level, timeout, started)
+        finally:
+            level.settled.append((time.perf_counter() - started) * 1000)
+
+
+async def _one_turn(client: httpx.AsyncClient, url: str, headers: dict, session: str,
+                    question: str, level: Level, timeout: float, started: float) -> None:
+    first = done = None
+    route = ""
+    errored = False
+    try:
+        async with client.stream("POST", f"{url}/chat/stream", headers=headers, timeout=timeout,
+                                 json={"message": question, "session_id": session}) as response:
+            if response.status_code != 200:
+                level.fail(f"http_{response.status_code}")
+                await response.aread()
+                return
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
                     continue
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    payload = line[6:]
-                    if payload == "[DONE]":
-                        done = time.perf_counter()
-                        continue
-                    try:
-                        event = json.loads(payload)
-                    except ValueError:
-                        continue
-                    kind = event.get("type")
-                    if kind == "content" and event.get("content") and first is None:
-                        first = time.perf_counter()
-                    elif kind == "error":
-                        level.fail("error_event")
-                    elif kind == "trace":
-                        route = str((event.get("rag_trace") or {}).get("route") or "")
-            closed = time.perf_counter()
-        except httpx.TimeoutException:
-            level.fail("timeout")
-            continue
-        except httpx.HTTPError as exc:
-            level.fail(type(exc).__name__)
-            continue
-        if done is None:
-            level.fail("no_done")
-            continue
-        if route in DEGRADED_ROUTES:
-            # A static apology streams and reaches [DONE] like an answer, and it is fast.
-            # Counting it would let a backend failing under load read as a quick one.
-            level.fail(f"route_{route}")
-            continue
-        if first is not None:
-            level.ttft.append((first - started) * 1000)
-        level.turn.append((done - started) * 1000)
-        level.closed.append((closed - started) * 1000)
+                payload = line[6:]
+                if payload == "[DONE]":
+                    done = time.perf_counter()
+                    continue
+                try:
+                    event = json.loads(payload)
+                except ValueError:
+                    continue
+                kind = event.get("type")
+                if kind == "content" and event.get("content") and first is None:
+                    first = time.perf_counter()
+                elif kind == "error":
+                    errored = True
+                elif kind == "trace":
+                    route = str((event.get("rag_trace") or {}).get("route") or "")
+        closed = time.perf_counter()
+    except httpx.TimeoutException:
+        level.fail("timeout")
+        return
+    except httpx.HTTPError as exc:
+        level.fail(type(exc).__name__)
+        return
+    if errored:
+        # The stream still reaches [DONE] after an error event, and an answer that was
+        # never given must not be counted as one.
+        level.fail("error_event")
+        return
+    if done is None:
+        level.fail("no_done")
+        return
+    if route in DEGRADED_ROUTES:
+        # A static apology streams and reaches [DONE] like an answer, and it is fast.
+        # Counting it would let a backend failing under load read as a quick one.
+        level.fail(f"route_{route}")
+        return
+    if first is not None:
+        level.ttft.append((first - started) * 1000)
+    level.turn.append((done - started) * 1000)
+    level.closed.append((closed - started) * 1000)
 
 
 async def run_level(url: str, token: str, parents: int, turns: int, pool: list[str],
@@ -272,6 +293,7 @@ def main() -> int:
     rows = []
     print(f"{args.label}: {args.url}, {args.turns} turn(s) per parent")
     print(f"{'parents':>7} {'ttft p50':>9} {'ttft p95':>9} {'turn p50':>9} {'turn p95':>9} "
+          f"{'any p95':>9} {'any max':>9} "
           f"{'turns/s':>8} {'ok':>5} {'pg conns':>9} {'idle tx':>8}  errors")
     if args.warmup:
         # A freshly started backend pays its cold starts — model clients, the scope index,
@@ -296,7 +318,8 @@ def main() -> int:
         rows.append(row)
         shown = {k: ("-" if v is None else v) for k, v in row.items()}
         print(f"{parents:>7} {shown['ttft_p50_ms']:>9} {shown['ttft_p95_ms']:>9} "
-              f"{shown['turn_p50_ms']:>9} {shown['turn_p95_ms']:>9} {row['turns_per_s']:>8} "
+              f"{shown['turn_p50_ms']:>9} {shown['turn_p95_ms']:>9} "
+              f"{shown['settled_p95_ms']:>9} {shown['settled_max_ms']:>9} {row['turns_per_s']:>8} "
               f"{row['completed']:>5} {row['pg_peak_connections']:>9} "
               f"{row['pg_peak_idle_in_transaction']:>8}  {row['errors'] or ''}", flush=True)
     if args.out:

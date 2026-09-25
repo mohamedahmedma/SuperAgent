@@ -18,6 +18,9 @@ because a stub the backend rejects would measure an error path instead:
     is in the conversation, a streamed text answer.
   * embeddings — deterministic unit vectors derived from the text, so the same question
     always lands in the same place and the dense lane stays exercised.
+  * a quota, when asked for (`--rpm`): a per-model limit that answers 429 with
+    `retry-after` and the `x-ratelimit-*` headers until the minute ends, so the backend's
+    rate-limit handling can be put under load (RAG_FIX_PLAN item 37).
 
 Everything waits with `asyncio.sleep`, so the stub itself is never the bottleneck: a
 thousand concurrent calls cost it nothing but memory.
@@ -63,6 +66,40 @@ ROUTE = {
 ANSWER = ("According to the school's published material, the answer is set out in the "
           "handbook section on this topic. Fees are reviewed each year and the office can "
           "confirm the figure for the current term. ")
+
+
+class Quota:
+    """A per-model requests-per-minute limit, counted in fixed one-minute windows.
+
+    0 is off. When on, every chat completion carries `x-ratelimit-limit-requests`,
+    `-remaining-requests` and `-reset-requests`, and a call over the limit is answered 429
+    with `retry-after` set to the end of the window — the "quota wall" a live turn meets
+    when a burst spends a model's minute.
+    """
+
+    rpm = 0
+    _windows: dict[str, tuple[int, int]] = {}  # model -> (window start, calls in it)
+
+    @classmethod
+    def admit(cls, model: str) -> tuple[bool, dict]:
+        now = time.time()
+        start = int(now // 60) * 60
+        window, used = cls._windows.get(model, (start, 0))
+        if window != start:
+            window, used = start, 0
+        reset = max(0.001, window + 60 - now)
+        admitted = used < cls.rpm
+        if admitted:
+            used += 1
+        cls._windows[model] = (window, used)
+        headers = {
+            "x-ratelimit-limit-requests": str(cls.rpm),
+            "x-ratelimit-remaining-requests": str(max(0, cls.rpm - used)),
+            "x-ratelimit-reset-requests": f"{reset:.2f}s",
+        }
+        if not admitted:
+            headers["retry-after"] = f"{reset:.2f}"
+        return admitted, headers
 
 
 class Latency:
@@ -195,6 +232,22 @@ def _chunk(model: str, delta: dict, finish: str | None = None) -> str:
 async def chat_completions(request: Request):
     body = await request.json()
     model = body.get("model", "stub")
+    if Quota.rpm:
+        admitted, headers = Quota.admit(model)
+        if not admitted:
+            _count(f"429:{model}")
+            return JSONResponse(
+                {"error": {"message": f"Rate limit reached for model `{model}` on requests per "
+                                      f"minute (RPM): Limit {Quota.rpm}", "type": "requests",
+                           "code": "rate_limit_exceeded"}},
+                status_code=429, headers=headers)
+        response = await _chat_completion(body, model)
+        response.headers.update(headers)
+        return response
+    return await _chat_completion(body, model)
+
+
+async def _chat_completion(body: dict, model: str):
     messages = body.get("messages") or []
     question = last_user_text(messages)
     tools = body.get("tools") or []
@@ -292,10 +345,14 @@ def main() -> None:
     parser.add_argument("--keep-alive", type=float, default=5.0,
                         help="seconds an idle connection is kept open (uvicorn's default is 5); "
                              "set low to make the client's stale-socket handling earn its keep")
+    parser.add_argument("--rpm", type=int, default=0,
+                        help="requests per minute allowed per model, then 429 until the minute "
+                             "ends (0 = unlimited)")
     args = parser.parse_args()
     for name in ("structured_ms", "toolcall_ms", "ttft_ms", "token_ms", "embed_ms", "jitter",
                  "tokens", "embed_dim"):
         setattr(Latency, name, getattr(args, name))
+    Quota.rpm = args.rpm
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning", access_log=False,
                 timeout_keep_alive=args.keep_alive)
 

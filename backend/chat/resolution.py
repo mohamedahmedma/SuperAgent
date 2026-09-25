@@ -432,7 +432,7 @@ def _default_resolve_invoke(  # pragma: no cover - needs a model
 
     from langchain.chat_models import init_chat_model
 
-    from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
+    from backend.assets.vision import invoke_structured
     from backend.llm import sampling
     from backend.profiles import get_profile
     from backend.prompts import resolve as resolve_prompt
@@ -462,19 +462,11 @@ def _default_resolve_invoke(  # pragma: no cover - needs a model
         **sampling("resolve"),
     )
 
-    # Same quota as every other call in the turn, so the same treatment. A 429 here
-    # would make the resolver abstain, which is safe but spends the clarification
-    # round-trip this call exists to avoid.
-    class _Retry:
-        vision_retry_attempts = int(getattr(config, "model_retry_attempts", 2))
-        vision_retry_base_seconds = float(getattr(config, "model_retry_base_seconds", 2.0))
-        vision_retry_max_seconds = float(getattr(config, "model_retry_max_seconds", 6.0))
-
-    result = call_with_rate_limit_retry(
-        lambda: invoke_structured(model, ResolvedQuery, [{"role": "user", "content": prompt}]),
-        config=_Retry(),
-        description="query resolution",
-    )
+    # A 429 is retried in the client, under the turn's rate-limit policy
+    # (backend/llm_http.py). Retrying here as well multiplied the attempts (item 37).
+    # One that still fails makes the resolver abstain: safe, but it spends the
+    # clarification round trip this call exists to avoid.
+    result = invoke_structured(model, ResolvedQuery, [{"role": "user", "content": prompt}])
     return result if isinstance(result, dict) else result.model_dump()
 
 
