@@ -12,6 +12,7 @@ Arabic is the highest-risk input for this code because:
 Tests assert the CORRECT behavior. A failure here is a defect in the pipeline,
 not in the test.
 """
+
 import os
 import unittest
 from pathlib import Path
@@ -40,8 +41,15 @@ AR_QUESTION = "ما هي الرسوم الدراسية؟"
 
 
 def _line(text, top=10.0, size=10.0, bold=False):
-    return {"text": text, "top": top, "bottom": top + size, "x0": 0.0, "x1": 200.0,
-            "size": size, "bold": bold}
+    return {
+        "text": text,
+        "top": top,
+        "bottom": top + size,
+        "x0": 0.0,
+        "x1": 200.0,
+        "size": size,
+        "bold": bold,
+    }
 
 
 def _text_block(content, page, top):
@@ -62,41 +70,51 @@ class ArabicCrossPageStitchingTests(unittest.TestCase):
         self.loader = DocumentLoader()
 
     def test_arabic_paragraph_split_across_pages_is_stitched(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block(AR_SENTENCE_1, 0, 700.0),
-            _text_block(AR_SENTENCE_2, 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block(AR_SENTENCE_1, 0, 700.0),
+                _text_block(AR_SENTENCE_2, 1, 30.0),
+            ]
+        )
         self.assertEqual(1, len(blocks), "Arabic continuation was not stitched")
         self.assertIn("الكتب المدرسية والأنشطة", blocks[0]["content"])
 
     def test_hebrew_paragraph_split_across_pages_is_stitched(self):
         # Same unicameral property; guards the general fix, not an Arabic special case.
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("שכר הלימוד כולל", 0, 700.0),
-            _text_block("את כל הספרים.", 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("שכר הלימוד כולל", 0, 700.0),
+                _text_block("את כל הספרים.", 1, 30.0),
+            ]
+        )
         self.assertEqual(1, len(blocks))
 
     def test_arabic_paragraph_ending_with_arabic_question_mark_is_not_stitched(self):
         # ؟ (U+061F) terminates a sentence: the next page starts new content.
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block(AR_QUESTION, 0, 700.0),
-            _text_block("الرسوم تختلف حسب الصف الدراسي.", 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block(AR_QUESTION, 0, 700.0),
+                _text_block("الرسوم تختلف حسب الصف الدراسي.", 1, 30.0),
+            ]
+        )
         self.assertEqual(2, len(blocks), "false stitch across an Arabic question mark")
 
     def test_arabic_paragraph_ending_with_arabic_semicolon_is_not_stitched(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("الرسوم تشمل الكتب؛", 0, 700.0),
-            _text_block("النقل يحسب بشكل منفصل.", 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("الرسوم تشمل الكتب؛", 0, 700.0),
+                _text_block("النقل يحسب بشكل منفصل.", 1, 30.0),
+            ]
+        )
         self.assertEqual(2, len(blocks))
 
     def test_arabic_paragraph_ending_with_urdu_full_stop_is_not_stitched(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("فیس میں کتابیں شامل ہیں۔", 0, 700.0),
-            _text_block("بس سروس الگ ہے۔", 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("فیس میں کتابیں شامل ہیں۔", 0, 700.0),
+                _text_block("بس سروس الگ ہے۔", 1, 30.0),
+            ]
+        )
         self.assertEqual(2, len(blocks))
 
 
@@ -141,8 +159,9 @@ class ArabicHeadingDetectionTests(unittest.TestCase):
 
     def test_arabic_line_ending_with_arabic_comma_is_not_a_heading(self):
         line = _line("الرسوم والنقل،", size=18.0, bold=True)
-        self.assertFalse(is_heading_line(line, body_size=10.0),
-                         "Arabic comma ، did not disqualify a heading")
+        self.assertFalse(
+            is_heading_line(line, body_size=10.0), "Arabic comma ، did not disqualify a heading"
+        )
 
     def test_arabic_line_ending_with_arabic_question_mark_is_not_a_heading(self):
         line = _line(AR_QUESTION, size=18.0, bold=True)
@@ -228,7 +247,13 @@ class ArabicTableTests(unittest.TestCase):
 
     def test_arabic_table_leaf_is_prefixed_with_arabic_section(self):
         blocks = [
-            {"type": "heading", "content": AR_HEADING_FEES, "level": 1, "page_number": 0, "top": 5.0},
+            {
+                "type": "heading",
+                "content": AR_HEADING_FEES,
+                "level": 1,
+                "page_number": 0,
+                "top": 5.0,
+            },
             _table_block([["الصف", "الرسوم"], ["الأول", "١٠٠٠٠"]], 0, 20.0),
         ]
         docs = self._load(blocks)
@@ -237,10 +262,12 @@ class ArabicTableTests(unittest.TestCase):
         self.assertIn("الأول | ١٠٠٠٠", leaf["text"])
 
     def test_arabic_table_split_across_pages_stitches(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _table_block([["الصف", "الرسوم"], ["الأول", "١٠٠٠٠"]], 0, 700.0),
-            _table_block([["الصف", "الرسوم"], ["الثاني", "١١٠٠٠"]], 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _table_block([["الصف", "الرسوم"], ["الأول", "١٠٠٠٠"]], 0, 700.0),
+                _table_block([["الصف", "الرسوم"], ["الثاني", "١١٠٠٠"]], 1, 30.0),
+            ]
+        )
         self.assertEqual(1, len(blocks))
         self.assertEqual(3, len(blocks[0]["rows"]))
 
@@ -283,7 +310,13 @@ class ArabicPipelineIntegrationTests(unittest.TestCase):
         _text_block("تشمل الرسوم الكتب المدرسية.", 0, 20.0),
         _text_block("تدفع الرسوم على ثلاث دفعات.", 0, 35.0),
         _table_block([["الصف", "الرسوم"], ["الأول", "١٠٠٠٠"]], 0, 50.0),
-        {"type": "heading", "content": AR_HEADING_TRANSPORT, "level": 1, "page_number": 1, "top": 5.0},
+        {
+            "type": "heading",
+            "content": AR_HEADING_TRANSPORT,
+            "level": 1,
+            "page_number": 1,
+            "top": 5.0,
+        },
         _text_block("خدمة الحافلات اختيارية لجميع الصفوف.", 1, 20.0),
     ]
 
@@ -314,10 +347,7 @@ class ArabicPipelineIntegrationTests(unittest.TestCase):
             self.assertNotIn("الكتب", leaf["text"])
 
     def test_small_arabic_fragments_merge_into_one_leaf(self):
-        fees_leaves = [
-            d for d in self.docs
-            if d["chunk_level"] == 3 and "تشمل الرسوم" in d["text"]
-        ]
+        fees_leaves = [d for d in self.docs if d["chunk_level"] == 3 and "تشمل الرسوم" in d["text"]]
         self.assertEqual(1, len(fees_leaves))
         self.assertIn("ثلاث دفعات", fees_leaves[0]["text"])
 
@@ -349,7 +379,13 @@ class MixedDirectionTests(unittest.TestCase):
 
     def test_arabic_heading_over_english_table(self):
         blocks = [
-            {"type": "heading", "content": AR_HEADING_FEES, "level": 1, "page_number": 0, "top": 5.0},
+            {
+                "type": "heading",
+                "content": AR_HEADING_FEES,
+                "level": 1,
+                "page_number": 0,
+                "top": 5.0,
+            },
             _table_block([["Grade", "Fee"], ["1", "10000"]], 0, 20.0),
         ]
         docs = self._load(blocks)
@@ -359,10 +395,12 @@ class MixedDirectionTests(unittest.TestCase):
     def test_english_sentence_then_arabic_fragment_does_not_false_stitch(self):
         # English sentence properly terminated -> no stitch even though the Arabic
         # fragment would qualify as a continuation on its own.
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("Fees are due in September.", 0, 700.0),
-            _text_block("الرسوم تشمل الكتب.", 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("Fees are due in September.", 0, 700.0),
+                _text_block("الرسوم تشمل الكتب.", 1, 30.0),
+            ]
+        )
         self.assertEqual(2, len(blocks))
 
     def test_mixed_arabic_english_line_heading_detection(self):
@@ -386,7 +424,9 @@ class ArabicDedupTests(unittest.TestCase):
             def get_embeddings(self, batch):
                 return [[1.0] for _ in batch]
 
-        writer = module.MilvusWriter(embedding_service=_Service(), milvus_manager=FakeMilvusStore(events))
+        writer = module.MilvusWriter(
+            embedding_service=_Service(), milvus_manager=FakeMilvusStore(events)
+        )
         writer.write_documents([self._doc(i, t) for i, t in enumerate(texts)])
         return [cid for event in events if event[0] == "insert" for cid in event[1]]
 
@@ -422,9 +462,14 @@ class PathologicalInputTests(unittest.TestCase):
             def load(self):
                 return [_StubPage()]
 
-        with patch.object(document_loader_module, "parse_pdf_blocks",
-                          return_value=[_text_block("   \n\t  ", 0, 10.0)]), \
-             patch.object(document_loader_module, "PyPDFLoader", _StubPyPDFLoader):
+        with (
+            patch.object(
+                document_loader_module,
+                "parse_pdf_blocks",
+                return_value=[_text_block("   \n\t  ", 0, 10.0)],
+            ),
+            patch.object(document_loader_module, "PyPDFLoader", _StubPyPDFLoader),
+        ):
             docs = self.loader.load_document("blank.pdf", "blank.pdf")
         self.assertTrue(any("fallback" in d["text"] for d in docs))
 
@@ -444,17 +489,31 @@ class PathologicalInputTests(unittest.TestCase):
     def test_duplicate_heading_titles_do_not_collide_chunk_ids(self):
         blocks = []
         for page in range(3):
-            blocks.append({"type": "heading", "content": AR_HEADING_FEES, "level": 1,
-                           "page_number": page, "top": 5.0})
-            blocks.append(_text_block(f"محتوى الصفحة {page} مع تفاصيل الرسوم الدراسية." * 20, page, 20.0))
+            blocks.append(
+                {
+                    "type": "heading",
+                    "content": AR_HEADING_FEES,
+                    "level": 1,
+                    "page_number": page,
+                    "top": 5.0,
+                }
+            )
+            blocks.append(
+                _text_block(f"محتوى الصفحة {page} مع تفاصيل الرسوم الدراسية." * 20, page, 20.0)
+            )
         docs = self._load(blocks)
         ids = [d["chunk_id"] for d in docs]
         self.assertEqual(len(ids), len(set(ids)), "chunk_id collision across repeated headings")
 
     def test_very_deep_heading_nesting_does_not_explode_prefix(self):
         blocks = [
-            {"type": "heading", "content": f"عنوان مستوى {level}", "level": level,
-             "page_number": 0, "top": float(level)}
+            {
+                "type": "heading",
+                "content": f"عنوان مستوى {level}",
+                "level": level,
+                "page_number": 0,
+                "top": float(level),
+            }
             for level in range(1, 7)
         ]
         blocks.append(_text_block("المحتوى النهائي تحت التسلسل العميق.", 0, 10.0))
@@ -492,7 +551,8 @@ class Utf8ByteLimitTests(unittest.TestCase):
         self.assertTrue(leaves)
         for leaf in leaves:
             self.assertLessEqual(
-                len(leaf["text"].encode("utf-8")), self.TEXT_LIMIT,
+                len(leaf["text"].encode("utf-8")),
+                self.TEXT_LIMIT,
                 "Arabic leaf exceeds the Milvus VARCHAR byte limit",
             )
 
@@ -571,7 +631,7 @@ class ArabicPresentationFormTests(unittest.TestCase):
         # Targeted NFKC must not leak into non-Arabic text.
         from backend.indexing.document_loader import sanitize_text
 
-        self.assertEqual("ﬁle", sanitize_text("ﬁle"))   # ﬁle stays ﬁle
+        self.assertEqual("ﬁle", sanitize_text("ﬁle"))  # ﬁle stays ﬁle
         self.assertEqual("ＡＢ", sanitize_text("ＡＢ"))  # ＡＢ unchanged
 
 
@@ -594,8 +654,9 @@ class StorageRoutingInvariantTests(unittest.TestCase):
         and it is still applied only to what goes there."""
         loader = DocumentLoader()
         rows = [["ق" * 40000, "ب" * 40000]]
-        with patch.object(document_loader_module, "parse_pdf_blocks",
-                          return_value=[_table_block(rows, 0, 10.0)]):
+        with patch.object(
+            document_loader_module, "parse_pdf_blocks", return_value=[_table_block(rows, 0, 10.0)]
+        ):
             docs = loader.load_document("big.pdf", "big.pdf")
 
         leaves = [d for d in docs if d["chunk_level"] == 3]
@@ -616,13 +677,19 @@ class StorageRoutingInvariantTests(unittest.TestCase):
         # Mirrors backend/api/routes/documents.py: level 1-2 -> parent store,
         # level 3 -> Milvus. Guards against a silent change in either place.
         loader = DocumentLoader()
-        with patch.object(document_loader_module, "parse_pdf_blocks",
-                          return_value=[_text_block("محتوى تجريبي للاختبار.", 0, 10.0)]):
+        with patch.object(
+            document_loader_module,
+            "parse_pdf_blocks",
+            return_value=[_text_block("محتوى تجريبي للاختبار.", 0, 10.0)],
+        ):
             docs = loader.load_document("r.pdf", "r.pdf")
         parent_docs = [d for d in docs if int(d.get("chunk_level", 0) or 0) in (1, 2)]
         leaf_docs = [d for d in docs if int(d.get("chunk_level", 0) or 0) == 3]
-        self.assertEqual(len(docs), len(parent_docs) + len(leaf_docs),
-                         "a chunk level exists that no storage path claims")
+        self.assertEqual(
+            len(docs),
+            len(parent_docs) + len(leaf_docs),
+            "a chunk level exists that no storage path claims",
+        )
 
 
 class FitUtf8BytesTests(unittest.TestCase):
@@ -679,14 +746,21 @@ class ArabicAcronymHeadingTests(unittest.TestCase):
     def test_arabic_acronym_sentence_stays_body_text_end_to_end(self):
         loader = DocumentLoader()
         blocks = [
-            {"type": "heading", "content": AR_HEADING_FEES, "level": 1, "page_number": 0, "top": 5.0},
+            {
+                "type": "heading",
+                "content": AR_HEADING_FEES,
+                "level": 1,
+                "page_number": 0,
+                "top": 5.0,
+            },
             _text_block("يجب تقديم شهادة IELTS للتسجيل", 0, 20.0),
         ]
         with patch.object(document_loader_module, "parse_pdf_blocks", return_value=blocks):
             docs = loader.load_document("ar.pdf", "ar.pdf")
         for doc in docs:
-            self.assertTrue(doc["text"].startswith(AR_HEADING_FEES),
-                            "acronym line became its own section")
+            self.assertTrue(
+                doc["text"].startswith(AR_HEADING_FEES), "acronym line became its own section"
+            )
 
 
 class ArabicTatweelTests(unittest.TestCase):
@@ -707,7 +781,9 @@ class ArabicTatweelTests(unittest.TestCase):
             def get_embeddings(self, texts):
                 return [[1.0] for _ in texts]
 
-        writer = module.MilvusWriter(embedding_service=_Service(), milvus_manager=FakeMilvusStore(events))
+        writer = module.MilvusWriter(
+            embedding_service=_Service(), milvus_manager=FakeMilvusStore(events)
+        )
         loader = DocumentLoader()
         blocks_a = [_text_block("الرســـوم الدراسية مطلوبة للتسجيل.", 0, 10.0)]
         blocks_b = [_text_block("الرسوم الدراسية مطلوبة للتسجيل.", 0, 10.0)]
@@ -771,9 +847,13 @@ class QueryIndexSymmetryTests(unittest.TestCase):
         # The store and the embedder are named here rather than stubbed into
         # `sys.modules`: retrieval resolves them from the container per call, and only
         # `embed_query` is still a module-level import.
-        set_default_services(Services(
-            milvus=_Store(), embedder=embedder, parent_chunks=_Parents(),
-        ))
+        set_default_services(
+            Services(
+                milvus=_Store(),
+                embedder=embedder,
+                parent_chunks=_Parents(),
+            )
+        )
         self.addCleanup(set_default_services, None)
 
         spec = importlib.util.spec_from_file_location(
@@ -781,10 +861,13 @@ class QueryIndexSymmetryTests(unittest.TestCase):
             REPO_ROOT / "src" / "backend" / "agent" / "rag" / "utils.py",
         )
         module = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {
-            "backend.indexing": fake_indexing,
-            "backend.indexing.embedding": fake_embedding,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "backend.indexing": fake_indexing,
+                "backend.indexing.embedding": fake_embedding,
+            },
+        ):
             spec.loader.exec_module(module)
 
         # Query as a user would paste it out of an Arabic PDF.
@@ -792,8 +875,9 @@ class QueryIndexSymmetryTests(unittest.TestCase):
 
         # The DENSE half gets the natural query. bge-m3 reads Arabic morphology, so
         # folding or stemming before embedding would throw away signal it uses.
-        self.assertEqual("الرسوم الدراسية", captured["embedded"],
-                         "query not normalized before embedding")
+        self.assertEqual(
+            "الرسوم الدراسية", captured["embedded"], "query not normalized before embedding"
+        )
 
         # The SPARSE half gets the folded, light-stemmed key, because that is what
         # milvus_writer put in `bm25_text`. Asserted against search_key itself rather
@@ -801,10 +885,16 @@ class QueryIndexSymmetryTests(unittest.TestCase):
         # here would only pin whatever the stemmer did on the day it was written.
         from backend.text_matching import search_key
 
-        self.assertEqual(search_key("الرسوم الدراسية"), captured["bm25_query"],
-                         "BM25 query not prepared the same way bm25_text was")
-        self.assertNotEqual(captured["embedded"], captured["bm25_query"],
-                            "the two retrieval halves should be fed differently")
+        self.assertEqual(
+            search_key("الرسوم الدراسية"),
+            captured["bm25_query"],
+            "BM25 query not prepared the same way bm25_text was",
+        )
+        self.assertNotEqual(
+            captured["embedded"],
+            captured["bm25_query"],
+            "the two retrieval halves should be fed differently",
+        )
 
     def test_normalize_query_matches_document_sanitization(self):
         from backend.text_normalization import normalize_query, sanitize_text
@@ -906,7 +996,8 @@ class MilvusAnalyzerTests(unittest.TestCase):
         import backend.indexing.milvus_client as milvus_client
 
         stop = next(
-            f for f in milvus_client.build_analyzer_params()["filter"]
+            f
+            for f in milvus_client.build_analyzer_params()["filter"]
             if isinstance(f, dict) and f.get("type") == "stop"
         )
         self.assertIn("_english_", stop["stop_words"])
@@ -915,7 +1006,8 @@ class MilvusAnalyzerTests(unittest.TestCase):
             self.assertIn(word, stop["stop_words"])
 
         stemmer = next(
-            f for f in milvus_client.build_analyzer_params()["filter"]
+            f
+            for f in milvus_client.build_analyzer_params()["filter"]
             if isinstance(f, dict) and f.get("type") == "stemmer"
         )
         self.assertEqual("english", stemmer["language"])

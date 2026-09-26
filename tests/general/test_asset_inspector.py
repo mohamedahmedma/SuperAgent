@@ -6,6 +6,7 @@ caption, alt text and tags. The description, the transcription, the model, its
 confidence and the error behind a failure existed only on the dossier, and reviewing an
 extraction without them is guesswork.
 """
+
 import asyncio
 import json
 import unittest
@@ -25,11 +26,22 @@ from backend.assets.dossier import (
 )
 
 
-def dossier(asset_id="kb.docx#p1#a", page=1, status=ExtractionStatus.EXTRACTED,
-            role=AssetRole.FIGURE, tier=AssetTier.SIMPLE, caption="Fee table",
-            description="A table of fees", transcription="Grade 1 | 50,000",
-            tags=("table",), model="qwen-vl", confidence=0.9, needs_review=False,
-            error="", extraction=True):
+def dossier(
+    asset_id="kb.docx#p1#a",
+    page=1,
+    status=ExtractionStatus.EXTRACTED,
+    role=AssetRole.FIGURE,
+    tier=AssetTier.SIMPLE,
+    caption="Fee table",
+    description="A table of fees",
+    transcription="Grade 1 | 50,000",
+    tags=("table",),
+    model="qwen-vl",
+    confidence=0.9,
+    needs_review=False,
+    error="",
+    extraction=True,
+):
     return AssetDossier(
         asset_id=asset_id,
         sha256="d" * 64,
@@ -39,12 +51,23 @@ def dossier(asset_id="kb.docx#p1#a", page=1, status=ExtractionStatus.EXTRACTED,
         source=SourceRef(filename="kb.docx", page_number=page),
         blob=BlobRef(content_type="image/png", byte_size=2048, width=800, height=600),
         extraction=ExtractionPayload(
-            text=TextSurface(caption=caption, description=description,
-                             transcription=transcription, tags=list(tags)),
-            provenance=Provenance(tier=tier, pipeline="figure", model_used=model,
-                                  confidence=confidence, needs_review=needs_review,
-                                  error=error),
-        ) if extraction else None,
+            text=TextSurface(
+                caption=caption,
+                description=description,
+                transcription=transcription,
+                tags=list(tags),
+            ),
+            provenance=Provenance(
+                tier=tier,
+                pipeline="figure",
+                model_used=model,
+                confidence=confidence,
+                needs_review=needs_review,
+                error=error,
+            ),
+        )
+        if extraction
+        else None,
     )
 
 
@@ -66,8 +89,12 @@ class _Milvus:
 
 
 def chunk_row(chunk_id, asset_ids, level=3, idx=0):
-    return {"chunk_id": chunk_id, "asset_ids": json.dumps(asset_ids),
-            "chunk_level": level, "chunk_idx": idx}
+    return {
+        "chunk_id": chunk_id,
+        "asset_ids": json.dumps(asset_ids),
+        "chunk_level": level,
+        "chunk_idx": idx,
+    }
 
 
 def review(dossiers, filename="kb.docx", chunks=(), milvus_error=None, store_error=None):
@@ -124,10 +151,13 @@ class WhatItReturnsTests(unittest.TestCase):
         self.assertFalse(by_id["b"].indexable)
 
     def test_assets_are_ordered_by_page_so_they_read_like_the_document(self):
-        response, _ = review([
-            dossier(asset_id="c", page=3), dossier(asset_id="a", page=1),
-            dossier(asset_id="b", page=2),
-        ])
+        response, _ = review(
+            [
+                dossier(asset_id="c", page=3),
+                dossier(asset_id="a", page=1),
+                dossier(asset_id="b", page=2),
+            ]
+        )
         self.assertEqual(["a", "b", "c"], [asset.asset_id for asset in response.assets])
 
 
@@ -137,11 +167,13 @@ class ReviewQueueTests(unittest.TestCase):
     recovered nothing. Nothing had ever read it back."""
 
     def test_the_count_leads_with_the_number_that_matters(self):
-        response, _ = review([
-            dossier(asset_id="a", needs_review=True),
-            dossier(asset_id="b", needs_review=False),
-            dossier(asset_id="c", needs_review=True),
-        ])
+        response, _ = review(
+            [
+                dossier(asset_id="a", needs_review=True),
+                dossier(asset_id="b", needs_review=False),
+                dossier(asset_id="c", needs_review=True),
+            ]
+        )
         self.assertEqual(3, response.total)
         self.assertEqual(2, response.needs_review_count)
 
@@ -204,7 +236,8 @@ class WhoMayReadItTests(unittest.TestCase):
         from backend.infra.auth import require_admin
 
         route = next(
-            r for r in documents.router.routes
+            r
+            for r in documents.router.routes
             if getattr(r, "path", "") == "/documents/{filename}/assets"
         )
         guards = [dependency.call for dependency in route.dependant.dependencies]
@@ -259,7 +292,8 @@ class MarkReviewedTests(unittest.TestCase):
         from backend.infra.auth import require_admin
 
         route = next(
-            r for r in documents.router.routes
+            r
+            for r in documents.router.routes
             if getattr(r, "path", "") == "/documents/assets/{asset_id:path}/reviewed"
         )
         guards = [dependency.call for dependency in route.dependant.dependencies]
@@ -274,7 +308,8 @@ class AssetIdRoutingTests(unittest.TestCase):
         from backend.api.routes import documents
 
         route = next(
-            r for r in documents.router.routes
+            r
+            for r in documents.router.routes
             if getattr(r, "path", "") == "/documents/assets/{asset_id:path}/reviewed"
         )
         scope = {"type": "http", "method": "POST", "path": path, "headers": []}
@@ -286,8 +321,9 @@ class AssetIdRoutingTests(unittest.TestCase):
 
     def test_an_id_holding_slashes_is_captured_whole(self):
         """`:path` is greedy, and must still stop at the suffix rather than eat it."""
-        self.assertEqual("kb/fees.docx#p1#a",
-                         self._match("/documents/assets/kb/fees.docx#p1#a/reviewed"))
+        self.assertEqual(
+            "kb/fees.docx#p1#a", self._match("/documents/assets/kb/fees.docx#p1#a/reviewed")
+        )
 
     def test_the_suffix_is_never_swallowed_into_the_id(self):
         captured = self._match("/documents/assets/a/b/reviewed")

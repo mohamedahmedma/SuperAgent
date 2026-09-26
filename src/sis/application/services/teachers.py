@@ -1,4 +1,5 @@
 """Manage teaching staff without changing anybody's roles."""
+
 from collections.abc import Callable, Sequence
 
 from sis.application.ports.repositories import TeacherRecord
@@ -15,7 +16,10 @@ class TeacherManagementService:
         self._uow_factory = uow_factory
 
     def list(
-        self, school_code: SchoolCode, *, year_level_code: YearCode | None = None,
+        self,
+        school_code: SchoolCode,
+        *,
+        year_level_code: YearCode | None = None,
         include_inactive: bool = False,
     ) -> Sequence[TeacherRecord]:
         """The teaching staff a caller may read: the school's, or one grade's.
@@ -46,18 +50,27 @@ class TeacherManagementService:
         names — the same reasoning the sign-in path uses for its single refusal message.
         """
         with self._uow_factory() as uow:
-            record = uow.teachers.get(
-                school_code, staff_number, year_level_code=year_level_code
-            )
+            record = uow.teachers.get(school_code, staff_number, year_level_code=year_level_code)
             if record is None:
-                raise UnknownReference(f"no teacher {staff_number} in {school_code}", field="staff_number")
+                raise UnknownReference(
+                    f"no teacher {staff_number} in {school_code}", field="staff_number"
+                )
             return record
 
     def save(
-        self, *, school_code: SchoolCode, staff_number: str, full_name_en: str,
-        full_name_ar: str, email: str, phone: str, is_active: bool,
-        username: str | None, password: str | None,
-        assignments: Sequence[tuple[str, str, str, Sequence[str]]], assigned_by: str,
+        self,
+        *,
+        school_code: SchoolCode,
+        staff_number: str,
+        full_name_en: str,
+        full_name_ar: str,
+        email: str,
+        phone: str,
+        is_active: bool,
+        username: str | None,
+        password: str | None,
+        assignments: Sequence[tuple[str, str, str, Sequence[str]]],
+        assigned_by: str,
         gender: Gender = Gender.UNSPECIFIED,
     ) -> TeacherRecord:
         if not full_name_en.strip() and not full_name_ar.strip():
@@ -68,14 +81,23 @@ class TeacherManagementService:
             )
         with self._uow_factory() as uow:
             record = uow.teachers.save(
-                school_code=school_code, staff_number=staff_number,
-                full_name_en=full_name_en, full_name_ar=full_name_ar,
+                school_code=school_code,
+                staff_number=staff_number,
+                full_name_en=full_name_en,
+                full_name_ar=full_name_ar,
                 gender=gender,
-                email=email, phone=phone, is_active=is_active, username=username,
+                email=email,
+                phone=phone,
+                is_active=is_active,
+                username=username,
                 password_hash=None if password is None else hash_password(password),
                 assignments=[
-                    (AcademicYearCode(year), SubjectCode(subject), YearCode(level),
-                     tuple(ClassCode(code) for code in classes))
+                    (
+                        AcademicYearCode(year),
+                        SubjectCode(subject),
+                        YearCode(level),
+                        tuple(ClassCode(code) for code in classes),
+                    )
                     for year, subject, level, classes in assignments
                 ],
                 assigned_by=assigned_by,

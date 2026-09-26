@@ -5,6 +5,7 @@ rules. What is asserted here is that the wiring between them survives — that a
 system of record computed reaches a parent unaltered, and that an unreachable system of
 record produces a refusal rather than a guess.
 """
+
 from dataclasses import replace
 
 from records.domain.errors import LmsUnavailable
@@ -63,6 +64,7 @@ class TestGradesFlow:
         assert course["excused_count"] == 1
         assert course["pending_count"] == 1
         assert course["is_complete"] is False
+
 
 class TestAttendanceFlow:
     def test_the_term_figure_reaches_the_contract(self, client):
@@ -141,9 +143,7 @@ class TestTimetableFlow:
         student and a term, and the room is resolved on the other side of it — which is what
         keeps a code that changes mid-year from being cached anywhere up here.
         """
-        client.get(
-            "/v1/guardians/G-1/students/S-1001/timetable", headers=agent_headers("G-1")
-        )
+        client.get("/v1/guardians/G-1/students/S-1001/timetable", headers=agent_headers("G-1"))
 
         assert fake_timetables.asked == [("S-1001", "2026-T1", "G-1")]
 
@@ -153,16 +153,12 @@ class TestTimetableFlow:
         Asserted here because nothing else would fail if a route stopped passing it: the
         week comes back identical and only the second refusal disappears.
         """
-        client.get(
-            "/v1/guardians/G-1/students/S-1001/timetable", headers=agent_headers("G-1")
-        )
+        client.get("/v1/guardians/G-1/students/S-1001/timetable", headers=agent_headers("G-1"))
 
         (_, _, guardian_ref) = fake_timetables.asked[0]
         assert guardian_ref == "G-1"
 
-    def test_a_child_who_is_not_this_guardian_s_is_never_asked_about(
-        self, client, fake_timetables
-    ):
+    def test_a_child_who_is_not_this_guardian_s_is_never_asked_about(self, client, fake_timetables):
         """Step 3 never runs before step 1 succeeds — the stated security property.
 
         The arguments are all known before the link check returns, so the two calls *could*
@@ -176,9 +172,7 @@ class TestTimetableFlow:
         assert refused.status_code == 404
         assert fake_timetables.asked == []
 
-    def test_no_class_and_no_timetable_stay_different_on_the_wire(
-        self, client, fake_timetables
-    ):
+    def test_no_class_and_no_timetable_stay_different_on_the_wire(self, client, fake_timetables):
         """Both are empty; only one of them means the school still has typing to do."""
         no_class = client.get(
             "/v1/guardians/G-1/students/S-1001/timetable?term=2026-T1",
@@ -266,9 +260,7 @@ class TestClassroomFlow:
         for teacher in body["teachers"]:
             assert forbidden.isdisjoint(teacher.keys()), teacher
 
-    def test_three_routes_ask_the_system_of_record_once_each(
-        self, client, fake_classrooms
-    ):
+    def test_three_routes_ask_the_system_of_record_once_each(self, client, fake_classrooms):
         """Three URLs, three reads — but each read asks about ONE room.
 
         The routes are separate because the questions are; the READ is not divisible, which
@@ -286,9 +278,7 @@ class TestClassroomFlow:
             ("S-1001", "2026-T1", "G-1"),
         ]
 
-    def test_a_child_who_is_not_this_guardian_s_is_never_asked_about(
-        self, client, fake_classrooms
-    ):
+    def test_a_child_who_is_not_this_guardian_s_is_never_asked_about(self, client, fake_classrooms):
         """Step 3 never runs before step 1 succeeds, on all three routes."""
         for path in ("class", "subjects", "teachers"):
             refused = self._get(client, path, guardian="G-2")
@@ -296,9 +286,7 @@ class TestClassroomFlow:
 
         assert fake_classrooms.asked == []
 
-    def test_no_class_this_term_is_a_status_and_not_an_empty_room(
-        self, client, fake_classrooms
-    ):
+    def test_no_class_this_term_is_a_status_and_not_an_empty_room(self, client, fake_classrooms):
         """The one emptiness that is about the CHILD, kept apart from the other two.
 
         With no placement there is no room to ask about, so the lists are empty for a
@@ -336,9 +324,7 @@ class TestHonestFailure:
             assert response.status_code == 503, path
             assert response.json()["detail"]["code"] == "lms_unavailable", path
 
-    def test_an_unreachable_timetable_is_a_503_not_an_empty_week(
-        self, client, fake_timetables
-    ):
+    def test_an_unreachable_timetable_is_a_503_not_an_empty_week(self, client, fake_timetables):
         """An empty week would tell a parent her daughter has no lessons.
 
         Same code as the marks path — `lms_unavailable` — deliberately: the agent is written
@@ -384,10 +370,7 @@ class TestHonestFailure:
         before a parent reports it."""
         fake_lms.unavailable = True
         with caplog.at_level("WARNING"):
-            client.get(
-                "/v1/guardians/G-1/students/S-1001/grades", headers=agent_headers("G-1")
-            )
+            client.get("/v1/guardians/G-1/students/S-1001/grades", headers=agent_headers("G-1"))
 
         assert "lms_unavailable" in caplog.text
         assert "S-1001" in caplog.text
-

@@ -9,6 +9,7 @@ Techniques applied per class:
   (zero-width, Arabic RTL, CJK), oversized inputs, data-loss corners the
   DataProcessing reference never covered.
 """
+
 import os
 import unittest
 from unittest.mock import patch
@@ -26,23 +27,44 @@ from tests.general.test_milvus_writer import FakeMilvusStore, load_milvus_writer
 
 
 def _line(text, top=10.0, size=10.0, bold=False):
-    return {"text": text, "top": top, "bottom": top + size, "x0": 0.0, "x1": 200.0,
-            "size": size, "bold": bold}
+    return {
+        "text": text,
+        "top": top,
+        "bottom": top + size,
+        "x0": 0.0,
+        "x1": 200.0,
+        "size": size,
+        "bold": bold,
+    }
 
 
 def _text_block(content, page, top):
     return {"type": "text", "content": content, "page_number": page, "top": top}
 
 
-def _table_block(rows, page, top, bottom=None, page_height=None,
-                 page_top=None, page_bottom=None, x0=None, x1=None):
+def _table_block(
+    rows,
+    page,
+    top,
+    bottom=None,
+    page_height=None,
+    page_top=None,
+    page_bottom=None,
+    x0=None,
+    x1=None,
+):
     """A table block. The geometry is what pdf_layout carries so the stitcher can ask
     whether a break fell at the page edges; omitting it is the older shape, and every
     caller that omits it is asserting the no-geometry path."""
     block = {"type": "table", "content": "", "rows": rows, "page_number": page, "top": top}
-    for key, value in (("bottom", bottom), ("page_height", page_height),
-                       ("page_top", page_top), ("page_bottom", page_bottom),
-                       ("x0", x0), ("x1", x1)):
+    for key, value in (
+        ("bottom", bottom),
+        ("page_height", page_height),
+        ("page_top", page_top),
+        ("page_bottom", page_bottom),
+        ("x0", x0),
+        ("x1", x1),
+    ):
         if value is not None:
             block[key] = value
     return block
@@ -205,13 +227,33 @@ class HeadingBoundaryTests(unittest.TestCase):
         self.assertFalse(is_heading_line(_line("FEE"), body_size=10.0))
 
     def test_missing_font_sizes_disable_size_signal_but_not_bold(self):
-        pages = [{"page_number": 0, "tables": [], "lines": [
-            {"text": "Some body line with words", "top": 10.0, "bottom": 20.0,
-             "x0": 0.0, "x1": 100.0, "size": None, "bold": False},
-        ]}]
+        pages = [
+            {
+                "page_number": 0,
+                "tables": [],
+                "lines": [
+                    {
+                        "text": "Some body line with words",
+                        "top": 10.0,
+                        "bottom": 20.0,
+                        "x0": 0.0,
+                        "x1": 100.0,
+                        "size": None,
+                        "bold": False,
+                    },
+                ],
+            }
+        ]
         self.assertIsNone(body_font_size(pages))
-        bold_line = {"text": "Fees", "top": 5.0, "bottom": 15.0, "x0": 0.0,
-                     "x1": 100.0, "size": None, "bold": True}
+        bold_line = {
+            "text": "Fees",
+            "top": 5.0,
+            "bottom": 15.0,
+            "x0": 0.0,
+            "x1": 100.0,
+            "size": None,
+            "bold": True,
+        }
         self.assertTrue(is_heading_line(bold_line, body_size=None))
 
 
@@ -304,39 +346,49 @@ class StitchingDecisionTableTests(unittest.TestCase):
         self.loader = DocumentLoader()
 
     def test_same_page_adjacent_texts_never_stitch(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("An unfinished thought about", 0, 100.0),
-            _text_block("something on the same page.", 0, 300.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("An unfinished thought about", 0, 100.0),
+                _text_block("something on the same page.", 0, 300.0),
+            ]
+        )
         self.assertEqual(2, len(blocks))
 
     def test_page_gap_of_two_never_stitches(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("An unfinished thought about", 0, 700.0),
-            _text_block("something two pages later.", 2, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("An unfinished thought about", 0, 700.0),
+                _text_block("something two pages later.", 2, 30.0),
+            ]
+        )
         self.assertEqual(2, len(blocks))
 
     def test_cjk_continuation_stitches(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("本学期的学费包括", 0, 700.0),
-            _text_block("所有教材费用。", 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("本学期的学费包括", 0, 700.0),
+                _text_block("所有教材费用。", 1, 30.0),
+            ]
+        )
         self.assertEqual(1, len(blocks))
         self.assertIn("学费包括 所有教材", blocks[0]["content"])
 
     def test_uppercase_start_blocks_stitching(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("The fee schedule includes", 0, 700.0),
-            _text_block("Transportation is billed separately.", 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("The fee schedule includes", 0, 700.0),
+                _text_block("Transportation is billed separately.", 1, 30.0),
+            ]
+        )
         self.assertEqual(2, len(blocks))
 
     def test_table_continuation_without_repeated_header_keeps_all_rows(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _table_block([["Grade", "Fee"], ["1", "100"]], 0, 700.0),
-            _table_block([["2", "200"], ["3", "300"]], 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _table_block([["Grade", "Fee"], ["1", "100"]], 0, 700.0),
+                _table_block([["2", "200"], ["3", "300"]], 1, 30.0),
+            ]
+        )
         self.assertEqual(1, len(blocks))
         self.assertEqual(4, len(blocks[0]["rows"]))
 
@@ -344,18 +396,18 @@ class StitchingDecisionTableTests(unittest.TestCase):
 #: A4 at 72dpi, the page these cases are laid out on. The edge band is 22% of it, so a
 #: table is at the foot past 656.8 and at the head before 185.2.
 A4 = 842.0
-FOOT = 780.0          # a table running to the bottom text margin
-HEAD = 70.0           # a table starting at the top text margin
-MIDDLE = 400.0        # neither
+FOOT = 780.0  # a table running to the bottom text margin
+HEAD = 70.0  # a table starting at the top text margin
+MIDDLE = 400.0  # neither
 
 
 #: A4 at 72dpi, the page these cases are laid out on. The edge band is 22% of it, so a
 #: table is at the foot past 656.8 and at the head before 185.2.
 A4 = 842.0
-FOOT = 780.0          # a table running to the bottom text margin
-HEAD = 70.0           # a table starting at the top text margin
-MIDDLE = 400.0        # neither
-LEFT, RIGHT = 72.0, 523.0     # the text column, edge to edge
+FOOT = 780.0  # a table running to the bottom text margin
+HEAD = 70.0  # a table starting at the top text margin
+MIDDLE = 400.0  # neither
+LEFT, RIGHT = 72.0, 523.0  # the text column, edge to edge
 
 
 class CrossPageTableJoinTests(unittest.TestCase):
@@ -386,13 +438,29 @@ class CrossPageTableJoinTests(unittest.TestCase):
 
     def _cut(self, rows, page, **kw):
         """A table running to the foot of its page — the shape of one about to be cut."""
-        return _table_block(rows, page, kw.pop("top", 500.0), kw.pop("bottom", FOOT),
-                            A4, x0=kw.pop("x0", LEFT), x1=kw.pop("x1", RIGHT), **kw)
+        return _table_block(
+            rows,
+            page,
+            kw.pop("top", 500.0),
+            kw.pop("bottom", FOOT),
+            A4,
+            x0=kw.pop("x0", LEFT),
+            x1=kw.pop("x1", RIGHT),
+            **kw,
+        )
 
     def _resumed(self, rows, page, **kw):
         """A table starting at the head of its page — the shape of one resuming."""
-        return _table_block(rows, page, kw.pop("top", HEAD), kw.pop("bottom", MIDDLE),
-                            A4, x0=kw.pop("x0", LEFT), x1=kw.pop("x1", RIGHT), **kw)
+        return _table_block(
+            rows,
+            page,
+            kw.pop("top", HEAD),
+            kw.pop("bottom", MIDDLE),
+            A4,
+            x0=kw.pop("x0", LEFT),
+            x1=kw.pop("x1", RIGHT),
+            **kw,
+        )
 
     # =================================================================================
     # ONE table, split by the break. Every one of these must JOIN.
@@ -404,8 +472,11 @@ class CrossPageTableJoinTests(unittest.TestCase):
             self._resumed([["Grade", "Fee"], ["Y03", "105,000"]], 1),
         )
         self.assertEqual(1, len(blocks))
-        self.assertEqual([["Grade", "Fee"], ["Y01", "95,000"], ["Y03", "105,000"]],
-                         self._rows(blocks), "the repeated header is dropped exactly once")
+        self.assertEqual(
+            [["Grade", "Fee"], ["Y01", "95,000"], ["Y03", "105,000"]],
+            self._rows(blocks),
+            "the repeated header is dropped exactly once",
+        )
 
     def test_numeric_rows_carrying_straight_on(self):
         blocks = self._stitch(
@@ -421,10 +492,20 @@ class CrossPageTableJoinTests(unittest.TestCase):
         these. Measured only after that rule shipped, which is why no content test may
         refuse a join now."""
         blocks = self._stitch(
-            self._cut([["Subject Group", "Subjects Taught"],
-                       ["Mathematics", "Counting, Place Value, Time & Money"]], 0),
-            self._resumed([["Humanities", "History, Geography and Egyptian Social Studies"],
-                           ["Languages", "Arabic Language, Islamic Education, French"]], 1),
+            self._cut(
+                [
+                    ["Subject Group", "Subjects Taught"],
+                    ["Mathematics", "Counting, Place Value, Time & Money"],
+                ],
+                0,
+            ),
+            self._resumed(
+                [
+                    ["Humanities", "History, Geography and Egyptian Social Studies"],
+                    ["Languages", "Arabic Language, Islamic Education, French"],
+                ],
+                1,
+            ),
         )
         self.assertEqual(1, len(blocks))
         self.assertEqual(4, len(self._rows(blocks)))
@@ -477,8 +558,7 @@ class CrossPageTableJoinTests(unittest.TestCase):
             self._resumed([header, ["Y11", "11"]], 2),
         )
         self.assertEqual(1, len(blocks))
-        self.assertEqual([header, ["Y01", "1"], ["Y03", "3"], ["Y11", "11"]],
-                         self._rows(blocks))
+        self.assertEqual([header, ["Y01", "1"], ["Y03", "3"], ["Y11", "11"]], self._rows(blocks))
 
     def test_a_table_spanning_three_pages(self):
         blocks = self._stitch(
@@ -536,18 +616,33 @@ class CrossPageTableJoinTests(unittest.TestCase):
         edges travel with the block so the comparison cannot drift."""
         offset = 200.0
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, offset + 300, offset + FOOT,
-                         page_top=offset, page_bottom=offset + A4, x0=LEFT, x1=RIGHT),
-            _table_block([["Y03", "3"]], 1, offset + HEAD, offset + MIDDLE,
-                         page_top=offset, page_bottom=offset + A4, x0=LEFT, x1=RIGHT),
+            _table_block(
+                [["Grade", "Fee"], ["Y01", "1"]],
+                0,
+                offset + 300,
+                offset + FOOT,
+                page_top=offset,
+                page_bottom=offset + A4,
+                x0=LEFT,
+                x1=RIGHT,
+            ),
+            _table_block(
+                [["Y03", "3"]],
+                1,
+                offset + HEAD,
+                offset + MIDDLE,
+                page_top=offset,
+                page_bottom=offset + A4,
+                x0=LEFT,
+                x1=RIGHT,
+            ),
         )
         self.assertEqual(1, len(blocks))
 
     def test_a_landscape_page_after_a_portrait_one(self):
         """Each side is judged against its own page, so a rotated page still works."""
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 500.0, FOOT, A4,
-                         x0=LEFT, x1=RIGHT),
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 500.0, FOOT, A4, x0=LEFT, x1=RIGHT),
             _table_block([["Y03", "3"]], 1, 40.0, 300.0, 595.0, x0=LEFT, x1=RIGHT),
         )
         self.assertEqual(1, len(blocks))
@@ -616,8 +711,9 @@ class CrossPageTableJoinTests(unittest.TestCase):
         """The header spans two columns and the body has three. Counting columns from
         the first row alone refused this join over a difference only in the heading."""
         blocks = self._stitch(
-            self._cut([["Fees", "EGP"], ["Y01", "95,000", "Egyptian"],
-                       ["Y03", "105,000", "Egyptian"]], 0),
+            self._cut(
+                [["Fees", "EGP"], ["Y01", "95,000", "Egyptian"], ["Y03", "105,000", "Egyptian"]], 0
+            ),
             self._resumed([["Y11", "150,000", "Egyptian"]], 1),
         )
         self.assertEqual(1, len(blocks))
@@ -657,7 +753,7 @@ class CrossPageTableJoinTests(unittest.TestCase):
         self.assertEqual(4, len(self._rows(blocks)))
 
     def test_a_totals_row_opening_the_continuation(self):
-        """"Total | 500,000" reads like a heading and is not one."""
+        """ "Total | 500,000" reads like a heading and is not one."""
         blocks = self._stitch(
             self._cut([["Grade", "Fee"], ["Y01", "95,000"]], 0),
             self._resumed([["Total", "500,000"]], 1),
@@ -681,8 +777,7 @@ class CrossPageTableJoinTests(unittest.TestCase):
         """The load-bearing refusal. Nothing cut this table short, so what follows on the
         next page is a different table."""
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 200.0, MIDDLE, A4,
-                         x0=LEFT, x1=RIGHT),
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 200.0, MIDDLE, A4, x0=LEFT, x1=RIGHT),
             self._resumed([["Programme", "Cost"], ["Half-Day", "2,500"]], 1),
         )
         self.assertEqual(2, len(blocks))
@@ -690,17 +785,24 @@ class CrossPageTableJoinTests(unittest.TestCase):
     def test_a_table_starting_mid_page_had_something_above_it(self):
         blocks = self._stitch(
             self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
-            _table_block([["Programme", "Cost"], ["Half-Day", "2,500"]], 1, MIDDLE, 700.0,
-                         A4, x0=LEFT, x1=RIGHT),
+            _table_block(
+                [["Programme", "Cost"], ["Half-Day", "2,500"]],
+                1,
+                MIDDLE,
+                700.0,
+                A4,
+                x0=LEFT,
+                x1=RIGHT,
+            ),
         )
         self.assertEqual(2, len(blocks))
 
     def test_neither_one_at_an_edge(self):
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 200.0, MIDDLE, A4,
-                         x0=LEFT, x1=RIGHT),
-            _table_block([["Programme", "Cost"], ["Half-Day", "2"]], 1, MIDDLE, 600.0, A4,
-                         x0=LEFT, x1=RIGHT),
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 200.0, MIDDLE, A4, x0=LEFT, x1=RIGHT),
+            _table_block(
+                [["Programme", "Cost"], ["Half-Day", "2"]], 1, MIDDLE, 600.0, A4, x0=LEFT, x1=RIGHT
+            ),
         )
         self.assertEqual(2, len(blocks))
 
@@ -768,8 +870,7 @@ class CrossPageTableJoinTests(unittest.TestCase):
 
     def test_two_tables_on_the_same_page(self):
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 100.0, MIDDLE, A4,
-                         x0=LEFT, x1=RIGHT),
+            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 100.0, MIDDLE, A4, x0=LEFT, x1=RIGHT),
             self._cut([["Y03", "3"]], 0),
         )
         self.assertEqual(2, len(blocks))
@@ -782,11 +883,16 @@ class CrossPageTableJoinTests(unittest.TestCase):
         self.assertEqual(2, len(blocks))
 
     def test_a_heading_between_them(self):
-        """"The same section" needs no test of its own: the heading becomes `prev`."""
+        """ "The same section" needs no test of its own: the heading becomes `prev`."""
         blocks = self._stitch(
             self._cut([["Grade", "Fee"], ["Y01", "1"]], 0),
-            {"type": "heading", "content": "Summer Camp", "level": 1,
-             "page_number": 1, "top": 40.0},
+            {
+                "type": "heading",
+                "content": "Summer Camp",
+                "level": 1,
+                "page_number": 1,
+                "top": 40.0,
+            },
             self._resumed([["Programme", "Cost"], ["Half-Day", "2,500"]], 1, top=120.0),
         )
         self.assertEqual(3, len(blocks))
@@ -902,8 +1008,7 @@ class CrossPageTableJoinTests(unittest.TestCase):
         self.assertNotIn("_last_page", first)
 
     def test_blocks_that_never_join_pass_through_unchanged(self):
-        heading = {"type": "heading", "content": "Fees", "level": 1,
-                   "page_number": 0, "top": 10.0}
+        heading = {"type": "heading", "content": "Fees", "level": 1, "page_number": 0, "top": 10.0}
         blocks = self._stitch(heading, self._cut([["Grade", "Fee"], ["Y01", "1"]], 0))
         self.assertEqual(heading, blocks[0])
 
@@ -951,18 +1056,35 @@ class CrossPageTableJoinTests(unittest.TestCase):
     def test_a_page_of_zero_height(self):
         """Degenerate geometry is unanswerable, not a refusal."""
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, 0.0, 0.0,
-                         page_top=0.0, page_bottom=0.0),
+            _table_block(
+                [["Grade", "Fee"], ["Y01", "1"]], 0, 0.0, 0.0, page_top=0.0, page_bottom=0.0
+            ),
             _table_block([["Y03", "3"]], 1, 0.0, 0.0, page_top=0.0, page_bottom=0.0),
         )
         self.assertEqual(1, len(blocks))
 
     def test_negative_page_coordinates(self):
         blocks = self._stitch(
-            _table_block([["Grade", "Fee"], ["Y01", "1"]], 0, -500.0, -70.0,
-                         page_top=-842.0, page_bottom=0.0, x0=LEFT, x1=RIGHT),
-            _table_block([["Y03", "3"]], 1, -800.0, -600.0,
-                         page_top=-842.0, page_bottom=0.0, x0=LEFT, x1=RIGHT),
+            _table_block(
+                [["Grade", "Fee"], ["Y01", "1"]],
+                0,
+                -500.0,
+                -70.0,
+                page_top=-842.0,
+                page_bottom=0.0,
+                x0=LEFT,
+                x1=RIGHT,
+            ),
+            _table_block(
+                [["Y03", "3"]],
+                1,
+                -800.0,
+                -600.0,
+                page_top=-842.0,
+                page_bottom=0.0,
+                x0=LEFT,
+                x1=RIGHT,
+            ),
         )
         self.assertEqual(1, len(blocks))
 
@@ -1001,7 +1123,13 @@ class RobustnessTests(unittest.TestCase):
 
     def test_arabic_heading_prefixes_arabic_content(self):
         blocks = [
-            {"type": "heading", "content": "الرسوم الدراسية", "level": 1, "page_number": 0, "top": 5.0},
+            {
+                "type": "heading",
+                "content": "الرسوم الدراسية",
+                "level": 1,
+                "page_number": 0,
+                "top": 5.0,
+            },
             _text_block("تشمل الرسوم جميع الكتب المدرسية للفصل الدراسي الأول.", 0, 20.0),
         ]
         docs = self._load(blocks)
@@ -1029,15 +1157,23 @@ class RobustnessTests(unittest.TestCase):
             def load(self):
                 return [_StubPage()]
 
-        with patch.object(document_loader_module, "parse_pdf_blocks", return_value=[]), patch.object(
-            document_loader_module, "PyPDFLoader", _StubPyPDFLoader
+        with (
+            patch.object(document_loader_module, "parse_pdf_blocks", return_value=[]),
+            patch.object(document_loader_module, "PyPDFLoader", _StubPyPDFLoader),
         ):
             docs = self.loader.load_document("empty.pdf", "empty.pdf")
         self.assertTrue(any("flat fallback" in d["text"] for d in docs))
 
     def test_heading_only_document_still_produces_chunks(self):
-        blocks = [{"type": "heading", "content": "Lonely Heading", "level": 1,
-                   "page_number": 0, "top": 5.0}]
+        blocks = [
+            {
+                "type": "heading",
+                "content": "Lonely Heading",
+                "level": 1,
+                "page_number": 0,
+                "top": 5.0,
+            }
+        ]
         docs = self._load(blocks)
         self.assertTrue(docs)
         self.assertTrue(all("Lonely Heading" in d["text"] for d in docs))
@@ -1082,7 +1218,7 @@ class WriterDedupBoundaryTests(unittest.TestCase):
     def test_cosine_exactly_at_threshold_is_skipped_and_below_is_kept(self):
         module = load_milvus_writer_module()
         cases = [
-            (0.97, ["c0"]),          # == threshold -> skipped
+            (0.97, ["c0"]),  # == threshold -> skipped
             (0.9699, ["c0", "c1"]),  # just below -> kept
         ]
         for cos, expected in cases:
@@ -1093,7 +1229,9 @@ class WriterDedupBoundaryTests(unittest.TestCase):
                     "second text": [cos, (1 - cos * cos) ** 0.5],
                 }
                 writer = self._writer(
-                    module, embeddings, events,
+                    module,
+                    embeddings,
+                    events,
                     env={"SEMANTIC_DEDUP_ENABLED": "true", "SEMANTIC_DEDUP_THRESHOLD": "0.97"},
                 )
                 writer.write_documents([self._doc(0, "first text"), self._doc(1, "second text")])
@@ -1117,9 +1255,7 @@ class WriterDedupBoundaryTests(unittest.TestCase):
         module = load_milvus_writer_module()
         events = []
         embeddings = {"a text": [0.0, 0.0], "b text": [1.0, 0.0]}
-        writer = self._writer(
-            module, embeddings, events, env={"SEMANTIC_DEDUP_ENABLED": "true"}
-        )
+        writer = self._writer(module, embeddings, events, env={"SEMANTIC_DEDUP_ENABLED": "true"})
         writer.write_documents([self._doc(0, "a text"), self._doc(1, "b text")])
         inserts = [e for e in events if e[0] == "insert"]
         self.assertEqual([("insert", ["c0", "c1"])], inserts)
@@ -1206,10 +1342,14 @@ class HierarchyInvariantTests(unittest.TestCase):
 
     RICH_BLOCKS = [
         {"type": "heading", "content": "Admissions", "level": 1, "page_number": 0, "top": 5.0},
-        _text_block("The admissions office reviews every application in order of arrival. " * 12, 0, 20.0),
+        _text_block(
+            "The admissions office reviews every application in order of arrival. " * 12, 0, 20.0
+        ),
         _table_block([["Step", "Owner"], ["Form", "Parent"], ["Review", "Office"]], 0, 40.0),
         {"type": "heading", "content": "Fees", "level": 1, "page_number": 1, "top": 5.0},
-        _text_block("Tuition is payable in three installments across the academic year. " * 12, 1, 20.0),
+        _text_block(
+            "Tuition is payable in three installments across the academic year. " * 12, 1, 20.0
+        ),
         _table_block([["Grade", "Fee"], ["1", "100"], ["2", "200"]], 1, 60.0),
         _text_block("Late payments accrue a small administrative surcharge.", 1, 90.0),
     ]
@@ -1252,7 +1392,12 @@ class HierarchyInvariantTests(unittest.TestCase):
         loader = DocumentLoader()
         blocks = [
             _text_block("T" * 2300, 0, 10.0),
-            _text_block("Second page paragraph with enough characters to overflow the window budget entirely. " * 3, 1, 10.0),
+            _text_block(
+                "Second page paragraph with enough characters to overflow the window budget entirely. "
+                * 3,
+                1,
+                10.0,
+            ),
         ]
         with patch.object(document_loader_module, "parse_pdf_blocks", return_value=blocks):
             docs = loader.load_document("pages.pdf", "pages.pdf")
@@ -1270,8 +1415,13 @@ class RefineUnitsTests(unittest.TestCase):
 
     def test_table_unit_resplits_at_finer_budget_with_header(self):
         rows = [["H1", "H2"]] + [[f"a{i}" * 4, f"b{i}" * 4] for i in range(20)]
-        unit = {"kind": "table", "rows": rows, "text": self.loader._render_rows(rows),
-                "sections": ("Fees",), "page": 2}
+        unit = {
+            "kind": "table",
+            "rows": rows,
+            "text": self.loader._render_rows(rows),
+            "sections": ("Fees",),
+            "page": 2,
+        }
         refined = self.loader._refine_units([unit], self.loader._splitter_level_3, table_budget=120)
         self.assertGreater(len(refined), 1)
         for piece in refined:
@@ -1296,41 +1446,57 @@ class StitchingDecisionTableCompletionTests(unittest.TestCase):
         self.loader = DocumentLoader()
 
     def test_text_then_table_never_stitches(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("A sentence about the fee", 0, 700.0),
-            _table_block([["Grade", "Fee"], ["1", "100"]], 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("A sentence about the fee", 0, 700.0),
+                _table_block([["Grade", "Fee"], ["1", "100"]], 1, 30.0),
+            ]
+        )
         self.assertEqual(2, len(blocks))
 
     def test_digit_start_blocks_paragraph_stitching(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("The academic year", 0, 700.0),
-            _text_block("2026 begins in September.", 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("The academic year", 0, 700.0),
+                _text_block("2026 begins in September.", 1, 30.0),
+            ]
+        )
         self.assertEqual(2, len(blocks))
 
     def test_empty_row_tables_never_stitch(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _table_block([], 0, 700.0),
-            _table_block([["a", "b"]], 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _table_block([], 0, 700.0),
+                _table_block([["a", "b"]], 1, 30.0),
+            ]
+        )
         self.assertEqual(2, len(blocks))
 
     def test_three_page_paragraph_chain(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("Enrollment continues with", 0, 700.0),
-            _text_block("a document check and", 1, 700.0),
-            _text_block("an interview to finish.", 2, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("Enrollment continues with", 0, 700.0),
+                _text_block("a document check and", 1, 700.0),
+                _text_block("an interview to finish.", 2, 30.0),
+            ]
+        )
         self.assertEqual(1, len(blocks))
         self.assertIn("continues with a document check and an interview", blocks[0]["content"])
 
     def test_heading_between_paragraphs_blocks_stitching(self):
-        blocks = self.loader._stitch_cross_page_blocks([
-            _text_block("An unfinished sentence about", 0, 700.0),
-            {"type": "heading", "content": "New Topic", "level": 1, "page_number": 1, "top": 10.0},
-            _text_block("something entirely different now.", 1, 30.0),
-        ])
+        blocks = self.loader._stitch_cross_page_blocks(
+            [
+                _text_block("An unfinished sentence about", 0, 700.0),
+                {
+                    "type": "heading",
+                    "content": "New Topic",
+                    "level": 1,
+                    "page_number": 1,
+                    "top": 10.0,
+                },
+                _text_block("something entirely different now.", 1, 30.0),
+            ]
+        )
         self.assertEqual(3, len(blocks))
 
 
@@ -1341,21 +1507,25 @@ class PdfBlockBuilderTests(unittest.TestCase):
     def test_prose_table_is_demoted_and_ordering_preserved(self):
         from backend.indexing.pdf_layout import build_blocks_from_pages
 
-        pages = [{
-            "page_number": 0,
-            "height": 800.0,
-            "tables": [{
-                "bbox": (0.0, 50.0, 200.0, 70.0),
-                "rows": [
-                    ["A long prose sentence pretending to be inside a table cell."],
-                    ["Another long prose sentence continuing the paragraph flow."],
+        pages = [
+            {
+                "page_number": 0,
+                "height": 800.0,
+                "tables": [
+                    {
+                        "bbox": (0.0, 50.0, 200.0, 70.0),
+                        "rows": [
+                            ["A long prose sentence pretending to be inside a table cell."],
+                            ["Another long prose sentence continuing the paragraph flow."],
+                        ],
+                    }
                 ],
-            }],
-            "lines": [
-                _line("Intro paragraph line with several plain words.", top=10.0),
-                _line("Closing paragraph line with several plain words.", top=90.0),
-            ],
-        }]
+                "lines": [
+                    _line("Intro paragraph line with several plain words.", top=10.0),
+                    _line("Closing paragraph line with several plain words.", top=90.0),
+                ],
+            }
+        ]
         blocks = build_blocks_from_pages(pages)
         self.assertEqual(["text", "text", "text"], [b["type"] for b in blocks])
         self.assertEqual([10.0, 50.0, 90.0], [b["top"] for b in blocks])
@@ -1363,17 +1533,19 @@ class PdfBlockBuilderTests(unittest.TestCase):
     def test_two_heading_font_sizes_rank_into_levels(self):
         from backend.indexing.pdf_layout import build_blocks_from_pages
 
-        pages = [{
-            "page_number": 0,
-            "height": 800.0,
-            "tables": [],
-            "lines": [
-                _line("Main Title Here", top=10.0, size=18.0, bold=True),
-                _line("Sub Section Here", top=40.0, size=14.0, bold=True),
-                _line("Ordinary body sentence with plenty of everyday words in it", top=70.0),
-                _line("Another ordinary body sentence with plenty of everyday words", top=85.0),
-            ],
-        }]
+        pages = [
+            {
+                "page_number": 0,
+                "height": 800.0,
+                "tables": [],
+                "lines": [
+                    _line("Main Title Here", top=10.0, size=18.0, bold=True),
+                    _line("Sub Section Here", top=40.0, size=14.0, bold=True),
+                    _line("Ordinary body sentence with plenty of everyday words in it", top=70.0),
+                    _line("Another ordinary body sentence with plenty of everyday words", top=85.0),
+                ],
+            }
+        ]
         blocks = build_blocks_from_pages(pages)
         headings = [b for b in blocks if b["type"] == "heading"]
         self.assertEqual([1, 2], [h["level"] for h in headings])
@@ -1388,15 +1560,17 @@ class FurnitureInteractionTests(unittest.TestCase):
 
         pages = []
         for i in range(4):
-            pages.append({
-                "page_number": i,
-                "height": 800.0,
-                "tables": [],
-                "lines": [
-                    _line("Fees", top=400.0, size=18.0, bold=True),
-                    _line(f"Page specific body content number {i} with words.", top=430.0),
-                ],
-            })
+            pages.append(
+                {
+                    "page_number": i,
+                    "height": 800.0,
+                    "tables": [],
+                    "lines": [
+                        _line("Fees", top=400.0, size=18.0, bold=True),
+                        _line(f"Page specific body content number {i} with words.", top=430.0),
+                    ],
+                }
+            )
         blocks = build_blocks_from_pages(pages)
         headings = [b for b in blocks if b["type"] == "heading"]
         self.assertEqual(4, len(headings))
@@ -1441,7 +1615,9 @@ class WriterDedupFlowTests(unittest.TestCase):
                 events.append(("embed", list(texts)))
                 return [[1.0] for _ in texts]
 
-        writer = module.MilvusWriter(embedding_service=_Service(), milvus_manager=FakeMilvusStore(events))
+        writer = module.MilvusWriter(
+            embedding_service=_Service(), milvus_manager=FakeMilvusStore(events)
+        )
         progress = []
         writer.write_documents(
             [self._doc(0, "alpha"), self._doc(1, "beta"), self._doc(2, "ALPHA")],
@@ -1461,8 +1637,8 @@ class WriterDedupFlowTests(unittest.TestCase):
         events = []
         vectors = {
             "first": [1.0, 0.0],
-            "near first": [0.995, (1 - 0.995 ** 2) ** 0.5],  # dropped vs "first"
-            "far away": [0.5, 3 ** 0.5 / 2],                  # cos 0.5 vs "first" -> kept
+            "near first": [0.995, (1 - 0.995**2) ** 0.5],  # dropped vs "first"
+            "far away": [0.5, 3**0.5 / 2],  # cos 0.5 vs "first" -> kept
         }
 
         class _Service:
@@ -1470,8 +1646,12 @@ class WriterDedupFlowTests(unittest.TestCase):
                 return [vectors[t] for t in texts]
 
         with patch.dict(_os.environ, {"SEMANTIC_DEDUP_ENABLED": "true"}):
-            writer = module.MilvusWriter(embedding_service=_Service(), milvus_manager=FakeMilvusStore(events))
-        writer.write_documents([self._doc(0, "first"), self._doc(1, "near first"), self._doc(2, "far away")])
+            writer = module.MilvusWriter(
+                embedding_service=_Service(), milvus_manager=FakeMilvusStore(events)
+            )
+        writer.write_documents(
+            [self._doc(0, "first"), self._doc(1, "near first"), self._doc(2, "far away")]
+        )
         inserts = [e for e in events if e[0] == "insert"]
         self.assertEqual([("insert", ["c0", "c2"])], inserts)
 
@@ -1529,9 +1709,16 @@ class BM25SectionPrefixTests(unittest.TestCase):
                 captured["rows"] = data
 
         writer = module.MilvusWriter(embedding_service=_Service(), milvus_manager=_Store())
-        writer.write_documents([
-            {"text": "no sections here", "filename": "f", "file_type": "Word", "chunk_id": "c0"},
-        ])
+        writer.write_documents(
+            [
+                {
+                    "text": "no sections here",
+                    "filename": "f",
+                    "file_type": "Word",
+                    "chunk_id": "c0",
+                },
+            ]
+        )
         self.assertEqual("no sections here", captured["rows"][0]["bm25_text"])
 
 

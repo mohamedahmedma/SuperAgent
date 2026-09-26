@@ -17,6 +17,7 @@ caller that wants a percentage divides by a number it can see. This service does
 school calendar, so it cannot tell an unmarked Tuesday from a holiday and will not compute a
 figure that pretends otherwise.
 """
+
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from typing import Annotated
@@ -46,6 +47,7 @@ from sis.infrastructure.db import models as m
 router = APIRouter(prefix="/v1", tags=["attendance"])
 
 _SIS_TIMEZONE = ZoneInfo("Africa/Cairo")
+
 
 def _sis_today() -> date:
     return datetime.now(_SIS_TIMEZONE).date()
@@ -238,13 +240,18 @@ class StudentAttendanceSummaryOut(BaseModel):
     absence_percent: float | None
 
 
-@router.get("/students/{student_number}/attendance/summary", response_model=StudentAttendanceSummaryOut)
+@router.get(
+    "/students/{student_number}/attendance/summary", response_model=StudentAttendanceSummaryOut
+)
 def read_student_attendance_summary(
     student_number: str,
     academic_year: Annotated[str, Query(description="Required academic-year code.")],
     caller: StudentReader,
     uow_factory: UowFactoryDep,
-    term: Annotated[str | None, Query(description="Optional term code; totals are then limited to its dated window.")] = None,
+    term: Annotated[
+        str | None,
+        Query(description="Optional term code; totals are then limited to its dated window."),
+    ] = None,
 ) -> StudentAttendanceSummaryOut:
     """Attendance totals from all recorded days in exactly one academic year."""
     caller.narrow(
@@ -254,16 +261,22 @@ def read_student_attendance_summary(
         ),
     )
     with uow_factory() as uow:
-        year = uow._session.scalar(select(m.AcademicYear).where(m.AcademicYear.code == academic_year))
+        year = uow._session.scalar(
+            select(m.AcademicYear).where(m.AcademicYear.code == academic_year)
+        )
         if year is None:
             raise UnknownReference(f"no academic year {academic_year}", field="academic_year")
-        student_id = uow._session.scalar(select(m.Student.id).where(m.Student.student_number == student_number))
+        student_id = uow._session.scalar(
+            select(m.Student.id).where(m.Student.student_number == student_number)
+        )
         if student_id is None:
             raise UnknownReference(f"no student {student_number}", field="student_number")
         statement = (
             select(m.Attendance.state, func.count())
             .join(m.ClassSection, m.Attendance.class_section_id == m.ClassSection.id)
-            .where(m.Attendance.student_id == student_id, m.ClassSection.academic_year_id == year.id)
+            .where(
+                m.Attendance.student_id == student_id, m.ClassSection.academic_year_id == year.id
+            )
         )
         term_row = None
         if term is not None:
@@ -284,12 +297,18 @@ def read_student_attendance_summary(
     late, excused = counts.get("late", 0), counts.get("excused", 0)
     applicable = present + absent + late + excused
     return StudentAttendanceSummaryOut(
-        academic_year=academic_year, term_code=None if term_row is None else str(term_row.code),
+        academic_year=academic_year,
+        term_code=None if term_row is None else str(term_row.code),
         from_date=None if term_row is None else term_row.starts_on,
         to_date=None if term_row is None else term_row.ends_on,
-        applicable_days=applicable, present=present,
-        absent=absent, late=late, excused=excused,
-        attendance_percent=None if not applicable else round((present + late) * 100 / applicable, 2),
+        applicable_days=applicable,
+        present=present,
+        absent=absent,
+        late=late,
+        excused=excused,
+        attendance_percent=None
+        if not applicable
+        else round((present + late) * 100 / applicable, 2),
         absence_percent=None if not applicable else round((absent + excused) * 100 / applicable, 2),
     )
 
@@ -348,13 +367,9 @@ def list_registerable_classes(
     on_date = on or _sis_today()
     with uow_factory() as uow:
         session = uow._session
-        year = session.scalar(
-            select(m.AcademicYear).where(m.AcademicYear.code == academic_year)
-        )
+        year = session.scalar(select(m.AcademicYear).where(m.AcademicYear.code == academic_year))
         if year is None:
-            raise UnknownReference(
-                f"no academic year {academic_year}", field="academic_year"
-            )
+            raise UnknownReference(f"no academic year {academic_year}", field="academic_year")
 
         rows = session.execute(
             select(m.ClassSection, m.YearLevel, m.EducationalSystem)
@@ -408,9 +423,7 @@ def list_registerable_classes(
         if caller.profile is not None:
             profile = caller.profile
             is_teacher = profile.has_role(RoleCode.TEACHER.value)
-            is_attendance_supervisor = profile.has_role(
-                RoleCode.ATTENDANCE_SUPERVISOR.value
-            )
+            is_attendance_supervisor = profile.has_role(RoleCode.ATTENDANCE_SUPERVISOR.value)
 
             if is_teacher:
                 teacher_id = session.scalar(
@@ -425,8 +438,7 @@ def list_registerable_classes(
                             select(m.TeacherClassSection.class_section_id)
                             .join(
                                 m.ClassSection,
-                                m.TeacherClassSection.class_section_id
-                                == m.ClassSection.id,
+                                m.TeacherClassSection.class_section_id == m.ClassSection.id,
                             )
                             .where(
                                 m.TeacherClassSection.teacher_id == teacher_id,
@@ -447,8 +459,7 @@ def list_registerable_classes(
                     assignment.scope.id
                     for assignment in profile.assignments
                     if (
-                        assignment.role_code
-                        == RoleCode.ATTENDANCE_SUPERVISOR.value
+                        assignment.role_code == RoleCode.ATTENDANCE_SUPERVISOR.value
                         and assignment.scope.type is ScopeType.CLASS_SECTION
                         and assignment.scope.id is not None
                     )
@@ -459,8 +470,7 @@ def list_registerable_classes(
                 # attendance workflow.
                 for assignment in profile.assignments:
                     if (
-                        assignment.role_code
-                        == RoleCode.ATTENDANCE_SUPERVISOR.value
+                        assignment.role_code == RoleCode.ATTENDANCE_SUPERVISOR.value
                         and assignment.scope.type is ScopeType.YEAR_LEVEL
                         and assignment.scope.id is not None
                     ):
@@ -485,13 +495,9 @@ def list_registerable_classes(
                 # Attendance supervisors may additionally be assigned at YEAR_LEVEL scope;
                 # that means every class under that grade.
                 supervisor_grade_match = (
-                    is_attendance_supervisor
-                    and level.id in supervisor_year_level_ids
+                    is_attendance_supervisor and level.id in supervisor_year_level_ids
                 )
-                if (
-                    section.id not in assigned_class_ids
-                    and not supervisor_grade_match
-                ):
+                if section.id not in assigned_class_ids and not supervisor_grade_match:
                     continue
             elif not caller.allows(Permission.ATTENDANCE_READ, where):
                 continue
@@ -514,9 +520,7 @@ def list_registerable_classes(
                 )
             )
 
-    return RegisterClassesOut(
-        academic_year_code=academic_year, on_date=on_date, classes=listed
-    )
+    return RegisterClassesOut(academic_year_code=academic_year, on_date=on_date, classes=listed)
 
 
 @router.get(
@@ -546,9 +550,7 @@ def read_class_register(
     # exists precisely so that this person cannot see this room.
     caller.narrow(
         Permission.ATTENDANCE_READ,
-        lambda scopes: scopes.for_class(
-            academic_year_code=academic_year, class_code=class_code
-        ),
+        lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code),
     )
     with domain_errors():
         register = attendance.register_for_class(
@@ -590,9 +592,7 @@ def take_register(
     # and taking the register of a room they were not given is the thing being refused.
     caller.narrow(
         Permission.ATTENDANCE_WRITE,
-        lambda scopes: scopes.for_class(
-            academic_year_code=academic_year, class_code=class_code
-        ),
+        lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code),
     )
     with domain_errors():
         register = attendance.take_register(
@@ -600,9 +600,7 @@ def take_register(
             ClassCode(class_code),
             on_date,
             states={entry.student_number: entry.state for entry in body.entries},
-            notes={
-                entry.student_number: entry.note for entry in body.entries if entry.note
-            },
+            notes={entry.student_number: entry.note for entry in body.entries if entry.note},
             actor=caller.prefix,
             absent_unlisted=body.absent_unlisted,
         )
@@ -629,9 +627,7 @@ def read_guardian_student_attendance(
     attendance: AttendanceServiceDep,
     caller: Reader,
     request_id: RequestId,
-    from_: Annotated[
-        date | None, Query(alias="from", description="First day, inclusive.")
-    ] = None,
+    from_: Annotated[date | None, Query(alias="from", description="First day, inclusive.")] = None,
     to: Annotated[date | None, Query(description="Last day, inclusive.")] = None,
 ) -> StudentAttendanceOut:
     with domain_errors():
@@ -661,13 +657,9 @@ def read_student_attendance(
     student_number: str,
     attendance: AttendanceServiceDep,
     caller: StudentReader,
-    from_: Annotated[
-        date | None, Query(alias="from", description="First day, inclusive.")
-    ] = None,
+    from_: Annotated[date | None, Query(alias="from", description="First day, inclusive.")] = None,
     to: Annotated[date | None, Query(description="Last day, inclusive.")] = None,
 ) -> StudentAttendanceOut:
     with domain_errors():
-        record = attendance.for_student(
-            StudentNumber(student_number), from_date=from_, to_date=to
-        )
+        record = attendance.for_student(StudentNumber(student_number), from_date=from_, to_date=to)
     return StudentAttendanceOut.of(record)

@@ -9,6 +9,7 @@ a plain class with the right methods: it does not import this module, inherits f
 nothing, and cannot be broken by a base gaining a method it does not use. The type checker
 still catches an implementation that drifts.
 """
+
 from records.ports.calendar import SchoolCalendar
 from records.ports.classroom import StudentClassrooms
 from records.ports.directory import GuardianDirectory

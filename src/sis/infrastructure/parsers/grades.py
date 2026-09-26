@@ -24,6 +24,7 @@ grade this service stores is one a teacher can find in the sheet they uploaded. 
 state both a percentage and a points pair; if the two disagree, both are kept and neither
 is corrected, because correcting one means choosing which figure the school meant.
 """
+
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -143,9 +144,7 @@ class SpreadsheetGradeParser:
             try:
                 subject_code = SubjectCode(raw_subject)  # type: ignore[arg-type]  # takes cells
             except ValidationError as error:
-                return RowOutcome.from_error(
-                    line, RowCode.UNKNOWN_SUBJECT, error, payload=payload
-                )
+                return RowOutcome.from_error(line, RowCode.UNKNOWN_SUBJECT, error, payload=payload)
         elif subject_code is None:
             # Only reachable when the file has a subject column and this row left it
             # empty: a missing column was refused at the header, above.
@@ -203,9 +202,7 @@ def _parse_marks(
             # The split is worth making: 105 is a teacher marking out of 120, which is a
             # conversation about the scale, while "abs" is a cell to retype.
             code = (
-                RowCode.GRADE_OUT_OF_RANGE
-                if _as_number(raw) is not None
-                else RowCode.INVALID_GRADE
+                RowCode.GRADE_OUT_OF_RANGE if _as_number(raw) is not None else RowCode.INVALID_GRADE
             )
             return _bad_mark(line, code, error.message, payload, PERCENTAGE.field, raw)
 
@@ -289,9 +286,7 @@ def _require_a_marks_column(columns: ColumnMap) -> None:
     """
     found = ", ".join(repr(header) for header in columns.headers) or "none at all"
     if not columns.has(PERCENTAGE.field) and not columns.has(POINTS.field):
-        accepted = ", ".join(
-            repr(alias) for spec in (PERCENTAGE, POINTS) for alias in spec.aliases
-        )
+        accepted = ", ".join(repr(alias) for spec in (PERCENTAGE, POINTS) for alias in spec.aliases)
         raise UnreadableImportFile(
             f"no marks column was found (accepted: {accepted}). "
             f"The columns in this file are: {found}.",

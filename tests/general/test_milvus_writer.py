@@ -150,10 +150,12 @@ class MilvusWriterTests(unittest.TestCase):
                         embedding_service=NearIdenticalEmbeddings(),
                         milvus_manager=FakeMilvusStore(events),
                     )
-                writer.write_documents([
-                    self._doc(0, "Fees are due in September."),
-                    self._doc(1, "Fees are due in October."),
-                ])
+                writer.write_documents(
+                    [
+                        self._doc(0, "Fees are due in September."),
+                        self._doc(1, "Fees are due in October."),
+                    ]
+                )
                 inserts = [event for event in events if event[0] == "insert"]
                 self.assertEqual([("insert", expected_ids)], inserts)
 

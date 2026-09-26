@@ -30,7 +30,11 @@ from backend.agent.rag.graph_nodes import (
     route_after_rewrite,
 )
 from backend.agent.rag.query_translation import translate_for_search
-from backend.agent.rag.hitl_resume import build_hitl_resume_state, is_hitl_result, refined_question_for_hitl
+from backend.agent.rag.hitl_resume import (
+    build_hitl_resume_state,
+    is_hitl_result,
+    refined_question_for_hitl,
+)
 from backend.agent.rag.rerank_assessor import CrossEncoderAssessor
 from backend.agent.profiles import get_profile
 from backend.agent.schemas.chat import HitlResumeState
@@ -133,7 +137,7 @@ class EvidenceGrade(StructuredOutput):
             "condition is absent (role name, version, file type, module name, product "
             "line). multiple_candidates: several directions could all be relevant. "
             "none: no clear ambiguity."
-        )
+        ),
     )
     constraints_discriminate: Literal["yes", "no", "unknown"] = Field(
         default="unknown",
@@ -210,7 +214,9 @@ def _initial_state(
         # Left unset when planning is off, because nothing classified this question and
         # writing "simple" would be the fabricated-grade pattern evidence.py exists to
         # prevent. The reason still says so, so a trace shows absence, not silence.
-        "complexity_reason": None if COMPLEXITY_PLANNING_ENABLED else "complexity_planning_disabled",
+        "complexity_reason": None
+        if COMPLEXITY_PLANNING_ENABLED
+        else "complexity_planning_disabled",
         "sub_questions": None,
         "is_sub_agent": is_sub_agent,
         "sub_results": [],
@@ -283,7 +289,9 @@ class LLMGraderAssessor:
         for index in range(1, total + 1):
             # supported stays None when the grader named nothing, because "it did not
             # tell us" and "it excluded this chunk" are different facts.
-            chunks.append(ChunkAssessment(index=index, supported=(index in cited) if cited else None))
+            chunks.append(
+                ChunkAssessment(index=index, supported=(index in cited) if cited else None)
+            )
 
         return EvidenceReport(
             question=ctx.question,
@@ -306,6 +314,7 @@ class LLMGraderAssessor:
 # ---------------------------------------------------------------------------
 # The graph's steps, bound to this module
 # ---------------------------------------------------------------------------
+
 
 class _ModuleDependencies:
     """`RagDependencies` read from this module's globals at the moment a step asks.
@@ -381,6 +390,7 @@ resume_retrieval = ResumeRetrieval(_DEPENDENCIES, grade_documents_node)
 # ---------------------------------------------------------------------------
 # Main RAG graph
 # ---------------------------------------------------------------------------
+
 
 def build_rag_graph(complexity_planning_enabled: Optional[bool] = None):
     """Compile the retrieval graph for this process.
@@ -506,22 +516,24 @@ def _state_from_resume(
     if current_resume_state.get("sub_questions"):
         rag_trace["sub_questions"] = current_resume_state["sub_questions"]
     state = _initial_state(refined_question, ctx)
-    state.update({
-        "query": refined_question,
-        "rewrite_count": current_resume_state["rewrite_count"],
-        # The turn being resumed IS a HITL round. Counting it here is what makes the
-        # limit mean "per question" rather than "per graph run".
-        "hitl_rounds": int(current_resume_state.get("hitl_rounds") or 0) + 1,
-        "complexity": current_resume_state.get("complexity"),
-        "complexity_reason": current_resume_state.get("complexity_reason"),
-        "sub_questions": current_resume_state.get("sub_questions") or [],
-        "carried_constraints": constraints,
-        # A resumed turn is a continuation by construction — the user is answering a
-        # question about a subject already on the table. Offering them a fresh choice of
-        # corpus directions here would be the second interruption in a row.
-        "is_followup": True,
-        "rag_trace": rag_trace,
-    })
+    state.update(
+        {
+            "query": refined_question,
+            "rewrite_count": current_resume_state["rewrite_count"],
+            # The turn being resumed IS a HITL round. Counting it here is what makes the
+            # limit mean "per question" rather than "per graph run".
+            "hitl_rounds": int(current_resume_state.get("hitl_rounds") or 0) + 1,
+            "complexity": current_resume_state.get("complexity"),
+            "complexity_reason": current_resume_state.get("complexity_reason"),
+            "sub_questions": current_resume_state.get("sub_questions") or [],
+            "carried_constraints": constraints,
+            # A resumed turn is a continuation by construction — the user is answering a
+            # question about a subject already on the table. Offering them a fresh choice of
+            # corpus directions here would be the second interruption in a row.
+            "is_followup": True,
+            "rag_trace": rag_trace,
+        }
+    )
     return state
 
 

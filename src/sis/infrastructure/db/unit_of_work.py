@@ -22,6 +22,7 @@ and know nothing about schools, so binding the unit of work binds every read and
 inside it. Physical separation is therefore enforced by the connection rather than by a
 filter each repository has to remember — see `sis.infrastructure.db.session`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

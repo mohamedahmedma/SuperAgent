@@ -16,6 +16,7 @@ no lessons when the truth is that nobody has written them down. That is the same
 `SubjectGrade.academic_unavailable` exists for: a model handed an empty list will narrate a
 plausible reason for it, and a model handed a reason will not.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -132,9 +133,7 @@ class StudentTimetable:
         """
         wanted = str(day).strip().lower()
         return tuple(
-            lesson
-            for lesson in self.lessons
-            if lesson.day_of_week.strip().lower() == wanted
+            lesson for lesson in self.lessons if lesson.day_of_week.strip().lower() == wanted
         )
 
 

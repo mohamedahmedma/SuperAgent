@@ -37,6 +37,7 @@ that carry one go through batch mode. `sis/migrations/env.py` already turns
 `render_as_batch` on for SQLite and verifies foreign keys afterwards; revision 0003's
 docstring explains why.
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -68,9 +69,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name="pk_educational_systems"),
         sa.UniqueConstraint("school_id", "code", name="uq_educational_systems_school_code"),
     )
-    op.create_index(
-        "ix_educational_systems_school_id", "educational_systems", ["school_id"]
-    )
+    op.create_index("ix_educational_systems_school_id", "educational_systems", ["school_id"])
 
     with op.batch_alter_table("year_levels") as batch:
         batch.add_column(sa.Column("educational_system_id", sa.Integer(), nullable=True))
@@ -153,9 +152,7 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_role_permissions"),
-        sa.UniqueConstraint(
-            "role_id", "permission_id", name="uq_role_permissions_role_permission"
-        ),
+        sa.UniqueConstraint("role_id", "permission_id", name="uq_role_permissions_role_permission"),
     )
     op.create_index("ix_role_permissions_role_id", "role_permissions", ["role_id"])
     op.create_index("ix_role_permissions_permission_id", "role_permissions", ["permission_id"])
@@ -224,9 +221,7 @@ def upgrade() -> None:
             ["user_id"], ["users.id"], name="fk_teachers_user_id_users", ondelete="SET NULL"
         ),
         sa.PrimaryKeyConstraint("id", name="pk_teachers"),
-        sa.UniqueConstraint(
-            "school_id", "staff_number", name="uq_teachers_school_staff_number"
-        ),
+        sa.UniqueConstraint("school_id", "staff_number", name="uq_teachers_school_staff_number"),
     )
     op.create_index("ix_teachers_school_id", "teachers", ["school_id"])
     op.create_index("ix_teachers_user", "teachers", ["user_id"])
@@ -258,9 +253,7 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_teacher_subjects"),
-        sa.UniqueConstraint(
-            "teacher_id", "subject_id", name="uq_teacher_subjects_teacher_subject"
-        ),
+        sa.UniqueConstraint("teacher_id", "subject_id", name="uq_teacher_subjects_teacher_subject"),
     )
     op.create_index("ix_teacher_subjects_teacher_id", "teacher_subjects", ["teacher_id"])
     op.create_index("ix_teacher_subjects_subject_id", "teacher_subjects", ["subject_id"])

@@ -21,6 +21,7 @@ are temporarily unavailable and never a remembered or inferred figure. Every way
 failing to reach a system of record collapses onto it — see `UpstreamUnavailable` — so
 there is no path where an outage reaches a parent as a number.
 """
+
 from __future__ import annotations
 
 import logging

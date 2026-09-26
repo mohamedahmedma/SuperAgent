@@ -17,6 +17,7 @@ regression says WHICH rule broke rather than that a fifteen-message replay did.
     unanswerable — `child_roster`, `child_resolution`, `pin_the_child_the_parent_named`.
   * A spelling of Monday the school's vocabulary did not carry — `school_week`.
 """
+
 import importlib
 import json
 import os
@@ -37,7 +38,12 @@ from backend.composition import Services
 from backend.school_week import day_phrase
 from tests.general.test_chat_hitl_resume import FakeStorage
 from backend.agent.chat.answer_blocks import _append_answer_blocks, settle_answer_blocks
-from backend.agent.chat.clarification import TurnEntry, build_pending_hitl, child_choice_pending, pin_the_child_the_parent_named
+from backend.agent.chat.clarification import (
+    TurnEntry,
+    build_pending_hitl,
+    child_choice_pending,
+    pin_the_child_the_parent_named,
+)
 
 service = importlib.import_module("backend.agent.chat.service")
 
@@ -47,9 +53,20 @@ USER = "parent-stuck"
 SESSION = "session-stuck"
 
 FATMA = "فاطمه محمد ابوالحسن"
-DAUGHTER = {"student_id": "S-1", "full_name_ar": FATMA, "full_name_en": "Fatma", "gender": "female", "year_level": "Year 11"}
+DAUGHTER = {
+    "student_id": "S-1",
+    "full_name_ar": FATMA,
+    "full_name_en": "Fatma",
+    "gender": "female",
+    "year_level": "Year 11",
+}
 NAMESAKE = {"student_id": "S-2", "full_name_ar": FATMA, "gender": "male", "year_level": "Year 9"}
-BROTHER = {"student_id": "S-3", "full_name_ar": "عمر محمد ابوالحسن", "gender": "male", "year_level": "Year 6"}
+BROTHER = {
+    "student_id": "S-3",
+    "full_name_ar": "عمر محمد ابوالحسن",
+    "gender": "male",
+    "year_level": "Year 6",
+}
 
 ORIGINAL = "طيب بتاخد مواد اي"
 SUNDAY = "طيب هي يوم الحد عندها حصص اي"
@@ -103,7 +120,7 @@ class _StreamAgent:
         if self.fail:
             raise RuntimeError("provider timed out")
         for start in range(0, len(self.reply), 9):
-            yield AIMessageChunk(content=self.reply[start:start + 9], id="answer"), {}
+            yield AIMessageChunk(content=self.reply[start : start + 9], id="answer"), {}
 
 
 class _SyncAgent:
@@ -119,7 +136,7 @@ def _events(chunks):
     for chunk in chunks:
         body = chunk.strip()
         if body.startswith("data: "):
-            data = body[len("data: "):]
+            data = body[len("data: ") :]
             out.append({"type": "DONE"} if data == "[DONE]" else json.loads(data))
     return out
 
@@ -168,7 +185,9 @@ class _Session(unittest.IsolatedAsyncioTestCase):
 
     def _agent(self, ctx, tool_names=None, language=None):
         asked = self.planned[-1] if self.planned else ""
-        return _StreamAgent(ctx, self.replies.get(asked, ""), fail=self.fail_agent, on_run=self.on_run)
+        return _StreamAgent(
+            ctx, self.replies.get(asked, ""), fail=self.fail_agent, on_run=self.on_run
+        )
 
     async def say(self, text):
         caller = CallerIdentity(user_id=USER, guardian_id=GUARDIAN, guardian_token=TOKEN)
@@ -321,10 +340,14 @@ class ANewQuestionInsteadOfAName(_Session):
 
         events = await self.say(BUS)
 
-        self.assertEqual(self.planned[-1], BUS, "planned as the parent typed it, not as the original question")
+        self.assertEqual(
+            self.planned[-1], BUS, "planned as the parent typed it, not as the original question"
+        )
         self.assertIn("٧:٣٠", _shown(events))
         self.assertIsNone(self.pending)
-        self.assertEqual(self.pin.get("student_id", ""), "", "nobody was pinned on the strength of a question")
+        self.assertEqual(
+            self.pin.get("student_id", ""), "", "nobody was pinned on the strength of a question"
+        )
 
     async def test_the_client_is_told_the_message_replaced_the_question(self):
         """Live, so the web app un-hides the message it had marked as an answer; and
@@ -347,7 +370,9 @@ class ANewQuestionInsteadOfAName(_Session):
         events = await self.say(f"{FATMA} — Year 11")
 
         self.assertIn({"type": "turn", "answers_clarification": True}, events)
-        self.assertEqual("answered", self.storage.appends[-1]["messages"][-1].rag_trace["turn_clarification"])
+        self.assertEqual(
+            "answered", self.storage.appends[-1]["messages"][-1].rag_trace["turn_clarification"]
+        )
 
     async def test_a_nickname_the_roster_cannot_place_still_asks_again(self):
         """The resolver abstains — «الكبيرة» is a description, not a new subject — and
@@ -384,7 +409,11 @@ class TheSyncPathSpendsItToo(unittest.TestCase):
         with (
             patch("backend.records_http.get", _roster([DAUGHTER, NAMESAKE])),
             patch.object(service, "plan_turn", plan),
-            patch.object(service, "create_agent_for_request", lambda ctx, *a, **k: _SyncAgent("بتاخد العربي.")),
+            patch.object(
+                service,
+                "create_agent_for_request",
+                lambda ctx, *a, **k: _SyncAgent("بتاخد العربي."),
+            ),
             patch.object(service, "generate_session_title", Mock(return_value="س")),
         ):
             service.chat_with_agent(
@@ -424,7 +453,10 @@ class TheStaticReplyKeepsThePin(_Session):
 
     async def test_a_static_turn_with_nothing_to_pin_leaves_the_pin_alone(self):
         self.storage.metadata["child_context"] = {
-            "student_id": "S-3", "label": "عمر", "gender": "male", "guardian_id": GUARDIAN,
+            "student_id": "S-3",
+            "label": "عمر",
+            "gender": "male",
+            "guardian_id": GUARDIAN,
         }
         self.plans["شكرا"] = _social()
         await self.say("شكرا")
@@ -460,13 +492,26 @@ class TheEvidenceCutRunsWithoutATable(unittest.TestCase):
         self.assertNotIn("SUBJECTS", _append_answer_blocks(LEAKED, _Ctx()))
 
     def test_every_records_header_is_cut_with_or_without_a_block(self):
-        for header in ("CLASS", "TEACHERS", "SUBJECT_TEACHER", "ATTENDANCE", "NO_RECORDS", "NOT_AUTHORIZED"):
+        for header in (
+            "CLASS",
+            "TEACHERS",
+            "SUBJECT_TEACHER",
+            "ATTENDANCE",
+            "NO_RECORDS",
+            "NOT_AUTHORIZED",
+        ):
             with self.subTest(header=header):
                 text = f"الجواب:\n{header} for X: something the model should not have pasted"
                 self.assertEqual(_append_answer_blocks(text, _Ctx()), "الجواب:")
 
     def test_the_knowledge_tools_headers_are_cut_as_well(self):
-        for header in ("NO_KNOWLEDGE", "PARTIAL_EVIDENCE", "RETRIEVAL_ERROR", "NEEDS_CLARIFICATION", "NEEDS_SCOPE_SELECTION"):
+        for header in (
+            "NO_KNOWLEDGE",
+            "PARTIAL_EVIDENCE",
+            "RETRIEVAL_ERROR",
+            "NEEDS_CLARIFICATION",
+            "NEEDS_SCOPE_SELECTION",
+        ):
             with self.subTest(header=header):
                 text = f"عذرًا.\n{header}: instructions to the model"
                 self.assertEqual(_append_answer_blocks(text, _Ctx()), "عذرًا.")
@@ -485,7 +530,11 @@ class TheEvidenceCutRunsWithoutATable(unittest.TestCase):
 
     def test_english_prose_a_parent_may_legitimately_read_survives(self):
         """The fee and uniform answers from the same conversation."""
-        for line in ("Sports Wear: All Grades - Unisex", "Pre-K: 34,000", "Y11-Y12: 72,000 SAR (VAT)"):
+        for line in (
+            "Sports Wear: All Grades - Unisex",
+            "Pre-K: 34,000",
+            "Y11-Y12: 72,000 SAR (VAT)",
+        ):
             with self.subTest(line=line):
                 self.assertEqual(_append_answer_blocks(line, _Ctx()), line)
 
@@ -538,7 +587,10 @@ class TwoChildrenUnderOneNameAreToldApart(unittest.TestCase):
         self.assertEqual(options[2].label, "عمر محمد ابوالحسن")
 
     def test_the_latin_spelling_is_next_when_the_year_is_missing(self):
-        rows = [{**DAUGHTER, "year_level": ""}, {**NAMESAKE, "year_level": "", "full_name_en": "Fatma M."}]
+        rows = [
+            {**DAUGHTER, "year_level": ""},
+            {**NAMESAKE, "year_level": "", "full_name_en": "Fatma M."},
+        ]
         labels = [c.label for c in _as_options(rows)]
         self.assertEqual(labels, [f"{FATMA} — Fatma", f"{FATMA} — Fatma M."])
 
@@ -560,7 +612,10 @@ class TwoChildrenUnderOneNameAreToldApart(unittest.TestCase):
         self.assertEqual(len(set(asked.option_labels)), 2)
 
     def test_the_student_number_never_appears_in_a_label(self):
-        for rows in ([DAUGHTER, NAMESAKE], [{**DAUGHTER, "year_level": "", "full_name_en": ""}, {**NAMESAKE, "year_level": ""}]):
+        for rows in (
+            [DAUGHTER, NAMESAKE],
+            [{**DAUGHTER, "year_level": "", "full_name_en": ""}, {**NAMESAKE, "year_level": ""}],
+        ):
             for child in _as_options(rows):
                 self.assertNotIn(child.student_id, child.label)
 
@@ -626,7 +681,9 @@ class TheChoiceIsRememberedAsAChoice(unittest.TestCase):
     def test_it_round_trips_through_metadata(self):
         child = SessionChild(guardian_id=GUARDIAN)
         child.pin(student_id="S-1", chosen_by_parent=True)
-        loaded = SessionChild.from_metadata({"child_context": child.to_metadata()}, guardian_id=GUARDIAN)
+        loaded = SessionChild.from_metadata(
+            {"child_context": child.to_metadata()}, guardian_id=GUARDIAN
+        )
         self.assertTrue(loaded.chosen_by_parent)
 
     def test_a_pin_stored_before_the_field_existed_still_loads(self):
@@ -652,7 +709,8 @@ class TappingAnOfferedOptionPinsThatChild(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.ctx = ChatRequestContext(
-            user_id=USER, session_id=SESSION,
+            user_id=USER,
+            session_id=SESSION,
             caller=CallerIdentity(user_id=USER, guardian_id=GUARDIAN, guardian_token=TOKEN),
         )
         self.addCleanup(self.ctx.close)

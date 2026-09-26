@@ -4,6 +4,7 @@ The store is exercised against real Postgres through an injected session factory
 throwaway schema per test, so the whole persistence layer — including delete cascades,
 the extraction cache, and the version backfill — runs the SQL production runs.
 """
+
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
@@ -136,7 +137,9 @@ class DossierModelTests(unittest.TestCase):
     def test_unextracted_or_empty_assets_are_not_indexable(self):
         """An empty text surface must not reach the index: it is unfindable noise that
         still costs an embedding."""
-        self.assertFalse(make_dossier(status=ExtractionStatus.PENDING, extraction=False).is_indexable)
+        self.assertFalse(
+            make_dossier(status=ExtractionStatus.PENDING, extraction=False).is_indexable
+        )
         self.assertFalse(make_dossier(status=ExtractionStatus.FAILED).is_indexable)
         empty = make_dossier()
         empty.extraction.text = TextSurface()
@@ -310,19 +313,25 @@ class AssetStorePersistenceTests(AssetStoreTestCase):
         self.assertIsNone(self.store.get(""))
 
     def test_get_many_preserves_requested_order_and_skips_missing(self):
-        self.store.record_many([
-            make_dossier(asset_id="doc.pdf::p1::img0"),
-            make_dossier(asset_id="doc.pdf::p2::img0", page=2),
-        ])
+        self.store.record_many(
+            [
+                make_dossier(asset_id="doc.pdf::p1::img0"),
+                make_dossier(asset_id="doc.pdf::p2::img0", page=2),
+            ]
+        )
         found = self.store.get_many(["doc.pdf::p2::img0", "missing", "doc.pdf::p1::img0"])
         self.assertEqual(["doc.pdf::p2::img0", "doc.pdf::p1::img0"], [d.asset_id for d in found])
 
     def test_list_by_filename_indexable_only_filters_unusable_assets(self):
-        self.store.record_many([
-            make_dossier(asset_id="doc.pdf::p1::img0"),
-            make_dossier(asset_id="doc.pdf::p1::img1", role=AssetRole.DECORATIVE),
-            make_dossier(asset_id="doc.pdf::p1::img2", status=ExtractionStatus.PENDING, extraction=False),
-        ])
+        self.store.record_many(
+            [
+                make_dossier(asset_id="doc.pdf::p1::img0"),
+                make_dossier(asset_id="doc.pdf::p1::img1", role=AssetRole.DECORATIVE),
+                make_dossier(
+                    asset_id="doc.pdf::p1::img2", status=ExtractionStatus.PENDING, extraction=False
+                ),
+            ]
+        )
         self.assertEqual(3, len(self.store.list_by_filename("doc.pdf")))
         indexable = self.store.list_by_filename("doc.pdf", indexable_only=True)
         self.assertEqual(["doc.pdf::p1::img0"], [d.asset_id for d in indexable])
@@ -377,8 +386,12 @@ class ExtractionCacheTests(AssetStoreTestCase):
 
         session = self.session_factory()
         session.add(
-            AssetExtraction(sha256="d" * 64, profile="base", dossier_version=DOSSIER_VERSION,
-                            payload={"text": {"unknown_field": 1}})
+            AssetExtraction(
+                sha256="d" * 64,
+                profile="base",
+                dossier_version=DOSSIER_VERSION,
+                payload={"text": {"unknown_field": 1}},
+            )
         )
         session.commit()
         session.close()
@@ -400,10 +413,12 @@ class DeletionTests(AssetStoreTestCase):
         """The dedup property has a deletion consequence: a logo shared across two
         documents must survive the deletion of one of them."""
         digest, uri = self._store_blob(b"shared-logo")
-        self.store.record_many([
-            make_dossier(asset_id="a.pdf::p1::img0", sha256=digest, filename="a.pdf", uri=uri),
-            make_dossier(asset_id="b.pdf::p1::img0", sha256=digest, filename="b.pdf", uri=uri),
-        ])
+        self.store.record_many(
+            [
+                make_dossier(asset_id="a.pdf::p1::img0", sha256=digest, filename="a.pdf", uri=uri),
+                make_dossier(asset_id="b.pdf::p1::img0", sha256=digest, filename="b.pdf", uri=uri),
+            ]
+        )
 
         result = self.store.delete_by_filename("a.pdf")
         self.assertEqual(1, result.assets_deleted)
@@ -444,10 +459,12 @@ class DeletionTests(AssetStoreTestCase):
 
 class BackfillTests(AssetStoreTestCase):
     def _seed(self, count, version=1):
-        self.store.record_many([
-            make_dossier(asset_id=f"doc.pdf::p{i}::img0", page=i, version=version)
-            for i in range(count)
-        ])
+        self.store.record_many(
+            [
+                make_dossier(asset_id=f"doc.pdf::p{i}::img0", page=i, version=version)
+                for i in range(count)
+            ]
+        )
 
     def test_iter_stale_paginates_without_skipping_mutated_rows(self):
         self._seed(7, version=1)
@@ -508,11 +525,12 @@ class BackfillTests(AssetStoreTestCase):
 class StatsTests(AssetStoreTestCase):
     def test_dedup_ratio_reports_cache_leverage(self):
         shared = compute_sha256(b"logo")
-        self.store.record_many([
-            make_dossier(asset_id=f"doc.pdf::p{i}::img0", page=i, sha256=shared)
-            for i in range(5)
-        ])
-        self.store.record(make_dossier(asset_id="doc.pdf::p9::img0", page=9, sha256=compute_sha256(b"unique")))
+        self.store.record_many(
+            [make_dossier(asset_id=f"doc.pdf::p{i}::img0", page=i, sha256=shared) for i in range(5)]
+        )
+        self.store.record(
+            make_dossier(asset_id="doc.pdf::p9::img0", page=9, sha256=compute_sha256(b"unique"))
+        )
         self.store.save_extraction(shared, "base", make_dossier().extraction)
 
         stats = self.store.stats()
@@ -567,7 +585,9 @@ class CachedStoreTests(AssetStoreTestCase):
 
     def test_get_is_served_from_cache_without_touching_the_database(self):
         self.store.record(make_dossier())
-        with patch.object(self.store, "_unit_of_work", side_effect=AssertionError("hit the database")):
+        with patch.object(
+            self.store, "_unit_of_work", side_effect=AssertionError("hit the database")
+        ):
             loaded = self.store.get("doc.pdf::p1::img0")
         self.assertEqual("Grade 5 fee schedule", loaded.extraction.text.caption)
 
@@ -611,10 +631,14 @@ class StoreEdgeCaseTests(AssetStoreTestCase):
 
     def test_same_image_in_two_documents_yields_two_indexable_occurrences(self):
         digest, uri = self._store_blob(b"one-image-two-docs")
-        self.store.record_many([
-            make_dossier(asset_id="a.pdf::p1::img0", sha256=digest, filename="a.pdf", uri=uri),
-            make_dossier(asset_id="b.pdf::p4::img0", sha256=digest, filename="b.pdf", page=4, uri=uri),
-        ])
+        self.store.record_many(
+            [
+                make_dossier(asset_id="a.pdf::p1::img0", sha256=digest, filename="a.pdf", uri=uri),
+                make_dossier(
+                    asset_id="b.pdf::p4::img0", sha256=digest, filename="b.pdf", page=4, uri=uri
+                ),
+            ]
+        )
         self.assertEqual(1, len(self.store.list_by_filename("a.pdf", indexable_only=True)))
         self.assertEqual(1, len(self.store.list_by_filename("b.pdf", indexable_only=True)))
         self.assertEqual(2.0, self.store.stats()["dedup_ratio"])
@@ -648,11 +672,15 @@ class StoreEdgeCaseTests(AssetStoreTestCase):
         self.assertEqual([1], [len(batch) for batch in batches])
 
     def test_stats_reports_mixed_statuses(self):
-        self.store.record_many([
-            make_dossier(asset_id="doc.pdf::p1::img0"),
-            make_dossier(asset_id="doc.pdf::p1::img1", status=ExtractionStatus.FAILED),
-            make_dossier(asset_id="doc.pdf::p1::img2", status=ExtractionStatus.PENDING, extraction=False),
-        ])
+        self.store.record_many(
+            [
+                make_dossier(asset_id="doc.pdf::p1::img0"),
+                make_dossier(asset_id="doc.pdf::p1::img1", status=ExtractionStatus.FAILED),
+                make_dossier(
+                    asset_id="doc.pdf::p1::img2", status=ExtractionStatus.PENDING, extraction=False
+                ),
+            ]
+        )
         by_status = self.store.stats()["by_status"]
         self.assertEqual({"extracted": 1, "failed": 1, "pending": 1}, by_status)
 
@@ -681,7 +709,9 @@ class DossierMetadataTests(unittest.TestCase):
             Relation(kind=RelationKind.PART_OF, target="doc.pdf::p1::l3::4", note="figure 2"),
         ]
         restored = AssetDossier.model_validate(dossier.model_dump(mode="json"))
-        self.assertEqual([RelationKind.DEPICTS, RelationKind.PART_OF], [r.kind for r in restored.relations])
+        self.assertEqual(
+            [RelationKind.DEPICTS, RelationKind.PART_OF], [r.kind for r in restored.relations]
+        )
         self.assertEqual("figure 2", restored.relations[1].note)
 
     def test_structured_surface_round_trips_typed_attributes_and_measures(self):
@@ -716,7 +746,9 @@ class DossierMetadataTests(unittest.TestCase):
 
     def test_source_bbox_is_optional_and_round_trips(self):
         dossier = make_dossier()
-        dossier.source = SourceRef(filename="doc.pdf", page_number=2, bbox=[10.0, 20.0, 100.0, 80.0])
+        dossier.source = SourceRef(
+            filename="doc.pdf", page_number=2, bbox=[10.0, 20.0, 100.0, 80.0]
+        )
         restored = AssetDossier.model_validate(dossier.model_dump(mode="json"))
         self.assertEqual([10.0, 20.0, 100.0, 80.0], restored.source.bbox)
         self.assertIsNone(make_dossier().source.bbox)

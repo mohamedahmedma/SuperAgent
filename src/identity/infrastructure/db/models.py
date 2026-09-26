@@ -17,6 +17,7 @@ it is given. Both paths share the property the rule is actually about: the accou
 names its own guardian. A parent who could choose their own guardian id could read any
 family's records, and neither path lets them near it.
 """
+
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
@@ -76,7 +77,9 @@ class Account(Base):
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class RefreshToken(Base):
@@ -115,7 +118,9 @@ class RefreshToken(Base):
 
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class VerificationChallenge(Base):
@@ -214,7 +219,9 @@ class VerificationChallenge(Base):
 
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class AuthAudit(Base):
@@ -240,4 +247,6 @@ class AuthAudit(Base):
     succeeded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
 
     client_ip: Mapped[str] = mapped_column(String(64), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )

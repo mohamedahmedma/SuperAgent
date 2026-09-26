@@ -10,6 +10,7 @@ answer it, and they cover different halves:
 
 Both are tested here so the pair is visible in one place.
 """
+
 import unittest
 from unittest.mock import patch
 
@@ -105,14 +106,16 @@ class AgentLoopTests(unittest.TestCase):
         from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
         from langchain_core.outputs import ChatGeneration, ChatResult
 
-        scripted = iter([
-            AIMessage(
-                content="",
-                tool_calls=[_call("مصاريف ابني كام", f"c{i}") for i in range(5)],
-                id="m1",
-            ),
-            AIMessage(content="رسوم الصف الأول 30,000 جنيه [1]", id="m2"),
-        ])
+        scripted = iter(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[_call("مصاريف ابني كام", f"c{i}") for i in range(5)],
+                    id="m1",
+                ),
+                AIMessage(content="رسوم الصف الأول 30,000 جنيه [1]", id="m2"),
+            ]
+        )
 
         class Scripted(GenericFakeChatModel):
             def _generate(self, messages, stop=None, run_manager=None, **kw):

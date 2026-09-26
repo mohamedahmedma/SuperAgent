@@ -19,6 +19,7 @@ and this needs to be a guarantee:
   * disclosing a personal detail overrides a rejection — someone answering "he is 9" is
     continuing a conversation, not changing the subject
 """
+
 from __future__ import annotations
 
 import logging
@@ -248,7 +249,6 @@ def _default_scope_invoke(ctx, signals: RequestSignals) -> Optional[Dict[str, An
     profile = get_profile()
     personal_fields = list(getattr(ctx.config, "personal_data_fields", None) or [])
 
-
     index = index_store.get()
     prompt = render(
         "rag/scope_check.j2",
@@ -404,9 +404,7 @@ def distinct_directions(
         if max_score_gap > 0 and (best - match.score) > max_score_gap:
             continue
         unit = _unit_vector(match.vector)
-        if unit is not None and any(
-            float(unit @ other) >= duplicate_similarity for other in kept
-        ):
+        if unit is not None and any(float(unit @ other) >= duplicate_similarity for other in kept):
             continue
         seen.add(question)
         if unit is not None:

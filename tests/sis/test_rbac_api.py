@@ -25,6 +25,7 @@ The existing integration door is untouched by all of this, and `test_authenticat
 still proves it. These tests sign in as people; that suite calls with no credential at all,
 and both must keep passing.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -88,12 +89,8 @@ def ids(client: TestClient, registrar: dict[str, str], school: None) -> dict[str
         sync_roles(session)
         found = {
             "school": session.scalar(select(m.School.id).where(m.School.code == SCHOOL)),
-            "level_p1": session.scalar(
-                select(m.YearLevel.id).where(m.YearLevel.code == "AR-P1")
-            ),
-            "level_s1": session.scalar(
-                select(m.YearLevel.id).where(m.YearLevel.code == "AR-S1")
-            ),
+            "level_p1": session.scalar(select(m.YearLevel.id).where(m.YearLevel.code == "AR-P1")),
+            "level_s1": session.scalar(select(m.YearLevel.id).where(m.YearLevel.code == "AR-S1")),
         }
         for code in ("P1A", "P1B", "LGA"):
             found[f"class_{code}"] = session.scalar(
@@ -107,9 +104,7 @@ def ids(client: TestClient, registrar: dict[str, str], school: None) -> dict[str
 
 
 def _sign_in(client: TestClient, username: str) -> dict[str, str]:
-    response = client.post(
-        "/v1/auth/login", json={"username": username, "password": PASSWORD}
-    )
+    response = client.post("/v1/auth/login", json={"username": username, "password": PASSWORD})
     assert response.status_code == 200, response.text
     return {"Authorization": "Bearer " + response.json()["token"]}
 
@@ -134,9 +129,7 @@ def teacher_of_p1a(client: TestClient, ids: dict[str, int]) -> dict[str, str]:
 def principal(client: TestClient, ids: dict[str, int]) -> dict[str, str]:
     with SqlAlchemyUnitOfWork() as uow:
         user_id = _make_user(uow._session, "principal.9", school_id=ids["school"])
-        _grant(
-            uow._session, user_id, RoleCode.PRINCIPAL, ScopeType.SCHOOL, ids["school"]
-        )
+        _grant(uow._session, user_id, RoleCode.PRINCIPAL, ScopeType.SCHOOL, ids["school"])
         uow.commit()
     return _sign_in(client, "principal.9")
 
@@ -205,9 +198,7 @@ class TestRolesAreAdditive:
                 == 200
             )
 
-        grants = client.get(
-            f"/v1/rbac/users/{teacher_id}/roles", headers=principal
-        ).json()
+        grants = client.get(f"/v1/rbac/users/{teacher_id}/roles", headers=principal).json()
         assert sorted(row["scope_id"] for row in grants) == sorted(
             [ids["class_P1A"], ids["class_P1B"]]
         )
@@ -225,12 +216,8 @@ class TestRolesAreAdditive:
             "scope_type": "class_section",
             "scope_id": ids["class_P1A"],
         }
-        first = client.post(
-            f"/v1/rbac/users/{user_id}/roles", headers=principal, json=body
-        )
-        second = client.post(
-            f"/v1/rbac/users/{user_id}/roles", headers=principal, json=body
-        )
+        first = client.post(f"/v1/rbac/users/{user_id}/roles", headers=principal, json=body)
+        second = client.post(f"/v1/rbac/users/{user_id}/roles", headers=principal, json=body)
         assert first.status_code == second.status_code == 200
         assert len(second.json()) == 1
 
@@ -483,8 +470,7 @@ class TestScopesBite:
             f"/v1/schools/{SCHOOL}/timetable-periods",
             json={
                 "periods": [
-                    {"period_number": n, "name_en": f"P{n}", "name_ar": f"P{n}"}
-                    for n in (1, 2)
+                    {"period_number": n, "name_en": f"P{n}", "name_ar": f"P{n}"} for n in (1, 2)
                 ]
             },
             headers={"X-API-Key": "registrar-fixture-key-0000000000"},
@@ -727,12 +713,19 @@ class TestCatalogue:
         assert "attendance.write" in rows["attendance_supervisor"]["permissions"]
         # The owner can maintain the approved in-school academic setup, but not records,
         # marks, system administration, or school creation.
-        assert {"structure.write", "teachers.assign_subjects", "teachers.assign_classes", "roles.assign"}.issubset(
-            rows["school_owner"]["permissions"]
-        )
-        assert not {"grades.write", "schools.write", "system.manage", "students.write", "attendance.write"}.intersection(
-            rows["school_owner"]["permissions"]
-        )
+        assert {
+            "structure.write",
+            "teachers.assign_subjects",
+            "teachers.assign_classes",
+            "roles.assign",
+        }.issubset(rows["school_owner"]["permissions"])
+        assert not {
+            "grades.write",
+            "schools.write",
+            "system.manage",
+            "students.write",
+            "attendance.write",
+        }.intersection(rows["school_owner"]["permissions"])
 
     def test_the_grade_supervisor_spelling_is_advertised(
         self, client: TestClient, principal: dict[str, str]
@@ -761,7 +754,9 @@ class TestCatalogue:
     def test_the_permission_catalogue_is_this_build(
         self, client: TestClient, principal: dict[str, str]
     ) -> None:
-        listed = {row["code"] for row in client.get("/v1/rbac/permissions", headers=principal).json()}
+        listed = {
+            row["code"] for row in client.get("/v1/rbac/permissions", headers=principal).json()
+        }
         assert listed == {permission.value for permission in Permission}
 
     def test_the_catalogue_needs_a_session(self, client: TestClient) -> None:
@@ -792,11 +787,7 @@ class TestTheProfile:
         profile = me.json()["profile"]
 
         assert "grades.write" in profile["permissions"]
-        writable = [
-            grant
-            for grant in profile["grants"]
-            if grant["permission"] == "grades.write"
-        ]
+        writable = [grant for grant in profile["grants"] if grant["permission"] == "grades.write"]
         assert writable == [
             {
                 "permission": "grades.write",
@@ -896,10 +887,7 @@ class TestTheCatalogueReconcile:
         assert permissions == len(list(Permission))
 
         with SqlAlchemyUnitOfWork() as uow:
-            stored = {
-                row.code
-                for row in uow._session.scalars(select(m.PermissionRow)).all()
-            }
+            stored = {row.code for row in uow._session.scalars(select(m.PermissionRow)).all()}
             # Every permission has a label, because both callers derive it the same way.
             blank = uow._session.scalars(
                 select(m.PermissionRow).where(m.PermissionRow.name_en == "")

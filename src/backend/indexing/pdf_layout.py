@@ -20,6 +20,7 @@ chunking; here they feed the section stack in document_loader for real.
 page_number is 0-based, matching the PyPDFLoader metadata the legacy path emits.
 pdfplumber is imported lazily so importing this module stays cheap for non-PDF flows.
 """
+
 from __future__ import annotations
 
 import re
@@ -46,8 +47,18 @@ NUM_HEADING_RE = re.compile(r"^(\d+(?:\.\d+)*)(\s+|:|\.|\))")
 # in sentence/clause punctuation). Includes Arabic-script marks: ، U+060C comma,
 # ؛ U+061B semicolon, ؟ U+061F question mark, ۔ U+06D4 full stop.
 _SENTENCE_ENDINGS = (
-    ".", ",", ";", ":", "。", "，", "；", "：",
-    "،", "؛", "؟", "۔",
+    ".",
+    ",",
+    ";",
+    ":",
+    "。",
+    "，",
+    "；",
+    "：",
+    "،",
+    "؛",
+    "؟",
+    "۔",
 )
 # Page furniture (repeated headers/footers): a short line whose digit-masked text
 # repeats on enough pages, inside the top/bottom edge bands when height is known.
@@ -129,25 +140,30 @@ def merge_lines_to_paragraphs(
         if abs(line["top"] - last_top) <= gap_threshold:
             buffer.append(line)
         else:
-            paragraphs.append({
-                "type": "text",
-                "content": "\n".join(item["text"].strip() for item in buffer),
-                "top": buffer[0]["top"],
-            })
+            paragraphs.append(
+                {
+                    "type": "text",
+                    "content": "\n".join(item["text"].strip() for item in buffer),
+                    "top": buffer[0]["top"],
+                }
+            )
             buffer = [line]
         last_top = line["top"]
 
-    paragraphs.append({
-        "type": "text",
-        "content": "\n".join(item["text"].strip() for item in buffer),
-        "top": buffer[0]["top"],
-    })
+    paragraphs.append(
+        {
+            "type": "text",
+            "content": "\n".join(item["text"].strip() for item in buffer),
+            "top": buffer[0]["top"],
+        }
+    )
     return paragraphs
 
 
 # ---------------------------------------------------------------------------
 # Heading classification
 # ---------------------------------------------------------------------------
+
 
 def _line_font_size(chars: List[dict]) -> Optional[float]:
     sizes = [c.get("size") for c in chars or [] if isinstance(c.get("size"), (int, float))]
@@ -277,7 +293,8 @@ def remove_page_furniture(
     for page in pages:
         height = page.get("height")
         kept_lines = [
-            line for line in page.get("lines", [])
+            line
+            for line in page.get("lines", [])
             if not (
                 _in_edge_band(line, height)
                 and _furniture_key((line.get("text") or "").strip()) in furniture_keys
@@ -316,11 +333,13 @@ def build_blocks_from_pages(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]
                     heading_sizes.add(round(float(line["size"]), 1))
             else:
                 body_lines.append(line)
-        page_partitions.append({
-            "page": page,
-            "heading_lines": heading_lines,
-            "body_lines": body_lines,
-        })
+        page_partitions.append(
+            {
+                "page": page,
+                "heading_lines": heading_lines,
+                "body_lines": body_lines,
+            }
+        )
 
     size_rank = {size: rank + 1 for rank, size in enumerate(sorted(heading_sizes, reverse=True))}
 
@@ -337,50 +356,55 @@ def build_blocks_from_pages(pages: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             top = float(table["bbox"][1])
             page_height = page.get("height")
             if looks_like_real_table(rows):
-                page_blocks.append({
-                    "type": "table",
-                    "content": format_table_rows(rows),
-                    "rows": rows,
-                    "page_number": page_number,
-                    "top": top,
-                    # For the cross-page stitcher in document_loader. One table split by
-                    # a page break ends at the foot of one page and resumes at the head
-                    # of the next; two different tables that happen to share a shape do
-                    # not. Without the geometry that test cannot run at all, so it is
-                    # carried here rather than recovered later.
-                    #
-                    # The page's own edges, not its height: a cropped page's coordinates
-                    # start at bbox[1] rather than 0, and comparing a bottom measured in
-                    # that space against a height measured as an extent is off by the
-                    # offset. Both edges travel, so the comparison cannot drift.
-                    "bottom": float(table["bbox"][3]),
-                    # The horizontal span too: a continuation is laid out with the
-                    # columns it is continuing, so it occupies the same span. A different
-                    # grid that happens to meet it at the page edges usually does not.
-                    "x0": float(table["bbox"][0]),
-                    "x1": float(table["bbox"][2]),
-                    "page_top": page.get("page_top", 0.0),
-                    "page_bottom": page.get("page_bottom") or (
-                        float(page_height) if page_height else None
-                    ),
-                })
+                page_blocks.append(
+                    {
+                        "type": "table",
+                        "content": format_table_rows(rows),
+                        "rows": rows,
+                        "page_number": page_number,
+                        "top": top,
+                        # For the cross-page stitcher in document_loader. One table split by
+                        # a page break ends at the foot of one page and resumes at the head
+                        # of the next; two different tables that happen to share a shape do
+                        # not. Without the geometry that test cannot run at all, so it is
+                        # carried here rather than recovered later.
+                        #
+                        # The page's own edges, not its height: a cropped page's coordinates
+                        # start at bbox[1] rather than 0, and comparing a bottom measured in
+                        # that space against a height measured as an extent is off by the
+                        # offset. Both edges travel, so the comparison cannot drift.
+                        "bottom": float(table["bbox"][3]),
+                        # The horizontal span too: a continuation is laid out with the
+                        # columns it is continuing, so it occupies the same span. A different
+                        # grid that happens to meet it at the page edges usually does not.
+                        "x0": float(table["bbox"][0]),
+                        "x1": float(table["bbox"][2]),
+                        "page_top": page.get("page_top", 0.0),
+                        "page_bottom": page.get("page_bottom")
+                        or (float(page_height) if page_height else None),
+                    }
+                )
             else:
-                page_blocks.append({
-                    "type": "text",
-                    "content": flatten_table_to_text(rows),
-                    "page_number": page_number,
-                    "top": top,
-                })
+                page_blocks.append(
+                    {
+                        "type": "text",
+                        "content": flatten_table_to_text(rows),
+                        "page_number": page_number,
+                        "top": top,
+                    }
+                )
 
         for line in partition["heading_lines"]:
             text = line["text"].strip()
-            page_blocks.append({
-                "type": "heading",
-                "content": text,
-                "level": heading_level(text, line.get("size"), size_rank),
-                "page_number": page_number,
-                "top": float(line["top"]),
-            })
+            page_blocks.append(
+                {
+                    "type": "heading",
+                    "content": text,
+                    "level": heading_level(text, line.get("size"), size_rank),
+                    "page_number": page_number,
+                    "top": float(line["top"]),
+                }
+            )
 
         for paragraph in merge_lines_to_paragraphs(partition["body_lines"]):
             paragraph["page_number"] = page_number
@@ -494,15 +518,17 @@ def _image_blocks_for_page(page, page_number: int) -> List[Dict[str, Any]]:
         data = _crop_image_bytes(page, bbox)
         if not data:
             continue
-        blocks.append({
-            "type": "image",
-            "content": "",
-            "data": data,
-            "content_type": "image/png",
-            "bbox": [float(value) for value in bbox],
-            "page_number": page_number,
-            "top": float(image.get("top") or 0.0),
-        })
+        blocks.append(
+            {
+                "type": "image",
+                "content": "",
+                "data": data,
+                "content_type": "image/png",
+                "bbox": [float(value) for value in bbox],
+                "page_number": page_number,
+                "top": float(image.get("top") or 0.0),
+            }
+        )
     return blocks
 
 
@@ -517,20 +543,21 @@ def parse_pdf_blocks(file_path: str) -> List[Dict[str, Any]]:
         for page_number, page in enumerate(pdf.pages):
             found_tables = page.find_tables()
             page_box = getattr(page, "bbox", None)
-            pages.append({
-                "page_number": page_number,
-                "height": float(page.height) if getattr(page, "height", None) else None,
-                # The page's own top and bottom in the coordinate space its tables are
-                # measured in. A cropped page starts at bbox[1], not 0, so its height is
-                # an extent and cannot be compared against a bottom directly.
-                "page_top": float(page_box[1]) if page_box else 0.0,
-                "page_bottom": float(page_box[3]) if page_box else None,
-                "tables": [
-                    {"bbox": table.bbox, "rows": table.extract()}
-                    for table in found_tables
-                ],
-                "lines": _extract_page_lines(page),
-            })
+            pages.append(
+                {
+                    "page_number": page_number,
+                    "height": float(page.height) if getattr(page, "height", None) else None,
+                    # The page's own top and bottom in the coordinate space its tables are
+                    # measured in. A cropped page starts at bbox[1], not 0, so its height is
+                    # an extent and cannot be compared against a bottom directly.
+                    "page_top": float(page_box[1]) if page_box else 0.0,
+                    "page_bottom": float(page_box[3]) if page_box else None,
+                    "tables": [
+                        {"bbox": table.bbox, "rows": table.extract()} for table in found_tables
+                    ],
+                    "lines": _extract_page_lines(page),
+                }
+            )
             if EXTRACT_PDF_IMAGES:
                 image_blocks.extend(_image_blocks_for_page(page, page_number))
 

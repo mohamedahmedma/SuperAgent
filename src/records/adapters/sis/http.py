@@ -25,6 +25,7 @@ A thread either sees `None` and joins the slow path, or sees a client ready to u
 lock still guards construction, and the second check inside it is what stops two threads
 that both saw `None` from building two pools.
 """
+
 from __future__ import annotations
 
 import threading

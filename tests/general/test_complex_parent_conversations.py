@@ -9,6 +9,7 @@ surcharge, arithmetic the parent asked for. Those went with the check itself: a 
 reaches the reader as a block the tool rendered, so there is no model-written figure left
 to verify. See tests/general/test_answer_blocks.py for what replaced it.
 """
+
 import unittest
 
 from backend.agent.chat.child_context import SessionChild

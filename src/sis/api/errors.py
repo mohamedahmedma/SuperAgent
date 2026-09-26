@@ -18,6 +18,7 @@ the error happened to be raised.
 anyone remembering to edit this file — and a mapping that silently defaulted such an
 error to 400 would ship a wrong status code with no test failing.
 """
+
 from __future__ import annotations
 
 import logging
@@ -129,9 +130,7 @@ async def sis_error_handler(request: Request, exc: SisError) -> JSONResponse:
     return _response(status_code, error_detail(exc.code, exc.message, exc.field))
 
 
-async def http_exception_handler(
-    request: Request, exc: StarletteHTTPException
-) -> JSONResponse:
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     """Normalise every `HTTPException` — ours and the framework's — into one envelope.
 
     Handlers raise `HTTPException(detail={"code": ..., "message": ...})` and that dict is
@@ -152,9 +151,7 @@ async def http_exception_handler(
     )
 
 
-async def validation_error_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """Pydantic's rejection, in the same envelope as a domain `ValidationError`.
 
     `errors` is kept alongside the envelope because a registrar uploading a form with
@@ -174,10 +171,17 @@ async def validation_error_handler(
         # `jsonable_encoder` is not needed: pydantic v2 already returns JSON-safe errors,
         # except for `ctx` values, which are dropped here rather than risking a 500 while
         # rendering a 422.
-        content={"detail": body, "errors": [
-            {"loc": [str(p) for p in e.get("loc", ())], "msg": e.get("msg", ""), "type": e.get("type", "")}
-            for e in exc.errors()
-        ]},
+        content={
+            "detail": body,
+            "errors": [
+                {
+                    "loc": [str(p) for p in e.get("loc", ())],
+                    "msg": e.get("msg", ""),
+                    "type": e.get("type", ""),
+                }
+                for e in exc.errors()
+            ],
+        },
     )
 
 

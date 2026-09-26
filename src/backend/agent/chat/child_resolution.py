@@ -26,6 +26,7 @@ this turn's guardian, and every subsequent read is re-checked there. The worst a
 answer here produces is a refusal, or an answer about the wrong one of the caller's own
 children — which is why the rules below degrade toward asking rather than guessing.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -189,9 +190,7 @@ def resolve_child(
     #    select a child by virtue of a blank cell — which is the state every child is in
     #    until a registrar uploads it.
     wanted = _GENDERED.get(reference, "")
-    candidates = (
-        [c for c in roster if c.gender in (wanted, "unknown")] if wanted else list(roster)
-    )
+    candidates = [c for c in roster if c.gender in (wanted, "unknown")] if wanted else list(roster)
     if wanted and not candidates:
         # The parent said "my son" and nobody on file could be one. Their wording is
         # better evidence than the column, so ask rather than declaring them wrong.

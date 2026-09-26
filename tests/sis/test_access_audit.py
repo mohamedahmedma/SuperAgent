@@ -15,6 +15,7 @@ distinction survives here, which is the only place it is safe for it to exist.
 before the refusal is raised. An audit rolled back alongside the request that failed
 records only the accesses that succeeded, which is exactly backwards.
 """
+
 from datetime import UTC, datetime
 
 import pytest
@@ -169,6 +170,7 @@ class TestWhatIsRecorded:
     def test_a_failing_audit_does_not_fail_the_read(self, family, permitted, caplog):
         """Best effort, and loudly. A school whose audit table is briefly unwritable
         should still be able to tell a parent her daughter's marks."""
+
         def _explode(_attempt):
             raise RuntimeError("the audit table is on fire")
 

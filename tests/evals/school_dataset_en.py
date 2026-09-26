@@ -27,6 +27,7 @@ retrieval.
 Gold spans are NOT translated. They are English either way, because they are quotations
 from an English corpus, so both datasets are scored against exactly the same evidence.
 """
+
 from __future__ import annotations
 
 import json
@@ -73,7 +74,11 @@ def _build() -> List[Case]:
             f"quietly flatter whichever side it favours."
         )
     return [
-        replace(case, question=english[case.id], context=english.get(f"{case.id}::context", case.context))
+        replace(
+            case,
+            question=english[case.id],
+            context=english.get(f"{case.id}::context", case.context),
+        )
         for case in _ARABIC_CASES
     ]
 

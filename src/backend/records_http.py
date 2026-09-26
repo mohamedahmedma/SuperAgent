@@ -13,6 +13,7 @@ same everywhere.
 seam a test replaces: patching it catches the roster and the records calls together, as
 patching `requests.get` used to.
 """
+
 from __future__ import annotations
 
 import threading

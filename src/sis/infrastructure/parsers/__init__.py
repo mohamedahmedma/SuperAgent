@@ -9,6 +9,7 @@ Neither half validates anything about a school. Resolving a class code, checking
 open and refusing a duplicate enrolment all belong to the services, after parsing, where
 the outcome is visible as a row the registrar can read.
 """
+
 from sis.infrastructure.parsers.grades import GRADE_COLUMNS, SpreadsheetGradeParser
 from sis.infrastructure.parsers.guardians import (
     GUARDIAN_COLUMNS,

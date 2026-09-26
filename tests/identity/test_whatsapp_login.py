@@ -9,6 +9,7 @@ The two tests that matter most are the pair near the bottom that hold one half o
 proof each. Every other test here checks that the flow works; those two check that it
 cannot be made to work by somebody who should not be able to.
 """
+
 import hashlib
 import hmac
 import json
@@ -104,9 +105,7 @@ def _inbound(wa_id: str, text: str, *, message_id: str = "wamid.TEST1") -> dict:
                                 "display_phone_number": "201288339613",
                                 "phone_number_id": "phone-number-id-1",
                             },
-                            "contacts": [
-                                {"profile": {"name": "فاطمة علي"}, "wa_id": wa_id}
-                            ],
+                            "contacts": [{"profile": {"name": "فاطمة علي"}, "wa_id": wa_id}],
                             "messages": [
                                 {
                                     "from": wa_id,
@@ -148,9 +147,7 @@ def _code_from(gateway: RecordingWhatsAppGateway) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_a_parent_signs_in_without_ever_having_a_password(
-    client, gateway, directory
-) -> None:
+def test_a_parent_signs_in_without_ever_having_a_password(client, gateway, directory) -> None:
     """The whole point, start to finish."""
     started = _start(client)
     assert started["business_number"] == SCHOOL_NUMBER
@@ -457,9 +454,7 @@ def test_a_tampered_payload_is_refused(client, gateway, directory) -> None:
     started = _start(client)
     raw, headers = _signed(_inbound(MOTHER_WA_ID, started["message"]))
 
-    tampered = client.post(
-        "/v1/auth/whatsapp/webhook", content=raw + b" ", headers=headers
-    )
+    tampered = client.post("/v1/auth/whatsapp/webhook", content=raw + b" ", headers=headers)
     assert tampered.status_code == 403
     assert gateway.sent == []
 
@@ -486,9 +481,7 @@ def test_metas_retries_do_not_send_a_second_code(client, gateway, directory) -> 
 
     for _ in range(3):
         assert (
-            _deliver(
-                client, MOTHER_WA_ID, started["message"], message_id="wamid.SAME"
-            ).status_code
+            _deliver(client, MOTHER_WA_ID, started["message"], message_id="wamid.SAME").status_code
             == 200
         )
 

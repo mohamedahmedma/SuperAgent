@@ -21,6 +21,7 @@ method states its count above its body and none grows with the number of rows.
 
 **Nothing here commits.** The transaction belongs to the unit of work.
 """
+
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
@@ -143,9 +144,7 @@ class SqlAlchemyGuardianRepository:
                 .where(models.GuardianPhone.guardian_id.in_(chunk))
                 # Primary first, then a stable order so two reads of one guardian never
                 # disagree about which of her secondary numbers comes second.
-                .order_by(
-                    models.GuardianPhone.is_primary.desc(), models.GuardianPhone.phone
-                )
+                .order_by(models.GuardianPhone.is_primary.desc(), models.GuardianPhone.phone)
             ):
                 numbers.setdefault(record.guardian_id, []).append(record.phone)
 
@@ -251,9 +250,7 @@ class SqlAlchemyGuardianRepository:
         # row whose primary is new may still name an alternate that already identifies an
         # existing guardian, and inserting a second row for her would trip the unique
         # index and reject the whole upload.
-        mentioned = {
-            str(phone) for guardian in incoming.values() for phone in guardian.phones
-        }
+        mentioned = {str(phone) for guardian in incoming.values() for phone in guardian.phones}
         owner_of = self.ids_for([Phone(phone) for phone in sorted(mentioned)])
         existing = self._rows_by_id(sorted(set(owner_of.values())))
 
@@ -264,11 +261,7 @@ class SqlAlchemyGuardianRepository:
 
         for identity, guardian in incoming.items():
             guardian_id = next(
-                (
-                    owner_of[str(phone)]
-                    for phone in guardian.phones
-                    if str(phone) in owner_of
-                ),
+                (owner_of[str(phone)] for phone in guardian.phones if str(phone) in owner_of),
                 None,
             )
             if guardian_id is None:
@@ -393,9 +386,7 @@ class SqlAlchemyStudentGuardianRepository:
             restriction_note=row.restriction_note,
         )
 
-    def list_for_student(
-        self, student_number: StudentNumber
-    ) -> Sequence[StudentGuardian]:
+    def list_for_student(self, student_number: StudentNumber) -> Sequence[StudentGuardian]:
         found = self.list_for_students([student_number])
         return found.get(str(student_number), ())
 
@@ -430,9 +421,7 @@ class SqlAlchemyStudentGuardianRepository:
         she gave the school sees the same children as one who verifies the first.
         """
         owner = self._session.scalars(
-            select(models.GuardianPhone.guardian_id).where(
-                models.GuardianPhone.phone == str(phone)
-            )
+            select(models.GuardianPhone.guardian_id).where(models.GuardianPhone.phone == str(phone))
         ).first()
         if owner is None:
             return ()
@@ -445,14 +434,10 @@ class SqlAlchemyStudentGuardianRepository:
             stmt = stmt.where(models.StudentGuardian.can_view_records.is_(True))
         return tuple(
             self._to_link(row)
-            for row in self._session.execute(
-                stmt.order_by(models.Student.student_number)
-            )
+            for row in self._session.execute(stmt.order_by(models.Student.student_number))
         )
 
-    def upsert_many(
-        self, links: Sequence[StudentGuardian]
-    ) -> Mapping[StudentGuardianKey, bool]:
+    def upsert_many(self, links: Sequence[StudentGuardian]) -> Mapping[StudentGuardianKey, bool]:
         """Insert or update links in bulk; `True` marks the ones this call created.
 
         Resolves student numbers and guardian phones to ids in two queries, then at most
@@ -503,9 +488,7 @@ class SqlAlchemyStudentGuardianRepository:
             row = existing.get(pair)
             if row is None:
                 created[key] = True
-                to_insert.append(
-                    {"student_id": pair[0], "guardian_id": pair[1], **fields}
-                )
+                to_insert.append({"student_id": pair[0], "guardian_id": pair[1], **fields})
                 continue
             created[key] = False
             if any(getattr(row, name) != value for name, value in fields.items()):
@@ -556,9 +539,7 @@ class SqlAlchemyStudentGuardianRepository:
         found: dict[tuple[int, int], models.StudentGuardian] = {}
         for chunk in _chunked(student_ids):
             for row in self._session.scalars(
-                select(models.StudentGuardian).where(
-                    models.StudentGuardian.student_id.in_(chunk)
-                )
+                select(models.StudentGuardian).where(models.StudentGuardian.student_id.in_(chunk))
             ):
                 found[(row.student_id, row.guardian_id)] = row
         return found

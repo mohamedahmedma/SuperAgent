@@ -38,6 +38,7 @@ because that is a statement about what the route is for rather than about who is
 unaffected by any of the above: it chooses the database a request is answered from, not
 who may ask.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -370,9 +371,7 @@ def _forbidden(permission: Permission) -> HTTPException:
     """
     return HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail=error_detail(
-            "not_authorized", f"This account does not hold {permission.value}."
-        ),
+        detail=error_detail("not_authorized", f"This account does not hold {permission.value}."),
     )
 
 
@@ -743,9 +742,7 @@ def get_roster_import_service(uow_factory: UowFactoryDep) -> RosterImportService
     settings = get_settings()
     return RosterImportService(
         uow_factory,
-        SpreadsheetFamilyRosterParser(
-            default_country_code=settings.default_country_code
-        ),
+        SpreadsheetFamilyRosterParser(default_country_code=settings.default_country_code),
         preview_ttl=timedelta(minutes=settings.import_preview_ttl_minutes),
         max_upload_bytes=settings.max_upload_bytes,
     )
@@ -762,9 +759,7 @@ def get_guardian_import_service(uow_factory: UowFactoryDep) -> GuardianImportSer
     settings = get_settings()
     return GuardianImportService(
         uow_factory,
-        SpreadsheetGuardianParser(
-            default_country_code=settings.default_country_code
-        ),
+        SpreadsheetGuardianParser(default_country_code=settings.default_country_code),
         preview_ttl=timedelta(minutes=settings.import_preview_ttl_minutes),
         max_upload_bytes=settings.max_upload_bytes,
     )
@@ -816,9 +811,7 @@ class ImportReports:
             if batch is None:
                 # A 404 rather than an empty report: "no such batch" and "a batch with no
                 # matching rows" look identical on screen and are opposite problems.
-                raise ImportBatchNotFound(
-                    f"no import batch {batch_id}", field="batch_id"
-                )
+                raise ImportBatchNotFound(f"no import batch {batch_id}", field="batch_id")
             total = uow.imports.count_rows(batch_id, outcomes=outcomes)
             rows = uow.imports.list_rows(
                 batch_id, outcomes=outcomes, offset=page.offset, limit=page.limit
@@ -857,9 +850,7 @@ class StructureCatalogue:
             uow.commit()
         return bool(created.get(str(subject.code), False))
 
-    def subject_assignments(
-        self, academic_year_code: AcademicYearCode
-    ) -> Sequence[GradeSubjects]:
+    def subject_assignments(self, academic_year_code: AcademicYearCode) -> Sequence[GradeSubjects]:
         """Every rung of the year that teaches something, and what it teaches.
 
         An unknown year is a refusal, not an empty board — the same rule the year's
@@ -946,6 +937,7 @@ class StructureCatalogue:
             )
             uow.commit()
         return section
+
     def create_school(
         self, school: School, *, stated: Collection[str] = ()
     ) -> tuple[School, bool, tuple[TermPlan, ...]]:
@@ -979,16 +971,13 @@ class StructureCatalogue:
         with self._uow_factory() as uow:
             existing = uow.schools.get(school.code)
             if carry_over and existing is not None:
-                school = replace(
-                    school, **{name: getattr(existing, name) for name in carry_over}
-                )
+                school = replace(school, **{name: getattr(existing, name) for name in carry_over})
             created = uow.schools.upsert_many([school])
             uow.schools.sync_tracks(school)
             plans: tuple[TermPlan, ...] = ()
             if existing is not None and existing.term_count != school.term_count:
                 plans = tuple(
-                    self._sync_terms(uow, year)
-                    for year in uow.academic_years.list_all(school.code)
+                    self._sync_terms(uow, year) for year in uow.academic_years.list_all(school.code)
                 )
             uow.commit()
         return school, bool(created.get(str(school.code), False)), plans
@@ -999,7 +988,9 @@ class StructureCatalogue:
                 raise UnknownReference(f"no school {school_code}", field="school_code")
             return list(uow.schools.list_tracks(school_code))
 
-    def configured_grades(self, school_code: SchoolCode, track_code: str) -> list[dict[str, object]]:
+    def configured_grades(
+        self, school_code: SchoolCode, track_code: str
+    ) -> list[dict[str, object]]:
         with self._uow_factory() as uow:
             school = uow.schools.get(school_code)
             if school is None:
@@ -1009,8 +1000,12 @@ class StructureCatalogue:
             if track not in tracks:
                 raise ValidationError(f"track {track!r} is not active", field="track_code")
             arabic_ordinals = {
-                1: "الأول", 2: "الثاني", 3: "الثالث", 4: "الرابع",
-                5: "الخامس", 6: "السادس",
+                1: "الأول",
+                2: "الثاني",
+                3: "الثالث",
+                4: "الرابع",
+                5: "الخامس",
+                6: "السادس",
             }
             prefixes = (
                 (Stage.GARDEN, "KG", "KG", "روضة"),
@@ -1019,22 +1014,31 @@ class StructureCatalogue:
                 (Stage.SECONDARY, "SEC", "Secondary", "الصف الثانوي"),
             )
             return [
-                {"code": f"{track}-{prefix}{number}", "stage": stage.value,
-                 "name_en": f"{label_en} {number}",
-                 "name_ar": f"{label_ar} {arabic_ordinals.get(number, str(number))}",
-                 "display_order": stage.order * 10 + number}
+                {
+                    "code": f"{track}-{prefix}{number}",
+                    "stage": stage.value,
+                    "name_en": f"{label_en} {number}",
+                    "name_ar": f"{label_ar} {arabic_ordinals.get(number, str(number))}",
+                    "display_order": stage.order * 10 + number,
+                }
                 for stage, prefix, label_en, label_ar in prefixes
                 for number in range(1, school.grade_count_for(stage) + 1)
             ]
 
     def create_configured_classes(
-        self, academic_year_code: AcademicYearCode, track_code: str,
-        counts: dict[str, int] | None, sequence: str, same_count: int | None = None,
+        self,
+        academic_year_code: AcademicYearCode,
+        track_code: str,
+        counts: dict[str, int] | None,
+        sequence: str,
+        same_count: int | None = None,
     ) -> tuple[list[YearLevel], list[ClassSection]]:
         with self._uow_factory() as uow:
             year = uow.academic_years.get(academic_year_code)
             if year is None:
-                raise UnknownReference(f"no academic year {academic_year_code}", field="academic_year_code")
+                raise UnknownReference(
+                    f"no academic year {academic_year_code}", field="academic_year_code"
+                )
             tracks = {track.code: track for track in uow.schools.list_tracks(year.school_code)}
             track = tracks.get(track_code.strip().upper())
             if track is None:
@@ -1045,7 +1049,10 @@ class StructureCatalogue:
                 counts = {code: same_count for code in expected}
             counts = counts or {}
             if set(counts) != expected:
-                raise ValidationError("class counts must name every active grade and no others", field="classes_by_grade")
+                raise ValidationError(
+                    "class counts must name every active grade and no others",
+                    field="classes_by_grade",
+                )
             required_sequence = "numeric" if track.department_key == "arabic" else "alphabetic"
             if sequence != required_sequence:
                 raise ValidationError(
@@ -1054,15 +1061,26 @@ class StructureCatalogue:
                 )
             for count in counts.values():
                 if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 60:
-                    raise ValidationError("class count must be between 0 and 60", field="classes_by_grade")
+                    raise ValidationError(
+                        "class count must be between 0 and 60", field="classes_by_grade"
+                    )
                 if track.department_key == "languages" and count > 26:
                     raise ValidationError(
                         "languages classes are lettered A through Z (maximum 26)",
                         field="classes_by_grade",
                     )
-            levels = [YearLevel(school_code=year.school_code, track_code=track_code,
-                code=str(spec["code"]), stage=str(spec["stage"]), name_en=str(spec["name_en"]),
-                name_ar=str(spec["name_ar"]), display_order=int(spec["display_order"])) for spec in specs]
+            levels = [
+                YearLevel(
+                    school_code=year.school_code,
+                    track_code=track_code,
+                    code=str(spec["code"]),
+                    stage=str(spec["stage"]),
+                    name_en=str(spec["name_en"]),
+                    name_ar=str(spec["name_ar"]),
+                    display_order=int(spec["display_order"]),
+                )
+                for spec in specs
+            ]
             uow.year_levels.upsert_many(levels)
             sections = []
             for level in levels:
@@ -1080,9 +1098,16 @@ class StructureCatalogue:
                         if track.department_key == "arabic"
                         else f"{level.name_en} Languages - Section {suffix}"
                     )
-                    sections.append(ClassSection(code=f"{level.code}-{suffix}",
-                        academic_year_code=academic_year_code, year_level_code=level.code,
-                        name_en=name_en, name_ar=name_ar, capacity=15))
+                    sections.append(
+                        ClassSection(
+                            code=f"{level.code}-{suffix}",
+                            academic_year_code=academic_year_code,
+                            year_level_code=level.code,
+                            name_en=name_en,
+                            name_ar=name_ar,
+                            capacity=15,
+                        )
+                    )
             uow.class_sections.upsert_many(sections)
             uow.commit()
             return levels, sections
@@ -1197,9 +1222,7 @@ class StructureCatalogue:
         """
         school = uow.schools.get(SchoolCode(str(year.school_code)))
         if school is None:
-            raise UnknownReference(
-                f"no school {year.school_code}", field="school_code"
-            )
+            raise UnknownReference(f"no school {year.school_code}", field="school_code")
         wanted = school.term_count
         existing = {term.sequence: term for term in uow.terms.list_for_year(year.code)}
 
@@ -1256,9 +1279,7 @@ class StructureCatalogue:
                 )
             school = uow.schools.get(SchoolCode(str(year.school_code)))
             if school is None:
-                raise UnknownReference(
-                    f"no school {year.school_code}", field="school_code"
-                )
+                raise UnknownReference(f"no school {year.school_code}", field="school_code")
             terms = list(uow.terms.list_for_year(year.code))
             levels = list(uow.year_levels.list_for_school(year.school_code))
             sections = list(uow.class_sections.list_for_year(year.code))
@@ -1311,8 +1332,6 @@ class StructureCatalogue:
             plan = self._sync_terms(uow, year)
             uow.commit()
         return plan
-
-
 
 
 class StudentDesk:
@@ -1378,9 +1397,7 @@ class StudentDesk:
             uow.enrolments.upsert_many([enrolment])
             uow.commit()
 
-    def set_student_active(
-        self, student_number: StudentNumber, *, is_active: bool
-    ) -> Student:
+    def set_student_active(self, student_number: StudentNumber, *, is_active: bool) -> Student:
         """Mark a child as having left the school, or having come back.
 
         There is no delete, and there should not be: her marks, her placements and her
@@ -1487,9 +1504,7 @@ class StudentDesk:
                         "choose a different class",
                         field="to_class_code",
                     )
-                source = uow.class_sections.get(
-                    current.academic_year_code, current.class_code
-                )
+                source = uow.class_sections.get(current.academic_year_code, current.class_code)
                 if source is None:
                     raise UnknownReference(
                         f"no class {current.class_code} in academic year {academic_year_code}",
@@ -1537,7 +1552,6 @@ class StudentDesk:
         return closed, opened
 
 
-
 class ApiKeyMinter:
     """Generate a secret, hash it and store the record — one act, one transaction.
 
@@ -1563,9 +1577,7 @@ class ApiKeyMinter:
             is_active=True,
             # `None` means no expiry, which is a key revoked deliberately rather than one
             # that stops working under somebody at 3am.
-            expires_at=(
-                None if expires_in_days is None else now + timedelta(days=expires_in_days)
-            ),
+            expires_at=(None if expires_in_days is None else now + timedelta(days=expires_in_days)),
             created_at=now,
         )
         with self._uow_factory() as uow:
@@ -1598,9 +1610,7 @@ def get_today() -> date:
 TodayDep = Annotated[date, Depends(get_today)]
 
 
-def get_attendance_service(
-    uow_factory: UowFactoryDep, today: TodayDep
-) -> AttendanceService:
+def get_attendance_service(uow_factory: UowFactoryDep, today: TodayDep) -> AttendanceService:
     """The daily register. A factory, like every other service here."""
     return AttendanceService(uow_factory, today=lambda: today)
 
@@ -1637,9 +1647,7 @@ QueryServiceDep = Annotated[QueryService, Depends(get_query_service)]
 StructureServiceDep = Annotated[StructureGenerationService, Depends(get_structure_service)]
 RosterImportServiceDep = Annotated[RosterImportService, Depends(get_roster_import_service)]
 GradeImportServiceDep = Annotated[GradeImportService, Depends(get_grade_import_service)]
-GuardianImportServiceDep = Annotated[
-    GuardianImportService, Depends(get_guardian_import_service)
-]
+GuardianImportServiceDep = Annotated[GuardianImportService, Depends(get_guardian_import_service)]
 
 
 __all__ = [

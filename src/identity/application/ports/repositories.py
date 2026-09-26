@@ -23,6 +23,7 @@ an aware column, and a comparison against `now` then raises `TypeError` in devel
 in tests only. Implementations re-attach UTC on the way out so no use case has to remember
 to.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

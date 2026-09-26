@@ -23,6 +23,7 @@ This is a Protocol, so a service's tests supply a fake unit of work holding in-m
 repositories, with `commit()` a flag it flips. That is the point of the whole layer --
 the rule "one bad row must not discard the good ones" is testable without a database.
 """
+
 from types import TracebackType
 from typing import Protocol
 

@@ -34,6 +34,7 @@ Text with no Harmony token in it is returned unchanged, byte for byte. A provide
 parses its own format correctly, or a model that never spoke Harmony, must not pay for
 this and must not be at risk from it.
 """
+
 from __future__ import annotations
 
 import re
@@ -119,7 +120,7 @@ def split_glued_transcript(text: str) -> str:
         return text
     finals = list(_GLUED_FINAL.finditer(text))
     if finals:
-        return text[finals[-1].end():]
+        return text[finals[-1].end() :]
     if _GLUED_MARKER.search(text):
         return ""
     return text
@@ -138,8 +139,13 @@ class HarmonyFilter:
     """
 
     __slots__ = (
-        "_buf", "_emitting", "_in_header", "_header",
-        "_saw_markup", "_settled", "_transcript",
+        "_buf",
+        "_emitting",
+        "_in_header",
+        "_header",
+        "_saw_markup",
+        "_settled",
+        "_transcript",
     )
 
     def __init__(self) -> None:
@@ -168,7 +174,7 @@ class HarmonyFilter:
             finals = list(_GLUED_FINAL.finditer(self._buf))
             if not finals:
                 return ""
-            self._buf = self._buf[finals[-1].end():]
+            self._buf = self._buf[finals[-1].end() :]
             self._transcript = False
             return self._drain(hold_partial=True)
         # The bare-header form carries no token to trigger the state machine, so it is

@@ -25,6 +25,7 @@ a plausible-looking number that quietly fails to match the real one.
 
 Ports only. No sqlalchemy, no fastapi, no `sis.config`.
 """
+
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -270,10 +271,7 @@ class GuardianImportService:
         there was never a file worth reporting on. Unlike the roster importer there is no
         whole-batch reference to resolve first, because the upload names no target.
         """
-        if (
-            self._max_upload_bytes is not None
-            and len(command.content) > self._max_upload_bytes
-        ):
+        if self._max_upload_bytes is not None and len(command.content) > self._max_upload_bytes:
             raise UploadTooLarge(
                 f"{command.filename} is larger than the {self._max_upload_bytes} byte limit",
                 field="content",
@@ -325,9 +323,7 @@ class GuardianImportService:
             uow.imports.add(batch, stored)
             uow.commit()
 
-        return ImportPreviewResult.from_rows(
-            batch.batch_id, reports, expires_at=batch.expires_at
-        )
+        return ImportPreviewResult.from_rows(batch.batch_id, reports, expires_at=batch.expires_at)
 
     # -- commit -------------------------------------------------------------
 
@@ -359,15 +355,12 @@ class GuardianImportService:
 
             previewed = uow.imports.list_rows(batch_id)
             assertions, replayed = self._replay(previewed)
-            approved = {
-                row.line_number: row.outcome for row in previewed if row.is_written
-            }
+            approved = {row.line_number: row.outcome for row in previewed if row.is_written}
             snapshot = self._load(uow, assertions)
 
             seen: dict[tuple[str, str], int] = {}
             plans = [
-                self._reconcile(self._evaluate(a, snapshot, seen), approved)
-                for a in assertions
+                self._reconcile(self._evaluate(a, snapshot, seen), approved) for a in assertions
             ]
             self._apply(uow, plans)
 
@@ -380,9 +373,7 @@ class GuardianImportService:
         reports = sorted((_restore(row) for row in stored), key=lambda r: r.line)
         return ImportCommitResult.from_rows(batch_id, reports, committed_at=now)
 
-    def _replay(
-        self, rows: Sequence[ImportRow]
-    ) -> tuple[list[_Assertion], list[ImportRow]]:
+    def _replay(self, rows: Sequence[ImportRow]) -> tuple[list[_Assertion], list[ImportRow]]:
         """Rebuild an assertion per writable row; carry every other row through untouched.
 
         Rows the registrar saw rejected stay rejected with the code she read. Only rows
@@ -537,9 +528,7 @@ class GuardianImportService:
         # late to tell the registrar which row was at fault.
         if stated.alt_phone is not None:
             alt_owner = snapshot.guardians.get(str(stated.alt_phone))
-            if alt_owner is not None and (
-                owner is None or alt_owner.identity != owner.identity
-            ):
+            if alt_owner is not None and (owner is None or alt_owner.identity != owner.identity):
                 return _Plan(
                     line=stated.line,
                     payload=payload,

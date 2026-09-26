@@ -1,4 +1,5 @@
 """Images found in documents: their extractions, occurrences and entity attributes."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -25,9 +26,7 @@ class AssetExtraction(Base):
     """
 
     __tablename__ = "asset_extractions"
-    __table_args__ = (
-        Index("ix_asset_extractions_version", "dossier_version"),
-    )
+    __table_args__ = (Index("ix_asset_extractions_version", "dossier_version"),)
 
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     profile: Mapped[str] = mapped_column(String(64), primary_key=True)

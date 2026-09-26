@@ -15,6 +15,7 @@ spellings of the same absence for every reader to handle.
 Batch mode for the ALTER, as everywhere else in this history: SQLite cannot add a
 constrained column in place and rebuilds the table instead.
 """
+
 from alembic import op
 import sqlalchemy as sa
 

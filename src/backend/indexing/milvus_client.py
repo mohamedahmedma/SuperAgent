@@ -1,4 +1,5 @@
 """Milvus access layer: stateless Store + short-lived gRPC connections (avoids holding stale channels long-term)."""
+
 from __future__ import annotations
 
 import json
@@ -27,9 +28,34 @@ TEXT_ANALYZER_TYPE = os.getenv("MILVUS_TEXT_ANALYZER", "standard").strip() or "s
 # their IDF stays high enough to pull in unrelated chunks. Stripped from both the
 # index and the query, since one analyzer serves both.
 _QUESTION_STOP_WORDS = [
-    "what", "how", "can", "i", "my", "do", "does", "did", "which", "when",
-    "where", "who", "why", "should", "would", "could", "me", "you", "your",
-    "am", "get", "need", "want", "please", "there", "any", "about", "tell",
+    "what",
+    "how",
+    "can",
+    "i",
+    "my",
+    "do",
+    "does",
+    "did",
+    "which",
+    "when",
+    "where",
+    "who",
+    "why",
+    "should",
+    "would",
+    "could",
+    "me",
+    "you",
+    "your",
+    "am",
+    "get",
+    "need",
+    "want",
+    "please",
+    "there",
+    "any",
+    "about",
+    "tell",
 ]
 
 
@@ -367,21 +393,23 @@ class MilvusStore:
         formatted_results = []
         for hits in results:
             for hit in hits:
-                formatted_results.append({
-                    "id": hit.get("id"),
-                    "text": hit.get("text", ""),
-                    "filename": hit.get("filename", ""),
-                    "file_type": hit.get("file_type", ""),
-                    "page_number": hit.get("page_number", 0),
-                    "chunk_id": hit.get("chunk_id", ""),
-                    "parent_chunk_id": hit.get("parent_chunk_id", ""),
-                    "root_chunk_id": hit.get("root_chunk_id", ""),
-                    "chunk_level": hit.get("chunk_level", 0),
-                    "chunk_idx": hit.get("chunk_idx", 0),
-                    "modality": hit.get("modality", "text"),
-                    "asset_ids": _decode_asset_ids(hit.get("asset_ids")),
-                    "score": hit.get("distance", 0.0),
-                })
+                formatted_results.append(
+                    {
+                        "id": hit.get("id"),
+                        "text": hit.get("text", ""),
+                        "filename": hit.get("filename", ""),
+                        "file_type": hit.get("file_type", ""),
+                        "page_number": hit.get("page_number", 0),
+                        "chunk_id": hit.get("chunk_id", ""),
+                        "parent_chunk_id": hit.get("parent_chunk_id", ""),
+                        "root_chunk_id": hit.get("root_chunk_id", ""),
+                        "chunk_level": hit.get("chunk_level", 0),
+                        "chunk_idx": hit.get("chunk_idx", 0),
+                        "modality": hit.get("modality", "text"),
+                        "asset_ids": _decode_asset_ids(hit.get("asset_ids")),
+                        "score": hit.get("distance", 0.0),
+                    }
+                )
         return formatted_results
 
     def dense_retrieve(
@@ -417,21 +445,23 @@ class MilvusStore:
         formatted_results = []
         for hits in results:
             for hit in hits:
-                formatted_results.append({
-                    "id": hit.get("id"),
-                    "text": hit.get("entity", {}).get("text", ""),
-                    "filename": hit.get("entity", {}).get("filename", ""),
-                    "file_type": hit.get("entity", {}).get("file_type", ""),
-                    "page_number": hit.get("entity", {}).get("page_number", 0),
-                    "chunk_id": hit.get("entity", {}).get("chunk_id", ""),
-                    "parent_chunk_id": hit.get("entity", {}).get("parent_chunk_id", ""),
-                    "root_chunk_id": hit.get("entity", {}).get("root_chunk_id", ""),
-                    "chunk_level": hit.get("entity", {}).get("chunk_level", 0),
-                    "chunk_idx": hit.get("entity", {}).get("chunk_idx", 0),
-                    "modality": hit.get("entity", {}).get("modality", "text"),
-                    "asset_ids": _decode_asset_ids(hit.get("entity", {}).get("asset_ids")),
-                    "score": hit.get("distance", 0.0),
-                })
+                formatted_results.append(
+                    {
+                        "id": hit.get("id"),
+                        "text": hit.get("entity", {}).get("text", ""),
+                        "filename": hit.get("entity", {}).get("filename", ""),
+                        "file_type": hit.get("entity", {}).get("file_type", ""),
+                        "page_number": hit.get("entity", {}).get("page_number", 0),
+                        "chunk_id": hit.get("entity", {}).get("chunk_id", ""),
+                        "parent_chunk_id": hit.get("entity", {}).get("parent_chunk_id", ""),
+                        "root_chunk_id": hit.get("entity", {}).get("root_chunk_id", ""),
+                        "chunk_level": hit.get("entity", {}).get("chunk_level", 0),
+                        "chunk_idx": hit.get("entity", {}).get("chunk_idx", 0),
+                        "modality": hit.get("entity", {}).get("modality", "text"),
+                        "asset_ids": _decode_asset_ids(hit.get("entity", {}).get("asset_ids")),
+                        "score": hit.get("distance", 0.0),
+                    }
+                )
         return formatted_results
 
     def delete(self, filter_expr: str):
@@ -451,4 +481,3 @@ class MilvusStore:
 
         self._run(_drop)
         self._changed()
-

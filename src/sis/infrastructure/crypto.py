@@ -17,6 +17,7 @@ most of a targeted phishing list.
 must not invalidate every existing password; it makes new hashes more expensive and leaves
 old ones verifiable, which is what `needs_rehash` is for.
 """
+
 from __future__ import annotations
 
 import base64

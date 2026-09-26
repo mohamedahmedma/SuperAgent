@@ -1,4 +1,5 @@
 """The accounts chat conversations belong to."""
+
 from __future__ import annotations
 
 from datetime import datetime

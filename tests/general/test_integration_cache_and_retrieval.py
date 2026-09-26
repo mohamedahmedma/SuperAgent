@@ -8,6 +8,7 @@ it would break the moment anybody re-indexed.
 
 Nothing here writes to the shared collection.
 """
+
 import threading
 import time
 import unittest
@@ -208,7 +209,9 @@ class RetrievalTests(unittest.TestCase):
     def test_hybrid_never_returns_more_than_top_k(self):
         for k in (1, 3, 8):
             with self.subTest(top_k=k):
-                docs = self.store.hybrid_retrieve(embed_query(EN_QUERIES[0]), EN_QUERIES[0], top_k=k)
+                docs = self.store.hybrid_retrieve(
+                    embed_query(EN_QUERIES[0]), EN_QUERIES[0], top_k=k
+                )
                 self.assertLessEqual(len(docs), k)
 
     @requires_corpus(5)
@@ -221,8 +224,14 @@ class RetrievalTests(unittest.TestCase):
     def test_the_same_query_retrieves_the_same_chunks_twice(self):
         """Retrieval has to be deterministic, or every downstream measurement is noise."""
         query = EN_QUERIES[1]
-        first = [d.get("chunk_id") for d in self.store.hybrid_retrieve(embed_query(query), query, top_k=5)]
-        second = [d.get("chunk_id") for d in self.store.hybrid_retrieve(embed_query(query), query, top_k=5)]
+        first = [
+            d.get("chunk_id")
+            for d in self.store.hybrid_retrieve(embed_query(query), query, top_k=5)
+        ]
+        second = [
+            d.get("chunk_id")
+            for d in self.store.hybrid_retrieve(embed_query(query), query, top_k=5)
+        ]
         self.assertEqual(first, second)
 
     @requires_corpus(5)
@@ -234,7 +243,9 @@ class RetrievalTests(unittest.TestCase):
 
     @requires_corpus(5)
     def test_a_nonsense_query_returns_without_error(self):
-        docs = self.store.hybrid_retrieve(embed_query("zzzz qqqq xyzzy"), "zzzz qqqq xyzzy", top_k=5)
+        docs = self.store.hybrid_retrieve(
+            embed_query("zzzz qqqq xyzzy"), "zzzz qqqq xyzzy", top_k=5
+        )
         self.assertIsInstance(docs, list)
 
     @requires_corpus(5)
@@ -271,8 +282,9 @@ class EmbedderTests(unittest.TestCase):
                 self.assertAlmostEqual(1.0, norm, places=3)
 
     def test_the_same_text_always_embeds_identically(self):
-        self.assertEqual(embed_query("what is the uniform policy"),
-                         embed_query("what is the uniform policy"))
+        self.assertEqual(
+            embed_query("what is the uniform policy"), embed_query("what is the uniform policy")
+        )
 
     def test_different_texts_embed_differently(self):
         self.assertNotEqual(embed_query("school fees"), embed_query("bus routes"))
@@ -293,6 +305,7 @@ class EmbedderTests(unittest.TestCase):
 
     def test_the_same_question_in_arabic_scores_above_an_unrelated_english_one(self):
         """Cross-lingual alignment is the property the whole bilingual gate rests on."""
+
         def cosine(a, b):
             return sum(x * y for x, y in zip(a, b))
 
@@ -346,7 +359,8 @@ class EmbedderTests(unittest.TestCase):
             own = cosine(results[text], expected[text])
             best_other = max(cosine(results[text], expected[o]) for o in texts if o != text)
             self.assertGreater(
-                own, best_other,
+                own,
+                best_other,
                 f"{text!r} was handed a vector closer to another query's",
             )
             self.assertGreater(own, 0.999, f"{text!r} drifted further than batching explains")

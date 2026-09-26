@@ -1,4 +1,5 @@
 """Shapes shared by every router."""
+
 from pydantic import BaseModel, Field
 
 
@@ -10,9 +11,7 @@ class ErrorOut(BaseModel):
     `identity/api/errors.py`, which is the only place a domain error becomes a status.
     """
 
-    code: str = Field(
-        description="not_authorized | locked | not_found | conflict | not_configured"
-    )
+    code: str = Field(description="not_authorized | locked | not_found | conflict | not_configured")
     message: str = ""
 
 

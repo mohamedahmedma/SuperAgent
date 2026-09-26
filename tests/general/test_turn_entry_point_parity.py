@@ -9,6 +9,7 @@ failing test rather than a support ticket.
 These are also the specification for folding the two paths into one turn pipeline: once
 every case passes on both, the unification has nothing left to reconcile.
 """
+
 from datetime import datetime, timezone
 import asyncio
 import importlib
@@ -113,13 +114,20 @@ class AResumedClarificationAfterAnOutage(unittest.TestCase):
 
     def _patched(self) -> ExitStack:
         stack = ExitStack()
-        stack.enter_context(patch.object(
-            service, "create_agent_for_request",
-            Mock(side_effect=AssertionError("a resume must not build the agent")),
-        ))
-        stack.enter_context(patch.object(
-            service, "_resume_rag_from_hitl_sync", Mock(return_value=dict(self.OUTAGE)),
-        ))
+        stack.enter_context(
+            patch.object(
+                service,
+                "create_agent_for_request",
+                Mock(side_effect=AssertionError("a resume must not build the agent")),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                service,
+                "_resume_rag_from_hitl_sync",
+                Mock(return_value=dict(self.OUTAGE)),
+            )
+        )
         stack.enter_context(patch.object(service, "model", _ModelThatMustNotAnswer()))
         return stack
 
@@ -152,9 +160,17 @@ class _SyncAgentEndingOnATerminalResult:
     def invoke(self, payload, config=None):
         self.ctx.store_rag_trace({"retrieval_status": self.status, "route": self.status}, None)
         self.ctx.note_short_circuit(self.status)
-        call = AIMessage(content="", tool_calls=[{
-            "name": KNOWLEDGE_TOOL, "args": {"query": "q"}, "id": "c1", "type": "tool_call",
-        }])
+        call = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": KNOWLEDGE_TOOL,
+                    "args": {"query": "q"},
+                    "id": "c1",
+                    "type": "tool_call",
+                }
+            ],
+        )
         result = ToolMessage(
             content="NO_KNOWLEDGE: nothing in the school's documents covers this.",
             tool_call_id="c1",
@@ -167,11 +183,14 @@ class _StreamAgentEndingOnATerminalResult(_SyncAgentEndingOnATerminalResult):
     async def astream(self, payload, stream_mode=None, config=None):
         self.ctx.store_rag_trace({"retrieval_status": self.status, "route": self.status}, None)
         self.ctx.note_short_circuit(self.status)
-        yield ToolMessage(
-            content="NO_KNOWLEDGE: nothing in the school's documents covers this.",
-            tool_call_id="c1",
-            name=KNOWLEDGE_TOOL,
-        ), {}
+        yield (
+            ToolMessage(
+                content="NO_KNOWLEDGE: nothing in the school's documents covers this.",
+                tool_call_id="c1",
+                name=KNOWLEDGE_TOOL,
+            ),
+            {},
+        )
 
 
 class AKnowledgeSearchThatEndsTheTurn(unittest.TestCase):
@@ -189,20 +208,25 @@ class AKnowledgeSearchThatEndsTheTurn(unittest.TestCase):
 
     def setUp(self):
         for status in self.STATUSES:
-            self.assertNotEqual(
-                terminal_reply(status, "en"), service._COPY.unverified_answer
-            )
+            self.assertNotEqual(terminal_reply(status, "en"), service._COPY.unverified_answer)
 
     def _patched(self, agent_type, status) -> ExitStack:
         plan = TurnPlan(exposed_tools=[KNOWLEDGE_TOOL], language="en", reasons=["unit"])
         stack = ExitStack()
-        stack.enter_context(patch.object(
-            service, "plan_turn", lambda *a, **k: (plan, RequestSignals()),
-        ))
-        stack.enter_context(patch.object(
-            service, "create_agent_for_request",
-            lambda ctx, *a, **k: agent_type(ctx, status),
-        ))
+        stack.enter_context(
+            patch.object(
+                service,
+                "plan_turn",
+                lambda *a, **k: (plan, RequestSignals()),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                service,
+                "create_agent_for_request",
+                lambda ctx, *a, **k: agent_type(ctx, status),
+            )
+        )
         return stack
 
     def test_the_streamed_path_serves_the_profile_reply(self):
@@ -239,18 +263,27 @@ class AShortCircuitedTurn(unittest.TestCase):
     def _history(self):
         window = service._PROFILE.agent.context_window_messages
         return [
-            HumanMessage(content=f"question {index}") if index % 2 == 0 else AIMessage(content=f"answer {index}")
+            HumanMessage(content=f"question {index}")
+            if index % 2 == 0
+            else AIMessage(content=f"answer {index}")
             for index in range(window + 2)
         ]
 
     def _patched(self) -> ExitStack:
-        plan = TurnPlan(static_reply="That is outside what I can help with.", exposed_tools=[], reasons=["unit"])
+        plan = TurnPlan(
+            static_reply="That is outside what I can help with.", exposed_tools=[], reasons=["unit"]
+        )
         stack = ExitStack()
-        stack.enter_context(patch.object(service, "plan_turn", lambda *a, **k: (plan, RequestSignals())))
-        stack.enter_context(patch.object(
-            service, "create_agent_for_request",
-            Mock(side_effect=AssertionError("a short-circuited turn builds no agent")),
-        ))
+        stack.enter_context(
+            patch.object(service, "plan_turn", lambda *a, **k: (plan, RequestSignals()))
+        )
+        stack.enter_context(
+            patch.object(
+                service,
+                "create_agent_for_request",
+                Mock(side_effect=AssertionError("a short-circuited turn builds no agent")),
+            )
+        )
         return stack
 
     def test_both_paths_store_the_request_signals(self):
@@ -259,9 +292,19 @@ class AShortCircuitedTurn(unittest.TestCase):
                 storage = FakeStorage(self._history())
                 with self._patched():
                     if path == "sync":
-                        service.chat_with_agent("what is the weather", "u", "s", services=Services(conversations=storage))
+                        service.chat_with_agent(
+                            "what is the weather",
+                            "u",
+                            "s",
+                            services=Services(conversations=storage),
+                        )
                     else:
-                        _stream_shown("what is the weather", "u", "s", services=Services(conversations=storage))
+                        _stream_shown(
+                            "what is the weather",
+                            "u",
+                            "s",
+                            services=Services(conversations=storage),
+                        )
                 stored = storage.appends[-1]["messages"][-1].rag_trace
                 self.assertIn("request_scope", stored)
 

@@ -15,6 +15,7 @@ Each service still reads its OWN environment — a deployment may legitimately r
 identity services, and this suite and the records suite set different values in one pytest
 process. What is shared is the default, not the configuration.
 """
+
 import os
 import unittest
 from unittest.mock import patch

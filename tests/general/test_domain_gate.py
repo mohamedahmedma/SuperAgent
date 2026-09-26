@@ -4,6 +4,7 @@ The gate's saving is real but secondary. What these tests mostly prove is that i
 open: a false rejection is an unrecoverable silent refusal of a valid question, while a
 false acceptance costs one search the grader would have caught anyway.
 """
+
 import unittest
 from unittest.mock import patch
 
@@ -35,21 +36,25 @@ REFERENCE = DomainReference(vectors=[("uniform", UNIFORM), ("fees", FEES), ("ter
 
 class EligibilityTests(unittest.TestCase):
     def test_disabled_by_default(self):
-        run, why = should_run("what is the uniform policy", has_history=False,
-                              config=load_profile("base").rag)
+        run, why = should_run(
+            "what is the uniform policy", has_history=False, config=load_profile("base").rag
+        )
         self.assertFalse(run)
         self.assertIn("domain_gate_enabled=false", why)
 
     def test_a_turn_with_history_is_exempt(self):
-        """"What about grade 6?" carries its topic in the previous turn. Scoring its own
+        """ "What about grade 6?" carries its topic in the previous turn. Scoring its own
         words measures nothing, and a low score would refuse a valid follow-up."""
         run, why = should_run("what about grade 6", has_history=True, config=rag_config())
         self.assertFalse(run)
         self.assertIn("follow-up", why)
 
     def test_history_exemption_can_be_turned_off(self):
-        run, _ = should_run("what is the uniform policy for grade 6", has_history=True,
-                            config=rag_config(domain_gate_skip_with_history=False))
+        run, _ = should_run(
+            "what is the uniform policy for grade 6",
+            has_history=True,
+            config=rag_config(domain_gate_skip_with_history=False),
+        )
         self.assertTrue(run)
 
     def test_a_very_short_question_is_exempt(self):
@@ -61,8 +66,9 @@ class EligibilityTests(unittest.TestCase):
         self.assertFalse(should_run("   ", has_history=False, config=rag_config())[0])
 
     def test_a_normal_first_turn_question_is_eligible(self):
-        run, _ = should_run("what is the school uniform policy", has_history=False,
-                            config=rag_config())
+        run, _ = should_run(
+            "what is the school uniform policy", has_history=False, config=rag_config()
+        )
         self.assertTrue(run)
 
 
@@ -94,7 +100,8 @@ class ClassificationTests(unittest.TestCase):
         near = [0.4, 0.0, 0.0]
         self.assertTrue(classify(near, REFERENCE, rag_config()).in_domain)
         self.assertFalse(
-            classify(near, REFERENCE, rag_config(domain_gate_min_similarity=0.9)).in_domain)
+            classify(near, REFERENCE, rag_config(domain_gate_min_similarity=0.9)).in_domain
+        )
 
 
 class FailOpenTests(unittest.TestCase):
@@ -206,7 +213,8 @@ class CrossEncoderAssessorTests(unittest.TestCase):
 
     def _assess(self, scores, **overrides):
         config = load_profile("base").rag.model_copy(
-            update={"rerank_cross_encoder_enabled": True, **overrides})
+            update={"rerank_cross_encoder_enabled": True, **overrides}
+        )
         ctx = AssessmentContext(question="what is the uniform", docs=self.docs, config=config)
         with patch("backend.agent.rag.rerank_assessor.score_pairs", lambda *a, **k: scores):
             return CrossEncoderAssessor().assess(ctx)

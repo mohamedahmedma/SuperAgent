@@ -20,6 +20,7 @@ nothing here returns anything an authorisation check could be written against. T
 one of these values gates a read, a revocation stops working for `ACCESS_TTL_MINUTES` and
 nothing reports it.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

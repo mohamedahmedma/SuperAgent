@@ -33,6 +33,7 @@ the placements: it is a time-bounded fact that changes mid-year, and a caller ho
 class code would eventually ask for the week of a room the child has left. So this port
 takes a student and a term, exactly as the marks port does, and never a class.
 """
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -43,9 +44,7 @@ from records.domain.timetable import StudentTimetable
 class StudentTimetables(Protocol):
     """What the facade needs in order to answer "what does her week look like". Nothing more."""
 
-    def get_timetable(
-        self, *, student_ref: str, term: str, guardian_ref: str
-    ) -> StudentTimetable:
+    def get_timetable(self, *, student_ref: str, term: str, guardian_ref: str) -> StudentTimetable:
         """One child's week for one term, read on behalf of one guardian.
 
         Takes the SCHOOL's student reference — the number on a letter home — never an

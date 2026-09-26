@@ -7,6 +7,7 @@ dies without releasing leadership stops the process batching for the rest of its
 Neither shows up as an error — both show up as the service getting slower and then
 stopping.
 """
+
 import threading
 import time
 import unittest
@@ -89,7 +90,7 @@ class CoalescingTests(unittest.TestCase):
         barrier = threading.Barrier(16)
 
         def call(index):
-            text = "x" * (index + 1)          # length is the identity here
+            text = "x" * (index + 1)  # length is the identity here
             barrier.wait()
             vector = embedder.embed_documents([text])[0]
             if vector != [float(index + 1)]:
@@ -175,9 +176,7 @@ class CoalescingTests(unittest.TestCase):
 
     def test_it_is_on_by_default(self):
         with patch.dict("os.environ", {"EMBEDDING_COALESCE_MAX_BATCH": ""}, clear=False):
-            self.assertIsInstance(
-                embedding_module._wrap(RecordingEmbedder()), CoalescingEmbedder
-            )
+            self.assertIsInstance(embedding_module._wrap(RecordingEmbedder()), CoalescingEmbedder)
 
 
 class ReadinessTests(unittest.TestCase):

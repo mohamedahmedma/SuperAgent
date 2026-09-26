@@ -1,4 +1,5 @@
 """RAG_FIX_PLAN item 41: calls to the records facade share kept-alive connections."""
+
 import socket
 import threading
 import unittest
@@ -39,8 +40,10 @@ class _KeepAliveServer:
                         return
                     buffer += data
                 _, _, buffer = buffer.partition(b"\r\n\r\n")
-                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                             b"Content-Length: 2\r\n\r\n{}")
+                conn.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                    b"Content-Length: 2\r\n\r\n{}"
+                )
         except OSError:
             pass
         finally:
@@ -67,7 +70,9 @@ class PooledFacadeTests(unittest.TestCase):
 
     def test_the_shared_pool_serves_every_call_on_one_connection(self):
         for path in ("/v1/guardians/G-1/students", "/v1/students/S-1/grades") * 3:
-            self.assertEqual(200, records_http.get(f"{self.server.url}{path}", timeout=5).status_code)
+            self.assertEqual(
+                200, records_http.get(f"{self.server.url}{path}", timeout=5).status_code
+            )
         self.assertEqual(1, self.server.connections)
 
     def test_the_pool_is_as_deep_as_the_turn_threads(self):

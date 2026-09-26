@@ -6,6 +6,7 @@ the player, and the assistant never heard a word. These pin the pieces that repl
 the service that keeps and transcribes a recording, the transcriber over the provider's
 Whisper endpoint, the routes, and the message that carries its note through a reload.
 """
+
 import io
 import logging
 import unittest
@@ -20,7 +21,12 @@ from fastapi.testclient import TestClient
 from backend.assets.blobs import LocalBlobStore
 from backend.agent.chat.attachments import ChatAttachments, VoiceNoteLimits, VoiceNoteRejected
 from backend.agent.chat.storage import ConversationStorage, MessageToStore
-from backend.agent.chat.transcription import NoTranscriber, Transcript, WhisperTranscriber, build_transcriber
+from backend.agent.chat.transcription import (
+    NoTranscriber,
+    Transcript,
+    WhisperTranscriber,
+    build_transcriber,
+)
 from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
 from tests.general.postgres_support import postgres_schema
@@ -44,7 +50,9 @@ class _VoiceNoteTestCase(unittest.TestCase):
 
         self.schema = postgres_schema(self, User, ChatSession, ChatMessage, ChatAttachment)
         db = self.schema.sessionmaker()()
-        db.add_all([User(username="parent", password_hash="x"), User(username="other", password_hash="x")])
+        db.add_all(
+            [User(username="parent", password_hash="x"), User(username="other", password_hash="x")]
+        )
         db.commit()
         db.close()
 
@@ -65,15 +73,21 @@ class _VoiceNoteTestCase(unittest.TestCase):
 
 class StoringAVoiceNote(_VoiceNoteTestCase):
     def test_a_recording_is_kept_once_transcribed_and_recorded_for_its_owner(self):
-        note = self.notes.store_voice_note("parent", WEBM, "audio/webm;codecs=opus", duration_ms=4200)
+        note = self.notes.store_voice_note(
+            "parent", WEBM, "audio/webm;codecs=opus", duration_ms=4200
+        )
 
         self.assertEqual("voice", note.kind)
-        self.assertEqual("audio/webm", note.content_type, "the codec parameter is not part of the container")
+        self.assertEqual(
+            "audio/webm", note.content_type, "the codec parameter is not part of the container"
+        )
         self.assertEqual(len(WEBM), note.byte_size)
         self.assertEqual(4200, note.duration_ms)
         self.assertEqual("إمتى الباص بييجي؟", note.transcript)
         self.assertEqual(Transcript.OK, note.transcript_status)
-        self.assertTrue(self.blobs.exists(note.sha256, "audio/webm"), "the bytes are in the blob store")
+        self.assertTrue(
+            self.blobs.exists(note.sha256, "audio/webm"), "the bytes are in the blob store"
+        )
         self.assertEqual(WEBM, self.notes.read_bytes(note))
         self.assertEqual([(len(WEBM), "audio/webm")], self.transcriber.calls)
         self.assertEqual(note, self.notes.get("parent", note.id))
@@ -107,7 +121,9 @@ class StoringAVoiceNote(_VoiceNoteTestCase):
         for data, content_type, duration, reason, limits in cases:
             with self.subTest(reason=reason):
                 with self.assertRaises(VoiceNoteRejected) as caught:
-                    self._service(self.transcriber, **limits).store_voice_note("parent", data, content_type, duration)
+                    self._service(self.transcriber, **limits).store_voice_note(
+                        "parent", data, content_type, duration
+                    )
                 self.assertEqual(reason, caught.exception.reason)
         self.assertEqual([], self.transcriber.calls, "nothing refused reaches the transcriber")
 
@@ -125,7 +141,9 @@ class StoringAVoiceNote(_VoiceNoteTestCase):
         read and the cache."""
         note = self.notes.store_voice_note("parent", WEBM, "audio/webm")
         storage = ConversationStorage(unit_of_work=self.schema.unit_of_work, cache=DictCache())
-        storage.append("parent", "s", [MessageToStore("human", note.transcript or "", attachment_id=note.id)])
+        storage.append(
+            "parent", "s", [MessageToStore("human", note.transcript or "", attachment_id=note.id)]
+        )
         storage.append("parent", "s", [MessageToStore("ai", "07:30.")])
 
         for attempt in ("cold", "warm"):
@@ -138,7 +156,9 @@ class StoringAVoiceNote(_VoiceNoteTestCase):
 class WhisperTranscriberTests(unittest.TestCase):
     def _client(self, text=" إمتى الباص؟ ", error=None):
         create = Mock(side_effect=error) if error else Mock(return_value=SimpleNamespace(text=text))
-        return SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=create))), create
+        return SimpleNamespace(
+            audio=SimpleNamespace(transcriptions=SimpleNamespace(create=create))
+        ), create
 
     def test_the_recording_is_posted_with_a_filename_the_endpoint_can_read(self):
         client, create = self._client()
@@ -174,7 +194,13 @@ class WhisperTranscriberTests(unittest.TestCase):
     def test_the_transcriber_is_built_from_the_resolved_provider_names(self):
         """`TRANSCRIPTION_MODEL` is what the provider block resolves onto — the same way
         `MODEL` and `GRADE_MODEL` reach the chat models."""
-        configured = build_transcriber({"TRANSCRIPTION_MODEL": "openai/whisper-large-v3", "ARK_API_KEY": "k", "BASE_URL": "https://api.together.xyz/v1"})
+        configured = build_transcriber(
+            {
+                "TRANSCRIPTION_MODEL": "openai/whisper-large-v3",
+                "ARK_API_KEY": "k",
+                "BASE_URL": "https://api.together.xyz/v1",
+            }
+        )
         self.assertIsInstance(configured, WhisperTranscriber)
         self.assertEqual("openai/whisper-large-v3", configured.model)
 
@@ -198,7 +224,9 @@ class WhisperTranscriberTests(unittest.TestCase):
 
     def test_a_configured_model_is_named_in_the_log_and_the_key_is_not(self):
         with self.assertLogs("backend.agent.chat.transcription", level=logging.INFO) as captured:
-            build_transcriber({"TRANSCRIPTION_MODEL": "openai/whisper-large-v3", "ARK_API_KEY": "secret-key"})
+            build_transcriber(
+                {"TRANSCRIPTION_MODEL": "openai/whisper-large-v3", "ARK_API_KEY": "secret-key"}
+            )
         line = "\n".join(captured.output)
         self.assertIn("openai/whisper-large-v3", line)
         self.assertNotIn("secret-key", line)
@@ -206,9 +234,14 @@ class WhisperTranscriberTests(unittest.TestCase):
     def test_the_provider_block_can_name_the_transcription_model(self):
         from backend.llm_provider import PROVIDERS, resolve
 
-        resolution = resolve(PROVIDERS["together"], {
-            "LLM_PROVIDER": "together", "TOGETHER_API_KEY": "k", "TOGETHER_TRANSCRIPTION_MODEL": "openai/whisper-large-v3",
-        })
+        resolution = resolve(
+            PROVIDERS["together"],
+            {
+                "LLM_PROVIDER": "together",
+                "TOGETHER_API_KEY": "k",
+                "TOGETHER_TRANSCRIPTION_MODEL": "openai/whisper-large-v3",
+            },
+        )
         self.assertEqual("openai/whisper-large-v3", resolution.values["TRANSCRIPTION_MODEL"])
 
 
@@ -230,7 +263,9 @@ class VoiceNoteRouteTests(_VoiceNoteTestCase):
         app.state.services = self.services
         app.include_router(attachments_router)
         app.include_router(sessions_router)
-        app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(username=username, role="user")
+        app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+            username=username, role="user"
+        )
         return TestClient(app)
 
     def _upload(self, client=None, data=WEBM, content_type="audio/webm", duration_ms="4200"):
@@ -272,12 +307,16 @@ class VoiceNoteRouteTests(_VoiceNoteTestCase):
         self.assertEqual(415, self._upload(content_type="video/mp4").status_code)
         self.assertEqual(400, self._upload(data=b"").status_code)
 
-        self.services = Services(attachments=self._service(self.transcriber, max_bytes=16), conversations=self.storage)
+        self.services = Services(
+            attachments=self._service(self.transcriber, max_bytes=16), conversations=self.storage
+        )
         self.assertEqual(413, self._upload(self._client_for("parent")).status_code)
 
     def test_a_reopened_conversation_carries_its_voice_notes(self):
         note = self._upload().json()
-        self.storage.append("parent", "s", [MessageToStore("human", note["transcript"], attachment_id=note["id"])])
+        self.storage.append(
+            "parent", "s", [MessageToStore("human", note["transcript"], attachment_id=note["id"])]
+        )
         self.storage.append("parent", "s", [MessageToStore("ai", "07:30.")])
 
         page = self.client.get("/sessions/s").json()

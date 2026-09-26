@@ -9,6 +9,7 @@ field from silently rewriting a service signature.
 Re-exported here so routes import from `sis.api.schemas` and the module split underneath
 stays free to change.
 """
+
 from sis.api.schemas.common import (
     CodeStr,
     ErrorDetail,

@@ -17,6 +17,7 @@ That is also where the misconfigurations are caught. A signing key that cannot b
 a school with no WhatsApp number, a SIS base URL with no key — each stops the deploy here,
 rather than surfacing as one parent's login failing at eight in the morning.
 """
+
 import logging
 from contextlib import asynccontextmanager
 

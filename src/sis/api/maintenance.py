@@ -5,6 +5,7 @@ still runs normally for bearer sessions; a global System Administrator grant is 
 bypass.  Liveness and sign-in remain reachable so an administrator can diagnose and
 recover a paused service.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

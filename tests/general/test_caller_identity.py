@@ -8,6 +8,7 @@ organised around:
 3. Absence of identity is a safe, explicit state — not an error, and not a
    half-configured session that reads something it should not.
 """
+
 import asyncio
 import unittest
 
@@ -59,6 +60,7 @@ class CallerIdentityTests(unittest.TestCase):
         It simply is not a parent, which is the correct outcome rather than an
         AttributeError at the top of every chat turn.
         """
+
         class Legacy:
             username = "old"
 
@@ -129,6 +131,7 @@ class ContextWiringTests(unittest.TestCase):
         A parameter honoured on the sync path and dropped on the streaming one is
         dead in exactly the path real users hit.
         """
+
         async def build():
             return ChatRequestContext.for_stream(
                 user_id="u",

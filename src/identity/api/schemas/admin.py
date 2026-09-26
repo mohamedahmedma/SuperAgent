@@ -1,4 +1,5 @@
 """Request shapes for the admin-key routes."""
+
 from pydantic import BaseModel, ConfigDict, Field
 
 

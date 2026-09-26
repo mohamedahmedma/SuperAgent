@@ -55,6 +55,7 @@ a child contradicts the year the roster reported. Each is a rule about the finis
 answer rather than about the model's format, and each gets a method here and a line in
 `as_trace()`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -256,6 +257,7 @@ class Finalizer:
                 self._dropped_chars,
                 self._harmony_messages,
             )
+
 
 def finalize_text(text: str, *, has_tool_calls: bool = False) -> str:
     """The same rules, for a response that arrived complete rather than streamed.

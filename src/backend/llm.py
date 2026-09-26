@@ -35,6 +35,7 @@ turns. `disable_streaming` makes these roles plain request/response calls.
 Resolution order is the backend's usual one — env > profile > schema default — and is
 implemented once, in backend/agent/profiles/registry.py. Nothing here reads the environment.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -43,12 +44,12 @@ from backend.agent.profiles import get_profile
 
 # Each entry is a `<role>_*` field group on ModelConfig, and names the node it serves.
 ROLES = (
-    "answer",    # the agent's answering call — the only open-ended role
-    "planner",   # question-complexity classification / decomposition
-    "grade",     # evidence grading
-    "rewrite",   # step-back / HyDE query planning
-    "scope",     # in-domain / out-of-domain scope check
-    "resolve",   # rewriting a follow-up into a standalone question
+    "answer",  # the agent's answering call — the only open-ended role
+    "planner",  # question-complexity classification / decomposition
+    "grade",  # evidence grading
+    "rewrite",  # step-back / HyDE query planning
+    "scope",  # in-domain / out-of-domain scope check
+    "resolve",  # rewriting a follow-up into a standalone question
 )
 
 #: The roles whose tokens a person reads as they arrive. Every other role is a plain call.

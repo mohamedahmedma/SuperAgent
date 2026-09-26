@@ -12,6 +12,7 @@ forgot to scope reaches nothing at all. The assertions below are written to fail
 the header is ever ignored: each school holds a child with the same `student_number`, and
 they are told apart only by which database answered.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -160,11 +161,17 @@ def split_client(two_databases: dict[str, str]) -> Iterator[TestClient]:
 
     for school_code in (NC, MD):
         with SqlAlchemyUnitOfWork(school_code=school_code) as uow:
-            uow.api_keys.add(ApiKey(
-                prefix=key_prefix(REGISTRAR_KEY), key_hash=hash_api_key(REGISTRAR_KEY),
-                label="split-estate registrar", scope=Scope.REGISTRAR, is_active=True,
-                expires_at=None, created_at=datetime.now(UTC),
-            ))
+            uow.api_keys.add(
+                ApiKey(
+                    prefix=key_prefix(REGISTRAR_KEY),
+                    key_hash=hash_api_key(REGISTRAR_KEY),
+                    label="split-estate registrar",
+                    scope=Scope.REGISTRAR,
+                    is_active=True,
+                    expires_at=None,
+                    created_at=datetime.now(UTC),
+                )
+            )
             uow.commit()
 
     with TestClient(app, headers={"X-API-Key": REGISTRAR_KEY}) as test_client:
@@ -208,12 +215,14 @@ def test_over_http_a_student_does_not_cross(split_client: TestClient) -> None:
     )
     assert created.status_code in (200, 201), created.text
 
-    assert split_client.get(
-        f"/v1/students/{SHARED_NUMBER}", headers={SCHOOL_HEADER: NC}
-    ).status_code == 200
-    assert split_client.get(
-        f"/v1/students/{SHARED_NUMBER}", headers={SCHOOL_HEADER: MD}
-    ).status_code == 404
+    assert (
+        split_client.get(f"/v1/students/{SHARED_NUMBER}", headers={SCHOOL_HEADER: NC}).status_code
+        == 200
+    )
+    assert (
+        split_client.get(f"/v1/students/{SHARED_NUMBER}", headers={SCHOOL_HEADER: MD}).status_code
+        == 404
+    )
 
 
 def test_a_request_naming_no_school_is_refused(split_client: TestClient) -> None:

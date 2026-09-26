@@ -26,6 +26,7 @@ what the embedder returned.
 
 **Fails open.** A Redis that cannot be reached is a miss, and the embedder answers.
 """
+
 from __future__ import annotations
 
 import base64
@@ -77,14 +78,18 @@ class QueryVectorCache:
         self._lock = threading.Lock()
 
     @classmethod
-    def from_environment(cls, embed: Callable[[str], Sequence[float]], cache: Any) -> "QueryVectorCache":
+    def from_environment(
+        cls, embed: Callable[[str], Sequence[float]], cache: Any
+    ) -> "QueryVectorCache":
         """`QUERY_VECTOR_CACHE_TTL_SECONDS` (7 days; 0 keeps only this process's memo)."""
-        model = ":".join((
-            os.getenv("EMBEDDING_BACKEND") or "local",
-            (os.getenv("EMBEDDING_BASE_URL") or "").rstrip("/"),
-            os.getenv("EMBEDDING_MODEL") or "BAAI/bge-m3",
-            os.getenv("DENSE_EMBEDDING_DIM") or "1024",
-        ))
+        model = ":".join(
+            (
+                os.getenv("EMBEDDING_BACKEND") or "local",
+                (os.getenv("EMBEDDING_BASE_URL") or "").rstrip("/"),
+                os.getenv("EMBEDDING_MODEL") or "BAAI/bge-m3",
+                os.getenv("DENSE_EMBEDDING_DIM") or "1024",
+            )
+        )
         return cls(
             embed,
             redis=getattr(cache, "client", None),

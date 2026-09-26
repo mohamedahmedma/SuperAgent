@@ -17,6 +17,7 @@ the client *declares* rather than something the server guesses:
 rendition. Adding a new channel means declaring its capabilities, not adding a code
 path.
 """
+
 from __future__ import annotations
 
 import base64
@@ -36,8 +37,8 @@ class AssetRenditionMode(str, Enum):
     """How the bytes reach the consumer."""
 
     REFERENCE = "reference"  # a URL the client fetches itself
-    INLINE = "inline"        # base64 data URI embedded in the response
-    METADATA = "metadata"    # no bytes at all — caption and dimensions only
+    INLINE = "inline"  # base64 data URI embedded in the response
+    METADATA = "metadata"  # no bytes at all — caption and dimensions only
 
 
 class ClientCapabilities(BaseModel):

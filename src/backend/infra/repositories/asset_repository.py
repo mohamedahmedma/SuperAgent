@@ -8,6 +8,7 @@ it, and two ingests of the same document could race between the read and the ins
 `AssetDossier` is imported where a dossier is built, not at the top of the module, so
 opening a unit of work does not load the assets package.
 """
+
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
@@ -87,7 +88,9 @@ class SqlAlchemyDocumentAssetRepository:
         statement = select(_DOSSIER_JSON).where(DocumentAsset.filename == filename)
         if extracted_only:
             statement = statement.where(DocumentAsset.status == _EXTRACTED)
-        payloads = self._session.scalars(statement.order_by(DocumentAsset.page_number, DocumentAsset.asset_id))
+        payloads = self._session.scalars(
+            statement.order_by(DocumentAsset.page_number, DocumentAsset.asset_id)
+        )
         return [_dossier(payload) for payload in payloads]
 
     def displayable_hashes(self, filenames: Sequence[str]) -> Sequence[tuple[str, str]]:
@@ -107,14 +110,18 @@ class SqlAlchemyDocumentAssetRepository:
             .returning(DocumentAsset.asset_id, DocumentAsset.sha256, DocumentAsset.storage_uri)
             .execution_options(synchronize_session=False)
         ).all()
-        return [StoredAssetRef(asset_id, sha256, storage_uri) for asset_id, sha256, storage_uri in rows]
+        return [
+            StoredAssetRef(asset_id, sha256, storage_uri) for asset_id, sha256, storage_uri in rows
+        ]
 
     def referenced_digests(self, digests: Collection[str]) -> set[str]:
         if not digests:
             return set()
         return set(
             self._session.scalars(
-                select(DocumentAsset.sha256).where(DocumentAsset.sha256.in_(list(digests))).distinct()
+                select(DocumentAsset.sha256)
+                .where(DocumentAsset.sha256.in_(list(digests)))
+                .distinct()
             )
         )
 
@@ -137,9 +144,9 @@ class SqlAlchemyDocumentAssetRepository:
         # gives: opening a unit of work must not load the assets package.
         from backend.assets.dossier import AssetDossier
 
-        rows = list(self._session.scalars(
-            select(DocumentAsset).where(DocumentAsset.sha256 == sha256)
-        ))
+        rows = list(
+            self._session.scalars(select(DocumentAsset).where(DocumentAsset.sha256 == sha256))
+        )
         now = datetime.now(UTC)
         changed = 0
         for row in rows:
@@ -154,10 +161,15 @@ class SqlAlchemyDocumentAssetRepository:
             changed += 1
         return changed
 
-    def older_than(self, dossier_version: int, *, after_asset_id: str, limit: int) -> Sequence[AssetDossier]:
+    def older_than(
+        self, dossier_version: int, *, after_asset_id: str, limit: int
+    ) -> Sequence[AssetDossier]:
         payloads = self._session.scalars(
             select(_DOSSIER_JSON)
-            .where(DocumentAsset.dossier_version < dossier_version, DocumentAsset.asset_id > after_asset_id)
+            .where(
+                DocumentAsset.dossier_version < dossier_version,
+                DocumentAsset.asset_id > after_asset_id,
+            )
             .order_by(DocumentAsset.asset_id)
             .limit(limit)
         )
@@ -165,7 +177,9 @@ class SqlAlchemyDocumentAssetRepository:
 
     def status_counts(self) -> dict[str, int]:
         rows = self._session.execute(
-            select(DocumentAsset.status, func.count(DocumentAsset.asset_id)).group_by(DocumentAsset.status)
+            select(DocumentAsset.status, func.count(DocumentAsset.asset_id)).group_by(
+                DocumentAsset.status
+            )
         ).all()
         return {status: int(count) for status, count in rows}
 
@@ -221,10 +235,20 @@ class SqlAlchemyAssetExtractionRepository:
         statement = insert(AssetExtraction).values(values)
         self._session.execute(
             statement.on_conflict_do_update(
-                index_elements=[AssetExtraction.sha256, AssetExtraction.profile, AssetExtraction.dossier_version],
+                index_elements=[
+                    AssetExtraction.sha256,
+                    AssetExtraction.profile,
+                    AssetExtraction.dossier_version,
+                ],
                 set_={
                     name: statement.excluded[name]
-                    for name in ("payload", "model_used", "confidence", "needs_review", "updated_at")
+                    for name in (
+                        "payload",
+                        "model_used",
+                        "confidence",
+                        "needs_review",
+                        "updated_at",
+                    )
                 },
             )
         )

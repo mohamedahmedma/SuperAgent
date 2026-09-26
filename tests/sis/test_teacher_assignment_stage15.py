@@ -1,4 +1,5 @@
 """Stage 15: manager eligibility and supervisor class assignment stay separate."""
+
 from fastapi.testclient import TestClient
 
 from tests.sis.test_grade_supervisor import grade_supervisor  # noqa: F401
@@ -14,12 +15,14 @@ def test_principal_can_define_subject_grade_and_derived_track(
         headers=principal,
         json={
             "full_name_en": "Arabic Teacher",
-            "assignments": [{
-                "academic_year_code": YEAR,
-                "subject_code": "MATH",
-                "year_level_code": "AR-P1",
-                "class_codes": [],
-            }],
+            "assignments": [
+                {
+                    "academic_year_code": YEAR,
+                    "subject_code": "MATH",
+                    "year_level_code": "AR-P1",
+                    "class_codes": [],
+                }
+            ],
         },
     )
     assert response.status_code == 200, response.text
@@ -52,12 +55,14 @@ def test_inactive_teacher_is_neither_listed_nor_assignable(
         json={
             "full_name_en": "Inactive Teacher",
             "is_active": False,
-            "assignments": [{
-                "academic_year_code": YEAR,
-                "subject_code": "MATH",
-                "year_level_code": "AR-P1",
-                "class_codes": [],
-            }],
+            "assignments": [
+                {
+                    "academic_year_code": YEAR,
+                    "subject_code": "MATH",
+                    "year_level_code": "AR-P1",
+                    "class_codes": [],
+                }
+            ],
         },
     )
     assert saved.status_code == 200, saved.text
@@ -91,24 +96,57 @@ def test_grade_scope_cannot_be_reused_against_another_school(
     grade_supervisor: dict[str, str],
     school: None,
 ) -> None:
-    assert client.post("/v1/schools", headers=registrar, json={
-        "code": "OTHER15", "name_en": "Other School", "name_ar": "Other",
-        "language_type": "arabic", "kg_grade_count": 0,
-        "primary_grade_count": 1, "preparatory_grade_count": 0,
-        "secondary_grade_count": 0, "term_count": 1,
-        "working_days": ["sunday"],
-    }).status_code == 201
-    assert client.post("/v1/academic-years", headers=registrar, json={
-        "code": "OTHER15-2025", "school_code": "OTHER15",
-        "name_en": "2025", "name_ar": "2025",
-        "starts_on": "2025-09-01", "ends_on": "2026-06-30",
-        "is_current": False,
-    }).status_code == 201
-    assert client.post("/v1/structure/levels", headers=registrar, json={
-        "code": "AR-P1", "school_code": "OTHER15", "track_code": "AR",
-        "name_en": "Primary 1", "name_ar": "Primary 1",
-        "display_order": 1, "stage": "primary",
-    }).status_code == 201
+    assert (
+        client.post(
+            "/v1/schools",
+            headers=registrar,
+            json={
+                "code": "OTHER15",
+                "name_en": "Other School",
+                "name_ar": "Other",
+                "language_type": "arabic",
+                "kg_grade_count": 0,
+                "primary_grade_count": 1,
+                "preparatory_grade_count": 0,
+                "secondary_grade_count": 0,
+                "term_count": 1,
+                "working_days": ["sunday"],
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/v1/academic-years",
+            headers=registrar,
+            json={
+                "code": "OTHER15-2025",
+                "school_code": "OTHER15",
+                "name_en": "2025",
+                "name_ar": "2025",
+                "starts_on": "2025-09-01",
+                "ends_on": "2026-06-30",
+                "is_current": False,
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/v1/structure/levels",
+            headers=registrar,
+            json={
+                "code": "AR-P1",
+                "school_code": "OTHER15",
+                "track_code": "AR",
+                "name_en": "Primary 1",
+                "name_ar": "Primary 1",
+                "display_order": 1,
+                "stage": "primary",
+            },
+        ).status_code
+        == 201
+    )
     response = client.get(
         "/v1/schools/OTHER15/grades/AR-P1/teacher-assignment-options",
         headers=grade_supervisor,

@@ -18,6 +18,7 @@ removes nothing -- retiring a section is a separate, deliberate act, because del
 here would take its enrolments and grades with it on a call the registrar thinks of as
 "generate the missing classes".
 """
+
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -128,17 +129,12 @@ class StructureGenerationService:
             # One school's ladder, and only that school's. Read across all schools this
             # would report another branch's `Y1` as "already present" and generate nothing
             # — leaving a new school with a year, no rungs, and a run that claimed success.
-            existing_levels = {
-                str(l.code): l for l in uow.year_levels.list_for_school(school_code)
-            }
-            self._refuse_parallel_ladder(
-                requested, existing_levels, allowed=allow_new_convention
-            )
+            existing_levels = {str(l.code): l for l in uow.year_levels.list_for_school(school_code)}
+            self._refuse_parallel_ladder(requested, existing_levels, allowed=allow_new_convention)
             # Section codes are unique per academic year, and this query is already
             # scoped to one, so the code alone is a sufficient key here.
             existing_sections = {
-                str(s.code): s
-                for s in uow.class_sections.list_for_year(academic_year_code)
+                str(s.code): s for s in uow.class_sections.list_for_year(academic_year_code)
             }
 
             items: list[GeneratedItem] = []
@@ -259,9 +255,7 @@ class StructureGenerationService:
             # Rungs before sections, in one transaction: a section carries its year level
             # code, so the reverse order fails a foreign key on a school's first run.
             level_flags = uow.year_levels.upsert_many(new_levels) if new_levels else {}
-            section_flags = (
-                uow.class_sections.upsert_many(new_sections) if new_sections else {}
-            )
+            section_flags = uow.class_sections.upsert_many(new_sections) if new_sections else {}
             uow.commit()
 
         # The repository's flag, not our own read, decides `created`: between the load
@@ -301,9 +295,7 @@ class StructureGenerationService:
         """
         if allowed or not existing:
             return
-        if {_stem(str(code)) for code, _ in requested} & {
-            _stem(code) for code in existing
-        }:
+        if {_stem(str(code)) for code, _ in requested} & {_stem(code) for code in existing}:
             return
         sample = ", ".join(sorted(existing)[:_SAMPLE_SIZE])
         raise DomainRuleViolation(

@@ -22,6 +22,7 @@ in this service at three, all of them built by the composition root with one poo
 The bug this prevents is the one that was actually here: three clients, three different
 answers to how wide the pool should be, and two of them wrong.
 """
+
 from __future__ import annotations
 
 import ast
@@ -148,16 +149,22 @@ def test_only_the_composition_root_builds_the_world() -> None:
     quietly acquiring the habit — and a whitelist makes that a test failure with a name on
     it rather than a rule somebody has to remember at review time.
     """
-    allowed = {"app.py", "config.py", "deps.py", "identity.py", "http.py",
-               "calendar.py", "directory.py", "grades.py"}
+    allowed = {
+        "app.py",
+        "config.py",
+        "deps.py",
+        "identity.py",
+        "http.py",
+        "calendar.py",
+        "directory.py",
+        "grades.py",
+    }
     offenders = [
         str(p.relative_to(RECORDS)).replace("\\", "/")
         for p in sorted(RECORDS.rglob("*.py"))
         if p.name not in allowed and "records.config" in _imports(p)
     ]
-    assert not offenders, (
-        f"These read configuration and should be handed it instead: {offenders}."
-    )
+    assert not offenders, f"These read configuration and should be handed it instead: {offenders}."
 
 
 def test_there_is_exactly_one_http_client_builder() -> None:

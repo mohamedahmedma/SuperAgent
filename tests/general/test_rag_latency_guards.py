@@ -26,13 +26,15 @@ class FakeMilvusStore:
         raise RuntimeError("hybrid unavailable")
 
     def dense_retrieve(self, **kwargs):
-        return [{
-            "text": "fallback result",
-            "filename": "doc.md",
-            "page_number": 1,
-            "chunk_id": "chunk-1",
-            "score": 0.9,
-        }]
+        return [
+            {
+                "text": "fallback result",
+                "filename": "doc.md",
+                "page_number": 1,
+                "chunk_id": "chunk-1",
+                "score": 0.9,
+            }
+        ]
 
 
 class FakeParentChunks:
@@ -65,11 +67,13 @@ def load_utils(env):
     fake_embedding.embed_query = lambda text: embedding_service.get_embeddings([text])[0]
     fake_embedding.reset_query_vector_cache = lambda: None
 
-    set_default_services(Services(
-        milvus=milvus_store,
-        embedder=embedding_service,
-        parent_chunks=FakeParentChunks(),
-    ))
+    set_default_services(
+        Services(
+            milvus=milvus_store,
+            embedder=embedding_service,
+            parent_chunks=FakeParentChunks(),
+        )
+    )
 
     module_name = f"rag_utils_under_test_{id(embedding_service)}"
     spec = importlib.util.spec_from_file_location(
@@ -99,12 +103,14 @@ class RagLatencyGuardTests(unittest.TestCase):
         set_default_services(None)
 
     def test_placeholder_rerank_settings_are_treated_as_disabled(self):
-        utils, _ = load_utils({
-            "RERANK_MODEL": "your_rerank_model",
-            "RERANK_BINDING_HOST": "https://your-rerank-host",
-            "RERANK_API_KEY": "your_rerank_api_key",
-            "AUTO_MERGE_ENABLED": "false",
-        })
+        utils, _ = load_utils(
+            {
+                "RERANK_MODEL": "your_rerank_model",
+                "RERANK_BINDING_HOST": "https://your-rerank-host",
+                "RERANK_API_KEY": "your_rerank_api_key",
+                "AUTO_MERGE_ENABLED": "false",
+            }
+        )
 
         with patch.object(utils.requests, "post") as post:
             docs, meta = utils._rerank_documents(
@@ -119,12 +125,14 @@ class RagLatencyGuardTests(unittest.TestCase):
         post.assert_not_called()
 
     def test_dense_fallback_reuses_the_query_embedding(self):
-        utils, embedding_service = load_utils({
-            "RERANK_MODEL": "",
-            "RERANK_BINDING_HOST": "",
-            "RERANK_API_KEY": "",
-            "AUTO_MERGE_ENABLED": "false",
-        })
+        utils, embedding_service = load_utils(
+            {
+                "RERANK_MODEL": "",
+                "RERANK_BINDING_HOST": "",
+                "RERANK_API_KEY": "",
+                "AUTO_MERGE_ENABLED": "false",
+            }
+        )
 
         result = utils.retrieve_documents("query", top_k=1)
 
@@ -150,16 +158,24 @@ class RagLatencyGuardTests(unittest.TestCase):
                 return self.schema(**self.payload)
 
         cases = [
-            ({
-                "method": "step_back",
-                "step_back_question": "What is a more abstract way to ask this?",
-                "hyde_document": "",
-            }, "step_back", "Step-back question"),
-            ({
-                "method": "hyde",
-                "step_back_question": "",
-                "hyde_document": "A possible answer-style document",
-            }, "hyde", "Hypothetical answer document"),
+            (
+                {
+                    "method": "step_back",
+                    "step_back_question": "What is a more abstract way to ask this?",
+                    "hyde_document": "",
+                },
+                "step_back",
+                "Step-back question",
+            ),
+            (
+                {
+                    "method": "hyde",
+                    "step_back_question": "",
+                    "hyde_document": "A possible answer-style document",
+                },
+                "hyde",
+                "Hypothetical answer document",
+            ),
         ]
         for payload, expected_method, expected_marker in cases:
             with self.subTest(method=expected_method):

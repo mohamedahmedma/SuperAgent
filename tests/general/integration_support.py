@@ -14,6 +14,7 @@ running application. Everything written here is namespaced under a per-run marke
 removed afterwards, and nothing deletes by any broader predicate. Read-only assertions
 against the real corpus are fine and are marked as such.
 """
+
 from __future__ import annotations
 
 import os
@@ -257,8 +258,10 @@ def temporary_user(username: Optional[str] = None, password: str = "Test-passw0r
                     {"p": f"{TEST_PREFIX}%"},
                 )
                 connection.execute(
-                    text("DELETE FROM chat_sessions WHERE user_id IN "
-                         "(SELECT id FROM users WHERE username = :u)"),
+                    text(
+                        "DELETE FROM chat_sessions WHERE user_id IN "
+                        "(SELECT id FROM users WHERE username = :u)"
+                    ),
                     {"u": name},
                 )
                 connection.execute(text("DELETE FROM users WHERE username = :u"), {"u": name})

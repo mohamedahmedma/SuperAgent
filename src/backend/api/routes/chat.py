@@ -86,7 +86,6 @@ def _admit(message: str, user: AuthenticatedUser, services: Services) -> TurnLea
     return decision
 
 
-
 # Deliberately `def`, not `async def`. `chat_with_agent` is synchronous from end to
 # end — the embedder's forward pass, the scope model call, retrieval, and every LLM
 # call in the turn. Declared `async`, all of that ran on the event loop, so one turn

@@ -30,6 +30,7 @@ What is asserted here, and why each one is a way the guarantee can quietly die:
     See `TheStreamedPath` below — the finding there is the reason this file exists at
     this length.
 """
+
 import asyncio
 import os
 import unittest
@@ -73,9 +74,11 @@ class _Stub:
         self.tool_choice = tool_choice
 
     def override(self, **overrides):
-        return _Stub(overrides.get("tools", self.tools),
-                     self.state,
-                     overrides.get("tool_choice", self.tool_choice))
+        return _Stub(
+            overrides.get("tools", self.tools),
+            self.state,
+            overrides.get("tool_choice", self.tool_choice),
+        )
 
 
 class _Ctx:
@@ -118,8 +121,9 @@ def _seen(middlewares, request):
     return record
 
 
-def _chosen(state=None, *, forced=RECORDS_TOOL, tools=(KNOWLEDGE_TOOL, RECORDS_TOOL),
-            tool_choice=None):
+def _chosen(
+    state=None, *, forced=RECORDS_TOOL, tools=(KNOWLEDGE_TOOL, RECORDS_TOOL), tool_choice=None
+):
     """The `tool_choice` the forcing middleware alone lets through."""
     middleware = runtime._force_the_planned_tool(_Ctx(forced))
     return _seen([middleware], _request(state, tools, tool_choice))["tool_choice"]
@@ -171,21 +175,37 @@ class WhatCountsAsTheFirstCall(unittest.TestCase):
             # text of past turns and, on some stores, the tool_calls attached to it —
             # but never the ToolMessages. Reading that as "a tool already ran" would
             # switch the forcing off for every resumed conversation.
-            ("history with a tool call but no result",
-             {"messages": [HumanMessage("hi"), an_ai_message_that_called_a_tool]}, True),
-            ("tool_calls_made present but empty",
-             {"messages": [], "tool_calls_made": {}}, True),
-            ("a tool result is in this turn",
-             {"messages": [an_ai_message_that_called_a_tool, a_result]}, False),
+            (
+                "history with a tool call but no result",
+                {"messages": [HumanMessage("hi"), an_ai_message_that_called_a_tool]},
+                True,
+            ),
+            ("tool_calls_made present but empty", {"messages": [], "tool_calls_made": {}}, True),
+            (
+                "a tool result is in this turn",
+                {"messages": [an_ai_message_that_called_a_tool, a_result]},
+                False,
+            ),
             # The one case the messages cannot show: a call the model made that produced
             # no result message at all. The budget's counter is what catches it.
-            ("the budget has counted a call",
-             {"messages": [], "tool_calls_made": {RECORDS_TOOL: 1}}, False),
-            ("both a result and a count",
-             {"messages": [an_ai_message_that_called_a_tool, a_result],
-              "tool_calls_made": {RECORDS_TOOL: 1}}, False),
-            ("a count for some other tool",
-             {"messages": [], "tool_calls_made": {KNOWLEDGE_TOOL: 1}}, False),
+            (
+                "the budget has counted a call",
+                {"messages": [], "tool_calls_made": {RECORDS_TOOL: 1}},
+                False,
+            ),
+            (
+                "both a result and a count",
+                {
+                    "messages": [an_ai_message_that_called_a_tool, a_result],
+                    "tool_calls_made": {RECORDS_TOOL: 1},
+                },
+                False,
+            ),
+            (
+                "a count for some other tool",
+                {"messages": [], "tool_calls_made": {KNOWLEDGE_TOOL: 1}},
+                False,
+            ),
         ]
 
     def test_the_state_shapes_a_turn_can_arrive_in_are_read_correctly(self):
@@ -241,8 +261,12 @@ class NothingToForce(unittest.TestCase):
     certain, and uncertainty must never turn into a required call."""
 
     def test_an_absent_plan_never_forces(self):
-        for label, forced in [("empty string", ""), ("spaces", "   "), ("a tab", "\t"),
-                              ("None", None)]:
+        for label, forced in [
+            ("empty string", ""),
+            ("spaces", "   "),
+            ("a tab", "\t"),
+            ("None", None),
+        ]:
             with self.subTest(label):
                 self.assertIsNone(_chosen(forced=forced))
 
@@ -253,6 +277,7 @@ class NothingToForce(unittest.TestCase):
         """`_force_the_planned_tool` reads the attribute off the context defensively;
         an older context object must degrade to "force nothing", not to an AttributeError
         that ends the turn."""
+
         class _Bare:
             pass
 
@@ -302,8 +327,9 @@ class TheRequestIsNeverMutated(unittest.TestCase):
 
         middleware.wrap_model_call(request, handler)
         self.assertIsNot(handed["request"], request)
-        self.assertEqual([runtime._tool_name(t) for t in handed["request"].tools],
-                         [KNOWLEDGE_TOOL, RECORDS_TOOL])
+        self.assertEqual(
+            [runtime._tool_name(t) for t in handed["request"].tools], [KNOWLEDGE_TOOL, RECORDS_TOOL]
+        )
 
     def test_declining_to_force_passes_the_original_request_straight_through(self):
         request = _request({"tool_calls_made": {RECORDS_TOOL: 1}})
@@ -332,9 +358,7 @@ class ProviderToolChoiceFallback(unittest.TestCase):
         attempts = []
 
         def handler(request):
-            attempts.append(
-                (request.tool_choice, [runtime._tool_name(t) for t in request.tools])
-            )
+            attempts.append((request.tool_choice, [runtime._tool_name(t) for t in request.tools]))
             if len(attempts) == 1:
                 raise self.ERROR
             return "recovered"
@@ -469,10 +493,10 @@ class ComposedWithTheBudget(ProfileScopedTest):
         for spent in [{}, {"tool_calls_made": {}}]:
             with self.subTest(spent):
                 self.assertTrue(runtime._first_model_call(_request(spent)))
-                self.assertEqual(self._both(spent)["tools"],
-                                 [KNOWLEDGE_TOOL, RECORDS_TOOL])
-        self.assertFalse(runtime._first_model_call(
-            _request({"tool_calls_made": {KNOWLEDGE_TOOL: 1}})))
+                self.assertEqual(self._both(spent)["tools"], [KNOWLEDGE_TOOL, RECORDS_TOOL])
+        self.assertFalse(
+            runtime._first_model_call(_request({"tool_calls_made": {KNOWLEDGE_TOOL: 1}}))
+        )
 
 
 # --------------------------------------------------------------------------------------
@@ -587,12 +611,14 @@ class TheStreamedPath(unittest.TestCase):
         default returns nothing, so a streamed turn counted no tool calls and the budget
         read zero forever — invisible, because it looks exactly like a spent budget."""
         counted = runtime._ToolBudget()
-        state = {"messages": [
-            HumanMessage(content="درجات ليلى كام؟"),
-            AIMessage(content="", tool_calls=[
-                {"name": RECORDS_TOOL, "args": {}, "id": "call-1"}
-            ]),
-        ]}
+        state = {
+            "messages": [
+                HumanMessage(content="درجات ليلى كام؟"),
+                AIMessage(
+                    content="", tool_calls=[{"name": RECORDS_TOOL, "args": {}, "id": "call-1"}]
+                ),
+            ]
+        }
         self.assertEqual(
             asyncio.run(counted.aafter_model(state, None)),
             {"tool_calls_made": {RECORDS_TOOL: 1}},
@@ -627,9 +653,7 @@ class TheRequirementIsCheckedAfterTheTurn(unittest.TestCase):
     def _verdict(self, forced, outcomes):
         from backend.agent.chat import service
 
-        return enforce_forced_tool_ran(
-            self._Finalizer(), self._Ctx(forced, outcomes), self._Plan()
-        )
+        return enforce_forced_tool_ran(self._Finalizer(), self._Ctx(forced, outcomes), self._Plan())
 
     def test_an_answer_with_no_tool_run_is_replaced(self):
         self.assertTrue(self._verdict(RECORDS_TOOL, []))

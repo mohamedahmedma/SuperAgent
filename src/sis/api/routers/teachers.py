@@ -1,4 +1,5 @@
 """Teacher identity, optional account, and valid teaching assignments."""
+
 from datetime import UTC, date, datetime
 from uuid import uuid4
 from typing import Annotated
@@ -54,15 +55,19 @@ def _sync_teacher_role_grants(session, teacher: m.Teacher, *, actor: str) -> Non
     role_id = session.scalar(select(m.Role.id).where(m.Role.code == "teacher"))
     if role_id is None:
         return
-    desired = set(session.scalars(
-        select(m.TeacherClassSection.class_section_id)
-        .where(m.TeacherClassSection.teacher_id == teacher.id)
-        .distinct()
-    ).all())
-    session.execute(delete(m.UserRole).where(
-        m.UserRole.user_id == teacher.user_id,
-        m.UserRole.role_id == role_id,
-    ))
+    desired = set(
+        session.scalars(
+            select(m.TeacherClassSection.class_section_id)
+            .where(m.TeacherClassSection.teacher_id == teacher.id)
+            .distinct()
+        ).all()
+    )
+    session.execute(
+        delete(m.UserRole).where(
+            m.UserRole.user_id == teacher.user_id,
+            m.UserRole.role_id == role_id,
+        )
+    )
     session.add_all(
         m.UserRole(
             user_id=teacher.user_id,
@@ -78,7 +83,9 @@ def _sync_teacher_role_grants(session, teacher: m.Teacher, *, actor: str) -> Non
 class TeacherAssignmentIn(BaseModel):
     academic_year_code: str
     subject_code: str
-    year_level_code: str = Field(description="The grade; its configured track is used automatically.")
+    year_level_code: str = Field(
+        description="The grade; its configured track is used automatically."
+    )
     class_codes: list[str] = Field(
         default_factory=list,
         description="Optional concrete classes within this grade. May contain several sections.",
@@ -96,7 +103,8 @@ class TeacherIn(BaseModel):
         default=None, description="Optional existing or new account. This does not grant a role."
     )
     password: str | None = Field(
-        default=None, min_length=PASSWORD_MIN_LENGTH,
+        default=None,
+        min_length=PASSWORD_MIN_LENGTH,
         description="Required only when creating a new account; omitted values never reset it.",
     )
     assignments: list[TeacherAssignmentIn] = Field(default_factory=list)
@@ -132,16 +140,26 @@ class TeacherOut(BaseModel):
     @classmethod
     def of(cls, record: TeacherRecord) -> "TeacherOut":
         return cls(
-            staff_number=record.teacher.staff_number, school_code=record.school_code,
-            user_id=record.teacher.user_id, username=record.username,
-            full_name_en=record.teacher.full_name_en, full_name_ar=record.teacher.full_name_ar,
+            staff_number=record.teacher.staff_number,
+            school_code=record.school_code,
+            user_id=record.teacher.user_id,
+            username=record.username,
+            full_name_en=record.teacher.full_name_en,
+            full_name_ar=record.teacher.full_name_ar,
             gender=record.teacher.gender,
-            email=record.email, phone=record.phone, is_active=record.teacher.is_active,
-            assignments=[TeacherAssignmentOut(
-                academic_year_code=row.academic_year_code, subject_code=row.subject_code,
-                year_level_code=row.year_level_code, track_code=row.track_code,
-                class_codes=list(row.class_codes),
-            ) for row in record.assignments],
+            email=record.email,
+            phone=record.phone,
+            is_active=record.teacher.is_active,
+            assignments=[
+                TeacherAssignmentOut(
+                    academic_year_code=row.academic_year_code,
+                    subject_code=row.subject_code,
+                    year_level_code=row.year_level_code,
+                    track_code=row.track_code,
+                    class_codes=list(row.class_codes),
+                )
+                for row in record.assignments
+            ],
         )
 
 
@@ -200,6 +218,7 @@ def _grade_context(session, school_code: str, year_code: str, level_code: str): 
     ).one_or_none()
     if row is None:
         from sis.domain.errors import UnknownReference
+
         raise UnknownReference(f"no grade {level_code} in {school_code}", field="year_level_code")
     return row
 
@@ -210,9 +229,12 @@ def _grade_context(session, school_code: str, year_code: str, level_code: str): 
     responses=error_responses(401, 403, 404, 422),
 )
 def grade_assignment_options(
-    school_code: str, year_level_code: str, caller: ClassAssigners,
+    school_code: str,
+    year_level_code: str,
+    caller: ClassAssigners,
     uow_factory: UowFactoryDep,
-    academic_year: Annotated[str, Query()], subject: Annotated[str | None, Query()] = None,
+    academic_year: Annotated[str, Query()],
+    subject: Annotated[str | None, Query()] = None,
 ) -> GradeAssignmentOptionsOut:
     caller.narrow(
         Permission.TEACHERS_ASSIGN_CLASSES,
@@ -222,9 +244,7 @@ def grade_assignment_options(
     )
     with uow_factory() as uow:
         session = uow._session
-        school, year, level = _grade_context(
-            session, school_code, academic_year, year_level_code
-        )
+        school, year, level = _grade_context(session, school_code, academic_year, year_level_code)
         subjects = session.execute(
             select(m.Subject.code, m.Subject.name_en, m.Subject.name_ar)
             .join(m.SubjectYearLevel, m.SubjectYearLevel.subject_id == m.Subject.id)
@@ -232,46 +252,59 @@ def grade_assignment_options(
                 m.Subject.academic_year_id == year.id,
                 m.SubjectYearLevel.year_level_id == level.id,
                 m.Subject.is_active.is_(True),
-            ).order_by(m.Subject.display_order, m.Subject.code)
+            )
+            .order_by(m.Subject.display_order, m.Subject.code)
         ).all()
         classes = session.execute(
             select(m.ClassSection.code, m.ClassSection.name_en, m.ClassSection.name_ar)
             .where(
                 m.ClassSection.academic_year_id == year.id,
                 m.ClassSection.year_level_id == level.id,
-            ).order_by(m.ClassSection.code)
+            )
+            .order_by(m.ClassSection.code)
         ).all()
         eligible: list[EligibleTeacherOut] = []
         available_classes = [
             {"code": r.code, "name_en": r.name_en, "name_ar": r.name_ar} for r in classes
         ]
         if subject:
-            subject_row = session.scalar(select(m.Subject).where(
-                m.Subject.academic_year_id == year.id, m.Subject.code == subject
-            ))
-            compatible = None if subject_row is None else session.scalar(
-                select(m.SubjectYearLevel.id).where(
-                    m.SubjectYearLevel.subject_id == subject_row.id,
-                    m.SubjectYearLevel.year_level_id == level.id,
+            subject_row = session.scalar(
+                select(m.Subject).where(
+                    m.Subject.academic_year_id == year.id, m.Subject.code == subject
+                )
+            )
+            compatible = (
+                None
+                if subject_row is None
+                else session.scalar(
+                    select(m.SubjectYearLevel.id).where(
+                        m.SubjectYearLevel.subject_id == subject_row.id,
+                        m.SubjectYearLevel.year_level_id == level.id,
+                    )
                 )
             )
             if compatible is None:
                 from sis.domain.errors import DomainRuleViolation
+
                 raise DomainRuleViolation(
                     f"{subject} is not configured for {year_level_code}",
                     field="subject_code",
                 )
             if subject_row is not None:
-                occupied = set(session.scalars(
-                    select(m.ClassSection.code)
-                    .join(m.TeacherClassSection)
-                    .where(
-                        m.TeacherClassSection.subject_id == subject_row.id,
-                        m.ClassSection.academic_year_id == year.id,
-                        m.ClassSection.year_level_id == level.id,
-                    )
-                ).all())
-                available_classes = [row for row in available_classes if row["code"] not in occupied]
+                occupied = set(
+                    session.scalars(
+                        select(m.ClassSection.code)
+                        .join(m.TeacherClassSection)
+                        .where(
+                            m.TeacherClassSection.subject_id == subject_row.id,
+                            m.ClassSection.academic_year_id == year.id,
+                            m.ClassSection.year_level_id == level.id,
+                        )
+                    ).all()
+                )
+                available_classes = [
+                    row for row in available_classes if row["code"] not in occupied
+                ]
                 teachers = session.scalars(
                     select(m.Teacher)
                     .join(m.TeacherYearLevel)
@@ -280,7 +313,8 @@ def grade_assignment_options(
                         m.Teacher.is_active.is_(True),
                         m.TeacherYearLevel.year_level_id == level.id,
                         m.TeacherYearLevel.subject_id == subject_row.id,
-                    ).order_by(m.Teacher.staff_number)
+                    )
+                    .order_by(m.Teacher.staff_number)
                 ).all()
                 for teacher in teachers:
                     assigned = session.scalars(
@@ -291,18 +325,26 @@ def grade_assignment_options(
                             m.TeacherClassSection.subject_id == subject_row.id,
                             m.ClassSection.academic_year_id == year.id,
                             m.ClassSection.year_level_id == level.id,
-                        ).order_by(m.ClassSection.code)
+                        )
+                        .order_by(m.ClassSection.code)
                     ).all()
-                    eligible.append(EligibleTeacherOut(
-                        staff_number=teacher.staff_number,
-                        full_name_en=teacher.full_name_en, full_name_ar=teacher.full_name_ar,
-                        assigned_class_codes=list(assigned),
-                    ))
+                    eligible.append(
+                        EligibleTeacherOut(
+                            staff_number=teacher.staff_number,
+                            full_name_en=teacher.full_name_en,
+                            full_name_ar=teacher.full_name_ar,
+                            assigned_class_codes=list(assigned),
+                        )
+                    )
         return GradeAssignmentOptionsOut(
-            school_code=school.code, academic_year_code=year.code,
-            year_level_code=level.code, year_level_name_en=level.name_en,
+            school_code=school.code,
+            academic_year_code=year.code,
+            year_level_code=level.code,
+            year_level_name_en=level.name_en,
             year_level_name_ar=level.name_ar,
-            subjects=[{"code": r.code, "name_en": r.name_en, "name_ar": r.name_ar} for r in subjects],
+            subjects=[
+                {"code": r.code, "name_en": r.name_en, "name_ar": r.name_ar} for r in subjects
+            ],
             classes=[{"code": r.code, "name_en": r.name_en, "name_ar": r.name_ar} for r in classes],
             available_classes=available_classes,
             eligible_teachers=eligible,
@@ -315,8 +357,11 @@ def grade_assignment_options(
     responses=error_responses(401, 403, 404, 409, 422),
 )
 def assign_teacher_classes(
-    school_code: str, year_level_code: str, body: GradeClassAssignmentIn,
-    caller: ClassAssigners, uow_factory: UowFactoryDep,
+    school_code: str,
+    year_level_code: str,
+    body: GradeClassAssignmentIn,
+    caller: ClassAssigners,
+    uow_factory: UowFactoryDep,
 ) -> GradeAssignmentOptionsOut:
     caller.narrow(
         Permission.TEACHERS_ASSIGN_CLASSES,
@@ -329,50 +374,72 @@ def assign_teacher_classes(
         school, year, level = _grade_context(
             session, school_code, body.academic_year_code, year_level_code
         )
-        subject = session.scalar(select(m.Subject).where(
-            m.Subject.academic_year_id == year.id, m.Subject.code == body.subject_code
-        ))
-        teacher = session.scalar(select(m.Teacher).where(
-            m.Teacher.school_id == school.id, m.Teacher.staff_number == body.staff_number
-        ))
-        compatible = None if subject is None else session.scalar(
-            select(m.SubjectYearLevel.id).where(
-                m.SubjectYearLevel.subject_id == subject.id,
-                m.SubjectYearLevel.year_level_id == level.id,
+        subject = session.scalar(
+            select(m.Subject).where(
+                m.Subject.academic_year_id == year.id, m.Subject.code == body.subject_code
             )
         )
-        eligible = None if subject is None or teacher is None else session.scalar(
-            select(m.TeacherYearLevel.id).where(
-                m.TeacherYearLevel.teacher_id == teacher.id,
-                m.TeacherYearLevel.subject_id == subject.id,
-                m.TeacherYearLevel.year_level_id == level.id,
+        teacher = session.scalar(
+            select(m.Teacher).where(
+                m.Teacher.school_id == school.id, m.Teacher.staff_number == body.staff_number
+            )
+        )
+        compatible = (
+            None
+            if subject is None
+            else session.scalar(
+                select(m.SubjectYearLevel.id).where(
+                    m.SubjectYearLevel.subject_id == subject.id,
+                    m.SubjectYearLevel.year_level_id == level.id,
+                )
+            )
+        )
+        eligible = (
+            None
+            if subject is None or teacher is None
+            else session.scalar(
+                select(m.TeacherYearLevel.id).where(
+                    m.TeacherYearLevel.teacher_id == teacher.id,
+                    m.TeacherYearLevel.subject_id == subject.id,
+                    m.TeacherYearLevel.year_level_id == level.id,
+                )
             )
         )
         if compatible is None:
             from sis.domain.errors import DomainRuleViolation
+
             raise DomainRuleViolation(
                 f"{body.subject_code} is not configured for {year_level_code}",
                 field="subject_code",
             )
         if teacher is not None and not teacher.is_active:
             from sis.domain.errors import DomainRuleViolation
+
             raise DomainRuleViolation("that teacher is inactive", field="staff_number")
         if eligible is None:
             from sis.domain.errors import DomainRuleViolation
+
             raise DomainRuleViolation(
                 "that teacher is not eligible for this subject and grade", field="staff_number"
             )
-        classes = session.scalars(select(m.ClassSection).where(
-            m.ClassSection.academic_year_id == year.id,
-            m.ClassSection.year_level_id == level.id,
-            m.ClassSection.code.in_(body.class_codes),
-        )).all()
+        classes = session.scalars(
+            select(m.ClassSection).where(
+                m.ClassSection.academic_year_id == year.id,
+                m.ClassSection.year_level_id == level.id,
+                m.ClassSection.code.in_(body.class_codes),
+            )
+        ).all()
         if {row.code for row in classes} != set(body.class_codes):
             from sis.domain.errors import DomainRuleViolation
-            raise DomainRuleViolation("one or more classes are outside this grade", field="class_codes")
+
+            raise DomainRuleViolation(
+                "one or more classes are outside this grade", field="class_codes"
+            )
         conflict = session.execute(
             select(m.ClassSection.code, m.Teacher.staff_number)
-            .join(m.TeacherClassSection, m.TeacherClassSection.class_section_id == m.ClassSection.id)
+            .join(
+                m.TeacherClassSection, m.TeacherClassSection.class_section_id == m.ClassSection.id
+            )
             .join(m.Teacher, m.Teacher.id == m.TeacherClassSection.teacher_id)
             .where(
                 m.TeacherClassSection.subject_id == subject.id,
@@ -382,30 +449,44 @@ def assign_teacher_classes(
         ).first()
         if conflict is not None:
             from sis.domain.errors import DomainRuleViolation
+
             raise DomainRuleViolation(
                 f"{conflict.code} already has a {body.subject_code} teacher ({conflict.staff_number})",
                 field="class_codes",
             )
-        existing_ids = session.scalars(select(m.TeacherClassSection.id)
+        existing_ids = session.scalars(
+            select(m.TeacherClassSection.id)
             .join(m.ClassSection)
             .where(
                 m.TeacherClassSection.teacher_id == teacher.id,
                 m.TeacherClassSection.subject_id == subject.id,
                 m.ClassSection.academic_year_id == year.id,
                 m.ClassSection.year_level_id == level.id,
-            )).all()
+            )
+        ).all()
         if existing_ids:
-            session.execute(delete(m.TeacherClassSection).where(m.TeacherClassSection.id.in_(existing_ids)))
-        session.add_all(m.TeacherClassSection(
-            teacher_id=teacher.id, class_section_id=section.id, subject_id=subject.id,
-            assigned_by=caller.username,
-        ) for section in classes)
+            session.execute(
+                delete(m.TeacherClassSection).where(m.TeacherClassSection.id.in_(existing_ids))
+            )
+        session.add_all(
+            m.TeacherClassSection(
+                teacher_id=teacher.id,
+                class_section_id=section.id,
+                subject_id=subject.id,
+                assigned_by=caller.username,
+            )
+            for section in classes
+        )
         session.flush()
         _sync_teacher_role_grants(session, teacher, actor=caller.username)
         uow.commit()
     return grade_assignment_options(
-        school_code, year_level_code, caller, uow_factory,
-        academic_year=body.academic_year_code, subject=body.subject_code,
+        school_code,
+        year_level_code,
+        caller,
+        uow_factory,
+        academic_year=body.academic_year_code,
+        subject=body.subject_code,
     )
 
 
@@ -421,13 +502,12 @@ def list_teacher_attendance(
     from_date: Annotated[date | None, Query(alias="from")] = None,
     to_date: Annotated[date | None, Query(alias="to")] = None,
 ) -> list[TeacherAttendanceOut]:
-    caller.narrow(
-        Permission.TEACHER_ATTENDANCE_READ, lambda scopes: scopes.for_school(school_code)
-    )
+    caller.narrow(Permission.TEACHER_ATTENDANCE_READ, lambda scopes: scopes.for_school(school_code))
     with uow_factory() as uow:
         school = uow._session.scalar(select(m.School).where(m.School.code == school_code))
         if school is None:
             from sis.domain.errors import UnknownReference
+
             raise UnknownReference("school", school_code)
         statement = (
             select(m.TeacherAttendance, m.Teacher)
@@ -440,12 +520,19 @@ def list_teacher_attendance(
         if to_date is not None:
             statement = statement.where(m.TeacherAttendance.on_date <= to_date)
         rows = uow._session.execute(statement).all()
-        return [TeacherAttendanceOut(
-            staff_number=teacher.staff_number, full_name_en=teacher.full_name_en,
-            full_name_ar=teacher.full_name_ar, on_date=row.on_date,
-            state=StaffAttendanceState(row.state), note=row.note,
-            recorded_by=row.recorded_by, updated_at=row.updated_at,
-        ) for row, teacher in rows]
+        return [
+            TeacherAttendanceOut(
+                staff_number=teacher.staff_number,
+                full_name_en=teacher.full_name_en,
+                full_name_ar=teacher.full_name_ar,
+                on_date=row.on_date,
+                state=StaffAttendanceState(row.state),
+                note=row.note,
+                recorded_by=row.recorded_by,
+                updated_at=row.updated_at,
+            )
+            for row, teacher in rows
+        ]
 
 
 @router.put(
@@ -454,8 +541,13 @@ def list_teacher_attendance(
     responses=error_responses(401, 403, 404, 422),
 )
 def record_teacher_attendance(
-    school_code: str, staff_number: str, on_date: date, body: TeacherAttendanceIn,
-    caller: AttendanceWriters, uow_factory: UowFactoryDep, today: TodayDep,
+    school_code: str,
+    staff_number: str,
+    on_date: date,
+    body: TeacherAttendanceIn,
+    caller: AttendanceWriters,
+    uow_factory: UowFactoryDep,
+    today: TodayDep,
 ) -> TeacherAttendanceOut:
     caller.narrow(
         Permission.TEACHER_ATTENDANCE_WRITE, lambda scopes: scopes.for_school(school_code)
@@ -465,23 +557,27 @@ def record_teacher_attendance(
     # fixtures to the afternoon it was written.
     if on_date > today:
         from sis.domain.errors import DomainRuleViolation
+
         raise DomainRuleViolation(
             "teacher attendance cannot be recorded for a future day",
             field="on_date",
         )
     with uow_factory() as uow:
         teacher = uow._session.scalar(
-            select(m.Teacher).join(m.School).where(
-                m.School.code == school_code, m.Teacher.staff_number == staff_number
-            )
+            select(m.Teacher)
+            .join(m.School)
+            .where(m.School.code == school_code, m.Teacher.staff_number == staff_number)
         )
         if teacher is None:
             from sis.domain.errors import UnknownReference
+
             raise UnknownReference("teacher", staff_number)
-        row = uow._session.scalar(select(m.TeacherAttendance).where(
-            m.TeacherAttendance.teacher_id == teacher.id,
-            m.TeacherAttendance.on_date == on_date,
-        ))
+        row = uow._session.scalar(
+            select(m.TeacherAttendance).where(
+                m.TeacherAttendance.teacher_id == teacher.id,
+                m.TeacherAttendance.on_date == on_date,
+            )
+        )
         if row is None:
             row = m.TeacherAttendance(
                 teacher_id=teacher.id, school_id=teacher.school_id, on_date=on_date
@@ -491,15 +587,22 @@ def record_teacher_attendance(
         row.recorded_by, row.updated_at = caller.username, datetime.now(UTC)
         uow._session.flush()
         result = TeacherAttendanceOut(
-            staff_number=teacher.staff_number, full_name_en=teacher.full_name_en,
-            full_name_ar=teacher.full_name_ar, on_date=row.on_date, state=body.state,
-            note=row.note, recorded_by=row.recorded_by, updated_at=row.updated_at,
+            staff_number=teacher.staff_number,
+            full_name_en=teacher.full_name_en,
+            full_name_ar=teacher.full_name_ar,
+            on_date=row.on_date,
+            state=body.state,
+            note=row.note,
+            recorded_by=row.recorded_by,
+            updated_at=row.updated_at,
         )
         uow.commit()
         return result
 
 
-@router.get("/schools/{school_code}/teachers", response_model=list[TeacherOut],
+@router.get(
+    "/schools/{school_code}/teachers",
+    response_model=list[TeacherOut],
     summary="The teaching staff a caller may read",
     description="Without `year_level` this is the school's whole directory, and it needs "
     "a school-wide grant.\n\n"
@@ -508,7 +611,8 @@ def record_teacher_attendance(
     "teachers assigned to that grade come back, and each one carries only their "
     "assignments on it — a teacher who also works two grades up does not bring that grade "
     "with them.",
-    responses=error_responses(401, 403, 404, 422))
+    responses=error_responses(401, 403, 404, 422),
+)
 def list_teachers(
     school_code: str,
     service: Teachers,
@@ -542,27 +646,37 @@ def list_teachers(
     responses=error_responses(401, 403, 404),
 )
 def list_archived_teachers(
-    school_code: str, service: Teachers, caller: Managers,
+    school_code: str,
+    service: Teachers,
+    caller: Managers,
 ) -> list[TeacherOut]:
     """A manager-only audit view; inactive staff never appear in the normal directory."""
     if not _may_manage_archived_staff(caller):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "principal_only", "message": "Only the school manager can view archived teachers."},
+            detail={
+                "code": "principal_only",
+                "message": "Only the school manager can view archived teachers.",
+            },
         )
-    caller.narrow(Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code))
+    caller.narrow(
+        Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
+    )
     with domain_errors():
         rows = service.list(SchoolCode(school_code), include_inactive=True)
     return [TeacherOut.of(row) for row in rows if not row.teacher.is_active]
 
 
-@router.get("/schools/{school_code}/teachers/{staff_number}", response_model=TeacherOut,
+@router.get(
+    "/schools/{school_code}/teachers/{staff_number}",
+    response_model=TeacherOut,
     summary="One teacher",
     description="`year_level` narrows this the same way it narrows the directory: the "
     "record comes back holding only that grade's assignments, and a teacher who does not "
     "teach on that grade answers 404 rather than 403 — a supervisor able to tell the two "
     "apart could enumerate the school's staff numbers.",
-    responses=error_responses(401, 403, 404, 422))
+    responses=error_responses(401, 403, 404, 422),
+)
 def get_teacher(
     school_code: str,
     staff_number: str,
@@ -591,29 +705,48 @@ def get_teacher(
     return TeacherOut.of(row)
 
 
-@router.put("/schools/{school_code}/teachers/{staff_number}", response_model=TeacherOut,
+@router.put(
+    "/schools/{school_code}/teachers/{staff_number}",
+    response_model=TeacherOut,
     summary="Create or replace a teacher and their teaching assignments",
     description="School-manager operation. Assignments replace the teacher's current subject, grade, and class scope atomically. The selected grade determines the academic track. No role is granted or promoted.",
-    responses=error_responses(401, 403, 404, 409, 422))
-def save_teacher(school_code: str, staff_number: str, body: TeacherIn,
-    service: Teachers, caller: Managers, uow_factory: UowFactoryDep) -> TeacherOut:
+    responses=error_responses(401, 403, 404, 409, 422),
+)
+def save_teacher(
+    school_code: str,
+    staff_number: str,
+    body: TeacherIn,
+    service: Teachers,
+    caller: Managers,
+    uow_factory: UowFactoryDep,
+) -> TeacherOut:
     caller.narrow(
         Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
     )
     with domain_errors():
         row = service.save(
-            school_code=SchoolCode(school_code), staff_number=staff_number,
-            full_name_en=body.full_name_en, full_name_ar=body.full_name_ar,
+            school_code=SchoolCode(school_code),
+            staff_number=staff_number,
+            full_name_en=body.full_name_en,
+            full_name_ar=body.full_name_ar,
             gender=body.gender,
-            email=body.email, phone=body.phone, is_active=body.is_active,
-            username=body.username, password=body.password,
-            assignments=[(a.academic_year_code, a.subject_code, a.year_level_code, a.class_codes)
-                         for a in body.assignments], assigned_by=str(caller),
+            email=body.email,
+            phone=body.phone,
+            is_active=body.is_active,
+            username=body.username,
+            password=body.password,
+            assignments=[
+                (a.academic_year_code, a.subject_code, a.year_level_code, a.class_codes)
+                for a in body.assignments
+            ],
+            assigned_by=str(caller),
         )
     with uow_factory() as uow:
-        teacher = uow._session.scalar(select(m.Teacher).join(m.School).where(
-            m.School.code == school_code, m.Teacher.staff_number == staff_number
-        ))
+        teacher = uow._session.scalar(
+            select(m.Teacher)
+            .join(m.School)
+            .where(m.School.code == school_code, m.Teacher.staff_number == staff_number)
+        )
         if teacher is not None:
             _sync_teacher_role_grants(uow._session, teacher, actor=caller.username)
             uow.commit()
@@ -628,8 +761,11 @@ def save_teacher(school_code: str, staff_number: str, body: TeacherIn,
     responses=error_responses(401, 403, 404, 409, 422),
 )
 def create_teacher(
-    school_code: str, body: TeacherIn, service: Teachers,
-    caller: Managers, uow_factory: UowFactoryDep,
+    school_code: str,
+    body: TeacherIn,
+    service: Teachers,
+    caller: Managers,
+    uow_factory: UowFactoryDep,
 ) -> TeacherOut:
     caller.narrow(
         Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
@@ -637,22 +773,33 @@ def create_teacher(
     staff_number = f"T-{uuid4().hex[:12].upper()}"
     with domain_errors():
         row = service.save(
-            school_code=SchoolCode(school_code), staff_number=staff_number,
-            full_name_en=body.full_name_en, full_name_ar=body.full_name_ar,
+            school_code=SchoolCode(school_code),
+            staff_number=staff_number,
+            full_name_en=body.full_name_en,
+            full_name_ar=body.full_name_ar,
             gender=body.gender,
-            email=body.email, phone=body.phone, is_active=body.is_active,
-            username=body.username, password=body.password,
-            assignments=[(a.academic_year_code, a.subject_code, a.year_level_code, a.class_codes)
-                         for a in body.assignments], assigned_by=str(caller),
+            email=body.email,
+            phone=body.phone,
+            is_active=body.is_active,
+            username=body.username,
+            password=body.password,
+            assignments=[
+                (a.academic_year_code, a.subject_code, a.year_level_code, a.class_codes)
+                for a in body.assignments
+            ],
+            assigned_by=str(caller),
         )
     with uow_factory() as uow:
-        teacher = uow._session.scalar(select(m.Teacher).join(m.School).where(
-            m.School.code == school_code, m.Teacher.staff_number == staff_number
-        ))
+        teacher = uow._session.scalar(
+            select(m.Teacher)
+            .join(m.School)
+            .where(m.School.code == school_code, m.Teacher.staff_number == staff_number)
+        )
         if teacher is not None:
             _sync_teacher_role_grants(uow._session, teacher, actor=caller.username)
             uow.commit()
     return TeacherOut.of(row)
+
 
 @router.delete(
     "/schools/{school_code}/teachers/{staff_number}",
@@ -667,7 +814,10 @@ def remove_teacher(
     if not _may_manage_archived_staff(caller):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "principal_only", "message": "Only the school manager can remove a teacher."},
+            detail={
+                "code": "principal_only",
+                "message": "Only the school manager can remove a teacher.",
+            },
         )
     caller.narrow(
         Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
@@ -675,25 +825,28 @@ def remove_teacher(
     with uow_factory() as uow:
         session = uow._session
         teacher = session.scalar(
-            select(m.Teacher).join(m.School).where(
-                m.School.code == school_code, m.Teacher.staff_number == staff_number
-            )
+            select(m.Teacher)
+            .join(m.School)
+            .where(m.School.code == school_code, m.Teacher.staff_number == staff_number)
         )
         if teacher is None or not teacher.is_active:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "unknown_reference", "message": "No active teacher with that reference exists in this school."},
+                detail={
+                    "code": "unknown_reference",
+                    "message": "No active teacher with that reference exists in this school.",
+                },
             )
 
         user = session.get(m.User, teacher.user_id) if teacher.user_id is not None else None
         if user is not None:
-            protected = set(session.scalars(
-                select(m.Role.code)
-                .join(m.UserRole, m.UserRole.role_id == m.Role.id)
-                .where(m.UserRole.user_id == user.id)
-            ).all()) & {
-                RoleCode.SYSTEM_ADMIN.value, RoleCode.SCHOOL_OWNER.value, RoleCode.PRINCIPAL.value
-            }
+            protected = set(
+                session.scalars(
+                    select(m.Role.code)
+                    .join(m.UserRole, m.UserRole.role_id == m.Role.id)
+                    .where(m.UserRole.user_id == user.id)
+                ).all()
+            ) & {RoleCode.SYSTEM_ADMIN.value, RoleCode.SCHOOL_OWNER.value, RoleCode.PRINCIPAL.value}
             if protected:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -718,7 +871,9 @@ def remove_teacher(
 
         uow.commit()
         return TeacherRemovalOut(
-            staff_number=staff_number, account_deactivated=account_deactivated, history_preserved=True
+            staff_number=staff_number,
+            account_deactivated=account_deactivated,
+            history_preserved=True,
         )
 
 
@@ -734,21 +889,27 @@ def restore_teacher(
     if not _may_manage_archived_staff(caller):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "principal_only", "message": "Only the school manager can restore a teacher."},
+            detail={
+                "code": "principal_only",
+                "message": "Only the school manager can restore a teacher.",
+            },
         )
     caller.narrow(
         Permission.TEACHERS_ASSIGN_SUBJECTS, lambda scopes: scopes.for_school(school_code)
     )
     with uow_factory() as uow:
         teacher = uow._session.scalar(
-            select(m.Teacher).join(m.School).where(
-                m.School.code == school_code, m.Teacher.staff_number == staff_number
-            )
+            select(m.Teacher)
+            .join(m.School)
+            .where(m.School.code == school_code, m.Teacher.staff_number == staff_number)
         )
         if teacher is None or teacher.is_active:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "unknown_reference", "message": "No archived teacher with that reference exists in this school."},
+                detail={
+                    "code": "unknown_reference",
+                    "message": "No archived teacher with that reference exists in this school.",
+                },
             )
         teacher.is_active = True
         user = uow._session.get(m.User, teacher.user_id) if teacher.user_id is not None else None

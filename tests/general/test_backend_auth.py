@@ -5,6 +5,7 @@ a verifier, and these cover the properties that verifier must hold — above all
 fails closed and that authority comes from the signed token rather than from a local
 row anyone could edit.
 """
+
 import os
 import time
 import unittest
@@ -236,9 +237,7 @@ class BackendAuthTests(unittest.TestCase):
         """The new roles must not accidentally satisfy the old admin gate."""
         for role in ("parent", "staff", "user"):
             with self.assertRaises(HTTPException):
-                backend_auth.require_admin(
-                    backend_auth.AuthenticatedUser(username="p", role=role)
-                )
+                backend_auth.require_admin(backend_auth.AuthenticatedUser(username="p", role=role))
 
 
 class RemovedSurfaceTests(unittest.TestCase):

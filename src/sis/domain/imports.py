@@ -31,6 +31,7 @@ is a parameter on every method that needs it (see `ImportBatch.is_expired`), bec
 service that expires a batch by calling `datetime.now()` inside the domain can only be
 tested by sleeping or by monkeypatching a module global.
 """
+
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field as dataclass_field, replace
 from datetime import datetime
@@ -230,9 +231,7 @@ class ImportBatch:
             if moment is not None and moment.tzinfo is None:
                 raise ValidationError(f"{name} must be timezone-aware", field=name)
         if self.expires_at <= self.created_at:
-            raise InvalidDateRange(
-                "a preview must expire after it was created", field="expires_at"
-            )
+            raise InvalidDateRange("a preview must expire after it was created", field="expires_at")
         object.__setattr__(self, "counts", MappingProxyType(dict(self.counts)))
 
     @property
@@ -280,8 +279,7 @@ class ImportBatch:
             )
         if current is ImportStatus.EXPIRED:
             raise ImportBatchExpired(
-                f"batch {self.batch_id} expired; upload the file again to see the "
-                "current outcomes",
+                f"batch {self.batch_id} expired; upload the file again to see the current outcomes",
                 field="batch_id",
             )
         if content_hash != self.content_hash:

@@ -9,6 +9,7 @@ That restraint is the whole content of this module. A number this service invent
 country for would resolve against the wrong family, or against nobody, and the failure
 would look exactly like a parent who is not registered.
 """
+
 from __future__ import annotations
 
 from typing import Final

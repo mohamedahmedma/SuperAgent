@@ -28,6 +28,7 @@ that module cannot tell why a dataclass declaration two hundred lines down behav
 strangely. Filtering by provenance keeps the star import honest without maintaining a
 name list that can drift.
 """
+
 # ruff: noqa: F401, F403
 import types as _types
 

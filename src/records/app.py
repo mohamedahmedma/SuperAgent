@@ -26,6 +26,7 @@ is a service that looks healthy until someone asks about a child.
 is built first. Two components resolving a term separately is how they come to disagree
 about it.
 """
+
 from __future__ import annotations
 
 import logging
@@ -86,9 +87,7 @@ def _build_calendar(resolved):
     """
     if not resolved.sis_base_url:
         return FakeSchoolCalendar()
-    return SisSchoolCalendar(
-        base_url=resolved.sis_base_url, api_key=_sis_api_key(resolved)
-    )
+    return SisSchoolCalendar(base_url=resolved.sis_base_url, api_key=_sis_api_key(resolved))
 
 
 def _build_directory(resolved):
@@ -104,9 +103,7 @@ def _build_directory(resolved):
             "and every parent will be told they have no children on file."
         )
         return FakeGuardianDirectory()
-    return SisGuardianDirectory(
-        base_url=resolved.sis_base_url, api_key=_sis_api_key(resolved)
-    )
+    return SisGuardianDirectory(base_url=resolved.sis_base_url, api_key=_sis_api_key(resolved))
 
 
 def _build_timetables(resolved):

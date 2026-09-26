@@ -10,6 +10,7 @@ The tool is bound NOWHERE else — not in `base`, which school extends. Every bo
 ships its schema to the model on every call, so a stray binding costs real tokens per
 turn and offers the model a capability it will occasionally try to use.
 """
+
 import os
 import unittest
 
@@ -96,9 +97,7 @@ class SchoolProfileTests(ProfileTestCase):
         `build_tools` raises `UnknownToolError` at process start rather than skipping
         the name, so this is the cheapest possible place to find out.
         """
-        unknown = [
-            name for name in load_profile("school").agent.tools if name not in TOOL_BUILDERS
-        ]
+        unknown = [name for name in load_profile("school").agent.tools if name not in TOOL_BUILDERS]
         self.assertEqual([], unknown)
 
     def test_its_tools_actually_build(self):
@@ -230,9 +229,7 @@ class DeterministicToolSelectionTests(ProfileTestCase):
         # Read off the class rather than spelled out, so adding a middleware to
         # `create_agent_for_request` cannot leave this test asserting the old node count
         # while real turns die at the limit.
-        self.assertGreaterEqual(
-            agent.recursion_limit, rounds * type(agent)._STEPS_PER_LOOP
-        )
+        self.assertGreaterEqual(agent.recursion_limit, rounds * type(agent)._STEPS_PER_LOOP)
 
     def test_it_lets_the_planner_dispatch_a_set_of_tools(self):
         """The opt-in for the other half: narrowing handles a one-tool question, this

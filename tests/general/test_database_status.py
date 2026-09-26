@@ -12,6 +12,7 @@ So: a permanent credential failure must be reported once, by name, with the reme
 never retried; a transient one must be waited for; and neither message may print the
 password.
 """
+
 import logging
 import unittest
 from unittest.mock import MagicMock, patch
@@ -37,7 +38,7 @@ def operational_error(message, pgcode=None):
 
 
 AUTH_FAILED = 'FATAL:  password authentication failed for user "postgres"'
-REFUSED = 'could not connect to server: Connection refused'
+REFUSED = "could not connect to server: Connection refused"
 
 
 class DescribeTests(unittest.TestCase):
@@ -55,7 +56,9 @@ class DescribeTests(unittest.TestCase):
             self.assertIn(expected, described)
 
     def test_an_absent_password_is_called_out_rather_than_shown_as_empty(self):
-        with patch.object(database, "DATABASE_URL", "postgresql+psycopg2://postgres@postgres:5432/app"):
+        with patch.object(
+            database, "DATABASE_URL", "postgresql+psycopg2://postgres@postgres:5432/app"
+        ):
             self.assertIn("password=ABSENT", database.describe_database())
 
     def test_the_boot_line_says_where_the_url_came_from(self):
@@ -74,7 +77,9 @@ class ClassificationTests(unittest.TestCase):
 
     def test_the_wider_authorization_sqlstate_is_permanent_too(self):
         """28000 covers a role that does not exist, which is equally not transient."""
-        self.assertTrue(database._is_auth_failure(operational_error("role does not exist", "28000")))
+        self.assertTrue(
+            database._is_auth_failure(operational_error("role does not exist", "28000"))
+        )
 
     def test_it_falls_back_to_the_message_when_no_sqlstate_is_set(self):
         """psycopg2 leaves pgcode unset when the handshake itself failed, which is this case."""
@@ -89,7 +94,10 @@ class VerifyConnectivityTests(unittest.TestCase):
     def test_a_rejected_credential_is_not_retried(self):
         engine = MagicMock()
         engine.connect.side_effect = operational_error(AUTH_FAILED, "28P01")
-        with patch.object(database, "engine", engine), patch.object(database, "DATABASE_URL", PROD_URL):
+        with (
+            patch.object(database, "engine", engine),
+            patch.object(database, "DATABASE_URL", PROD_URL),
+        ):
             with self.assertLogs(database.logger, level=logging.ERROR):
                 with self.assertRaises(RuntimeError):
                     database.verify_connectivity(attempts=5, delay_seconds=0)
@@ -98,7 +106,10 @@ class VerifyConnectivityTests(unittest.TestCase):
     def test_the_rejection_names_the_remedy_and_hides_the_password(self):
         engine = MagicMock()
         engine.connect.side_effect = operational_error(AUTH_FAILED, "28P01")
-        with patch.object(database, "engine", engine), patch.object(database, "DATABASE_URL", PROD_URL):
+        with (
+            patch.object(database, "engine", engine),
+            patch.object(database, "DATABASE_URL", PROD_URL),
+        ):
             with self.assertLogs(database.logger, level=logging.ERROR) as captured:
                 with self.assertRaises(RuntimeError):
                     database.verify_connectivity(attempts=1, delay_seconds=0)
@@ -111,7 +122,10 @@ class VerifyConnectivityTests(unittest.TestCase):
     def test_the_psycopg2_chain_is_dropped_so_it_cannot_bury_the_diagnosis(self):
         engine = MagicMock()
         engine.connect.side_effect = operational_error(AUTH_FAILED, "28P01")
-        with patch.object(database, "engine", engine), patch.object(database, "DATABASE_URL", PROD_URL):
+        with (
+            patch.object(database, "engine", engine),
+            patch.object(database, "DATABASE_URL", PROD_URL),
+        ):
             with self.assertLogs(database.logger, level=logging.ERROR):
                 with self.assertRaises(RuntimeError) as raised:
                     database.verify_connectivity(attempts=1, delay_seconds=0)
@@ -121,7 +135,10 @@ class VerifyConnectivityTests(unittest.TestCase):
     def test_a_transient_failure_is_retried_and_then_succeeds(self):
         engine = MagicMock()
         engine.connect.side_effect = [operational_error(REFUSED), MagicMock()]
-        with patch.object(database, "engine", engine), patch.object(database, "DATABASE_URL", PROD_URL):
+        with (
+            patch.object(database, "engine", engine),
+            patch.object(database, "DATABASE_URL", PROD_URL),
+        ):
             with self.assertLogs(database.logger, level=logging.WARNING):
                 database.verify_connectivity(attempts=3, delay_seconds=0)
         self.assertEqual(2, engine.connect.call_count)
@@ -129,7 +146,10 @@ class VerifyConnectivityTests(unittest.TestCase):
     def test_a_transient_failure_that_never_clears_gives_up_and_says_so(self):
         engine = MagicMock()
         engine.connect.side_effect = operational_error(REFUSED)
-        with patch.object(database, "engine", engine), patch.object(database, "DATABASE_URL", PROD_URL):
+        with (
+            patch.object(database, "engine", engine),
+            patch.object(database, "DATABASE_URL", PROD_URL),
+        ):
             with self.assertLogs(database.logger, level=logging.ERROR) as captured:
                 with self.assertRaises(RuntimeError):
                     database.verify_connectivity(attempts=3, delay_seconds=0)
@@ -138,7 +158,10 @@ class VerifyConnectivityTests(unittest.TestCase):
 
     def test_a_reachable_database_logs_nothing_and_raises_nothing(self):
         engine = MagicMock()
-        with patch.object(database, "engine", engine), patch.object(database, "DATABASE_URL", PROD_URL):
+        with (
+            patch.object(database, "engine", engine),
+            patch.object(database, "DATABASE_URL", PROD_URL),
+        ):
             database.verify_connectivity(attempts=3, delay_seconds=0)
         engine.connect.assert_called_once()
 

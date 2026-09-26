@@ -36,6 +36,7 @@ one test process can legitimately disagree about the issuer they expect.
 The two copies this replaces disagreed about `httpx` versus `requests`, which meant their
 timeout behaviour and their error types differed for no reason a deployment ever chose.
 """
+
 from schoolauth.claims import (
     children_from_claims,
     guardian_id_from_claims,

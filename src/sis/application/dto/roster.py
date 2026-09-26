@@ -6,6 +6,7 @@ overwritten — which is the only reason "which class was she in during Term 1" 
 answerable in June (decision 2). A DTO that flattened this to `class_code` on the student
 would discard that at the boundary, before any service could preserve it.
 """
+
 from dataclasses import dataclass
 from datetime import date
 

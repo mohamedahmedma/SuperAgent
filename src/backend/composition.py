@@ -32,6 +32,7 @@ background CLI jobs, and a chat turn served without one. It is a lazily built pr
 default, NOT the import-time singleton it replaces: nothing is constructed until
 something asks, and a caller with its own `Services` never consults it.
 """
+
 from __future__ import annotations
 
 import threading
@@ -343,7 +344,9 @@ class Services:
             from backend.agent.rag.retrieval_cache import RetrievalCache
             from backend.agent.rag.utils import retrieval_settings
 
-            return RetrievalCache.from_environment(self.cache, self.corpus_version, retrieval_settings())
+            return RetrievalCache.from_environment(
+                self.cache, self.corpus_version, retrieval_settings()
+            )
 
         return self._singleton("retrieval_cache", build)
 

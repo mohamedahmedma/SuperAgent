@@ -5,6 +5,7 @@ that produced it.  The latter tables were introduced with the route but not with
 schema revision, so every save reached the final INSERT and failed with a 500 in a
 migrated production database.  These tables make that write durable.
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -34,15 +35,37 @@ def upgrade() -> None:
             sa.Column("name", sa.String(length=160), nullable=False),
             sa.Column("max_points", sa.Float(), nullable=True),
             sa.Column("recorded_by", sa.String(length=120), nullable=False, server_default=""),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-            sa.UniqueConstraint("academic_year_code", "class_code", "subject_code", "term_code", "assessment_type", "name", name="uq_assessments_identity"),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
+            sa.UniqueConstraint(
+                "academic_year_code",
+                "class_code",
+                "subject_code",
+                "term_code",
+                "assessment_type",
+                "name",
+                name="uq_assessments_identity",
+            ),
         )
         tables.add("assessments")
 
     assessment_indexes = {index["name"] for index in inspector.get_indexes("assessments")}
     if "ix_assessments_class_lookup" not in assessment_indexes:
-        op.create_index("ix_assessments_class_lookup", "assessments", ["academic_year_code", "class_code", "subject_code", "term_code", "assessment_type"])
+        op.create_index(
+            "ix_assessments_class_lookup",
+            "assessments",
+            ["academic_year_code", "class_code", "subject_code", "term_code", "assessment_type"],
+        )
 
     if "assessment_marks" not in tables:
         op.create_table(
@@ -54,12 +77,29 @@ def upgrade() -> None:
             sa.Column("max_points", sa.Float(), nullable=True),
             sa.Column("percentage", sa.Float(), nullable=True),
             sa.Column("is_absent", sa.Boolean(), nullable=False, server_default=sa.text("0")),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
             sa.ForeignKeyConstraint(["assessment_id"], ["assessments.id"], ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(["student_number"], ["students.student_number"], ondelete="RESTRICT"),
-            sa.UniqueConstraint("assessment_id", "student_number", name="uq_assessment_marks_student"),
-            sa.CheckConstraint("percentage IS NULL OR (percentage >= 0 AND percentage <= 100)", name="ck_assessment_marks_percentage_range"),
+            sa.ForeignKeyConstraint(
+                ["student_number"], ["students.student_number"], ondelete="RESTRICT"
+            ),
+            sa.UniqueConstraint(
+                "assessment_id", "student_number", name="uq_assessment_marks_student"
+            ),
+            sa.CheckConstraint(
+                "percentage IS NULL OR (percentage >= 0 AND percentage <= 100)",
+                name="ck_assessment_marks_percentage_range",
+            ),
         )
 
     mark_indexes = {index["name"] for index in inspector.get_indexes("assessment_marks")}

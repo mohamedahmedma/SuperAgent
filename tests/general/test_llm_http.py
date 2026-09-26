@@ -13,6 +13,7 @@ connection for two model calls in three, and against a real provider a TLS hands
 These tests run the SDK against a real HTTP/1.1 server that counts connections, so they
 fail if either the SDK's behaviour or our fix changes.
 """
+
 import asyncio
 import json
 import socket
@@ -66,8 +67,14 @@ class _ProviderServer:
                 return None
             data += chunk
         head, _, body = data.partition(blank)
-        length = next((int(l.split(b":", 1)[1]) for l in head.split(b"\r\n")
-                       if l.lower().startswith(b"content-length:")), 0)
+        length = next(
+            (
+                int(l.split(b":", 1)[1])
+                for l in head.split(b"\r\n")
+                if l.lower().startswith(b"content-length:")
+            ),
+            0,
+        )
         while len(body) < length:
             body += conn.recv(65536)
         return json.loads(body or b"{}")
@@ -79,26 +86,50 @@ class _ProviderServer:
         try:
             while (request := self._read_request(conn)) is not None:  # keep-alive
                 if not request.get("stream"):
-                    completion = json.dumps({
-                        "id": "c", "object": "chat.completion", "created": 0, "model": "m",
-                        "choices": [{"index": 0, "finish_reason": "stop", "message": {
-                            "role": "assistant", "content": '{"ok": true}'}}],
-                    }).encode()
-                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                                 + f"Content-Length: {len(completion)}\r\n\r\n".encode()
-                                 + completion)
+                    completion = json.dumps(
+                        {
+                            "id": "c",
+                            "object": "chat.completion",
+                            "created": 0,
+                            "model": "m",
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "finish_reason": "stop",
+                                    "message": {"role": "assistant", "content": '{"ok": true}'},
+                                }
+                            ],
+                        }
+                    ).encode()
+                    conn.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        + f"Content-Length: {len(completion)}\r\n\r\n".encode()
+                        + completion
+                    )
                     continue
                 self.streamed += 1
-                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
-                             b"Transfer-Encoding: chunked\r\n\r\n")
+                conn.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+                    b"Transfer-Encoding: chunked\r\n\r\n"
+                )
                 # Structured output streams its JSON, so a role that regresses into
                 # streaming fails on the counts below rather than on a parse error.
-                pieces = (['{"ok"', ": ", "true}"] if request.get("response_format")
-                          else [f"w{i} " for i in range(self.chunks)])
+                pieces = (
+                    ['{"ok"', ": ", "true}"]
+                    if request.get("response_format")
+                    else [f"w{i} " for i in range(self.chunks)]
+                )
                 for i, piece in enumerate(pieces):
-                    delta = {"role": "assistant", "content": piece} if i == 0 else {"content": piece}
-                    event = {"id": "c", "object": "chat.completion.chunk", "created": 0, "model": "m",
-                             "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
+                    delta = (
+                        {"role": "assistant", "content": piece} if i == 0 else {"content": piece}
+                    )
+                    event = {
+                        "id": "c",
+                        "object": "chat.completion.chunk",
+                        "created": 0,
+                        "model": "m",
+                        "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                    }
                     conn.sendall(chunk(f"data: {json.dumps(event)}\n\n".encode()))
                     if self.trickle:
                         time.sleep(self.trickle)
@@ -116,7 +147,8 @@ class _ProviderServer:
 async def _stream_n(client, n, *, abandon=False):
     for _ in range(n):
         stream = await client.chat.completions.create(
-            model="m", stream=True, messages=[{"role": "user", "content": "q"}])
+            model="m", stream=True, messages=[{"role": "user", "content": "q"}]
+        )
         async for _ in stream:
             if abandon:
                 break
@@ -129,10 +161,12 @@ class ConnectionReuseTests(unittest.TestCase):
         transport in backend/llm_http.py can go."""
         server = _ProviderServer()
         try:
+
             async def main():
                 client = openai.AsyncOpenAI(api_key="x", base_url=server.url, max_retries=0)
                 await _stream_n(client, 5)
                 await client.close()
+
             asyncio.run(main())
             self.assertEqual(5, server.connections)
         finally:
@@ -141,12 +175,15 @@ class ConnectionReuseTests(unittest.TestCase):
     def test_through_the_shared_clients_one_connection_serves_every_stream(self):
         server = _ProviderServer()
         try:
+
             async def main():
                 shared = ProviderHttpClients()
-                client = openai.AsyncOpenAI(api_key="x", base_url=server.url, max_retries=0,
-                                            http_client=shared.async_client)
+                client = openai.AsyncOpenAI(
+                    api_key="x", base_url=server.url, max_retries=0, http_client=shared.async_client
+                )
                 await _stream_n(client, 5)
                 await shared.async_client.aclose()
+
             asyncio.run(main())
             self.assertEqual(1, server.connections)
         finally:
@@ -157,12 +194,15 @@ class ConnectionReuseTests(unittest.TestCase):
         within its budget and the connection is discarded, as before."""
         server = _ProviderServer(chunks=200, trickle=0.02)  # ~4 s to finish if drained
         try:
+
             async def main():
                 shared = ProviderHttpClients()
-                client = openai.AsyncOpenAI(api_key="x", base_url=server.url, max_retries=0,
-                                            http_client=shared.async_client)
+                client = openai.AsyncOpenAI(
+                    api_key="x", base_url=server.url, max_retries=0, http_client=shared.async_client
+                )
                 stream = await client.chat.completions.create(
-                    model="m", stream=True, messages=[{"role": "user", "content": "q"}])
+                    model="m", stream=True, messages=[{"role": "user", "content": "q"}]
+                )
                 async for _ in stream:
                     break
                 # Only the close is timed: opening a first connection to a fresh server
@@ -172,6 +212,7 @@ class ConnectionReuseTests(unittest.TestCase):
                 elapsed = time.perf_counter() - started
                 await shared.async_client.aclose()
                 return elapsed
+
             elapsed = asyncio.run(main())
             self.assertLess(elapsed, DRAIN_MAX_SECONDS + 0.5)
         finally:
@@ -180,10 +221,12 @@ class ConnectionReuseTests(unittest.TestCase):
     def test_cancelling_a_streaming_turn_still_cancels_it(self):
         server = _ProviderServer(chunks=200, trickle=0.02)
         try:
+
             async def main():
                 shared = ProviderHttpClients()
-                client = openai.AsyncOpenAI(api_key="x", base_url=server.url, max_retries=0,
-                                            http_client=shared.async_client)
+                client = openai.AsyncOpenAI(
+                    api_key="x", base_url=server.url, max_retries=0, http_client=shared.async_client
+                )
                 task = asyncio.create_task(_stream_n(client, 1))
                 await asyncio.sleep(0.3)
                 task.cancel()
@@ -194,6 +237,7 @@ class ConnectionReuseTests(unittest.TestCase):
                     return True
                 finally:
                     await shared.async_client.aclose()
+
             self.assertTrue(asyncio.run(main()))
         finally:
             server.close()
@@ -228,8 +272,14 @@ def _in_a_streaming_turn(call):
 def _model(server, clients, role):
     from langchain.chat_models import init_chat_model
 
-    return init_chat_model(model="m", model_provider="openai", api_key="x",
-                           base_url=server.url, **clients.model_kwargs(), **sampling(role))
+    return init_chat_model(
+        model="m",
+        model_provider="openai",
+        api_key="x",
+        base_url=server.url,
+        **clients.model_kwargs(),
+        **sampling(role),
+    )
 
 
 class InternalCallsDoNotStreamTests(unittest.TestCase):
@@ -241,7 +291,8 @@ class InternalCallsDoNotStreamTests(unittest.TestCase):
             client = openai.OpenAI(api_key="x", base_url=server.url, max_retries=0)
             for _ in range(5):
                 for _ in client.chat.completions.create(
-                        model="m", stream=True, messages=[{"role": "user", "content": "q"}]):
+                    model="m", stream=True, messages=[{"role": "user", "content": "q"}]
+                ):
                     pass
             client.close()
             self.assertEqual(5, server.connections)
@@ -252,8 +303,9 @@ class InternalCallsDoNotStreamTests(unittest.TestCase):
         self.assertEqual({"answer"}, set(STREAMED_ROLES))
         for role in ROLES:
             with self.subTest(role=role):
-                self.assertEqual(role not in STREAMED_ROLES,
-                                 sampling(role).get("disable_streaming", False))
+                self.assertEqual(
+                    role not in STREAMED_ROLES, sampling(role).get("disable_streaming", False)
+                )
 
     def test_a_grade_inside_a_streaming_turn_is_one_plain_call_on_one_connection(self):
         server = _ProviderServer()
@@ -301,8 +353,11 @@ class WiringTests(unittest.TestCase):
             return object()
 
         marker = object()
-        factory = ChatModelFactory(environ={"ARK_API_KEY": "k", "GRADE_MODEL": "g"},
-                                   build=build, http_kwargs={"http_async_client": marker})
+        factory = ChatModelFactory(
+            environ={"ARK_API_KEY": "k", "GRADE_MODEL": "g"},
+            build=build,
+            http_kwargs={"http_async_client": marker},
+        )
         factory.grader()
         self.assertIs(marker, built["http_async_client"])
 

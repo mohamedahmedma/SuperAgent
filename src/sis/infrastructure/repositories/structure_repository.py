@@ -24,6 +24,7 @@ school froze in December — would silently undo an administrative act nobody re
 `Subject.is_active` is the deliberate exception: `SubjectRepository` has no `set_active`,
 so upsert is the only path by which a subject can be retired.
 """
+
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -159,9 +160,7 @@ def bulk_upsert(
     if not rows:
         return set()
     existing = _existing_keys(session, model, rows, conflict_on)
-    _write_upsert(
-        session, model, rows, conflict_on=conflict_on, update_columns=update_columns
-    )
+    _write_upsert(session, model, rows, conflict_on=conflict_on, update_columns=update_columns)
     return existing
 
 
@@ -184,9 +183,7 @@ def _require(mapping: Mapping[str, int], code: str, field: str) -> int:
     return resolved
 
 
-def _require_level(
-    mapping: Mapping[tuple[str, str], int], year_code: str, level_code: str
-) -> int:
+def _require_level(mapping: Mapping[tuple[str, str], int], year_code: str, level_code: str) -> int:
     """Resolve a rung within one academic year's school, or say so naming both.
 
     The message names the year as well as the rung because "no year level 'Y1' on file"
@@ -196,8 +193,7 @@ def _require_level(
     resolved = mapping.get((year_code, level_code))
     if resolved is None:
         raise UnknownReference(
-            f"no year level {level_code!r} at the school that owns academic year "
-            f"{year_code!r}",
+            f"no year level {level_code!r} at the school that owns academic year {year_code!r}",
             field="year_level_code",
         )
     return resolved
@@ -207,9 +203,7 @@ def _ids_by_code(session: Session, model: type[Any], codes: Collection[str]) -> 
     """One statement resolving many codes to surrogate ids; absent codes are simply missing."""
     if not codes:
         return {}
-    rows = session.execute(
-        select(model.code, model.id).where(model.code.in_(set(codes)))
-    ).all()
+    rows = session.execute(select(model.code, model.id).where(model.code.in_(set(codes)))).all()
     return {code: identifier for code, identifier in rows}
 
 
@@ -390,9 +384,7 @@ class SqlAlchemyAcademicYearRepository:
         statement = (
             select(models.AcademicYear, models.School.code)
             .join(models.School)
-            .order_by(
-                models.AcademicYear.starts_on.desc(), models.AcademicYear.code.desc()
-            )
+            .order_by(models.AcademicYear.starts_on.desc(), models.AcademicYear.code.desc())
         )
         if school_code is not None:
             statement = statement.where(models.School.code == str(school_code))
@@ -444,10 +436,7 @@ class SqlAlchemyAcademicYearRepository:
         today = datetime.now(timezone.utc).date()
         self._session.execute(
             update(models.AcademicYear)
-            .where(
-                models.AcademicYear.is_current.is_(True)
-                | (models.AcademicYear.code == wanted)
-            )
+            .where(models.AcademicYear.is_current.is_(True) | (models.AcademicYear.code == wanted))
             .values(
                 is_current=(models.AcademicYear.code == wanted),
                 status=case(
@@ -473,9 +462,7 @@ class SqlAlchemyAcademicYearRepository:
         rows = [
             {
                 "code": str(year.code),
-                "school_id": _require(
-                    school_ids, str(year.school_code), "school_code"
-                ),
+                "school_id": _require(school_ids, str(year.school_code), "school_code"),
                 "name_en": year.name_en,
                 "name_ar": year.name_ar,
                 "starts_on": year.starts_on,
@@ -498,7 +485,13 @@ class SqlAlchemyAcademicYearRepository:
             # every class, term, subject and mark in it across, under a school that never
             # taught them.
             update_columns=(
-                "name_en", "name_ar", "starts_on", "ends_on", "status", "is_current", "updated_at"
+                "name_en",
+                "name_ar",
+                "starts_on",
+                "ends_on",
+                "status",
+                "is_current",
+                "updated_at",
             ),
         )
         return {row["code"]: (row["code"],) not in existing for row in rows}
@@ -587,22 +580,23 @@ class SqlAlchemyYearLevelRepository:
             self._session, models.School, {str(level.school_code) for level in levels}
         )
         system_rows = self._session.execute(
-            select(models.EducationalSystem.school_id, models.EducationalSystem.code,
-                   models.EducationalSystem.id)
-            .where(models.EducationalSystem.school_id.in_(set(school_ids.values())))
+            select(
+                models.EducationalSystem.school_id,
+                models.EducationalSystem.code,
+                models.EducationalSystem.id,
+            ).where(models.EducationalSystem.school_id.in_(set(school_ids.values())))
         ).all()
         system_ids = {(school_id, code): identifier for school_id, code, identifier in system_rows}
         now = _utcnow()
         rows = [
             {
                 "code": str(level.code),
-                "school_id": _require(
-                    school_ids, str(level.school_code), "school_code"
-                ),
+                "school_id": _require(school_ids, str(level.school_code), "school_code"),
                 "stage": str(level.stage),
                 "educational_system_id": (
                     system_ids.get((school_ids[str(level.school_code)], level.track_code))
-                    if level.track_code else None
+                    if level.track_code
+                    else None
                 ),
                 "name_en": level.name_en,
                 "name_ar": level.name_ar,
@@ -623,16 +617,18 @@ class SqlAlchemyYearLevelRepository:
             # not, for the reason a year's is not: it would carry every class and mark under
             # the rung into a school that never taught them.
             update_columns=(
-                "name_en", "name_ar", "display_order", "stage", "educational_system_id"
+                "name_en",
+                "name_ar",
+                "display_order",
+                "stage",
+                "educational_system_id",
             ),
         )
         # Keyed on the pair, matching `conflict_on`. Checking `(code,)` against a set of
         # `(school_id, code)` tuples never matches, so every rung would be reported as
         # newly created — and structure generation would announce a full ladder built on
         # every re-run, which is invariant 3 reported as broken while working correctly.
-        return {
-            row["code"]: (row["school_id"], row["code"]) not in existing for row in rows
-        }
+        return {row["code"]: (row["school_id"], row["code"]) not in existing for row in rows}
 
 
 # Class sections carry their parents' codes, and the relationships are `lazy="raise"`, so
@@ -673,15 +669,11 @@ class SqlAlchemyClassSectionRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get(
-        self, academic_year_code: AcademicYearCode, code: ClassCode
-    ) -> ClassSection | None:
+    def get(self, academic_year_code: AcademicYearCode, code: ClassCode) -> ClassSection | None:
         found = self.get_many([(str(academic_year_code), str(code))])
         return found.get((str(academic_year_code), str(code)))
 
-    def get_many(
-        self, keys: Collection[ClassSectionKey]
-    ) -> Mapping[ClassSectionKey, ClassSection]:
+    def get_many(self, keys: Collection[ClassSectionKey]) -> Mapping[ClassSectionKey, ClassSection]:
         rows = self._section_rows(keys)
         return _one_per_key(
             ((year_code, section.code), _to_section(section, year_code, level_code))
@@ -741,16 +733,12 @@ class SqlAlchemyClassSectionRepository:
         self._session.execute(
             update(models.ClassSection)
             .where(models.ClassSection.id == section.id)
-            .values(
-                name_en=renamed.name_en, name_ar=renamed.name_ar, updated_at=_utcnow()
-            )
+            .values(name_en=renamed.name_en, name_ar=renamed.name_ar, updated_at=_utcnow())
         )
         _sync(self._session)
         return renamed
 
-    def upsert_many(
-        self, sections: Sequence[ClassSection]
-    ) -> Mapping[ClassSectionKey, bool]:
+    def upsert_many(self, sections: Sequence[ClassSection]) -> Mapping[ClassSectionKey, bool]:
         """The one path structure generation writes through — uniform or per-year alike.
 
         Four statements regardless of size: resolve the academic years, resolve the year
@@ -828,9 +816,7 @@ class SqlAlchemyClassSectionRepository:
         )
         wanted = set(keys)
         return [
-            row
-            for row in self._session.execute(statement).all()
-            if (row[1], row[0].code) in wanted
+            row for row in self._session.execute(statement).all() if (row[1], row[0].code) in wanted
         ]
 
 
@@ -847,9 +833,7 @@ class SqlAlchemyTermRepository:
         self._session = session
 
     def get(self, code: TermCode) -> Term | None:
-        row = self._session.execute(
-            _TERM_ROWS.where(models.Term.code == str(code))
-        ).first()
+        row = self._session.execute(_TERM_ROWS.where(models.Term.code == str(code))).first()
         return None if row is None else _to_term(row[0], row[1])
 
     def get_many(self, codes: Collection[TermCode]) -> Mapping[str, Term]:
@@ -870,9 +854,7 @@ class SqlAlchemyTermRepository:
 
     def set_closed(self, code: TermCode, *, is_closed: bool) -> Term:
         """Freeze or reopen. Refusing writes against a closed term is the service's job."""
-        row = self._session.execute(
-            _TERM_ROWS.where(models.Term.code == str(code))
-        ).first()
+        row = self._session.execute(_TERM_ROWS.where(models.Term.code == str(code))).first()
         if row is None:
             raise UnknownReference(f"no term {str(code)!r} on file", field="term_code")
         term = _to_term(row[0], row[1])  # read before the write; `_sync` expires the row
@@ -962,9 +944,7 @@ class SqlAlchemySubjectRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get(
-        self, code: SubjectCode, academic_year_code: AcademicYearCode
-    ) -> Subject | None:
+    def get(self, code: SubjectCode, academic_year_code: AcademicYearCode) -> Subject | None:
         row = self._session.execute(
             select(models.Subject)
             .join(models.AcademicYear)
@@ -1074,14 +1054,9 @@ class SqlAlchemySubjectRepository:
             # way a subject can ever be retired.
             update_columns=("name_en", "name_ar", "display_order", "is_active"),
         )
-        return {
-            row["code"]: (row["academic_year_id"], row["code"]) not in existing
-            for row in rows
-        }
+        return {row["code"]: (row["academic_year_id"], row["code"]) not in existing for row in rows}
 
-    def assignments_for_year(
-        self, academic_year_code: AcademicYearCode
-    ) -> Sequence[GradeSubjects]:
+    def assignments_for_year(self, academic_year_code: AcademicYearCode) -> Sequence[GradeSubjects]:
         """The whole board in one query, grouped in Python rather than in the database.
 
         Retired subjects are included. A rung that taught `LATIN` until the school dropped
@@ -1184,9 +1159,7 @@ class SqlAlchemySubjectRepository:
         )
         if exists is not None:
             return False
-        self._session.add(
-            models.SubjectYearLevel(subject_id=subject_id, year_level_id=level_id)
-        )
+        self._session.add(models.SubjectYearLevel(subject_id=subject_id, year_level_id=level_id))
         self._session.flush()
         return True
 
@@ -1209,7 +1182,6 @@ class SqlAlchemySubjectRepository:
                 models.SubjectYearLevel.year_level_id == level_id,
             )
         )
-
 
 
 def _to_period(row: models.TimetablePeriod, school_code: str) -> TimetablePeriod:
@@ -1357,12 +1329,8 @@ class SqlAlchemyTimetableRepository:
                 models.AcademicYear,
                 models.TimetableEntry.academic_year_id == models.AcademicYear.id,
             )
-            .outerjoin(
-                models.Subject, models.TimetableEntry.subject_id == models.Subject.id
-            )
-            .outerjoin(
-                models.Teacher, models.TimetableEntry.teacher_id == models.Teacher.id
-            )
+            .outerjoin(models.Subject, models.TimetableEntry.subject_id == models.Subject.id)
+            .outerjoin(models.Teacher, models.TimetableEntry.teacher_id == models.Teacher.id)
         )
 
     def list_entries(
@@ -1373,9 +1341,7 @@ class SqlAlchemyTimetableRepository:
         term_code: TermCode | None = None,
         year_level_code: YearCode | None = None,
     ) -> Sequence[TimetableEntry]:
-        statement = self._entry_rows().where(
-            models.AcademicYear.code == str(academic_year_code)
-        )
+        statement = self._entry_rows().where(models.AcademicYear.code == str(academic_year_code))
         if class_code is not None:
             statement = statement.where(models.ClassSection.code == str(class_code))
         if term_code is not None:
@@ -1408,9 +1374,7 @@ class SqlAlchemyTimetableRepository:
             for row in rows
         ]
 
-    def upsert_entries(
-        self, entries: Sequence[TimetableEntry]
-    ) -> Mapping[tuple, bool]:
+    def upsert_entries(self, entries: Sequence[TimetableEntry]) -> Mapping[tuple, bool]:
         """Insert or update by slot. See the port: the slot is the identity.
 
         Four bulk lookups and one upsert, whatever the size of the grid. The alternative —
@@ -1437,12 +1401,8 @@ class SqlAlchemyTimetableRepository:
                 models.ClassSection.academic_year_id == models.AcademicYear.id,
             )
             .where(
-                models.ClassSection.code.in_(
-                    {str(entry.slot.class_code) for entry in entries}
-                ),
-                models.AcademicYear.code.in_(
-                    {str(entry.academic_year_code) for entry in entries}
-                ),
+                models.ClassSection.code.in_({str(entry.slot.class_code) for entry in entries}),
+                models.AcademicYear.code.in_({str(entry.academic_year_code) for entry in entries}),
             )
         ).all()
         sections = {(code, year): identifier for code, year, identifier in section_ids}
@@ -1455,16 +1415,10 @@ class SqlAlchemyTimetableRepository:
             )
             .where(
                 models.Subject.code.in_(
-                    {
-                        str(entry.subject_code)
-                        for entry in entries
-                        if entry.subject_code is not None
-                    }
+                    {str(entry.subject_code) for entry in entries if entry.subject_code is not None}
                     or {""}
                 ),
-                models.AcademicYear.code.in_(
-                    {str(entry.academic_year_code) for entry in entries}
-                ),
+                models.AcademicYear.code.in_({str(entry.academic_year_code) for entry in entries}),
             )
         ).all()
         subjects = {(code, year): identifier for code, year, identifier in subject_rows}
@@ -1476,9 +1430,7 @@ class SqlAlchemyTimetableRepository:
             class_code = str(entry.slot.class_code)
             section_id = sections.get((class_code, year_code))
             if section_id is None:
-                raise UnknownReference(
-                    f"no class {class_code} in {year_code}", field="class_code"
-                )
+                raise UnknownReference(f"no class {class_code} in {year_code}", field="class_code")
             subject_id = None
             if entry.subject_code is not None:
                 subject_id = subjects.get((str(entry.subject_code), year_code))
@@ -1490,12 +1442,8 @@ class SqlAlchemyTimetableRepository:
             rows.append(
                 {
                     "class_section_id": section_id,
-                    "academic_year_id": _require(
-                        year_ids, year_code, "academic_year_code"
-                    ),
-                    "term_id": _require(
-                        term_ids, str(entry.slot.term_code), "term_code"
-                    ),
+                    "academic_year_id": _require(year_ids, year_code, "academic_year_code"),
+                    "term_id": _require(term_ids, str(entry.slot.term_code), "term_code"),
                     "day_of_week": str(entry.slot.day_of_week),
                     "period_number": entry.slot.period_number,
                     "subject_id": subject_id,
@@ -1543,9 +1491,7 @@ class SqlAlchemyTimetableRepository:
         removed = 0
         by_pair: dict[tuple[str, str], list[TimetableSlot]] = {}
         for slot in slots:
-            by_pair.setdefault(
-                (str(slot.class_code), str(slot.term_code)), []
-            ).append(slot)
+            by_pair.setdefault((str(slot.class_code), str(slot.term_code)), []).append(slot)
         for (class_code, term_code), group in by_pair.items():
             result = self._session.execute(
                 delete(models.TimetableEntry).where(
@@ -1553,24 +1499,16 @@ class SqlAlchemyTimetableRepository:
                         select(models.TimetableEntry.id)
                         .join(
                             models.ClassSection,
-                            models.TimetableEntry.class_section_id
-                            == models.ClassSection.id,
+                            models.TimetableEntry.class_section_id == models.ClassSection.id,
                         )
-                        .join(
-                            models.Term, models.TimetableEntry.term_id == models.Term.id
-                        )
+                        .join(models.Term, models.TimetableEntry.term_id == models.Term.id)
                         .where(
                             models.ClassSection.code == class_code,
                             models.Term.code == term_code,
                             tuple_(
                                 models.TimetableEntry.day_of_week,
                                 models.TimetableEntry.period_number,
-                            ).in_(
-                                [
-                                    (str(slot.day_of_week), slot.period_number)
-                                    for slot in group
-                                ]
-                            ),
+                            ).in_([(str(slot.day_of_week), slot.period_number) for slot in group]),
                         )
                     )
                 )
@@ -1602,9 +1540,7 @@ class SqlAlchemySchoolRepository:
         if not codes:
             return {}
         rows = self._session.execute(
-            select(models.School).where(
-                models.School.code.in_({str(code) for code in codes})
-            )
+            select(models.School).where(models.School.code.in_({str(code) for code in codes}))
         ).scalars()
         return {row.code: _to_school(row) for row in rows}
 
@@ -1681,10 +1617,19 @@ class SqlAlchemySchoolRepository:
                     "is_active": True,
                     "created_at": now,
                 }
-                for order, (code, kind, department_key, name_en, name_ar) in enumerate(wanted, start=1)
+                for order, (code, kind, department_key, name_en, name_ar) in enumerate(
+                    wanted, start=1
+                )
             ],
             conflict_on=("school_id", "code"),
-            update_columns=("kind", "department_key", "name_en", "name_ar", "display_order", "is_active"),
+            update_columns=(
+                "kind",
+                "department_key",
+                "name_en",
+                "name_ar",
+                "display_order",
+                "is_active",
+            ),
         )
         self._sync_secondary_education_systems(school_id, now)
 
@@ -1695,45 +1640,98 @@ class SqlAlchemySchoolRepository:
             ("egyptian_baccalaureate", "Egyptian Baccalaureate", "البكالوريا المصرية"),
         )
         bulk_upsert(
-            self._session, models.SecondaryEducationSystem,
-            [{"school_id": school_id, "key": key, "name_en": en, "name_ar": ar,
-              "is_active": True, "created_at": now} for key, en, ar in systems],
-            conflict_on=("school_id", "key"), update_columns=("name_en", "name_ar", "is_active"),
+            self._session,
+            models.SecondaryEducationSystem,
+            [
+                {
+                    "school_id": school_id,
+                    "key": key,
+                    "name_en": en,
+                    "name_ar": ar,
+                    "is_active": True,
+                    "created_at": now,
+                }
+                for key, en, ar in systems
+            ],
+            conflict_on=("school_id", "key"),
+            update_columns=("name_en", "name_ar", "is_active"),
         )
-        system_ids = dict(self._session.execute(
-            select(models.SecondaryEducationSystem.key, models.SecondaryEducationSystem.id)
-            .where(models.SecondaryEducationSystem.school_id == school_id)
-        ).all())
+        system_ids = dict(
+            self._session.execute(
+                select(
+                    models.SecondaryEducationSystem.key, models.SecondaryEducationSystem.id
+                ).where(models.SecondaryEducationSystem.school_id == school_id)
+            ).all()
+        )
         definitions = (
             ("general_secondary", "scientific", "Scientific", "علمي", (2,)),
             ("general_secondary", "literary", "Literary", "أدبي", (2, 3)),
             ("general_secondary", "science", "Science", "علوم", (3,)),
             ("general_secondary", "mathematics", "Mathematics", "رياضيات", (3,)),
-            ("egyptian_baccalaureate", "medicine_life_sciences", "Medicine and Life Sciences", "الطب وعلوم الحياة", (1, 2, 3)),
-            ("egyptian_baccalaureate", "engineering_computer_science", "Engineering and Computer Science", "الهندسة وعلوم الحاسب", (1, 2, 3)),
+            (
+                "egyptian_baccalaureate",
+                "medicine_life_sciences",
+                "Medicine and Life Sciences",
+                "الطب وعلوم الحياة",
+                (1, 2, 3),
+            ),
+            (
+                "egyptian_baccalaureate",
+                "engineering_computer_science",
+                "Engineering and Computer Science",
+                "الهندسة وعلوم الحاسب",
+                (1, 2, 3),
+            ),
             ("egyptian_baccalaureate", "business", "Business", "الأعمال", (1, 2, 3)),
-            ("egyptian_baccalaureate", "arts_humanities", "Arts and Humanities", "الآداب والعلوم الإنسانية", (1, 2, 3)),
+            (
+                "egyptian_baccalaureate",
+                "arts_humanities",
+                "Arts and Humanities",
+                "الآداب والعلوم الإنسانية",
+                (1, 2, 3),
+            ),
         )
         bulk_upsert(
-            self._session, models.SecondaryTrack,
-            [{"education_system_id": system_ids[system_key], "key": key, "name_en": en,
-              "name_ar": ar, "is_active": True}
-             for system_key, key, en, ar, _ in definitions],
-            conflict_on=("education_system_id", "key"), update_columns=("name_en", "name_ar", "is_active"),
+            self._session,
+            models.SecondaryTrack,
+            [
+                {
+                    "education_system_id": system_ids[system_key],
+                    "key": key,
+                    "name_en": en,
+                    "name_ar": ar,
+                    "is_active": True,
+                }
+                for system_key, key, en, ar, _ in definitions
+            ],
+            conflict_on=("education_system_id", "key"),
+            update_columns=("name_en", "name_ar", "is_active"),
         )
         track_ids = {
             (system_key, key): identifier
             for system_key, key, identifier in self._session.execute(
-                select(models.SecondaryEducationSystem.key, models.SecondaryTrack.key, models.SecondaryTrack.id)
-                .join(models.SecondaryTrack, models.SecondaryTrack.education_system_id == models.SecondaryEducationSystem.id)
+                select(
+                    models.SecondaryEducationSystem.key,
+                    models.SecondaryTrack.key,
+                    models.SecondaryTrack.id,
+                )
+                .join(
+                    models.SecondaryTrack,
+                    models.SecondaryTrack.education_system_id == models.SecondaryEducationSystem.id,
+                )
                 .where(models.SecondaryEducationSystem.school_id == school_id)
             ).all()
         }
         bulk_upsert(
-            self._session, models.SecondaryTrackGrade,
-            [{"secondary_track_id": track_ids[(system_key, key)], "grade_number": grade}
-             for system_key, key, _, _, grades in definitions for grade in grades],
-            conflict_on=("secondary_track_id", "grade_number"), update_columns=("grade_number",),
+            self._session,
+            models.SecondaryTrackGrade,
+            [
+                {"secondary_track_id": track_ids[(system_key, key)], "grade_number": grade}
+                for system_key, key, _, _, grades in definitions
+                for grade in grades
+            ],
+            conflict_on=("secondary_track_id", "grade_number"),
+            update_columns=("grade_number",),
         )
 
     def upsert_many(self, schools: Sequence[School]) -> Mapping[str, bool]:
@@ -1766,12 +1764,20 @@ class SqlAlchemySchoolRepository:
             # `is_active` is written here because this port has no `set_active`, exactly as
             # for a subject: upsert is the only way a branch can be closed or reopened.
             update_columns=(
-                "name_en", "name_ar", "is_active", "language_type",
-                "kg_grade_count", "primary_grade_count", "preparatory_grade_count",
-                "secondary_grade_count", "term_count", "working_days",
+                "name_en",
+                "name_ar",
+                "is_active",
+                "language_type",
+                "kg_grade_count",
+                "primary_grade_count",
+                "preparatory_grade_count",
+                "secondary_grade_count",
+                "term_count",
+                "working_days",
             ),
         )
         return {row["code"]: (row["code"],) not in existing for row in rows}
+
 
 __all__ = [
     "SqlAlchemyAcademicYearRepository",

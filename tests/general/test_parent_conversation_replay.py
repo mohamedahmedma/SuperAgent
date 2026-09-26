@@ -26,6 +26,7 @@ and the answers, reproducing what the live model actually produced — and the n
 which serves one school's facade payloads. Retrieval is stubbed at `run_rag_graph`, so the
 knowledge tool itself still runs and reports its own outcome.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -343,11 +344,17 @@ def _turns(*, which_child_replan_names_her: bool = False) -> List[Turn]:
         Turn(
             "طب كام مصاريف المدرسه",
             [_envelope(about_child=False, kind="school_matter", tools=["search_knowledge_base"])],
-            lambda _t: "حضرتك، رسوم المدرسة للعام الدراسي 26/27 بالريال:\n\n- Pre-K: 34,000\n- Y11-Y12: 72,000 [1]",
+            lambda _t: (
+                "حضرتك، رسوم المدرسة للعام الدراسي 26/27 بالريال:\n\n- Pre-K: 34,000\n- Y11-Y12: 72,000 [1]"
+            ),
         ),
         Turn(
             "طب مصاريف بنتي كام كده",
-            [_envelope(reference="daughter", kind="school_matter", tools=["search_knowledge_base"])],
+            [
+                _envelope(
+                    reference="daughter", kind="school_matter", tools=["search_knowledge_base"]
+                )
+            ],
             lambda _t: "حضرتك، مصاريف بنتك في Y11-Y12 هي 72,000 ريال للمواطنين السعوديين. [1]",
         ),
         Turn(
@@ -468,7 +475,7 @@ class _ScriptedAgent:
 
         answer = turn.answer(texts) if turn else ""
         for start in range(0, len(answer), 7):
-            yield AIMessageChunk(content=answer[start:start + 7], id="answer"), {}
+            yield AIMessageChunk(content=answer[start : start + 7], id="answer"), {}
 
 
 class _Replay:
@@ -478,7 +485,9 @@ class _Replay:
     — the parent's tap is sent straight after it, as its own message.
     """
 
-    def __init__(self, roster: list, turns: List[Turn], *, which_at: Optional[int] = WHICH_CHILD_TURN):
+    def __init__(
+        self, roster: list, turns: List[Turn], *, which_at: Optional[int] = WHICH_CHILD_TURN
+    ):
         self.roster = roster
         self.turns = turns
         self.which_at = which_at
@@ -544,7 +553,7 @@ class _Replay:
             body = chunk.strip()
             if not body.startswith("data: "):
                 continue
-            data = body[len("data: "):]
+            data = body[len("data: ") :]
             observed.events.append({"type": "DONE"} if data == "[DONE]" else json.loads(data))
         shown = ""
         for event in observed.events:

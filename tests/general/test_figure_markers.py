@@ -17,6 +17,7 @@ Three properties, one class each:
     intact underneath it, and it never leaves the reader's message for the model's
     history.
 """
+
 import unittest
 
 
@@ -37,11 +38,13 @@ class TheNumberIsTheHandle(unittest.TestCase):
     def test_each_asset_gets_its_own_number_in_retrieval_order(self):
         from backend.agent.tools.knowledge import _figure_markers
 
-        per_chunk, mapping = _figure_markers([
-            {"asset_ids": ["a.pdf::p1::img0"]},
-            {"text": "no picture here"},
-            {"asset_ids": ["b.pdf::p3::img1"]},
-        ])
+        per_chunk, mapping = _figure_markers(
+            [
+                {"asset_ids": ["a.pdf::p1::img0"]},
+                {"text": "no picture here"},
+                {"asset_ids": ["b.pdf::p3::img1"]},
+            ]
+        )
         self.assertEqual([[1], [], [2]], per_chunk)
         self.assertEqual({1: "a.pdf::p1::img0", 2: "b.pdf::p3::img1"}, mapping)
 
@@ -116,9 +119,7 @@ class AnInventedMarkerCostsNothing(unittest.TestCase):
 
         for marker in ("[FIGURE ٢]", "[الشكل ٢]", "[شكل 2]", "[figure 2]"):
             with self.subTest(marker=marker):
-                out = resolve_figure_markers(
-                    f"انظر {marker} هنا", _Ctx({2: "kb.pdf::p5::img1"})
-                )
+                out = resolve_figure_markers(f"انظر {marker} هنا", _Ctx({2: "kb.pdf::p5::img1"}))
                 self.assertIn("<!--figure:kb.pdf::p5::img1-->", out)
 
     def test_an_answer_with_no_marker_is_untouched(self):
@@ -177,10 +178,12 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
         ids = asset_ids_for_answer(
             "كما في [2]",
             self._TurnCtx(["a::p1::img0", "b::p1::img0"]),
-            {"retrieved_chunks": [
-                {"asset_ids": ["a::p1::img0"]},
-                {"asset_ids": ["b::p1::img0"]},
-            ]},
+            {
+                "retrieved_chunks": [
+                    {"asset_ids": ["a::p1::img0"]},
+                    {"asset_ids": ["b::p1::img0"]},
+                ]
+            },
             self.CONFIG,
         )
         self.assertEqual(["b::p1::img0"], ids)
@@ -190,9 +193,7 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
 
         self.assertEqual(
             ["second::p1::img0", "first::p1::img0"],
-            anchored_asset_ids(
-                "أ <!--figure:second::p1::img0--> ب <!--figure:first::p1::img0-->"
-            ),
+            anchored_asset_ids("أ <!--figure:second::p1::img0--> ب <!--figure:first::p1::img0-->"),
         )
 
     def test_an_anchor_is_invisible_to_a_reader(self):
@@ -202,7 +203,7 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
         from backend.agent.chat.answer_blocks import resolve_figure_markers
 
         out = resolve_figure_markers("انظر [FIGURE 1]", _Ctx({1: "a::p1::img0"}))
-        anchor = out[out.index("<!--"):]
+        anchor = out[out.index("<!--") :]
         self.assertTrue(anchor.startswith("<!--"))
         self.assertTrue(anchor.endswith("-->"))
 

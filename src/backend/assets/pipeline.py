@@ -13,6 +13,7 @@ Extraction failures never fail an upload: the pipeline falls back to the heurist
 extractor and, failing that, records the asset as FAILED so it is visible to the
 backfill queue rather than silently absent.
 """
+
 from __future__ import annotations
 
 import logging
@@ -269,37 +270,53 @@ class FigurePipeline:
             report.skipped_over_limit = len(images) - limit
             logger.warning(
                 "%s contains %d images; processing the first %d (assets.max_images_per_document)",
-                filename, len(images), limit,
+                filename,
+                len(images),
+                limit,
             )
             images = images[:limit]
 
         digests = [compute_sha256(image.data) for image in images]
         pages_by_digest, total_pages = count_digest_pages(
-            [{"sha256": digest, "page_number": image.page_number}
-             for digest, image in zip(digests, images)]
+            [
+                {"sha256": digest, "page_number": image.page_number}
+                for digest, image in zip(digests, images)
+            ]
         )
 
         # Every digest is already in hand, so the cache is one query rather than one per
         # image. A 400-image catalogue used to ask 400 times before the first model call.
-        cached_by_digest = self.store.find_extractions(
-            digests, profile_name, DOSSIER_VERSION
-        )
+        cached_by_digest = self.store.find_extractions(digests, profile_name, DOSSIER_VERSION)
 
         # Extraction is one network round trip per image, and no image's result informs
         # another's, so they are run together instead of in series. Only the model calls
         # move: every counter, cache write and store write still happens in the loop
         # below, on one thread, so none of them needs a lock.
         extracted_by_digest = self._extract_many(
-            images, digests, filename, assets_config, pages_by_digest, total_pages,
-            cached_by_digest, progress,
+            images,
+            digests,
+            filename,
+            assets_config,
+            pages_by_digest,
+            total_pages,
+            cached_by_digest,
+            progress,
         )
 
         dossiers: List[AssetDossier] = []
         for image, digest in zip(images, digests):
             dossier = self._process_one(
-                image, digest, filename, file_path, profile_name,
-                assets_config, pages_by_digest, total_pages, report,
-                cached_by_digest, extracted_by_digest,
+                image,
+                digest,
+                filename,
+                file_path,
+                profile_name,
+                assets_config,
+                pages_by_digest,
+                total_pages,
+                report,
+                cached_by_digest,
+                extracted_by_digest,
             )
             dossiers.append(dossier)
 
@@ -358,9 +375,9 @@ class FigurePipeline:
             if cached is not None and not self._cache_is_weaker(cached, role, verdict.tier):
                 continue
 
-            plan.append(_PlannedExtraction(
-                digest=digest, image=image, tier=verdict.tier, role=role
-            ))
+            plan.append(
+                _PlannedExtraction(digest=digest, image=image, tier=verdict.tier, role=role)
+            )
         return plan
 
     def _extract_many(
@@ -404,9 +421,7 @@ class FigurePipeline:
         _ = self.fallback
 
         results: Dict[str, Optional[ExtractionPayload]] = {}
-        logger.info(
-            "Extracting %d image(s) for %s, %d at a time", len(plan), filename, workers
-        )
+        logger.info("Extracting %d image(s) for %s, %d at a time", len(plan), filename, workers)
         report_progress(progress, 0, len(plan))
         with ThreadPoolExecutor(
             max_workers=min(workers, len(plan)), thread_name_prefix="figure-extract"
@@ -422,9 +437,7 @@ class FigurePipeline:
                 except Exception:
                     # `_extract` catches its own failures and falls back; this is the
                     # belt to that brace, so one thread cannot cost the others theirs.
-                    logger.exception(
-                        "Extraction thread failed for %s in %s", digest[:12], filename
-                    )
+                    logger.exception("Extraction thread failed for %s in %s", digest[:12], filename)
                     results[digest] = None
                 report_progress(progress, len(results), len(plan))
         return results
@@ -497,7 +510,10 @@ class FigurePipeline:
             dossier.status = ExtractionStatus.SKIPPED
             dossier.extraction = ExtractionPayload(
                 provenance=Provenance(
-                    tier=verdict.tier, pipeline="triage", model_used="", confidence=1.0,
+                    tier=verdict.tier,
+                    pipeline="triage",
+                    model_used="",
+                    confidence=1.0,
                     error=verdict.reason,
                 )
             )
@@ -525,8 +541,11 @@ class FigurePipeline:
             # upgrade a silent no-op across the whole corpus. See `_cache_is_weaker`.
             logger.info(
                 "Re-extracting %s: cached result came from %r at tier %s, now running %r at %s",
-                asset_id, cached.provenance.model_used, cached.provenance.tier.value,
-                self._extractor_for(role).name, verdict.tier.value,
+                asset_id,
+                cached.provenance.model_used,
+                cached.provenance.tier.value,
+                self._extractor_for(role).name,
+                verdict.tier.value,
             )
             cached = None
         if cached is not None:

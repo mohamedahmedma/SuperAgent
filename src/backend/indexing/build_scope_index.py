@@ -8,6 +8,7 @@ Run after ingesting or editing a corpus. Sections whose text is unchanged are re
 so a re-run after editing one page costs one model call, and a re-run after editing
 nothing costs none.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -105,7 +106,8 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
     if not sections:
         logger.error(
             "no chunk_level=%s sections found — ingest a document first, or set "
-            "rag.scope_section_level to a level this corpus has", level,
+            "rag.scope_section_level to a level this corpus has",
+            level,
         )
         return {"sections": 0, "summarised": 0, "reused": 0, "removed": 0}
 
@@ -113,7 +115,9 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
     plan = plan_sections(sections, known)
     logger.info(
         "%d section(s): %d to summarise, %d reused",
-        len(sections), len(plan["summarise"]), len(plan["reuse"]),
+        len(sections),
+        len(plan["summarise"]),
+        len(plan["reuse"]),
     )
     if dry_run:
         return {
@@ -124,7 +128,9 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
             "would_summarise": len(plan["summarise"]),
         }
 
-    invoke = _structured_invoke(getattr(config, "scope_summary_model", None) or _default_model(), profile)
+    invoke = _structured_invoke(
+        getattr(config, "scope_summary_model", None) or _default_model(), profile
+    )
     records: List[SectionRecord] = []
     for section in plan["summarise"]:
         result = summarise_section(
@@ -165,7 +171,9 @@ def build(dry_run: bool = False, force: bool = False) -> dict:
     report = verify(stored, expected=len(sections))
     logger.info(
         "catalogue: %d/%d section(s), %d question(s); topics: %s",
-        report["with_questions"], len(sections), report["questions"],
+        report["with_questions"],
+        len(sections),
+        report["questions"],
         corpus_catalogue(stored) or "none",
     )
     for problem in report["problems"]:
@@ -314,7 +322,8 @@ def verify(records, expected: int) -> dict:
     with_questions = [record for record in records if record.answers]
     without = [record.chunk_id for record in records if not record.answers]
     unvectored = [
-        record.chunk_id for record in with_questions
+        record.chunk_id
+        for record in with_questions
         if len(record.question_vectors) != len(record.answers)
     ]
 
@@ -342,10 +351,13 @@ def _repair_missing_vectors(profile_name: str) -> int:
     stored = _catalogue().load_records(profile_name)
     model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
     stale = [
-        record for record in stored
+        record
+        for record in stored
         if record.answers
-        and (len(record.question_vectors) != len(record.answers)
-             or record.embedding_model != model_name)
+        and (
+            len(record.question_vectors) != len(record.answers)
+            or record.embedding_model != model_name
+        )
     ]
     if not stale:
         return 0
@@ -383,15 +395,18 @@ def _embed_questions(records: List[SectionRecord]) -> None:
     if len(vectors) != len(flat):
         # Leaving the vectors empty is safe: the index falls back to embedding at boot,
         # which is slow but correct. Storing a misaligned list would not be.
-        logger.error("embedder returned %d vectors for %d questions; not storing any",
-                     len(vectors), len(flat))
+        logger.error(
+            "embedder returned %d vectors for %d questions; not storing any",
+            len(vectors),
+            len(flat),
+        )
         return
 
     model_name = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
     cursor = 0
     for record in pending:
         count = len(record.answers)
-        record.question_vectors = [list(v) for v in vectors[cursor:cursor + count]]
+        record.question_vectors = [list(v) for v in vectors[cursor : cursor + count]]
         record.embedding_model = model_name
         cursor += count
 
@@ -404,10 +419,15 @@ def _default_model() -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true", help="report what would change, call nothing")
-    parser.add_argument("--force", action="store_true", help="re-summarise every section, ignoring the cache")
-    parser.add_argument("--check", action="store_true",
-                        help="report catalogue completeness and exit; calls nothing")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="report what would change, call nothing"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="re-summarise every section, ignoring the cache"
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="report catalogue completeness and exit; calls nothing"
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
 

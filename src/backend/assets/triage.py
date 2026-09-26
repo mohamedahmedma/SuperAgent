@@ -9,6 +9,7 @@ Decisions are explained, not just made: every result carries a `reason` string t
 lands in the dossier's provenance, so "why was this figure never indexed?" has an
 answer without re-running ingest.
 """
+
 from __future__ import annotations
 
 import logging

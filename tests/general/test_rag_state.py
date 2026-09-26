@@ -6,6 +6,7 @@ writing it, so retrieval read None for the turn's language on every turn and the
 Arabic and English halves of a paired document competed in every search. Nothing
 failed; answers just got worse. This is the check that would have said so.
 """
+
 import ast
 import unittest
 from pathlib import Path
@@ -22,7 +23,9 @@ def _keys_initial_state_writes() -> list:
     reaches for the embedder, which this test has no business doing."""
     tree = ast.parse(PIPELINE.read_text(encoding="utf-8"))
     function = next(
-        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_initial_state"
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_initial_state"
     )
     returned = next(node for node in ast.walk(function) if isinstance(node, ast.Return))
     return [key.value for key in returned.value.keys]
@@ -30,9 +33,12 @@ def _keys_initial_state_writes() -> list:
 
 class TheStateDeclaresEveryKeyTheGraphStartsFrom(unittest.TestCase):
     def test_no_initial_key_is_silently_dropped(self):
-        undeclared = [key for key in _keys_initial_state_writes() if key not in RAGState.__annotations__]
+        undeclared = [
+            key for key in _keys_initial_state_writes() if key not in RAGState.__annotations__
+        ]
         self.assertEqual(
-            [], undeclared,
+            [],
+            undeclared,
             "written by _initial_state and dropped by LangGraph: declare each on RAGState",
         )
 
@@ -49,7 +55,9 @@ class TheStateDeclaresEveryKeyTheGraphStartsFrom(unittest.TestCase):
         graph.add_node("probe", probe)
         graph.set_entry_point("probe")
         graph.add_edge("probe", END)
-        graph.compile().invoke({"question": "q", "language": "ar", "child_year": "Year 3", "sub_results": []})
+        graph.compile().invoke(
+            {"question": "q", "language": "ar", "child_year": "Year 3", "sub_results": []}
+        )
 
         self.assertEqual({"language": "ar", "child_year": "Year 3"}, seen)
 

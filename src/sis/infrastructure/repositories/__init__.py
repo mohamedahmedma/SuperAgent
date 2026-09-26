@@ -22,6 +22,7 @@ SQLAlchemy class it must never see".
 same shape for students, enrolments and grades, and a second hand-rolled copy is how one
 of them ends up looping per row.
 """
+
 from sis.infrastructure.repositories.access_audit_repository import (
     SqlAlchemyAccessAuditRepository,
 )

@@ -1,4 +1,5 @@
 """Upload and delete job progress."""
+
 from __future__ import annotations
 
 from datetime import datetime

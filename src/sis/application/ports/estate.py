@@ -18,6 +18,7 @@ no reachable database -- and `sis.tenancy.get_registry` raises `TenancyMisconfig
 exactly that, at startup, so the service stops booting until someone edits a file by
 hand. One of these failures is a retry; the other is an outage.
 """
+
 from typing import Protocol
 
 

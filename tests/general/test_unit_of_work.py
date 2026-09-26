@@ -4,6 +4,7 @@ The rules here are the ones every service relies on without restating: nothing l
 without `commit()`, a repository cannot be used once its transaction is over, and a
 listing of conversations costs one query however many conversations there are.
 """
+
 import unittest
 from datetime import UTC, datetime, timedelta
 
@@ -18,7 +19,12 @@ class UnitOfWorkTestCase(unittest.TestCase):
     def setUp(self):
         self.schema = postgres_schema(self, User, ChatSession, ChatMessage)
         with self.schema.sessionmaker()() as db:
-            db.add_all([User(username="parent", password_hash="x"), User(username="other", password_hash="x")])
+            db.add_all(
+                [
+                    User(username="parent", password_hash="x"),
+                    User(username="other", password_hash="x"),
+                ]
+            )
             db.commit()
 
     def count(self, model):
@@ -73,13 +79,19 @@ class ConversationRepositoryTests(UnitOfWorkTestCase):
         with self.schema.unit_of_work() as uow:
             session = uow.conversations.open_session("parent", "s1", {})
             ids = uow.conversations.add_messages(
-                session, [NewMessage(kind, text, now, None) for kind, text in (("human", "a"), ("ai", "b"), ("human", "c"))]
+                session,
+                [
+                    NewMessage(kind, text, now, None)
+                    for kind, text in (("human", "a"), ("ai", "b"), ("human", "c"))
+                ],
             )
             uow.commit()
         self.assertEqual(sorted(ids), list(ids))
         with self.schema.unit_of_work() as uow:
             session = uow.conversations.find_session("parent", "s1")
-            self.assertEqual(["a", "b", "c"], [m.content for m in uow.conversations.messages(session)])
+            self.assertEqual(
+                ["a", "b", "c"], [m.content for m in uow.conversations.messages(session)]
+            )
 
     def test_summaries_are_newest_first_counted_and_one_query(self):
         start = datetime(2026, 9, 13, 10, 0, tzinfo=UTC)
@@ -89,7 +101,9 @@ class ConversationRepositoryTests(UnitOfWorkTestCase):
                 uow.conversations.add_messages(
                     session, [NewMessage("human", str(i), start, None) for i in range(count)]
                 )
-                uow.conversations.patch_session(session, metadata=None, updated_at=start + timedelta(minutes=offset))
+                uow.conversations.patch_session(
+                    session, metadata=None, updated_at=start + timedelta(minutes=offset)
+                )
             other = uow.conversations.open_session("other", "theirs", {})
             uow.conversations.add_messages(other, [NewMessage("human", "x", start, None)])
             uow.commit()
@@ -107,7 +121,9 @@ class ConversationRepositoryTests(UnitOfWorkTestCase):
             [("s3", 1), ("s2", 0), ("s1", 3)],
             [(summary.session_id, summary.message_count) for summary in summaries],
         )
-        self.assertEqual(1, sum(1 for sql in statements if sql.lstrip().upper().startswith("SELECT")))
+        self.assertEqual(
+            1, sum(1 for sql in statements if sql.lstrip().upper().startswith("SELECT"))
+        )
 
     def test_deleting_a_conversation_removes_its_messages_and_nobody_elses(self):
         now = datetime.now(UTC)

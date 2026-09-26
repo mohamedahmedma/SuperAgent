@@ -1,4 +1,5 @@
 """WhatsApp: sending a code, reading a delivery, and knowing which school it is for."""
+
 from identity.infrastructure.whatsapp.channels import (
     UNATTRIBUTABLE_SCHOOL,
     WhatsAppChannels,

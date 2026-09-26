@@ -9,6 +9,7 @@ declaration — then asserting all four track a vocabulary this file invents at 
 No shipped profile turns entity extraction on, so the catalogue these tests index is
 declared below as `SHOP_ENTITIES` and composed onto `base` by `shop_profile()`.
 """
+
 import io
 import random
 import unittest
@@ -59,18 +60,74 @@ SHOP_ENTITIES = {
     "candidate_pool": 200,
     "max_results": 20,
     "attributes": [
-        {"name": "category", "type": "string", "description": "What kind of product this is",
-         "values": ["shoe", "sandal", "boot", "shirt", "trousers", "dress", "jacket", "bag", "accessory"]},
-        {"name": "color", "type": "string", "multi": True, "description": "Dominant colours visible on the product",
-         "values": ["black", "white", "grey", "red", "blue", "green", "yellow", "orange", "purple", "pink",
-                    "brown", "beige", "gold", "silver"]},
-        {"name": "material", "type": "string", "multi": True, "description": "Visible materials",
-         "values": ["leather", "suede", "canvas", "cotton", "denim", "wool", "synthetic", "mesh", "rubber"]},
-        {"name": "pattern", "type": "string", "description": "Surface pattern",
-         "values": ["solid", "striped", "checked", "floral", "printed", "embroidered"]},
+        {
+            "name": "category",
+            "type": "string",
+            "description": "What kind of product this is",
+            "values": [
+                "shoe",
+                "sandal",
+                "boot",
+                "shirt",
+                "trousers",
+                "dress",
+                "jacket",
+                "bag",
+                "accessory",
+            ],
+        },
+        {
+            "name": "color",
+            "type": "string",
+            "multi": True,
+            "description": "Dominant colours visible on the product",
+            "values": [
+                "black",
+                "white",
+                "grey",
+                "red",
+                "blue",
+                "green",
+                "yellow",
+                "orange",
+                "purple",
+                "pink",
+                "brown",
+                "beige",
+                "gold",
+                "silver",
+            ],
+        },
+        {
+            "name": "material",
+            "type": "string",
+            "multi": True,
+            "description": "Visible materials",
+            "values": [
+                "leather",
+                "suede",
+                "canvas",
+                "cotton",
+                "denim",
+                "wool",
+                "synthetic",
+                "mesh",
+                "rubber",
+            ],
+        },
+        {
+            "name": "pattern",
+            "type": "string",
+            "description": "Surface pattern",
+            "values": ["solid", "striped", "checked", "floral", "printed", "embroidered"],
+        },
         {"name": "gender", "type": "string", "values": ["men", "women", "unisex", "kids"]},
         {"name": "price", "type": "number", "unit": "EGP", "description": "Listed price, if shown"},
-        {"name": "in_stock", "type": "boolean", "description": "Whether the listing shows it as available"},
+        {
+            "name": "in_stock",
+            "type": "boolean",
+            "description": "Whether the listing shows it as available",
+        },
     ],
 }
 
@@ -125,8 +182,12 @@ class DynamicSchemaTests(unittest.TestCase):
     def setUp(self):
         self.schema = custom_schema(
             {"name": "voltage", "type": "number", "unit": "V"},
-            {"name": "connector", "type": "string", "multi": True,
-             "values": ["usb_c", "xlr", "jack"]},
+            {
+                "name": "connector",
+                "type": "string",
+                "multi": True,
+                "values": ["usb_c", "xlr", "jack"],
+            },
             {"name": "certified", "type": "boolean"},
             {"name": "serial", "type": "string", "filterable": False},
         )
@@ -194,8 +255,14 @@ class NormalisationTests(unittest.TestCase):
         self.assertEqual({}, self.schema.normalize({"price": "not a number"}))
 
     def test_booleans_accept_natural_phrasing(self):
-        for raw, expected in [("yes", True), ("in stock", True), (True, True),
-                              ("no", False), ("out of stock", False), (False, False)]:
+        for raw, expected in [
+            ("yes", True),
+            ("in stock", True),
+            (True, True),
+            ("no", False),
+            ("out of stock", False),
+            (False, False),
+        ]:
             with self.subTest(raw=raw):
                 self.assertEqual({"in_stock": expected}, self.schema.normalize({"in_stock": raw}))
         self.assertEqual({}, self.schema.normalize({"in_stock": "maybe"}))
@@ -256,7 +323,12 @@ class FilterValidationTests(unittest.TestCase):
 class InMemoryMatchTests(unittest.TestCase):
     def setUp(self):
         self.schema = shop_schema()
-        self.product = {"category": "shoe", "color": ["red", "white"], "price": 85.0, "in_stock": True}
+        self.product = {
+            "category": "shoe",
+            "color": ["red", "white"],
+            "price": 85.0,
+            "in_stock": True,
+        }
 
     def test_no_filters_matches_everything(self):
         self.assertTrue(self.schema.matches(self.product, {}))
@@ -313,7 +385,11 @@ class EntityExtractorTests(unittest.TestCase):
 
     def _vision(self, result):
         extractor = VisionEntityExtractor(
-            self.config, self.schema, model_id="vl", api_key="k", base_url="u",
+            self.config,
+            self.schema,
+            model_id="vl",
+            api_key="k",
+            base_url="u",
             figures_config=shop_profile().assets.figures,
         )
         structured = Mock()
@@ -325,12 +401,14 @@ class EntityExtractorTests(unittest.TestCase):
 
     def test_vision_extraction_produces_normalised_attributes(self):
         output_model = build_entity_model(self.schema)
-        extractor, _ = self._vision(output_model(
-            title="RS-200 Running Shoe",
-            summary="A lightweight red running shoe.",
-            confidence=0.9,
-            attributes={"category": "shoe", "color": ["Red", "White"], "price": 850},
-        ))
+        extractor, _ = self._vision(
+            output_model(
+                title="RS-200 Running Shoe",
+                summary="A lightweight red running shoe.",
+                confidence=0.9,
+                attributes={"category": "shoe", "color": ["Red", "White"], "price": 850},
+            )
+        )
         payload = extractor.extract(ExtractionRequest(data=make_png()))
 
         self.assertEqual("RS-200 Running Shoe", payload.text.caption)
@@ -343,9 +421,11 @@ class EntityExtractorTests(unittest.TestCase):
         """Filters narrow; they do not do the finding. The attribute text is what makes
         'red shoes' hit before any filter runs."""
         output_model = build_entity_model(self.schema)
-        extractor, _ = self._vision(output_model(
-            title="Shoe", confidence=0.9, attributes={"color": ["red"], "category": "shoe"}
-        ))
+        extractor, _ = self._vision(
+            output_model(
+                title="Shoe", confidence=0.9, attributes={"color": ["red"], "category": "shoe"}
+            )
+        )
         payload = extractor.extract(ExtractionRequest(data=make_png()))
         self.assertIn("red", payload.text.transcription)
         self.assertIn("red", payload.text.tags)
@@ -353,9 +433,9 @@ class EntityExtractorTests(unittest.TestCase):
     def test_invented_values_are_stripped_after_the_model_returns(self):
         """A model told to pick from a list still occasionally invents one."""
         output_model = build_entity_model(self.schema)
-        extractor, _ = self._vision(output_model(
-            title="Shoe", confidence=0.9, attributes={"color": ["burgundy"]}
-        ))
+        extractor, _ = self._vision(
+            output_model(title="Shoe", confidence=0.9, attributes={"color": ["burgundy"]})
+        )
         payload = extractor.extract(ExtractionRequest(data=make_png()))
         self.assertEqual({}, payload.structured.attributes)
         self.assertTrue(payload.provenance.needs_review)
@@ -436,8 +516,9 @@ class EntityIndexTests(IndexTestCase):
     def test_string_filters_match_any_listed_value(self):
         self._seed()
         self.assertEqual({"p1", "p3", "p4"}, self.index.find({"color": ["red"]}, self.schema))
-        self.assertEqual({"p1", "p2", "p3", "p4"},
-                         self.index.find({"color": ["red", "blue"]}, self.schema))
+        self.assertEqual(
+            {"p1", "p2", "p3", "p4"}, self.index.find({"color": ["red", "blue"]}, self.schema)
+        )
 
     def test_matching_is_case_insensitive(self):
         self._seed()
@@ -445,10 +526,15 @@ class EntityIndexTests(IndexTestCase):
 
     def test_range_filters_work_on_numbers(self):
         self._seed()
-        self.assertEqual({"p1", "p3"}, self.index.find({"price": NumberRange(max=100)}, self.schema))
-        self.assertEqual({"p2", "p4"}, self.index.find({"price": NumberRange(min=100)}, self.schema))
-        self.assertEqual({"p1", "p2"},
-                         self.index.find({"price": NumberRange(min=80, max=150)}, self.schema))
+        self.assertEqual(
+            {"p1", "p3"}, self.index.find({"price": NumberRange(max=100)}, self.schema)
+        )
+        self.assertEqual(
+            {"p2", "p4"}, self.index.find({"price": NumberRange(min=100)}, self.schema)
+        )
+        self.assertEqual(
+            {"p1", "p2"}, self.index.find({"price": NumberRange(min=80, max=150)}, self.schema)
+        )
 
     def test_boolean_filters(self):
         self._seed()
@@ -479,8 +565,9 @@ class EntityIndexTests(IndexTestCase):
     def test_narrow_preserves_retrieval_rank(self):
         self._seed()
         ranked = ["p4", "p3", "p1", "p2"]
-        self.assertEqual(["p4", "p3", "p1"],
-                         self.index.narrow(ranked, {"color": ["red"]}, self.schema))
+        self.assertEqual(
+            ["p4", "p3", "p1"], self.index.narrow(ranked, {"color": ["red"]}, self.schema)
+        )
 
     def test_narrow_without_filters_is_a_passthrough(self):
         self._seed()
@@ -520,8 +607,9 @@ class EntityIngestTests(IndexTestCase):
         super().setUp()
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(unit_of_work=self.unit_of_work, blob_store=self.blobs,
-                                cache_enabled=False)
+        self.store = AssetStore(
+            unit_of_work=self.unit_of_work, blob_store=self.blobs, cache_enabled=False
+        )
         self.profile = shop_profile()
 
     def tearDown(self):
@@ -531,7 +619,12 @@ class EntityIngestTests(IndexTestCase):
     def _pipeline(self, attributes=None):
         extractor = Mock()
         if attributes is not None:
-            from backend.assets.dossier import ExtractionPayload, Provenance, StructuredSurface, TextSurface
+            from backend.assets.dossier import (
+                ExtractionPayload,
+                Provenance,
+                StructuredSurface,
+                TextSurface,
+            )
 
             extractor.extract.return_value = ExtractionPayload(
                 text=TextSurface(caption="Red running shoes"),
@@ -539,9 +632,13 @@ class EntityIngestTests(IndexTestCase):
                 provenance=Provenance(model_used="test", confidence=0.9),
             )
         return FigurePipeline(
-            profile=self.profile, store=self.store, blob_store=self.blobs,
-            entity_extractor=extractor, entity_index=self.index,
-            extractor=Mock(), fallback_extractor=Mock(),
+            profile=self.profile,
+            store=self.store,
+            blob_store=self.blobs,
+            entity_extractor=extractor,
+            entity_index=self.index,
+            extractor=Mock(),
+            fallback_extractor=Mock(),
         ), extractor
 
     def test_an_entity_profile_produces_entity_assets(self):
@@ -588,7 +685,9 @@ class EntityIngestTests(IndexTestCase):
 
     def test_an_entity_with_no_attributes_is_still_stored(self):
         pipeline, _ = self._pipeline({})
-        dossiers, report = pipeline.process([ImageInput(data=make_png(), index=0)], filename="c.pdf")
+        dossiers, report = pipeline.process(
+            [ImageInput(data=make_png(), index=0)], filename="c.pdf"
+        )
         self.assertEqual(1, report.entities)
         self.assertEqual(0, report.attributes_indexed)
         self.assertIsNotNone(self.store.get(dossiers[0].asset_id))
@@ -597,7 +696,9 @@ class EntityIngestTests(IndexTestCase):
         pipeline, _ = self._pipeline({"color": ["red"]})
         pipeline._entity_index = Mock()
         pipeline._entity_index.index_asset.side_effect = RuntimeError("db down")
-        dossiers, report = pipeline.process([ImageInput(data=make_png(), index=0)], filename="c.pdf")
+        dossiers, report = pipeline.process(
+            [ImageInput(data=make_png(), index=0)], filename="c.pdf"
+        )
         self.assertEqual(ExtractionStatus.EXTRACTED, dossiers[0].status)
         self.assertEqual(0, report.attributes_indexed)
 
@@ -618,9 +719,11 @@ class EntityRetrievalTests(IndexTestCase):
     def setUp(self):
         super().setUp()
         self._tmp = TemporaryDirectory()
-        self.store = AssetStore(unit_of_work=self.unit_of_work,
-                                blob_store=LocalBlobStore(Path(self._tmp.name)),
-                                cache_enabled=False)
+        self.store = AssetStore(
+            unit_of_work=self.unit_of_work,
+            blob_store=LocalBlobStore(Path(self._tmp.name)),
+            cache_enabled=False,
+        )
         self.profile = shop_profile()
         self.catalogue = self._seed()
         for asset_id, attributes in self.catalogue.items():
@@ -633,12 +736,19 @@ class EntityRetrievalTests(IndexTestCase):
     @staticmethod
     def _dossier(asset_id, attributes):
         from backend.assets.dossier import (
-            AssetDossier, ExtractionPayload, SourceRef, StructuredSurface, TextSurface,
+            AssetDossier,
+            ExtractionPayload,
+            SourceRef,
+            StructuredSurface,
+            TextSurface,
         )
 
         return AssetDossier(
-            asset_id=asset_id, sha256="a" * 64, profile=SHOP,
-            role=AssetRole.ENTITY, status=ExtractionStatus.EXTRACTED,
+            asset_id=asset_id,
+            sha256="a" * 64,
+            profile=SHOP,
+            role=AssetRole.ENTITY,
+            status=ExtractionStatus.EXTRACTED,
             source=SourceRef(filename="catalogue.pdf", page_number=1),
             extraction=ExtractionPayload(
                 text=TextSurface(caption=f"Product {asset_id}", description="A product."),
@@ -648,7 +758,9 @@ class EntityRetrievalTests(IndexTestCase):
 
     def _retriever(self, recalled):
         return EntityRetriever(
-            profile=self.profile, asset_store=self.store, entity_index=self.index,
+            profile=self.profile,
+            asset_store=self.store,
+            entity_index=self.index,
             recall=lambda query, top_k, language="": [
                 {"asset_ids": [asset_id], "score": score} for asset_id, score in recalled
             ],
@@ -708,7 +820,9 @@ class EntityRetrievalTests(IndexTestCase):
         profile = self.profile.model_copy(deep=True)
         profile.assets.entities.max_results = 2
         retriever = EntityRetriever(
-            profile=profile, asset_store=self.store, entity_index=self.index,
+            profile=profile,
+            asset_store=self.store,
+            entity_index=self.index,
             recall=lambda q, k: [{"asset_ids": [a], "score": 1.0} for a in self.catalogue],
         )
         self.assertEqual(2, len(retriever.search("anything").hits))
@@ -718,7 +832,9 @@ class EntityRetrievalTests(IndexTestCase):
         broken = Mock()
         broken.narrow.side_effect = RuntimeError("db down")
         retriever = EntityRetriever(
-            profile=self.profile, asset_store=self.store, entity_index=broken,
+            profile=self.profile,
+            asset_store=self.store,
+            entity_index=broken,
             recall=lambda q, k: [{"asset_ids": ["p1"], "score": 1.0}],
         )
         result = retriever.search("red shoes", {"color": ["red"]})
@@ -726,8 +842,17 @@ class EntityRetrievalTests(IndexTestCase):
 
     def test_the_result_serialises_for_a_trace(self):
         payload = self._retriever([("p1", 0.9)]).search("shoes", {"color": ["red"]}).as_dict()
-        self.assertEqual(["hits", "recalled", "after_filter", "filters_applied",
-                          "rejected_filters", "filtered_to_empty"], list(payload))
+        self.assertEqual(
+            [
+                "hits",
+                "recalled",
+                "after_filter",
+                "filters_applied",
+                "rejected_filters",
+                "filtered_to_empty",
+            ],
+            list(payload),
+        )
 
 
 class ProfileIntegrationTests(unittest.TestCase):

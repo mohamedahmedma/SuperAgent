@@ -3,6 +3,7 @@
 The built-in catalogue remains authoritative at runtime. This migration applies the same
 boundary immediately for existing databases, before any owner can call an API manually.
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -14,9 +15,16 @@ depends_on = None
 
 
 READ_ONLY = (
-    "schools.read", "structure.read", "students.read", "teachers.read",
-    "timetable.read", "guardians.read", "grades.read", "teacher_attendance.read",
-    "users.read", "reports.read",
+    "schools.read",
+    "structure.read",
+    "students.read",
+    "teachers.read",
+    "timetable.read",
+    "guardians.read",
+    "grades.read",
+    "teacher_attendance.read",
+    "users.read",
+    "reports.read",
 )
 
 
@@ -28,10 +36,13 @@ def upgrade() -> None:
     placeholders = ", ".join(f":p{index}" for index in range(len(READ_ONLY)))
     params = {f"p{index}": code for index, code in enumerate(READ_ONLY)}
     params["role_id"] = owner_id
-    bind.execute(sa.text(
-        "DELETE FROM role_permissions WHERE role_id=:role_id AND permission_id IN ("
-        "SELECT id FROM permissions WHERE code NOT IN (" + placeholders + "))"
-    ), params)
+    bind.execute(
+        sa.text(
+            "DELETE FROM role_permissions WHERE role_id=:role_id AND permission_id IN ("
+            "SELECT id FROM permissions WHERE code NOT IN (" + placeholders + "))"
+        ),
+        params,
+    )
 
 
 def downgrade() -> None:

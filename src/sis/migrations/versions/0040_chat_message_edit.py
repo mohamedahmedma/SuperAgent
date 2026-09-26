@@ -3,6 +3,7 @@
 Revision ID: 0040
 Revises: 0039
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -27,4 +28,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column("chat_messages", "original_body")
     op.drop_column("chat_messages", "edited_at")
-

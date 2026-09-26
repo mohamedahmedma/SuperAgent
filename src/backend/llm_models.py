@@ -16,6 +16,7 @@ Credentials and model ids are read when the factory is built, not per call, matc
 what the module globals did: one read per process, early, so a deployment cannot change
 which model it is calling halfway through serving a request.
 """
+
 from __future__ import annotations
 
 import os
@@ -76,9 +77,7 @@ class ChatModelFactory:
         source = environ if environ is not None else os.environ
         self._api_key = source.get("ARK_API_KEY")
         self._base_url = source.get("BASE_URL")
-        self._model_ids = {
-            role: source.get(variable) for role, variable in _MODEL_VARIABLE.items()
-        }
+        self._model_ids = {role: source.get(variable) for role, variable in _MODEL_VARIABLE.items()}
         self._build = build
         # The shared provider clients (backend/llm_http.py), when the composition root
         # supplies them. Empty in a factory built on its own, which then behaves as before.

@@ -15,6 +15,7 @@ missing. A model handed `null` will narrate a plausible reason; a model handed
 **Every payload is stamped.** `as_of` tells the agent how fresh the figure is, so
 "your child's grade is 84" can be said with the honest qualifier attached.
 """
+
 from datetime import datetime
 from enum import Enum
 
@@ -368,14 +369,10 @@ class StudentClassOut(BaseModel):
     student: StudentRef
     term: TermOut
     status: ClassroomStatusOut
-    class_code: str = Field(
-        default="", description="Empty exactly when `status` is `no_class`."
-    )
+    class_code: str = Field(default="", description="Empty exactly when `status` is `no_class`.")
     class_name_ar: str = ""
     class_name_en: str = ""
-    year_level_code: str = Field(
-        default="", description="The rung the room sits on, e.g. `AR-P4`."
-    )
+    year_level_code: str = Field(default="", description="The rung the room sits on, e.g. `AR-P4`.")
     year_level_name_ar: str = Field(
         default="",
         description="The rung's human name — 'Year 3'. Empty when the school's ladder is "

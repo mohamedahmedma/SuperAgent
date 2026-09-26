@@ -12,6 +12,7 @@ matter most: the citation contract (its loss breaks asset delivery silently, bec
 attribution parses [n] out of the answer) and the worked examples (a small model cannot
 instantiate a register from adjectives). Both are asserted below alongside the count.
 """
+
 import unittest
 
 import tiktoken
@@ -69,9 +70,7 @@ class SchoolPromptBudgetTests(unittest.TestCase):
     def test_an_english_turn_does_not_pay_for_the_arabic_register(self):
         """The register only works written in Arabic, which makes it dead weight on an
         English turn — and it is more than half the prompt."""
-        english = self.profile.render_system_prompt(
-            ["search_knowledge_base"], language="en"
-        )
+        english = self.profile.render_system_prompt(["search_knowledge_base"], language="en")
         self.assertLess(count(english), count(self.prompt) // 2)
         self.assertNotIn("حضرتك", english, "the Arabic register leaked into an English turn")
 

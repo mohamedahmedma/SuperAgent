@@ -22,6 +22,7 @@ The class on the response is resolved *for the term* rather than read from the c
 current placement (invariant 2). A Term 1 report keeps printing 3A after a March move to
 3B, because that is the room those marks were earned in.
 """
+
 from dataclasses import replace
 from typing import Annotated
 
@@ -211,14 +212,10 @@ def read_student_term_grades(
     # scope would bound nothing on the one screen it most obviously should.
     caller.narrow(
         Permission.GRADES_READ,
-        lambda scopes: scopes.for_student_in_term(
-            term_code=term, student_number=student_number
-        ),
+        lambda scopes: scopes.for_student_in_term(term_code=term, student_number=student_number),
     )
     with domain_errors():
-        report = queries.student_term_grades(
-            StudentNumber(student_number), TermCode(term)
-        )
+        report = queries.student_term_grades(StudentNumber(student_number), TermCode(term))
     # Class access does not imply access to every colleague's subject. A teacher sees
     # only the academic lines assigned to them in the child's class for this term.
     # Non-teaching roles return ``None`` and retain their ordinary scope-based view.
@@ -233,9 +230,7 @@ def read_student_term_grades(
             report = replace(
                 report,
                 lines=tuple(
-                    line
-                    for line in report.lines
-                    if str(line.grade.subject_code) in allowed
+                    line for line in report.lines if str(line.grade.subject_code) in allowed
                 ),
             )
     return StudentTermGradesOut.of(report)

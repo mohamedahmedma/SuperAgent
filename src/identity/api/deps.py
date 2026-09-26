@@ -30,6 +30,7 @@ built per request, because they hold a session that belongs to that request and 
 else. A cached service would pin a closed session and serve one request's transaction to
 the next.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -168,16 +169,12 @@ def get_parent_session_service(
 SessionServiceDep = Annotated[SessionService, Depends(get_session_service)]
 AdminServiceDep = Annotated[AdministrationService, Depends(get_admin_service)]
 WhatsAppServiceDep = Annotated[WhatsAppLoginService, Depends(get_whatsapp_service)]
-ParentSessionServiceDep = Annotated[
-    ParentSessionService, Depends(get_parent_session_service)
-]
+ParentSessionServiceDep = Annotated[ParentSessionService, Depends(get_parent_session_service)]
 
 
 # ---------------------------------------------------------------------------
 # Credentials
 # ---------------------------------------------------------------------------
-
-
 
 
 #: Declared so the OpenAPI document says how to authenticate, which is what puts the

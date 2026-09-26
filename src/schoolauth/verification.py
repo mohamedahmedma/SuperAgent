@@ -14,6 +14,7 @@ It **fails closed**. With no verification material configured at all, every call
 quietly accepts unsigned tokens when it cannot find a key is worse than one that is down,
 because nothing reports it.
 """
+
 from __future__ import annotations
 
 import json
@@ -208,9 +209,7 @@ def _verification_key(config: IdentityConfig) -> str | dict:
     if pem:
         return pem
     if not config.jwks_url:
-        raise IdentityNotConfigured(
-            "Neither IDENTITY_PUBLIC_KEY_PEM nor IDENTITY_JWKS_URL is set."
-        )
+        raise IdentityNotConfigured("Neither IDENTITY_PUBLIC_KEY_PEM nor IDENTITY_JWKS_URL is set.")
     return _fetch_jwks(config.jwks_url, config.jwks_ttl_seconds)
 
 

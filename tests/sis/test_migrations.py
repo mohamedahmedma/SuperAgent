@@ -20,6 +20,7 @@ Two distinct failures hid in that gap, and both are what this file is here to ca
 So these tests assert on data, not on schema. A schema assertion would have passed
 throughout both bugs.
 """
+
 from datetime import date
 
 import pytest
@@ -66,7 +67,15 @@ def _seed_a_school_with_marks() -> None:
             ]
         )
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة 3", display_order=3)]
+            [
+                YearLevel(
+                    code="3",
+                    school_code="MAIN",
+                    name_en="Year 3",
+                    name_ar="السنة 3",
+                    display_order=3,
+                )
+            ]
         )
         uow.class_sections.upsert_many(
             [
@@ -157,9 +166,7 @@ def _seed_a_school_with_marks() -> None:
 def _marks_on_file() -> dict[str, float | None]:
     """The marks as the service reads them back, keyed by subject code."""
     with SqlAlchemyUnitOfWork() as uow:
-        grades = uow.grades.list_for_student(
-            StudentNumber("10432"), term_code=TermCode(TERM)
-        )
+        grades = uow.grades.list_for_student(StudentNumber("10432"), term_code=TermCode(TERM))
         return {
             str(grade.subject_code): (
                 None if grade.percentage is None else float(grade.percentage.value)

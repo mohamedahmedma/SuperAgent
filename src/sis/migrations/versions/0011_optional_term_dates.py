@@ -22,6 +22,7 @@ half that can fail, and it says so rather than inventing dates — see below.
 Revision ID: 0011
 Revises: 0010
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -47,9 +48,12 @@ def downgrade() -> None:
     # for subjects it cannot keep. Filling them from the year's window would be the worst
     # available option: it would look like a successful downgrade and would silently turn
     # "not decided" into a boundary that decides where marks are filed.
-    undated = op.get_bind().execute(
-        sa.text("SELECT code FROM terms WHERE starts_on IS NULL OR ends_on IS NULL")
-    ).scalars().all()
+    undated = (
+        op.get_bind()
+        .execute(sa.text("SELECT code FROM terms WHERE starts_on IS NULL OR ends_on IS NULL"))
+        .scalars()
+        .all()
+    )
     if undated:
         raise RuntimeError(
             "cannot restore NOT NULL term dates: "

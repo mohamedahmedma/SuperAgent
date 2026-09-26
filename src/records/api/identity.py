@@ -19,6 +19,7 @@ It **fails closed**. With no verification material configured, every parent-faci
 returns 503 rather than falling back to trusting the path. A records service that quietly
 accepts unsigned identity is worse than one that is down.
 """
+
 from records.config import settings
 
 from schoolauth import (
@@ -57,9 +58,7 @@ def _config() -> IdentityConfig:
         audience=AUDIENCE if AUDIENCE is not None else resolved.identity_audience,
         jwks_url=JWKS_URL if JWKS_URL is not None else resolved.identity_jwks_url,
         jwks_ttl_seconds=(
-            JWKS_TTL_SECONDS
-            if JWKS_TTL_SECONDS is not None
-            else resolved.identity_jwks_ttl_seconds
+            JWKS_TTL_SECONDS if JWKS_TTL_SECONDS is not None else resolved.identity_jwks_ttl_seconds
         ),
     )
 

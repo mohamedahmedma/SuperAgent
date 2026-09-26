@@ -19,6 +19,7 @@ browser that asked. Holding one without the other is worth nothing:
   * A parent tricked into sending an attacker's nonce delivers the code to *the parent's*
     WhatsApp, which the attacker cannot read.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -75,7 +76,7 @@ def new_nonce() -> str:
 
 def new_code() -> str:
     """A zero-padded six-digit code. `secrets`, never `random`."""
-    return f"{secrets.randbelow(10 ** CODE_DIGITS):0{CODE_DIGITS}d}"
+    return f"{secrets.randbelow(10**CODE_DIGITS):0{CODE_DIGITS}d}"
 
 
 def new_poll_secret() -> str:

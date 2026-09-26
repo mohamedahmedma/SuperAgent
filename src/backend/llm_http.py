@@ -28,6 +28,7 @@ said it will reject, learns the quota from every response, and tells the SDK whe
 retry is worth making through the `x-should-retry` header the SDK obeys. So the SDK
 stays the ONE place that retries, and it retries only what the policy allows.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -136,7 +137,9 @@ def _refusal(request: httpx.Request, exc: QuotaExhausted) -> httpx.Response:
 def _judge(gate: ProviderGate, response: httpx.Response) -> None:
     gate.observe(response.status_code, response.headers)
     if response.status_code in RETRYABLE_STATUSES:
-        response.headers["x-should-retry"] = "true" if gate.should_retry(response.headers) else "false"
+        response.headers["x-should-retry"] = (
+            "true" if gate.should_retry(response.headers) else "false"
+        )
 
 
 class GatedTransport(httpx.BaseTransport):

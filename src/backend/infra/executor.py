@@ -19,6 +19,7 @@ are not the only limit: each may hold a database connection (the pool is sized i
 backend/infra/database.py) and each may be a concurrent call against a provider's quota
 (item 37). Raise it with those in view.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -49,7 +50,9 @@ def turn_executor_workers() -> int:
     try:
         return max(1, int(configured))
     except ValueError:
-        logger.warning("TURN_EXECUTOR_WORKERS=%r is not a number; using %d", configured, DEFAULT_WORKERS)
+        logger.warning(
+            "TURN_EXECUTOR_WORKERS=%r is not a number; using %d", configured, DEFAULT_WORKERS
+        )
         return DEFAULT_WORKERS
 
 

@@ -22,6 +22,7 @@ migrating every stored conversation; keeping a row per username costs nothing an
 session ownership work unchanged. Its `password_hash` column now holds a sentinel that
 matches no hash format, and nothing in this codebase reads it any more.
 """
+
 import logging
 import os
 import threading
@@ -115,7 +116,12 @@ class AuthenticatedUser:
     """
 
     __slots__ = (
-        "username", "role", "guardian_id", "display_name", "access_token", "children",
+        "username",
+        "role",
+        "guardian_id",
+        "display_name",
+        "access_token",
+        "children",
     )
 
     def __init__(
@@ -182,7 +188,6 @@ def _children_from(claims: dict) -> tuple:
     return tuple(found)
 
 
-
 class KnownUsers:
     """Usernames whose projection row is known to exist, so a request need not ask again.
 
@@ -202,7 +207,9 @@ class KnownUsers:
     query moves from once per request to once per user per worker per TTL.
     """
 
-    def __init__(self, capacity: int = 50_000, ttl_seconds: float = 600.0, clock=time.monotonic) -> None:
+    def __init__(
+        self, capacity: int = 50_000, ttl_seconds: float = 600.0, clock=time.monotonic
+    ) -> None:
         self._capacity = max(1, int(capacity))
         self._ttl = float(ttl_seconds)
         self._clock = clock

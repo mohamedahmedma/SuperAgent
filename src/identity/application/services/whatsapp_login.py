@@ -38,6 +38,7 @@ is, is the registrar's fact and not a claim to be self-asserted.
 No enumeration surface. `start` takes no phone number at all, so there is nothing to
 probe: a caller learns only about the number they can actually send a message from.
 """
+
 from __future__ import annotations
 
 import logging
@@ -215,9 +216,7 @@ class WhatsAppLoginService:
             return OUTCOME_UNKNOWN_SCHOOL
 
         if as_aware(challenge.expires_at) <= now:
-            self._challenges.mark_rejected(
-                challenge, reason=OUTCOME_EXPIRED, message_id=message_id
-            )
+            self._challenges.mark_rejected(challenge, reason=OUTCOME_EXPIRED, message_id=message_id)
             self._say(
                 channel, wa_id, "That link has expired. Please start again from the school app."
             )

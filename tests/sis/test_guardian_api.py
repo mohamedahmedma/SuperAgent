@@ -12,6 +12,7 @@ of a response body:
 * **The unique constraint on a phone.** The fakes model it, but only a real database
   proves the schema agrees, and it is the constraint a future parent login depends on.
 """
+
 import io
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
@@ -129,7 +130,15 @@ def roll(client: TestClient, registrar: dict[str, str]) -> None:
             ]
         )
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة 3", display_order=3)]
+            [
+                YearLevel(
+                    code="3",
+                    school_code="MAIN",
+                    name_en="Year 3",
+                    name_ar="السنة 3",
+                    display_order=3,
+                )
+            ]
         )
         uow.class_sections.upsert_many(
             [
@@ -200,9 +209,7 @@ def test_the_router_is_mounted(client: TestClient) -> None:
     assert "/v1/imports/guardians/{batch_id}/commit" in paths
 
 
-def test_preview_writes_nothing(
-    client: TestClient, registrar: dict[str, str], roll: None
-) -> None:
+def test_preview_writes_nothing(client: TestClient, registrar: dict[str, str], roll: None) -> None:
     """The promise the two-step flow rests on: a preview is a report, not a write."""
     preview = client.post(
         "/v1/imports/guardians/preview",
@@ -353,7 +360,9 @@ def test_access_can_be_revoked_without_an_upload(
 ) -> None:
     """The urgent custody path. A court order arrives and the office has to act now."""
     _upload(client, registrar)
-    assert client.get("/v1/guardians/+201002223333/students", headers=registrar).json()["count"] == 1
+    assert (
+        client.get("/v1/guardians/+201002223333/students", headers=registrar).json()["count"] == 1
+    )
 
     revoked = client.patch(
         "/v1/students/S001/guardians/+201002223333",
@@ -363,7 +372,9 @@ def test_access_can_be_revoked_without_an_upload(
     assert revoked.status_code == 200, revoked.text
     assert revoked.json()["can_view_records"] is False
 
-    assert client.get("/v1/guardians/+201002223333/students", headers=registrar).json()["count"] == 0
+    assert (
+        client.get("/v1/guardians/+201002223333/students", headers=registrar).json()["count"] == 0
+    )
     # The link survives; only the reading was removed.
     still_listed = client.get("/v1/students/S001/guardians", headers=registrar).json()
     father = next(g for g in still_listed["guardians"] if g["phone"] == "+201002223333")
@@ -396,7 +407,7 @@ def test_guardian_details_and_the_child_specific_relationship_are_editable(
 def test_an_unknown_student_is_a_404_not_an_empty_list(
     client: TestClient, registrar: dict[str, str], roll: None
 ) -> None:
-    """"No such child" and "no guardians recorded yet" must stay distinguishable.
+    """ "No such child" and "no guardians recorded yet" must stay distinguishable.
 
     The second is the normal state of every child between the two uploads, so answering
     both with an empty list would send a registrar looking for a typo that is not there.
@@ -418,7 +429,10 @@ def test_a_batch_cannot_be_committed_twice(
         headers=registrar,
     )
     batch_id = preview.json()["batch_id"]
-    assert client.post(f"/v1/imports/guardians/{batch_id}/commit", headers=registrar).status_code == 200
+    assert (
+        client.post(f"/v1/imports/guardians/{batch_id}/commit", headers=registrar).status_code
+        == 200
+    )
 
     again = client.post(f"/v1/imports/guardians/{batch_id}/commit", headers=registrar)
     assert again.status_code == 409
@@ -555,9 +569,7 @@ def test_an_unusable_number_is_refused_rather_than_resolved(
 ) -> None:
     """422, not 404. "That is not a phone number" and "that number is not a parent here"
     are different answers and the caller acts differently on each."""
-    refused = client.post(
-        "/v1/guardians/resolve", json={"phone": "not a phone"}, headers=registrar
-    )
+    refused = client.post("/v1/guardians/resolve", json={"phone": "not a phone"}, headers=registrar)
     assert refused.status_code == 422
 
 
@@ -630,7 +642,7 @@ def test_a_restricted_child_is_absent_from_the_handle_answer(
 def test_an_unknown_handle_is_a_404(
     client: TestClient, registrar: dict[str, str], roll: None
 ) -> None:
-    """"Not a guardian" must stay distinguishable from "a guardian who may see nobody" —
+    """ "Not a guardian" must stay distinguishable from "a guardian who may see nobody" —
     the second is what a custody restriction looks like, and it must not read as a broken
     token."""
     missing = client.get("/v1/guardians/by-id/not-a-real-handle/students", headers=registrar)
@@ -638,9 +650,9 @@ def test_an_unknown_handle_is_a_404(
 
 
 def _handle_for(client: TestClient, headers: dict[str, str], phone: str) -> str:
-    return client.post(
-        "/v1/guardians/resolve", json={"phone": phone}, headers=headers
-    ).json()["public_id"]
+    return client.post("/v1/guardians/resolve", json={"phone": phone}, headers=headers).json()[
+        "public_id"
+    ]
 
 
 def test_a_guardian_may_read_her_own_child_s_marks(
@@ -714,11 +726,13 @@ def test_an_unknown_child_and_someone_else_s_child_look_identical(
 
     not_hers = client.get(
         f"/v1/guardians/by-id/{brother}/students/S002/grades",
-        params={"term": "2026-T1"}, headers=registrar,
+        params={"term": "2026-T1"},
+        headers=registrar,
     ).json()["detail"]
     no_such = client.get(
         f"/v1/guardians/by-id/{brother}/students/S999/grades",
-        params={"term": "2026-T1"}, headers=registrar,
+        params={"term": "2026-T1"},
+        headers=registrar,
     ).json()["detail"]
 
     assert not_hers["code"] == no_such["code"]
@@ -741,9 +755,7 @@ def test_a_guardian_may_read_her_own_child_s_attendance(
     _upload(client, registrar)
     handle = _handle_for(client, registrar, "+201001234567")
 
-    record = client.get(
-        f"/v1/guardians/by-id/{handle}/students/S001/attendance", headers=registrar
-    )
+    record = client.get(f"/v1/guardians/by-id/{handle}/students/S001/attendance", headers=registrar)
     assert record.status_code == 200, record.text
     assert record.json()["student_number"] == "S001"
 
@@ -875,76 +887,91 @@ def week(
         )
         uow.commit()
 
-    assert client.put(
-        "/v1/schools/MAIN/timetable-periods",
-        json={
-            "periods": [
-                {"period_number": 1, "name_en": "Period 1", "name_ar": "حصة ١"},
-                {"period_number": 2, "name_en": "Break", "name_ar": "فسحة", "is_teaching": False},
-                {"period_number": 3, "name_en": "Period 3", "name_ar": "حصة ٣"},
-            ]
-        },
-        headers=registrar,
-    ).status_code == 200
+    assert (
+        client.put(
+            "/v1/schools/MAIN/timetable-periods",
+            json={
+                "periods": [
+                    {"period_number": 1, "name_en": "Period 1", "name_ar": "حصة ١"},
+                    {
+                        "period_number": 2,
+                        "name_en": "Break",
+                        "name_ar": "فسحة",
+                        "is_teaching": False,
+                    },
+                    {"period_number": 3, "name_en": "Period 3", "name_ar": "حصة ٣"},
+                ]
+            },
+            headers=registrar,
+        ).status_code
+        == 200
+    )
 
-    assert client.post(
-        "/v1/subjects",
-        json={
-            "code": "MATH",
-            "academic_year_code": YEAR_CODE,
-            "name_en": "Mathematics",
-            "name_ar": "الرياضيات",
-        },
-        headers=registrar,
-    ).status_code == 201
-    assert client.put(
-        "/v1/subject-assignments",
-        json={
-            "academic_year_code": YEAR_CODE,
-            "subject_code": "MATH",
-            "year_level_code": "3",
-            "assigned": True,
-        },
-        headers=registrar,
-    ).status_code == 204
+    assert (
+        client.post(
+            "/v1/subjects",
+            json={
+                "code": "MATH",
+                "academic_year_code": YEAR_CODE,
+                "name_en": "Mathematics",
+                "name_ar": "الرياضيات",
+            },
+            headers=registrar,
+        ).status_code
+        == 201
+    )
+    assert (
+        client.put(
+            "/v1/subject-assignments",
+            json={
+                "academic_year_code": YEAR_CODE,
+                "subject_code": "MATH",
+                "year_level_code": "3",
+                "assigned": True,
+            },
+            headers=registrar,
+        ).status_code
+        == 204
+    )
 
     # 3A sits maths on Sunday; 3B sits it on Monday. Two rooms with different weeks, so
     # "which room did we resolve" is answerable from the lessons alone.
-    assert client.put(
-        "/v1/timetable",
-        json={
-            "academic_year_code": YEAR_CODE,
-            "entries": [
-                {
-                    "class_code": "3A",
-                    "term_code": FIRST_TERM,
-                    "day_of_week": "sunday",
-                    "period_number": 1,
-                    "subject_code": "MATH",
-                },
-                {
-                    "class_code": "3A",
-                    "term_code": FIRST_TERM,
-                    "day_of_week": "monday",
-                    "period_number": 3,
-                    "subject_code": None,
-                },
-                {
-                    "class_code": "3B",
-                    "term_code": SECOND_TERM,
-                    "day_of_week": "monday",
-                    "period_number": 1,
-                    "subject_code": "MATH",
-                },
-            ],
-        },
-        headers=registrar,
-    ).status_code == 200
+    assert (
+        client.put(
+            "/v1/timetable",
+            json={
+                "academic_year_code": YEAR_CODE,
+                "entries": [
+                    {
+                        "class_code": "3A",
+                        "term_code": FIRST_TERM,
+                        "day_of_week": "sunday",
+                        "period_number": 1,
+                        "subject_code": "MATH",
+                    },
+                    {
+                        "class_code": "3A",
+                        "term_code": FIRST_TERM,
+                        "day_of_week": "monday",
+                        "period_number": 3,
+                        "subject_code": None,
+                    },
+                    {
+                        "class_code": "3B",
+                        "term_code": SECOND_TERM,
+                        "day_of_week": "monday",
+                        "period_number": 1,
+                        "subject_code": "MATH",
+                    },
+                ],
+            },
+            headers=registrar,
+        ).status_code
+        == 200
+    )
 
 
-def _timetable(
-    client: TestClient, headers: dict[str, str], handle: str, student: str, term: str
-):
+def _timetable(client: TestClient, headers: dict[str, str], handle: str, student: str, term: str):
     return client.get(
         f"/v1/guardians/by-id/{handle}/students/{student}/timetable",
         params={"term": term},
@@ -1004,9 +1031,7 @@ def test_the_timetable_is_the_class_she_sat_in_for_that_term(
     handle = _handle_for(client, registrar, "+201001234567")
 
     with SqlAlchemyUnitOfWork() as uow:
-        uow.enrolments.close_open_enrolment(
-            StudentNumber("S001"), ends_on=date(2025, 12, 31)
-        )
+        uow.enrolments.close_open_enrolment(StudentNumber("S001"), ends_on=date(2025, 12, 31))
         uow.enrolments.upsert_many(
             [
                 ClassEnrolment(
@@ -1029,9 +1054,7 @@ def test_the_timetable_is_the_class_she_sat_in_for_that_term(
     ]
 
     assert spring["class_code"] == "3B"
-    assert [(l["day_of_week"], l["period_number"]) for l in spring["lessons"]] == [
-        ("monday", 1)
-    ]
+    assert [(l["day_of_week"], l["period_number"]) for l in spring["lessons"]] == [("monday", 1)]
 
 
 def test_a_class_with_no_grid_yet_is_not_the_same_as_no_class(
@@ -1055,9 +1078,7 @@ def test_a_class_with_no_grid_yet_is_not_the_same_as_no_class(
     assert [p["period_number"] for p in no_grid["periods"]] == [1, 2, 3]
 
     with SqlAlchemyUnitOfWork() as uow:
-        uow.enrolments.close_open_enrolment(
-            StudentNumber("S002"), ends_on=date(2025, 9, 2)
-        )
+        uow.enrolments.close_open_enrolment(StudentNumber("S002"), ends_on=date(2025, 9, 2))
         uow.commit()
 
     no_class = _timetable(client, registrar, handle, "S002", SECOND_TERM)
@@ -1176,26 +1197,32 @@ def classroom(client: TestClient, registrar: dict[str, str], week: None) -> None
       T-OTHER  MATH in 3B          another room, which must not leak into 3A's answer
       T-GONE   MATH in 3A inactive left the school, and must not be offered to a parent
     """
-    assert client.post(
-        "/v1/subjects",
-        json={
-            "code": "SCI",
-            "academic_year_code": YEAR_CODE,
-            "name_en": "Science",
-            "name_ar": "العلوم",
-        },
-        headers=registrar,
-    ).status_code == 201
-    assert client.put(
-        "/v1/subject-assignments",
-        json={
-            "academic_year_code": YEAR_CODE,
-            "subject_code": "SCI",
-            "year_level_code": "3",
-            "assigned": True,
-        },
-        headers=registrar,
-    ).status_code == 204
+    assert (
+        client.post(
+            "/v1/subjects",
+            json={
+                "code": "SCI",
+                "academic_year_code": YEAR_CODE,
+                "name_en": "Science",
+                "name_ar": "العلوم",
+            },
+            headers=registrar,
+        ).status_code
+        == 201
+    )
+    assert (
+        client.put(
+            "/v1/subject-assignments",
+            json={
+                "academic_year_code": YEAR_CODE,
+                "subject_code": "SCI",
+                "year_level_code": "3",
+                "assigned": True,
+            },
+            headers=registrar,
+        ).status_code
+        == 204
+    )
 
     for staff, name_ar, name_en, subject, classes, active in (
         ("T-MATH", "أ. سامي", "Mr Sami", "MATH", ["3A"], True),
@@ -1205,16 +1232,19 @@ def classroom(client: TestClient, registrar: dict[str, str], week: None) -> None
         ("T-GONE", "أ. فريد", "Mr Farid", "MATH", ["3A"], False),
     ):
         created = _teacher(
-            client, registrar, staff,
-            name_ar=name_ar, name_en=name_en, subject=subject,
-            classes=classes, is_active=active,
+            client,
+            registrar,
+            staff,
+            name_ar=name_ar,
+            name_en=name_en,
+            subject=subject,
+            classes=classes,
+            is_active=active,
         )
         assert created.status_code == 200, created.text
 
 
-def _classroom(
-    client: TestClient, headers: dict[str, str], handle: str, student: str, term: str
-):
+def _classroom(client: TestClient, headers: dict[str, str], handle: str, student: str, term: str):
     return client.get(
         f"/v1/guardians/by-id/{handle}/students/{student}/classroom",
         params={"term": term},
@@ -1339,9 +1369,7 @@ def test_a_child_with_no_placement_has_no_room_rather_than_an_empty_one(
     handle = _handle_for(client, registrar, "+201001234567")
 
     with SqlAlchemyUnitOfWork() as uow:
-        uow.enrolments.close_open_enrolment(
-            StudentNumber("S002"), ends_on=date(2025, 9, 2)
-        )
+        uow.enrolments.close_open_enrolment(StudentNumber("S002"), ends_on=date(2025, 9, 2))
         uow.commit()
 
     gone = _classroom(client, registrar, handle, "S002", SECOND_TERM)
@@ -1366,9 +1394,7 @@ def test_the_room_is_the_one_she_sat_in_for_that_term(
     handle = _handle_for(client, registrar, "+201001234567")
 
     with SqlAlchemyUnitOfWork() as uow:
-        uow.enrolments.close_open_enrolment(
-            StudentNumber("S001"), ends_on=date(2025, 12, 31)
-        )
+        uow.enrolments.close_open_enrolment(StudentNumber("S001"), ends_on=date(2025, 12, 31))
         uow.enrolments.upsert_many(
             [
                 ClassEnrolment(

@@ -27,6 +27,7 @@ composition root and read off `app.state`. Only the thin service objects are per
 because they hold nothing but references. Rebuilding an adapter per request would mean a
 new connection pool, and therefore a TCP and TLS handshake, on every parent's question.
 """
+
 from __future__ import annotations
 
 import hmac
@@ -159,9 +160,7 @@ def require_agent(
             "RECORDS_API_KEY is not set; every request is refused. Set it to the secret "
             "the chat backend presents."
         )
-        audit.refused(
-            audit.NOT_AUTHORIZED, endpoint=str(request.url.path), request_id=request_id
-        )
+        audit.refused(audit.NOT_AUTHORIZED, endpoint=str(request.url.path), request_id=request_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "not_configured", "message": "This service is not configured."},
@@ -173,9 +172,7 @@ def require_agent(
     if not presented or not hmac.compare_digest(
         presented.encode("utf-8"), expected.encode("utf-8")
     ):
-        audit.refused(
-            audit.NOT_AUTHORIZED, endpoint=str(request.url.path), request_id=request_id
-        )
+        audit.refused(audit.NOT_AUTHORIZED, endpoint=str(request.url.path), request_id=request_id)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "not_authorized", "message": "Missing or invalid API key."},

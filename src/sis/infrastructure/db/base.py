@@ -12,6 +12,7 @@ Naming them up front also makes autogenerate stable: without a convention, alemb
 compares a named model constraint against an anonymous database one and proposes a
 spurious drop-and-recreate on every run.
 """
+
 from sqlalchemy import MetaData
 from sqlalchemy.orm import DeclarativeBase
 

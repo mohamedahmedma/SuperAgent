@@ -33,6 +33,7 @@ rebind an account to a different guardian (`identity/routes.py:342`) — a user-
 would survive that rebind and be wrong-family; a guardian-keyed one moves with the
 binding.
 """
+
 from __future__ import annotations
 
 import logging
@@ -274,9 +275,7 @@ def load_roster(
         if isinstance(cached, list) and cached:
             return OK, _as_options(cached)
 
-    outcome, rows = (fetch or _fetch)(
-        guardian_id, token, getattr(ctx, "session_id", "") or ""
-    )
+    outcome, rows = (fetch or _fetch)(guardian_id, token, getattr(ctx, "session_id", "") or "")
     # Written only on a positive, non-empty answer. Caching an outage would turn a
     # three-second blip into ninety seconds of a parent being told nothing is there,
     # and caching an empty list would do the same for any future 200-with-[].
@@ -348,9 +347,7 @@ class _Prefetch:
             except Exception:  # pragma: no cover - load_roster does not raise
                 logger.warning("child roster prefetch failed", exc_info=True)
 
-        self._thread = threading.Thread(
-            target=run, name="child-roster-prefetch", daemon=True
-        )
+        self._thread = threading.Thread(target=run, name="child-roster-prefetch", daemon=True)
         self._thread.start()
 
     def result(self, timeout: float | None = None) -> Tuple[str, List[ChildOption]]:

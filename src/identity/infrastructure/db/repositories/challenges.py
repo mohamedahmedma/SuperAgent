@@ -5,6 +5,7 @@ the webhook path, and Meta is counting the milliseconds before it decides a deli
 unacknowledged and schedules a retry. A table scan on a table that grows by one row per
 sign-in attempt is how a school's parents start receiving duplicate codes.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

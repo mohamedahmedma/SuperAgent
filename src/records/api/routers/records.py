@@ -12,6 +12,7 @@ in `application/reads.py`, where it is stated once instead of four times, and no
 `try/except` appears below because `api/errors.py` turns a domain error into a status in
 one place.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Query, Request
@@ -45,10 +46,19 @@ router = APIRouter(prefix="/v1", tags=["records"])
 # Documented once and attached to every parent-facing route, so the generated OpenAPI
 # tells an integrator what the failure modes are without reading this file.
 AGENT_RESPONSES = {
-    401: {"model": ErrorOut, "description": "Missing or invalid API key, or missing/invalid identity token."},
-    403: {"model": ErrorOut, "description": "Identity token does not authorise the guardian named in the path."},
+    401: {
+        "model": ErrorOut,
+        "description": "Missing or invalid API key, or missing/invalid identity token.",
+    },
+    403: {
+        "model": ErrorOut,
+        "description": "Identity token does not authorise the guardian named in the path.",
+    },
     404: {"model": ErrorOut, "description": "No such student record for this guardian."},
-    503: {"model": ErrorOut, "description": "System of record unreachable. Do not answer from memory."},
+    503: {
+        "model": ErrorOut,
+        "description": "System of record unreachable. Do not answer from memory.",
+    },
 }
 
 
@@ -93,16 +103,15 @@ def list_terms(service: RecordsServiceDep, _: AgentCaller) -> list[TermOut]:
     response_model=StudentListOut,
     responses=AGENT_RESPONSES,
 )
-def list_students(guardian_id: str, subject: ParentSubjectDep,
-                  service: RecordsServiceDep) -> StudentListOut:
+def list_students(
+    guardian_id: str, subject: ParentSubjectDep, service: RecordsServiceDep
+) -> StudentListOut:
     """Children this guardian may ask about.
 
     The agent's first call in any conversation. An unknown guardian and a guardian with no
     visible children both return an empty list — see `AccessService.permitted_students`.
     """
-    students = service.students(
-        guardian_id=subject.guardian_id, school_code=subject.school_code
-    )
+    students = service.students(guardian_id=subject.guardian_id, school_code=subject.school_code)
     return StudentListOut(
         guardian_id=subject.guardian_id,
         students=[_student_ref(s) for s in students],
@@ -386,9 +395,7 @@ def get_subjects(
         class_name_ar=room.class_name_ar,
         class_name_en=room.class_name_en,
         subjects=[
-            StudySubjectOut(
-                code=item.code, name_ar=item.name_ar, name_en=item.name_en
-            )
+            StudySubjectOut(code=item.code, name_ar=item.name_ar, name_en=item.name_en)
             for item in room.subjects
         ],
         as_of=result.as_of,

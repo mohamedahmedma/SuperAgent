@@ -6,6 +6,7 @@ its HTTP response body would have the wire format as part of its signature, so r
 JSON field would mean editing a service, and the import script — which speaks no HTTP —
 would be constructing response models to call it.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

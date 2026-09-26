@@ -4,6 +4,7 @@ Also the reference for what a correct adapter returns — particularly the two e
 a real one is most likely to flatten into each other: a child with no class this term, and
 a class whose week nobody has laid out. See `records/domain/timetable.py`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

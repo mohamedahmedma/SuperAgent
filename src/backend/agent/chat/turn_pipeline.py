@@ -22,6 +22,7 @@ stream's last event is sent, and the request is free to end. The next turn on th
 conversation waits for that queue before it reads the conversation, which is what keeps
 "queued" and "stored" indistinguishable from where the parent sits.
 """
+
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -29,7 +30,11 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from backend.agent.chat.answer_blocks import attach_answer_blocks, resolve_figure_markers, settle_answer_blocks
+from backend.agent.chat.answer_blocks import (
+    attach_answer_blocks,
+    resolve_figure_markers,
+    settle_answer_blocks,
+)
 from backend.agent.chat.answer_checks import (
     enforce_answer_figures,
     enforce_forced_tool_ran,
@@ -219,11 +224,15 @@ class TurnPipeline:
         After the previous turn's writes: its save was queued rather than waited for, and a
         parent's next message can arrive before a queued save has run.
         """
-        if not self._c.background.flush(self.conversation_key(user_id, session_id), timeout=self.SAVE_WAIT_SECONDS):
+        if not self._c.background.flush(
+            self.conversation_key(user_id, session_id), timeout=self.SAVE_WAIT_SECONDS
+        ):
             logger.warning(
                 "the previous turn's save for %s/%s is still running after %.0fs; "
                 "continuing with what is stored",
-                user_id, session_id, self.SAVE_WAIT_SECONDS,
+                user_id,
+                session_id,
+                self.SAVE_WAIT_SECONDS,
             )
         messages, metadata = self._c.conversations.load_for_turn(
             user_id, session_id, window=history_window(self._c.profile.agent)
@@ -257,21 +266,27 @@ class TurnPipeline:
         )
 
     def sync_context(self, turn: Turn):
-        return self._attach(turn, self._c.context_type.for_sync(
-            user_id=turn.user_id,
-            session_id=turn.session_id,
-            caller=turn.caller,
-            child=turn.child_state,
-        ))
+        return self._attach(
+            turn,
+            self._c.context_type.for_sync(
+                user_id=turn.user_id,
+                session_id=turn.session_id,
+                caller=turn.caller,
+                child=turn.child_state,
+            ),
+        )
 
     def stream_context(self, turn: Turn, output_queue):
-        return self._attach(turn, self._c.context_type.for_stream(
-            user_id=turn.user_id,
-            session_id=turn.session_id,
-            output_queue=output_queue,
-            caller=turn.caller,
-            child=turn.child_state,
-        ))
+        return self._attach(
+            turn,
+            self._c.context_type.for_stream(
+                user_id=turn.user_id,
+                session_id=turn.session_id,
+                output_queue=output_queue,
+                caller=turn.caller,
+                child=turn.child_state,
+            ),
+        )
 
     def _attach(self, turn: Turn, ctx):
         turn.ctx = ctx
@@ -330,7 +345,9 @@ class TurnPipeline:
             describe="store the question",
         )
 
-    def _store(self, turn: Turn, messages: list, *, metadata: dict | None = None, describe: str) -> None:
+    def _store(
+        self, turn: Turn, messages: list, *, metadata: dict | None = None, describe: str
+    ) -> None:
         """Queue an append to this conversation, behind whatever it already has queued.
 
         Retried through a transient database failure, where it used to be logged and
@@ -347,9 +364,11 @@ class TurnPipeline:
                 describe=label,
             )
 
-        turn.writes.append(self._c.background.submit(
-            self.conversation_key(user_id, session_id), work, describe=label
-        ))
+        turn.writes.append(
+            self._c.background.submit(
+                self.conversation_key(user_id, session_id), work, describe=label
+            )
+        )
 
     # -- a resumed search --------------------------------------------------------------
 
@@ -439,7 +458,9 @@ class TurnPipeline:
         question, carried as the pending clarification the next message answers.
         """
         plan = turn.plan
-        turn.next_pending = child_choice_pending(plan, turn.entry.original_question or turn.user_text)
+        turn.next_pending = child_choice_pending(
+            plan, turn.entry.original_question or turn.user_text
+        )
         reply = plan.static_reply or ""
         turn.answer = (
             format_hitl_message(reply, turn.next_pending["options"]) if turn.next_pending else reply
@@ -452,7 +473,9 @@ class TurnPipeline:
     def agent_call(self, turn: Turn) -> tuple:
         """The agent, the conversation it is shown, and the config it runs under."""
         agent = self._c.create_agent(turn.ctx, turn.plan.exposed_tools, turn.plan.language)
-        messages = build_context_messages(turn.messages[:-1], turn.entry.effective_user_text, turn.plan)
+        messages = build_context_messages(
+            turn.messages[:-1], turn.entry.effective_user_text, turn.plan
+        )
         config = {"recursion_limit": self._c.profile.agent.recursion_limit}
         return agent, messages, config
 
@@ -498,7 +521,9 @@ class TurnPipeline:
             withheld_everything=bool(raw.strip()) and not text.strip(),
         )
 
-    def settle_agent_answer(self, turn: Turn, answer: StreamedAnswer | InvokedAnswer) -> AnswerSettlement:
+    def settle_agent_answer(
+        self, turn: Turn, answer: StreamedAnswer | InvokedAnswer
+    ) -> AnswerSettlement:
         """Settle what the agent said: a question, a replacement, or the answer with its records.
 
         The evidence is in hand for the first time here, so this is where the answer can be
@@ -530,7 +555,9 @@ class TurnPipeline:
         # Nothing was withheld, so the record goes under the sentence — as the TOOL rendered
         # it, never as the model retyped it — after the figure markers resolve, and never
         # under a refusal, which is why this comes after the checks above.
-        settled, blocks = settle_answer_blocks(resolve_figure_markers(answer.text, turn.ctx), turn.ctx)
+        settled, blocks = settle_answer_blocks(
+            resolve_figure_markers(answer.text, turn.ctx), turn.ctx
+        )
         changed = settled != answer.text
         turn.answer = finalizer.replace_answer(settled) if changed else answer.text
         turn.answer_blocks = blocks
@@ -558,7 +585,9 @@ class TurnPipeline:
         """
         delivery = self._c.profile.assets.delivery
         turn.asset_references = build_asset_references(
-            asset_ids_for_answer(turn.answer if answer is None else answer, turn.ctx, turn.rag_trace, delivery),
+            asset_ids_for_answer(
+                turn.answer if answer is None else answer, turn.ctx, turn.rag_trace, delivery
+            ),
             effective_capabilities(client_capabilities, delivery),
             delivery,
         )
@@ -583,7 +612,9 @@ class TurnPipeline:
             patch["title"] = turn.title
         if turn.next_pending:
             patch[PENDING_HITL_KEY] = turn.next_pending
-        elif turn.entry.spends_the_pending_question(agent_error=bool(turn.agent_error) or interrupted):
+        elif turn.entry.spends_the_pending_question(
+            agent_error=bool(turn.agent_error) or interrupted
+        ):
             # Answered, replaced, or settled by naming a child — every way a clarification
             # ends is decided in one place. See `TurnEntry`.
             patch[PENDING_HITL_KEY] = None
@@ -603,7 +634,9 @@ class TurnPipeline:
         # is where a stored message keeps what the wire told the client live.
         outcome = turn.entry.clarification_outcome if turn.entry is not None else None
         if outcome:
-            turn.rag_trace = normalize_rag_trace({**(turn.rag_trace or {}), "turn_clarification": outcome})
+            turn.rag_trace = normalize_rag_trace(
+                {**(turn.rag_trace or {}), "turn_clarification": outcome}
+            )
         self._store(
             turn,
             [MessageToStore("ai", turn.answer, rag_trace=trace_for_storage(turn.rag_trace))],

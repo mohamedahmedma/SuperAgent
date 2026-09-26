@@ -23,6 +23,7 @@ a single ALTER. Quick at this estate's size; on a far larger database, schedule 
 Revision ID: 0002
 Revises: 0001
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -58,7 +59,9 @@ _TIMESTAMP_COLUMNS = {
 def _alter(json_clause: str, timestamp_clause: str) -> None:
     for table in sorted(set(_JSON_COLUMNS) | set(_TIMESTAMP_COLUMNS)):
         clauses = [json_clause.format(c=column) for column in _JSON_COLUMNS.get(table, ())]
-        clauses += [timestamp_clause.format(c=column) for column in _TIMESTAMP_COLUMNS.get(table, ())]
+        clauses += [
+            timestamp_clause.format(c=column) for column in _TIMESTAMP_COLUMNS.get(table, ())
+        ]
         op.execute(f'ALTER TABLE "{table}" ' + ", ".join(clauses))
 
 

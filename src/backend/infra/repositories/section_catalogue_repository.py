@@ -4,6 +4,7 @@
 `backend.indexing` runs its package `__init__` — the document loader, Milvus, the
 embedder — on any import from it, and opening a unit of work must not cost that.
 """
+
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
@@ -25,7 +26,9 @@ class SqlAlchemySectionSummaryRepository:
         self._session = session
 
     def for_profile(self, profile: str) -> Sequence[SectionRecord]:
-        rows = self._session.scalars(select(SectionSummary).where(SectionSummary.profile == profile))
+        rows = self._session.scalars(
+            select(SectionSummary).where(SectionSummary.profile == profile)
+        )
         return [_section(row) for row in rows]
 
     def hashes(self, profile: str) -> dict[str, str]:
@@ -39,7 +42,9 @@ class SqlAlchemySectionSummaryRepository:
     def upsert_many(self, profile: str, records: Sequence[SectionRecord]) -> int:
         now = datetime.now(UTC)
         for record in records:
-            row = self._session.get(SectionSummary, {"chunk_id": record.chunk_id, "profile": profile})
+            row = self._session.get(
+                SectionSummary, {"chunk_id": record.chunk_id, "profile": profile}
+            )
             if row is None:
                 row = SectionSummary(chunk_id=record.chunk_id, profile=profile)
                 self._session.add(row)

@@ -8,6 +8,7 @@ Nothing in this module knows what the client is. It takes declared capabilities 
 returns structured references; a browser, a bot, and a downstream service all go
 through the same function.
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,7 +36,9 @@ def effective_capabilities(
     set the server's egress budget for it.
     """
     capabilities = (requested or ClientCapabilities()).model_copy(deep=True)
-    capabilities.max_inline_bytes = min(capabilities.max_inline_bytes, delivery_config.max_inline_bytes)
+    capabilities.max_inline_bytes = min(
+        capabilities.max_inline_bytes, delivery_config.max_inline_bytes
+    )
     capabilities.max_assets = min(capabilities.max_assets, delivery_config.max_assets_per_response)
     return capabilities
 
@@ -178,7 +181,9 @@ def build_asset_references(
         return []
 
 
-def attach_assets_to_trace(rag_trace: Optional[dict], references: List[AssetReference]) -> Optional[dict]:
+def attach_assets_to_trace(
+    rag_trace: Optional[dict], references: List[AssetReference]
+) -> Optional[dict]:
     """Record the turn's renditions on the trace, which is what persists them.
 
     A trace is created when there is none but there are references, because the trace
@@ -190,7 +195,9 @@ def attach_assets_to_trace(rag_trace: Optional[dict], references: List[AssetRefe
     if not references:
         return rag_trace
     enriched = dict(rag_trace or {})
-    enriched["assets"] = [reference.model_dump(mode="json", exclude_none=True) for reference in references]
+    enriched["assets"] = [
+        reference.model_dump(mode="json", exclude_none=True) for reference in references
+    ]
     return enriched
 
 

@@ -15,6 +15,7 @@ seconds while the second sends a registrar looking for children who were never m
 That refusal is `QueryService`'s, not this router's — it is a rule, and rules do not live
 here.
 """
+
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 from uuid import uuid4
@@ -54,9 +55,7 @@ _SCHOOL_TZ = ZoneInfo("Africa/Cairo")
 # would refuse the registrar reading her own register.
 Reader = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_READ))]
 Registrar = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_WRITE))]
-AdmissionsManager = Annotated[
-    Principal, Depends(require_permission(Permission.STUDENTS_CREATE))
-]
+AdmissionsManager = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_CREATE))]
 Queries = Annotated[QueryService, Depends(get_query_service)]
 Desk = Annotated[StudentDesk, Depends(get_student_desk)]
 
@@ -73,15 +72,23 @@ class StudentTimelineEventOut(BaseModel):
 
 
 @router.get("/students/{student_number}/timeline", response_model=list[StudentTimelineEventOut])
-def student_timeline(student_number: str, caller: Reader, uow_factory: UowFactoryDep) -> list[StudentTimelineEventOut]:
+def student_timeline(
+    student_number: str, caller: Reader, uow_factory: UowFactoryDep
+) -> list[StudentTimelineEventOut]:
     """One student's projection of the shared, append-only audit stream."""
     with uow_factory() as uow:
-        student = uow._session.scalar(select(m.Student).where(m.Student.student_number == student_number))
+        student = uow._session.scalar(
+            select(m.Student).where(m.Student.student_number == student_number)
+        )
         if student is None:
             raise UnknownReference(f"no student {student_number}", field="student_number")
         # JSON filtering differs between SQLite and Postgres, so retain one portable audit
         # query and filter its bounded newest-first window in Python.
-        rows = uow._session.scalars(select(m.AuditLog).order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc()).limit(1000)).all()
+        rows = uow._session.scalars(
+            select(m.AuditLog)
+            .order_by(m.AuditLog.created_at.desc(), m.AuditLog.id.desc())
+            .limit(1000)
+        ).all()
 
         # Materialise the response while the ORM rows are still attached. The unit of work
         # expires instances when it commits on exit, so touching their JSON fields afterwards
@@ -92,16 +99,20 @@ def student_timeline(student_number: str, caller: Reader, uow_factory: UowFactor
                 str(value.get("student_id", "")) == str(student.id) for value in values
             )
 
-        return [StudentTimelineEventOut(
-            id=row.id,
-            action=row.action,
-            entity_type=row.entity_type,
-            entity_id=row.entity_id,
-            actor=row.actor,
-            at=row.created_at,
-            old_values=row.old_values,
-            new_values=row.new_values,
-        ) for row in rows if belongs(row)][:200]
+        return [
+            StudentTimelineEventOut(
+                id=row.id,
+                action=row.action,
+                entity_type=row.entity_type,
+                entity_id=row.entity_id,
+                actor=row.actor,
+                at=row.created_at,
+                old_values=row.old_values,
+                new_values=row.new_values,
+            )
+            for row in rows
+            if belongs(row)
+        ][:200]
 
 
 class RosterEntryOut(BaseModel):
@@ -166,9 +177,7 @@ def read_class_roster(
 ) -> ClassRosterOut:
     caller.narrow(
         Permission.STUDENTS_READ,
-        lambda scopes: scopes.for_class(
-            academic_year_code=academic_year, class_code=class_code
-        ),
+        lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code),
     )
     on_date = on or datetime.now(_SCHOOL_TZ).date()
     with domain_errors():
@@ -384,9 +393,14 @@ class StudentAdmissionIn(BaseModel):
     class_code: str = Field(min_length=1)
 
     @field_validator(
-        "full_name_ar", "full_name_en", "address", "guardian_full_name_ar",
-        "guardian_full_name_en", "guardian_phone",
-        "academic_year_code", "class_code",
+        "full_name_ar",
+        "full_name_en",
+        "address",
+        "guardian_full_name_ar",
+        "guardian_full_name_en",
+        "guardian_phone",
+        "academic_year_code",
+        "class_code",
     )
     @classmethod
     def no_blank_fields(cls, value: str) -> str:
@@ -438,22 +452,22 @@ def search_students(
     if academic_year and year_level and found:
         numbers = [str(student.student_number) for student in found]
         with uow_factory() as uow:
-            allowed = set(uow._session.scalars(
-                select(m.Student.student_number)
-                .join(m.ClassEnrolment)
-                .join(m.ClassSection)
-                .join(m.AcademicYear)
-                .join(m.YearLevel, m.ClassSection.year_level_id == m.YearLevel.id)
-                .where(
-                    m.Student.student_number.in_(numbers),
-                    m.AcademicYear.code == academic_year,
-                    m.YearLevel.code == year_level,
-                )
-            ).all())
+            allowed = set(
+                uow._session.scalars(
+                    select(m.Student.student_number)
+                    .join(m.ClassEnrolment)
+                    .join(m.ClassSection)
+                    .join(m.AcademicYear)
+                    .join(m.YearLevel, m.ClassSection.year_level_id == m.YearLevel.id)
+                    .where(
+                        m.Student.student_number.in_(numbers),
+                        m.AcademicYear.code == academic_year,
+                        m.YearLevel.code == year_level,
+                    )
+                ).all()
+            )
         found = [student for student in found if str(student.student_number) in allowed]
-    return StudentSearchOut(
-        query=q, count=len(found), students=[StudentOut.of(s) for s in found]
-    )
+    return StudentSearchOut(query=q, count=len(found), students=[StudentOut.of(s) for s in found])
 
 
 @router.post(
@@ -479,9 +493,7 @@ def admit_student(
         # A new admission starts on the first day of the selected academic year. The
         # form no longer asks the registrar to repeat a date the year already owns.
         with uow_factory() as uow:
-            academic_year = uow.academic_years.get(
-                AcademicYearCode(body.academic_year_code)
-            )
+            academic_year = uow.academic_years.get(AcademicYearCode(body.academic_year_code))
         if academic_year is None:
             raise UnknownReference(
                 f"no academic year {body.academic_year_code}",
@@ -490,9 +502,7 @@ def admit_student(
         # The form accepts the way a registrar actually writes an Egyptian guardian
         # number (01024066401) and stores one canonical value (+201024066401).
         country = get_settings().default_country_code
-        guardian_phone = Phone.parse(
-            body.guardian_phone, default_country_code=country
-        )
+        guardian_phone = Phone.parse(body.guardian_phone, default_country_code=country)
         # A student number is an internal, immutable reference.  It is minted here so a
         # manager never has to guess the next number or coordinate with another desk.
         student_number = f"S-{uuid4().hex[:12].upper()}"
@@ -543,7 +553,9 @@ def admit_student(
     responses=error_responses(401, 403, 404, 422),
 )
 def read_student(
-    student_number: str, queries: Queries, caller: Reader,
+    student_number: str,
+    queries: Queries,
+    caller: Reader,
     academic_year: Annotated[str | None, Query()] = None,
 ) -> StudentOut:
     caller.narrow(
@@ -568,9 +580,7 @@ def read_student(
     "`POST /v1/students/{student_number}/placements`.",
     responses=error_responses(401, 403, 409, 422),
 )
-def save_student(
-    body: StudentIn, desk: Desk, caller: Registrar, response: Response
-) -> StudentOut:
+def save_student(body: StudentIn, desk: Desk, caller: Registrar, response: Response) -> StudentOut:
     with domain_errors():
         student = Student(
             student_number=body.student_number,
@@ -610,6 +620,7 @@ def update_student(
         # unknown child comes from here rather than from the write, which would otherwise
         # cheerfully create her.
         current = queries.get_student(number)
+
         def kept(new: object, old: object) -> object:
             """Omitted means "leave it alone", never "blank it"."""
             return old if new is None else new
@@ -651,7 +662,8 @@ def read_student_placements(
         lambda scopes: (
             scopes.for_class(
                 academic_year_code=str(row.academic_year_code), class_code=str(row.class_code)
-            ) for row in placements
+            )
+            for row in placements
         ),
     )
     return PlacementHistoryOut(

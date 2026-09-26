@@ -16,6 +16,7 @@ The existing tests for that check used a fabricated `("search_knowledge_base", "
 outcome, so they passed against a tool that never produced one. Everything here invokes
 the real tool.
 """
+
 import json
 import sys
 import types
@@ -97,10 +98,7 @@ OUTCOMES = [
 @pytest.mark.parametrize(
     "outcome, result",
     OUTCOMES,
-    ids=[
-        f"{outcome}-{result['rag_trace']['retrieval_status']}"
-        for outcome, result in OUTCOMES
-    ],
+    ids=[f"{outcome}-{result['rag_trace']['retrieval_status']}" for outcome, result in OUTCOMES],
 )
 def test_the_knowledge_tool_reports_its_own_outcome(outcome, result):
     """Same contract as `test_the_timetable_tool_reports_its_own_outcome`."""
@@ -215,8 +213,12 @@ class _ObedientModel(GenericFakeChatModel):
         message = message.generations[0].message
         if message.tool_calls:
             chunks = [
-                {"name": call["name"], "args": json.dumps(call["args"]),
-                 "id": call["id"], "index": index}
+                {
+                    "name": call["name"],
+                    "args": json.dumps(call["args"]),
+                    "id": call["id"],
+                    "index": index,
+                }
                 for index, call in enumerate(message.tool_calls)
             ]
             yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=chunks))

@@ -4,6 +4,7 @@
 court order arrives, and a cached "yes" would keep letting somebody in for as long as the
 entry lived. This is asked once per parent question, not once per page view.
 """
+
 from __future__ import annotations
 
 import logging
@@ -40,7 +41,6 @@ class SisGuardianDirectory:
         self._api_key = api_key
         self._timeout = timeout_seconds or settings().lookup_timeout_seconds
         self._pool = PooledClient(base_url=base_url, timeout_seconds=self._timeout)
-
 
     def children_of(
         self, guardian_id: str, *, school_code: str | None = None
@@ -120,7 +120,6 @@ class SisGuardianDirectory:
             (child for child in self.children_of(guardian_id) if child.student_id == wanted),
             None,
         )
-
 
     def close(self) -> None:
         """Release the pooled client. Called from the app's shutdown hook."""

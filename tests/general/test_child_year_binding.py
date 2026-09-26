@@ -12,6 +12,7 @@ wrote once for everybody, so every such query term is dilution. The year therefo
 travels beside the question to the two stages that can act on it without costing recall
 — the grader, and the answer prompt.
 """
+
 import unittest
 
 from backend.agent.chat.child_resolution import ResolvedChild
@@ -170,9 +171,13 @@ class AnswerPromptTests(unittest.TestCase):
 
     def test_the_turn_context_states_the_year_as_binding(self):
         rendered = resolve_prompt(
-            "", "agent/turn_context.j2",
-            resolved_question="", constraints=[],
-            child_hint="علي", child_year=YEAR, child_options=[],
+            "",
+            "agent/turn_context.j2",
+            resolved_question="",
+            constraints=[],
+            child_hint="علي",
+            child_year=YEAR,
+            child_options=[],
         )
         self.assertIn("binds the answer", rendered)
         self.assertIn("must not be given as theirs", rendered)
@@ -196,8 +201,15 @@ class OlderContextCompatibilityTests(unittest.TestCase):
             self.carried_constraints = []
             self.language = ""
 
-        def note_turn_plan(self, retrieval_sections, scope_options, *,
-                           carried_constraints=(), is_followup=False, language=""):
+        def note_turn_plan(
+            self,
+            retrieval_sections,
+            scope_options,
+            *,
+            carried_constraints=(),
+            is_followup=False,
+            language="",
+        ):
             self.retrieval_sections = list(retrieval_sections or [])
             self.carried_constraints = list(carried_constraints or [])
             self.language = language

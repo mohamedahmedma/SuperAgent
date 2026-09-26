@@ -15,6 +15,7 @@ transaction would roll back along with the failure.
 If a multi-row write ever arrives — a bulk parent import that must be all-or-nothing — the
 right move is `sis`'s unit of work, not a `flush()` here and a `commit()` three frames up.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -86,9 +87,7 @@ class SqlAccountRepository:
         account.locked_until = None
         self._db.commit()
 
-    def register_failure(
-        self, account: Account, policy: LockoutPolicy, *, now: datetime
-    ) -> None:
+    def register_failure(self, account: Account, policy: LockoutPolicy, *, now: datetime) -> None:
         """Count a bad password and apply the policy. The rule itself is in the domain."""
         attempts, locked_until = policy.next_failure(account.failed_attempts, now=now)
         account.failed_attempts = attempts
@@ -101,13 +100,7 @@ class SqlAccountRepository:
     def list_page(self, *, limit: int, offset: int) -> list[Account]:
         # Ordered by id, not by username: id is immutable and unique, so a rename between
         # two pages cannot move a row across the boundary and make the pager skip it.
-        return (
-            self._db.query(Account)
-            .order_by(Account.id)
-            .limit(limit)
-            .offset(offset)
-            .all()
-        )
+        return self._db.query(Account).order_by(Account.id).limit(limit).offset(offset).all()
 
     def count(self) -> int:
         return self._db.query(Account.id).count()
@@ -168,11 +161,7 @@ class SqlRefreshTokenRepository:
         self._db.commit()
 
     def find(self, token_hash: str) -> RefreshTokenRecord | None:
-        record = (
-            self._db.query(RefreshToken)
-            .filter(RefreshToken.token_hash == token_hash)
-            .first()
-        )
+        record = self._db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
         return None if record is None else _record(record)
 
     def mark_rotated(self, token_hash: str, *, replaced_by_hash: str, at: datetime) -> None:
@@ -206,11 +195,7 @@ class SqlRefreshTokenRepository:
         return deleted
 
     def revoke(self, token_hash: str) -> bool:
-        record = (
-            self._db.query(RefreshToken)
-            .filter(RefreshToken.token_hash == token_hash)
-            .first()
-        )
+        record = self._db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
         if record is None or record.revoked_at is not None:
             return False
         record.revoked_at = datetime.now(timezone.utc)

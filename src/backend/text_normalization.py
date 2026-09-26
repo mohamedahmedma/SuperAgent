@@ -16,6 +16,7 @@ Arabic notes (this corpus is Arabic-first):
   splits "الرســوم" and "الرسوم" into different BM25 tokens.
 - ZWNJ/ZWJ are ORTHOGRAPHIC in Arabic-script languages and are preserved.
 """
+
 from __future__ import annotations
 
 import re

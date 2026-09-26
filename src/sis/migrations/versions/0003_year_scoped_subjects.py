@@ -35,14 +35,15 @@ Revises: 0002
 Created: 2026-08-20
 
 """
+
 from collections.abc import Sequence
 
 from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '0003'
-down_revision: str | None = '0002'
+revision: str = "0003"
+down_revision: str | None = "0002"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -106,9 +107,7 @@ def upgrade() -> None:
                 {"year": year_id, "id": subject_id},
             )
         bind.execute(
-            sa.text(
-                "UPDATE subjects SET academic_year_id = :year WHERE academic_year_id IS NULL"
-            ),
+            sa.text("UPDATE subjects SET academic_year_id = :year WHERE academic_year_id IS NULL"),
             {"year": fallback_year_id},
         )
 
@@ -129,9 +128,7 @@ def upgrade() -> None:
     # The identity swap. The old constraint has to go before the new one can exist, or the
     # same code in a second year is unwritable — which is the entire point of the revision.
     with op.batch_alter_table("subjects", schema=None) as batch_op:
-        batch_op.alter_column(
-            "academic_year_id", existing_type=sa.Integer(), nullable=False
-        )
+        batch_op.alter_column("academic_year_id", existing_type=sa.Integer(), nullable=False)
         batch_op.drop_constraint("uq_subjects_code", type_="unique")
         batch_op.create_foreign_key(
             batch_op.f("fk_subjects_academic_year_id_academic_years"),
@@ -140,9 +137,7 @@ def upgrade() -> None:
             ["id"],
             ondelete="RESTRICT",
         )
-        batch_op.create_unique_constraint(
-            "uq_subjects_year_code", ["academic_year_id", "code"]
-        )
+        batch_op.create_unique_constraint("uq_subjects_year_code", ["academic_year_id", "code"])
         batch_op.drop_index("ix_subjects_order")
         batch_op.create_index(
             "ix_subjects_year_order", ["academic_year_id", "display_order"], unique=False
@@ -161,9 +156,7 @@ def downgrade() -> None:
     bind = op.get_bind()
 
     clashes = bind.execute(
-        sa.text(
-            "SELECT code, COUNT(*) AS n FROM subjects GROUP BY code HAVING COUNT(*) > 1"
-        )
+        sa.text("SELECT code, COUNT(*) AS n FROM subjects GROUP BY code HAVING COUNT(*) > 1")
     ).all()
     if clashes:
         listed = ", ".join(f"{row.code} ({row.n} years)" for row in clashes)

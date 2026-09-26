@@ -13,6 +13,7 @@ different year group's fee and the turn answers confidently from it, which is th
 class of failure as item 26. So the prompt asks, and the code VERIFIES, and anything it
 cannot verify searches with the original.
 """
+
 import unittest
 from unittest.mock import patch
 
@@ -137,9 +138,7 @@ class WhatTheCodeVerifiesRatherThanAsksForTests(unittest.TestCase):
         """An early run came back with "Pre-K" spelled using a non-breaking hyphen, which
         BM25 scores as a different token — the measurement would have been of the
         translator rather than of the retrieval."""
-        text, trace = self._translate(
-            "مصاريف Pre-K كام؟", "What are the Pre‑K fees?"
-        )
+        text, trace = self._translate("مصاريف Pre-K كام؟", "What are the Pre‑K fees?")
         self.assertTrue(trace["query_translated"])
         self.assertIn("Pre-K", text)
         self.assertNotIn("‑", text)
@@ -190,8 +189,7 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
     def _config(**overrides):
         from backend.agent.profiles.registry import load_profile
 
-        settings = {"query_resolution_enabled": True, "query_resolution_max_chars": 24,
-                    **overrides}
+        settings = {"query_resolution_enabled": True, "query_resolution_max_chars": 24, **overrides}
         return load_profile("school").agent.model_copy(update=settings)
 
     def _resolve(self, question, history, payload, **kw):
@@ -211,9 +209,13 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
         carries its own subject — and translation still has to happen."""
         long_arabic = "ما هي مصاريف Year 3 للطالب المصري في العام الدراسي القادم؟"
         resolved, seen = self._resolve(
-            long_arabic, [],
-            {"question": long_arabic, "intent": "standalone",
-             "search_text": "What are the Year 3 fees for an Egyptian student next year?"},
+            long_arabic,
+            [],
+            {
+                "question": long_arabic,
+                "intent": "standalone",
+                "search_text": "What are the Year 3 fees for an Egyptian student next year?",
+            },
         )
         self.assertTrue(seen.get("translating"))
         self.assertFalse(seen.get("resolving"))
@@ -228,9 +230,13 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
 
         long_arabic = "ما هي مصاريف Year 3 للطالب المصري في العام الدراسي القادم؟"
         self._resolve(
-            long_arabic, [],
-            {"question": long_arabic, "intent": "standalone",
-             "search_text": "What are the Year 3 fees for an Egyptian student next year?"},
+            long_arabic,
+            [],
+            {
+                "question": long_arabic,
+                "intent": "standalone",
+                "search_text": "What are the Year 3 fees for an Egyptian student next year?",
+            },
         )
         with patch.object(qt._RETRIEVAL, "query_translation_enabled", True):
             text, trace = qt.translate_for_search(long_arabic, invoke=_invoke("unused"))
@@ -239,9 +245,13 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
 
     def test_an_english_follow_up_is_resolved_without_being_translated(self):
         resolved, seen = self._resolve(
-            "and for international?", [{"role": "user", "content": "what are the Year 3 fees?"}],
-            {"question": "what are the Year 3 international fees?", "intent": "followup",
-             "search_text": ""},
+            "and for international?",
+            [{"role": "user", "content": "what are the Year 3 fees?"}],
+            {
+                "question": "what are the Year 3 international fees?",
+                "intent": "followup",
+                "search_text": "",
+            },
         )
         self.assertTrue(seen.get("resolving"))
         self.assertFalse(seen.get("translating"))
@@ -249,9 +259,13 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
 
     def test_an_arabic_follow_up_asks_for_both(self):
         resolved, seen = self._resolve(
-            "وللدولي؟", [{"role": "user", "content": "مصاريف Year 3 كام؟"}],
-            {"question": "مصاريف Year 3 للدولي كام؟", "intent": "followup",
-             "search_text": "What are the Year 3 international fees?"},
+            "وللدولي؟",
+            [{"role": "user", "content": "مصاريف Year 3 كام؟"}],
+            {
+                "question": "مصاريف Year 3 للدولي كام؟",
+                "intent": "followup",
+                "search_text": "What are the Year 3 international fees?",
+            },
         )
         self.assertTrue(seen.get("resolving"))
         self.assertTrue(seen.get("translating"))
@@ -261,9 +275,13 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
         """Each field is validated on its own. A translation that drops the one term that
         identifies the answer is discarded; the resolution it arrived with still stands."""
         resolved, _ = self._resolve(
-            "وللدولي؟", [{"role": "user", "content": "مصاريف Year 3 كام؟"}],
-            {"question": "مصاريف Year 3 للدولي كام؟", "intent": "followup",
-             "search_text": "What are the international fees?"},
+            "وللدولي؟",
+            [{"role": "user", "content": "مصاريف Year 3 كام؟"}],
+            {
+                "question": "مصاريف Year 3 للدولي كام؟",
+                "intent": "followup",
+                "search_text": "What are the international fees?",
+            },
         )
         self.assertEqual("", resolved.search_text, "the translation dropped Year 3")
         self.assertTrue(resolved.resolved)
@@ -273,9 +291,13 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
         """And the other way round: an empty question is an abstention, but a verified
         translation is already in the memo and still useful to retrieval."""
         resolved, _ = self._resolve(
-            "وللدولي؟", [{"role": "user", "content": "مصاريف Year 3 كام؟"}],
-            {"question": "", "intent": "followup",
-             "search_text": "What are the Year 3 international fees?"},
+            "وللدولي؟",
+            [{"role": "user", "content": "مصاريف Year 3 كام؟"}],
+            {
+                "question": "",
+                "intent": "followup",
+                "search_text": "What are the Year 3 international fees?",
+            },
         )
         self.assertFalse(resolved.resolved)
         self.assertEqual("What are the Year 3 international fees?", resolved.search_text)
@@ -289,11 +311,15 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
         from backend.agent.chat.resolution import resolve_question
 
         legacy = lambda *args: {  # noqa: E731 — the shape being tested is the signature
-            "question": "مصاريف Year 3 للدولي كام؟", "intent": "followup", "constraints": [],
+            "question": "مصاريف Year 3 للدولي كام؟",
+            "intent": "followup",
+            "constraints": [],
         }
         resolved = resolve_question(
-            "وللدولي؟", [{"role": "user", "content": "مصاريف Year 3 كام؟"}],
-            self._config(), invoke=legacy,
+            "وللدولي؟",
+            [{"role": "user", "content": "مصاريف Year 3 كام؟"}],
+            self._config(),
+            invoke=legacy,
         )
         self.assertTrue(resolved.resolved, "an old callable must still resolve")
         self.assertEqual("مصاريف Year 3 للدولي كام؟", resolved.question)
@@ -309,8 +335,10 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
             return {"question": "x", "intent": "standalone"}
 
         resolved = resolve_question(
-            "What are the fees for Year 3 Egyptian students next year?", [],
-            self._config(), invoke=_spy,
+            "What are the fees for Year 3 Egyptian students next year?",
+            [],
+            self._config(),
+            invoke=_spy,
         )
         self.assertEqual([], calls)
         self.assertFalse(resolved.resolved)

@@ -11,6 +11,7 @@ SQL instead.
 Services own the transaction boundary -- they enter the unit of work and commit once --
 because they are what composes a request. Repositories never commit on their own.
 """
+
 from sis.application.services.attendance import (
     AttendanceService,
     ClassRegister,

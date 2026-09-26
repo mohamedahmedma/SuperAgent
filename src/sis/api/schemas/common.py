@@ -15,6 +15,7 @@ arrive as a key whose value is `null`, not as an absence.
 
 Pydantic is imported in `sis/api/` and nowhere else in this service.
 """
+
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any, Self

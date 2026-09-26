@@ -24,6 +24,7 @@ Latin-script proper nouns, and an English one carries Arabic names — so a chec
 demanded purity would reject the corpus it exists to protect. Only a document that looks
 plainly, overwhelmingly like the OTHER language is rejected.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -80,12 +81,16 @@ def verify(text: str, declared: str) -> LanguageVerdict:
 
     if declared == ARABIC and ratio <= LATIN_CEILING:
         return LanguageVerdict(
-            declared, ratio, False,
+            declared,
+            ratio,
+            False,
             f"uploaded as Arabic but only {ratio:.0%} of its letters are Arabic script",
         )
     if declared == ENGLISH and ratio >= ARABIC_FLOOR:
         return LanguageVerdict(
-            declared, ratio, False,
+            declared,
+            ratio,
+            False,
             f"uploaded as English but {ratio:.0%} of its letters are Arabic script",
         )
     return LanguageVerdict(declared, ratio, True)

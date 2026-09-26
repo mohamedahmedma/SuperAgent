@@ -13,6 +13,7 @@ all three matter in production:
 MinIO already running for Milvus (its own bucket, never Milvus's) and imports boto3
 lazily, so the dependency is only required by deployments that select it.
 """
+
 from __future__ import annotations
 
 import logging
@@ -72,12 +73,10 @@ class BlobStore(ABC):
         """Store bytes, returning the URI. A no-op when the digest already exists."""
 
     @abstractmethod
-    def get(self, uri: str) -> bytes:
-        ...
+    def get(self, uri: str) -> bytes: ...
 
     @abstractmethod
-    def exists(self, sha256: str, content_type: str = "") -> bool:
-        ...
+    def exists(self, sha256: str, content_type: str = "") -> bool: ...
 
     @abstractmethod
     def delete(self, uri: str) -> bool:
@@ -96,7 +95,7 @@ class LocalBlobStore(BlobStore):
         return self.root / _shard(_validate_digest(sha256), content_type)
 
     def _resolve(self, uri: str) -> Path:
-        raw = uri[len(self.SCHEME):] if uri.startswith(self.SCHEME) else uri
+        raw = uri[len(self.SCHEME) :] if uri.startswith(self.SCHEME) else uri
         path = (self.root / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
         # Defence in depth: even though keys are digests, never follow a URI out of root.
         if not str(path).startswith(str(self.root)):
@@ -186,9 +185,9 @@ class S3BlobStore(BlobStore):
         return _shard(_validate_digest(sha256), content_type)
 
     def _key_from_uri(self, uri: str) -> str:
-        raw = uri[len(self.SCHEME):] if uri.startswith(self.SCHEME) else uri
+        raw = uri[len(self.SCHEME) :] if uri.startswith(self.SCHEME) else uri
         prefix = f"{self.bucket}/"
-        return raw[len(prefix):] if raw.startswith(prefix) else raw
+        return raw[len(prefix) :] if raw.startswith(prefix) else raw
 
     def put(self, sha256: str, data: bytes, content_type: str = "") -> str:
         key = self._key_for(sha256, content_type)
@@ -205,7 +204,9 @@ class S3BlobStore(BlobStore):
 
     def exists(self, sha256: str, content_type: str = "") -> bool:
         try:
-            self._get_client().head_object(Bucket=self.bucket, Key=self._key_for(sha256, content_type))
+            self._get_client().head_object(
+                Bucket=self.bucket, Key=self._key_for(sha256, content_type)
+            )
             return True
         except Exception:
             return False
@@ -244,6 +245,7 @@ def build_blob_store(assets_config, project_root: Optional[Path] = None) -> Blob
         )
 
     raise ValueError(f"Unknown assets.blob_backend: {backend!r} (expected 'local' or 's3')")
+
 
 def purge_local_store(root: Path | str) -> None:
     """Remove an entire local blob tree. Destructive; used only by test teardown."""

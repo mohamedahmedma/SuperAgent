@@ -11,6 +11,7 @@ logging and holds module-level state, so migrating ten schools in one process la
 environments on top of each other, and the failure that produces is a migration silently
 running against the previous school's URL.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -100,8 +101,7 @@ class PostgresProvisioner:
             # Deliberately not `return False`. An unreachable server means "I could not
             # tell", and answering "it is not there" sends the caller on to CREATE.
             raise ProvisioningFailed(
-                f"could not reach the PostgreSQL server to check whether {name!r} "
-                f"exists: {error}"
+                f"could not reach the PostgreSQL server to check whether {name!r} exists: {error}"
             ) from error
         finally:
             engine.dispose()
@@ -121,9 +121,7 @@ class PostgresProvisioner:
                 # unusual prefix cannot change the statement's shape.
                 connection.execute(text(f'CREATE DATABASE "{name}"'))
         except Exception as error:  # noqa: BLE001
-            raise ProvisioningFailed(
-                f"could not create database {name!r}: {error}"
-            ) from error
+            raise ProvisioningFailed(f"could not create database {name!r}: {error}") from error
         finally:
             engine.dispose()
 

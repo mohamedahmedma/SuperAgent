@@ -16,6 +16,7 @@ The database is built by `alembic upgrade head` (invariant 8), and the app's own
 check runs against it unmocked — a suite that skipped that check would not notice the day
 the migration and the code stopped agreeing.
 """
+
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -56,12 +57,9 @@ ROSTER_CSV = (
 
 # Three deliberate shapes: a stated mark, a blank cell, and an earned zero. The last two
 # must not be able to render as the same thing.
-GRADES_CSV = (
-    "Student Number,Subject,Percentage\n"
-    "S001,MATH,87.5\n"
-    "S001,SCI,\n"
-    "S002,MATH,0\n"
-).encode("utf-8")
+GRADES_CSV = ("Student Number,Subject,Percentage\nS001,MATH,87.5\nS001,SCI,\nS002,MATH,0\n").encode(
+    "utf-8"
+)
 
 FAMILY_CSV = (
     "student_number,full_name_ar,full_name_en,class_code,"
@@ -152,7 +150,15 @@ def _seed_generated_structure() -> None:
     """
     with SqlAlchemyUnitOfWork() as uow:
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة 3", display_order=3)]
+            [
+                YearLevel(
+                    code="3",
+                    school_code="MAIN",
+                    name_en="Year 3",
+                    name_ar="السنة 3",
+                    display_order=3,
+                )
+            ]
         )
         uow.class_sections.upsert_many(
             [
@@ -188,17 +194,14 @@ def _csv_upload(name: str = "roster.csv", content: bytes = ROSTER_CSV) -> dict[s
     return {"file": (name, content, "text/csv")}
 
 
-def test_a_registrar_key_reads_structure(
-    client: TestClient, registrar: dict[str, str]
-) -> None:
+def test_a_registrar_key_reads_structure(client: TestClient, registrar: dict[str, str]) -> None:
     _seed_academic_year()
 
     assert client.get("/v1/structure/years", headers=registrar).status_code == 200
     # `academic_year` is required: the catalogue is per-year, so a bare /v1/subjects is not
     # a question with an answer and the route says so with a 422 rather than guessing.
     assert (
-        client.get(f"/v1/subjects?academic_year={YEAR_CODE}", headers=registrar).status_code
-        == 200
+        client.get(f"/v1/subjects?academic_year={YEAR_CODE}", headers=registrar).status_code == 200
     )
     assert client.get("/v1/subjects", headers=registrar).status_code == 422
 
@@ -239,9 +242,7 @@ def test_a_file_this_service_cannot_read_is_refused_by_name(
     )
 
     assert 400 <= response.status_code < 500
-    assert_error_envelope(
-        response, status=response.status_code, code="unsupported_file_type"
-    )
+    assert_error_envelope(response, status=response.status_code, code="unsupported_file_type")
     assert response.json()["detail"]["field"] == "file"
 
 
@@ -265,9 +266,7 @@ def test_one_roster_row_creates_student_guardian_and_link_atomically(
     # Preview is read-only for both halves of the family row.
     assert client.get("/v1/students/S100/guardians", headers=registrar).status_code == 404
 
-    committed = client.post(
-        f"/v1/imports/roster/{body['batch_id']}/commit", headers=registrar
-    )
+    committed = client.post(f"/v1/imports/roster/{body['batch_id']}/commit", headers=registrar)
     assert committed.status_code == 200, committed.text
 
     guardians = client.get("/v1/students/S100/guardians", headers=registrar)
@@ -389,9 +388,7 @@ def test_registrar_imports_a_roster_then_marks_and_reads_back_the_report_card(
     assert empty.status_code == 200
     assert empty.json()["count"] == 0
 
-    committed = client.post(
-        f"/v1/imports/roster/{previewed['batch_id']}/commit", headers=registrar
-    )
+    committed = client.post(f"/v1/imports/roster/{previewed['batch_id']}/commit", headers=registrar)
     assert committed.status_code == 200, committed.text
     assert committed.json()["ok_count"] == 2
 
@@ -413,15 +410,17 @@ def test_registrar_imports_a_roster_then_marks_and_reads_back_the_report_card(
             select(m.Student).where(m.Student.student_number == "S001")
         )
         assert student_row is not None
-        uow._session.add(m.AuditLog(
-            actor="api-test",
-            action="update",
-            entity_type="Student",
-            entity_id=str(student_row.id),
-            old_values=None,
-            new_values={"student_id": student_row.id},
-            created_at=datetime.now(UTC),
-        ))
+        uow._session.add(
+            m.AuditLog(
+                actor="api-test",
+                action="update",
+                entity_type="Student",
+                entity_id=str(student_row.id),
+                old_values=None,
+                new_values={"student_id": student_row.id},
+                created_at=datetime.now(UTC),
+            )
+        )
         uow.commit()
 
     timeline = client.get("/v1/students/S001/timeline", headers=registrar)
@@ -448,15 +447,11 @@ def test_registrar_imports_a_roster_then_marks_and_reads_back_the_report_card(
 
     # A second commit is refused rather than re-applied — what makes a double-clicked
     # button safe.
-    replayed = client.post(
-        f"/v1/imports/grades/{marks['batch_id']}/commit", headers=registrar
-    )
+    replayed = client.post(f"/v1/imports/grades/{marks['batch_id']}/commit", headers=registrar)
     assert_error_envelope(replayed, status=409)
 
     # -- the report card ----------------------------------------------------
-    report = client.get(
-        "/v1/students/S001/grades", params={"term": TERM_CODE}, headers=registrar
-    )
+    report = client.get("/v1/students/S001/grades", params={"term": TERM_CODE}, headers=registrar)
     assert report.status_code == 200, report.text
     card = report.json()
 

@@ -10,6 +10,7 @@ prose lines and headings never reached the section stack.
 
 HTML has no pages: page_number is always 0 and `top` is a document-order surrogate.
 """
+
 from __future__ import annotations
 
 import base64
@@ -30,7 +31,9 @@ from backend.indexing.pdf_layout import (
 _HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 _BLOCK_TAGS = list(_HEADING_TAGS) + ["p", "li", "pre", "table", "img", "figure"]
 
-_DATA_URI_RE = re.compile(r"^data:(?P<mime>image/[\w.+-]+)?;?(?P<encoding>base64)?,(?P<payload>.*)$", re.S)
+_DATA_URI_RE = re.compile(
+    r"^data:(?P<mime>image/[\w.+-]+)?;?(?P<encoding>base64)?,(?P<payload>.*)$", re.S
+)
 _LOCAL_IMAGE_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -124,13 +127,15 @@ def parse_html_blocks(file_path: str) -> List[Dict[str, Any]]:
 
     title = html_processor._doc_title(soup)
     if title:
-        blocks.append({
-            "type": "heading",
-            "content": title,
-            "level": 1,
-            "page_number": 0,
-            "top": order,
-        })
+        blocks.append(
+            {
+                "type": "heading",
+                "content": title,
+                "level": 1,
+                "page_number": 0,
+                "top": order,
+            }
+        )
         order += 1.0
 
     for el in root.find_all(_BLOCK_TAGS, limit=8000):
@@ -156,27 +161,31 @@ def parse_html_blocks(file_path: str) -> List[Dict[str, Any]]:
                 # No decodable bytes. Alt text is still real, human-authored signal,
                 # so it is kept as ordinary text rather than discarded.
                 if alt:
-                    blocks.append({
-                        "type": "text",
-                        "content": alt,
-                        "page_number": 0,
-                        "top": order,
-                    })
+                    blocks.append(
+                        {
+                            "type": "text",
+                            "content": alt,
+                            "page_number": 0,
+                            "top": order,
+                        }
+                    )
                     order += 1.0
                 continue
             data, content_type = payload
-            blocks.append({
-                "type": "image",
-                "content": "",
-                "data": data,
-                "content_type": content_type,
-                "alt_text": alt,
-                # An explicitly empty alt is the HTML author declaring the image
-                # decorative; triage honours that rather than second-guessing it.
-                "declared_decorative": el.has_attr("alt") and not alt,
-                "page_number": 0,
-                "top": order,
-            })
+            blocks.append(
+                {
+                    "type": "image",
+                    "content": "",
+                    "data": data,
+                    "content_type": content_type,
+                    "alt_text": alt,
+                    # An explicitly empty alt is the HTML author declaring the image
+                    # decorative; triage honours that rather than second-guessing it.
+                    "declared_decorative": el.has_attr("alt") and not alt,
+                    "page_number": 0,
+                    "top": order,
+                }
+            )
             order += 1.0
             continue
 
@@ -185,20 +194,24 @@ def parse_html_blocks(file_path: str) -> List[Dict[str, Any]]:
             if not rows:
                 continue
             if looks_like_real_table(rows):
-                blocks.append({
-                    "type": "table",
-                    "content": format_table_rows(rows),
-                    "rows": rows,
-                    "page_number": 0,
-                    "top": order,
-                })
+                blocks.append(
+                    {
+                        "type": "table",
+                        "content": format_table_rows(rows),
+                        "rows": rows,
+                        "page_number": 0,
+                        "top": order,
+                    }
+                )
             else:
-                blocks.append({
-                    "type": "text",
-                    "content": flatten_table_to_text(rows),
-                    "page_number": 0,
-                    "top": order,
-                })
+                blocks.append(
+                    {
+                        "type": "text",
+                        "content": flatten_table_to_text(rows),
+                        "page_number": 0,
+                        "top": order,
+                    }
+                )
             order += 1.0
             continue
 
@@ -206,20 +219,24 @@ def parse_html_blocks(file_path: str) -> List[Dict[str, Any]]:
         if not text:
             continue
         if el.name in _HEADING_TAGS:
-            blocks.append({
-                "type": "heading",
-                "content": text,
-                "level": int(el.name[1]),
-                "page_number": 0,
-                "top": order,
-            })
+            blocks.append(
+                {
+                    "type": "heading",
+                    "content": text,
+                    "level": int(el.name[1]),
+                    "page_number": 0,
+                    "top": order,
+                }
+            )
         else:
-            blocks.append({
-                "type": "text",
-                "content": text,
-                "page_number": 0,
-                "top": order,
-            })
+            blocks.append(
+                {
+                    "type": "text",
+                    "content": text,
+                    "page_number": 0,
+                    "top": order,
+                }
+            )
         order += 1.0
 
     return blocks

@@ -5,6 +5,7 @@ profile into bound tool objects. Every builder takes the request context and ret
 a tool, so request-scoped tools (which need the context for budgets and step
 emission) and stateless ones share one signature.
 """
+
 from typing import Callable, Dict, List
 
 from backend.agent.chat.request_context import ChatRequestContext

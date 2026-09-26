@@ -5,6 +5,7 @@ to pin down the ORDER rather than any single rule — because the order is where
 wrong. A gender word that outranks the pin re-asks a parent who already answered; a pin
 that outranks a name answers about the sister of the child they just asked about.
 """
+
 import unittest
 
 from backend.agent.chat.child_context import SessionChild
@@ -26,7 +27,7 @@ def _pin(student_id="", gender="unknown"):
 
 class NobodyToChooseFrom(unittest.TestCase):
     def test_an_empty_roster_says_nothing_rather_than_asking(self):
-        """"This parent has no readable children" is a fact the records tool has careful
+        """ "This parent has no readable children" is a fact the records tool has careful
         wording for, and only it should say it."""
         out = resolve_child(reference="son", roster=[])
         self.assertFalse(out.resolved)
@@ -44,7 +45,13 @@ class NobodyToChooseFrom(unittest.TestCase):
         "My son" about a daughter, a nickname, a spelling the roster cannot place — each
         used to end in "which child?" with a single option, a question with one answer.
         From two children up the same words FILTER; here they are ignored."""
-        for reference, name in (("son", ""), ("daughter", ""), ("named", "خالد"), ("named", "Loulou"), ("child", "")):
+        for reference, name in (
+            ("son", ""),
+            ("daughter", ""),
+            ("named", "خالد"),
+            ("named", "Loulou"),
+            ("child", ""),
+        ):
             with self.subTest(reference=reference, name=name):
                 out = resolve_child(reference=reference, child_name=name, roster=[LAYLA])
                 self.assertTrue(out.resolved)
@@ -62,9 +69,14 @@ class TheParentNamedSomebody(unittest.TestCase):
     def test_a_partial_name_matches_the_full_one_on_file(self):
         """A parent writing "Ali" means the child stored as "Ali Hassan"; this school
         stores a full patronymic."""
-        out = resolve_child(reference="named", child_name="Ali", roster=[
-            ChildOption(student_id="S-1", label="Ali Osman", gender="male"), LAYLA,
-        ])
+        out = resolve_child(
+            reference="named",
+            child_name="Ali",
+            roster=[
+                ChildOption(student_id="S-1", label="Ali Osman", gender="male"),
+                LAYLA,
+            ],
+        )
         self.assertEqual(out.student_id, "S-1")
 
     def test_a_name_inside_two_children_asks_between_those_two(self):
@@ -77,10 +89,13 @@ class TheParentNamedSomebody(unittest.TestCase):
         self.assertEqual(sorted(out.option_labels), sorted(["علي أحمد حسن", "أحمد حسن"]))
 
     def test_a_name_beats_the_pin(self):
-        """"And how is Omar?" must move the conversation on even when the previous
+        """ "And how is Omar?" must move the conversation on even when the previous
         question was about his sister."""
         out = resolve_child(
-            reference="named", child_name="أحمد", roster=TWO_SONS, pin=_pin("S-1"),
+            reference="named",
+            child_name="أحمد",
+            roster=TWO_SONS,
+            pin=_pin("S-1"),
         )
         self.assertEqual(out.student_id, "S-2")
 
@@ -88,7 +103,10 @@ class TheParentNamedSomebody(unittest.TestCase):
         """The parent named somebody. Answering about a different child while they watch
         is worse than one more question."""
         out = resolve_child(
-            reference="named", child_name="خالد", roster=TWO_SONS, pin=_pin("S-1"),
+            reference="named",
+            child_name="خالد",
+            roster=TWO_SONS,
+            pin=_pin("S-1"),
         )
         self.assertTrue(out.ask)
         self.assertFalse(out.resolved)
@@ -193,7 +211,10 @@ class ResolvedAndAskAreExclusive(unittest.TestCase):
                 for pin in pins:
                     with self.subTest(reference=reference, size=len(roster), pin=pin.student_id):
                         out = resolve_child(
-                            reference=reference, child_name="علي", roster=roster, pin=pin,
+                            reference=reference,
+                            child_name="علي",
+                            roster=roster,
+                            pin=pin,
                         )
                         self.assertFalse(out.resolved and out.ask)
                         if out.ask:

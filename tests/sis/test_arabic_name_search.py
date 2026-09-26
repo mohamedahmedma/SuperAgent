@@ -16,6 +16,7 @@ column does not contain. Symmetric folding is the whole mechanism.
 and an English name is still matched as it always was. A search that quietly became a
 prefix-of-anything match would pass a test that only checked the Arabic.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -28,7 +29,9 @@ def registrar() -> dict[str, str]:
     return registrar_headers()
 
 
-def _add(client: TestClient, headers: dict[str, str], number: str, arabic: str, english: str = "") -> None:
+def _add(
+    client: TestClient, headers: dict[str, str], number: str, arabic: str, english: str = ""
+) -> None:
     created = client.post(
         "/v1/students",
         json={"student_number": number, "full_name_ar": arabic, "full_name_en": english},
@@ -124,8 +127,14 @@ def test_a_compound_name_is_found_with_extra_or_missing_spaces(
     client: TestClient, registrar: dict[str, str]
 ) -> None:
     _add(client, registrar, "10433", "عبد الرحمن أحمد")
-    assert client.get("/v1/students", params={"q": "عبدالرحمن"}, headers=registrar).json()["count"] == 1
-    assert client.get("/v1/students", params={"q": "عبد   الرحمن"}, headers=registrar).json()["count"] == 1
+    assert (
+        client.get("/v1/students", params={"q": "عبدالرحمن"}, headers=registrar).json()["count"]
+        == 1
+    )
+    assert (
+        client.get("/v1/students", params={"q": "عبد   الرحمن"}, headers=registrar).json()["count"]
+        == 1
+    )
 
 
 def test_a_wildcard_is_still_a_character_and_not_a_wildcard(

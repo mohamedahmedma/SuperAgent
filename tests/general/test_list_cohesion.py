@@ -33,14 +33,21 @@ The hard budget still wins over all of them. A list longer than a whole window h
 break somewhere, and an unbounded chunk is the thing every other rule in the chunker
 exists to prevent.
 """
+
 import unittest
 
 from backend.indexing.document_loader import DocumentLoader
 
 
 def unit(text, list_group=0, kind="text", sections=("Doc",)):
-    return {"kind": kind, "text": text, "sections": sections, "page": 0,
-            "asset_ids": (), "list_group": list_group}
+    return {
+        "kind": kind,
+        "text": text,
+        "sections": sections,
+        "page": 0,
+        "asset_ids": (),
+        "list_group": list_group,
+    }
 
 
 def texts(windows):
@@ -73,11 +80,13 @@ class AListIsNotCutInHalfTests(unittest.TestCase):
         self.assertEqual(7, len(windows[1]), "the whole list moved, not part of it")
 
     def test_a_list_travels_with_its_heading(self):
-        """"The school features:" is a Heading 3. Moving the list without it left five
+        """ "The school features:" is a Heading 3. Moving the list without it left five
         bare items that matched nothing and disappeared from the results."""
-        units = [unit("x" * 180)] + [unit("The school features:", 1)] + [
-            unit(f"feature {i}", 1) for i in range(5)
-        ]
+        units = (
+            [unit("x" * 180)]
+            + [unit("The school features:", 1)]
+            + [unit(f"feature {i}", 1) for i in range(5)]
+        )
         windows = DocumentLoader._pack_units(units, budget=200, target=200)
 
         with_list = next(w for w in windows if any(u["text"] == "feature 0" for u in w))
@@ -138,25 +147,26 @@ class TheCorpusItselfTests(unittest.TestCase):
         cls.blocks = parse_docx_blocks(cls.CORPUS)
 
     def test_word_list_items_arrive_carrying_their_list(self):
-        districts = [b for b in self.blocks if (b.get("content") or "") in
-                     ("Fifth Settlement", "New Cairo", "Mokattam", "Madinaty")]
+        districts = [
+            b
+            for b in self.blocks
+            if (b.get("content") or "") in ("Fifth Settlement", "New Cairo", "Mokattam", "Madinaty")
+        ]
         self.assertEqual(4, len(districts))
         groups = {b.get("list_group") for b in districts}
         self.assertEqual(1, len(groups), "the districts are one list")
         self.assertTrue(all(groups), "and it is not group zero")
 
     def test_a_lead_in_is_pulled_into_the_list_it_introduces(self):
-        lead = next(b for b in self.blocks
-                    if (b.get("content") or "") == "Currently, covered districts:")
-        district = next(b for b in self.blocks
-                        if (b.get("content") or "") == "Fifth Settlement")
+        lead = next(
+            b for b in self.blocks if (b.get("content") or "") == "Currently, covered districts:"
+        )
+        district = next(b for b in self.blocks if (b.get("content") or "") == "Fifth Settlement")
         self.assertEqual(district["list_group"], lead.get("list_group"))
 
     def test_a_heading_is_pulled_in_too(self):
-        heading = next(b for b in self.blocks
-                       if (b.get("content") or "") == "The school features:")
-        item = next(b for b in self.blocks
-                    if (b.get("content") or "") == "Qualified British Staff")
+        heading = next(b for b in self.blocks if (b.get("content") or "") == "The school features:")
+        item = next(b for b in self.blocks if (b.get("content") or "") == "Qualified British Staff")
         self.assertEqual("heading", heading["type"], "it is a real Heading 3")
         self.assertEqual(item["list_group"], heading.get("list_group"))
 
@@ -164,8 +174,15 @@ class TheCorpusItselfTests(unittest.TestCase):
         loader = DocumentLoader()
         docs = loader.load_document(self.CORPUS, "kb.docx")
         leaves = [d for d in docs if d["chunk_level"] == 3]
-        districts = ["Fifth Settlement", "New Cairo", "Nasr City", "Heliopolis",
-                     "Maadi", "Mokattam", "Madinaty"]
+        districts = [
+            "Fifth Settlement",
+            "New Cairo",
+            "Nasr City",
+            "Heliopolis",
+            "Maadi",
+            "Mokattam",
+            "Madinaty",
+        ]
         homes = {
             next(i for i, leaf in enumerate(leaves) if name in leaf["text"])
             for name in districts

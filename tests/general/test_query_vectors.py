@@ -1,4 +1,5 @@
 """RAG_FIX_PLAN item 18: a query vector is computed once per text for the whole deployment."""
+
 import threading
 import time
 import unittest
@@ -43,8 +44,10 @@ class MemoTests(unittest.TestCase):
         embed = _Embedder(delay=0.2)
         cache = QueryVectorCache(embed)
         results = []
-        threads = [threading.Thread(target=lambda: results.append(cache.vector("uniform?")))
-                   for _ in range(8)]
+        threads = [
+            threading.Thread(target=lambda: results.append(cache.vector("uniform?")))
+            for _ in range(8)
+        ]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -101,8 +104,13 @@ class SharedLayerTests(unittest.TestCase):
             _CLIENT.delete(key)
 
     def worker(self, embed, namespace="bge-m3"):
-        return QueryVectorCache(embed, redis=lambda: _CLIENT, key=lambda name: f"{self.prefix}:{name}",
-                                namespace=namespace, ttl_seconds=60)
+        return QueryVectorCache(
+            embed,
+            redis=lambda: _CLIENT,
+            key=lambda name: f"{self.prefix}:{name}",
+            namespace=namespace,
+            ttl_seconds=60,
+        )
 
     def test_a_second_worker_reads_what_the_first_computed(self):
         first, second = _Embedder(), _Embedder()
@@ -119,8 +127,12 @@ class SharedLayerTests(unittest.TestCase):
 
     def test_vectors_keep_float32_precision(self):
         values = [0.1234567, -0.7654321, 1e-4]
-        QueryVectorCache(lambda text: values, redis=lambda: _CLIENT,
-                         key=lambda name: f"{self.prefix}:{name}", ttl_seconds=60).vector("q")
+        QueryVectorCache(
+            lambda text: values,
+            redis=lambda: _CLIENT,
+            key=lambda name: f"{self.prefix}:{name}",
+            ttl_seconds=60,
+        ).vector("q")
         read = self.worker(_Embedder(), namespace="").vector("q")
         for expected, got in zip(values, read):
             self.assertAlmostEqual(expected, got, places=6)

@@ -16,6 +16,7 @@ Every field is read out of Milvus rather than recomputed. A value here that disa
 with the index would be worse than not showing it at all, because the whole point of the
 view is to be believed.
 """
+
 import asyncio
 import json
 import unittest
@@ -45,12 +46,19 @@ class _Milvus:
         return list(self.rows)
 
 
-def row(chunk_id, text="", level=3, idx=0, parent="", root="", page=1,
-        modality="text", asset_ids="[]"):
+def row(
+    chunk_id, text="", level=3, idx=0, parent="", root="", page=1, modality="text", asset_ids="[]"
+):
     return {
-        "chunk_id": chunk_id, "text": text, "chunk_level": level, "chunk_idx": idx,
-        "parent_chunk_id": parent, "root_chunk_id": root, "page_number": page,
-        "modality": modality, "asset_ids": asset_ids,
+        "chunk_id": chunk_id,
+        "text": text,
+        "chunk_level": level,
+        "chunk_idx": idx,
+        "parent_chunk_id": parent,
+        "root_chunk_id": root,
+        "page_number": page,
+        "modality": modality,
+        "asset_ids": asset_ids,
     }
 
 
@@ -104,8 +112,17 @@ class WhatItReadsTests(unittest.TestCase):
 
     def test_it_reads_every_field_the_tree_and_the_pins_need(self):
         _, milvus = inspect([row("a")])
-        for field in ("chunk_id", "parent_chunk_id", "root_chunk_id", "chunk_level",
-                      "chunk_idx", "page_number", "modality", "text", "asset_ids"):
+        for field in (
+            "chunk_id",
+            "parent_chunk_id",
+            "root_chunk_id",
+            "chunk_level",
+            "chunk_idx",
+            "page_number",
+            "modality",
+            "text",
+            "asset_ids",
+        ):
             self.assertIn(field, milvus.fields[0])
 
     def test_the_collection_is_initialised_first(self):
@@ -147,8 +164,11 @@ class BothHalvesOfTheCorpusTests(unittest.TestCase):
         """The property the tree depends on, asserted directly."""
         response, _ = inspect(self.LEAVES, parents=self.PARENTS)
         present = {chunk.chunk_id for chunk in response.chunks}
-        orphans = [c.chunk_id for c in response.chunks
-                   if c.parent_chunk_id and c.parent_chunk_id not in present]
+        orphans = [
+            c.chunk_id
+            for c in response.chunks
+            if c.parent_chunk_id and c.parent_chunk_id not in present
+        ]
         self.assertEqual([], orphans)
 
     def test_the_filter_reaches_the_parent_levels_too(self):
@@ -184,8 +204,9 @@ class TheHierarchyTests(unittest.TestCase):
         """Level then index, so the flat list reads the way the document does and the
         tree can be built from it without a second pass."""
         response, _ = inspect(self._corpus())
-        self.assertEqual(["L1-a", "L2-a", "L3-a", "L3-b"],
-                         [chunk.chunk_id for chunk in response.chunks])
+        self.assertEqual(
+            ["L1-a", "L2-a", "L3-a", "L3-b"], [chunk.chunk_id for chunk in response.chunks]
+        )
 
     def test_the_parent_and_root_of_every_chunk_survive(self):
         response, _ = inspect(self._corpus())
@@ -204,8 +225,7 @@ class TheHierarchyTests(unittest.TestCase):
         rows = [row("b", level=3, idx=0), row("a", level=3, idx=0)]
         first, _ = inspect(rows)
         second, _ = inspect(list(reversed(rows)))
-        self.assertEqual([c.chunk_id for c in first.chunks],
-                         [c.chunk_id for c in second.chunks])
+        self.assertEqual([c.chunk_id for c in first.chunks], [c.chunk_id for c in second.chunks])
 
 
 class TheMetadataPinsTests(unittest.TestCase):
@@ -372,7 +392,8 @@ class WhoMayReadItTests(unittest.TestCase):
         from backend.infra.auth import require_admin
 
         route = next(
-            r for r in documents.router.routes
+            r
+            for r in documents.router.routes
             if getattr(r, "path", "") == "/documents/{filename}/chunks"
         )
         guards = [dependency.call for dependency in route.dependant.dependencies]

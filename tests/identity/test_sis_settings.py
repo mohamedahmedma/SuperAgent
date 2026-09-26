@@ -11,6 +11,7 @@ The specific name still wins, because a deployment may legitimately run identity
 different SIS from the records facade. That was the only defensible reason for the second
 name, and it is preserved rather than removed.
 """
+
 import unittest
 
 from identity.config import reset_settings, settings

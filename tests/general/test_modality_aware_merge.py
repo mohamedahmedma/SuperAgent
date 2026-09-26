@@ -11,6 +11,7 @@ nothing between it and the model trims anything — so once the grader reads chu
 the whole parent is the difference between a prompt sized by the retrieval and a prompt
 sized by the corpus. It now returns the text around the match instead.
 """
+
 import unittest
 
 from backend.agent.rag.utils import (
@@ -60,8 +61,16 @@ class MergeBehaviourTests(unittest.TestCase):
 
         # Stand in for the Postgres parent lookup: every requested parent exists.
         def fake_parents(ids):
-            return [{"chunk_id": pid, "text": f"parent {pid}", "chunk_level": 2,
-                     "modality": "text", "asset_ids": []} for pid in ids]
+            return [
+                {
+                    "chunk_id": pid,
+                    "text": f"parent {pid}",
+                    "chunk_level": 2,
+                    "modality": "text",
+                    "asset_ids": [],
+                }
+                for pid in ids
+            ]
 
         store = MagicMock()
         store.get_documents_by_ids.side_effect = fake_parents
@@ -98,7 +107,8 @@ class MergeBehaviourTests(unittest.TestCase):
 
     def test_text_and_figure_groups_are_decided_independently(self):
         docs = [
-            chunk("t1", "p_text"), chunk("t2", "p_text"),
+            chunk("t1", "p_text"),
+            chunk("t2", "p_text"),
             chunk("f1", "p_fig", modality="figure", assets=["img1"]),
             chunk("f2", "p_fig", modality="figure", assets=["img2"]),
         ]
@@ -154,14 +164,14 @@ class LocatingTheMatchInsideItsParentTests(unittest.TestCase):
         child = "Aurexis > 1. ADMISSION > Fees\nYear 3 costs 105,000 EGP."
         span = _match_spans(parent, child, 600)[0]
         self.assertIsNotNone(span)
-        self.assertEqual("Year 3 costs 105,000 EGP.", parent[span[0]:span[1]])
+        self.assertEqual("Year 3 costs 105,000 EGP.", parent[span[0] : span[1]])
 
     def test_a_child_that_shares_only_its_longest_line_is_located(self):
         parent = "Heading\nYear 3 costs 105,000 EGP for Egyptian pupils.\nMore prose."
         child = "Prefix\nYear 3 costs 105,000 EGP for Egyptian pupils.\nTrailing text"
         span = _match_spans(parent, child, 600)[0]
         self.assertIsNotNone(span)
-        self.assertIn("105,000 EGP", parent[span[0]:span[1]])
+        self.assertIn("105,000 EGP", parent[span[0] : span[1]])
 
     def test_a_child_from_a_different_document_is_not_located(self):
         self.assertEqual([], _match_spans("Fees are payable each term.", "Uniform is navy.", 600))
@@ -177,13 +187,14 @@ class LocatingTheMatchInsideItsParentTests(unittest.TestCase):
         came back holding rows 1-34: the parent's text, none of the child's, and a fee
         for the wrong year group. Verified end to end before the uniqueness rule."""
         header = "Year Group | Tuition Egyptian | Tuition International | Bus | Books"
-        rows = [f"Y{i:02d} | {90 + i},000 EGP | {100 + i},000 EGP | 8,000 | 2,000"
-                for i in range(60)]
+        rows = [
+            f"Y{i:02d} | {90 + i},000 EGP | {100 + i},000 EGP | 8,000 | 2,000" for i in range(60)
+        ]
         parent = "\n".join([header] + rows)
         child = "\n".join(["Fees > Schedule", header] + rows[35:40])
 
         start, end = _match_spans(parent, child, 600)[0]
-        self.assertIn("Y35", parent[start:end] + parent[end:end + 200])
+        self.assertIn("Y35", parent[start:end] + parent[end : end + 200])
         self.assertNotEqual(0, start, "anchored on the header repeated in every group")
 
         window = _parent_window(parent, [{"text": child}], 600)
@@ -222,9 +233,7 @@ class TheMergeWindowTests(unittest.TestCase):
 
     def test_two_matches_are_both_inside_the_window(self):
         parent = "\n".join(f"line {i:03d}" for i in range(200))
-        window = _parent_window(
-            parent, [{"text": "line 100"}, {"text": "line 104"}], 300
-        )
+        window = _parent_window(parent, [{"text": "line 100"}, {"text": "line 104"}], 300)
         self.assertIn("line 100", window)
         self.assertIn("line 104", window)
 
@@ -252,8 +261,16 @@ class MergeKeepsItsPromisesTests(unittest.TestCase):
         from backend.composition import Services, set_default_services
 
         def fake_parents(ids):
-            return [{"chunk_id": pid, "text": parent_text, "chunk_level": 2,
-                     "modality": "figure", "asset_ids": ["img1"]} for pid in ids]
+            return [
+                {
+                    "chunk_id": pid,
+                    "text": parent_text,
+                    "chunk_level": 2,
+                    "modality": "figure",
+                    "asset_ids": ["img1"],
+                }
+                for pid in ids
+            ]
 
         store = MagicMock()
         store.get_documents_by_ids.side_effect = fake_parents
@@ -267,8 +284,10 @@ class MergeKeepsItsPromisesTests(unittest.TestCase):
         written from two paragraphs that never mention it — and splitting images makes
         this common, because one image now spans several parents."""
         parent_text = (
-            "[Figure] Uniform guide\n" + "\n".join(f"figure line {i}" for i in range(80))
-            + "\n" + "\n".join(f"prose line {i:03d} " + "z" * 60 for i in range(60))
+            "[Figure] Uniform guide\n"
+            + "\n".join(f"figure line {i}" for i in range(80))
+            + "\n"
+            + "\n".join(f"prose line {i:03d} " + "z" * 60 for i in range(60))
         )
         docs = [chunk("c1", "p1"), chunk("c2", "p1")]
         docs[0]["text"] = "prose line 030 " + "z" * 60
@@ -282,8 +301,10 @@ class MergeKeepsItsPromisesTests(unittest.TestCase):
 
     def test_a_windowed_parent_that_kept_its_figure_keeps_the_asset(self):
         parent_text = (
-            "[Figure] Uniform guide\n" + "\n".join(f"figure line {i}" for i in range(80))
-            + "\n" + "\n".join(f"prose line {i:03d} " + "z" * 60 for i in range(60))
+            "[Figure] Uniform guide\n"
+            + "\n".join(f"figure line {i}" for i in range(80))
+            + "\n"
+            + "\n".join(f"prose line {i:03d} " + "z" * 60 for i in range(60))
         )
         docs = [chunk("c1", "p1"), chunk("c2", "p1")]
         docs[0]["text"] = "figure line 2"

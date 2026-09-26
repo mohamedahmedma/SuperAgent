@@ -21,6 +21,7 @@ every listing that narrows a grade or a year refuses them and they have no way t
 what they teach. It answers from their own grants and assignments, grouped by grade, so a
 teacher of four rooms across three rungs and two sections sees all of it in one call.
 """
+
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
@@ -202,8 +203,10 @@ class AssessmentSummaryOut(BaseModel):
     name: str
     max_points: float | None = None
 
+
 class AssessmentListOut(BaseModel):
     assessments: list[AssessmentSummaryOut]
+
 
 class AssessmentSheetOut(BaseModel):
     id: int
@@ -240,9 +243,7 @@ def list_my_teaching(
         is_teaching_staff=teaching.is_teaching_staff(user_id),
         assignments=[
             TeachingAssignmentOut.of(row)
-            for row in teaching.assignments_for_user(
-                user_id, academic_year_code=academic_year
-            )
+            for row in teaching.assignments_for_user(user_id, academic_year_code=academic_year)
         ],
     )
 
@@ -274,9 +275,7 @@ def read_mark_sheet(
 ) -> MarkSheetOut:
     caller.narrow(
         Permission.GRADES_READ,
-        lambda scopes: scopes.for_class(
-            academic_year_code=academic_year, class_code=class_code
-        ),
+        lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code),
     )
     if (
         caller.profile is not None
@@ -298,40 +297,106 @@ def read_mark_sheet(
 
 
 @router.get("/classes/{class_code}/assessments", response_model=AssessmentListOut)
-def list_class_assessments(class_code: str, caller: Reader, teaching: Teaching, uow_factory: UowFactoryDep,
-    academic_year: Annotated[str, Query()], term: Annotated[str, Query()],
-    subject: Annotated[str, Query()], assessment_type: Annotated[Literal["exam", "assignment"], Query()]) -> AssessmentListOut:
-    caller.narrow(Permission.GRADES_READ, lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code))
+def list_class_assessments(
+    class_code: str,
+    caller: Reader,
+    teaching: Teaching,
+    uow_factory: UowFactoryDep,
+    academic_year: Annotated[str, Query()],
+    term: Annotated[str, Query()],
+    subject: Annotated[str, Query()],
+    assessment_type: Annotated[Literal["exam", "assignment"], Query()],
+) -> AssessmentListOut:
+    caller.narrow(
+        Permission.GRADES_READ,
+        lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code),
+    )
     if not _may_record(caller, teaching, academic_year, class_code, subject):
         raise _assignment_forbidden(subject, class_code)
     with uow_factory() as uow:
-        rows=uow._session.execute(text("SELECT id,assessment_type,name,max_points FROM assessments WHERE academic_year_code=:y AND class_code=:c AND subject_code=:s AND term_code=:t AND assessment_type=:a ORDER BY created_at DESC,id DESC"),
-            {"y":academic_year,"c":class_code,"s":subject,"t":term,"a":assessment_type}).mappings().all()
+        rows = (
+            uow._session.execute(
+                text(
+                    "SELECT id,assessment_type,name,max_points FROM assessments WHERE academic_year_code=:y AND class_code=:c AND subject_code=:s AND term_code=:t AND assessment_type=:a ORDER BY created_at DESC,id DESC"
+                ),
+                {
+                    "y": academic_year,
+                    "c": class_code,
+                    "s": subject,
+                    "t": term,
+                    "a": assessment_type,
+                },
+            )
+            .mappings()
+            .all()
+        )
     return AssessmentListOut(assessments=[AssessmentSummaryOut(**dict(x)) for x in rows])
 
+
 @router.get("/classes/{class_code}/assessments/{assessment_id}", response_model=AssessmentSheetOut)
-def read_class_assessment(class_code: str, assessment_id: int, caller: Reader, teaching: Teaching, sheets: Sheets,
-    uow_factory: UowFactoryDep, academic_year: Annotated[str, Query()]) -> AssessmentSheetOut:
-    caller.narrow(Permission.GRADES_READ, lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code))
+def read_class_assessment(
+    class_code: str,
+    assessment_id: int,
+    caller: Reader,
+    teaching: Teaching,
+    sheets: Sheets,
+    uow_factory: UowFactoryDep,
+    academic_year: Annotated[str, Query()],
+) -> AssessmentSheetOut:
+    caller.narrow(
+        Permission.GRADES_READ,
+        lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code),
+    )
     with uow_factory() as uow:
-        head=uow._session.execute(text("SELECT id,class_code,subject_code,term_code,assessment_type,name,max_points FROM assessments WHERE id=:id AND academic_year_code=:y AND class_code=:c"),
-            {"id":assessment_id,"y":academic_year,"c":class_code}).mappings().first()
-        if head is None: raise HTTPException(status_code=404, detail="Assessment not found.")
+        head = (
+            uow._session.execute(
+                text(
+                    "SELECT id,class_code,subject_code,term_code,assessment_type,name,max_points FROM assessments WHERE id=:id AND academic_year_code=:y AND class_code=:c"
+                ),
+                {"id": assessment_id, "y": academic_year, "c": class_code},
+            )
+            .mappings()
+            .first()
+        )
+        if head is None:
+            raise HTTPException(status_code=404, detail="Assessment not found.")
         if not _may_record(caller, teaching, academic_year, class_code, head["subject_code"]):
             raise _assignment_forbidden(head["subject_code"], class_code)
-        saved={x["student_number"]:x for x in uow._session.execute(text("SELECT student_number,points,max_points,percentage,is_absent FROM assessment_marks WHERE assessment_id=:id"),{"id":assessment_id}).mappings().all()}
+        saved = {
+            x["student_number"]: x
+            for x in uow._session.execute(
+                text(
+                    "SELECT student_number,points,max_points,percentage,is_absent FROM assessment_marks WHERE assessment_id=:id"
+                ),
+                {"id": assessment_id},
+            )
+            .mappings()
+            .all()
+        }
     with domain_errors():
-        roster=sheets.sheet(AcademicYearCode(academic_year),ClassCode(class_code),SubjectCode(head["subject_code"]),TermCode(head["term_code"]))
-    base=MarkSheetOut.of(roster,may_record=False)
-    students=[]
+        roster = sheets.sheet(
+            AcademicYearCode(academic_year),
+            ClassCode(class_code),
+            SubjectCode(head["subject_code"]),
+            TermCode(head["term_code"]),
+        )
+    base = MarkSheetOut.of(roster, may_record=False)
+    students = []
     for line in base.students:
-        mark=saved.get(line.student_number)
-        students.append(MarkSheetLineOut(student_number=line.student_number,full_name_ar=line.full_name_ar,full_name_en=line.full_name_en,
-            percentage=None if mark is None else mark["percentage"],points=None if mark is None else mark["points"],
-            max_points=None if mark is None else mark["max_points"],
-            is_graded=mark is not None and not bool(mark["is_absent"]),
-            is_absent=False if mark is None else bool(mark["is_absent"])))
-    return AssessmentSheetOut(**dict(head),students=students)
+        mark = saved.get(line.student_number)
+        students.append(
+            MarkSheetLineOut(
+                student_number=line.student_number,
+                full_name_ar=line.full_name_ar,
+                full_name_en=line.full_name_en,
+                percentage=None if mark is None else mark["percentage"],
+                points=None if mark is None else mark["points"],
+                max_points=None if mark is None else mark["max_points"],
+                is_graded=mark is not None and not bool(mark["is_absent"]),
+                is_absent=False if mark is None else bool(mark["is_absent"]),
+            )
+        )
+    return AssessmentSheetOut(**dict(head), students=students)
 
 
 @router.put(
@@ -365,9 +430,7 @@ def record_marks(
     # a school-wide grant, and it is what refuses a teacher another teacher's classroom.
     caller.narrow(
         Permission.GRADES_WRITE,
-        lambda scopes: scopes.for_class(
-            academic_year_code=academic_year, class_code=class_code
-        ),
+        lambda scopes: scopes.for_class(academic_year_code=academic_year, class_code=class_code),
     )
     # Then the assignment: is this subject yours in it. The check the scope model cannot
     # make, and the one this stage exists for.
@@ -405,28 +468,77 @@ def record_marks(
     return MarkSheetOut.of(sheet, may_record=True)
 
 
-def _save_assessment_snapshot(uow_factory, class_code: str, academic_year: str, body: RecordMarksIn, actor: str) -> None:
-    maximum=max([float(x.max_points) for x in body.marks if x.max_points is not None] or [0.0]) or None
+def _save_assessment_snapshot(
+    uow_factory, class_code: str, academic_year: str, body: RecordMarksIn, actor: str
+) -> None:
+    maximum = (
+        max([float(x.max_points) for x in body.marks if x.max_points is not None] or [0.0]) or None
+    )
     with uow_factory() as uow:
-        s=uow._session
-        s.execute(text("INSERT INTO assessments(academic_year_code,class_code,subject_code,term_code,assessment_type,name,max_points,recorded_by) VALUES(:y,:c,:s,:t,:a,:n,:m,:r) ON CONFLICT(academic_year_code,class_code,subject_code,term_code,assessment_type,name) DO UPDATE SET max_points=excluded.max_points,recorded_by=excluded.recorded_by,updated_at=CURRENT_TIMESTAMP"),
-            {"y":academic_year,"c":class_code,"s":body.subject_code,"t":body.term_code,"a":body.assessment_type,"n":body.assessment_name.strip(),"m":maximum,"r":actor})
-        aid=s.execute(text("SELECT id FROM assessments WHERE academic_year_code=:y AND class_code=:c AND subject_code=:s AND term_code=:t AND assessment_type=:a AND name=:n"),
-            {"y":academic_year,"c":class_code,"s":body.subject_code,"t":body.term_code,"a":body.assessment_type,"n":body.assessment_name.strip()}).scalar_one()
+        s = uow._session
+        s.execute(
+            text(
+                "INSERT INTO assessments(academic_year_code,class_code,subject_code,term_code,assessment_type,name,max_points,recorded_by) VALUES(:y,:c,:s,:t,:a,:n,:m,:r) ON CONFLICT(academic_year_code,class_code,subject_code,term_code,assessment_type,name) DO UPDATE SET max_points=excluded.max_points,recorded_by=excluded.recorded_by,updated_at=CURRENT_TIMESTAMP"
+            ),
+            {
+                "y": academic_year,
+                "c": class_code,
+                "s": body.subject_code,
+                "t": body.term_code,
+                "a": body.assessment_type,
+                "n": body.assessment_name.strip(),
+                "m": maximum,
+                "r": actor,
+            },
+        )
+        aid = s.execute(
+            text(
+                "SELECT id FROM assessments WHERE academic_year_code=:y AND class_code=:c AND subject_code=:s AND term_code=:t AND assessment_type=:a AND name=:n"
+            ),
+            {
+                "y": academic_year,
+                "c": class_code,
+                "s": body.subject_code,
+                "t": body.term_code,
+                "a": body.assessment_type,
+                "n": body.assessment_name.strip(),
+            },
+        ).scalar_one()
         for mark in body.marks:
             if mark.clear:
-                s.execute(text("DELETE FROM assessment_marks WHERE assessment_id=:a AND student_number=:n"),{"a":aid,"n":mark.student_number})
+                s.execute(
+                    text(
+                        "DELETE FROM assessment_marks WHERE assessment_id=:a AND student_number=:n"
+                    ),
+                    {"a": aid, "n": mark.student_number},
+                )
                 continue
             if mark.absent:
-                s.execute(text("INSERT INTO assessment_marks(assessment_id,student_number,points,max_points,percentage,is_absent) VALUES(:a,:n,NULL,NULL,NULL,1) ON CONFLICT(assessment_id,student_number) DO UPDATE SET points=NULL,max_points=NULL,percentage=NULL,is_absent=1,updated_at=CURRENT_TIMESTAMP"),{"a":aid,"n":mark.student_number})
+                s.execute(
+                    text(
+                        "INSERT INTO assessment_marks(assessment_id,student_number,points,max_points,percentage,is_absent) VALUES(:a,:n,NULL,NULL,NULL,1) ON CONFLICT(assessment_id,student_number) DO UPDATE SET points=NULL,max_points=NULL,percentage=NULL,is_absent=1,updated_at=CURRENT_TIMESTAMP"
+                    ),
+                    {"a": aid, "n": mark.student_number},
+                )
                 continue
-            if mark.points is None and mark.percentage is None: continue
-            pct=mark.percentage
+            if mark.points is None and mark.percentage is None:
+                continue
+            pct = mark.percentage
             if pct is None and mark.points is not None and mark.max_points:
-                pct=(float(mark.points)/float(mark.max_points))*100.0
-            s.execute(text("INSERT INTO assessment_marks(assessment_id,student_number,points,max_points,percentage,is_absent) VALUES(:a,:n,:p,:m,:pct,0) ON CONFLICT(assessment_id,student_number) DO UPDATE SET points=excluded.points,max_points=excluded.max_points,percentage=excluded.percentage,is_absent=0,updated_at=CURRENT_TIMESTAMP"),{"a":aid,"n":mark.student_number,"p":mark.points,"m":mark.max_points,"pct":pct})
+                pct = (float(mark.points) / float(mark.max_points)) * 100.0
+            s.execute(
+                text(
+                    "INSERT INTO assessment_marks(assessment_id,student_number,points,max_points,percentage,is_absent) VALUES(:a,:n,:p,:m,:pct,0) ON CONFLICT(assessment_id,student_number) DO UPDATE SET points=excluded.points,max_points=excluded.max_points,percentage=excluded.percentage,is_absent=0,updated_at=CURRENT_TIMESTAMP"
+                ),
+                {
+                    "a": aid,
+                    "n": mark.student_number,
+                    "p": mark.points,
+                    "m": mark.max_points,
+                    "pct": pct,
+                },
+            )
         uow.commit()
-
 
 
 def _may_record(

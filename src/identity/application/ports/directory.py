@@ -10,6 +10,7 @@ the right two methods: it does not import this module, inherits from nothing, an
 be broken by a base class gaining a method it does not use. The type checker still catches
 an implementation that drifts.
 """
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -20,9 +21,7 @@ from identity.domain.guardians import ChildRef, GuardianRef
 class GuardianDirectory(Protocol):
     """Resolving a verified phone number to the parent the school has on file."""
 
-    def resolve(
-        self, phone_e164: str, *, school_code: str | None = None
-    ) -> GuardianRef | None:
+    def resolve(self, phone_e164: str, *, school_code: str | None = None) -> GuardianRef | None:
         """The guardian reachable on this number, or `None` when it reaches nobody.
 
         `None` is an ordinary answer, not an error: most numbers in the world are not this
@@ -38,9 +37,7 @@ class GuardianDirectory(Protocol):
         only answer this service can give: the row is not in the file it is connected to.
         """
 
-    def children_of(
-        self, public_id: str, *, school_code: str | None = None
-    ) -> list[ChildRef]:
+    def children_of(self, public_id: str, *, school_code: str | None = None) -> list[ChildRef]:
         """Every child this guardian may be told about, by her opaque handle.
 
         Empty is an ordinary answer — a parent whose only link carries a custody

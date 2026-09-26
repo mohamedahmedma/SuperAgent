@@ -4,6 +4,7 @@ The property these protect: **nobody has to choose a new password.** A migration
 forced a reset on every family would have been abandoned halfway, leaving the old auth
 running forever — which is exactly the outcome this whole task exists to avoid.
 """
+
 import os
 import tempfile
 
@@ -73,9 +74,7 @@ def test_a_legacy_hash_is_marked_for_upgrade():
 
 def test_a_weaker_pbkdf2_hash_is_marked_for_upgrade(monkeypatch):
     """Raising the round count upgrades everyone as they sign in, not just new users."""
-    weak = hasher.hash(PASSWORD).replace(
-        f"pbkdf2_sha256${PBKDF2_ROUNDS}$", "pbkdf2_sha256$1000$"
-    )
+    weak = hasher.hash(PASSWORD).replace(f"pbkdf2_sha256${PBKDF2_ROUNDS}$", "pbkdf2_sha256$1000$")
     assert hasher.needs_rehash(weak) is True
 
 
@@ -95,7 +94,9 @@ def test_logging_in_upgrades_a_legacy_hash_in_place(client, db):
 
     fresh = new_session()
     try:
-        stored = fresh.query(Account).filter(Account.username == "legacy-user").first().password_hash
+        stored = (
+            fresh.query(Account).filter(Account.username == "legacy-user").first().password_hash
+        )
     finally:
         fresh.close()
 
@@ -113,7 +114,10 @@ def test_a_wrong_password_does_not_upgrade_anything(client, db):
 
     fresh = new_session()
     try:
-        assert fresh.query(Account).filter(Account.username == "legacy-two").first().password_hash == legacy
+        assert (
+            fresh.query(Account).filter(Account.username == "legacy-two").first().password_hash
+            == legacy
+        )
     finally:
         fresh.close()
 
@@ -143,7 +147,9 @@ def test_import_preserves_the_admin_role(client, db):
     source = _legacy_source_db([("kept-admin", hasher.hash(PASSWORD), "admin")])
     import_accounts(source)
 
-    body = client.post("/v1/auth/login", json={"username": "kept-admin", "password": PASSWORD}).json()
+    body = client.post(
+        "/v1/auth/login", json={"username": "kept-admin", "password": PASSWORD}
+    ).json()
     assert body["role"] == "admin"
 
 
@@ -153,7 +159,9 @@ def test_import_never_creates_a_guardian_binding(client, db):
     source = _legacy_source_db([("no-binding", hasher.hash(PASSWORD), "user")])
     import_accounts(source)
 
-    body = client.post("/v1/auth/login", json={"username": "no-binding", "password": PASSWORD}).json()
+    body = client.post(
+        "/v1/auth/login", json={"username": "no-binding", "password": PASSWORD}
+    ).json()
     assert body["guardian_id"] is None
 
 
@@ -210,9 +218,7 @@ def test_self_registration_is_gone(client):
     again, and it keeps a shape in the OpenAPI document that a client will be written
     against.
     """
-    response = client.post(
-        "/v1/auth/register", json={"username": "stranger", "password": PASSWORD}
-    )
+    response = client.post("/v1/auth/register", json={"username": "stranger", "password": PASSWORD})
 
     assert response.status_code == 404
 
@@ -253,9 +259,12 @@ def test_accounts_are_created_through_the_admin_route_instead(client, admin_head
     )
 
     assert response.status_code == 201
-    assert client.post(
-        "/v1/auth/login", json={"username": "newcomer", "password": PASSWORD}
-    ).status_code == 200
+    assert (
+        client.post(
+            "/v1/auth/login", json={"username": "newcomer", "password": PASSWORD}
+        ).status_code
+        == 200
+    )
 
 
 def test_creating_an_account_still_requires_being_an_administrator(client):

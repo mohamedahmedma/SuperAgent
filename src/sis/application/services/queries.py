@@ -18,6 +18,7 @@ symptom is a Term 1 mark filed under 3A that prints under 3B.
 Ports only: no sqlalchemy, no fastapi, no `sis.config`. Every method here is exercisable
 against fake repositories.
 """
+
 import logging
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
@@ -299,14 +300,10 @@ class QueryService:
         with self._uow_factory() as uow:
             school = uow.schools.get(school_code)
             if school is None:
-                raise UnknownReference(
-                    f"no school {school_code}", field="school_code"
-                )
+                raise UnknownReference(f"no school {school_code}", field="school_code")
             return school
 
-    def list_academic_years(
-        self, school_code: SchoolCode | None = None
-    ) -> Sequence[AcademicYear]:
+    def list_academic_years(self, school_code: SchoolCode | None = None) -> Sequence[AcademicYear]:
         """Every school year, most recent first; one school's when asked for.
 
         The school is optional here and required on `list_year_levels` below, and the
@@ -319,9 +316,7 @@ class QueryService:
                 self._require_school(uow, school_code)
             return tuple(uow.academic_years.list_all(school_code))
 
-    def current_academic_year(
-        self, school_code: SchoolCode | None = None
-    ) -> AcademicYear | None:
+    def current_academic_year(self, school_code: SchoolCode | None = None) -> AcademicYear | None:
         """The year the registrar has marked current, or `None` before one is chosen."""
         with self._uow_factory() as uow:
             return uow.academic_years.current(school_code)
@@ -411,9 +406,7 @@ class QueryService:
         with self._uow_factory() as uow:
             student = uow.students.get(student_number)
             if student is None:
-                raise UnknownReference(
-                    f"no student {student_number}", field="student_number"
-                )
+                raise UnknownReference(f"no student {student_number}", field="student_number")
             return student
 
     def search_students(
@@ -430,15 +423,9 @@ class QueryService:
         the picker a registrar uses to place somebody in a class today.
         """
         with self._uow_factory() as uow:
-            return tuple(
-                uow.students.search(
-                    query, limit=limit, include_inactive=include_inactive
-                )
-            )
+            return tuple(uow.students.search(query, limit=limit, include_inactive=include_inactive))
 
-    def student_placements(
-        self, student_number: StudentNumber
-    ) -> Sequence[ClassEnrolment]:
+    def student_placements(self, student_number: StudentNumber) -> Sequence[ClassEnrolment]:
         """Every placement this child has ever had, so the history is visible as history.
 
         This is invariant 2 made legible. A child who moved 3A -> 3B in March has two rows
@@ -447,9 +434,7 @@ class QueryService:
         """
         with self._uow_factory() as uow:
             if uow.students.get(student_number) is None:
-                raise UnknownReference(
-                    f"no student {student_number}", field="student_number"
-                )
+                raise UnknownReference(f"no student {student_number}", field="student_number")
             return tuple(uow.enrolments.list_for_student(student_number))
 
     def class_roster(
@@ -473,9 +458,7 @@ class QueryService:
                 raise UnknownReference(
                     f"no class {class_code} in {academic_year_code}", field="class_code"
                 )
-            enrolments = uow.enrolments.roster_on(
-                academic_year_code, class_code, on_date
-            )
+            enrolments = uow.enrolments.roster_on(academic_year_code, class_code, on_date)
             students = uow.students.get_many(
                 [
                     e.student_number
@@ -493,17 +476,13 @@ class QueryService:
                 student=student,
             )
             for enrolment in enrolments
-            if (
-                student := students.get(str(enrolment.student_number))
-            ) is not None
+            if (student := students.get(str(enrolment.student_number))) is not None
             and student.is_active
         )
 
     # -- Guardians ---------------------------------------------------------
 
-    def student_guardians(
-        self, student_number: StudentNumber
-    ) -> Sequence[GuardianLink]:
+    def student_guardians(self, student_number: StudentNumber) -> Sequence[GuardianLink]:
         """Every adult on file for one child, with what each is to her.
 
         An unknown student raises rather than returning an empty sequence, for the reason
@@ -514,9 +493,7 @@ class QueryService:
         """
         with self._uow_factory() as uow:
             if uow.students.get(student_number) is None:
-                raise UnknownReference(
-                    f"no student {student_number}", field="student_number"
-                )
+                raise UnknownReference(f"no student {student_number}", field="student_number")
             links = uow.student_guardians.list_for_student(student_number)
             guardians = uow.guardians.get_many([link.guardian_phone for link in links])
         return tuple(
@@ -651,9 +628,7 @@ class QueryService:
         )
 
         if reason is not AccessReason.OK:
-            raise UnknownReference(
-                "no such student for this guardian", field="student_number"
-            )
+            raise UnknownReference("no such student for this guardian", field="student_number")
 
     def guardian_student_term_grades(
         self,
@@ -665,9 +640,7 @@ class QueryService:
         request_id: str = "",
     ) -> StudentTermGrades:
         """One child's marks for a term, for a caller who is only a guardian handle."""
-        self.require_guardian_may_see(
-            public_id, student_number, actor=actor, request_id=request_id
-        )
+        self.require_guardian_may_see(public_id, student_number, actor=actor, request_id=request_id)
         return self.student_term_grades(student_number, term_code)
 
     def guardian_students_by_id(
@@ -690,9 +663,7 @@ class QueryService:
             raise UnknownReference(
                 "no guardian is on file under that reference", field="guardian_id"
             )
-        return self.guardian_students(
-            phone, viewable_only=viewable_only, on_date=on_date
-        )
+        return self.guardian_students(phone, viewable_only=viewable_only, on_date=on_date)
 
     def guardian_students(
         self, phone: Phone, *, viewable_only: bool = True, on_date: date | None = None
@@ -777,8 +748,7 @@ class QueryService:
                 wanted.setdefault(str(year.school_code), set()).add(section.year_level_code)
 
         by_school: dict[str, Mapping[str, YearLevel]] = {
-            school: uow.year_levels.get_many(codes, school)
-            for school, codes in wanted.items()
+            school: uow.year_levels.get_many(codes, school) for school, codes in wanted.items()
         }
 
         levels: dict[str, YearLevel] = {}
@@ -806,18 +776,14 @@ class QueryService:
         with self._uow_factory() as uow:
             student = uow.students.get(student_number)
             if student is None:
-                raise UnknownReference(
-                    f"no student {student_number}", field="student_number"
-                )
+                raise UnknownReference(f"no student {student_number}", field="student_number")
             term = uow.terms.get(term_code)
             if term is None:
                 raise UnknownReference(f"no term {term_code}", field="term_code")
             # The term's year, which is what an undated term is resolved against. A term
             # whose year is missing is a broken foreign key rather than a normal state, so
             # this refuses rather than falling back to something arbitrary.
-            year = uow.academic_years.get(
-                AcademicYearCode(str(term.academic_year_code))
-            )
+            year = uow.academic_years.get(AcademicYearCode(str(term.academic_year_code)))
             if year is None:
                 raise UnknownReference(
                     f"no academic year {term.academic_year_code}",
@@ -836,9 +802,7 @@ class QueryService:
                 ],
                 term.academic_year_code,
             )
-            section = resolve_section_for_term(
-                uow.enrolments, student_number, term, year
-            )
+            section = resolve_section_for_term(uow.enrolments, student_number, term, year)
         return StudentTermGrades(
             student=student,
             term=term,
@@ -879,7 +843,5 @@ class QueryService:
         """
         year = uow.academic_years.get(code)
         if year is None:
-            raise UnknownReference(
-                f"no academic year {code}", field="academic_year_code"
-            )
+            raise UnknownReference(f"no academic year {code}", field="academic_year_code")
         return year

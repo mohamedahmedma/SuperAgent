@@ -18,6 +18,7 @@ mother last-wins and silently dropped the alternate number one of them carried. 
 accumulated correctly and the SQL did not, so every service test passed — which is exactly
 the divergence this file exists to catch.
 """
+
 from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
@@ -94,7 +95,15 @@ def two_children(sis_database: None) -> None:
             ]
         )
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة الثالثة", display_order=3)]
+            [
+                YearLevel(
+                    code="3",
+                    school_code="MAIN",
+                    name_en="Year 3",
+                    name_ar="السنة الثالثة",
+                    display_order=3,
+                )
+            ]
         )
         uow.class_sections.upsert_many(
             [
@@ -137,9 +146,7 @@ def test_a_guardian_upsert_does_not_duplicate_on_a_second_run(two_children: None
 def test_a_second_number_finds_the_same_guardian(two_children: None) -> None:
     """The lookup that makes `guardian_phones` worth having rather than a column."""
     with SqlAlchemyUnitOfWork() as uow:
-        uow.guardians.upsert_many(
-            [Guardian(phones=(MOTHER, MOTHER_ALT), full_name_en="Fatma Ali")]
-        )
+        uow.guardians.upsert_many([Guardian(phones=(MOTHER, MOTHER_ALT), full_name_en="Fatma Ali")])
         uow.commit()
 
     assert _count("guardian_phones") == 2
@@ -175,9 +182,7 @@ def test_two_rows_for_one_mother_keep_both_her_numbers(two_children: None) -> No
 def test_numbers_accumulate_across_uploads(two_children: None) -> None:
     """A later upload mentioning one number must not drop the other already on file."""
     with SqlAlchemyUnitOfWork() as uow:
-        uow.guardians.upsert_many(
-            [Guardian(phones=(MOTHER, MOTHER_ALT), full_name_en="Fatma Ali")]
-        )
+        uow.guardians.upsert_many([Guardian(phones=(MOTHER, MOTHER_ALT), full_name_en="Fatma Ali")])
         uow.commit()
 
     with SqlAlchemyUnitOfWork() as uow:
@@ -305,9 +310,7 @@ def test_a_guardian_with_two_numbers_is_listed_once_per_child(
     problem rather than a query one.
     """
     with SqlAlchemyUnitOfWork() as uow:
-        uow.guardians.upsert_many(
-            [Guardian(phones=(MOTHER, MOTHER_ALT), full_name_en="Fatma Ali")]
-        )
+        uow.guardians.upsert_many([Guardian(phones=(MOTHER, MOTHER_ALT), full_name_en="Fatma Ali")])
         uow.student_guardians.upsert_many(
             [StudentGuardian(student_number=LAYLA, guardian_phone=MOTHER)]
         )
@@ -348,9 +351,7 @@ def test_a_restricted_link_is_filtered_in_sql(two_children: None) -> None:
 
     with SqlAlchemyUnitOfWork() as uow:
         visible = uow.student_guardians.list_students_for_guardian(MOTHER)
-        everything = uow.student_guardians.list_students_for_guardian(
-            MOTHER, viewable_only=False
-        )
+        everything = uow.student_guardians.list_students_for_guardian(MOTHER, viewable_only=False)
 
     assert [str(link.student_number) for link in visible] == ["S001"]
     assert len(everything) == 2
@@ -418,9 +419,7 @@ def test_the_stored_primary_number_is_never_demoted(two_children: None) -> None:
 
     # A later sheet lists her numbers the other way round.
     with SqlAlchemyUnitOfWork() as uow:
-        uow.guardians.upsert_many(
-            [Guardian(phones=(MOTHER_ALT, MOTHER), full_name_en="Fatma Ali")]
-        )
+        uow.guardians.upsert_many([Guardian(phones=(MOTHER_ALT, MOTHER), full_name_en="Fatma Ali")])
         uow.commit()
 
     with SqlAlchemyUnitOfWork() as uow:

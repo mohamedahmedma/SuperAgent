@@ -9,6 +9,7 @@ The schema is Alembic's (backend/alembic.ini). A change to a model here is half 
 change: the revision that makes the database match it is the other half, and the
 backend refuses to start against a database that has not applied it.
 """
+
 from backend.db.models.assets import AssetExtraction, DocumentAsset, EntityAttribute
 from backend.db.models.attachments import ChatAttachment
 from backend.db.models.conversations import ChatMessage, ChatSession

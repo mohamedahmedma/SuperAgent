@@ -30,6 +30,7 @@ looks finished.
 **Nothing here touches attendance.** A timetable is a plan and the register is a record.
 Per-lesson attendance would need exactly this table and is deliberately not built on it.
 """
+
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import time
@@ -146,13 +147,10 @@ class TimetableService:
             self._require_school(uow, school_code)
             numbers = [period.period_number for period in periods]
             if len(numbers) != len(set(numbers)):
-                raise ValidationError(
-                    "each period number may appear once", field="periods"
-                )
+                raise ValidationError("each period number may appear once", field="periods")
             wanted = set(numbers)
             current = {
-                period.period_number: period
-                for period in uow.timetable.list_periods(school_code)
+                period.period_number: period for period in uow.timetable.list_periods(school_code)
             }
             school_entries = self._entries_for_school(uow, school_code)
             in_use = {entry.slot.period_number for entry in school_entries}
@@ -213,8 +211,12 @@ class TimetableService:
             year, school = self._require_year_and_school(uow, academic_year_code)
             section = self._require_class(uow, academic_year_code, class_code)
             self._require_term(uow, academic_year_code, term_code)
-            periods = self._periods_for_level(uow, academic_year_code, section.year_level_code,
-                uow.timetable.list_periods(SchoolCode(str(school.code))))
+            periods = self._periods_for_level(
+                uow,
+                academic_year_code,
+                section.year_level_code,
+                uow.timetable.list_periods(SchoolCode(str(school.code))),
+            )
             entries = uow.timetable.list_entries(
                 academic_year_code, class_code=class_code, term_code=term_code
             )
@@ -227,9 +229,7 @@ class TimetableService:
             entries=self._in_week_order(entries, school),
         )
 
-    def week_for_student(
-        self, student_number: StudentNumber, term_code: TermCode
-    ) -> StudentWeek:
+    def week_for_student(self, student_number: StudentNumber, term_code: TermCode) -> StudentWeek:
         """One child's week, resolved through the class she sat in for that term.
 
         The read a parent's question ends at, and the reason it is one method rather than
@@ -253,17 +253,13 @@ class TimetableService:
         """
         with self._uow_factory() as uow:
             if uow.students.get(student_number) is None:
-                raise UnknownReference(
-                    f"no student {student_number}", field="student_number"
-                )
+                raise UnknownReference(f"no student {student_number}", field="student_number")
             term = uow.terms.get(term_code)
             if term is None:
                 raise UnknownReference(f"no term {term_code}", field="term_code")
             # The term's own year, which is the only year this week can be about. A term
             # whose year is missing is a broken foreign key, not a state to answer around.
-            year = uow.academic_years.get(
-                AcademicYearCode(str(term.academic_year_code))
-            )
+            year = uow.academic_years.get(AcademicYearCode(str(term.academic_year_code)))
             if year is None:
                 raise UnknownReference(
                     f"no academic year {term.academic_year_code}",
@@ -271,13 +267,9 @@ class TimetableService:
                 )
             school = uow.schools.get(SchoolCode(str(year.school_code)))
             if school is None:
-                raise UnknownReference(
-                    f"no school {year.school_code}", field="school_code"
-                )
+                raise UnknownReference(f"no school {year.school_code}", field="school_code")
 
-            section = resolve_section_for_term(
-                uow.enrolments, student_number, term, year
-            )
+            section = resolve_section_for_term(uow.enrolments, student_number, term, year)
             if section is None:
                 return StudentWeek(
                     student_number=str(student_number),
@@ -490,36 +482,88 @@ class TimetableService:
             uow.commit()
         return removed
 
-    def set_break_for_level(self, academic_year_code: AcademicYearCode, year_level_code: YearCode,
-                            period_number: int | None, break_duration_minutes: int = 0) -> None:
+    def set_break_for_level(
+        self,
+        academic_year_code: AcademicYearCode,
+        year_level_code: YearCode,
+        period_number: int | None,
+        break_duration_minutes: int = 0,
+    ) -> None:
         with self._uow_factory() as uow:
             year, school = self._require_year_and_school(uow, academic_year_code)
             if uow.year_levels.get(year_level_code, SchoolCode(str(school.code))) is None:
                 raise UnknownReference(f"no year level {year_level_code}", field="year_level_code")
             grid = uow.timetable.list_periods(SchoolCode(str(school.code)))
-            if period_number is not None and not any(p.period_number == period_number for p in grid):
-                raise ValidationError(f"school {school.code} has no period {period_number}", field="period_number")
+            if period_number is not None and not any(
+                p.period_number == period_number for p in grid
+            ):
+                raise ValidationError(
+                    f"school {school.code} has no period {period_number}", field="period_number"
+                )
             old = self._break_for_level(uow, academic_year_code, year_level_code, grid)
-            classes = {str(row.code) for row in uow.class_sections.list_for_year(academic_year_code, year_level_code=year_level_code)}
-            entries = [entry for entry in uow.timetable.list_entries(academic_year_code) if str(entry.slot.class_code) in classes]
+            classes = {
+                str(row.code)
+                for row in uow.class_sections.list_for_year(
+                    academic_year_code, year_level_code=year_level_code
+                )
+            }
+            entries = [
+                entry
+                for entry in uow.timetable.list_entries(academic_year_code)
+                if str(entry.slot.class_code) in classes
+            ]
             if old is not None and period_number is not None and old != period_number:
+
                 def destination(number: int) -> int:
-                    if period_number < old and period_number <= number < old: return number + 1
-                    if old < period_number and old < number <= period_number: return number - 1
+                    if period_number < old and period_number <= number < old:
+                        return number + 1
+                    if old < period_number and old < number <= period_number:
+                        return number - 1
                     return number
-                moves = [(entry, replace(entry, slot=TimetableSlot(str(entry.slot.class_code), str(entry.slot.term_code), entry.slot.day_of_week, destination(entry.slot.period_number)))) for entry in entries if destination(entry.slot.period_number) != entry.slot.period_number]
+
+                moves = [
+                    (
+                        entry,
+                        replace(
+                            entry,
+                            slot=TimetableSlot(
+                                str(entry.slot.class_code),
+                                str(entry.slot.term_code),
+                                entry.slot.day_of_week,
+                                destination(entry.slot.period_number),
+                            ),
+                        ),
+                    )
+                    for entry in entries
+                    if destination(entry.slot.period_number) != entry.slot.period_number
+                ]
                 uow.timetable.delete_entries([entry.slot for entry, _ in moves])
                 uow.timetable.upsert_entries([entry for _, entry in moves])
             key = self._break_key(academic_year_code, year_level_code)
             row = uow._session.scalar(select(m.SystemSetting).where(m.SystemSetting.key == key))
             if row is None:
-                row = m.SystemSetting(key=key, value="" if period_number is None else str(period_number), note="", updated_by="timetable")
+                row = m.SystemSetting(
+                    key=key,
+                    value="" if period_number is None else str(period_number),
+                    note="",
+                    updated_by="timetable",
+                )
                 uow._session.add(row)
-            else: row.value = "" if period_number is None else str(period_number)
+            else:
+                row.value = "" if period_number is None else str(period_number)
             duration_key = self._break_duration_key(academic_year_code, year_level_code)
-            duration_row = uow._session.scalar(select(m.SystemSetting).where(m.SystemSetting.key == duration_key))
+            duration_row = uow._session.scalar(
+                select(m.SystemSetting).where(m.SystemSetting.key == duration_key)
+            )
             if duration_row is None:
-                uow._session.add(m.SystemSetting(key=duration_key, value=str(break_duration_minutes), note="", updated_by="timetable"))
+                uow._session.add(
+                    m.SystemSetting(
+                        key=duration_key,
+                        value=str(break_duration_minutes),
+                        note="",
+                        updated_by="timetable",
+                    )
+                )
             else:
                 duration_row.value = str(break_duration_minutes)
             uow.commit()
@@ -533,15 +577,22 @@ class TimetableService:
         return f"timetable.break_duration.{year}.{level}"
 
     def _break_duration_for_level(self, uow, year, level) -> int:
-        value = uow._session.scalar(select(m.SystemSetting.value).where(m.SystemSetting.key == self._break_duration_key(year, level)))
+        value = uow._session.scalar(
+            select(m.SystemSetting.value).where(
+                m.SystemSetting.key == self._break_duration_key(year, level)
+            )
+        )
         # Older timetables predate the duration setting. Give their existing break a
         # usable default rather than constructing a zero-minute period, which the domain
         # correctly rejects as an invalid time range.
         return int(value) if value else 20
 
     def _break_for_level(self, uow, year, level, grid) -> int | None:
-        row = uow._session.scalar(select(m.SystemSetting.value).where(m.SystemSetting.key == self._break_key(year, level)))
-        if row is not None: return int(row) if row else None
+        row = uow._session.scalar(
+            select(m.SystemSetting.value).where(m.SystemSetting.key == self._break_key(year, level))
+        )
+        if row is not None:
+            return int(row) if row else None
         return next((p.period_number for p in grid if not p.is_teaching), None)
 
     def _periods_for_level(self, uow, year, level, grid):
@@ -559,8 +610,14 @@ class TimetableService:
         for period in grid:
             slot_duration = duration if period.period_number == chosen else lesson_minutes
             begins, finishes = round(cursor), round(cursor + slot_duration)
-            periods.append(replace(period, is_teaching=period.period_number != chosen,
-                starts_at=time(begins // 60, begins % 60), ends_at=time(finishes // 60, finishes % 60)))
+            periods.append(
+                replace(
+                    period,
+                    is_teaching=period.period_number != chosen,
+                    starts_at=time(begins // 60, begins % 60),
+                    ends_at=time(finishes // 60, finishes % 60),
+                )
+            )
             cursor += slot_duration
         return tuple(periods)
 
@@ -630,9 +687,7 @@ class TimetableService:
                     include_inactive=False,
                     year_level_code=section.year_level_code,
                 )
-                if not any(
-                    str(subject.code) == str(entry.subject_code) for subject in assigned
-                ):
+                if not any(str(subject.code) == str(entry.subject_code) for subject in assigned):
                     raise DomainRuleViolation(
                         f"{entry.subject_code} is not assigned to "
                         f"{section.year_level_code}, so {slot.class_code} does not "
@@ -667,9 +722,7 @@ class TimetableService:
             )
         school = uow.schools.get(SchoolCode(str(year.school_code)))
         if school is None:
-            raise UnknownReference(
-                f"no school {year.school_code}", field="school_code"
-            )
+            raise UnknownReference(f"no school {year.school_code}", field="school_code")
         return year, school
 
     @staticmethod
@@ -684,9 +737,7 @@ class TimetableService:
         return section
 
     @staticmethod
-    def _require_term(
-        uow: UnitOfWork, academic_year_code: AcademicYearCode, term_code: TermCode
-    ):
+    def _require_term(uow: UnitOfWork, academic_year_code: AcademicYearCode, term_code: TermCode):
         term = uow.terms.get(term_code)
         if term is None:
             raise UnknownReference(f"no term {term_code}", field="term_code")
@@ -694,16 +745,13 @@ class TimetableService:
         # for a stretch of time the class does not exist in.
         if str(term.academic_year_code) != str(academic_year_code):
             raise ValidationError(
-                f"term {term_code} belongs to {term.academic_year_code}, not "
-                f"{academic_year_code}",
+                f"term {term_code} belongs to {term.academic_year_code}, not {academic_year_code}",
                 field="term_code",
             )
         return term
 
     @staticmethod
-    def _entries_for_school(
-        uow: UnitOfWork, school_code: SchoolCode
-    ) -> Sequence[TimetableEntry]:
+    def _entries_for_school(uow: UnitOfWork, school_code: SchoolCode) -> Sequence[TimetableEntry]:
         """Every lesson at a school, across its years. Only `set_periods` needs this.
 
         Across years rather than in the current one because the period grid is the

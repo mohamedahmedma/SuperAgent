@@ -15,6 +15,7 @@ The `PATCH` route exists so a custody change does not require a spreadsheet. Whe
 order arrives, the office needs to revoke one parent's access in the next minute, and an
 answer of "re-upload the guardians file" is not one.
 """
+
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends
@@ -248,9 +249,7 @@ def resolve_guardian(
     request whose purpose is to stop holding numbers.
     """
     with domain_errors():
-        phone = Phone.parse(
-            body.phone, default_country_code=body.default_country_code
-        )
+        phone = Phone.parse(body.phone, default_country_code=body.default_country_code)
         found = queries.resolve_guardian(phone)
     if found is None:
         # The same shape as every other "nothing on file" in this service. It says nothing
@@ -420,9 +419,7 @@ def update_guardian_details(
             if guardian is None:
                 raise UnknownReference(f"no guardian reachable on {parsed}", field="phone")
             replacement_phone = (
-                Phone.parse(
-                    body.phone, default_country_code=get_settings().default_country_code
-                )
+                Phone.parse(body.phone, default_country_code=get_settings().default_country_code)
                 if body.phone
                 else parsed
             )
@@ -443,9 +440,11 @@ def update_guardian_details(
                     .where(m.GuardianPhone.guardian_id == guardian_id)
                     .values(is_primary=False)
                 )
-                session.add(m.GuardianPhone(
-                    guardian_id=guardian_id, phone=str(replacement_phone), is_primary=True
-                ))
+                session.add(
+                    m.GuardianPhone(
+                        guardian_id=guardian_id, phone=str(replacement_phone), is_primary=True
+                    )
+                )
                 session.execute(
                     delete(m.GuardianPhone).where(
                         m.GuardianPhone.guardian_id == guardian_id,
@@ -456,7 +455,11 @@ def update_guardian_details(
                 guardian,
                 phones=(
                     replacement_phone,
-                    *(known for known in guardian.phones if known != parsed and known != replacement_phone),
+                    *(
+                        known
+                        for known in guardian.phones
+                        if known != parsed and known != replacement_phone
+                    ),
                 ),
                 full_name_ar=body.full_name_ar,
                 full_name_en=body.full_name_en,
@@ -521,9 +524,7 @@ def _require_link(uow: UnitOfWork, number: StudentNumber, phone: Phone):
         for link in links:
             if guardian.reachable_on(link.guardian_phone):
                 return link
-    raise UnknownReference(
-        f"{phone} is not a guardian of student {number}", field="phone"
-    )
+    raise UnknownReference(f"{phone} is not a guardian of student {number}", field="phone")
 
 
 def _replaced(link, *, can_view_records: bool, restriction_note: str):

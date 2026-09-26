@@ -12,6 +12,7 @@ paragraph and needed no changes to support images.
 This module is the only place that knows both vocabularies. `backend/assets` never
 hears the word "block"; the layout parsers never hear the word "dossier".
 """
+
 from __future__ import annotations
 
 import logging
@@ -158,22 +159,24 @@ def enrich_image_blocks(
         if entry is None:
             continue
         surrogate, dossier = entry
-        enriched.append({
-            "type": "text",
-            "content": surrogate,
-            "page_number": int(block.get("page_number", 0) or 0),
-            "top": block.get("top", 0.0),
-            # Carried through units into chunks so retrieval can surface the image
-            # itself alongside the text that made it findable.
-            "asset_ids": [dossier.asset_id],
-            # The surrogate again, still divided into the fields it was built from.
-            # `content` is the same text joined, kept because everything between here
-            # and the hierarchy builder reads a block's `content` and should not have
-            # to learn about figures. Chunking reads THIS, because where a figure may
-            # be divided is a question about its fields — the header identifies every
-            # piece, the transcription is the part that can be arbitrarily long — and
-            # the joined string no longer says where one ends and the next begins.
-            "figure": dossier.surrogate_parts(),
-        })
+        enriched.append(
+            {
+                "type": "text",
+                "content": surrogate,
+                "page_number": int(block.get("page_number", 0) or 0),
+                "top": block.get("top", 0.0),
+                # Carried through units into chunks so retrieval can surface the image
+                # itself alongside the text that made it findable.
+                "asset_ids": [dossier.asset_id],
+                # The surrogate again, still divided into the fields it was built from.
+                # `content` is the same text joined, kept because everything between here
+                # and the hierarchy builder reads a block's `content` and should not have
+                # to learn about figures. Chunking reads THIS, because where a figure may
+                # be divided is a question about its fields — the header identifies every
+                # piece, the transcription is the part that can be arbitrarily long — and
+                # the joined string no longer says where one ends and the next begins.
+                "figure": dossier.surrogate_parts(),
+            }
+        )
 
     return enriched, report

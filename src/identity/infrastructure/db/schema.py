@@ -6,6 +6,7 @@ reaches a fresh database and silently misses every database that already exists.
 additive case is handled here, and **only** the additive case: nothing below drops,
 renames or retypes anything.
 """
+
 from __future__ import annotations
 
 import logging
@@ -62,9 +63,7 @@ def _add_missing_columns(engine) -> None:
             continue
         try:
             with engine.begin() as connection:
-                connection.execute(
-                    text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-                )
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
             logger.info("Added missing column %s.%s", table, column)
         except Exception:  # noqa: BLE001 - reported, never fatal; see the docstring
             logger.exception(

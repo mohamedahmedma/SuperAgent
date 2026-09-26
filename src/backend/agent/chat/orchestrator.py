@@ -22,6 +22,7 @@ What it can do, in order of how much it saves:
 All of it degrades to today's behaviour. The ladder's rungs are off by default, every
 detector failure abstains, and an empty plan means "build the agent exactly as before".
 """
+
 from __future__ import annotations
 
 import logging
@@ -77,9 +78,7 @@ def plan_turn(
     try:
         config = _LadderConfig(profile.agent, profile.rag)
         messages = list(history or [])
-        resolved = resolution or resolve_question(
-            question, messages, config, invoke=resolve_invoke
-        )
+        resolved = resolution or resolve_question(question, messages, config, invoke=resolve_invoke)
         signals = build_ladder(config, envelope_invoke=envelope_invoke).run(
             SignalContext(
                 question=question,
@@ -101,7 +100,9 @@ def plan_turn(
         )
     except Exception:
         logger.warning("turn planning failed; running the turn unchanged", exc_info=True)
-        return TurnPlan(reasons=["planner error — defaults applied"]), RequestSignals(question=question)
+        return TurnPlan(reasons=["planner error — defaults applied"]), RequestSignals(
+            question=question
+        )
 
     _hand_to_graph(ctx, plan)
     _emit(ctx, signals, plan)
@@ -182,8 +183,15 @@ def _hand_to_graph(ctx: Optional[ChatRequestContext], plan: TurnPlan) -> None:
     # dropped, so the retry re-sends the argument that caused the TypeError and the
     # ladder walks all the way down handing over nothing at all.
     for dropped in (
-        "child_names", "planned_calls", "forced_tool", "child_label", "child_id",
-        "child_year", "language", "is_followup", "carried_constraints",
+        "child_names",
+        "planned_calls",
+        "forced_tool",
+        "child_label",
+        "child_id",
+        "child_year",
+        "language",
+        "is_followup",
+        "carried_constraints",
     ):
         hints.pop(dropped, None)
         try:
@@ -288,9 +296,7 @@ def _emit(ctx: Optional[ChatRequestContext], signals: RequestSignals, plan: Turn
         if plan.child_hint:
             ctx.emit_rag_step("👤", "Reading one child's details", plan.child_hint)
         elif plan.child_options:
-            ctx.emit_rag_step(
-                "👥", "Asking which child", f"{len(plan.child_options)} on file"
-            )
+            ctx.emit_rag_step("👥", "Asking which child", f"{len(plan.child_options)} on file")
         if plan.short_circuit:
             ctx.emit_rag_step("🚪", "Answered without searching", "; ".join(plan.reasons)[:90])
         elif plan.planned_calls:
@@ -308,7 +314,8 @@ def _emit(ctx: Optional[ChatRequestContext], signals: RequestSignals, plan: Turn
             )
         elif plan.retrieval_sections:
             ctx.emit_rag_step(
-                "🧭", f"Prioritising {len(plan.retrieval_sections)} knowledge section(s)",
+                "🧭",
+                f"Prioritising {len(plan.retrieval_sections)} knowledge section(s)",
                 "; ".join(signals.reasons)[:90],
             )
     except Exception:  # pragma: no cover - progress reporting must never break a turn

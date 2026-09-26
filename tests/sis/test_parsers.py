@@ -17,6 +17,7 @@ implementation becomes "helpful" about it:
   produce well-formed rows there — every value is a valid code — so nothing downstream
   could notice; only an assertion on which field got which value catches it.
 """
+
 import io
 from collections.abc import Callable, Sequence
 
@@ -232,9 +233,7 @@ def test_arabic_indic_digits_in_a_student_number_reject_only_that_row() -> None:
     result = ROSTER.parse(content, "roster.csv")
 
     assert [str(row.student_number) for row in result.rows] == ["S001", "S003"]
-    assert [(d.line, d.code) for d in result.diagnostics] == [
-        (3, RowCode.MISSING_STUDENT_NUMBER)
-    ]
+    assert [(d.line, d.code) for d in result.diagnostics] == [(3, RowCode.MISSING_STUDENT_NUMBER)]
     assert result.total_lines == 3
 
 
@@ -244,7 +243,7 @@ def test_arabic_indic_digits_in_a_student_number_reject_only_that_row() -> None:
 
 
 def test_a_missing_required_header_quotes_the_headers_that_were_found() -> None:
-    """"Not found" without evidence sends a registrar looking for a column she has.
+    """ "Not found" without evidence sends a registrar looking for a column she has.
 
     The message has to carry both halves — the spellings that would have worked and the
     spellings the file actually holds — because the fix is a rename, and she cannot make
@@ -390,7 +389,7 @@ def test_a_blank_mark_is_none_and_a_zero_is_a_mark(
 
 
 def test_an_unmarked_row_keeps_the_scale_its_points_column_states() -> None:
-    """"Out of 20, unmarked" is the honest record; the maximum is a scale, not a mark."""
+    """ "Out of 20, unmarked" is the honest record; the maximum is a scale, not a mark."""
     content = as_xlsx(
         [
             ("Student Number", "Points", "Out Of"),

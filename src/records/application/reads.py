@@ -28,6 +28,7 @@ project it: which class she is in, which subjects she studies, who teaches her. 
 separate questions and one read, because all three describe the same room and asking three
 times could be told about three different ones. See `records/ports/classroom.py`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -190,7 +191,11 @@ class RecordsService:
         )
 
     def grades(
-        self, *, guardian_id: str, student_id: str, term_code: str | None,
+        self,
+        *,
+        guardian_id: str,
+        student_id: str,
+        term_code: str | None,
         school_code: str | None = None,
     ) -> GradesResult:
         """Every subject's rollup for one student in one term."""
@@ -220,8 +225,13 @@ class RecordsService:
         )
 
     def course_detail(
-        self, *, guardian_id: str, student_id: str, course_id: str,
-        term_code: str | None, school_code: str | None = None,
+        self,
+        *,
+        guardian_id: str,
+        student_id: str,
+        course_id: str,
+        term_code: str | None,
+        school_code: str | None = None,
     ) -> CourseDetailResult:
         """One subject in detail — the figures behind "why is her maths grade 72"."""
         student = self._resolve_student(guardian_id, student_id, school_code)
@@ -243,7 +253,11 @@ class RecordsService:
         raise StudentNotFound("No such subject for this student this term.")
 
     def attendance(
-        self, *, guardian_id: str, student_id: str, term_code: str | None,
+        self,
+        *,
+        guardian_id: str,
+        student_id: str,
+        term_code: str | None,
         school_code: str | None = None,
     ) -> AttendanceResult:
         """Attendance totals for a term, with the recent days behind them."""
@@ -273,7 +287,11 @@ class RecordsService:
         )
 
     def timetable(
-        self, *, guardian_id: str, student_id: str, term_code: str | None,
+        self,
+        *,
+        guardian_id: str,
+        student_id: str,
+        term_code: str | None,
         school_code: str | None = None,
     ) -> TimetableResult:
         """One child's week for a term — the class she sits in, and what it does.
@@ -294,9 +312,7 @@ class RecordsService:
             # A deployment that wired no timetable port. `NotConfigured` rather than an
             # empty week, because "this deployment cannot answer" is the operator's problem
             # and an empty week would be read by a parent as "she has no lessons".
-            raise NotConfigured(
-                "This deployment has no timetable backend configured."
-            )
+            raise NotConfigured("This deployment has no timetable backend configured.")
 
         timetable = self._timetables.get_timetable(
             student_ref=student.external_id,
@@ -307,12 +323,14 @@ class RecordsService:
             guardian_ref=guardian_id,
         )
 
-        return TimetableResult(
-            student=student, term=term, timetable=timetable, as_of=self._clock()
-        )
+        return TimetableResult(student=student, term=term, timetable=timetable, as_of=self._clock())
 
     def classroom(
-        self, *, guardian_id: str, student_id: str, term_code: str | None,
+        self,
+        *,
+        guardian_id: str,
+        student_id: str,
+        term_code: str | None,
         school_code: str | None = None,
     ) -> ClassroomResult:
         """One child's room, its subject board and its staff — one read, three routes.
@@ -338,9 +356,7 @@ class RecordsService:
             # A deployment that wired no classroom port. `NotConfigured` rather than an
             # empty room, because "this deployment cannot answer" is the operator's problem
             # and an empty room reads to a parent as "she has no teachers".
-            raise NotConfigured(
-                "This deployment has no classroom backend configured."
-            )
+            raise NotConfigured("This deployment has no classroom backend configured.")
 
         classroom = self._classrooms.get_classroom(
             student_ref=student.external_id,
@@ -351,9 +367,7 @@ class RecordsService:
             guardian_ref=guardian_id,
         )
 
-        return ClassroomResult(
-            student=student, term=term, classroom=classroom, as_of=self._clock()
-        )
+        return ClassroomResult(student=student, term=term, classroom=classroom, as_of=self._clock())
 
     # -- internals ----------------------------------------------------------
 

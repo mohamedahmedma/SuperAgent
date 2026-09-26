@@ -20,6 +20,7 @@ and never to reject — rejection has to be escalated to something that reads me
 Detectors report. They never decide: turning signals into actions is
 `backend/agent/chat/turn_policy.py`, which is pure.
 """
+
 from __future__ import annotations
 
 import logging
@@ -161,9 +162,12 @@ class RequestSignals:
             "request_candidate_sections": list(self.candidate_sections),
             "request_scope_options": list(self.scope_options),
             "request_top_match": (
-                {"question": self.scope_matches[0].question,
-                 "score": round(self.scope_matches[0].score, 4)}
-                if self.scope_matches else None
+                {
+                    "question": self.scope_matches[0].question,
+                    "score": round(self.scope_matches[0].score, 4),
+                }
+                if self.scope_matches
+                else None
             ),
             "request_assessed_by": list(self.assessed_by),
             "request_reason": "; ".join(self.reasons)[:400] or "n/a",
@@ -250,8 +254,7 @@ class SocialDetector:
 
     def detect(self, ctx: SignalContext, signals: RequestSignals) -> Optional[RequestSignals]:
         phrases = {
-            _social_key(phrase)
-            for phrase in (getattr(ctx.config, "social_phrases", None) or [])
+            _social_key(phrase) for phrase in (getattr(ctx.config, "social_phrases", None) or [])
         }
         key = _social_key(ctx.question)
         if not key or key not in phrases:
@@ -270,6 +273,7 @@ class SocialDetector:
 # ---------------------------------------------------------------------------
 # Rung 1 — corpus similarity
 # ---------------------------------------------------------------------------
+
 
 class CorpusSimilarityDetector:
     """Compares the question against corpus section vectors.
@@ -334,11 +338,7 @@ def _last_user_text(history: Sequence[Any]) -> str:
             if isinstance(content, str):
                 return content
             if isinstance(content, list):
-                parts = [
-                    block.get("text", "")
-                    for block in content
-                    if isinstance(block, dict)
-                ]
+                parts = [block.get("text", "") for block in content if isinstance(block, dict)]
                 return " ".join(part for part in parts if part)
     return ""
 
@@ -416,9 +416,7 @@ class EnvelopeDetector:
         # name from the turn before is exactly the carried-over guess the check exists to
         # catch. The resolved question is a different matter: a resolver naming the child
         # is the designed path, and its name is evidence.
-        self._read_child(
-            result, signals, classified_text=ctx.resolved_question or ctx.question
-        )
+        self._read_child(result, signals, classified_text=ctx.resolved_question or ctx.question)
 
         verdict = str(result.get("scope") or "").strip().lower()
         if verdict == Scope.OUT_OF_DOMAIN.value:
@@ -478,9 +476,7 @@ class EnvelopeDetector:
         wanted = {str(item).strip() for item in named}
         signals.needed_tools = [name for name in catalogue if name in wanted]
         if signals.needed_tools:
-            signals.reasons.append(
-                f"classifier: needs {', '.join(signals.needed_tools)}"
-            )
+            signals.reasons.append(f"classifier: needs {', '.join(signals.needed_tools)}")
 
     @staticmethod
     def _read_child(result: dict, signals: RequestSignals, *, classified_text: str = "") -> None:
@@ -624,9 +620,9 @@ class RequestEnvelope(StructuredOutput):
             "rather than about the school in general"
         ),
     )
-    child_reference: _Literal[
-        "none", "son", "daughter", "child", "plural", "named", "context"
-    ] = Field(default="none", description="How the child was referred to")
+    child_reference: _Literal["none", "son", "daughter", "child", "plural", "named", "context"] = (
+        Field(default="none", description="How the child was referred to")
+    )
     child_name: str = Field(
         default="",
         description="A name the message actually contained; empty otherwise",
@@ -667,7 +663,6 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
     personal_fields = list(getattr(config, "personal_data_fields", None) or [])
     child_context = bool(getattr(config, "child_context_enabled", False))
     tool_catalogue = dict(getattr(config, "tool_selection", None) or {})
-
 
     prompt = render(
         "chat/request_envelope.j2",
@@ -721,6 +716,7 @@ def _history_text(history, config) -> str:
 # Ladder
 # ---------------------------------------------------------------------------
 
+
 class SignalLadder:
     """Runs detectors cheapest-first, stopping once scope is settled well enough."""
 
@@ -748,7 +744,9 @@ class SignalLadder:
             except Exception:
                 # A detector is an optimisation. Losing one costs the savings it would
                 # have produced, never the turn.
-                logger.warning("signal detector %s failed, continuing", detector.name, exc_info=True)
+                logger.warning(
+                    "signal detector %s failed, continuing", detector.name, exc_info=True
+                )
                 continue
             if updated is None:
                 continue

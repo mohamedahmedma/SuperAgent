@@ -4,6 +4,7 @@ Both satisfy `application/ports/messaging.WhatsAppGateway`. Neither reads the en
 — credentials arrive as constructor arguments from the composition root, which is what
 lets a two-school deployment build two of these with different tokens.
 """
+
 from __future__ import annotations
 
 import logging
@@ -89,8 +90,7 @@ class CloudApiWhatsAppGateway:
         import httpx
 
         url = (
-            f"{_GRAPH_HOST}/{self._graph_version}/"
-            f"{quote(self._phone_number_id, safe='')}/messages"
+            f"{_GRAPH_HOST}/{self._graph_version}/{quote(self._phone_number_id, safe='')}/messages"
         )
         payload = {
             "messaging_product": "whatsapp",

@@ -12,6 +12,7 @@ page_number is the worksheet index (the citation anchor: "sheet 2"); `top` is a
 document-order surrogate. Sheets are row-capped defensively so a pathological
 workbook cannot balloon ingestion. openpyxl is imported lazily.
 """
+
 from __future__ import annotations
 
 import logging
@@ -46,7 +47,8 @@ def parse_xlsx_blocks(file_path: str) -> List[Dict[str, Any]]:
                 if row_index >= MAX_ROWS_PER_SHEET:
                     logger.warning(
                         "Sheet %r exceeds %d rows — truncating remaining rows",
-                        worksheet.title, MAX_ROWS_PER_SHEET,
+                        worksheet.title,
+                        MAX_ROWS_PER_SHEET,
                     )
                     break
                 raw_rows.append([_cell_to_text(value) for value in row])
@@ -57,21 +59,25 @@ def parse_xlsx_blocks(file_path: str) -> List[Dict[str, Any]]:
 
             title = (worksheet.title or "").strip()
             if title:
-                blocks.append({
-                    "type": "heading",
-                    "content": title,
-                    "level": 1,
+                blocks.append(
+                    {
+                        "type": "heading",
+                        "content": title,
+                        "level": 1,
+                        "page_number": sheet_index,
+                        "top": order,
+                    }
+                )
+                order += 1.0
+            blocks.append(
+                {
+                    "type": "table",
+                    "content": format_table_rows(rows),
+                    "rows": rows,
                     "page_number": sheet_index,
                     "top": order,
-                })
-                order += 1.0
-            blocks.append({
-                "type": "table",
-                "content": format_table_rows(rows),
-                "rows": rows,
-                "page_number": sheet_index,
-                "top": order,
-            })
+                }
+            )
             order += 1.0
         return blocks
     finally:

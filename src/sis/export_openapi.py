@@ -10,6 +10,7 @@ schema changes.
 No database is needed to run this. The schema check lives in the app's lifespan, which
 never starts here — rendering the contract must not require production credentials.
 """
+
 import json
 import pathlib
 

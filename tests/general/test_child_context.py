@@ -10,6 +10,7 @@ The tests that matter most are the ones about NOT remembering: a pin that outliv
 guardian binding it was resolved under would inject one family's child into another
 family's conversation, and that is the only failure here that is worse than the bug.
 """
+
 import unittest
 
 from backend.api.routes.chat import DEFAULT_THREAD, _thread_id
@@ -45,11 +46,15 @@ class SessionChildTests(unittest.TestCase):
     def test_a_pin_the_session_already_stores_is_not_written_again(self):
         """Two turns in flight on one conversation: the one that pinned nobody must not
         write its snapshot back over the child the other one settled."""
-        stored = SessionChild(student_id="S1001", label="ليلى", guardian_id="gdn_7f3a").to_metadata()
+        stored = SessionChild(
+            student_id="S1001", label="ليلى", guardian_id="gdn_7f3a"
+        ).to_metadata()
         child = load_child_state({SESSION_CHILD_KEY: stored}, guardian_id="gdn_7f3a")
 
         self.assertEqual({}, save_child_state({}, child, stored=stored))
-        self.assertEqual({}, save_child_state({}, SessionChild(guardian_id="gdn_7f3a"), stored=None))
+        self.assertEqual(
+            {}, save_child_state({}, SessionChild(guardian_id="gdn_7f3a"), stored=None)
+        )
 
         child.pin(student_id="S1002")
         self.assertIn(SESSION_CHILD_KEY, save_child_state({}, child, stored=stored))
@@ -62,9 +67,11 @@ class SessionChildTests(unittest.TestCase):
         (identity/routes.py:342), so without this check a custody transfer leaves the
         conversation pinned to the previous family's child.
         """
-        stored = {SESSION_CHILD_KEY: SessionChild(
-            student_id="S1001", label="ليلى", guardian_id="gdn_OLD"
-        ).to_metadata()}
+        stored = {
+            SESSION_CHILD_KEY: SessionChild(
+                student_id="S1001", label="ليلى", guardian_id="gdn_OLD"
+            ).to_metadata()
+        }
 
         inherited = load_child_state(stored, guardian_id="gdn_NEW")
 

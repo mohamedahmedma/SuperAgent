@@ -35,6 +35,7 @@ class belongs to a rung, and a rung belongs to exactly one track. The Arabic and
 sections therefore have separate timetables by construction, and a `track_id` here could
 only ever disagree with the rung's own.
 """
+
 from dataclasses import dataclass
 from datetime import time
 
@@ -124,9 +125,7 @@ class TimetablePeriod:
         if not code:
             raise ValidationError("school code is required", field="school_code")
         object.__setattr__(self, "school_code", code)
-        object.__setattr__(
-            self, "period_number", _period_number(self.period_number)
-        )
+        object.__setattr__(self, "period_number", _period_number(self.period_number))
         object.__setattr__(self, "name_en", str(self.name_en or "").strip())
         object.__setattr__(self, "name_ar", str(self.name_ar or "").strip())
         # A stated range must not be inverted; an absent one is checked no further. Same
@@ -136,9 +135,7 @@ class TimetablePeriod:
             and self.ends_at is not None
             and self.ends_at <= self.starts_at
         ):
-            raise ValidationError(
-                "a period must end after it starts", field="ends_at"
-            )
+            raise ValidationError("a period must end after it starts", field="ends_at")
 
     @property
     def is_timed(self) -> bool:
@@ -169,9 +166,7 @@ class TimetableSlot:
         object.__setattr__(self, "class_code", ClassCode(self.class_code))
         object.__setattr__(self, "term_code", TermCode(self.term_code))
         object.__setattr__(self, "day_of_week", _working_day(self.day_of_week))
-        object.__setattr__(
-            self, "period_number", _period_number(self.period_number)
-        )
+        object.__setattr__(self, "period_number", _period_number(self.period_number))
 
     @property
     def key(self) -> tuple[str, str, str, int]:
@@ -217,9 +212,7 @@ class TimetableEntry:
             object.__setattr__(
                 self, "academic_year_code", AcademicYearCode(self.academic_year_code)
             )
-        if self.subject_code is not None and not isinstance(
-            self.subject_code, SubjectCode
-        ):
+        if self.subject_code is not None and not isinstance(self.subject_code, SubjectCode):
             object.__setattr__(self, "subject_code", SubjectCode(self.subject_code))
         if self.teacher_staff_number is not None:
             staff = str(self.teacher_staff_number).strip()

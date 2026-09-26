@@ -21,6 +21,7 @@ of them grows with the number of rows.
 repository that committed per row would leave row 140's failure on top of 139 written
 enrolments, which is the half-imported roster no screen reports as broken.
 """
+
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from datetime import date
 from typing import Any
@@ -46,11 +47,24 @@ _IN_CHUNK = 400
 # domain table so older databases/builds get the same behaviour without a data migration.
 # Both sides of the comparison are folded through the same sequence.
 _EXTRA_SEARCH_FOLDING = (
-    ("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ٱ", "ا"),
-    ("ة", "ه"), ("ى", "ي"), ("ئ", "ي"), ("ؤ", "و"),
+    ("أ", "ا"),
+    ("إ", "ا"),
+    ("آ", "ا"),
+    ("ٱ", "ا"),
+    ("ة", "ه"),
+    ("ى", "ي"),
+    ("ئ", "ي"),
+    ("ؤ", "و"),
     ("ـ", ""),
-    ("ً", ""), ("ٌ", ""), ("ٍ", ""), ("َ", ""), ("ُ", ""),
-    ("ِ", ""), ("ّ", ""), ("ْ", ""), ("ٰ", ""),
+    ("ً", ""),
+    ("ٌ", ""),
+    ("ٍ", ""),
+    ("َ", ""),
+    ("ُ", ""),
+    ("ِ", ""),
+    ("ّ", ""),
+    ("ْ", ""),
+    ("ٰ", ""),
 )
 
 
@@ -192,15 +206,19 @@ def _to_enrolment(row: Any) -> ClassEnrolment:
 
 def _join_section(stmt: Select[Any]) -> Select[Any]:
     """Attach the section, its year and its level to a statement already on enrolments."""
-    return stmt.join(
-        models.ClassSection,
-        models.ClassSection.id == models.ClassEnrolment.class_section_id,
-    ).join(
-        models.AcademicYear,
-        models.AcademicYear.id == models.ClassSection.academic_year_id,
-    ).join(
-        models.YearLevel,
-        models.YearLevel.id == models.ClassSection.year_level_id,
+    return (
+        stmt.join(
+            models.ClassSection,
+            models.ClassSection.id == models.ClassEnrolment.class_section_id,
+        )
+        .join(
+            models.AcademicYear,
+            models.AcademicYear.id == models.ClassSection.academic_year_id,
+        )
+        .join(
+            models.YearLevel,
+            models.YearLevel.id == models.ClassSection.year_level_id,
+        )
     )
 
 
@@ -228,15 +246,11 @@ class SqlAlchemyStudentRepository:
 
     def get(self, student_number: StudentNumber) -> Student | None:
         row = self._session.scalars(
-            select(models.Student).where(
-                models.Student.student_number == str(student_number)
-            )
+            select(models.Student).where(models.Student.student_number == str(student_number))
         ).first()
         return _to_student(row) if row is not None else None
 
-    def get_many(
-        self, student_numbers: Collection[StudentNumber]
-    ) -> Mapping[str, Student]:
+    def get_many(self, student_numbers: Collection[StudentNumber]) -> Mapping[str, Student]:
         wanted = sorted({str(number) for number in student_numbers})
         found: dict[str, Student] = {}
         for chunk in _chunked(wanted):
@@ -315,9 +329,7 @@ class SqlAlchemyStudentRepository:
         created: dict[str, bool] = {}
         for number, student in incoming.items():
             row = existing.get(number)
-            details = {
-                column: getattr(student, column) for column in _STUDENT_DETAIL_COLUMNS
-            }
+            details = {column: getattr(student, column) for column in _STUDENT_DETAIL_COLUMNS}
             if row is None:
                 created[number] = True
                 to_insert.append({"student_number": number, **details})
@@ -328,10 +340,7 @@ class SqlAlchemyStudentRepository:
             # invariant 3 held honestly: re-importing September's roster in March must not
             # stamp `updated_at` on nine hundred children and destroy the only column that
             # can answer "whose details changed in this import".
-            if any(
-                getattr(row, column) != details[column]
-                for column in _STUDENT_DETAIL_COLUMNS
-            ):
+            if any(getattr(row, column) != details[column] for column in _STUDENT_DETAIL_COLUMNS):
                 to_update.append({"id": row.id, **details})
 
         if to_insert:
@@ -342,9 +351,7 @@ class SqlAlchemyStudentRepository:
 
     def set_active(self, student_number: StudentNumber, *, is_active: bool) -> Student:
         row = self._session.scalars(
-            select(models.Student).where(
-                models.Student.student_number == str(student_number)
-            )
+            select(models.Student).where(models.Student.student_number == str(student_number))
         ).first()
         if row is None:
             raise UnknownReference(
@@ -364,9 +371,7 @@ class SqlAlchemyEnrolmentRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def class_section_on(
-        self, student_id: StudentNumber, on_date: date
-    ) -> ClassSection | None:
+    def class_section_on(self, student_id: StudentNumber, on_date: date) -> ClassSection | None:
         """Which class this child was in on `on_date`, or `None`.
 
         The window test is `starts_on <= on_date AND (ends_on IS NULL OR ends_on >=
@@ -577,12 +582,8 @@ class SqlAlchemyEnrolmentRepository:
         if row is None:
             return None
 
-        section_ids = self._section_ids(
-            {(str(academic_year_code), str(to_class))}
-        )
-        section_id = section_ids.get(
-            (str(academic_year_code), str(to_class))
-        )
+        section_ids = self._section_ids({(str(academic_year_code), str(to_class))})
+        section_id = section_ids.get((str(academic_year_code), str(to_class)))
         if section_id is None:
             raise UnknownReference(
                 f"no class {to_class} in academic year {academic_year_code}",
@@ -604,9 +605,7 @@ class SqlAlchemyEnrolmentRepository:
             ends_on=None,
         )
 
-    def upsert_many(
-        self, enrolments: Sequence[ClassEnrolment]
-    ) -> Mapping[EnrolmentKey, bool]:
+    def upsert_many(self, enrolments: Sequence[ClassEnrolment]) -> Mapping[EnrolmentKey, bool]:
         """Insert or update placements in bulk; `True` marks the ones this call created.
 
         Five statements for a roster of any size: student numbers -> ids, class codes ->
@@ -644,9 +643,7 @@ class SqlAlchemyEnrolmentRepository:
         existing: dict[tuple[int, int, date], models.ClassEnrolment] = {}
         for chunk in _chunked(sorted(student_ids.values())):
             for row in self._session.scalars(
-                select(models.ClassEnrolment).where(
-                    models.ClassEnrolment.student_id.in_(chunk)
-                )
+                select(models.ClassEnrolment).where(models.ClassEnrolment.student_id.in_(chunk))
             ):
                 existing[(row.student_id, row.class_section_id, row.starts_on)] = row
 
@@ -705,9 +702,7 @@ class SqlAlchemyEnrolmentRepository:
                 found[number] = student_id
         return found
 
-    def _section_ids(
-        self, keys: Collection[tuple[str, str]]
-    ) -> dict[tuple[str, str], int]:
+    def _section_ids(self, keys: Collection[tuple[str, str]]) -> dict[tuple[str, str], int]:
         """`(year code, class code)` -> section id, refusing an ambiguous match.
 
         `class_sections` is unique on `(year, level, code)`, so a school whose section

@@ -8,6 +8,7 @@ that fell out.
 Mocked at the adapter's own `_get`, which is where `records/`'s other adapter tests sit —
 no network, and no extra dependency to keep current.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -58,7 +59,9 @@ def test_a_term_of_register_days_becomes_one_entry(adapter: SisAdapter) -> None:
     register SIS actually keeps, reported at the granularity it is kept, and summing it
     gives the contract's term figures exactly.
     """
-    with patch.object(SisAdapter, "_get", return_value=_tally(present=7, absent=1, late=1, excused=1)):
+    with patch.object(
+        SisAdapter, "_get", return_value=_tally(present=7, absent=1, late=1, excused=1)
+    ):
         subjects = adapter.get_subject_attendance(student_ref="S001", term="2026-T1")
 
     assert len(subjects) == 1
@@ -73,7 +76,9 @@ def test_an_excused_day_counts_as_attended(adapter: SisAdapter) -> None:
     the parent-facing template says so out loud. Mapping SIS's narrower figure through
     would show a child with a doctor's note as having missed school.
     """
-    with patch.object(SisAdapter, "_get", return_value=_tally(present=7, absent=1, late=1, excused=1)):
+    with patch.object(
+        SisAdapter, "_get", return_value=_tally(present=7, absent=1, late=1, excused=1)
+    ):
         (subject,) = adapter.get_subject_attendance(student_ref="S001", term="2026-T1")
 
     # 9 of 10 — everything except the unexcused absence.
@@ -124,7 +129,9 @@ def test_without_a_calendar_attendance_is_simply_absent() -> None:
 
 def test_the_statuses_a_parent_is_shown_are_carried_through(adapter: SisAdapter) -> None:
     """The contract counts by description, so the four have to arrive named."""
-    with patch.object(SisAdapter, "_get", return_value=_tally(present=7, absent=1, late=1, excused=1)):
+    with patch.object(
+        SisAdapter, "_get", return_value=_tally(present=7, absent=1, late=1, excused=1)
+    ):
         (subject,) = adapter.get_subject_attendance(student_ref="S001", term="2026-T1")
 
     counts = {row["description"]: row["count"] for row in subject.by_status}
@@ -156,16 +163,22 @@ def _path_asked(adapter: SisAdapter, method: str, **kwargs) -> str:
 
 def test_grades_are_read_through_the_guardian_scoped_route(adapter: SisAdapter) -> None:
     path = _path_asked(
-        adapter, "get_subject_grades",
-        student_ref="S-1001", term="2026-T1", guardian_ref="G-1",
+        adapter,
+        "get_subject_grades",
+        student_ref="S-1001",
+        term="2026-T1",
+        guardian_ref="G-1",
     )
     assert path == "/v1/guardians/by-id/G-1/students/S-1001/grades"
 
 
 def test_attendance_is_read_through_the_guardian_scoped_route(adapter: SisAdapter) -> None:
     path = _path_asked(
-        adapter, "get_subject_attendance",
-        student_ref="S-1001", term="2026-T1", guardian_ref="G-1",
+        adapter,
+        "get_subject_attendance",
+        student_ref="S-1001",
+        term="2026-T1",
+        guardian_ref="G-1",
     )
     assert path == "/v1/guardians/by-id/G-1/students/S-1001/attendance"
 
@@ -178,8 +191,11 @@ def test_a_handle_with_a_slash_cannot_rewrite_the_path(adapter: SisAdapter) -> N
     into an unscoped one.
     """
     path = _path_asked(
-        adapter, "get_subject_grades",
-        student_ref="S-1001", term="2026-T1", guardian_ref="../..",
+        adapter,
+        "get_subject_grades",
+        student_ref="S-1001",
+        term="2026-T1",
+        guardian_ref="../..",
     )
     assert path == "/v1/guardians/by-id/..%2F../students/S-1001/grades"
     assert "/v1/students/" not in path
@@ -193,6 +209,9 @@ def test_no_guardian_falls_back_to_the_registrar_route(adapter: SisAdapter) -> N
     return the right data.
     """
     path = _path_asked(
-        adapter, "get_subject_grades", student_ref="S-1001", term="2026-T1",
+        adapter,
+        "get_subject_grades",
+        student_ref="S-1001",
+        term="2026-T1",
     )
     assert path == "/v1/students/S-1001/grades"

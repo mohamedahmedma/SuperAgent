@@ -9,6 +9,7 @@ as it did before profiles existed, and so a single container can be re-tuned wit
 editing a packaged YAML file. Profiles express *what a domain is*; env expresses
 *how this one deployment is dialled in*.
 """
+
 from __future__ import annotations
 
 import copy
@@ -158,9 +159,7 @@ def _inheritance_chain(name: str) -> List[str]:
 
     while current:
         if current in seen:
-            raise ProfileError(
-                f"Circular profile inheritance: {' -> '.join([*chain, current])}"
-            )
+            raise ProfileError(f"Circular profile inheritance: {' -> '.join([*chain, current])}")
         if len(chain) >= _MAX_INHERITANCE_DEPTH:
             raise ProfileError(
                 f"Profile inheritance deeper than {_MAX_INHERITANCE_DEPTH}: {' -> '.join(chain)}"

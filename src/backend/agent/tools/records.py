@@ -55,6 +55,7 @@ search_knowledge_base: this file decides which outcome occurred, the template re
 it. Every branch depends on what the call actually returned, so the system prompt
 cannot state any of it in advance.
 """
+
 import logging
 import os
 
@@ -509,9 +510,7 @@ def _one_day_context(context: dict, asked: AskedDay, language: str) -> dict:
         "day_relative": relative,
         # The school's week, for telling a parent which days their child does have when
         # the day they asked about is not one of them.
-        "school_days": [
-            str(day.get("shows_as") or day.get("name") or "") for day in days
-        ],
+        "school_days": [str(day.get("shows_as") or day.get("name") or "") for day in days],
     }
 
 
@@ -520,8 +519,12 @@ def _one_day_context(context: dict, asked: AskedDay, language: str) -> dict:
 #: do. A parent asking in Arabic and being shown «sunday» is the cost of rendering
 #: verbatim, and this is where that cost is paid rather than handed back to the model.
 _DAY_NAMES_AR = {
-    "sunday": "الأحد", "monday": "الاثنين", "tuesday": "الثلاثاء",
-    "wednesday": "الأربعاء", "thursday": "الخميس", "friday": "الجمعة",
+    "sunday": "الأحد",
+    "monday": "الاثنين",
+    "tuesday": "الثلاثاء",
+    "wednesday": "الأربعاء",
+    "thursday": "الخميس",
+    "friday": "الجمعة",
     "saturday": "السبت",
 }
 
@@ -563,9 +566,7 @@ def _timetable_context(student_label: str, data: dict, language: str = "") -> di
     contract is shaped to prevent.
     """
     lessons = data.get("lessons") or []
-    periods = {
-        int(row.get("period_number") or 0): row for row in data.get("periods") or []
-    }
+    periods = {int(row.get("period_number") or 0): row for row in data.get("periods") or []}
 
     def _slot(lesson: dict) -> dict:
         period = periods.get(int(lesson.get("period_number") or 0)) or {}
@@ -704,8 +705,7 @@ def make_get_student_subjects(ctx: ChatRequestContext):
             status=str(data.get("status") or ""),
             class_label=_label(data, "class_name_ar", "class_name_en"),
             subjects=[
-                _label(row, "name_ar", "name_en", "code")
-                for row in data.get("subjects") or []
+                _label(row, "name_ar", "name_en", "code") for row in data.get("subjects") or []
             ],
         )
 
@@ -752,8 +752,10 @@ def make_get_student_teachers(ctx: ChatRequestContext):
                 "which_subject",
                 student=student,
                 options=sorted(
-                    {_label(row, "subject_name_ar", "subject_name_en", "subject_code")
-                     for row in rows}
+                    {
+                        _label(row, "subject_name_ar", "subject_name_en", "subject_code")
+                        for row in rows
+                    }
                 ),
             )
         # Every teacher of that subject, never the first: two teachers for one subject is a
@@ -763,9 +765,7 @@ def make_get_student_teachers(ctx: ChatRequestContext):
             "subject_teacher",
             student_label=student.label,
             status=str(data.get("status") or ""),
-            subject_label=_label(
-                matched[0], "subject_name_ar", "subject_name_en", "subject_code"
-            ),
+            subject_label=_label(matched[0], "subject_name_ar", "subject_name_en", "subject_code"),
             teachers=[_label(row, "full_name_ar", "full_name_en") for row in matched],
         )
 

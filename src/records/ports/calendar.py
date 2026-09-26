@@ -1,4 +1,5 @@
 """The academic calendar, as far as this service needs it."""
+
 from __future__ import annotations
 
 from typing import Protocol

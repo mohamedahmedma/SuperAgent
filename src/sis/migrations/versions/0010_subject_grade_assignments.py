@@ -25,6 +25,7 @@ would be an assignment nobody could see on a board and nobody could delete from 
 Revision ID: 0010
 Revises: 0009
 """
+
 from alembic import op
 import sqlalchemy as sa
 

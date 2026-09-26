@@ -19,6 +19,7 @@ is serving, including JWKS and every password login, for as long as it takes. Th
 work therefore goes to a threadpool, which is where FastAPI would have run it anyway had
 the handler been a plain `def`.
 """
+
 import logging
 
 from fastapi import APIRouter, Query, Request, Response, status

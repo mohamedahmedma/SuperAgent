@@ -32,7 +32,9 @@ class FakeStructuredInvoker:
         self.handler = handler
 
     def invoke(self, messages):
-        content = messages[0]["content"] if messages and isinstance(messages[0], dict) else str(messages)
+        content = (
+            messages[0]["content"] if messages and isinstance(messages[0], dict) else str(messages)
+        )
         payload = self.handler(self.schema, content)
         return self.schema(**payload)
 
@@ -72,12 +74,14 @@ def load_pipeline(
     # would make every graph assertion depend on how long a fixture's text happens to be.
     fake_utils.EVIDENCE_WINDOW_CHARS = 2600
     fake_utils.retrieve_documents = retrieve_documents
-    fake_utils.rewrite_query_once = rewrite_query_once or (lambda query: {
-        "rewrite_method": "step_back",
-        "step_back_question": "broader question",
-        "hyde_document": "",
-        "rewritten_query": f"rewritten {query}",
-    })
+    fake_utils.rewrite_query_once = rewrite_query_once or (
+        lambda query: {
+            "rewrite_method": "step_back",
+            "step_back_question": "broader question",
+            "hyde_document": "",
+            "rewritten_query": f"rewritten {query}",
+        }
+    )
     fake_utils.dedupe_documents = _dedupe_documents
     fake_utils.retrieval_trace_fields = lambda meta: dict(meta)
 
@@ -88,7 +92,9 @@ def load_pipeline(
     )
     module = importlib.util.module_from_spec(spec)
 
-    with patch.dict(sys.modules, {"backend.agent.rag": fake_rag, "backend.agent.rag.utils": fake_utils}):
+    with patch.dict(
+        sys.modules, {"backend.agent.rag": fake_rag, "backend.agent.rag.utils": fake_utils}
+    ):
         spec.loader.exec_module(module)
 
     return module
@@ -229,9 +235,11 @@ class RagShortCircuitTests(unittest.TestCase):
             }
 
         pipeline = enable_complexity_planning(load_pipeline(retrieve_documents=retrieve))
-        complexity_model = Mock(return_value=FakeStructuredModel(
-            lambda schema, prompt: {"complexity": "simple", "reason": "model"}
-        ))
+        complexity_model = Mock(
+            return_value=FakeStructuredModel(
+                lambda schema, prompt: {"complexity": "simple", "reason": "model"}
+            )
+        )
         pipeline._get_complexity_model = complexity_model
         pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
 
@@ -327,6 +335,7 @@ class RagShortCircuitTests(unittest.TestCase):
         Asserting only "the model was not called" would also pass if the node ran and
         took its fast path, which is a different (and still billable) system. So the
         graph's own node list is checked too."""
+
         def retrieve(query, top_k=5, language=""):
             return {"docs": [_doc("direct answer evidence")], "meta": _meta(1)}
 
@@ -347,7 +356,12 @@ class RagShortCircuitTests(unittest.TestCase):
         pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
 
         nodes = set(pipeline.rag_graph.get_graph().nodes)
-        for absent in ("classify_complexity", "prepare_sub_questions", "rag_sub_agent", "synthesis"):
+        for absent in (
+            "classify_complexity",
+            "prepare_sub_questions",
+            "rag_sub_agent",
+            "synthesis",
+        ):
             self.assertNotIn(absent, nodes)
         self.assertIn("retrieve_initial", nodes)
 
@@ -385,7 +399,9 @@ class RagShortCircuitTests(unittest.TestCase):
 
         pipeline = load_pipeline(
             retrieve_documents=retrieve,
-            rewrite_query_once=lambda query: calls.__setitem__("step_back", calls["step_back"] + 1) or {},
+            rewrite_query_once=lambda query: (
+                calls.__setitem__("step_back", calls["step_back"] + 1) or {}
+            ),
         )
         pipeline._get_complexity_model = lambda: FakeStructuredModel(
             lambda schema, prompt: {"complexity": "simple", "reason": "unit"}
@@ -470,10 +486,17 @@ class RagShortCircuitTests(unittest.TestCase):
         The chunks now reach the model, marked `partial` so the tool tells it to answer
         from what they establish and name what they leave open.
         """
+
         def retrieve(query, top_k=5, language=""):
-            return {"docs": [_doc("Our partners include Cairo University and the British Council.",
-                                  "chunk-partners")],
-                    "meta": _meta(1)}
+            return {
+                "docs": [
+                    _doc(
+                        "Our partners include Cairo University and the British Council.",
+                        "chunk-partners",
+                    )
+                ],
+                "meta": _meta(1),
+            }
 
         def grade(schema, prompt):
             return {
@@ -514,13 +537,19 @@ class RagShortCircuitTests(unittest.TestCase):
 
         def retrieve(query, top_k=5, language=""):
             calls["retrieve"] += 1
-            return {"docs": [_doc("Our partners include Cairo University.", "chunk-1")],
-                    "meta": _meta(1)}
+            return {
+                "docs": [_doc("Our partners include Cairo University.", "chunk-1")],
+                "meta": _meta(1),
+            }
 
         def rewrite(query):
             calls["rewrite"] += 1
-            return {"rewrite_method": "step_back", "step_back_question": "b",
-                    "hyde_document": "", "rewritten_query": f"rewritten {query}"}
+            return {
+                "rewrite_method": "step_back",
+                "step_back_question": "b",
+                "hyde_document": "",
+                "rewritten_query": f"rewritten {query}",
+            }
 
         def grade(schema, prompt):
             return {
@@ -588,8 +617,10 @@ class RagShortCircuitTests(unittest.TestCase):
 
         def retrieve(query, top_k=5, language=""):
             calls["retrieve"] += 1
-            return {"docs": [_doc("the school partners are listed here", "chunk-1")],
-                    "meta": _meta(1)}
+            return {
+                "docs": [_doc("the school partners are listed here", "chunk-1")],
+                "meta": _meta(1),
+            }
 
         def grade(schema, prompt):
             return {
@@ -623,9 +654,12 @@ class RagShortCircuitTests(unittest.TestCase):
         knowledge tool pinned nothing, which is exactly what a denial does. Leaving them
         there is how "the knowledge base has no reliable information on this" arrived
         with the figure that answers the question attached to it."""
+
         def retrieve(query, top_k=5, language=""):
-            return {"docs": [{**_doc("a page about something else"), "asset_ids": ["asset-1"]}],
-                    "meta": _meta(1)}
+            return {
+                "docs": [{**_doc("a page about something else"), "asset_ids": ["asset-1"]}],
+                "meta": _meta(1),
+            }
 
         def grade(schema, prompt):
             return {
@@ -728,13 +762,17 @@ class RagShortCircuitTests(unittest.TestCase):
                         "route": route,
                         "confidence": 0.61,
                         "missing_slots": ["version"] if ambiguity == "missing_slot" else [],
-                        "hitl_prompt": "Please provide the version" if ambiguity == "missing_slot" else "Please choose a direction",
+                        "hitl_prompt": "Please provide the version"
+                        if ambiguity == "missing_slot"
+                        else "Please choose a direction",
                         "hitl_options": ["A", "B"] if ambiguity == "multiple_candidates" else [],
                     }
 
                 pipeline = load_pipeline(
                     retrieve_documents=retrieve,
-                    rewrite_query_once=lambda query: calls.__setitem__("step_back", calls["step_back"] + 1) or {},
+                    rewrite_query_once=lambda query: (
+                        calls.__setitem__("step_back", calls["step_back"] + 1) or {}
+                    ),
                 )
                 pipeline._get_complexity_model = lambda: FakeStructuredModel(
                     lambda schema, prompt: {"complexity": "simple", "reason": "unit"}
@@ -754,7 +792,10 @@ class RagShortCircuitTests(unittest.TestCase):
 
     def test_hitl_result_includes_only_current_resume_state(self):
         def retrieve(query, top_k=5, language=""):
-            return {"docs": [_doc("Both Danjin and Dan Heng could be relevant", "candidate")], "meta": _meta(1)}
+            return {
+                "docs": [_doc("Both Danjin and Dan Heng could be relevant", "candidate")],
+                "meta": _meta(1),
+            }
 
         def grade(schema, prompt):
             return {
@@ -784,31 +825,37 @@ class RagShortCircuitTests(unittest.TestCase):
         self.assertIsInstance(resume_state, dict)
         self.assertEqual("What is this character's element?", resume_state.get("question"))
         self.assertEqual("needs_clarification", resume_state.get("retrieval_status"))
-        self.assertEqual({
-            "question",
-            "route",
-            "retrieval_status",
-            "rewrite_count",
-            "hitl_rounds",
-            "complexity",
-            "complexity_reason",
-            "sub_questions",
-            # Conditions set before the clarification. They cross the resume boundary
-            # for the same reason `hitl_rounds` does: the graph starts fresh there.
-            "carried_constraints",
-            # The planner's hints the question ran with, for the same reason again.
-            "language",
-            "child_year",
-            "retrieval_sections",
-            "child_names",
-        }, set(resume_state))
+        self.assertEqual(
+            {
+                "question",
+                "route",
+                "retrieval_status",
+                "rewrite_count",
+                "hitl_rounds",
+                "complexity",
+                "complexity_reason",
+                "sub_questions",
+                # Conditions set before the clarification. They cross the resume boundary
+                # for the same reason `hitl_rounds` does: the graph starts fresh there.
+                "carried_constraints",
+                # The planner's hints the question ran with, for the same reason again.
+                "language",
+                "child_year",
+                "retrieval_sections",
+                "child_names",
+            },
+            set(resume_state),
+        )
 
     def test_resume_goes_directly_to_targeted_retrieval_after_hitl_answer(self):
         calls = {"retrieve": []}
 
         def retrieve(query, top_k=5, language=""):
             calls["retrieve"].append(query)
-            return {"docs": [_doc("Danjin is the Imaginary element", "retrieved")], "meta": _meta(1)}
+            return {
+                "docs": [_doc("Danjin is the Imaginary element", "retrieved")],
+                "meta": _meta(1),
+            }
 
         def grade(schema, prompt):
             return {
@@ -837,8 +884,12 @@ class RagShortCircuitTests(unittest.TestCase):
         self.assertEqual("answerable", result.get("retrieval_status"))
         self.assertEqual(1, len(result.get("docs", [])))
         self.assertTrue(result.get("rag_trace", {}).get("hitl_resumed"))
-        self.assertEqual("targeted_retrieval", result.get("rag_trace", {}).get("hitl_resume_strategy"))
-        self.assertEqual("hitl_targeted_retrieval", result.get("rag_trace", {}).get("retrieval_stage"))
+        self.assertEqual(
+            "targeted_retrieval", result.get("rag_trace", {}).get("hitl_resume_strategy")
+        )
+        self.assertEqual(
+            "hitl_targeted_retrieval", result.get("rag_trace", {}).get("retrieval_stage")
+        )
 
     def test_complex_sub_agents_keep_partial_docs_without_rewrite(self):
         calls = {"retrieve": [], "step_back": 0}
@@ -865,10 +916,14 @@ class RagShortCircuitTests(unittest.TestCase):
                 "confidence": 0.5,
             }
 
-        pipeline = enable_complexity_planning(load_pipeline(
-            retrieve_documents=retrieve,
-            rewrite_query_once=lambda query: calls.__setitem__("step_back", calls["step_back"] + 1) or {},
-        ))
+        pipeline = enable_complexity_planning(
+            load_pipeline(
+                retrieve_documents=retrieve,
+                rewrite_query_once=lambda query: (
+                    calls.__setitem__("step_back", calls["step_back"] + 1) or {}
+                ),
+            )
+        )
         pipeline._get_complexity_model = lambda: FakeStructuredModel(complexity)
         pipeline._get_grader_model = lambda: FakeStructuredModel(grade)
 

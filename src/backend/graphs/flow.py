@@ -30,6 +30,7 @@ This lives under `backend/` rather than `scripts/` because the image carries `ba
 and nothing else, so `python -m backend.graphs` is runnable in the container the same way
 `alembic upgrade head` is.
 """
+
 from __future__ import annotations
 
 import base64
@@ -78,118 +79,418 @@ SECTIONS = {
 STEPS = [
     # HTTP door
     ("parent", "http", "Parent message", "POST /chat/stream", "start", ""),
-    ("auth", "http", "get_current_user", "RS256 token, checked against identity's JWKS", "step",
-     "backend.infra.auth:get_current_user"),
+    (
+        "auth",
+        "http",
+        "get_current_user",
+        "RS256 token, checked against identity's JWKS",
+        "step",
+        "backend.infra.auth:get_current_user",
+    ),
     ("r401", "http", "401", "no valid token", "refuse", ""),
-    ("attach", "http", "_attachment_id", "a voice note must be the caller's own", "step",
-     "backend.api.routes.chat:_attachment_id"),
-    ("admit", "http", "TurnAdmission.admit",
-     "provider cooldown → per-user GCRA rate → per-user concurrent lease · Redis Lua, fails open",
-     "step", "backend.agent.chat.admission:TurnAdmission.admit"),
+    (
+        "attach",
+        "http",
+        "_attachment_id",
+        "a voice note must be the caller's own",
+        "step",
+        "backend.api.routes.chat:_attachment_id",
+    ),
+    (
+        "admit",
+        "http",
+        "TurnAdmission.admit",
+        "provider cooldown → per-user GCRA rate → per-user concurrent lease · Redis Lua, fails open",
+        "step",
+        "backend.agent.chat.admission:TurnAdmission.admit",
+    ),
     ("r429", "http", "429 + Retry-After", "refused at the door", "refuse", ""),
-    ("stream", "http", "chat_with_agent_stream", "SSE: rag_step · content · trace · done", "step",
-     "backend.agent.chat.service:chat_with_agent_stream"),
+    (
+        "stream",
+        "http",
+        "chat_with_agent_stream",
+        "SSE: rag_step · content · trace · done",
+        "step",
+        "backend.agent.chat.service:chat_with_agent_stream",
+    ),
     # Turn entry
-    ("open", "entry", "TurnPipeline.open", "waits ≤10s for the previous save · loads window + child pin",
-     "step", "backend.agent.chat.turn_pipeline:TurnPipeline.open"),
-    ("enter", "entry", "enter_turn", "reads the message against a pending clarification (TTL)", "step",
-     "backend.agent.chat.clarification:enter_turn"),
-    ("resolve_reply", "entry", "resolve_turn_question", "FAST_MODEL · answer, correction or new question?",
-     "llm", "backend.agent.chat.orchestrator:resolve_turn_question"),
-    ("child_choice", "entry", "TurnPipeline.settle_child_choice", "a reply to 'which child?' pins the child",
-     "step", "backend.agent.chat.turn_pipeline:TurnPipeline.settle_child_choice"),
-    ("record", "entry", "TurnPipeline.record_question", "queued, not awaited", "step",
-     "backend.agent.chat.turn_pipeline:TurnPipeline.record_question"),
-    ("resumes", "entry", "TurnPipeline.resumes_a_search", "is this the answer to a paused search?", "decision",
-     "backend.agent.chat.turn_pipeline:TurnPipeline.resumes_a_search"),
+    (
+        "open",
+        "entry",
+        "TurnPipeline.open",
+        "waits ≤10s for the previous save · loads window + child pin",
+        "step",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.open",
+    ),
+    (
+        "enter",
+        "entry",
+        "enter_turn",
+        "reads the message against a pending clarification (TTL)",
+        "step",
+        "backend.agent.chat.clarification:enter_turn",
+    ),
+    (
+        "resolve_reply",
+        "entry",
+        "resolve_turn_question",
+        "FAST_MODEL · answer, correction or new question?",
+        "llm",
+        "backend.agent.chat.orchestrator:resolve_turn_question",
+    ),
+    (
+        "child_choice",
+        "entry",
+        "TurnPipeline.settle_child_choice",
+        "a reply to 'which child?' pins the child",
+        "step",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.settle_child_choice",
+    ),
+    (
+        "record",
+        "entry",
+        "TurnPipeline.record_question",
+        "queued, not awaited",
+        "step",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.record_question",
+    ),
+    (
+        "resumes",
+        "entry",
+        "TurnPipeline.resumes_a_search",
+        "is this the answer to a paused search?",
+        "decision",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.resumes_a_search",
+    ),
     # Resumed clarification
-    ("run_resume", "resume", "TurnPipeline.run_resumed_search", "carries the paused turn's language, year, names",
-     "step", "backend.agent.chat.turn_pipeline:TurnPipeline.run_resumed_search"),
-    ("resume_rag", "resume", "resume_rag_from_hitl", "refines the question with the reply", "step",
-     "backend.agent.rag.pipeline:resume_rag_from_hitl"),
-    ("resume_retrieval", "resume", "ResumeRetrieval", "targeted search, graded like any other", "step",
-     "backend.agent.rag.graph_nodes:ResumeRetrieval"),
-    ("settle_resume", "resume", "TurnPipeline.settle_resumed_search", "", "decision",
-     "backend.agent.chat.turn_pipeline:TurnPipeline.settle_resumed_search"),
-    ("resume_answer", "resume", "build_resume_answer_messages", "MODEL answers from the retrieved documents",
-     "llm", "backend.agent.chat.context_messages:build_resume_answer_messages"),
-    ("resume_static", "resume", "resumed_static_reply", "profile copy: nothing to answer from", "reply",
-     "backend.agent.chat.answer_checks:resumed_static_reply"),
+    (
+        "run_resume",
+        "resume",
+        "TurnPipeline.run_resumed_search",
+        "carries the paused turn's language, year, names",
+        "step",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.run_resumed_search",
+    ),
+    (
+        "resume_rag",
+        "resume",
+        "resume_rag_from_hitl",
+        "refines the question with the reply",
+        "step",
+        "backend.agent.rag.pipeline:resume_rag_from_hitl",
+    ),
+    (
+        "resume_retrieval",
+        "resume",
+        "ResumeRetrieval",
+        "targeted search, graded like any other",
+        "step",
+        "backend.agent.rag.graph_nodes:ResumeRetrieval",
+    ),
+    (
+        "settle_resume",
+        "resume",
+        "TurnPipeline.settle_resumed_search",
+        "",
+        "decision",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.settle_resumed_search",
+    ),
+    (
+        "resume_answer",
+        "resume",
+        "build_resume_answer_messages",
+        "MODEL answers from the retrieved documents",
+        "llm",
+        "backend.agent.chat.context_messages:build_resume_answer_messages",
+    ),
+    (
+        "resume_static",
+        "resume",
+        "resumed_static_reply",
+        "profile copy: nothing to answer from",
+        "reply",
+        "backend.agent.chat.answer_checks:resumed_static_reply",
+    ),
     # Planner
-    ("plan", "planner", "TurnPipeline.plan → plan_turn", "never raises: a failed plan runs the turn unplanned",
-     "step", "backend.agent.chat.orchestrator:plan_turn"),
-    ("roster", "planner", "_start_roster", "records roster prefetch, in parallel · cached per guardian", "io",
-     "backend.agent.chat.orchestrator:_start_roster"),
-    ("resolve", "planner", "resolve_question", "FAST_MODEL · only for a follow-up (needs_resolution)", "llm",
-     "backend.agent.chat.resolution:resolve_question"),
-    ("ladder", "planner", "SignalLadder.run", "cheapest rung first, stops once scope is settled", "step",
-     "backend.agent.chat.signals:SignalLadder.run"),
-    ("settle_child", "planner", "_settle_child → resolve_child", "which child this turn is about", "step",
-     "backend.agent.chat.orchestrator:_settle_child"),
-    ("resolve_turn", "planner", "resolve_turn", "the plan: what runs, with which tools", "decision",
-     "backend.agent.chat.turn_policy:resolve_turn"),
-    ("plan_social", "planner", "_plan_social", "greeting / thanks", "step", "backend.agent.chat.turn_policy:_plan_social"),
-    ("plan_ood", "planner", "_plan_out_of_domain", "out of scope, with certainty", "step",
-     "backend.agent.chat.turn_policy:_plan_out_of_domain"),
-    ("plan_child_choice", "planner", "_plan_child_choice", "several children, none named", "step",
-     "backend.agent.chat.turn_policy:_plan_child_choice"),
-    ("plan_tools", "planner", "_plan_tools", "narrow tools · planned parallel calls · forced tool", "step",
-     "backend.agent.chat.turn_policy:_plan_tools"),
-    ("short_circuit", "planner", "TurnPipeline.settle_short_circuit",
-     "static reply, refusal, or 'which child?' — no agent is built", "reply",
-     "backend.agent.chat.turn_pipeline:TurnPipeline.settle_short_circuit"),
+    (
+        "plan",
+        "planner",
+        "TurnPipeline.plan → plan_turn",
+        "never raises: a failed plan runs the turn unplanned",
+        "step",
+        "backend.agent.chat.orchestrator:plan_turn",
+    ),
+    (
+        "roster",
+        "planner",
+        "_start_roster",
+        "records roster prefetch, in parallel · cached per guardian",
+        "io",
+        "backend.agent.chat.orchestrator:_start_roster",
+    ),
+    (
+        "resolve",
+        "planner",
+        "resolve_question",
+        "FAST_MODEL · only for a follow-up (needs_resolution)",
+        "llm",
+        "backend.agent.chat.resolution:resolve_question",
+    ),
+    (
+        "ladder",
+        "planner",
+        "SignalLadder.run",
+        "cheapest rung first, stops once scope is settled",
+        "step",
+        "backend.agent.chat.signals:SignalLadder.run",
+    ),
+    (
+        "settle_child",
+        "planner",
+        "_settle_child → resolve_child",
+        "which child this turn is about",
+        "step",
+        "backend.agent.chat.orchestrator:_settle_child",
+    ),
+    (
+        "resolve_turn",
+        "planner",
+        "resolve_turn",
+        "the plan: what runs, with which tools",
+        "decision",
+        "backend.agent.chat.turn_policy:resolve_turn",
+    ),
+    (
+        "plan_social",
+        "planner",
+        "_plan_social",
+        "greeting / thanks",
+        "step",
+        "backend.agent.chat.turn_policy:_plan_social",
+    ),
+    (
+        "plan_ood",
+        "planner",
+        "_plan_out_of_domain",
+        "out of scope, with certainty",
+        "step",
+        "backend.agent.chat.turn_policy:_plan_out_of_domain",
+    ),
+    (
+        "plan_child_choice",
+        "planner",
+        "_plan_child_choice",
+        "several children, none named",
+        "step",
+        "backend.agent.chat.turn_policy:_plan_child_choice",
+    ),
+    (
+        "plan_tools",
+        "planner",
+        "_plan_tools",
+        "narrow tools · planned parallel calls · forced tool",
+        "step",
+        "backend.agent.chat.turn_policy:_plan_tools",
+    ),
+    (
+        "short_circuit",
+        "planner",
+        "TurnPipeline.settle_short_circuit",
+        "static reply, refusal, or 'which child?' — no agent is built",
+        "reply",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.settle_short_circuit",
+    ),
     # Agent (its graph is compiled in; these are the doors in and out)
-    ("agent_call", "agent", "TurnPipeline.agent_call", "recursion_limit from the profile", "step",
-     "backend.agent.chat.turn_pipeline:TurnPipeline.agent_call"),
+    (
+        "agent_call",
+        "agent",
+        "TurnPipeline.agent_call",
+        "recursion_limit from the profile",
+        "step",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.agent_call",
+    ),
     # Knowledge tool internals (the tool boxes themselves are read from the profile)
-    ("run_rag", "tools", "run_rag_graph", "turn memo: an identical query is answered from the first run",
-     "step", "backend.agent.rag.pipeline:run_rag_graph"),
-    ("kb_outcome", "tools", "knowledge outcome",
-     "chunks · no_knowledge · needs_clarification · needs_scope_selection · retrieval_error · empty",
-     "decision", "backend.agent.tools.knowledge:make_search_knowledge_base"),
-    ("records_service", "tools", "records service :8100", "guardian ↔ student check · access audit", "io", ""),
+    (
+        "run_rag",
+        "tools",
+        "run_rag_graph",
+        "turn memo: an identical query is answered from the first run",
+        "step",
+        "backend.agent.rag.pipeline:run_rag_graph",
+    ),
+    (
+        "kb_outcome",
+        "tools",
+        "knowledge outcome",
+        "chunks · no_knowledge · needs_clarification · needs_scope_selection · retrieval_error · empty",
+        "decision",
+        "backend.agent.tools.knowledge:make_search_knowledge_base",
+    ),
+    (
+        "records_service",
+        "tools",
+        "records service :8100",
+        "guardian ↔ student check · access audit",
+        "io",
+        "",
+    ),
     # Retrieval internals
-    ("translate", "retrieval", "translate_for_search", "FAST_MODEL · only when not in the corpus's language",
-     "llm", "backend.agent.rag.query_translation:translate_for_search"),
-    ("cache_lookup", "retrieval", "RetrievalCache.lookup", "Redis · keyed on corpus_version", "io",
-     "backend.agent.rag.retrieval_cache:RetrievalCache.lookup"),
-    ("embed", "retrieval", "embed_query", "bge-m3 · in-process memo → Redis", "io",
-     "backend.indexing.embedding:embed_query"),
-    ("hybrid", "retrieval", "MilvusStore.hybrid_retrieve", "dense + BM25 · RRF k=60 · leaf chunks (L3)", "io",
-     "backend.indexing.milvus_client:MilvusStore.hybrid_retrieve"),
-    ("merge", "retrieval", "_auto_merge_candidates", "leaves → L2/L1 parents from Postgres", "io",
-     "backend.agent.rag.utils:_auto_merge_candidates"),
-    ("rerank", "retrieval", "_rerank_documents", "Jina rerank, optional · min-score filter", "step",
-     "backend.agent.rag.utils:_rerank_documents"),
-    ("cache_store", "retrieval", "RetrievalCache.store", "", "io", "backend.agent.rag.retrieval_cache:RetrievalCache.store"),
+    (
+        "translate",
+        "retrieval",
+        "translate_for_search",
+        "FAST_MODEL · only when not in the corpus's language",
+        "llm",
+        "backend.agent.rag.query_translation:translate_for_search",
+    ),
+    (
+        "cache_lookup",
+        "retrieval",
+        "RetrievalCache.lookup",
+        "Redis · keyed on corpus_version",
+        "io",
+        "backend.agent.rag.retrieval_cache:RetrievalCache.lookup",
+    ),
+    (
+        "embed",
+        "retrieval",
+        "embed_query",
+        "bge-m3 · in-process memo → Redis",
+        "io",
+        "backend.indexing.embedding:embed_query",
+    ),
+    (
+        "hybrid",
+        "retrieval",
+        "MilvusStore.hybrid_retrieve",
+        "dense + BM25 · RRF k=60 · leaf chunks (L3)",
+        "io",
+        "backend.indexing.milvus_client:MilvusStore.hybrid_retrieve",
+    ),
+    (
+        "merge",
+        "retrieval",
+        "_auto_merge_candidates",
+        "leaves → L2/L1 parents from Postgres",
+        "io",
+        "backend.agent.rag.utils:_auto_merge_candidates",
+    ),
+    (
+        "rerank",
+        "retrieval",
+        "_rerank_documents",
+        "Jina rerank, optional · min-score filter",
+        "step",
+        "backend.agent.rag.utils:_rerank_documents",
+    ),
+    (
+        "cache_store",
+        "retrieval",
+        "RetrievalCache.store",
+        "",
+        "io",
+        "backend.agent.rag.retrieval_cache:RetrievalCache.store",
+    ),
     # Answer settlement
-    ("settle", "settle", "TurnPipeline.settle_agent_answer", "evidence in hand for the first time", "decision",
-     "backend.agent.chat.turn_pipeline:TurnPipeline.settle_agent_answer"),
-    ("ask", "settle", "build_pending_hitl", "retrieval asked a question · the next message answers it", "reply",
-     "backend.agent.chat.clarification:build_pending_hitl"),
-    ("check_records", "settle", "enforce_records_agreement", "figures must match the records", "step",
-     "backend.agent.chat.answer_checks:enforce_records_agreement"),
-    ("check_forced", "settle", "enforce_forced_tool_ran", "a required tool must have run", "step",
-     "backend.agent.chat.answer_checks:enforce_forced_tool_ran"),
-    ("check_figures", "settle", "enforce_answer_figures", "numbers must appear in the retrieved chunks", "step",
-     "backend.agent.chat.answer_checks:enforce_answer_figures"),
-    ("check_empty", "settle", "nothing_usable_reply", "the model said nothing usable", "step",
-     "backend.agent.chat.answer_checks:nothing_usable_reply"),
+    (
+        "settle",
+        "settle",
+        "TurnPipeline.settle_agent_answer",
+        "evidence in hand for the first time",
+        "decision",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.settle_agent_answer",
+    ),
+    (
+        "ask",
+        "settle",
+        "build_pending_hitl",
+        "retrieval asked a question · the next message answers it",
+        "reply",
+        "backend.agent.chat.clarification:build_pending_hitl",
+    ),
+    (
+        "check_records",
+        "settle",
+        "enforce_records_agreement",
+        "figures must match the records",
+        "step",
+        "backend.agent.chat.answer_checks:enforce_records_agreement",
+    ),
+    (
+        "check_forced",
+        "settle",
+        "enforce_forced_tool_ran",
+        "a required tool must have run",
+        "step",
+        "backend.agent.chat.answer_checks:enforce_forced_tool_ran",
+    ),
+    (
+        "check_figures",
+        "settle",
+        "enforce_answer_figures",
+        "numbers must appear in the retrieved chunks",
+        "step",
+        "backend.agent.chat.answer_checks:enforce_answer_figures",
+    ),
+    (
+        "check_empty",
+        "settle",
+        "nothing_usable_reply",
+        "the model said nothing usable",
+        "step",
+        "backend.agent.chat.answer_checks:nothing_usable_reply",
+    ),
     ("replace", "settle", "content_replace", "answer withdrawn and replaced", "reply", ""),
-    ("blocks", "settle", "settle_answer_blocks", "record tables as typed blocks · figure markers resolved",
-     "reply", "backend.agent.chat.answer_blocks:settle_answer_blocks"),
-    ("assets", "settle", "TurnPipeline.attach_assets", "figures, rendered for this client", "step",
-     "backend.agent.chat.turn_pipeline:TurnPipeline.attach_assets"),
+    (
+        "blocks",
+        "settle",
+        "settle_answer_blocks",
+        "record tables as typed blocks · figure markers resolved",
+        "reply",
+        "backend.agent.chat.answer_blocks:settle_answer_blocks",
+    ),
+    (
+        "assets",
+        "settle",
+        "TurnPipeline.attach_assets",
+        "figures, rendered for this client",
+        "step",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.attach_assets",
+    ),
     # Save
-    ("save_meta", "save", "TurnPipeline.save_metadata", "a patch: child pin, pending question, title", "step",
-     "backend.agent.chat.turn_pipeline:TurnPipeline.save_metadata"),
-    ("commit", "save", "TurnPipeline.commit", "BackgroundJobs lane per conversation · retry · idempotency keys",
-     "step", "backend.agent.chat.turn_pipeline:TurnPipeline.commit"),
-    ("interrupted", "save", "TurnPipeline.commit_interrupted", "stop pressed / connection dropped", "step",
-     "backend.agent.chat.turn_pipeline:TurnPipeline.commit_interrupted"),
+    (
+        "save_meta",
+        "save",
+        "TurnPipeline.save_metadata",
+        "a patch: child pin, pending question, title",
+        "step",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.save_metadata",
+    ),
+    (
+        "commit",
+        "save",
+        "TurnPipeline.commit",
+        "BackgroundJobs lane per conversation · retry · idempotency keys",
+        "step",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.commit",
+    ),
+    (
+        "interrupted",
+        "save",
+        "TurnPipeline.commit_interrupted",
+        "stop pressed / connection dropped",
+        "step",
+        "backend.agent.chat.turn_pipeline:TurnPipeline.commit_interrupted",
+    ),
     ("postgres", "save", "Postgres · conversations", "append-only messages", "io", ""),
-    ("hold", "save", "_hold_until_stored", "'stored' event with the row ids", "step",
-     "backend.agent.chat.service:_hold_until_stored"),
+    (
+        "hold",
+        "save",
+        "_hold_until_stored",
+        "'stored' event with the row ids",
+        "step",
+        "backend.agent.chat.service:_hold_until_stored",
+    ),
     ("done", "save", "Reply delivered", "SSE done", "finish", ""),
 ]
 
@@ -295,9 +596,18 @@ RAG_RETRIEVAL_ENTRY = {
 
 LADDER_NOTES = {
     "backend.agent.chat.signals:SocialDetector": ("social phrases · no model", "step"),
-    "backend.agent.rag.scope_detector:CatalogueScopeDetector": ("scope catalogue · vector match", "step"),
-    "backend.agent.rag.scope_detector:ScopeModelDetector": ("FAST_MODEL · second opinion on scope", "llm"),
-    "backend.agent.chat.signals:CorpusSimilarityDetector": ("domain gate · corpus similarity", "step"),
+    "backend.agent.rag.scope_detector:CatalogueScopeDetector": (
+        "scope catalogue · vector match",
+        "step",
+    ),
+    "backend.agent.rag.scope_detector:ScopeModelDetector": (
+        "FAST_MODEL · second opinion on scope",
+        "llm",
+    ),
+    "backend.agent.chat.signals:CorpusSimilarityDetector": (
+        "domain gate · corpus similarity",
+        "step",
+    ),
     "backend.agent.chat.signals:EnvelopeDetector": ("FAST_MODEL · request envelope", "llm"),
 }
 
@@ -365,48 +675,143 @@ TARGET_SECTIONS = {
 
 TARGET_STEPS = [
     ("t_msg", "t_door", "Parent message", "POST /chat/stream", "start"),
-    ("t_valid", "t_door", "validate the request",
-     "the attachment must be the caller's own · still before admission  [R2]", "step"),
-    ("t_admit", "t_door", "admit",
-     "rate, then lease · still two scripts, on purpose  [R3] · quota checked only for the "
-     "models this turn will call  [T2]", "step"),
-    ("t_429", "t_door", "401 / 429 + Retry-After",
-     "one model's cooldown no longer refuses every turn  [T2]", "refuse"),
-    ("t_lease", "t_door", "lease held until the work ends",
-     "a cancelled stream does not free a place while its tool thread still runs  [T3]", "io"),
-    ("t_resume", "t_graph", "resume or start",
-     "a reconnect replays from the journal · nothing is replanned", "decision"),
-    ("t_open", "t_graph", "load the thread",
-     "window + child pin · the pending question merged as a PATCH, never written whole", "step"),
-    ("t_resolve", "t_classify", "resolve the question",
-     "FAST_MODEL · gated: a follow-up or a translation, not every turn", "llm"),
-    ("t_ladder", "t_classify", "scope ladder",
-     "cheapest rung first · fed the RESOLVED question · stops once settled  [R1]", "step"),
+    (
+        "t_valid",
+        "t_door",
+        "validate the request",
+        "the attachment must be the caller's own · still before admission  [R2]",
+        "step",
+    ),
+    (
+        "t_admit",
+        "t_door",
+        "admit",
+        "rate, then lease · still two scripts, on purpose  [R3] · quota checked only for the "
+        "models this turn will call  [T2]",
+        "step",
+    ),
+    (
+        "t_429",
+        "t_door",
+        "401 / 429 + Retry-After",
+        "one model's cooldown no longer refuses every turn  [T2]",
+        "refuse",
+    ),
+    (
+        "t_lease",
+        "t_door",
+        "lease held until the work ends",
+        "a cancelled stream does not free a place while its tool thread still runs  [T3]",
+        "io",
+    ),
+    (
+        "t_resume",
+        "t_graph",
+        "resume or start",
+        "a reconnect replays from the journal · nothing is replanned",
+        "decision",
+    ),
+    (
+        "t_open",
+        "t_graph",
+        "load the thread",
+        "window + child pin · the pending question merged as a PATCH, never written whole",
+        "step",
+    ),
+    (
+        "t_resolve",
+        "t_classify",
+        "resolve the question",
+        "FAST_MODEL · gated: a follow-up or a translation, not every turn",
+        "llm",
+    ),
+    (
+        "t_ladder",
+        "t_classify",
+        "scope ladder",
+        "cheapest rung first · fed the RESOLVED question · stops once settled  [R1]",
+        "step",
+    ),
     ("t_roster", "t_classify", "roster prefetch", "started first, joined here · unchanged", "io"),
-    ("t_route", "t_classify", "route",
-     "social · out of domain · which child · records · knowledge", "decision"),
+    (
+        "t_route",
+        "t_classify",
+        "route",
+        "social · out of domain · which child · records · knowledge",
+        "decision",
+    ),
     ("t_static", "t_classify", "profile copy", "no model call at all", "reply"),
-    ("t_search", "t_retrieve", "retrieve",
-     "cache → embed → hybrid + BM25 → merge → rerank · unchanged", "io"),
-    ("t_degraded", "t_retrieve", "say when it degraded",
-     "a dense-only fallback is logged and marked on the trace, never silent  [T5]", "step"),
-    ("t_grade", "t_retrieve", "grade",
-     "GRADE_MODEL · memoised per query · skipped only when decisive  [T8]", "llm"),
-    ("t_rewrite", "t_retrieve", "rewrite once",
-     "adds to the first pass, and IS graded again  [R4]", "llm"),
-    ("t_ask", "t_retrieve", "ask the parent",
-     "clarification · kept if the stream is cut off", "reply"),
-    ("t_answer", "t_answer", "answer",
-     "MODEL · narrow tools OR a cached prefix — measure which is cheaper  [T7]", "llm"),
-    ("t_checks", "t_answer", "grounding checks",
-     "records agreement · forced tool · figures · unchanged", "step"),
-    ("t_replace", "t_answer", "withdraw and replace",
-     "a failed check never reaches the parent as an answer", "reply"),
-    ("t_journal", "t_deliver", "append to the event journal",
-     "numbered and durable BEFORE it is sent · the append is off the event loop  [T1, T6]", "io"),
-    ("t_stream", "t_deliver", "stream from the journal",
-     "Last-Event-ID resumes a dropped connection  [T6] · the HITL verdict is memoised on "
-     "the trace version, not recomputed per token  [T4]", "step"),
+    (
+        "t_search",
+        "t_retrieve",
+        "retrieve",
+        "cache → embed → hybrid + BM25 → merge → rerank · unchanged",
+        "io",
+    ),
+    (
+        "t_degraded",
+        "t_retrieve",
+        "say when it degraded",
+        "a dense-only fallback is logged and marked on the trace, never silent  [T5]",
+        "step",
+    ),
+    (
+        "t_grade",
+        "t_retrieve",
+        "grade",
+        "GRADE_MODEL · memoised per query · skipped only when decisive  [T8]",
+        "llm",
+    ),
+    (
+        "t_rewrite",
+        "t_retrieve",
+        "rewrite once",
+        "adds to the first pass, and IS graded again  [R4]",
+        "llm",
+    ),
+    (
+        "t_ask",
+        "t_retrieve",
+        "ask the parent",
+        "clarification · kept if the stream is cut off",
+        "reply",
+    ),
+    (
+        "t_answer",
+        "t_answer",
+        "answer",
+        "MODEL · narrow tools OR a cached prefix — measure which is cheaper  [T7]",
+        "llm",
+    ),
+    (
+        "t_checks",
+        "t_answer",
+        "grounding checks",
+        "records agreement · forced tool · figures · unchanged",
+        "step",
+    ),
+    (
+        "t_replace",
+        "t_answer",
+        "withdraw and replace",
+        "a failed check never reaches the parent as an answer",
+        "reply",
+    ),
+    (
+        "t_journal",
+        "t_deliver",
+        "append to the event journal",
+        "numbered and durable BEFORE it is sent · the append is off the event loop  [T1, T6]",
+        "io",
+    ),
+    (
+        "t_stream",
+        "t_deliver",
+        "stream from the journal",
+        "Last-Event-ID resumes a dropped connection  [T6] · the HITL verdict is memoised on "
+        "the trace version, not recomputed per token  [T4]",
+        "step",
+    ),
     ("t_save", "t_deliver", "save", "background lane, idempotent · off the loop  [T1]", "step"),
     ("t_done", "t_deliver", "Reply delivered", "resumable", "finish"),
 ]
@@ -458,6 +863,7 @@ def build_target() -> FlowChart:
 
 # -- checking the map against the code --------------------------------------------------
 
+
 def resolve_ref(ref: str):
     module, _, qualname = ref.partition(":")
     target = importlib.import_module(module)
@@ -480,6 +886,7 @@ def stale_references() -> list[str]:
 
 # -- building the chart -----------------------------------------------------------------
 
+
 def _safe_id(prefix: str, name: str) -> str:
     return prefix + re.sub(r"[^A-Za-z0-9_]", "_", name)
 
@@ -490,14 +897,16 @@ def _text(value: str) -> str:
 
 @dataclass
 class FlowChart:
-    nodes: dict = field(default_factory=dict)       # id -> (label, note, kind)
-    members: dict = field(default_factory=dict)     # section -> [id]
-    edges: list = field(default_factory=list)       # (from, to, label, dotted)
+    nodes: dict = field(default_factory=dict)  # id -> (label, note, kind)
+    members: dict = field(default_factory=dict)  # section -> [id]
+    edges: list = field(default_factory=list)  # (from, to, label, dotted)
     #: The lanes this chart draws, in order. Defaulted to the live turn's, so the target
     #: chart is the only caller that has to say which it means.
     sections: dict = field(default_factory=lambda: SECTIONS)
 
-    def node(self, node_id: str, section: str, label: str, note: str = "", kind: str = "step") -> None:
+    def node(
+        self, node_id: str, section: str, label: str, note: str = "", kind: str = "step"
+    ) -> None:
         self.nodes[node_id] = (label, note, kind)
         self.members.setdefault(section, []).append(node_id)
 
@@ -551,8 +960,17 @@ class FlowChart:
         return f'{node_id}["{text}"]'
 
 
-def _embed_graph(chart: FlowChart, graph, *, prefix: str, section: str, notes: dict, model_nodes: set,
-                 enter_from: str, exit_to: str) -> set:
+def _embed_graph(
+    chart: FlowChart,
+    graph,
+    *,
+    prefix: str,
+    section: str,
+    notes: dict,
+    model_nodes: set,
+    enter_from: str,
+    exit_to: str,
+) -> set:
     """Copy a compiled graph into the chart, its start and end joined to the steps around it."""
     drawable = graph.get_graph(xray=True)
     named = set()
@@ -572,7 +990,9 @@ def _embed_graph(chart: FlowChart, graph, *, prefix: str, section: str, notes: d
 
     for edge in drawable.edges:
         label = edge.data if edge.data and edge.data != edge.target else ""
-        chart.edge(endpoint(edge.source), endpoint(edge.target), str(label or ""), bool(edge.conditional))
+        chart.edge(
+            endpoint(edge.source), endpoint(edge.target), str(label or ""), bool(edge.conditional)
+        )
     return named
 
 
@@ -636,8 +1056,14 @@ def build_flow(parts: Compiled) -> tuple[FlowChart, dict]:
 
     # The agent, joined to the planner and to settlement.
     agent_nodes = _embed_graph(
-        chart, parts.agent, prefix="ag_", section="agent", notes=AGENT_NOTES,
-        model_nodes=AGENT_MODEL_NODES, enter_from="agent_call", exit_to="settle",
+        chart,
+        parts.agent,
+        prefix="ag_",
+        section="agent",
+        notes=AGENT_NOTES,
+        model_nodes=AGENT_MODEL_NODES,
+        enter_from="agent_call",
+        exit_to="settle",
     )
     chart.edge("ag_model", "interrupted", "stop / disconnect", True)
 
@@ -657,8 +1083,14 @@ def build_flow(parts: Compiled) -> tuple[FlowChart, dict]:
 
     # The RAG graph, entered from the knowledge tool and ending in its outcome.
     rag_nodes = _embed_graph(
-        chart, parts.rag, prefix="rag_", section="rag", notes=RAG_NOTES,
-        model_nodes=RAG_MODEL_NODES, enter_from="run_rag", exit_to="kb_outcome",
+        chart,
+        parts.rag,
+        prefix="rag_",
+        section="rag",
+        notes=RAG_NOTES,
+        model_nodes=RAG_MODEL_NODES,
+        enter_from="run_rag",
+        exit_to="kb_outcome",
     )
     for node_name, entry in RAG_RETRIEVAL_ENTRY.items():
         if node_name in rag_nodes:
@@ -682,6 +1114,7 @@ def _drop(chart: FlowChart, node_id: str) -> None:
 
 
 # -- rendering --------------------------------------------------------------------------
+
 
 def _pako(mermaid: str) -> str:
     """mermaid.ink's compressed form: short enough for a large chart to fit in a URL."""
@@ -735,4 +1168,3 @@ def write_chart(name: str, mermaid: str, out: Path) -> bool:
     except Exception as exc:  # the service is down, or this machine is offline
         print(f"  {name}.png FAILED: {exc}")
         return False
-

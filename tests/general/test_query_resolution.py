@@ -24,6 +24,7 @@ Four separate defects produced that, and each has tests below:
   4. the resume path never saw the conversation, and built its query by concatenating
      the correction onto the reading it was correcting — so it retrieved both
 """
+
 from datetime import datetime, timezone
 import unittest
 
@@ -108,13 +109,13 @@ class TheGateTests(unittest.TestCase):
         self.assertIn("carries its own subject", reason)
 
     def test_a_short_reply_is_resolved_even_with_no_marker(self):
-        """"grade 5" answers a question and names no referent. It is exactly the case a
+        """ "grade 5" answers a question and names no referent. It is exactly the case a
         marker list cannot catch, and exactly the case that needs resolving."""
         wanted, _ = needs_resolution("grade 5", UNIFORM_TURN, _config())
         self.assertTrue(wanted)
 
     def test_a_marker_does_not_fire_inside_a_longer_word(self):
-        """"it" must not match "admission". Single-word markers are word-bounded."""
+        """ "it" must not match "admission". Single-word markers are word-bounded."""
         wanted, _ = needs_resolution(
             "please describe the admission requirements for international applicants here",
             UNIFORM_TURN,
@@ -271,9 +272,7 @@ class TextToScoreTests(unittest.TestCase):
     def test_without_a_resolution_the_old_concatenation_still_applies(self):
         """The fallback is deliberately unchanged: blunt, but better than scoring a
         bare follow-up alone, which measures nothing and looks like being off-topic."""
-        ctx = SignalContext(
-            question="and what is the fees for this years", history=UNIFORM_TURN
-        )
+        ctx = SignalContext(question="and what is the fees for this years", history=UNIFORM_TURN)
         self.assertIn("clothes", ctx.text_to_score)
         self.assertIn("fees", ctx.text_to_score)
 
@@ -533,9 +532,16 @@ class PlanTurnWiringTests(unittest.TestCase):
         def emit_rag_step(self, icon, label, detail="", **kwargs):
             self.steps.append((icon, label, detail))
 
-        def note_turn_plan(self, retrieval_sections, scope_options, *,
-                           carried_constraints=(), is_followup=False, language="",
-                           child_year=""):
+        def note_turn_plan(
+            self,
+            retrieval_sections,
+            scope_options,
+            *,
+            carried_constraints=(),
+            is_followup=False,
+            language="",
+            child_year="",
+        ):
             self.retrieval_sections = list(retrieval_sections or [])
             self.scope_options = list(scope_options or [])
             self.carried_constraints = list(carried_constraints or [])

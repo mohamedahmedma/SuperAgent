@@ -14,6 +14,7 @@ Collapsing these into a single record is the mistake that makes image ingest
 expensive, because it ties the cost of extraction to the number of occurrences
 instead of the number of distinct images.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -39,35 +40,35 @@ DOSSIER_VERSION = 2
 class AssetRole(str, Enum):
     """What the image IS, which decides which index it belongs in."""
 
-    FIGURE = "figure"          # evidence inside a document → text index
-    ENTITY = "entity"          # the image IS the record (product) → entity indexes
-    PAGE = "page"              # full-page render (scanned / layout-critical)
+    FIGURE = "figure"  # evidence inside a document → text index
+    ENTITY = "entity"  # the image IS the record (product) → entity indexes
+    PAGE = "page"  # full-page render (scanned / layout-critical)
     DECORATIVE = "decorative"  # logo, rule, spacer → dropped, never indexed
 
 
 class AssetTier(str, Enum):
     """How much extraction the asset warrants. Set by triage, upgradeable later."""
 
-    DROP = "drop"        # T0 — no extraction at all
-    SIMPLE = "simple"    # T1 — caption + OCR from a small model
+    DROP = "drop"  # T0 — no extraction at all
+    SIMPLE = "simple"  # T1 — caption + OCR from a small model
     COMPLEX = "complex"  # T2 — full structured extraction, chart→table
-    LAYOUT = "layout"    # T3 — T2 plus page render and visual embedding
+    LAYOUT = "layout"  # T3 — T2 plus page render and visual embedding
 
 
 class ExtractionStatus(str, Enum):
-    PENDING = "pending"      # recorded, not yet extracted
+    PENDING = "pending"  # recorded, not yet extracted
     EXTRACTED = "extracted"  # complete at `dossier_version`
-    SKIPPED = "skipped"      # triaged as DROP; intentionally has no extraction
-    FAILED = "failed"        # extraction attempted and errored
-    STALE = "stale"          # extracted at an older version, needs re-extraction
+    SKIPPED = "skipped"  # triaged as DROP; intentionally has no extraction
+    FAILED = "failed"  # extraction attempted and errored
+    STALE = "stale"  # extracted at an older version, needs re-extraction
 
 
 class RelationKind(str, Enum):
-    PART_OF = "part_of"            # → document/chunk that contains this asset
+    PART_OF = "part_of"  # → document/chunk that contains this asset
     REFERENCED_BY = "referenced_by"  # → chunk whose text points at this figure
-    DEPICTS = "depicts"            # → product/entity id
-    VARIANT_OF = "variant_of"      # → sibling asset (same product, other angle)
-    SUPERSEDES = "supersedes"      # → older asset this replaces
+    DEPICTS = "depicts"  # → product/entity id
+    VARIANT_OF = "variant_of"  # → sibling asset (same product, other angle)
+    SUPERSEDES = "supersedes"  # → older asset this replaces
 
 
 class _Model(BaseModel):
@@ -283,10 +284,12 @@ class AssetDossier(_Model):
             return {}
         text = self.extraction.text
         summary = [
-            line for line in (
+            line
+            for line in (
                 tags_line(text.tags),
                 answers_line(self.extraction.answerable_questions),
-            ) if line
+            )
+            if line
         ]
         return {
             "header": figure_header(text.caption),
@@ -342,6 +345,7 @@ def compute_sha256(data: bytes) -> str:
 # ---------------------------------------------------------------------------
 # Versioning
 # ---------------------------------------------------------------------------
+
 
 class Migration:
     """One dossier-version upgrade.

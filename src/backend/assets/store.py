@@ -8,6 +8,7 @@ The database is reached through a unit of work, and the blob store and cache are
 too, so tests run the whole store against a throwaway Postgres schema and a temporary
 blob directory.
 """
+
 from __future__ import annotations
 
 import logging
@@ -108,7 +109,9 @@ class AssetStore:
 
         if self.cache is not None:
             for dossier in items:
-                self.cache.set_json(self._cache_key(dossier.asset_id), dossier.model_dump(mode="json"))
+                self.cache.set_json(
+                    self._cache_key(dossier.asset_id), dossier.model_dump(mode="json")
+                )
         return len(items)
 
     def record(self, dossier: AssetDossier) -> AssetDossier:
@@ -178,7 +181,9 @@ class AssetStore:
         if not filename:
             return []
         with self._unit_of_work() as uow:
-            dossiers = list(uow.document_assets.list_by_filename(filename, extracted_only=indexable_only))
+            dossiers = list(
+                uow.document_assets.list_by_filename(filename, extracted_only=indexable_only)
+            )
         return [d for d in dossiers if d.is_indexable] if indexable_only else dossiers
 
     # -- extraction cache -------------------------------------------------------
@@ -358,7 +363,9 @@ class AssetStore:
         while True:
             with self._unit_of_work() as uow:
                 batch = list(
-                    uow.document_assets.older_than(target_version, after_asset_id=cursor, limit=batch_size)
+                    uow.document_assets.older_than(
+                        target_version, after_asset_id=cursor, limit=batch_size
+                    )
                 )
             if not batch:
                 return

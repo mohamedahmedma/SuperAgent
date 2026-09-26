@@ -4,6 +4,7 @@ Both are values, not rows. This service stores neither: it asks the school's sys
 record, uses the answer to mint one token, and forgets it. What is kept on an account is
 the handle — `guardian_external_id` — and nothing else about the family.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

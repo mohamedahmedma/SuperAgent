@@ -19,6 +19,7 @@ developer's real `sis.db`.
 
 Nothing in this module creates tables. Alembic owns the schema; see `base.py`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator

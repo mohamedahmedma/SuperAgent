@@ -23,6 +23,7 @@ are read.
 A typo'd `SIS_TIMEOUT_SECONDS=ten` must not take the facade down for a school; it should
 run with the documented default and say so in the log.
 """
+
 from __future__ import annotations
 
 import logging
@@ -181,7 +182,9 @@ def primary_figure() -> str:
         return raw
     logger.warning(
         "RECORDS_PRIMARY_GRADE=%r is not one of %s — falling back to %r",
-        raw, _VALID_PRIMARY, _VALID_PRIMARY[0],
+        raw,
+        _VALID_PRIMARY,
+        _VALID_PRIMARY[0],
     )
     return _VALID_PRIMARY[0]
 
@@ -195,9 +198,7 @@ def settings() -> Settings:
         sis_base_url=env_value("SIS_BASE_URL"),
         sis_api_key=env_value("SIS_API_KEY"),
         sis_timeout_seconds=float_env("SIS_TIMEOUT_SECONDS", _DEFAULT_SIS_TIMEOUT),
-        lookup_timeout_seconds=float_env(
-            "SIS_LOOKUP_TIMEOUT_SECONDS", _DEFAULT_LOOKUP_TIMEOUT
-        ),
+        lookup_timeout_seconds=float_env("SIS_LOOKUP_TIMEOUT_SECONDS", _DEFAULT_LOOKUP_TIMEOUT),
         pool_size=int_env("RECORDS_POOL_SIZE", _DEFAULT_POOL_SIZE),
         calendar_cache_seconds=float_env(
             "RECORDS_CALENDAR_CACHE_SECONDS", _DEFAULT_CALENDAR_CACHE_SECONDS

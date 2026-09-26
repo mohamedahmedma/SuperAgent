@@ -25,6 +25,7 @@ tables it reads have no repository — they are read once per request by primary
 repository per table would be five classes of pass-through. It takes the session as a
 parameter rather than making one, so a test drives it against its own database.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -116,9 +117,7 @@ def sign_in(
     ensure_catalogue(session)
     handle = str(username or "").strip()
 
-    user = session.scalars(
-        select(m.User).where(m.User.username == handle)
-    ).one_or_none()
+    user = session.scalars(select(m.User).where(m.User.username == handle)).one_or_none()
 
     presented_ok = verify_password(password or "", user.password_hash if user else dummy_hash())
 
@@ -184,9 +183,7 @@ def _record_failure(session: Session, user: m.User, at: datetime) -> None:
         )
 
 
-def resolve(
-    session: Session, *, token: str, now: datetime | None = None
-) -> AccessProfile | None:
+def resolve(session: Session, *, token: str, now: datetime | None = None) -> AccessProfile | None:
     """A bearer token to a profile. `None` for anything that is not a live session.
 
     Looked up by the hash, which is indexed and unique, so this is one row by key —
@@ -296,9 +293,7 @@ SCOPE_TABLES: dict[ScopeType, tuple[object, object]] = {
 }
 
 
-def scope_codes(
-    session: Session, profile: AccessProfile
-) -> dict[tuple[str, int], str]:
+def scope_codes(session: Session, profile: AccessProfile) -> dict[tuple[str, int], str]:
     """The human code behind each scope id this profile is bounded by.
 
     Exists for the console. A grant is stored against a surrogate id, and a screen holds
@@ -456,7 +451,10 @@ def sync_builtin_rbac(session: Session) -> None:
             session.add(row)
             roles[definition.code.value] = row
         row.name_en, row.name_ar = definition.name_en, definition.name_ar
-        row.description, row.default_scope = definition.description_en, definition.default_scope.value
+        row.description, row.default_scope = (
+            definition.description_en,
+            definition.default_scope.value,
+        )
         row.is_builtin = True
     session.flush()
 
@@ -483,9 +481,7 @@ def sync_builtin_rbac(session: Session) -> None:
             )
         existing = set(
             session.scalars(
-                select(m.RolePermission.permission_id).where(
-                    m.RolePermission.role_id == role.id
-                )
+                select(m.RolePermission.permission_id).where(m.RolePermission.role_id == role.id)
             ).all()
         )
         if not is_customised:

@@ -20,6 +20,7 @@ Neither importing `config` is the one that decays fastest, and the one with the 
 symptom: a use case that reads the environment behaves differently depending on which test
 ran before it.
 """
+
 from __future__ import annotations
 
 import ast
@@ -70,7 +71,9 @@ def test_the_domain_imports_nothing_outward(path: pathlib.Path) -> None:
             f"{path.name} imports {module}. The domain layer holds rules, not I/O — "
             f"move whatever needs {root} into infrastructure/ and pass it in."
         )
-        assert not module.startswith(("identity.application", "identity.infrastructure", "identity.api")), (
+        assert not module.startswith(
+            ("identity.application", "identity.infrastructure", "identity.api")
+        ), (
             f"{path.name} imports {module}, which points outward. Dependencies in this "
             f"service point inward: application -> domain, never the reverse."
         )

@@ -16,6 +16,7 @@ Three classes of thing are pinned, and they fail in different ways:
     and the display; `search_key` feeds BM25. If folded text ever reaches the first,
     answers start quoting Arabic that was never written.
 """
+
 import sqlite3
 import unittest
 from pathlib import Path
@@ -300,8 +301,20 @@ class StopWordTests(unittest.TestCase):
     def test_school_vocabulary_is_not_stopped(self):
         stop = set(arabic_stop_words_for_analyzer())
         vocabulary = [
-            "الرسوم", "المصاريف", "الحضور", "الغياب", "الزي", "الباص", "النتيجة",
-            "الدرجات", "الامتحان", "المواد", "الصف", "الترم", "الكتب", "المدرسة",
+            "الرسوم",
+            "المصاريف",
+            "الحضور",
+            "الغياب",
+            "الزي",
+            "الباص",
+            "النتيجة",
+            "الدرجات",
+            "الامتحان",
+            "المواد",
+            "الصف",
+            "الترم",
+            "الكتب",
+            "المدرسة",
         ]
         for word in vocabulary:
             with self.subTest(word=word):
@@ -353,16 +366,17 @@ class RealRosterSpellingsTests(unittest.TestCase):
         cls.rows = [
             ("\u0645\u062d\u0645\u062f \u0627\u062d\u0645\u062f", "Mohamed Ahmed"),
             ("\u0627\u0645\u064a\u0631\u0647 \u0645\u062d\u0645\u0648\u062f", "Amira Mahmoud"),
-            ("\u064a\u0648\u0633\u0641 \u0627\u0628\u0631\u0627\u0647\u064a\u0645", "Youssef Ibrahim"),
+            (
+                "\u064a\u0648\u0633\u0641 \u0627\u0628\u0631\u0627\u0647\u064a\u0645",
+                "Youssef Ibrahim",
+            ),
             ("\u0633\u0627\u0631\u0629 \u0645\u062d\u0645\u0648\u062f", "Sara Mahmoud"),
             ("\u0633\u064a\u062f \u064a\u0633\u0631\u064a", "Sayed Yousry"),
             ("\u0644\u064a\u0644\u0649 \u0623\u062d\u0645\u062f", "Layla Ahmed"),
-
             # Ambiguity must remain ambiguity.
             ("\u0623\u062d\u0645\u062f \u0645\u062d\u0645\u0648\u062f", "Ahmed Mahmoud"),
             ("\u0623\u062d\u0645\u062f \u062d\u0633\u0646", "Ahmed Hassan"),
             ("\u0623\u062d\u0645\u062f \u0639\u0644\u064a", "Ahmed Ali"),
-
             # Wrong consonant: folding must NOT hide this data-entry typo.
             ("\u0641\u0627\u0643\u0645\u0647 \u0623\u062d\u0645\u062f", "Fatma Ahmed"),
         ]
@@ -370,10 +384,12 @@ class RealRosterSpellingsTests(unittest.TestCase):
     def _roster(self):
         from backend.agent.chat.child_roster import _as_options
 
-        return _as_options([
-            {"student_id": str(index), "full_name_ar": arabic, "full_name_en": english}
-            for index, (arabic, english) in enumerate(self.rows, 1)
-        ])
+        return _as_options(
+            [
+                {"student_id": str(index), "full_name_ar": arabic, "full_name_en": english}
+                for index, (arabic, english) in enumerate(self.rows, 1)
+            ]
+        )
 
     def test_correct_spelling_resolves_against_a_variant_row(self):
         from backend.agent.chat.child_resolution import resolve_child

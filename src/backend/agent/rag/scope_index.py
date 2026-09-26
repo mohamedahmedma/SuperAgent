@@ -28,6 +28,7 @@ question, and only that model may end a turn. So a badly derived floor costs che
 model calls, never a wrong refusal — which is the property that makes shipping this
 safe before anyone has looked at a single score.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -267,7 +268,8 @@ def build_index(
         if len(fresh) != len(missing):
             logger.error(
                 "scope index: embedder returned %d vectors for %d questions; abstaining",
-                len(fresh), len(missing),
+                len(fresh),
+                len(missing),
             )
             return ScopeIndex(catalogue=catalogue)
         for position, vector in zip(missing, fresh):
@@ -288,13 +290,18 @@ def build_index(
         floor = float(cached_floor[1])
         logger.info(
             "scope index: %d questions over %d sections, floor %.4f from cache",
-            len(questions), len(set(chunk_ids)), floor,
+            len(questions),
+            len(set(chunk_ids)),
+            floor,
         )
     else:
         floor = derive_floor(matrix, chunk_ids, floor_percentile)
         logger.info(
             "scope index: %d questions over %d sections, derived floor %.4f (p%.0f)",
-            len(questions), len(set(chunk_ids)), floor, floor_percentile,
+            len(questions),
+            len(set(chunk_ids)),
+            floor,
+            floor_percentile,
         )
     return ScopeIndex(
         questions=questions,

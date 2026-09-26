@@ -13,6 +13,7 @@ answering from weak evidence, which is the failure this whole pipeline exists to
 prevent; calling it unnecessarily only costs latency. So every signal must agree
 before grading is skipped, and anything unusual falls through to the grader.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,11 +33,44 @@ except Exception:  # pragma: no cover
     _STOP_WORDS = []
 
 _STOP = set(_STOP_WORDS) | {
-    "the", "a", "an", "of", "for", "to", "in", "on", "at", "and", "or", "is", "are",
-    "was", "were", "be", "with", "that", "this", "it", "as", "by", "from",
+    "the",
+    "a",
+    "an",
+    "of",
+    "for",
+    "to",
+    "in",
+    "on",
+    "at",
+    "and",
+    "or",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "with",
+    "that",
+    "this",
+    "it",
+    "as",
+    "by",
+    "from",
     # Arabic function words: the corpus is Arabic-first and these carry no more
     # signal than "the" does.
-    "من", "في", "على", "عن", "الى", "إلى", "هو", "هي", "ما", "هل", "مع", "أو", "او",
+    "من",
+    "في",
+    "على",
+    "عن",
+    "الى",
+    "إلى",
+    "هو",
+    "هي",
+    "ما",
+    "هل",
+    "مع",
+    "أو",
+    "او",
 }
 
 _TOKEN_RE = re.compile(r"[\w؀-ۿ]+", re.UNICODE)
@@ -66,8 +100,7 @@ def content_tokens(text: str) -> List[str]:
     """Meaningful tokens: normalised, stop-words removed, single characters dropped."""
     normalized = (normalize_query(text) or text or "").lower()
     return [
-        token for token in _TOKEN_RE.findall(normalized)
-        if len(token) > 1 and token not in _STOP
+        token for token in _TOKEN_RE.findall(normalized) if len(token) > 1 and token not in _STOP
     ]
 
 
@@ -139,7 +172,9 @@ def assess(
     meta = meta or {}
     scores = _scores(docs)
     top = scores[0] if scores else None
-    margin = (top - (sum(scores[1:]) / len(scores[1:]))) if len(scores) > 1 and top is not None else None
+    margin = (
+        (top - (sum(scores[1:]) / len(scores[1:]))) if len(scores) > 1 and top is not None else None
+    )
 
     verdict = ConfidenceVerdict(
         confident=False,

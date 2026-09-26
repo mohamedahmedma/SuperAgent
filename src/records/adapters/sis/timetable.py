@@ -21,6 +21,7 @@ Failures normalise to `TimetableUnavailable`, which is an `UpstreamUnavailable` 
 this term is **not** a failure: SIS answers 200 with a null class, and that arrives here as
 `TimetableStatus.NO_CLASS`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -99,9 +100,7 @@ class SisTimetableAdapter:
         headers = {"Accept": "application/json"}
         if api_key:
             headers["X-API-Key"] = api_key
-        self._pool = PooledClient(
-            base_url=base_url, timeout_seconds=self._timeout, headers=headers
-        )
+        self._pool = PooledClient(base_url=base_url, timeout_seconds=self._timeout, headers=headers)
 
     def get_timetable(
         self, *, student_ref: str, term: str, guardian_ref: str = ""
@@ -138,9 +137,7 @@ class SisTimetableAdapter:
             # correctly instead of having its prefix truncated by concatenation.
             response = self._pool.get().get(path.lstrip("/"), params=params)
         except httpx.HTTPError as exc:
-            raise TimetableUnavailable(
-                f"{path}: transport failure — {exc}"
-            ) from exc
+            raise TimetableUnavailable(f"{path}: transport failure — {exc}") from exc
 
         if response.status_code in REDIRECT_STATUSES:
             raise TimetableUnavailable(
@@ -164,9 +161,7 @@ class SisTimetableAdapter:
         logger.warning(
             "SIS refused %s: HTTP %s (%s)", path, response.status_code, code or "no code"
         )
-        raise TimetableUnavailable(
-            f"{path}: HTTP {response.status_code} ({code or 'no code'})"
-        )
+        raise TimetableUnavailable(f"{path}: HTTP {response.status_code} ({code or 'no code'})")
 
     # -- reshaping ----------------------------------------------------------
 

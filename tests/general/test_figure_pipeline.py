@@ -4,6 +4,7 @@ The end-to-end assertion that matters is the last class: an image block entering
 layout pipeline must come out as a leaf chunk whose text is searchable and which
 still points at the image that produced it.
 """
+
 import base64
 import io
 import random
@@ -108,15 +109,11 @@ class TriageTests(unittest.TestCase):
         self.assertIn("page_furniture", result.reason)
 
     def test_an_image_on_a_minority_of_pages_is_not_furniture(self):
-        result = triage_image(
-            self._facts(pages_with_digest=2, total_pages=10), triage_config()
-        )
+        result = triage_image(self._facts(pages_with_digest=2, total_pages=10), triage_config())
         self.assertFalse(result.is_dropped)
 
     def test_a_single_page_document_cannot_establish_repetition(self):
-        result = triage_image(
-            self._facts(pages_with_digest=1, total_pages=1), triage_config()
-        )
+        result = triage_image(self._facts(pages_with_digest=1, total_pages=1), triage_config())
         self.assertFalse(result.is_dropped)
 
     def test_unknown_dimensions_do_not_drop_the_image(self):
@@ -136,12 +133,14 @@ class TriageTests(unittest.TestCase):
         self.assertTrue(triage_image(self._facts(), strict).is_dropped)
 
     def test_digest_page_counting(self):
-        counts, pages = count_digest_pages([
-            {"sha256": "a", "page_number": 0},
-            {"sha256": "a", "page_number": 1},
-            {"sha256": "a", "page_number": 1},
-            {"sha256": "b", "page_number": 2},
-        ])
+        counts, pages = count_digest_pages(
+            [
+                {"sha256": "a", "page_number": 0},
+                {"sha256": "a", "page_number": 1},
+                {"sha256": "a", "page_number": 1},
+                {"sha256": "b", "page_number": 2},
+            ]
+        )
         self.assertEqual({"a": 2, "b": 1}, counts)
         self.assertEqual(3, pages)
 
@@ -155,8 +154,13 @@ class TriageTests(unittest.TestCase):
 
 class CaptionHeuristicTests(unittest.TestCase):
     def test_caption_markers_are_recognised_across_scripts(self):
-        for text in ["Figure 3: Tuition by grade", "Fig. 2 — Enrolment",
-                     "Table 4. Fees", "الشكل ٢: الرسوم الدراسية", "جدول 1 - المواعيد"]:
+        for text in [
+            "Figure 3: Tuition by grade",
+            "Fig. 2 — Enrolment",
+            "Table 4. Fees",
+            "الشكل ٢: الرسوم الدراسية",
+            "جدول 1 - المواعيد",
+        ]:
             with self.subTest(text=text):
                 self.assertIsNotNone(CAPTION_PREFIX_RE.match(text))
 
@@ -190,7 +194,9 @@ class HeuristicExtractorTests(unittest.TestCase):
 
     def test_section_path_becomes_tags(self):
         payload = HeuristicExtractor(figures_config()).extract(
-            ExtractionRequest(data=b"x", alt_text="Fees", section_path=["Handbook", "Admissions", "Fees"])
+            ExtractionRequest(
+                data=b"x", alt_text="Fees", section_path=["Handbook", "Admissions", "Fees"]
+            )
         )
         self.assertEqual(["Admissions", "Fees"], payload.text.tags)
 
@@ -223,15 +229,17 @@ class VisionExtractorTests(unittest.TestCase):
         return extractor, structured
 
     def test_structured_output_maps_onto_the_text_surface(self):
-        extractor, _ = self._extractor(FigureExtraction(
-            caption="Tuition by grade",
-            description="Bar chart of fees.",
-            transcription="| Grade | Fee |\n| 5 | 42000 |",
-            tags=["fees"],
-            image_type="chart",
-            answerable_questions=["How much is grade 5?"],
-            confidence=0.9,
-        ))
+        extractor, _ = self._extractor(
+            FigureExtraction(
+                caption="Tuition by grade",
+                description="Bar chart of fees.",
+                transcription="| Grade | Fee |\n| 5 | 42000 |",
+                tags=["fees"],
+                image_type="chart",
+                answerable_questions=["How much is grade 5?"],
+                confidence=0.9,
+            )
+        )
         payload = extractor.extract(ExtractionRequest(data=make_png(), tier=AssetTier.COMPLEX))
 
         self.assertEqual("Tuition by grade", payload.text.caption)
@@ -271,13 +279,15 @@ class VisionExtractorTests(unittest.TestCase):
 
     def test_context_is_woven_into_the_prompt(self):
         extractor, structured = self._extractor(FigureExtraction(caption="c", confidence=0.8))
-        extractor.extract(ExtractionRequest(
-            data=make_png(),
-            section_path=["Handbook", "Fees"],
-            text_after="Figure 3: Tuition",
-            filename="doc.pdf",
-            page_number=4,
-        ))
+        extractor.extract(
+            ExtractionRequest(
+                data=make_png(),
+                section_path=["Handbook", "Fees"],
+                text_after="Figure 3: Tuition",
+                filename="doc.pdf",
+                page_number=4,
+            )
+        )
         prompt = structured.invoke.call_args[0][0][0]["content"][0]["text"]
         self.assertIn("Handbook > Fees", prompt)
         self.assertIn("Figure 3: Tuition", prompt)
@@ -299,7 +309,9 @@ class DownscaleTests(unittest.TestCase):
 
 class BuildExtractorTests(unittest.TestCase):
     def test_vision_disabled_yields_the_heuristic_extractor(self):
-        self.assertIsInstance(build_extractor(figures_config(vision_enabled=False)), HeuristicExtractor)
+        self.assertIsInstance(
+            build_extractor(figures_config(vision_enabled=False)), HeuristicExtractor
+        )
 
     def test_missing_credentials_fall_back_to_heuristic(self):
         with patch.dict("os.environ", {"VISION_MODEL": "", "MODEL": "", "ARK_API_KEY": ""}):
@@ -307,7 +319,9 @@ class BuildExtractorTests(unittest.TestCase):
         self.assertIsInstance(extractor, HeuristicExtractor)
 
     def test_configured_credentials_yield_the_vision_extractor(self):
-        with patch.dict("os.environ", {"VISION_MODEL": "vl-1", "ARK_API_KEY": "k", "BASE_URL": "u"}):
+        with patch.dict(
+            "os.environ", {"VISION_MODEL": "vl-1", "ARK_API_KEY": "k", "BASE_URL": "u"}
+        ):
             extractor = build_extractor(figures_config(vision_enabled=True))
         self.assertIsInstance(extractor, VisionExtractor)
 
@@ -320,7 +334,9 @@ class PipelineTestCase(unittest.TestCase):
 
         self._tmp = TemporaryDirectory()
         self.blobs = LocalBlobStore(Path(self._tmp.name))
-        self.store = AssetStore(unit_of_work=unit_of_work, blob_store=self.blobs, cache_enabled=False)
+        self.store = AssetStore(
+            unit_of_work=unit_of_work, blob_store=self.blobs, cache_enabled=False
+        )
         self.profile = load_profile("base")
 
     def tearDown(self):
@@ -361,7 +377,9 @@ class FigurePipelineTests(PipelineTestCase):
     def test_triaged_out_images_are_recorded_with_a_reason_but_never_stored(self):
         """Recording the rejection is what makes a threshold tunable after the fact;
         not storing the blob is what stops a logo earning disk space."""
-        dossiers, report = self.pipeline().process([self.image(width=40, height=40)], filename="doc.pdf")
+        dossiers, report = self.pipeline().process(
+            [self.image(width=40, height=40)], filename="doc.pdf"
+        )
         dossier = dossiers[0]
         self.assertEqual(ExtractionStatus.SKIPPED, dossier.status)
         self.assertEqual(AssetRole.DECORATIVE, dossier.role)
@@ -409,7 +427,9 @@ class FigurePipelineTests(PipelineTestCase):
 
         shared = make_png(400, 300, seed=11)
         heuristic = self.pipeline()
-        heuristic.process([ImageInput(data=shared, index=0, alt_text="Timetable")], filename="a.pdf")
+        heuristic.process(
+            [ImageInput(data=shared, index=0, alt_text="Timetable")], filename="a.pdf"
+        )
 
         vision = Mock()
         vision.name = "vision"
@@ -449,11 +469,12 @@ class FigurePipelineTests(PipelineTestCase):
         """Every digest is in hand before any image is triaged, so the lookup is one
         query rather than one per image. A 400-image catalogue asked 400 times."""
         images = [self.image(index=i, page=i) for i in range(5)]
-        with patch.object(
-            self.store, "find_extractions", wraps=self.store.find_extractions
-        ) as batch, patch.object(
-            self.store, "find_extraction", wraps=self.store.find_extraction
-        ) as single:
+        with (
+            patch.object(
+                self.store, "find_extractions", wraps=self.store.find_extractions
+            ) as batch,
+            patch.object(self.store, "find_extraction", wraps=self.store.find_extraction) as single,
+        ):
             self.pipeline().process(images, filename="doc.pdf")
 
         self.assertEqual(1, batch.call_count)
@@ -514,8 +535,13 @@ class FigurePipelineTests(PipelineTestCase):
         dossier = self.pipeline(extractor=vision)._process_one(
             ImageInput(data=shared, index=0),
             compute_sha256(shared),
-            "doc.pdf", "", self.profile.name,
-            self.profile.assets, {}, 1, report,
+            "doc.pdf",
+            "",
+            self.profile.name,
+            self.profile.assets,
+            {},
+            1,
+            report,
         )
 
         vision.extract.assert_not_called()
@@ -532,7 +558,11 @@ class FigurePipelineTests(PipelineTestCase):
         to prevent, arriving by the other door.
         """
         from backend.assets.dossier import (
-            AssetTier, ExtractionPayload, Provenance, TextSurface, compute_sha256,
+            AssetTier,
+            ExtractionPayload,
+            Provenance,
+            TextSurface,
+            compute_sha256,
         )
 
         # 600x500 = 300,000 >= base's complex_min_area of 250,000, so triage asks COMPLEX.
@@ -542,9 +572,7 @@ class FigurePipelineTests(PipelineTestCase):
             self.profile.name,
             ExtractionPayload(
                 text=TextSurface(caption="Fee table"),
-                provenance=Provenance(
-                    model_used="vl-test", tier=AssetTier.SIMPLE, confidence=0.9
-                ),
+                provenance=Provenance(model_used="vl-test", tier=AssetTier.SIMPLE, confidence=0.9),
             ),
         )
 
@@ -552,9 +580,7 @@ class FigurePipelineTests(PipelineTestCase):
         vision.name = "vision"
         vision.extract.return_value = ExtractionPayload(
             text=TextSurface(caption="Fee table", transcription="Year 6 | 45,000"),
-            provenance=Provenance(
-                model_used="vl-test", tier=AssetTier.COMPLEX, confidence=0.9
-            ),
+            provenance=Provenance(model_used="vl-test", tier=AssetTier.COMPLEX, confidence=0.9),
         )
         dossiers, report = self.pipeline(extractor=vision).process(
             [ImageInput(data=shared, index=0)], filename="fees.pdf"
@@ -571,7 +597,11 @@ class FigurePipelineTests(PipelineTestCase):
         now — the thresholds moved the other way — already holds the better answer, and
         re-reading it would pay a vision call to get less."""
         from backend.assets.dossier import (
-            AssetTier, ExtractionPayload, Provenance, TextSurface, compute_sha256,
+            AssetTier,
+            ExtractionPayload,
+            Provenance,
+            TextSurface,
+            compute_sha256,
         )
 
         shared = make_png(400, 300, seed=14)
@@ -580,9 +610,7 @@ class FigurePipelineTests(PipelineTestCase):
             self.profile.name,
             ExtractionPayload(
                 text=TextSurface(caption="Fee table", transcription="Year 6 | 45,000"),
-                provenance=Provenance(
-                    model_used="vl-test", tier=AssetTier.COMPLEX, confidence=0.9
-                ),
+                provenance=Provenance(model_used="vl-test", tier=AssetTier.COMPLEX, confidence=0.9),
             ),
         )
 
@@ -638,7 +666,9 @@ class FigurePipelineTests(PipelineTestCase):
             file_path="/data/doc.pdf",
         )
         source = dossiers[0].source
-        self.assertEqual(("doc.pdf", "/data/doc.pdf", 4), (source.filename, source.file_path, source.page_number))
+        self.assertEqual(
+            ("doc.pdf", "/data/doc.pdf", 4), (source.filename, source.file_path, source.page_number)
+        )
         self.assertEqual([1.0, 2.0, 3.0, 4.0], source.bbox)
 
 
@@ -647,8 +677,13 @@ class EnrichmentStageTests(PipelineTestCase):
         return [
             {"type": "heading", "content": "Admissions", "level": 1, "page_number": 0, "top": 0.0},
             {"type": "text", "content": "Fees are set annually.", "page_number": 0, "top": 1.0},
-            {"type": "image", "data": make_png(), "content_type": "image/png",
-             "page_number": 0, "top": 2.0},
+            {
+                "type": "image",
+                "data": make_png(),
+                "content_type": "image/png",
+                "page_number": 0,
+                "top": 2.0,
+            },
             {"type": "text", "content": "Figure 1: Tuition by grade", "page_number": 0, "top": 3.0},
         ]
 
@@ -687,7 +722,9 @@ class EnrichmentStageTests(PipelineTestCase):
         """Enrichment is additive: losing figures beats losing the document."""
         exploding = Mock()
         exploding.process.side_effect = RuntimeError("pipeline down")
-        enriched, report = enrich_image_blocks(self._blocks(), filename="doc.pdf", pipeline=exploding)
+        enriched, report = enrich_image_blocks(
+            self._blocks(), filename="doc.pdf", pipeline=exploding
+        )
         self.assertEqual(3, len(enriched))
         self.assertTrue(all(block["type"] != "image" for block in enriched))
         self.assertEqual(0, report.total)
@@ -720,18 +757,35 @@ class ChunkIntegrationTests(PipelineTestCase):
 
         blocks = [
             {"type": "heading", "content": "Admissions", "level": 1, "page_number": 0, "top": 0.0},
-            {"type": "text", "content": "Tuition is reviewed each year. " * 20, "page_number": 0, "top": 1.0},
-            {"type": "image", "data": make_png(), "content_type": "image/png",
-             "page_number": 0, "top": 2.0},
+            {
+                "type": "text",
+                "content": "Tuition is reviewed each year. " * 20,
+                "page_number": 0,
+                "top": 1.0,
+            },
+            {
+                "type": "image",
+                "data": make_png(),
+                "content_type": "image/png",
+                "page_number": 0,
+                "top": 2.0,
+            },
             {"type": "text", "content": "Figure 1: Tuition by grade", "page_number": 0, "top": 3.0},
         ]
         loader = DocumentLoader()
-        with patch.object(DocumentLoader, "_enrich_assets", staticmethod(
-            lambda blocks, filename, file_path, progress=None: enrich_image_blocks(
-                blocks, filename=filename, file_path=file_path, pipeline=self.pipeline(),
-                progress=progress,
-            )[0]
-        )):
+        with patch.object(
+            DocumentLoader,
+            "_enrich_assets",
+            staticmethod(
+                lambda blocks, filename, file_path, progress=None: enrich_image_blocks(
+                    blocks,
+                    filename=filename,
+                    file_path=file_path,
+                    pipeline=self.pipeline(),
+                    progress=progress,
+                )[0]
+            ),
+        ):
             return loader._load_blocks_with_layout(blocks, "/data/doc.pdf", "doc.pdf", "PDF")
 
     def test_a_figure_produces_a_leaf_chunk_tagged_and_linked(self):
@@ -746,7 +800,9 @@ class ChunkIntegrationTests(PipelineTestCase):
 
     def test_a_figure_leaf_is_isolated_from_surrounding_prose(self):
         """Leaf isolation keeps the figure's embedding about the figure."""
-        figures = [c for c in self._chunks() if c.get("modality") == "figure" and c["chunk_level"] == 3]
+        figures = [
+            c for c in self._chunks() if c.get("modality") == "figure" and c["chunk_level"] == 3
+        ]
         self.assertNotIn("reviewed each year", figures[0]["text"])
 
     def test_parents_inherit_the_asset_reference(self):
@@ -761,7 +817,9 @@ class ChunkIntegrationTests(PipelineTestCase):
         chunker applies it — and _apply_section_prefix additionally skips when the
         topic is already near the top of the text (the heuristic extractor puts it in
         tags). Either route is fine; two copies would not be."""
-        figures = [c for c in self._chunks() if c.get("modality") == "figure" and c["chunk_level"] == 3]
+        figures = [
+            c for c in self._chunks() if c.get("modality") == "figure" and c["chunk_level"] == 3
+        ]
         self.assertEqual(1, figures[0]["text"].count("Admissions"))
 
     def test_plain_text_chunks_stay_text_modality_with_no_assets(self):
@@ -784,7 +842,9 @@ class HtmlImageParsingTests(unittest.TestCase):
 
     def test_a_data_uri_image_becomes_an_image_block(self):
         encoded = base64.b64encode(make_png()).decode()
-        blocks = self._parse(f'<p>Intro</p><img src="data:image/png;base64,{encoded}" alt="Org chart">')
+        blocks = self._parse(
+            f'<p>Intro</p><img src="data:image/png;base64,{encoded}" alt="Org chart">'
+        )
         images = [b for b in blocks if b["type"] == "image"]
         self.assertEqual(1, len(images))
         self.assertEqual("Org chart", images[0]["alt_text"])
@@ -962,8 +1022,11 @@ class ExtractionConcurrencyTests(PipelineTestCase):
         images = self._images(4)
         tracker.doomed = compute_sha256(images[2].data)
         pipeline = FigurePipeline(
-            profile=self._profile(4), store=self.store, blob_store=self.blobs,
-            extractor=tracker, fallback_extractor=inner,
+            profile=self._profile(4),
+            store=self.store,
+            blob_store=self.blobs,
+            extractor=tracker,
+            fallback_extractor=inner,
         )
 
         dossiers, report = pipeline.process(images, filename="doc.pdf")
@@ -1017,8 +1080,10 @@ class ExtractionProgressTests(PipelineTestCase):
         assets = self.profile.assets.model_copy(update={"extraction_workers": workers})
         return FigurePipeline(
             profile=self.profile.model_copy(update={"assets": assets}),
-            store=self.store, blob_store=self.blobs,
-            extractor=inner, fallback_extractor=inner,
+            store=self.store,
+            blob_store=self.blobs,
+            extractor=inner,
+            fallback_extractor=inner,
         )
 
     def _images(self, count):
@@ -1158,8 +1223,11 @@ class MarkReviewedStoreTests(PipelineTestCase):
 
         inner = HeuristicExtractor(self.profile.assets.figures)
         return FigurePipeline(
-            profile=self.profile, store=self.store, blob_store=self.blobs,
-            extractor=Flagging(inner), fallback_extractor=inner,
+            profile=self.profile,
+            store=self.store,
+            blob_store=self.blobs,
+            extractor=Flagging(inner),
+            fallback_extractor=inner,
         )
 
     def test_accepting_clears_the_flag_that_is_read_back(self):
@@ -1201,7 +1269,6 @@ class MarkReviewedStoreTests(PipelineTestCase):
         after = self.store.get(dossiers[0].asset_id)
 
         self.assertEqual(before.extraction.text.caption, after.extraction.text.caption)
-        self.assertEqual(before.extraction.text.transcription,
-                         after.extraction.text.transcription)
+        self.assertEqual(before.extraction.text.transcription, after.extraction.text.transcription)
         self.assertEqual(before.status, after.status)
         self.assertEqual(before.is_indexable, after.is_indexable)

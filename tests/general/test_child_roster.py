@@ -5,6 +5,7 @@ outage tells a parent for ninety seconds that the school has no record of their 
 a cached refusal does the same for a sign-in that has merely expired. Both are worse
 than the extra HTTP call the cache exists to save.
 """
+
 import pytest
 
 import backend.agent.chat.child_roster as child_roster

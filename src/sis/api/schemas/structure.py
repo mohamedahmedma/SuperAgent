@@ -12,6 +12,7 @@ domain `ValidationError`, which reaches a client as a 4xx with no field-level de
 a check here becomes a 422 that names `classes_by_year` and shows in OpenAPI before anyone
 presses the button. The command stays the authority — this layer is the courtesy.
 """
+
 from datetime import date
 from typing import Annotated, Literal
 
@@ -85,8 +86,12 @@ class GenerateStructureRequest(RequestModel):
         default="Y{n}",
         description="Year level code template. Must contain `{n}`, or every rung gets the same code.",
     )
-    year_name_en_template: str = Field(default="Year {n}", description="English year level name template.")
-    year_name_ar_template: str = Field(default="السنة {n}", description="Arabic year level name template.")
+    year_name_en_template: str = Field(
+        default="Year {n}", description="English year level name template."
+    )
+    year_name_ar_template: str = Field(
+        default="السنة {n}", description="Arabic year level name template."
+    )
     class_code_template: str = Field(
         default="{year}{suffix}",
         description="Class code template. Must contain both `{year}` and `{suffix}`.",
@@ -145,7 +150,9 @@ class GeneratedItemOut(ResponseModel):
     """
 
     kind: Literal["year_level", "class_section"] = Field(description="What was generated.")
-    code: CodeStr = Field(description="Code of the created or already-present item.", examples=["3A"])
+    code: CodeStr = Field(
+        description="Code of the created or already-present item.", examples=["3A"]
+    )
     name_en: str = Field(description="English label, from the name template.")
     name_ar: str = Field(description="Arabic label, from the name template.")
     created: bool = Field(
@@ -194,7 +201,9 @@ class ClassSectionOut(NamedOut):
     different room of children each time, so a client caching by code alone will mix years.
     """
 
-    code: CodeStr = Field(description="Class code, unique within its academic year.", examples=["3A"])
+    code: CodeStr = Field(
+        description="Class code, unique within its academic year.", examples=["3A"]
+    )
     academic_year_code: CodeStr = Field(description="Year this section belongs to.")
     year_level_code: CodeStr = Field(description="Rung this section sits on.")
     capacity: int | None = Field(
@@ -210,7 +219,9 @@ class TermOut(NamedOut):
     academic_year_code: CodeStr = Field(description="Year this term belongs to.")
     starts_on: date = Field(description="First day of term.")
     ends_on: date = Field(description="Last day of term, inclusive.")
-    sequence: int = Field(default=1, description="Chronological position; sort by this, not by code.")
+    sequence: int = Field(
+        default=1, description="Chronological position; sort by this, not by code."
+    )
     is_closed: bool = Field(default=False, description="Whether marks for this term are final.")
 
 

@@ -1,4 +1,5 @@
 """Parent chunks for the auto-merging retriever: Postgres through a unit of work, Redis in front."""
+
 from __future__ import annotations
 
 from typing import Callable, List

@@ -48,6 +48,7 @@ day", as in «اليوم الدراسي بيخلص امتى» — the school day
 longest-first, so listing that one as recognised-but-not-a-day is all it takes to keep
 it out.
 """
+
 from __future__ import annotations
 
 import logging
@@ -64,13 +65,25 @@ logger = logging.getLogger(__name__)
 #: the facade relays them. Matched against a payload's own day strings, so they cannot be
 #: prettied up here.
 WEEKDAYS = (
-    "saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday",
+    "saturday",
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
 )
 
 #: `date.weekday()` order — Monday is 0. Written out rather than derived from `WEEKDAYS`
 #: above, which is in a school's reading order and not Python's.
 _BY_INDEX = (
-    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
 )
 
 #: Phrases that mean a day RELATIVE to now, and how many days from today they are.

@@ -38,6 +38,7 @@ Every failure path returns the query unchanged. A translator that is misconfigur
 limited or returning nonsense costs the improvement, never the turn — the same rule
 `rewrite_query_once` follows.
 """
+
 from __future__ import annotations
 
 import logging
@@ -63,9 +64,18 @@ _RETRIEVAL = _PROFILE.retrieval
 #: non-breaking hyphen (U+2011), which BM25 scores as a different token entirely, so the
 #: measurement would have been of the translator rather than of the retrieval.
 _TYPOGRAPHY = {
-    "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-",
-    "−": "-", "‘": "'", "’": "'", "“": '"', "”": '"',
-    " ": " ", " ": " ",
+    "‐": "-",
+    "‑": "-",
+    "‒": "-",
+    "–": "-",
+    "—": "-",
+    "−": "-",
+    "‘": "'",
+    "’": "'",
+    "“": '"',
+    "”": '"',
+    " ": " ",
+    " ": " ",
 }
 
 #: Arabic-Indic and Eastern Arabic-Indic digits. A translator that "localises" 105,000
@@ -104,6 +114,7 @@ def protected_tokens(text: str) -> set:
             found.add(token)
     return found
 
+
 #: Process-local, bounded, and keyed on the normalized query — the same shape as the
 #: query-embedding memo. A turn that rewrites searches twice from the same base question,
 #: and a parent who asks the same thing twice should not pay twice.
@@ -139,9 +150,7 @@ def _usable(original: str, candidate: str, target: str) -> bool:
         return False
     lost = [token for token in protected_tokens(original) if token not in candidate]
     if lost:
-        logger.warning(
-            "translated query dropped %s; searching with the original", sorted(lost)[:4]
-        )
+        logger.warning("translated query dropped %s; searching with the original", sorted(lost)[:4])
         return False
     if detect_language(candidate) != target:
         logger.warning("translated query is not in %s; searching with the original", target)
@@ -150,8 +159,11 @@ def _usable(original: str, candidate: str, target: str) -> bool:
     # answered the question, explained it, or hallucinated context onto it, and every
     # extra term it invented is dilution on both halves of the retrieval.
     if len(candidate) > max(120, len(original) * 3):
-        logger.warning("translated query is %d chars for a %d-char question; searching with "
-                       "the original", len(candidate), len(original))
+        logger.warning(
+            "translated query is %d chars for a %d-char question; searching with the original",
+            len(candidate),
+            len(original),
+        )
         return False
     return True
 

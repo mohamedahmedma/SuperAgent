@@ -9,6 +9,7 @@ described, reports itself healthy, and answers wrongly.
 what keeps a shell or the Windows launcher, a container injecting real secrets, and a
 test that sets its own value all behaving exactly as before.
 """
+
 import os
 from pathlib import Path
 

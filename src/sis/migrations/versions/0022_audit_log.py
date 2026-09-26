@@ -1,4 +1,5 @@
 """Append-only mutation audit log."""
+
 from alembic import op
 import sqlalchemy as sa
 

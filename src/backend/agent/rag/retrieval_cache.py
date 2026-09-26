@@ -29,6 +29,7 @@ that is served.
 Only a complete result is kept: a failed embedding or search is not an answer to
 remember. And it fails open, since a Redis that cannot be reached is a miss.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -46,15 +47,21 @@ _VERSION_KEY = "corpus_version"
 class CorpusVersion:
     """A counter every write to the searchable corpus moves forward."""
 
-    def __init__(self, *, redis: Optional[Callable[[], Any]] = None,
-                 key: Callable[[str], str] = lambda name: name) -> None:
+    def __init__(
+        self,
+        *,
+        redis: Optional[Callable[[], Any]] = None,
+        key: Callable[[str], str] = lambda name: name,
+    ) -> None:
         self._redis = redis
         self._key = key(_VERSION_KEY)
 
     @classmethod
     def for_cache(cls, cache: Any) -> "CorpusVersion":
         """Over the cache's Redis. A cache with none behind it (a test's stand-in) counts nothing."""
-        return cls(redis=getattr(cache, "client", None), key=getattr(cache, "key", lambda name: name))
+        return cls(
+            redis=getattr(cache, "client", None), key=getattr(cache, "key", lambda name: name)
+        )
 
     @property
     def key(self) -> str:
@@ -71,8 +78,9 @@ class CorpusVersion:
         try:
             self._redis().incr(self._key)
         except Exception:
-            logger.warning("could not mark the corpus changed; cached retrievals expire by TTL",
-                           exc_info=True)
+            logger.warning(
+                "could not mark the corpus changed; cached retrievals expire by TTL", exc_info=True
+            )
 
 
 @dataclass(frozen=True)
@@ -106,7 +114,9 @@ class RetrievalCache:
         self._ttl = int(ttl_seconds)
 
     @classmethod
-    def from_environment(cls, cache: Any, corpus: CorpusVersion, settings: dict) -> "RetrievalCache":
+    def from_environment(
+        cls, cache: Any, corpus: CorpusVersion, settings: dict
+    ) -> "RetrievalCache":
         """`RETRIEVAL_CACHE_TTL_SECONDS` (an hour; 0 turns the cache off).
 
         `settings` is everything retrieval is configured with; its fingerprint is part of
@@ -123,7 +133,9 @@ class RetrievalCache:
             ttl_seconds=int(os.getenv("RETRIEVAL_CACHE_TTL_SECONDS") or 3600),
         )
 
-    def lookup(self, query: str, top_k: int, filter_expr: str) -> tuple[Optional[dict], RetrievalTicket]:
+    def lookup(
+        self, query: str, top_k: int, filter_expr: str
+    ) -> tuple[Optional[dict], RetrievalTicket]:
         """The cached result, or None and the ticket to store the computed one under."""
         if self._redis is None:
             return None, RetrievalTicket()

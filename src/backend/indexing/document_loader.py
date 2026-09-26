@@ -1,11 +1,16 @@
 """Document loading and chunking service"""
+
 import logging
 import os
 import re
 import unicodedata
 from typing import Dict, List, Optional
 
-from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, UnstructuredExcelLoader
+from langchain_community.document_loaders import (
+    Docx2txtLoader,
+    PyPDFLoader,
+    UnstructuredExcelLoader,
+)
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from backend.env import env_bool
@@ -72,7 +77,7 @@ def cut_to_budget(text: str, budget: int) -> List[str]:
     """
     if len(text) <= budget:
         return [text]
-    return [text[index:index + budget] for index in range(0, len(text), budget)]
+    return [text[index : index + budget] for index in range(0, len(text), budget)]
 
 
 class SentenceSplitter:
@@ -110,7 +115,7 @@ class SentenceSplitter:
         for sentence in sentences:
             if current and current_len + len(sentence) + 1 > self.max_chars:
                 chunks.append(" ".join(current))
-                overlap = current[-self.overlap_sentences:] if self.overlap_sentences else []
+                overlap = current[-self.overlap_sentences :] if self.overlap_sentences else []
                 current = list(overlap)
                 current_len = sum(len(s) + 1 for s in current)
             current.append(sentence)
@@ -118,6 +123,7 @@ class SentenceSplitter:
         if current:
             chunks.append(" ".join(current))
         return chunks
+
 
 # Text normalization is shared with the retrieval layer so documents and queries
 # are normalized identically (see backend/text_normalization.py). Re-exported here
@@ -163,14 +169,17 @@ class DocumentLoader:
         if strategy not in CHUNK_STRATEGIES:
             logger.warning(
                 "Unknown CHUNK_STRATEGY=%r (choices: %s) — using 'recursive'",
-                strategy, ", ".join(CHUNK_STRATEGIES),
+                strategy,
+                ", ".join(CHUNK_STRATEGIES),
             )
             return "recursive"
         if strategy == "token":
             try:
                 import tiktoken  # noqa: F401 — availability check only
             except ImportError:
-                logger.warning("CHUNK_STRATEGY=token but tiktoken is not installed — using 'recursive'")
+                logger.warning(
+                    "CHUNK_STRATEGY=token but tiktoken is not installed — using 'recursive'"
+                )
                 return "recursive"
         return strategy
 
@@ -270,15 +279,17 @@ class DocumentLoader:
                         continue
                     level_3_id = self._build_chunk_id(filename, page_number, 3, counters["l3"])
                     counters["l3"] += 1
-                    root_chunks.append({
-                        **base_doc,
-                        "text": level_3_text,
-                        "chunk_id": level_3_id,
-                        "parent_chunk_id": level_2_id,
-                        "root_chunk_id": level_1_id,
-                        "chunk_level": 3,
-                        "chunk_idx": page_global_chunk_idx,
-                    })
+                    root_chunks.append(
+                        {
+                            **base_doc,
+                            "text": level_3_text,
+                            "chunk_id": level_3_id,
+                            "parent_chunk_id": level_2_id,
+                            "root_chunk_id": level_1_id,
+                            "chunk_level": 3,
+                            "chunk_idx": page_global_chunk_idx,
+                        }
+                    )
                     page_global_chunk_idx += 1
 
         return root_chunks
@@ -335,16 +346,12 @@ class DocumentLoader:
             # The header alone fills the budget, so there is no room to repeat it and
             # therefore no grid left to preserve. Bounded lines are what remains, and
             # bounded is the property that has to hold.
-            return [
-                [[piece]] for piece in self._line_passages(self._render_rows(rows), budget)
-            ]
+            return [[[piece]] for piece in self._line_passages(self._render_rows(rows), budget)]
 
         # Every body row made to fit BESIDE a repeated header, so a group is the header
         # plus at least one row and still within budget.
         rows = [header] + [
-            fitted
-            for row in rows[1:]
-            for fitted in self._fit_row(row, budget - header_len - 1)
+            fitted for row in rows[1:] for fitted in self._fit_row(row, budget - header_len - 1)
         ]
 
         groups: List[List[List[str]]] = []
@@ -405,14 +412,16 @@ class DocumentLoader:
         for piece in splitter.split_text(text):
             piece = (piece or "").strip()
             if piece:
-                units.append({
-                    "kind": kind,
-                    "text": piece,
-                    "sections": sections,
-                    "page": page,
-                    "asset_ids": tuple(asset_ids),
-                    "list_group": list_group,
-                })
+                units.append(
+                    {
+                        "kind": kind,
+                        "text": piece,
+                        "sections": sections,
+                        "page": page,
+                        "asset_ids": tuple(asset_ids),
+                        "list_group": list_group,
+                    }
+                )
         return units
 
     #: When a transcription is a grid rather than prose. Three is the fewest lines that
@@ -502,8 +511,7 @@ class DocumentLoader:
                 runs.append((piped, [line]))
         # A short run of pipes is a sentence containing one, not a grid to regroup.
         return [
-            (piped and len(lines) >= cls._FIGURE_TABLE_MIN_ROWS, lines)
-            for piped, lines in runs
+            (piped and len(lines) >= cls._FIGURE_TABLE_MIN_ROWS, lines) for piped, lines in runs
         ]
 
     def _discovery_passages(self, description: str, summary: str, budget: int) -> List[str]:
@@ -579,7 +587,7 @@ class DocumentLoader:
         # passage over the bound, and one image exploding into hundreds of chunks that
         # all share an asset_id and compete for the final slots. Capped at a third, the
         # same shape of rule `_apply_section_prefix` already applies to a section path.
-        header = header[:max(budget // 3, 1)].strip()
+        header = header[: max(budget // 3, 1)].strip()
         body_budget = max(budget - len(header) - 1, 1)
 
         bodies = self._discovery_passages(description, summary, body_budget)
@@ -703,7 +711,11 @@ class DocumentLoader:
                 close()
                 windows.append([unit])
                 continue
-            if split_on_section_change and current and unit.get("sections", ()) != current[0].get("sections", ()):
+            if (
+                split_on_section_change
+                and current
+                and unit.get("sections", ()) != current[0].get("sections", ())
+            ):
                 close()
             # A list is one thing. Word says so in the paragraph style, and the parser
             # now carries it here. Closing a window between "Maadi" and "Mokattam"
@@ -851,8 +863,22 @@ class DocumentLoader:
     # CJK, and Arabic-script terminators (؟ U+061F, ؛ U+061B, ۔ U+06D4) — Arabic
     # sentences end with these, never with the Latin set alone.
     _TERMINAL_PUNCTUATION = (
-        ".", "!", "?", "。", "！", "？", ":", "：", ";", "；", '"', ")", "）",
-        "؟", "؛", "۔",
+        ".",
+        "!",
+        "?",
+        "。",
+        "！",
+        "？",
+        ":",
+        "：",
+        ";",
+        "；",
+        '"',
+        ")",
+        "）",
+        "؟",
+        "؛",
+        "۔",
     )
 
     @staticmethod
@@ -1084,7 +1110,9 @@ class DocumentLoader:
         for block in blocks:
             prev = stitched[-1] if stitched else None
             if prev is not None and self._is_paragraph_continuation(prev, block):
-                prev["content"] = prev["content"].rstrip() + " " + (block.get("content") or "").lstrip()
+                prev["content"] = (
+                    prev["content"].rstrip() + " " + (block.get("content") or "").lstrip()
+                )
                 prev["_last_page"] = block.get("page_number", 0)
                 continue
             if prev is not None and self._is_table_continuation(prev, block):
@@ -1142,20 +1170,24 @@ class DocumentLoader:
                 title = sanitize_text(block.get("content") or "").strip()
                 if title:
                     self._update_section_stack(section_stack, title, block.get("level"))
-                    units.append({
-                        "kind": "text",
-                        "text": title,
-                        # Carried so a heading is never separated from the list it heads.
-                        "list_group": block.get("list_group", 0),
-                        "sections": tuple(entry["title"] for entry in section_stack),
-                        "page": page_number,
-                    })
+                    units.append(
+                        {
+                            "kind": "text",
+                            "text": title,
+                            # Carried so a heading is never separated from the list it heads.
+                            "list_group": block.get("list_group", 0),
+                            "sections": tuple(entry["title"] for entry in section_stack),
+                            "page": page_number,
+                        }
+                    )
                 continue
 
             sections = tuple(entry["title"] for entry in section_stack)
             if block_type == "table":
                 units.extend(
-                    self._table_units(block.get("rows") or [], self._level_1_size, sections, page_number)
+                    self._table_units(
+                        block.get("rows") or [], self._level_1_size, sections, page_number
+                    )
                 )
             else:
                 content = (block.get("content") or "").strip()
@@ -1180,13 +1212,15 @@ class DocumentLoader:
                         for passage in self._figure_passages(
                             block.get("figure") or {}, content, self._level_3_size
                         ):
-                            units.append({
-                                "kind": "figure",
-                                "text": passage,
-                                "sections": sections,
-                                "page": page_number,
-                                "asset_ids": asset_ids,
-                            })
+                            units.append(
+                                {
+                                    "kind": "figure",
+                                    "text": passage,
+                                    "sections": sections,
+                                    "page": page_number,
+                                    "asset_ids": asset_ids,
+                                }
+                            )
                     else:
                         units.extend(
                             self._text_units(
@@ -1230,27 +1264,29 @@ class DocumentLoader:
             level_1_body = sanitize_text(self._window_text(window_1)).strip()
             level_1_sections = self._window_sections(window_1)
             level_1_text = self._apply_section_prefix(
-                    level_1_body, level_1_sections, self._window_modality(window_1)
-                )
+                level_1_body, level_1_sections, self._window_modality(window_1)
+            )
             level_1_bm25 = self._apply_bm25_section_prefix(level_1_body, level_1_sections)
             if not level_1_text:
                 continue
             level_1_page = window_page(window_1)
             level_1_id = self._build_chunk_id(filename, level_1_page, 1, counters["l1"])
             counters["l1"] += 1
-            chunks.append({
-                **doc_info,
-                "page_number": level_1_page,
-                "text": level_1_text,
-                "bm25_text": level_1_bm25,
-                "chunk_id": level_1_id,
-                "parent_chunk_id": "",
-                "root_chunk_id": level_1_id,
-                "chunk_level": 1,
-                "chunk_idx": chunk_idx,
-                "asset_ids": self._window_asset_ids(window_1),
-                "modality": self._window_modality(window_1),
-            })
+            chunks.append(
+                {
+                    **doc_info,
+                    "page_number": level_1_page,
+                    "text": level_1_text,
+                    "bm25_text": level_1_bm25,
+                    "chunk_id": level_1_id,
+                    "parent_chunk_id": "",
+                    "root_chunk_id": level_1_id,
+                    "chunk_level": 1,
+                    "chunk_idx": chunk_idx,
+                    "asset_ids": self._window_asset_ids(window_1),
+                    "modality": self._window_modality(window_1),
+                }
+            )
             chunk_idx += 1
 
             units_2 = self._refine_units(window_1, self._splitter_level_2, self._level_2_size)
@@ -1266,19 +1302,21 @@ class DocumentLoader:
                 level_2_page = window_page(window_2)
                 level_2_id = self._build_chunk_id(filename, level_2_page, 2, counters["l2"])
                 counters["l2"] += 1
-                chunks.append({
-                    **doc_info,
-                    "page_number": level_2_page,
-                    "text": level_2_text,
-                    "bm25_text": level_2_bm25,
-                    "chunk_id": level_2_id,
-                    "parent_chunk_id": level_1_id,
-                    "root_chunk_id": level_1_id,
-                    "chunk_level": 2,
-                    "chunk_idx": chunk_idx,
-                    "asset_ids": self._window_asset_ids(window_2),
-                    "modality": self._window_modality(window_2),
-                })
+                chunks.append(
+                    {
+                        **doc_info,
+                        "page_number": level_2_page,
+                        "text": level_2_text,
+                        "bm25_text": level_2_bm25,
+                        "chunk_id": level_2_id,
+                        "parent_chunk_id": level_1_id,
+                        "root_chunk_id": level_1_id,
+                        "chunk_level": 2,
+                        "chunk_idx": chunk_idx,
+                        "asset_ids": self._window_asset_ids(window_2),
+                        "modality": self._window_modality(window_2),
+                    }
+                )
                 chunk_idx += 1
 
                 units_3 = self._refine_units(window_2, self._splitter_level_3, self._level_3_size)
@@ -1292,8 +1330,8 @@ class DocumentLoader:
                     level_3_body = sanitize_text(self._window_text(window_3)).strip()
                     level_3_sections = self._window_sections(window_3)
                     level_3_text = self._apply_section_prefix(
-                    level_3_body, level_3_sections, self._window_modality(window_3)
-                )
+                        level_3_body, level_3_sections, self._window_modality(window_3)
+                    )
                     level_3_text = fit_utf8_bytes(level_3_text, self._MILVUS_TEXT_CAP_BYTES).strip()
                     level_3_bm25 = fit_utf8_bytes(
                         self._apply_bm25_section_prefix(level_3_body, level_3_sections),
@@ -1304,19 +1342,21 @@ class DocumentLoader:
                     level_3_page = window_page(window_3)
                     level_3_id = self._build_chunk_id(filename, level_3_page, 3, counters["l3"])
                     counters["l3"] += 1
-                    chunks.append({
-                        **doc_info,
-                        "page_number": level_3_page,
-                        "text": level_3_text,
-                        "bm25_text": level_3_bm25,
-                        "chunk_id": level_3_id,
-                        "parent_chunk_id": level_2_id,
-                        "root_chunk_id": level_1_id,
-                        "chunk_level": 3,
-                        "chunk_idx": chunk_idx,
-                        "asset_ids": self._window_asset_ids(window_3),
-                        "modality": self._window_modality(window_3),
-                    })
+                    chunks.append(
+                        {
+                            **doc_info,
+                            "page_number": level_3_page,
+                            "text": level_3_text,
+                            "bm25_text": level_3_bm25,
+                            "chunk_id": level_3_id,
+                            "parent_chunk_id": level_2_id,
+                            "root_chunk_id": level_1_id,
+                            "chunk_level": 3,
+                            "chunk_idx": chunk_idx,
+                            "asset_ids": self._window_asset_ids(window_3),
+                            "modality": self._window_modality(window_3),
+                        }
+                    )
                     chunk_idx += 1
 
         return chunks
@@ -1357,7 +1397,9 @@ class DocumentLoader:
 
     @staticmethod
     def _enrich_assets(
-        blocks: List[Dict], filename: str, file_path: str,
+        blocks: List[Dict],
+        filename: str,
+        file_path: str,
         progress: Optional[IngestProgress] = None,
     ) -> List[Dict]:
         """Turn image blocks into retrievable text, or drop them.
@@ -1379,7 +1421,11 @@ class DocumentLoader:
         return enriched
 
     def _try_layout_path(
-        self, parse_blocks, file_path: str, filename: str, doc_type: str,
+        self,
+        parse_blocks,
+        file_path: str,
+        filename: str,
+        doc_type: str,
         progress: Optional[IngestProgress] = None,
     ):
         """Run a format's block parser through the shared pipeline; None means the
@@ -1392,12 +1438,14 @@ class DocumentLoader:
                 return documents
             logger.warning(
                 "Layout parser produced no chunks for %s (%s); falling back to flat extraction",
-                filename, doc_type,
+                filename,
+                doc_type,
             )
         except Exception:
             logger.exception(
                 "Layout-aware parsing failed for %s (%s); falling back to flat extraction",
-                filename, doc_type,
+                filename,
+                doc_type,
             )
         return None
 
@@ -1467,7 +1515,9 @@ class DocumentLoader:
         if file_lower.endswith(".pdf"):
             doc_type = "PDF"
             if PDF_LAYOUT_PARSER_ENABLED:
-                documents = self._try_layout_path(parse_pdf_blocks, file_path, filename, doc_type, progress)
+                documents = self._try_layout_path(
+                    parse_pdf_blocks, file_path, filename, doc_type, progress
+                )
                 if documents:
                     return documents
             loader = PyPDFLoader(file_path)
@@ -1475,7 +1525,9 @@ class DocumentLoader:
             doc_type = "Word"
             # python-docx reads only .docx; legacy .doc always uses the flat loader.
             if LAYOUT_PARSER_ENABLED and file_lower.endswith(".docx"):
-                documents = self._try_layout_path(parse_docx_blocks, file_path, filename, doc_type, progress)
+                documents = self._try_layout_path(
+                    parse_docx_blocks, file_path, filename, doc_type, progress
+                )
                 if documents:
                     return documents
             loader = Docx2txtLoader(file_path)
@@ -1483,14 +1535,18 @@ class DocumentLoader:
             doc_type = "Excel"
             # openpyxl reads only .xlsx; legacy .xls always uses the flat loader.
             if LAYOUT_PARSER_ENABLED and file_lower.endswith(".xlsx"):
-                documents = self._try_layout_path(parse_xlsx_blocks, file_path, filename, doc_type, progress)
+                documents = self._try_layout_path(
+                    parse_xlsx_blocks, file_path, filename, doc_type, progress
+                )
                 if documents:
                     return documents
             loader = UnstructuredExcelLoader(file_path)
         elif file_lower.endswith((".html", ".htm")):
             doc_type = "HTML"
             if LAYOUT_PARSER_ENABLED:
-                documents = self._try_layout_path(parse_html_blocks, file_path, filename, doc_type, progress)
+                documents = self._try_layout_path(
+                    parse_html_blocks, file_path, filename, doc_type, progress
+                )
                 if documents:
                     return documents
             from backend.indexing.html_processor import load_html_for_document_loader

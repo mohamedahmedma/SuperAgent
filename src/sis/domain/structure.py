@@ -18,6 +18,7 @@ can build a `Subject` straight from a spreadsheet row and get `InvalidCode` at t
 that caused it. No framework imports: these types are what the service unit tests are
 written against, with no database in sight.
 """
+
 from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
@@ -428,9 +429,7 @@ class YearLevel(_Named):
             object.__setattr__(self, "track_code", track or None)
         # A bool is an int, and `display_order=True` would silently mean "position 1".
         if isinstance(self.display_order, bool) or not isinstance(self.display_order, int):
-            raise ValidationError(
-                "display order must be a whole number", field="display_order"
-            )
+            raise ValidationError("display order must be a whole number", field="display_order")
 
     @property
     def sort_key(self) -> tuple[int, int, str]:
@@ -617,9 +616,7 @@ class Subject(_Named):
         _coerce("academic_year_code", AcademicYearCode, self)
         _coerce_names(self)
         if isinstance(self.display_order, bool) or not isinstance(self.display_order, int):
-            raise ValidationError(
-                "display order must be a whole number", field="display_order"
-            )
+            raise ValidationError("display order must be a whole number", field="display_order")
 
     @property
     def sort_key(self) -> tuple[int, str]:

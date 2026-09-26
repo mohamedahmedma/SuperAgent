@@ -11,6 +11,7 @@ has reported nothing for `STALLED_AFTER` is presented as failed when read. The s
 is left as it is: the job may be alive on another worker and merely slow, and if it
 reports again its next update is simply shown.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -143,7 +144,9 @@ class IngestJobTracker:
         sub = {
             name: value
             for name, value in (
-                ("sub_label", sub_label), ("sub_done", sub_done), ("sub_total", sub_total)
+                ("sub_label", sub_label),
+                ("sub_done", sub_done),
+                ("sub_total", sub_total),
             )
             if value is not None
         }
@@ -163,7 +166,9 @@ class IngestJobTracker:
                 current_step=step_key,
                 message=message,
                 total_chunks=job.total_chunks if total_chunks is None else int(total_chunks),
-                processed_chunks=job.processed_chunks if processed_chunks is None else int(processed_chunks),
+                processed_chunks=job.processed_chunks
+                if processed_chunks is None
+                else int(processed_chunks),
             )
 
         return self._change(job_id, change)
@@ -171,12 +176,16 @@ class IngestJobTracker:
     def complete_step(self, job_id: str, step_key: str, message: str = "") -> dict | None:
         return self.update_step(job_id, step_key, 100, "completed", message)
 
-    def complete_job(self, job_id: str, message: str = "Document ingestion complete") -> dict | None:
+    def complete_job(
+        self, job_id: str, message: str = "Document ingestion complete"
+    ) -> dict | None:
         def change(job: IngestJobRecord) -> IngestJobRecord:
             return replace(
                 job,
                 steps=tuple(
-                    step if step.status == "failed" else replace(step, percent=100, status="completed")
+                    step
+                    if step.status == "failed"
+                    else replace(step, percent=100, status="completed")
                     for step in job.steps
                 ),
                 status="completed",
@@ -242,4 +251,3 @@ class IngestJobTracker:
             "updated_at": job.updated_at.isoformat(),
             "steps": [asdict(step) for step in job.steps],
         }
-

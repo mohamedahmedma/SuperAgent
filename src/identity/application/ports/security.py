@@ -13,6 +13,7 @@ directly could not be exercised without generating or loading one.
 Neither port exists to make the algorithm swappable. PBKDF2 and RS256 are decided, and the
 reasons are written down in `infrastructure/crypto/`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

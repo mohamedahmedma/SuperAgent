@@ -29,6 +29,7 @@ Fields that only a language model can honestly fill — ambiguity, HITL prompts 
 default to the inert value. A cheap assessor therefore cannot invent an ambiguity it
 never assessed; the property is structural rather than special-cased.
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,10 +49,10 @@ class Certainty(IntEnum):
     overlap and not meaning.
     """
 
-    NONE = 0      # nothing has looked at the evidence
-    LOW = 1       # structural or lexical proxies only — no semantic judgement
-    MEDIUM = 2    # a calibrated semantic score (cross-encoder relevance)
-    HIGH = 3      # a language model read the chunks and the question together
+    NONE = 0  # nothing has looked at the evidence
+    LOW = 1  # structural or lexical proxies only — no semantic judgement
+    MEDIUM = 2  # a calibrated semantic score (cross-encoder relevance)
+    HIGH = 3  # a language model read the chunks and the question together
 
 
 _CERTAINTY_BY_NAME = {level.name.lower(): level for level in Certainty}
@@ -85,11 +86,11 @@ class EvidenceReport:
     chunks: List[ChunkAssessment] = field(default_factory=list)
     certainty: Certainty = Certainty.NONE
 
-    relevance: str = "unknown"      # none | weak | strong | unknown
-    sufficiency: str = "unknown"    # none | partial | sufficient | unknown
+    relevance: str = "unknown"  # none | weak | strong | unknown
+    sufficiency: str = "unknown"  # none | partial | sufficient | unknown
     # Only a language model may move this off "none": deciding that a question is
     # under-specified requires reading it, not scoring it.
-    ambiguity: str = "none"         # none | missing_slot | multiple_candidates
+    ambiguity: str = "none"  # none | missing_slot | multiple_candidates
     confidence: float = 0.0
 
     # Whether the retrieved material actually VARIES by the conditions the turn carried
@@ -307,7 +308,8 @@ def _merge(base: EvidenceReport, incoming: EvidenceReport) -> EvidenceReport:
     merged = EvidenceReport(
         question=incoming.question or base.question,
         certainty=max(base.certainty, incoming.certainty),
-        assessed_by=base.assessed_by + [n for n in incoming.assessed_by if n not in base.assessed_by],
+        assessed_by=base.assessed_by
+        + [n for n in incoming.assessed_by if n not in base.assessed_by],
         reasons=base.reasons + incoming.reasons,
     )
 

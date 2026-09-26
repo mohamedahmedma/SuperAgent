@@ -4,6 +4,7 @@ Format tests author real files with python-docx / openpyxl / plain HTML, then ru
 them through the block parsers and the full DocumentLoader pipeline — true
 end-to-end coverage without binary fixtures in the repo.
 """
+
 import os
 import tempfile
 import unittest
@@ -94,7 +95,6 @@ class SentenceSplitterTests(unittest.TestCase):
 
 
 class DocxLayoutTests(unittest.TestCase):
-
     def setUp(self):
         # The section path is off by default now: five reindexed arms measured it
         # costing recall rather than adding it, in Arabic and in English alike.
@@ -104,6 +104,7 @@ class DocxLayoutTests(unittest.TestCase):
         prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
         prefix.start()
         self.addCleanup(prefix.stop)
+
     @classmethod
     def setUpClass(cls):
         import docx as docx_lib
@@ -137,9 +138,7 @@ class DocxLayoutTests(unittest.TestCase):
 
     def test_loader_end_to_end_word_table_is_row_safe_and_topic_prefixed(self):
         docs = DocumentLoader().load_document(self.path, "handbook.docx")
-        table_leaf = next(
-            d for d in docs if d["chunk_level"] == 3 and "Grade | Fee" in d["text"]
-        )
+        table_leaf = next(d for d in docs if d["chunk_level"] == 3 and "Grade | Fee" in d["text"])
         self.assertTrue(table_leaf["text"].startswith("Admission Fees\n"))
         self.assertIn("2 | 200", table_leaf["text"])
         self.assertNotIn("Bus service", table_leaf["text"])
@@ -162,8 +161,9 @@ class DocxLayoutTests(unittest.TestCase):
                 return [_StubDoc()]
 
         layout_mock = Mock()
-        with patch.object(document_loader_module, "parse_docx_blocks", layout_mock), patch.object(
-            document_loader_module, "Docx2txtLoader", _StubDocx2txtLoader
+        with (
+            patch.object(document_loader_module, "parse_docx_blocks", layout_mock),
+            patch.object(document_loader_module, "Docx2txtLoader", _StubDocx2txtLoader),
         ):
             docs = DocumentLoader().load_document("legacy.doc", "legacy.doc")
         layout_mock.assert_not_called()
@@ -171,7 +171,6 @@ class DocxLayoutTests(unittest.TestCase):
 
 
 class XlsxLayoutTests(unittest.TestCase):
-
     def setUp(self):
         # The section path is off by default now: five reindexed arms measured it
         # costing recall rather than adding it, in Arabic and in English alike.
@@ -181,6 +180,7 @@ class XlsxLayoutTests(unittest.TestCase):
         prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
         prefix.start()
         self.addCleanup(prefix.stop)
+
     @classmethod
     def setUpClass(cls):
         from openpyxl import Workbook
@@ -206,15 +206,12 @@ class XlsxLayoutTests(unittest.TestCase):
 
     def test_loader_end_to_end_sheet_table_under_sheet_topic(self):
         docs = DocumentLoader().load_document(self.path, "fees.xlsx")
-        table_leaf = next(
-            d for d in docs if d["chunk_level"] == 3 and "Grade | Fee" in d["text"]
-        )
+        table_leaf = next(d for d in docs if d["chunk_level"] == 3 and "Grade | Fee" in d["text"])
         self.assertTrue(table_leaf["text"].startswith("Tuition\n"))
         self.assertEqual("Excel", table_leaf["file_type"])
 
 
 class HtmlLayoutTests(unittest.TestCase):
-
     def setUp(self):
         # The section path is off by default now: five reindexed arms measured it
         # costing recall rather than adding it, in Arabic and in English alike.
@@ -224,6 +221,7 @@ class HtmlLayoutTests(unittest.TestCase):
         prefix = patch.dict(os.environ, {"CHUNK_SECTION_PREFIX": "full"})
         prefix.start()
         self.addCleanup(prefix.stop)
+
     @classmethod
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
@@ -262,9 +260,7 @@ class HtmlLayoutTests(unittest.TestCase):
 
     def test_loader_end_to_end_html_table_under_section(self):
         docs = DocumentLoader().load_document(self.path, "guide.html")
-        table_leaf = next(
-            d for d in docs if d["chunk_level"] == 3 and "Grade | Fee" in d["text"]
-        )
+        table_leaf = next(d for d in docs if d["chunk_level"] == 3 and "Grade | Fee" in d["text"])
         self.assertTrue(table_leaf["text"].startswith("Fees\n"))
         self.assertEqual("HTML", table_leaf["file_type"])
 
@@ -302,7 +298,9 @@ class HtmlEdgeCaseTests(unittest.TestCase):
         self.assertEqual(3, len(tables[0]["rows"]))
 
     def test_list_items_become_text_blocks(self):
-        blocks = self._parse("<ul><li>Bring the vaccination card.</li><li>Bring two photos.</li></ul>")
+        blocks = self._parse(
+            "<ul><li>Bring the vaccination card.</li><li>Bring two photos.</li></ul>"
+        )
         texts = [b["content"] for b in blocks if b["type"] == "text"]
         self.assertIn("Bring the vaccination card.", texts)
         self.assertIn("Bring two photos.", texts)

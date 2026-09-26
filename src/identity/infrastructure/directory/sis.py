@@ -22,6 +22,7 @@ itself anyway, and it runs *inside* the latency of a parent's sign-in — so it 
 tighter one. With a single budget, a slow SIS added the full timeout to every parent's
 login in exchange for saving the backend one call it makes regardless.
 """
+
 from __future__ import annotations
 
 import logging
@@ -58,9 +59,7 @@ class SisGuardianDirectory:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout = timeout_seconds or self.DEFAULT_TIMEOUT_SECONDS
-        self._children_timeout = (
-            children_timeout_seconds or self.DEFAULT_CHILDREN_TIMEOUT_SECONDS
-        )
+        self._children_timeout = children_timeout_seconds or self.DEFAULT_CHILDREN_TIMEOUT_SECONDS
         self._client = None
         self._lock = threading.Lock()
 
@@ -99,9 +98,7 @@ class SisGuardianDirectory:
                 )
             return self._client
 
-    def resolve(
-        self, phone_e164: str, *, school_code: str | None = None
-    ) -> GuardianRef | None:
+    def resolve(self, phone_e164: str, *, school_code: str | None = None) -> GuardianRef | None:
         import httpx
 
         headers = self._headers(school_code)
@@ -146,9 +143,7 @@ class SisGuardianDirectory:
         if not public_id:
             # A blank handle would bind an account to nothing while looking like success —
             # the one shape of answer that must never be treated as a resolution.
-            raise GuardianDirectoryUnavailable(
-                "The guardian lookup returned an empty handle."
-            )
+            raise GuardianDirectoryUnavailable("The guardian lookup returned an empty handle.")
 
         return GuardianRef(
             public_id=public_id,
@@ -157,9 +152,7 @@ class SisGuardianDirectory:
             preferred_language=str(body.get("preferred_language") or "ar"),
         )
 
-    def children_of(
-        self, public_id: str, *, school_code: str | None = None
-    ) -> list[ChildRef]:
+    def children_of(self, public_id: str, *, school_code: str | None = None) -> list[ChildRef]:
         """Ask SIS by the opaque handle, never by the number that found her.
 
         The same discipline `GuardianRef` states: once the phone number has resolved to a

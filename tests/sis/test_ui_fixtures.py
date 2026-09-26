@@ -21,6 +21,7 @@ a fixture that is slightly untidy; a fixture with the wrong keys is a test that 
 of those is worth failing a build over, and adding the other would mean modelling every
 `date | None` in the schema.
 """
+
 import json
 from pathlib import Path
 
@@ -28,7 +29,9 @@ import pytest
 
 from sis.app import app
 
-FIXTURES = Path(__file__).resolve().parents[2] / "src" / "sis" / "frontend" / "tests" / "fixtures.json"
+FIXTURES = (
+    Path(__file__).resolve().parents[2] / "src" / "sis" / "frontend" / "tests" / "fixtures.json"
+)
 
 #: Answered by the app itself and outside the versioned contract, so there is no model to
 #: compare it against.

@@ -9,6 +9,7 @@ knows how anything is built.
 
 The providers are deliberately thin. Anything with logic in it belongs in a service.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

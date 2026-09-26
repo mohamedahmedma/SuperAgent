@@ -22,6 +22,7 @@ Unreachable is an error, not a skip. `integration_support` skips because it borr
 live estate a developer may reasonably not be running; these tests have no other way to
 run, so skipping them would turn "no database" into a green build that tested nothing.
 """
+
 from __future__ import annotations
 
 import os
@@ -65,7 +66,9 @@ class PostgresSchema:
         try:
             # Models or tables, plus whatever they reference; created parents first so
             # foreign keys resolve.
-            for table in sort_tables(_with_referenced_tables(getattr(item, "__table__", item) for item in tables)):
+            for table in sort_tables(
+                _with_referenced_tables(getattr(item, "__table__", item) for item in tables)
+            ):
                 table.create(self.engine)
         except Exception:
             self.drop()

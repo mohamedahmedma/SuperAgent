@@ -26,6 +26,7 @@ that had to set six variables and clear an `lru_cache`. Building it is now
 `infrastructure/whatsapp/registry.py`'s job; what is left here is the data and the three
 lookups, which a test constructs directly.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

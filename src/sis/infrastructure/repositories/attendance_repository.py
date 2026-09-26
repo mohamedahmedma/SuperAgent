@@ -17,6 +17,7 @@ that day, and every count this module produces reports how many days it counted,
 is never divided by a denominator that includes days nobody looked at. That is invariant 1 —
 a blank is not a zero — one column over.
 """
+
 from collections.abc import Collection, Mapping, Sequence
 from datetime import date, datetime, timezone
 
@@ -74,9 +75,7 @@ class SqlAlchemyAttendanceRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def marks_for_class(
-        self, class_section_id: int, on_date: date
-    ) -> Mapping[str, AttendanceMark]:
+    def marks_for_class(self, class_section_id: int, on_date: date) -> Mapping[str, AttendanceMark]:
         """The marks taken for one class on one day, keyed by student number.
 
         A mapping rather than a list because the caller is merging it into a register: the
@@ -105,9 +104,7 @@ class SqlAlchemyAttendanceRepository:
         wrong one here: a registrar asking for a term asks from its first day to its last,
         and those are the two dates the term itself states.
         """
-        statement = _joined().where(
-            models.Student.student_number == str(student_number)
-        )
+        statement = _joined().where(models.Student.student_number == str(student_number))
         if from_date is not None:
             statement = statement.where(models.Attendance.on_date >= from_date)
         if to_date is not None:
@@ -126,17 +123,13 @@ class SqlAlchemyAttendanceRepository:
         if not student_numbers:
             return []
         statement = _joined().where(
-            models.Student.student_number.in_(
-                {str(number) for number in student_numbers}
-            )
+            models.Student.student_number.in_({str(number) for number in student_numbers})
         )
         if from_date is not None:
             statement = statement.where(models.Attendance.on_date >= from_date)
         if to_date is not None:
             statement = statement.where(models.Attendance.on_date <= to_date)
-        statement = statement.order_by(
-            models.Student.student_number, models.Attendance.on_date
-        )
+        statement = statement.order_by(models.Student.student_number, models.Attendance.on_date)
         return [_to_domain(row) for row in self._session.execute(statement).all()]
 
     def upsert_many(
@@ -181,9 +174,7 @@ class SqlAlchemyAttendanceRepository:
                 "class_section_id": mark.class_section_id,
                 "on_date": mark.on_date,
                 "state": str(
-                    mark.state.value
-                    if isinstance(mark.state, AttendanceState)
-                    else mark.state
+                    mark.state.value if isinstance(mark.state, AttendanceState) else mark.state
                 ),
                 "note": mark.note,
                 "recorded_by": recorded_by,

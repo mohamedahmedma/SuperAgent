@@ -10,6 +10,7 @@ The close is that two independent facts must agree. The school the browser was o
 challenge was minted is recorded on the row; the school that owns the number the message
 arrived on is read from the delivery. A mismatch spends the nonce and issues nothing.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -46,9 +47,7 @@ def _service(db, directories: dict[str | None, FakeGuardianDirectory]):
         )
 
     return (
-        WhatsAppLoginService(
-            challenges=SqlChallengeRepository(db), channel_for=channel_for
-        ),
+        WhatsAppLoginService(challenges=SqlChallengeRepository(db), channel_for=channel_for),
         gateways,
     )
 
@@ -77,9 +76,7 @@ def test_a_challenge_records_the_school_it_was_started_for(db, two_schools) -> N
     from identity.infrastructure.db.models import VerificationChallenge
 
     stored = (
-        db.query(VerificationChallenge)
-        .filter(VerificationChallenge.nonce == started.nonce)
-        .one()
+        db.query(VerificationChallenge).filter(VerificationChallenge.nonce == started.nonce).one()
     )
     assert stored.school_code == NC
 
@@ -141,19 +138,25 @@ def test_a_spent_nonce_cannot_be_retried_at_the_right_school(db, two_schools) ->
     service, _ = _service(db, two_schools)
     started = service.start(school_code=NC)
 
-    assert service.claim(
-        wa_id="+201000000000",
-        body=f"SCHOOL VERIFY: {started.nonce}",
-        message_id="wamid.FIRST",
-        school_code=MD,
-    ) == "wrong_school"
+    assert (
+        service.claim(
+            wa_id="+201000000000",
+            body=f"SCHOOL VERIFY: {started.nonce}",
+            message_id="wamid.FIRST",
+            school_code=MD,
+        )
+        == "wrong_school"
+    )
 
-    assert service.claim(
-        wa_id="+201000000000",
-        body=f"SCHOOL VERIFY: {started.nonce}",
-        message_id="wamid.SECOND",
-        school_code=NC,
-    ) == "already_claimed"
+    assert (
+        service.claim(
+            wa_id="+201000000000",
+            body=f"SCHOOL VERIFY: {started.nonce}",
+            message_id="wamid.SECOND",
+            school_code=NC,
+        )
+        == "already_claimed"
+    )
 
 
 def test_a_single_school_service_still_works_with_no_school_at_all(db) -> None:

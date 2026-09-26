@@ -21,6 +21,7 @@ would otherwise both read the old `SIS_SCHOOLS`, and the second write would drop
 first school's entry while keeping its database. The lock is a file created with
 `O_EXCL`, which is atomic on every platform this runs on and needs no dependency.
 """
+
 from __future__ import annotations
 
 import os
@@ -143,9 +144,7 @@ class DotEnvConfigStore:
             temporary.write_text(content, encoding="utf-8", newline="")
             os.replace(temporary, self._path)
         except OSError as error:
-            raise ConfigStoreUnavailable(
-                f"could not write {self._path}: {error}"
-            ) from error
+            raise ConfigStoreUnavailable(f"could not write {self._path}: {error}") from error
         finally:
             if temporary.exists():
                 temporary.unlink(missing_ok=True)
@@ -154,9 +153,7 @@ class DotEnvConfigStore:
         try:
             return self._path.read_text(encoding="utf-8")
         except OSError as error:
-            raise ConfigStoreUnavailable(
-                f"could not read {self._path}: {error}"
-            ) from error
+            raise ConfigStoreUnavailable(f"could not read {self._path}: {error}") from error
 
     # -- locking ------------------------------------------------------------------
 
@@ -184,9 +181,7 @@ class _FileLock:
         deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
         while True:
             try:
-                self._descriptor = os.open(
-                    self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY
-                )
+                self._descriptor = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.write(self._descriptor, str(os.getpid()).encode("ascii"))
                 return self
             except FileExistsError:

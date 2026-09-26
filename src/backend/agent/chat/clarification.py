@@ -8,6 +8,7 @@ runs. This module holds that state and the reading of it.
 It was part of `service.py`, where both chat entry points reached it. Nothing here builds
 an agent or calls a model, except through the resolver `enter_turn` is handed.
 """
+
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -216,10 +217,12 @@ def _build_hitl_resume_query(pending_hitl: dict, user_text: str) -> str:
     if previous_answers:
         lines.append("The user has previously provided:")
         lines.extend(f"- {answer}" for answer in previous_answers)
-    lines.extend([
-        f"User's input this round: {user_text}",
-        "Please form a complete query based on the above and continue with the original Agent/RAG flow.",
-    ])
+    lines.extend(
+        [
+            f"User's input this round: {user_text}",
+            "Please form a complete query based on the above and continue with the original Agent/RAG flow.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -345,7 +348,10 @@ def enter_turn(
     if entry.pending_hitl is not None and _has_expired(entry.pending_hitl, now):
         # Asked too long ago to still be waiting for this. The parent is starting again,
         # and the stale question is cleared so their NEXT message is not read against it.
-        logger.info("a clarification asked at %s has expired; reading the message as new", entry.pending_hitl.get("created_at"))
+        logger.info(
+            "a clarification asked at %s has expired; reading the message as new",
+            entry.pending_hitl.get("created_at"),
+        )
         entry.pending_hitl = None
     entry.invalid_pending_hitl = stored is not None and entry.pending_hitl is None
     if not isinstance(entry.pending_hitl, dict):

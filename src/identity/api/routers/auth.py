@@ -6,6 +6,7 @@ indistinguishable, that a refresh re-reads the binding — live in
 `application/services/sessions.py`, and no `try/except` appears below because
 `api/errors.py` turns a domain error into a status in one place.
 """
+
 from fastapi import APIRouter, status
 
 from identity.api.deps import BearerToken, ClientIp, SessionServiceDep

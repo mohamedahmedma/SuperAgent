@@ -11,17 +11,21 @@ class RagTraceSchemaTests(unittest.TestCase):
             RagTrace.model_validate({"query": "q", "unsupported_field": True})
 
     def test_trace_normalizer_removes_unknown_top_level_and_nested_fields(self):
-        trace = normalize_rag_trace({
-            "query": "main",
-            "rewrite_method": "hyde",
-            "hyde_document": "A hypothetical answer used for retrieval",
-            "unsupported_field": True,
-            "sub_traces": [{
-                "query": "sub",
-                "route": "answer",
-                "unsupported_nested_field": True,
-            }],
-        })
+        trace = normalize_rag_trace(
+            {
+                "query": "main",
+                "rewrite_method": "hyde",
+                "hyde_document": "A hypothetical answer used for retrieval",
+                "unsupported_field": True,
+                "sub_traces": [
+                    {
+                        "query": "sub",
+                        "route": "answer",
+                        "unsupported_nested_field": True,
+                    }
+                ],
+            }
+        )
 
         self.assertEqual("main", trace["query"])
         self.assertEqual("hyde", trace["rewrite_method"])
@@ -31,12 +35,14 @@ class RagTraceSchemaTests(unittest.TestCase):
 
     def test_resume_state_rejects_unknown_fields(self):
         with self.assertRaises(ValidationError):
-            HitlResumeState.model_validate({
-                "question": "question",
-                "route": "clarify",
-                "retrieval_status": "needs_clarification",
-                "unsupported_field": True,
-            })
+            HitlResumeState.model_validate(
+                {
+                    "question": "question",
+                    "route": "clarify",
+                    "retrieval_status": "needs_clarification",
+                    "unsupported_field": True,
+                }
+            )
 
 
 if __name__ == "__main__":

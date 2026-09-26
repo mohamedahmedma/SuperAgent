@@ -7,6 +7,7 @@ resume needs, and work out the question the resumed search should actually run.
 Moved out of `pipeline.py` with its behaviour unchanged. Pure: nothing here searches or
 calls a model.
 """
+
 from backend.agent.schemas.chat import HitlResumeState
 
 
@@ -16,7 +17,10 @@ def is_hitl_result(result: dict | None) -> bool:
     trace = result.get("rag_trace") or {}
     status = result.get("retrieval_status") or trace.get("retrieval_status")
     route = result.get("route") or trace.get("route")
-    return status in ("needs_clarification", "needs_scope_selection") or route in ("clarify", "scope_select")
+    return status in ("needs_clarification", "needs_scope_selection") or route in (
+        "clarify",
+        "scope_select",
+    )
 
 
 def build_hitl_resume_state(result: dict) -> dict:

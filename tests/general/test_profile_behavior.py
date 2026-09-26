@@ -11,6 +11,7 @@ Two consumer shapes need different treatment:
 * **import-time** consumers snapshot the profile into module constants, so they are
   re-executed from source under the profile being tested.
 """
+
 import importlib.util
 import os
 import sys
@@ -66,7 +67,9 @@ def temp_profile(yaml_body: str, env: dict | None = None, name: str = "under_tes
 def reexec_module(relative_path: str, fake_modules: dict | None = None):
     """Execute a backend module from source so its import-time profile snapshot is
     taken under whatever profile is currently active."""
-    module_name = f"under_test_{relative_path.replace('/', '_').replace('.', '_')}_{id(fake_modules)}"
+    module_name = (
+        f"under_test_{relative_path.replace('/', '_').replace('.', '_')}_{id(fake_modules)}"
+    )
     spec = importlib.util.spec_from_file_location(module_name, REPO_ROOT / relative_path)
     module = importlib.util.module_from_spec(spec)
     with patch.dict(sys.modules, fake_modules or {}):
@@ -125,6 +128,7 @@ class ProfileTestCase(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Call-time consumers
 # ---------------------------------------------------------------------------
+
 
 class UploadPolicyTests(ProfileTestCase):
     def test_accepted_extensions_follow_the_active_profile(self):
@@ -214,10 +218,10 @@ class AgentAssemblyTests(ProfileTestCase):
 
     def test_agent_is_built_with_exactly_the_profile_tools_and_prompt(self):
         kwargs = self._built_kwargs(active_profile("base"))
-        self.assertEqual(
-            ["search_knowledge_base"], [tool.name for tool in kwargs["tools"]]
+        self.assertEqual(["search_knowledge_base"], [tool.name for tool in kwargs["tools"]])
+        self.assertTrue(
+            kwargs["system_prompt"].startswith("You are a helpful knowledge-base assistant.")
         )
-        self.assertTrue(kwargs["system_prompt"].startswith("You are a helpful knowledge-base assistant."))
 
     def test_tool_order_follows_the_profile_declaration(self):
         body = 'name: reversed\nagent:\n  tools: ["get_student_grades", "search_knowledge_base"]\n'
@@ -297,6 +301,7 @@ class CacheNamespaceTests(ProfileTestCase):
 # Import-time consumers (module re-execution)
 # ---------------------------------------------------------------------------
 
+
 class PipelineBehaviourTests(ProfileTestCase):
     @staticmethod
     def _pipeline():
@@ -310,14 +315,18 @@ class PipelineBehaviourTests(ProfileTestCase):
             pipeline = self._pipeline()
 
         # A marker only this profile declares classifies as simple...
-        self.assertIsNotNone(pipeline.classify_complexity.fast_path_reason("price of the blue shoe"))
+        self.assertIsNotNone(
+            pipeline.classify_complexity.fast_path_reason("price of the blue shoe")
+        )
         # ...and a comparison marker only this profile declares blocks the fast path.
         self.assertIsNone(pipeline.classify_complexity.fast_path_reason("recommend a running shoe"))
 
     def test_base_profile_does_not_know_that_vocabulary(self):
         with active_profile("base"):
             pipeline = self._pipeline()
-        self.assertIsNone(pipeline.classify_complexity.fast_path_reason("price of the blue shoe today"))
+        self.assertIsNone(
+            pipeline.classify_complexity.fast_path_reason("price of the blue shoe today")
+        )
 
     def test_fast_path_length_limit_is_profile_driven(self):
         question = "what is the refund window for online orders placed abroad"  # 58 chars
@@ -414,7 +423,9 @@ class PipelineBehaviourTests(ProfileTestCase):
 
     def test_hitl_copy_is_profile_driven(self):
         shop = load_profile("base").model_copy(deep=True)
-        shop.user_copy.hitl_scope_default = "I found a few product lines that could match. Which one did you mean?"
+        shop.user_copy.hitl_scope_default = (
+            "I found a few product lines that could match. Which one did you mean?"
+        )
         with active_profile(shop):
             pipeline = self._pipeline()
 
@@ -441,7 +452,10 @@ class PipelineBehaviourTests(ProfileTestCase):
             route="clarify",
             missing_slots=["grade", "term"],
         )
-        self.assertEqual("Still need: grade, term", pipeline.grade_documents_node.default_hitl_prompt("clarify", grade))
+        self.assertEqual(
+            "Still need: grade, term",
+            pipeline.grade_documents_node.default_hitl_prompt("clarify", grade),
+        )
 
     def test_sub_question_cap_is_profile_driven(self):
         with temp_profile("name: wide\nrag:\n  max_sub_questions: 2\n"):
@@ -472,7 +486,7 @@ class ChunkingBehaviourTests(ProfileTestCase):
         with temp_profile(body, env=cleared):
             loader = self._loader_module().DocumentLoader()
 
-        self.assertEqual(600, loader._level_3_size)   # max(600, 400) floor still applies
+        self.assertEqual(600, loader._level_3_size)  # max(600, 400) floor still applies
         self.assertEqual(2000, loader._level_1_size)  # max(2000, 400*3)
         self.assertEqual(1000, loader._level_2_size)  # max(1000, 400*2)
 
@@ -630,6 +644,7 @@ class RetrievalBehaviourTests(ProfileTestCase):
 # Environment reader semantics
 # ---------------------------------------------------------------------------
 
+
 class EnvReaderTests(unittest.TestCase):
     """A variable set to an empty string must count as unset, everywhere.
 
@@ -672,8 +687,16 @@ class EnvReaderTests(unittest.TestCase):
             self.assertEqual(42, env_int("X_TEST", 0))
         with patch.dict(os.environ, {"X_TEST": "0.25"}):
             self.assertEqual(0.25, env_float("X_TEST", 0.0))
-        for raw, expected in [("true", True), ("1", True), ("YES", True), ("on", True),
-                              ("false", False), ("0", False), ("No", False), ("off", False)]:
+        for raw, expected in [
+            ("true", True),
+            ("1", True),
+            ("YES", True),
+            ("on", True),
+            ("false", False),
+            ("0", False),
+            ("No", False),
+            ("off", False),
+        ]:
             with self.subTest(raw=raw), patch.dict(os.environ, {"X_TEST": raw}):
                 self.assertEqual(expected, env_bool("X_TEST", not expected))
 

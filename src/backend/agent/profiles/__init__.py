@@ -13,6 +13,7 @@ Select the active profile with the ACTIVE_PROFILE environment variable (default:
 overridden by their original environment variables — see ENV_OVERRIDES in registry.py for
 the full list.
 """
+
 from backend.agent.profiles.registry import (
     DEFAULT_PROFILE,
     ENV_OVERRIDES,

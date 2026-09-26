@@ -3,6 +3,7 @@
 A verifier that checks only the signature passes a frightening number of attacks, so
 every case here forges a token that is valid apart from the single thing under test.
 """
+
 import base64
 import hashlib
 import hmac
@@ -169,9 +170,7 @@ class TestVerification:
             _b64(json.dumps(header, separators=(",", ":")).encode("utf-8")),
             _b64(json.dumps(_forged_claims(), separators=(",", ":")).encode("utf-8")),
         ).encode("ascii")
-        signature = hmac.new(
-            PUBLIC_PEM.encode("utf-8"), signing_input, hashlib.sha256
-        ).digest()
+        signature = hmac.new(PUBLIC_PEM.encode("utf-8"), signing_input, hashlib.sha256).digest()
         forged = f"{signing_input.decode('ascii')}.{_b64(signature)}"
         with pytest.raises(IdentityError):
             verify_token(forged, _config())

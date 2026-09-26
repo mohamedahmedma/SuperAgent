@@ -36,6 +36,7 @@ renders literally rather than executing. That is what keeps profile-supplied tex
 rather than code. If templates ever become user-supplied (as opposed to profile
 *selection* being user-driven), this must move to `SandboxedEnvironment`.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache

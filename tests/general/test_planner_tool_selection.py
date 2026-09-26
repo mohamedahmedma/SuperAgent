@@ -21,6 +21,7 @@ The assertions lean on the DEGRADED cases as hard as the narrowing ones. Every r
 is allowed to fail, and each has to fail toward binding everything, because that is the
 behaviour that shipped before any of this existed.
 """
+
 import unittest
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -63,9 +64,7 @@ class _Copy:
 
 def _plan(child=None, *, agent=None, **signal_kwargs):
     signals = RequestSignals(question="q", **signal_kwargs)
-    return resolve_turn(
-        signals, agent_config=agent or _Agent(), copy_config=_Copy(), child=child
-    )
+    return resolve_turn(signals, agent_config=agent or _Agent(), copy_config=_Copy(), child=child)
 
 
 def _settled(roster=(LAYLA,)):
@@ -96,8 +95,7 @@ class ThePlanPicksTheTool(unittest.TestCase):
         class _Both(_Agent):
             tools = [RECORDS_TOOL, KNOWLEDGE_TOOL]
 
-        plan = _plan(_settled(), agent=_Both(), about_child=True,
-                     child_question_kind="records")
+        plan = _plan(_settled(), agent=_Both(), about_child=True, child_question_kind="records")
         self.assertEqual(plan.exposed_tools, [RECORDS_TOOL])
 
 
@@ -112,8 +110,11 @@ class EveryFailureBindsEverything(unittest.TestCase):
         """Not "bind everything and let the agent sort it out". Which child is meant is
         a fact about a roster, so the turn ends here with the question — there is no tool
         worth binding for a lookup nobody can perform yet."""
-        plan = _plan(resolve_child(reference="child", roster=[LAYLA, OMAR]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="child", roster=[LAYLA, OMAR]),
+            about_child=True,
+            child_question_kind="records",
+        )
         self.assertEqual(plan.child_options, ["ليلى أحمد", "عمر أحمد"])
         self.assertTrue(plan.short_circuit)
         self.assertEqual(plan.exposed_tools, [])
@@ -134,40 +135,38 @@ class EveryFailureBindsEverything(unittest.TestCase):
         class _Off(_Agent):
             narrow_tools_to_the_turn = False
 
-        plan = _plan(_settled(), agent=_Off(), about_child=True,
-                     child_question_kind="records")
+        plan = _plan(_settled(), agent=_Off(), about_child=True, child_question_kind="records")
         self.assertIsNone(plan.exposed_tools)
 
     def test_a_profile_binding_no_such_tool_narrows_nothing(self):
         """A plan naming a tool the profile refuses is a startup error in `build_tools`,
         and an empty list would read as "bind no tools at all"."""
+
         class _KnowledgeOnly(_Agent):
             tools = [KNOWLEDGE_TOOL]
 
-        plan = _plan(_settled(), agent=_KnowledgeOnly(), about_child=True,
-                     child_question_kind="records")
+        plan = _plan(
+            _settled(), agent=_KnowledgeOnly(), about_child=True, child_question_kind="records"
+        )
         self.assertIsNone(plan.exposed_tools)
         self.assertIn("binds no such tool", "; ".join(plan.reasons))
 
     def test_a_social_turn_still_binds_nothing(self):
         """The rung above this one still wins: narrowing must not resurrect a tool."""
-        plan = _plan(_settled(), is_social=True, about_child=True,
-                     child_question_kind="records")
+        plan = _plan(_settled(), is_social=True, about_child=True, child_question_kind="records")
         self.assertEqual(plan.exposed_tools, [])
 
 
 class TheDecisionIsVisible(unittest.TestCase):
     def test_the_trace_names_the_bound_tools_and_the_required_one(self):
-        trace = _plan(_settled(), about_child=True,
-                      child_question_kind="records").as_trace()
+        trace = _plan(_settled(), about_child=True, child_question_kind="records").as_trace()
         self.assertEqual(trace["turn_exposed_tools"], [RECORDS_TOOL])
         self.assertEqual(trace["turn_forced_tool"], RECORDS_TOOL)
 
     def test_the_trace_names_no_child(self):
         """A child is resolved here and the trace is persisted and streamed. It records
         THAT one was settled, never which — the rule `as_trace` already follows."""
-        trace = _plan(_settled(), about_child=True,
-                      child_question_kind="records").as_trace()
+        trace = _plan(_settled(), about_child=True, child_question_kind="records").as_trace()
         self.assertTrue(trace["turn_child_resolved"])
         self.assertNotIn("ليلى", str(trace))
 
@@ -218,8 +217,7 @@ class _Ctx:
         self.forced_tool = forced_tool
 
 
-def _chosen(state, *, forced=RECORDS_TOOL, tools=(KNOWLEDGE_TOOL, RECORDS_TOOL),
-            tool_choice=None):
+def _chosen(state, *, forced=RECORDS_TOOL, tools=(KNOWLEDGE_TOOL, RECORDS_TOOL), tool_choice=None):
     """The `tool_choice` the middleware lets through, given the turn so far."""
     middleware = runtime._force_the_planned_tool(_Ctx(forced))
     seen = {}
@@ -242,20 +240,21 @@ class ForcingTheCall(unittest.TestCase):
     def test_a_turn_with_a_tool_result_behind_it_is_not_forced(self):
         """The measured provider limit, and the reason it costs nothing: by the time a
         result exists the selection has already happened."""
-        state = {"messages": [
-            HumanMessage(content="درجات ليلى كام؟"),
-            AIMessage(content="", tool_calls=[
-                {"name": RECORDS_TOOL, "args": {}, "id": "call-1"}
-            ]),
-            ToolMessage(content="الرياضيات ٨٧.٥٪", tool_call_id="call-1"),
-        ]}
+        state = {
+            "messages": [
+                HumanMessage(content="درجات ليلى كام؟"),
+                AIMessage(
+                    content="", tool_calls=[{"name": RECORDS_TOOL, "args": {}, "id": "call-1"}]
+                ),
+                ToolMessage(content="الرياضيات ٨٧.٥٪", tool_call_id="call-1"),
+            ]
+        }
         self.assertIsNone(_chosen(state))
 
     def test_a_turn_the_budget_has_already_counted_is_not_forced(self):
         """`tool_calls_made` catches the one case the messages cannot — a call that was
         requested and produced no result message."""
-        state = {"messages": [HumanMessage(content="q")],
-                 "tool_calls_made": {RECORDS_TOOL: 1}}
+        state = {"messages": [HumanMessage(content="q")], "tool_calls_made": {RECORDS_TOOL: 1}}
         self.assertIsNone(_chosen(state))
 
     def test_a_tool_the_budget_withheld_is_never_required(self):
@@ -297,35 +296,40 @@ class DenyingWhatTheToolReturned(unittest.TestCase):
         return _denies_the_records(self._Outcomes(outcomes), answer, phrases=list(phrases))
 
     def test_a_denial_after_a_successful_lookup_is_caught(self):
-        self.assertTrue(self._denies(
-            [("get_student_grades", "grades")], "I couldn't find any records for her."
-        ))
+        self.assertTrue(
+            self._denies([("get_student_grades", "grades")], "I couldn't find any records for her.")
+        )
 
     def test_the_arabic_wording_is_caught_through_folding(self):
-        self.assertTrue(self._denies(
-            [("get_student_grades", "grades")], "ما لقيتش أي معلومات عن درجات ليلى أحمد"
-        ))
+        self.assertTrue(
+            self._denies(
+                [("get_student_grades", "grades")], "ما لقيتش أي معلومات عن درجات ليلى أحمد"
+            )
+        )
 
     def test_a_denial_after_a_failed_lookup_is_the_correct_answer(self):
         """`no_records`, an outage and a refusal all SHOULD produce a reply saying so."""
         for outcome in ("no_records", "unavailable", "not_authorized", "which_student"):
             with self.subTest(outcome=outcome):
-                self.assertFalse(self._denies(
-                    [("get_student_grades", outcome)], "I couldn't find any records."
-                ))
+                self.assertFalse(
+                    self._denies([("get_student_grades", outcome)], "I couldn't find any records.")
+                )
 
     def test_an_answer_that_reports_the_marks_is_not_flagged(self):
-        self.assertFalse(self._denies(
-            [("get_student_grades", "grades")], "ليلى حاصلة على 87.5% في الرياضيات"
-        ))
+        self.assertFalse(
+            self._denies([("get_student_grades", "grades")], "ليلى حاصلة على 87.5% في الرياضيات")
+        )
 
     def test_a_deployment_with_no_phrases_configured_never_fires(self):
         """The phrase list is the guessing half of this check, so an empty one has to
         mean 'do not guess' rather than 'match everything'."""
-        self.assertFalse(self._denies(
-            [("get_student_grades", "grades")], "I couldn't find any records.",
-            phrases=(),
-        ))
+        self.assertFalse(
+            self._denies(
+                [("get_student_grades", "grades")],
+                "I couldn't find any records.",
+                phrases=(),
+            )
+        )
 
 
 if __name__ == "__main__":
@@ -338,7 +342,7 @@ AHMED = ChildOption(student_id="S-5", label="أحمد أحمد", gender="male")
 
 
 class TheGenderNarrowsTheRoster(unittest.TestCase):
-    """"give me the results of my son", against a roster the school already gave us.
+    """ "give me the results of my son", against a roster the school already gave us.
 
     No model reads the roster and no model picks the child. The classifier's only job is
     to report that the message said "son"; everything after that is a filter over a list
@@ -348,8 +352,11 @@ class TheGenderNarrowsTheRoster(unittest.TestCase):
     def test_one_son_among_two_children_is_answered_without_asking(self):
         """A son and a daughter. "my son" leaves exactly one candidate, so the parent is
         never asked a question whose answer is already on file."""
-        plan = _plan(resolve_child(reference="son", roster=[ALI, SARA]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="son", roster=[ALI, SARA]),
+            about_child=True,
+            child_question_kind="records",
+        )
 
         self.assertEqual(plan.child_hint, "علي أحمد")
         self.assertEqual(plan.child_id, "S-4")
@@ -360,65 +367,90 @@ class TheGenderNarrowsTheRoster(unittest.TestCase):
     def test_two_sons_are_offered_as_a_choice_and_the_daughter_is_not(self):
         """Asking "Ali, Ahmed or Sara?" after the parent said "my son" ignores what they
         just told us. The options are the candidates the filter left, never the family."""
-        plan = _plan(resolve_child(reference="son", roster=[ALI, AHMED, SARA]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="son", roster=[ALI, AHMED, SARA]),
+            about_child=True,
+            child_question_kind="records",
+        )
 
         self.assertEqual(plan.child_options, ["علي أحمد", "أحمد أحمد"])
         self.assertNotIn("سارة أحمد", plan.child_options)
         self.assertTrue(plan.short_circuit)
 
     def test_a_daughter_among_sons_is_answered_without_asking(self):
-        plan = _plan(resolve_child(reference="daughter", roster=[ALI, AHMED, SARA]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="daughter", roster=[ALI, AHMED, SARA]),
+            about_child=True,
+            child_question_kind="records",
+        )
         self.assertEqual(plan.child_hint, "سارة أحمد")
 
     def test_an_only_child_is_never_asked_about_at_all(self):
-        plan = _plan(resolve_child(reference="context", roster=[ALI]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="context", roster=[ALI]),
+            about_child=True,
+            child_question_kind="records",
+        )
         self.assertEqual(plan.child_hint, "علي أحمد")
 
     def test_a_child_whose_sex_the_school_never_recorded_stays_a_candidate(self):
         """`unknown` matches both, so a half-filled column can never select a child by
         virtue of a blank cell — the state every child is in until a registrar fills it."""
         blank = ChildOption(student_id="S-6", label="نور أحمد")
-        plan = _plan(resolve_child(reference="son", roster=[ALI, blank]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="son", roster=[ALI, blank]),
+            about_child=True,
+            child_question_kind="records",
+        )
         self.assertEqual(plan.child_options, ["علي أحمد", "نور أحمد"])
 
     def test_saying_son_when_no_child_could_be_one_asks_rather_than_refusing(self):
         """The parent's wording is better evidence than the column, so this asks instead
         of declaring them wrong about their own family."""
         nour = ChildOption(student_id="S-7", label="نور أحمد", gender="female")
-        plan = _plan(resolve_child(reference="son", roster=[SARA, nour]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="son", roster=[SARA, nour]),
+            about_child=True,
+            child_question_kind="records",
+        )
         self.assertEqual(plan.child_options, ["سارة أحمد", "نور أحمد"])
 
     def test_an_only_child_is_answered_even_when_the_wording_slips(self):
         """One child on file and the parent says "my son" about a daughter. The roster
         route that fires first is deliberate: with nothing to disambiguate, asking would
         be pedantry about a family the parent knows better than the SIS column does."""
-        plan = _plan(resolve_child(reference="son", roster=[SARA]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="son", roster=[SARA]),
+            about_child=True,
+            child_question_kind="records",
+        )
         self.assertEqual(plan.child_hint, "سارة أحمد")
         self.assertEqual(plan.child_options, [])
 
     def test_the_question_is_the_profiles_own_copy_in_the_turns_language(self):
-        plan = _plan(resolve_child(reference="son", roster=[ALI, AHMED]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="son", roster=[ALI, AHMED]),
+            about_child=True,
+            child_question_kind="records",
+        )
         self.assertEqual(plan.static_reply, "Which child do you mean?")
 
     def test_no_copy_configured_falls_through_to_the_agent(self):
         """Refusing with an empty string is worse than answering — the rule
         `_plan_out_of_domain` already follows."""
+
         class _NoCopy:
             social = None
             out_of_domain = None
             which_child = None
 
-        signals = RequestSignals(question="q", about_child=True,
-                                 child_question_kind="records")
-        plan = resolve_turn(signals, agent_config=_Agent(), copy_config=_NoCopy(),
-                            child=resolve_child(reference="son", roster=[ALI, AHMED]))
+        signals = RequestSignals(question="q", about_child=True, child_question_kind="records")
+        plan = resolve_turn(
+            signals,
+            agent_config=_Agent(),
+            copy_config=_NoCopy(),
+            child=resolve_child(reference="son", roster=[ALI, AHMED]),
+        )
         self.assertFalse(plan.short_circuit)
         self.assertIsNone(plan.exposed_tools)
 
@@ -429,8 +461,11 @@ class TheChoiceComesBackAsAnAnswer(unittest.TestCase):
     def _pending(self):
         from backend.agent.chat.clarification import child_choice_pending
 
-        plan = _plan(resolve_child(reference="son", roster=[ALI, AHMED]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="son", roster=[ALI, AHMED]),
+            about_child=True,
+            child_question_kind="records",
+        )
         return child_choice_pending(plan, "نتيجة ابني ايه؟")
 
     def test_the_question_is_stored_as_a_real_clarification(self):
@@ -449,8 +484,11 @@ class TheChoiceComesBackAsAnAnswer(unittest.TestCase):
     def test_a_plan_that_settled_the_child_asks_nothing(self):
         from backend.agent.chat.clarification import child_choice_pending
 
-        plan = _plan(resolve_child(reference="son", roster=[ALI, SARA]),
-                     about_child=True, child_question_kind="records")
+        plan = _plan(
+            resolve_child(reference="son", roster=[ALI, SARA]),
+            about_child=True,
+            child_question_kind="records",
+        )
         self.assertIsNone(child_choice_pending(plan, "q"))
 
     def test_the_reply_reopens_the_original_question_rather_than_searching_for_a_name(self):

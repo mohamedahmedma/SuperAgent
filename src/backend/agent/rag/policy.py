@@ -9,6 +9,7 @@ a new component deriving its own view of the evidence.
 Each policy declares the certainty it requires. Below that floor it degrades to its
 conservative default — it does not go looking for a cheaper signal to justify acting.
 """
+
 from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple
@@ -231,7 +232,10 @@ def decide_route(
         # so a list of neighbouring catalogue entries cannot narrow anything and asking
         # from it interrupts someone who has already answered the question being asked.
         if directions and hitl_rounds < int(getattr(config, "max_hitl_rounds", 1)):
-            return "scope_select", f"{len(directions)} catalogued directions, asking before rewriting"
+            return (
+                "scope_select",
+                f"{len(directions)} catalogued directions, asking before rewriting",
+            )
         # A rewrite is the cheap chance to close the gap before answering from less
         # than the question asked for. It is not a gate: when the budget is spent, the
         # evidence is answered from, never denied.
@@ -245,7 +249,9 @@ def decide_route(
     return "no_knowledge", "no assessment placed the retrieved evidence on the subject"
 
 
-def _answer_from_what_there_is(report, ask_allowed: bool, ask_reason: str, context: str) -> Tuple[str, str]:
+def _answer_from_what_there_is(
+    report, ask_allowed: bool, ask_reason: str, context: str
+) -> Tuple[str, str]:
     """What to do with on-subject evidence once rewriting is spent.
 
     Answer from it, unless there is a specific question worth asking. Evidence that
@@ -259,7 +265,8 @@ def _answer_from_what_there_is(report, ask_allowed: bool, ask_reason: str, conte
         return route, f"{context}, {ask_reason}"
     if report.relevance in ("weak", "strong"):
         grade = (
-            "partial evidence" if report.sufficiency == "partial"
+            "partial evidence"
+            if report.sufficiency == "partial"
             else f"{report.relevance} on-subject evidence"
         )
         return "answer", f"{context}; answering from {grade} ({ask_reason})"

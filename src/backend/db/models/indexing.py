@@ -1,4 +1,5 @@
 """What indexing stores beside the vector index: parent chunks, pairs and the scope catalogue."""
+
 from __future__ import annotations
 
 from datetime import datetime

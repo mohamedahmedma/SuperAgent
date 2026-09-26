@@ -39,6 +39,7 @@ Every failure path returns the message unchanged with `resolved=False`, which is
 the behaviour that existed before this module. A resolver that is misconfigured, rate
 limited, or returning nonsense costs the improvement, never the turn.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -126,6 +127,7 @@ def unresolved(question: str, reason: str) -> ResolvedQuestion:
 # The gate
 # ---------------------------------------------------------------------------
 
+
 def needs_resolution(question: str, history: Sequence[Any], config) -> Tuple[bool, str]:
     """Whether this message can only be understood from the conversation.
 
@@ -154,7 +156,10 @@ def needs_resolution(question: str, history: Sequence[Any], config) -> Tuple[boo
 
     ceiling = int(getattr(config, "query_resolution_max_chars", 0) or 0)
     if ceiling and len(text) <= ceiling:
-        return True, f"short enough ({len(text)} chars) to be carrying its subject in the conversation"
+        return (
+            True,
+            f"short enough ({len(text)} chars) to be carrying its subject in the conversation",
+        )
 
     return False, "message carries its own subject"
 
@@ -184,6 +189,7 @@ def _normalized(text: Any) -> str:
 # ---------------------------------------------------------------------------
 # Conversation rendering
 # ---------------------------------------------------------------------------
+
 
 def message_role_and_text(message: Any) -> Tuple[str, str]:
     """`("user"|"assistant"|"", text)` for a LangChain message or a plain dict."""
@@ -221,7 +227,7 @@ def conversation_text(history: Sequence[Any], limit: int = 6, max_chars: int = 6
     everything else in this prompt combined.
     """
     lines: List[str] = []
-    for message in list(history)[-max(1, limit):]:
+    for message in list(history)[-max(1, limit) :]:
         role, text = message_role_and_text(message)
         # Blocks out, before the clip. A rendered record is most of the message it is
         # attached to, so a 600-character window spent on lesson rows leaves nothing of
@@ -243,6 +249,7 @@ def conversation_text(history: Sequence[Any], limit: int = 6, max_chars: int = 6
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
+
 
 def resolve_question(
     question: str,
@@ -286,7 +293,12 @@ def resolve_question(
     call = invoke or _default_resolve_invoke
     try:
         result = _call_resolver(
-            call, question, rendered, config, hitl_prompt, list(hitl_options or []),
+            call,
+            question,
+            rendered,
+            config,
+            hitl_prompt,
+            list(hitl_options or []),
             resolving=bool(wanted or hitl_prompt),
             translating=translating,
         )
@@ -417,15 +429,20 @@ class ResolvedQuery(StructuredOutput):
     search_text: str = Field(
         default="",
         description=(
-            "The question translated for SEARCHING only, when asked for; otherwise an "
-            "empty string"
+            "The question translated for SEARCHING only, when asked for; otherwise an empty string"
         ),
     )
 
 
 def _default_resolve_invoke(  # pragma: no cover - needs a model
-    question, history, config, hitl_prompt, hitl_options,
-    *, resolving: bool = True, translating: bool = False,
+    question,
+    history,
+    config,
+    hitl_prompt,
+    hitl_options,
+    *,
+    resolving: bool = True,
+    translating: bool = False,
 ):
     """One small structured call on FAST_MODEL, carrying whichever jobs this turn needs."""
     import os
@@ -439,7 +456,6 @@ def _default_resolve_invoke(  # pragma: no cover - needs a model
     from backend.composition import default_services
 
     profile = get_profile()
-
 
     prompt = resolve_prompt(
         getattr(config, "query_resolution_prompt", "") or "",

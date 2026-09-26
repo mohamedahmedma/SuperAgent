@@ -25,6 +25,7 @@ The topic side of the same comparison is a bonus, not a second mechanism: the se
 that scored highest narrow the retrieval filter, so a question about uniforms stops
 competing with fee tables for candidate slots.
 """
+
 from __future__ import annotations
 
 import logging
@@ -129,7 +130,9 @@ class DomainReferenceStore:
             self._failed = False
 
 
-def milvus_reference_provider(level: Optional[int] = None, section_field: str = "root_chunk_id") -> DomainReference:
+def milvus_reference_provider(
+    level: Optional[int] = None, section_field: str = "root_chunk_id"
+) -> DomainReference:
     """Build the reference set from the vectors already sitting in Milvus.
 
     Reads the LEAF level, because that is the only level Milvus has — the parent tiers
@@ -164,7 +167,9 @@ def milvus_reference_provider(level: Optional[int] = None, section_field: str = 
             vectors.append((str(label), list(vector)))
     logger.info(
         "domain reference built from chunk_level=%s: %d vectors over %d sections",
-        effective_level, len(vectors), len({label for label, _ in vectors}),
+        effective_level,
+        len(vectors),
+        len({label for label, _ in vectors}),
     )
     return DomainReference(vectors=vectors)
 

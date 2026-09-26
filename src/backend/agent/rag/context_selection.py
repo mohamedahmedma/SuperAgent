@@ -25,6 +25,7 @@ justify a cut. Three separate guards stand in front of it:
 Anything unusual keeps the full set. Trimming too little costs tokens; trimming too
 much costs correctness, and only one of those is recoverable.
 """
+
 from __future__ import annotations
 
 import logging
@@ -41,10 +42,26 @@ logger = logging.getLogger(__name__)
 # answer that is wrong by omission while looking complete, which is worse than a long
 # prompt. Matched on the normalized question, so Arabic forms sit alongside English.
 _EXHAUSTIVE_MARKERS = (
-    "list all", "list the", "all of the", "each of", "every ",
-    "compare", "difference between", "versus", " vs ",
-    "how many", "how much", "breakdown", "summar", "overview",
-    "جميع", "كل ", "قارن", "الفرق بين", "اذكر", "عدد ",
+    "list all",
+    "list the",
+    "all of the",
+    "each of",
+    "every ",
+    "compare",
+    "difference between",
+    "versus",
+    " vs ",
+    "how many",
+    "how much",
+    "breakdown",
+    "summar",
+    "overview",
+    "جميع",
+    "كل ",
+    "قارن",
+    "الفرق بين",
+    "اذكر",
+    "عدد ",
 )
 
 
@@ -129,7 +146,9 @@ def select_context(
     verdict = assess(question, docs, meta or {}, config)
     if not verdict.confident:
         selection.coverage = verdict.term_coverage
-        selection.reasons.append("retrieval not confidently on target: " + "; ".join(verdict.reasons))
+        selection.reasons.append(
+            "retrieval not confidently on target: " + "; ".join(verdict.reasons)
+        )
         return docs, selection
 
     tokens = content_tokens(question)
@@ -164,5 +183,7 @@ def select_context(
             f"{len(kept)} of {len(docs)} chunks cover {selection.coverage:.0%} of the question"
         )
     else:
-        selection.reasons.append(f"all {len(docs)} chunks needed to reach {selection.coverage:.0%} coverage")
+        selection.reasons.append(
+            f"all {len(docs)} chunks needed to reach {selection.coverage:.0%} coverage"
+        )
     return kept, selection

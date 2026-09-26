@@ -7,6 +7,7 @@ a fully compromised chat backend still cannot read a family it holds no token fo
 Each test forges a token that is wrong in exactly one way, because a verifier that
 checks only the signature passes a frightening number of attacks.
 """
+
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
@@ -29,7 +30,9 @@ def test_api_key_alone_is_not_enough(client):
     A valid agent key with no identity token reads nothing. If this test fails, a
     leaked key is a student-body dump.
     """
-    response = client.get("/v1/guardians/G-1/students", headers={"X-API-Key": agent_headers()["X-API-Key"]})
+    response = client.get(
+        "/v1/guardians/G-1/students", headers={"X-API-Key": agent_headers()["X-API-Key"]}
+    )
     assert response.status_code == 401
 
 
@@ -52,9 +55,7 @@ def test_guardian_mismatch_is_reported_under_its_own_reason(client, caplog):
     that far.
     """
     with caplog.at_level("WARNING"):
-        client.get(
-            "/v1/guardians/G-2/students/S-1001/grades", headers=agent_headers("G-1")
-        )
+        client.get("/v1/guardians/G-2/students/S-1001/grades", headers=agent_headers("G-1"))
 
     assert "guardian_mismatch" in caplog.text
 

@@ -14,6 +14,7 @@ works, the app opens, the message is prefilled, and the flow is dead.
 what keeps a test that sets its own value, and a container that injects real secrets,
 working exactly as before.
 """
+
 import os
 from pathlib import Path
 

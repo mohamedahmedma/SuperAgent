@@ -18,6 +18,7 @@ Failures normalise to `ClassroomUnavailable`, which is an `UpstreamUnavailable` 
 this term is **not** a failure: SIS answers 200 with a null class, which arrives here as
 `ClassroomStatus.NO_CLASS`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -72,9 +73,7 @@ class SisClassroomAdapter:
         headers = {"Accept": "application/json"}
         if api_key:
             headers["X-API-Key"] = api_key
-        self._pool = PooledClient(
-            base_url=base_url, timeout_seconds=self._timeout, headers=headers
-        )
+        self._pool = PooledClient(base_url=base_url, timeout_seconds=self._timeout, headers=headers)
 
     def get_classroom(
         self, *, student_ref: str, term: str, guardian_ref: str = ""
@@ -135,9 +134,7 @@ class SisClassroomAdapter:
         logger.warning(
             "SIS refused %s: HTTP %s (%s)", path, response.status_code, code or "no code"
         )
-        raise ClassroomUnavailable(
-            f"{path}: HTTP {response.status_code} ({code or 'no code'})"
-        )
+        raise ClassroomUnavailable(f"{path}: HTTP {response.status_code} ({code or 'no code'})")
 
     # -- reshaping ----------------------------------------------------------
 

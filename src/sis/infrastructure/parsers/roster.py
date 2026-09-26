@@ -22,6 +22,7 @@ ambiguous `03/04/2026` would be stored as fact, and `RowCode` — closed on purp
 member with which to reject a bad one. A column this parser cannot reject is a column it
 must not read.
 """
+
 from collections.abc import Mapping
 from typing import Final
 
@@ -117,9 +118,7 @@ class SpreadsheetFamilyRosterParser:
         from sis.infrastructure.parsers.guardians import SpreadsheetGuardianParser
 
         self._roster = SpreadsheetRosterParser()
-        self._guardians = SpreadsheetGuardianParser(
-            default_country_code=default_country_code
-        )
+        self._guardians = SpreadsheetGuardianParser(default_country_code=default_country_code)
 
     def parse(self, content: bytes, filename: str) -> ParseResult[ParsedRosterRow]:
         from sis.infrastructure.parsers.columns import map_columns
@@ -127,7 +126,9 @@ class SpreadsheetFamilyRosterParser:
 
         roster = self._roster.parse(content, filename)
         guardian_map = map_columns(roster.headers, GUARDIAN_COLUMNS)
-        guardian_fields = {spec.field for spec in GUARDIAN_COLUMNS if spec.field != "student_number"}
+        guardian_fields = {
+            spec.field for spec in GUARDIAN_COLUMNS if spec.field != "student_number"
+        }
         if not guardian_fields.intersection(guardian_map.mapping):
             return roster
 

@@ -126,8 +126,7 @@ class ChatRequestContext:
             self.caller = CallerIdentity.for_user(self.user_id)
         elif self.caller.user_id != self.user_id:
             raise ValueError(
-                f"caller.user_id {self.caller.user_id!r} does not match "
-                f"user_id {self.user_id!r}"
+                f"caller.user_id {self.caller.user_id!r} does not match user_id {self.user_id!r}"
             )
 
     # Read-only views onto the caller. Properties rather than fields so there is

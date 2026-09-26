@@ -11,6 +11,7 @@ receives `ParseResult[ParsedGradeRow]` and can reach `row.percentage` without a 
 two row types share no fields worth abstracting: a roster row asserts a placement, a grade
 row asserts a figure.
 """
+
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -62,7 +63,10 @@ class ParseResult[RowT]:
             # `line`, not `line_number`: `RowOutcome` names the Excel gutter number `line`.
             # The two spellings coexisted across parallel modules and this call was the
             # one that raised `TypeError` the first time a parser rejected a line.
-            diagnostics=(*self.diagnostics, RowOutcome(line=line_number, code=code, message=message)),
+            diagnostics=(
+                *self.diagnostics,
+                RowOutcome(line=line_number, code=code, message=message),
+            ),
             total_lines=self.total_lines,
             headers=self.headers,
         )

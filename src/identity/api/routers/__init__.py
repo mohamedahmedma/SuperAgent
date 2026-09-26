@@ -10,6 +10,7 @@ Four routers, separated by **what authenticates the caller** rather than only by
 That separation is structural. A parent's token cannot reach the admin routes at all,
 because those routes do not accept a bearer token as a credential in the first place.
 """
+
 from identity.api.routers import admin, auth, health, wellknown, whatsapp
 
 __all__ = ["admin", "auth", "health", "wellknown", "whatsapp"]

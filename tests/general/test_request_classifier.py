@@ -9,6 +9,7 @@ The prompt itself is asserted too. It is 2,400 tokens paid on every turn, and th
 properties that make that affordable — everything fixed first, the message last — are
 invisible to every other test in the suite.
 """
+
 import unittest
 
 from backend.agent.chat.signals import (
@@ -96,8 +97,12 @@ class ChildVerdictTests(unittest.TestCase):
 
     def test_a_name_is_kept_verbatim_and_whitespace_normalised(self):
         signals = _run(
-            {"scope": "in_domain", "about_child": True,
-             "child_reference": "named", "child_name": "  علي   حسن "},
+            {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "named",
+                "child_name": "  علي   حسن ",
+            },
             question="درجات علي حسن ايه؟",
         )
         self.assertEqual(signals.child_name, "علي حسن")
@@ -114,17 +119,25 @@ class ChildVerdictTests(unittest.TestCase):
     def test_a_name_is_dropped_when_the_message_did_not_contain_one(self):
         """A name on any other reference kind is the model carrying one over from the
         conversation — which is a guess, and it resolves against real children."""
-        signals = _run({
-            "scope": "in_domain", "about_child": True,
-            "child_reference": "son", "child_name": "علي",
-        })
+        signals = _run(
+            {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "son",
+                "child_name": "علي",
+            }
+        )
         self.assertEqual(signals.child_name, "")
 
     def test_named_with_no_name_falls_back_rather_than_selecting_nobody(self):
-        signals = _run({
-            "scope": "in_domain", "about_child": True,
-            "child_reference": "named", "child_name": "   ",
-        })
+        signals = _run(
+            {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "named",
+                "child_name": "   ",
+            }
+        )
         self.assertEqual(signals.child_reference, "context")
         self.assertEqual(signals.child_name, "")
 
@@ -139,8 +152,12 @@ class ChildVerdictTests(unittest.TestCase):
         wrong name here OVERRIDES a correct pin.
         """
         signals = _run(
-            {"scope": "in_domain", "about_child": True,
-             "child_reference": "named", "child_name": "علي"},
+            {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "named",
+                "child_name": "علي",
+            },
             question="طيب وجدوله؟",
         )
 
@@ -157,8 +174,12 @@ class ChildVerdictTests(unittest.TestCase):
             resolved_question="ما هو جدول علي الدراسي؟",
         )
         signals = EnvelopeDetector(
-            invoke=lambda *a: {"scope": "in_domain", "about_child": True,
-                               "child_reference": "named", "child_name": "علي"}
+            invoke=lambda *a: {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "named",
+                "child_name": "علي",
+            }
         ).detect(ctx, RequestSignals(question="طيب وجدوله؟"))
 
         self.assertEqual(signals.child_reference, "named")
@@ -168,8 +189,12 @@ class ChildVerdictTests(unittest.TestCase):
         """This trace is persisted per message and streamed to the browser, and a turn
         may resolve a child silently without ever showing the name."""
         signals = _run(
-            {"scope": "in_domain", "about_child": True,
-             "child_reference": "named", "child_name": "ليلى"},
+            {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "named",
+                "child_name": "ليلى",
+            },
             question="ليلى عاملة ايه؟",
         )
         trace = signals.as_trace()
@@ -261,8 +286,7 @@ class PromptShapeTests(unittest.TestCase):
         a heading that says what it is."""
         rendered = self._render(question="x", history="")
         specimens = [
-            line for line in rendered.splitlines()
-            if "->" in line and '"' in line.split("->")[0]
+            line for line in rendered.splitlines() if "->" in line and '"' in line.split("->")[0]
         ]
         self.assertTrue(specimens, "the examples have gone missing entirely")
         unmarked = [line for line in specimens if not line.lstrip().startswith("ex ")]
@@ -281,7 +305,8 @@ class PromptShapeTests(unittest.TestCase):
         answer and as the search query, on an account with no child on file."""
         rendered = self._render(question="x", history="")
         offenders = [
-            line for line in rendered.splitlines()
+            line
+            for line in rendered.splitlines()
             if line.lstrip().startswith("ex ") and any(ch.isdigit() for ch in line)
         ]
         self.assertEqual([], offenders)
@@ -291,9 +316,12 @@ class PromptShapeTests(unittest.TestCase):
         rendered = self._render(question="x", history="")
         legend = rendered.index("stands where a real message would carry a child's name")
         first_use = min(
-            line_start for line_start in
-            [rendered.index(line) for line in rendered.splitlines()
-             if line.lstrip().startswith("ex ") and (" X" in line or "X " in line)]
+            line_start
+            for line_start in [
+                rendered.index(line)
+                for line in rendered.splitlines()
+                if line.lstrip().startswith("ex ") and (" X" in line or "X " in line)
+            ]
         )
         self.assertLess(legend, first_use)
         self.assertIn("Never put the letter `X`", rendered)
@@ -331,27 +359,40 @@ class WhatAnsweringWouldNeedToRead(unittest.TestCase):
     """
 
     def test_a_records_question_is_reported_as_records(self):
-        signals = _run({
-            "scope": "in_domain", "about_child": True,
-            "child_reference": "named", "child_name": "ليلى",
-            "child_question_kind": "records",
-        }, question="درجات ليلى كام؟")
+        signals = _run(
+            {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "named",
+                "child_name": "ليلى",
+                "child_question_kind": "records",
+            },
+            question="درجات ليلى كام؟",
+        )
         self.assertEqual(signals.child_question_kind, "records")
 
     def test_a_school_matter_asked_about_a_child_is_reported_as_such(self):
-        signals = _run({
-            "scope": "in_domain", "about_child": True,
-            "child_reference": "son", "child_question_kind": "school_matter",
-        })
+        signals = _run(
+            {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "son",
+                "child_question_kind": "school_matter",
+            }
+        )
         self.assertEqual(signals.child_question_kind, "school_matter")
 
     def test_a_kind_outside_the_closed_set_degrades_to_both(self):
         for kind in ("everything", "eldest", "", None, 7):
             with self.subTest(kind=kind):
-                signals = _run({
-                    "scope": "in_domain", "about_child": True,
-                    "child_reference": "son", "child_question_kind": kind,
-                })
+                signals = _run(
+                    {
+                        "scope": "in_domain",
+                        "about_child": True,
+                        "child_reference": "son",
+                        "child_question_kind": kind,
+                    }
+                )
                 self.assertEqual(signals.child_question_kind, "both")
 
     def test_case_and_padding_are_tolerated(self):
@@ -359,30 +400,45 @@ class WhatAnsweringWouldNeedToRead(unittest.TestCase):
         reason: a provider that upper-cased an enum value said what it meant."""
         for kind in ("RECORDS", " records ", "Records"):
             with self.subTest(kind=kind):
-                signals = _run({
-                    "scope": "in_domain", "about_child": True,
-                    "child_reference": "son", "child_question_kind": kind,
-                })
+                signals = _run(
+                    {
+                        "scope": "in_domain",
+                        "about_child": True,
+                        "child_reference": "son",
+                        "child_question_kind": kind,
+                    }
+                )
                 self.assertEqual(signals.child_question_kind, "records")
 
     def test_a_classifier_that_omits_the_field_leaves_it_at_both(self):
         """Which is what a provider dropping an optional field produces, and what every
         deployment on the previous schema produces."""
-        signals = _run({
-            "scope": "in_domain", "about_child": True, "child_reference": "son",
-        })
+        signals = _run(
+            {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "son",
+            }
+        )
         self.assertEqual(signals.child_question_kind, "both")
 
     def test_a_turn_that_is_not_about_a_child_is_left_at_both(self):
-        signals = _run({
-            "scope": "in_domain", "about_child": False,
-            "child_question_kind": "records",
-        })
+        signals = _run(
+            {
+                "scope": "in_domain",
+                "about_child": False,
+                "child_question_kind": "records",
+            }
+        )
         self.assertEqual(signals.child_question_kind, "both")
 
     def test_the_trace_carries_it(self):
-        signals = _run({
-            "scope": "in_domain", "about_child": True,
-            "child_reference": "son", "child_question_kind": "school_matter",
-        })
+        signals = _run(
+            {
+                "scope": "in_domain",
+                "about_child": True,
+                "child_reference": "son",
+                "child_question_kind": "school_matter",
+            }
+        )
         self.assertEqual(signals.as_trace()["request_child_question_kind"], "school_matter")

@@ -12,6 +12,7 @@ table is gone with the flat-course backend it existed for; the system of record 
 marks against the school's own subject codes, so a subject it reports for a child in a term
 is one the school entered against her, and there is nothing to match or drop.
 """
+
 import pytest
 
 from records.application.assembly import AttendanceAssembler, GradeAssembler
@@ -37,17 +38,13 @@ class TestGradeAssembly:
 
     def test_both_percentages_are_carried_through(self):
         """The case the two figures exist for: attendance drags the official total down."""
-        courses = GradeAssembler().assemble(
-            [subject(percentage=65.0, academic_percentage=80.0)]
-        )
+        courses = GradeAssembler().assemble([subject(percentage=65.0, academic_percentage=80.0)])
 
         assert courses[0].computed_percentage == 65.0
         assert courses[0].academic.percentage == 80.0
 
     def test_each_percentage_gets_its_own_letter(self):
-        courses = GradeAssembler().assemble(
-            [subject(percentage=65.0, academic_percentage=80.0)]
-        )
+        courses = GradeAssembler().assemble([subject(percentage=65.0, academic_percentage=80.0)])
 
         assert courses[0].letter_grade == "D"
         assert courses[0].academic.letter_grade == "B"
@@ -162,10 +159,12 @@ class TestAttendanceAssembly:
         """A school may rename or reorder its statuses; the meaning is in the label."""
         assembler = AttendanceAssembler()
         subjects = [
-            self.attendance(by_status=(
-                {"acronym": "X", "description": "Absent without notice", "count": 2},
-                {"acronym": "Y", "description": "Excused by parent", "count": 1},
-            ))
+            self.attendance(
+                by_status=(
+                    {"acronym": "X", "description": "Absent without notice", "count": 2},
+                    {"acronym": "Y", "description": "Excused by parent", "count": 1},
+                )
+            )
         ]
 
         counts = assembler.counts(subjects)

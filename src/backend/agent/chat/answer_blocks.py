@@ -8,6 +8,7 @@ placed where it pointed.
 
 Moved out of `service.py` with its behaviour unchanged.
 """
+
 import logging
 import re
 
@@ -261,7 +262,8 @@ def resolve_figure_markers(answer: str, ctx) -> str:
         if not asset_id:
             logger.info(
                 "the answer named figure %s; this turn retrieved %s",
-                number, sorted(numbers) or "none",
+                number,
+                sorted(numbers) or "none",
             )
             dropped = True
             return ""
@@ -300,7 +302,11 @@ def _narrow_block(kind: str, block: str, answer: str) -> str:
 
     if kind == "grades":
         # `subject: 84.0% (B)` — the label is what precedes the colon.
-        kept = [ln for ln in lines if name_key(ln.split(":")[0]) and name_key(ln.split(":")[0]) in folded]
+        kept = [
+            ln
+            for ln in lines
+            if name_key(ln.split(":")[0]) and name_key(ln.split(":")[0]) in folded
+        ]
         return "\n".join(kept) if kept else block
 
     if kind == "timetable":

@@ -25,6 +25,7 @@ register has to keep saying so.
 argument, so a service's behaviour in a test is a function of its inputs rather than of the
 day the suite runs.
 """
+
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -102,9 +103,7 @@ class AttendanceMark:
 
         if not isinstance(self.state, AttendanceState):
             try:
-                object.__setattr__(
-                    self, "state", AttendanceState(str(self.state).strip().lower())
-                )
+                object.__setattr__(self, "state", AttendanceState(str(self.state).strip().lower()))
             except ValueError:
                 raise ValidationError(
                     f"{self.state!r} is not an attendance state; expected one of "
@@ -121,9 +120,7 @@ class AttendanceMark:
                 field="note",
             )
 
-        if not isinstance(self.class_section_id, int) or isinstance(
-            self.class_section_id, bool
-        ):
+        if not isinstance(self.class_section_id, int) or isinstance(self.class_section_id, bool):
             raise ValidationError(
                 "class_section_id must be the surrogate id of the class she was in",
                 field="class_section_id",

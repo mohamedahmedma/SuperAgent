@@ -11,6 +11,7 @@ we actually have should this turn get". A dedicated langid model would be more
 accurate at a question nobody is asking, and would cost a load and a forward pass to
 answer it.
 """
+
 from __future__ import annotations
 
 from typing import Iterable

@@ -13,6 +13,7 @@ Two implementations behind one port:
 The pipeline runs the configured extractor and falls back to the heuristic one on any
 failure, so a vision outage degrades recall instead of failing an upload.
 """
+
 from __future__ import annotations
 
 import base64
@@ -101,8 +102,7 @@ class FigureExtractor(ABC):
     name: str = "extractor"
 
     @abstractmethod
-    def extract(self, request: ExtractionRequest) -> ExtractionPayload:
-        ...
+    def extract(self, request: ExtractionRequest) -> ExtractionPayload: ...
 
 
 class HeuristicExtractor(FigureExtractor):
@@ -239,7 +239,8 @@ class VisionExtractor(FigureExtractor):
                 pipeline="figure",
                 model_used=self._model_id,
                 confidence=float(result.confidence or 0.0),
-                needs_review=float(result.confidence or 0.0) < self._config.escalate_below_confidence,
+                needs_review=float(result.confidence or 0.0)
+                < self._config.escalate_below_confidence,
                 extracted_at=datetime.now(UTC),
             ),
         )

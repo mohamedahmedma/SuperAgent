@@ -1,4 +1,5 @@
 """Files a parent sends with a message — today, voice notes."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -28,7 +29,9 @@ class ChatAttachment(Base):
     #: A random id rather than the sha256: two parents who record the same silence must
     #: not share a row, and a URL that names one's note must not resolve for the other.
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     #: "voice" today. A string so a second kind is a value, not a migration.
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
 

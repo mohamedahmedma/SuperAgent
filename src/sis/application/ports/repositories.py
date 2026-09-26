@@ -38,6 +38,7 @@ one to rebuild a value object purely to index a dict. Arguments stay strict: a r
 takes `SubjectCode`, so the parsing failure surfaces at the boundary where the cell was
 read rather than as an empty result three layers down.
 """
+
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -84,6 +85,7 @@ type GradeKey = tuple[str, str, str]
 # of the key: a child who returns to 3A after a term in 3B has two placements in that
 # class, and they are different facts, not a duplicate.
 type EnrolmentKey = tuple[str, str, str, date]
+
 
 @dataclass(frozen=True, slots=True)
 class GradeSubjects:
@@ -182,7 +184,10 @@ class TeacherRepository(Protocol):
     """Teaching staff, their optional login, and their teaching scope."""
 
     def list_for_school(
-        self, school_code: SchoolCode, *, year_level_code: YearCode | None = None,
+        self,
+        school_code: SchoolCode,
+        *,
+        year_level_code: YearCode | None = None,
         include_inactive: bool = False,
     ) -> Sequence[TeacherRecord]:
         """The school's teachers, or only those teaching on one grade.
@@ -214,9 +219,7 @@ class TeacherRepository(Protocol):
         is_active: bool,
         username: str | None,
         password_hash: str | None,
-        assignments: Sequence[
-            tuple[AcademicYearCode, SubjectCode, YearCode, Sequence[ClassCode]]
-        ],
+        assignments: Sequence[tuple[AcademicYearCode, SubjectCode, YearCode, Sequence[ClassCode]]],
         assigned_by: str,
         gender: Gender = Gender.UNSPECIFIED,
     ) -> TeacherRecord: ...
@@ -267,9 +270,7 @@ class AttendanceRepository(Protocol):
     a rate divided by "school days" would be divided by a number this service does not hold.
     """
 
-    def marks_for_class(
-        self, class_section_id: int, on_date: date
-    ) -> Mapping[str, AttendanceMark]:
+    def marks_for_class(self, class_section_id: int, on_date: date) -> Mapping[str, AttendanceMark]:
         """What was recorded for one class on one day, keyed by student number.
 
         Keyed rather than listed because the caller is merging it into a register built from
@@ -311,9 +312,7 @@ class AcademicYearRepository(Protocol):
     def get(self, code: AcademicYearCode) -> AcademicYear | None:
         """The year, or `None` when no such code is on file."""
 
-    def get_many(
-        self, codes: Collection[AcademicYearCode]
-    ) -> Mapping[str, AcademicYear]:
+    def get_many(self, codes: Collection[AcademicYearCode]) -> Mapping[str, AcademicYear]:
         """The years that exist, keyed by code; absent codes are simply missing."""
 
     def list_all(self, school_code: SchoolCode | None = None) -> Sequence[AcademicYear]:
@@ -339,9 +338,7 @@ class AcademicYearRepository(Protocol):
         wrongly in that window.
         """
 
-    def upsert_many(
-        self, years: Sequence[AcademicYear]
-    ) -> Mapping[str, bool]:
+    def upsert_many(self, years: Sequence[AcademicYear]) -> Mapping[str, bool]:
         """Insert or update by code; `True` marks the ones this call created."""
 
 
@@ -375,14 +372,10 @@ class YearLevelRepository(Protocol):
 class ClassSectionRepository(Protocol):
     """Class sections, unique per `(academic_year_code, code)` and never per term."""
 
-    def get(
-        self, academic_year_code: AcademicYearCode, code: ClassCode
-    ) -> ClassSection | None:
+    def get(self, academic_year_code: AcademicYearCode, code: ClassCode) -> ClassSection | None:
         """One section within one year, or `None`."""
 
-    def get_many(
-        self, keys: Collection[ClassSectionKey]
-    ) -> Mapping[ClassSectionKey, ClassSection]:
+    def get_many(self, keys: Collection[ClassSectionKey]) -> Mapping[ClassSectionKey, ClassSection]:
         """The sections that exist, so a whole roster validates in one query."""
 
     def list_for_year(
@@ -393,9 +386,7 @@ class ClassSectionRepository(Protocol):
     ) -> Sequence[ClassSection]:
         """Sections of a year, optionally narrowed to one level, in code order."""
 
-    def upsert_many(
-        self, sections: Sequence[ClassSection]
-    ) -> Mapping[ClassSectionKey, bool]:
+    def upsert_many(self, sections: Sequence[ClassSection]) -> Mapping[ClassSectionKey, bool]:
         """The one path structure generation writes through, uniform or per-year alike."""
 
     def rename(
@@ -413,9 +404,7 @@ class ClassSectionRepository(Protocol):
         one of those rows reports an error when it happens.
         """
 
-    def ids_for(
-        self, keys: Collection[ClassSectionKey]
-    ) -> Mapping[ClassSectionKey, int]:
+    def ids_for(self, keys: Collection[ClassSectionKey]) -> Mapping[ClassSectionKey, int]:
         """Surrogate ids for the sections named, absent keys omitted.
 
         `SubjectGrade.class_section_id` stores the surrogate, so a grade import has to
@@ -528,9 +517,7 @@ class SubjectRepository(Protocol):
     resolving, which is the only year the code can be about.
     """
 
-    def get(
-        self, code: SubjectCode, academic_year_code: AcademicYearCode
-    ) -> Subject | None:
+    def get(self, code: SubjectCode, academic_year_code: AcademicYearCode) -> Subject | None:
         """The subject as that year teaches it, or `None`."""
 
     def get_many(
@@ -566,9 +553,7 @@ class SubjectRepository(Protocol):
         time is the only caller.
         """
 
-    def assignments_for_year(
-        self, academic_year_code: AcademicYearCode
-    ) -> Sequence[GradeSubjects]:
+    def assignments_for_year(self, academic_year_code: AcademicYearCode) -> Sequence[GradeSubjects]:
         """Every assignment in the year, keyed by the rung code that carries it.
 
         Rungs belong to one academic track, so the Arabic and Languages sections of a
@@ -612,9 +597,7 @@ class StudentRepository(Protocol):
     def get(self, student_number: StudentNumber) -> Student | None:
         """The student, or `None`."""
 
-    def get_many(
-        self, student_numbers: Collection[StudentNumber]
-    ) -> Mapping[str, Student]:
+    def get_many(self, student_numbers: Collection[StudentNumber]) -> Mapping[str, Student]:
         """Which of these children are already on file — one query for a whole roster."""
 
     def search(
@@ -625,18 +608,14 @@ class StudentRepository(Protocol):
     def upsert_many(self, students: Sequence[Student]) -> Mapping[str, bool]:
         """Insert or update by student number; `True` marks the ones this call created."""
 
-    def set_active(
-        self, student_number: StudentNumber, *, is_active: bool
-    ) -> Student:
+    def set_active(self, student_number: StudentNumber, *, is_active: bool) -> Student:
         """Mark a child as left or returned; never deletes, because grades outlive them."""
 
 
 class EnrolmentRepository(Protocol):
     """Time-bounded placements of children in classes — invariant 2 made storable."""
 
-    def class_section_on(
-        self, student_id: StudentNumber, on_date: date
-    ) -> ClassSection | None:
+    def class_section_on(self, student_id: StudentNumber, on_date: date) -> ClassSection | None:
         """Which class this child was in on `on_date`. The query invariant 2 exists for.
 
         A child who moves from 3A to 3B in March has two placements, both true: 3A from
@@ -713,9 +692,7 @@ class EnrolmentRepository(Protocol):
     ) -> ClassEnrolment | None:
         """Retarget the open placement for a repeated same-day transfer."""
 
-    def upsert_many(
-        self, enrolments: Sequence[ClassEnrolment]
-    ) -> Mapping[EnrolmentKey, bool]:
+    def upsert_many(self, enrolments: Sequence[ClassEnrolment]) -> Mapping[EnrolmentKey, bool]:
         """Insert or update placements in bulk; `True` marks the ones this call created.
 
         Keyed including `starts_on`, so committing the same roster twice writes the same
@@ -787,9 +764,7 @@ class StudentGuardianRepository(Protocol):
     is asked with a phone number in hand and no student number at all.
     """
 
-    def list_for_student(
-        self, student_number: StudentNumber
-    ) -> Sequence[StudentGuardian]:
+    def list_for_student(self, student_number: StudentNumber) -> Sequence[StudentGuardian]:
         """Every guardian link for one child."""
 
     def list_for_students(
@@ -812,9 +787,7 @@ class StudentGuardianRepository(Protocol):
         including the barred ones passes `False` deliberately.
         """
 
-    def upsert_many(
-        self, links: Sequence[StudentGuardian]
-    ) -> Mapping[StudentGuardianKey, bool]:
+    def upsert_many(self, links: Sequence[StudentGuardian]) -> Mapping[StudentGuardianKey, bool]:
         """Insert or update links in bulk; `True` marks the ones this call created."""
 
     def unlink(self, student_number: StudentNumber, phone: Phone) -> bool:
@@ -856,9 +829,7 @@ class GradeRepository(Protocol):
     ) -> Sequence[SubjectGrade]:
         """The grade sheet: one class, one term, optionally one subject."""
 
-    def upsert_many(
-        self, grades: Sequence[SubjectGrade]
-    ) -> Mapping[GradeKey, bool]:
+    def upsert_many(self, grades: Sequence[SubjectGrade]) -> Mapping[GradeKey, bool]:
         """Write the stated figures in bulk; `True` marks the ones this call created.
 
         A `percentage` of `None` is written as SQL NULL — invariant 1: an ungraded child
@@ -895,9 +866,7 @@ class ImportBatchRepository(Protocol):
         becomes slower than the import.
         """
 
-    def count_rows(
-        self, batch_id: str, *, outcomes: Collection[RowOutcome] | None = None
-    ) -> int:
+    def count_rows(self, batch_id: str, *, outcomes: Collection[RowOutcome] | None = None) -> int:
         """How many rows match, without fetching them."""
 
     def replace_rows(self, batch_id: str, rows: Sequence[ImportRow]) -> None:

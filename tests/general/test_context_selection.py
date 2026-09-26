@@ -4,6 +4,7 @@ Trimming too little costs tokens; trimming too much costs correctness, and only 
 those is recoverable. These tests are weighted toward proving the set is NOT trimmed
 whenever there is any doubt.
 """
+
 import unittest
 
 from backend.agent.profiles.registry import load_profile
@@ -40,8 +41,12 @@ FILLER = doc(
 
 class ExhaustiveIntentTests(unittest.TestCase):
     def test_breadth_questions_are_recognised(self):
-        for question in ("list all the partners", "compare grade 5 and grade 6 fees",
-                         "how many teachers are there", "what is the difference between them"):
+        for question in (
+            "list all the partners",
+            "compare grade 5 and grade 6 fees",
+            "how many teachers are there",
+            "what is the difference between them",
+        ):
             self.assertTrue(wants_exhaustive_answer(question), question)
 
     def test_arabic_breadth_questions_are_recognised(self):
@@ -72,10 +77,14 @@ class TrimmingTests(unittest.TestCase):
 
     def test_more_chunks_are_kept_until_the_question_is_covered(self):
         docs = [
-            doc("The school partners include Cairo University and several local institutions "
-                "that support the academic programme throughout the year."),
-            doc("Uniform requirements for sports are navy shorts and a white polo shirt, "
-                "which must be worn for every physical education lesson."),
+            doc(
+                "The school partners include Cairo University and several local institutions "
+                "that support the academic programme throughout the year."
+            ),
+            doc(
+                "Uniform requirements for sports are navy shorts and a white polo shirt, "
+                "which must be worn for every physical education lesson."
+            ),
         ] * 2
         kept, selection = select_context("school partners sports uniform", docs, self.config)
         self.assertGreaterEqual(len(kept), 2)
@@ -105,7 +114,9 @@ class NoTrimmingGuardTests(unittest.TestCase):
 
     def test_weak_retrieval_keeps_everything(self):
         docs = [doc("The uniform is navy blue with gold accents and must be worn daily.")] * 4
-        kept, selection = select_context("scholarship application deadlines abroad", docs, self.config)
+        kept, selection = select_context(
+            "scholarship application deadlines abroad", docs, self.config
+        )
         self.assertEqual(4, len(kept))
         self.assertFalse(selection.trimmed)
         self.assertIn("not confidently on target", selection.reasons[0])
@@ -128,8 +139,9 @@ class NoTrimmingGuardTests(unittest.TestCase):
 
     def test_off_mode_keeps_everything(self):
         docs = [ANSWER, FILLER, FILLER, FILLER]
-        kept, selection = select_context("what are the school partners", docs,
-                                         rag_config(context_selection_mode="off"))
+        kept, selection = select_context(
+            "what are the school partners", docs, rag_config(context_selection_mode="off")
+        )
         self.assertEqual(4, len(kept))
         self.assertFalse(selection.trimmed)
         self.assertIn("context_selection_mode=off", selection.reasons)
@@ -138,15 +150,17 @@ class NoTrimmingGuardTests(unittest.TestCase):
 class ConfigurationTests(unittest.TestCase):
     def test_the_floor_is_respected(self):
         docs = [ANSWER, FILLER, FILLER, FILLER]
-        kept, _ = select_context("what are the school partners", docs,
-                                 rag_config(context_min_chunks=3))
+        kept, _ = select_context(
+            "what are the school partners", docs, rag_config(context_min_chunks=3)
+        )
         self.assertEqual(3, len(kept))
 
     def test_a_stricter_coverage_target_keeps_more(self):
         """Nothing can exceed 100% coverage, so an unreachable target keeps the set."""
         docs = [ANSWER, FILLER, FILLER, FILLER]
-        kept, _ = select_context("what are the school partners", docs,
-                                 rag_config(context_target_coverage=1.01))
+        kept, _ = select_context(
+            "what are the school partners", docs, rag_config(context_target_coverage=1.01)
+        )
         self.assertEqual(4, len(kept))
 
     def test_the_shipped_default_trims_to_graded_chunks(self):
@@ -168,8 +182,9 @@ class ConfigurationTests(unittest.TestCase):
 
 class TraceTests(unittest.TestCase):
     def test_the_decision_is_recorded(self):
-        trace = ContextSelection(kept=1, available=4, coverage=1.0, trimmed=True,
-                                 reasons=["1 of 4 chunks"]).as_trace()
+        trace = ContextSelection(
+            kept=1, available=4, coverage=1.0, trimmed=True, reasons=["1 of 4 chunks"]
+        ).as_trace()
         self.assertEqual(1, trace["context_chunks_kept"])
         self.assertEqual(4, trace["context_chunks_available"])
         self.assertTrue(trace["context_trimmed"])
@@ -178,11 +193,15 @@ class TraceTests(unittest.TestCase):
     def test_the_trace_schema_carries_the_new_fields(self):
         from backend.agent.schemas.chat import normalize_rag_trace
 
-        trace = normalize_rag_trace({
-            "context_chunks_kept": 1, "context_chunks_available": 4,
-            "context_trimmed": True, "context_coverage": 1.0,
-            "context_selection_reason": "1 of 4 chunks",
-        })
+        trace = normalize_rag_trace(
+            {
+                "context_chunks_kept": 1,
+                "context_chunks_available": 4,
+                "context_trimmed": True,
+                "context_coverage": 1.0,
+                "context_selection_reason": "1 of 4 chunks",
+            }
+        )
         self.assertEqual(1, trace["context_chunks_kept"])
         self.assertTrue(trace["context_trimmed"])
 
@@ -207,6 +226,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             "rag_trace": {"retrieved_chunks": docs, "initial_retrieved_chunks": docs},
             "request_context": SilentContext(),
         }
+
         # The grader is stubbed rather than disabled by config: the ladder climbs to it
         # whenever the profile requires HIGH certainty, so a config flag no longer keeps
         # this node offline. Trimming is what is under test, not grading.
@@ -216,12 +236,18 @@ class PipelineIntegrationTests(unittest.TestCase):
 
             def invoke(self, _messages):
                 return pipeline.EvidenceGrade(
-                    relevance="strong", answerability="sufficient", route="answer",
-                    confidence=0.9, supporting_chunks=[1],
+                    relevance="strong",
+                    answerability="sufficient",
+                    route="answer",
+                    confidence=0.9,
+                    supporting_chunks=[1],
                 )
 
         config = rag_config()
-        with patch.object(pipeline, "_RAG", config),              patch.object(pipeline, "_get_grader_model", lambda: StubGrader()):
+        with (
+            patch.object(pipeline, "_RAG", config),
+            patch.object(pipeline, "_get_grader_model", lambda: StubGrader()),
+        ):
             update = pipeline.grade_documents_node(state)
 
         self.assertEqual("answer", update["route"])

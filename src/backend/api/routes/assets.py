@@ -18,6 +18,7 @@ backend knowing anything about that client.
 from the database row, so a crafted id cannot escape the blob root no matter what it
 contains.
 """
+
 from __future__ import annotations
 
 import logging
@@ -57,7 +58,9 @@ class AssetResolveResponse(BaseModel):
 
 def _require_assets_enabled() -> None:
     if not get_profile().assets.enabled:
-        raise HTTPException(status_code=404, detail="Asset support is disabled for this deployment.")
+        raise HTTPException(
+            status_code=404, detail="Asset support is disabled for this deployment."
+        )
 
 
 def _load(services: Services, asset_id: str):

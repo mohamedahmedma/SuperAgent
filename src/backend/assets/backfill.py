@@ -15,6 +15,7 @@ Two outcomes per stale row, and the distinction is the point of the whole mechan
 
 Never a full re-ingest: that was the failure mode this design exists to avoid.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -55,8 +56,12 @@ def run_backfill(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Backfill asset dossiers to the current schema version.")
-    parser.add_argument("--dry-run", action="store_true", help="Report what would change, write nothing.")
+    parser = argparse.ArgumentParser(
+        description="Backfill asset dossiers to the current schema version."
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Report what would change, write nothing."
+    )
     parser.add_argument("--batch-size", type=int, default=200)
     parser.add_argument(
         "--target-version",

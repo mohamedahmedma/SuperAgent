@@ -23,6 +23,7 @@ service that is being taken out of the decision path, they key on a guardian id 
 the same thing but was never reconciled, and a partial history presented as a complete one
 is worse than a clean start with a documented cut-over date.
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -53,9 +54,7 @@ def upgrade() -> None:
         "access_audit",
         ["guardian_public_id", "created_at"],
     )
-    op.create_index(
-        "ix_access_audit_allowed_time", "access_audit", ["allowed", "created_at"]
-    )
+    op.create_index("ix_access_audit_allowed_time", "access_audit", ["allowed", "created_at"])
     op.create_index("ix_access_audit_request_id", "access_audit", ["request_id"])
 
 

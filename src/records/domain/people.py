@@ -4,6 +4,7 @@ Deliberately thin, and thinner than the ORM row it replaced. It carries what a p
 question needs answered about — a name to greet her by and the year group that narrows a
 general question like "what are the fees for my son?" — and nothing about her record.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

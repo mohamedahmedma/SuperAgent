@@ -4,6 +4,7 @@ Everything LMS-shaped is behind this. Routes never import a Moodle symbol, never
 web-service function name, never handle a Moodle error type — replacing the system of
 record means writing one class, and the blast radius is one file under `adapters/`.
 """
+
 from __future__ import annotations
 
 from typing import Protocol

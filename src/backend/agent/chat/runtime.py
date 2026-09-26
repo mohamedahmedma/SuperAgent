@@ -41,15 +41,17 @@ _UNHONOURED_TOOL_CHOICE_PARTS = (
 #
 # Both of a turn's streamed calls — the tool decision and the answer — go through it, so it
 # is the model whose connections matter most to reuse (backend/llm_http.py, item 48).
-model = fold_tool_results_into_text(init_chat_model(
-    model=MODEL,
-    model_provider="openai",
-    api_key=API_KEY,
-    base_url=BASE_URL,
-    stream_usage=True,
-    **default_services().provider_http.model_kwargs(),
-    **sampling("answer"),
-))
+model = fold_tool_results_into_text(
+    init_chat_model(
+        model=MODEL,
+        model_provider="openai",
+        api_key=API_KEY,
+        base_url=BASE_URL,
+        stream_usage=True,
+        **default_services().provider_http.model_kwargs(),
+        **sampling("answer"),
+    )
+)
 
 
 # Tool results whose outcome is already the final answer. The model adds nothing to
@@ -210,13 +212,15 @@ class _ToolBudget(AgentMiddleware[ToolBudgetState, Any, Any]):
         if not made or not request.tools:
             return request
         affordable = [
-            tool for tool in request.tools
+            tool
+            for tool in request.tools
             if made.get(_tool_name(tool), 0) < budget_for(_tool_name(tool))
         ]
         if len(affordable) == len(request.tools):
             return request
-        withheld = sorted({_tool_name(t) for t in request.tools}
-                          - {_tool_name(t) for t in affordable})
+        withheld = sorted(
+            {_tool_name(t) for t in request.tools} - {_tool_name(t) for t in affordable}
+        )
         logger.info("tool budget spent, not offering: %s", ", ".join(withheld))
         overrides = {"tools": affordable}
         if not affordable:
@@ -406,10 +410,7 @@ def planned_tool_calls(planned, already_made: dict) -> list:
         {"name": str((call or {}).get("name") or ""), "args": (call or {}).get("args")}
         for call in (planned or [])
     ]
-    well_formed = [
-        call for call in well_formed
-        if call["name"] and isinstance(call["args"], dict)
-    ]
+    well_formed = [call for call in well_formed if call["name"] and isinstance(call["args"], dict)]
 
     calls = []
     made = dict(already_made or {})

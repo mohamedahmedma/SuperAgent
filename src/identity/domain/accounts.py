@@ -14,6 +14,7 @@ number, asks the school's own system of record which guardian that number belong
 writes the answer it is given. Both share the property the rule is actually about: the
 account never names its own guardian.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -57,9 +58,7 @@ def assignable_role(requested: str | None) -> str:
     return role if role in ASSIGNABLE_ROLES else DEFAULT_ROLE
 
 
-def guard_last_administrator(
-    *, removing_an_active_admin: bool, other_active_admins: int
-) -> None:
+def guard_last_administrator(*, removing_an_active_admin: bool, other_active_admins: int) -> None:
     """Refuse a change that would leave the estate with no administrator at all.
 
     The three ways to commit that mistake are deleting the last admin, demoting them, and

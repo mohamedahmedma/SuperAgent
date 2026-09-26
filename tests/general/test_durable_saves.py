@@ -9,6 +9,7 @@ which would otherwise hold the reply). What these pin is that it is:
     the answer twice;
   * **visible to every worker**, so the parent's next message waits for it wherever it lands.
 """
+
 import threading
 import time
 import unittest
@@ -25,7 +26,9 @@ from tests.general.test_turn_admission import _CLIENT, requires_redis
 
 
 def _lost_connection():
-    return sa_exc.OperationalError("COMMIT", {}, Exception("server closed the connection unexpectedly"))
+    return sa_exc.OperationalError(
+        "COMMIT", {}, Exception("server closed the connection unexpectedly")
+    )
 
 
 class RetryTests(unittest.TestCase):
@@ -149,8 +152,12 @@ class SharedWriteBarrierTests(unittest.TestCase):
             _CLIENT.delete(key)
 
     def worker(self, **options):
-        runner = SharedWriteBarrier(BackgroundJobs(name=f"w{len(self.runners)}"), redis=lambda: _CLIENT,
-                                    key=lambda name: f"{self.prefix}:{name}", **options)
+        runner = SharedWriteBarrier(
+            BackgroundJobs(name=f"w{len(self.runners)}"),
+            redis=lambda: _CLIENT,
+            key=lambda name: f"{self.prefix}:{name}",
+            **options,
+        )
         self.runners.append(runner)
         return runner
 
@@ -159,7 +166,9 @@ class SharedWriteBarrierTests(unittest.TestCase):
         gate, landed = threading.Event(), []
         saving.submit("conversation:u:s", lambda: (gate.wait(5), landed.append("answer")))
 
-        waiter = threading.Thread(target=lambda: landed.append(("flushed", reading.flush("conversation:u:s", timeout=5))))
+        waiter = threading.Thread(
+            target=lambda: landed.append(("flushed", reading.flush("conversation:u:s", timeout=5)))
+        )
         waiter.start()
         time.sleep(0.2)
         self.assertEqual([], landed, "the other worker went ahead before the save landed")

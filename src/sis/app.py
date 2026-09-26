@@ -17,6 +17,7 @@ against a fixture database. Neither should need a migrated Postgres to be reacha
 and an import-time check would mean the OpenAPI file could only be regenerated on a
 machine with production credentials.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -78,6 +79,7 @@ DESCRIPTION = (
 # ---------------------------------------------------------------------------
 # Startup gate: the schema is alembic's, and the service refuses to guess.
 # ---------------------------------------------------------------------------
+
 
 def _sanitised_url(url: object) -> str:
     """The database URL with the password removed, for putting in a log line."""
@@ -319,9 +321,7 @@ class _ConsoleStaticFiles(StaticFiles):
         response = super().file_response(full_path, stat_result, scope, *args, **kwargs)
         path = scope.get("path", "") if isinstance(scope, dict) else ""
         hashed = f"/{self._HASHED}/" in path and _looks_hashed(path)
-        response.headers.setdefault(
-            "Cache-Control", self._FOREVER if hashed else self._REVALIDATE
-        )
+        response.headers.setdefault("Cache-Control", self._FOREVER if hashed else self._REVALIDATE)
         return response
 
 
@@ -431,8 +431,11 @@ def warn_that_authentication_is_disabled() -> None:
 #: and write routes.
 _INTEGRATION_KEYS: tuple[tuple[tuple[str, ...], str, str], ...] = (
     (("SIS_BOOTSTRAP_REGISTRAR_KEY", "LOCAL_SERVICE_KEY"), "bootstrap registrar", "registrar"),
-    (("SIS_IDENTITY_API_KEY", "IDENTITY_SIS_API_KEY", "LOCAL_SERVICE_KEY"),
-     "identity service", "reader"),
+    (
+        ("SIS_IDENTITY_API_KEY", "IDENTITY_SIS_API_KEY", "LOCAL_SERVICE_KEY"),
+        "identity service",
+        "reader",
+    ),
     (("SIS_RECORDS_API_KEY", "RECORDS_API_KEY", "LOCAL_SERVICE_KEY"), "records facade", "reader"),
 )
 

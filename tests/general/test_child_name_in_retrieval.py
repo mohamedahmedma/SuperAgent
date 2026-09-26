@@ -17,6 +17,7 @@ answers from instead of the text retrieval searches for. The last of those would
 regression in the other direction — the parent asked about their child by name and the
 answer stops saying which child it is about.
 """
+
 import unittest
 
 from backend.agent.chat.child_names import name_surfaces, strip_child_names
@@ -32,9 +33,7 @@ from backend.agent.rag.graph_nodes import search_query
 ALI = ChildOption(student_id="S-1", label="علي حسن", gender="male", year_level="Year 4")
 #: A name no Arabic sentence contains by accident, and one the SIS spells with a maksura
 #: while a parent types a yeh.
-LAYLA = ChildOption(
-    student_id="S-2", label="ليلى أحمد", label_en="Layla Ahmed", gender="female"
-)
+LAYLA = ChildOption(student_id="S-2", label="ليلى أحمد", label_en="Layla Ahmed", gender="female")
 
 
 def _surfaces(child, name, reference="named"):
@@ -94,9 +93,7 @@ class TheNameThatIsAlsoAWord(unittest.TestCase):
         contains no name, so there is nothing to look for."""
         for reference in ("context", "son", "child", "plural", "none"):
             with self.subTest(reference=reference):
-                text, cuts = _cut(
-                    "هل فيه خصم على الصف الثالث؟", ALI, "", reference=reference
-                )
+                text, cuts = _cut("هل فيه خصم على الصف الثالث؟", ALI, "", reference=reference)
                 self.assertEqual("هل فيه خصم على الصف الثالث؟", text)
                 self.assertEqual(0, cuts)
 

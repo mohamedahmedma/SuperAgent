@@ -19,6 +19,7 @@ must not take a term of marks with it, and re-saving a year must not overwrite t
 registrar has since typed. Both have a test here, because both are the kind of loss nobody
 notices until a report card is wrong.
 """
+
 from datetime import date
 
 import pytest
@@ -288,40 +289,49 @@ def _place_a_mark_in(client: TestClient, headers: dict[str, str], *, term_code: 
     that confuses "no mark" with "a mark of nothing" — including a delete that checked for
     grades with a truth test.
     """
-    assert client.post(
-        "/v1/structure/levels",
-        json={
-            "code": "T-S1",
-            "school_code": SCHOOL,
-            "track_code": "AR",
-            "name_en": "Secondary 1",
-            "name_ar": "الأول الثانوي",
-            "display_order": 1,
-            "stage": "secondary",
-        },
-        headers=headers,
-    ).status_code == 201
-    assert client.post(
-        "/v1/structure/classes",
-        json={
-            "code": "S1A",
-            "academic_year_code": YEAR,
-            "year_level_code": "T-S1",
-            "name_en": "S1A",
-            "name_ar": "S1A",
-        },
-        headers=headers,
-    ).status_code == 201
-    assert client.post(
-        "/v1/subjects",
-        json={
-            "code": "PHYS",
-            "academic_year_code": YEAR,
-            "name_en": "Physics",
-            "name_ar": "فيزياء",
-        },
-        headers=headers,
-    ).status_code == 201
+    assert (
+        client.post(
+            "/v1/structure/levels",
+            json={
+                "code": "T-S1",
+                "school_code": SCHOOL,
+                "track_code": "AR",
+                "name_en": "Secondary 1",
+                "name_ar": "الأول الثانوي",
+                "display_order": 1,
+                "stage": "secondary",
+            },
+            headers=headers,
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/v1/structure/classes",
+            json={
+                "code": "S1A",
+                "academic_year_code": YEAR,
+                "year_level_code": "T-S1",
+                "name_en": "S1A",
+                "name_ar": "S1A",
+            },
+            headers=headers,
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/v1/subjects",
+            json={
+                "code": "PHYS",
+                "academic_year_code": YEAR,
+                "name_en": "Physics",
+                "name_ar": "فيزياء",
+            },
+            headers=headers,
+        ).status_code
+        == 201
+    )
 
     with SqlAlchemyUnitOfWork() as unit:
         unit.students.upsert_many(
@@ -393,30 +403,36 @@ def test_the_year_names_its_school_its_tracks_and_its_classes(
     assert _school(client, registrar, terms=2).status_code == 201
     assert _year(client, registrar).status_code == 201
     for code, track in (("T-P1", "AR"), ("LG-P1", "LANG")):
-        assert client.post(
-            "/v1/structure/levels",
+        assert (
+            client.post(
+                "/v1/structure/levels",
+                json={
+                    "code": code,
+                    "school_code": SCHOOL,
+                    "track_code": track,
+                    "name_en": code,
+                    "name_ar": code,
+                    "display_order": 1,
+                    "stage": "primary",
+                },
+                headers=registrar,
+            ).status_code
+            == 201
+        )
+    assert (
+        client.post(
+            "/v1/structure/classes",
             json={
-                "code": code,
-                "school_code": SCHOOL,
-                "track_code": track,
-                "name_en": code,
-                "name_ar": code,
-                "display_order": 1,
-                "stage": "primary",
+                "code": "P1A",
+                "academic_year_code": YEAR,
+                "year_level_code": "T-P1",
+                "name_en": "P1A",
+                "name_ar": "P1A",
             },
             headers=registrar,
-        ).status_code == 201
-    assert client.post(
-        "/v1/structure/classes",
-        json={
-            "code": "P1A",
-            "academic_year_code": YEAR,
-            "year_level_code": "T-P1",
-            "name_en": "P1A",
-            "name_ar": "P1A",
-        },
-        headers=registrar,
-    ).status_code == 201
+        ).status_code
+        == 201
+    )
 
     detail = client.get(f"/v1/academic-years/{YEAR}", headers=registrar)
     assert detail.status_code == 200, detail.text

@@ -4,6 +4,7 @@ Homework predates the ORM table set, so some deployed databases have its table w
 new installations do not.  The migration owns both cases instead of relying on a route
 to create schema at runtime.
 """
+
 from alembic import op
 import sqlalchemy as sa
 

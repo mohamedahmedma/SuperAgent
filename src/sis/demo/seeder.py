@@ -28,6 +28,7 @@ check constraints and the naming convention all apply exactly as they do at runt
 is slower than a bulk insert and it is the point: a demo that only loads because it
 bypassed a constraint is a demo that hides the constraint.
 """
+
 from __future__ import annotations
 
 import logging
@@ -161,9 +162,7 @@ class Counts:
 
     def as_lines(self) -> list[str]:
         return [
-            f"  {name.replace('_', ' '):<22} {value}"
-            for name, value in vars(self).items()
-            if value
+            f"  {name.replace('_', ' '):<22} {value}" for name, value in vars(self).items() if value
         ]
 
 
@@ -230,9 +229,7 @@ def _dice(*parts: object) -> random.Random:
 
 
 def demo_school(session: Session) -> m.School | None:
-    return session.scalars(
-        select(m.School).where(m.School.code == bp.SCHOOL_CODE)
-    ).one_or_none()
+    return session.scalars(select(m.School).where(m.School.code == bp.SCHOOL_CODE)).one_or_none()
 
 
 def sync_demo(session: Session) -> int:
@@ -264,7 +261,9 @@ def sync_demo(session: Session) -> int:
     for spec in bp.SECTIONS:
         row = sections.get(spec.code)
         if row is None:
-            raise DemoRefused(f"demo section {spec.code} is missing; use `reset` to rebuild the demo")
+            raise DemoRefused(
+                f"demo section {spec.code} is missing; use `reset` to rebuild the demo"
+            )
         row.kind = spec.kind.value
         row.name_en = spec.name_en
         row.name_ar = spec.name_ar
@@ -319,18 +318,20 @@ def remove(session: Session) -> int:
         # Sessions and role grants cascade from `users`, but they are deleted explicitly:
         # a cascade that silently does nothing (SQLite with foreign keys off, say) would
         # leave orphan grants that still authorise.
-        removed += session.execute(
-            delete(m.UserSession).where(m.UserSession.user_id.in_(user_ids))
-        ).rowcount or 0
-        removed += session.execute(
-            delete(m.UserRole).where(m.UserRole.user_id.in_(user_ids))
-        ).rowcount or 0
+        removed += (
+            session.execute(
+                delete(m.UserSession).where(m.UserSession.user_id.in_(user_ids))
+            ).rowcount
+            or 0
+        )
+        removed += (
+            session.execute(delete(m.UserRole).where(m.UserRole.user_id.in_(user_ids))).rowcount
+            or 0
+        )
 
     if school is None:
         if user_ids:
-            removed += session.execute(
-                delete(m.User).where(m.User.id.in_(user_ids))
-            ).rowcount or 0
+            removed += session.execute(delete(m.User).where(m.User.id.in_(user_ids))).rowcount or 0
         return removed
 
     year_ids = list(
@@ -339,16 +340,12 @@ def remove(session: Session) -> int:
         ).all()
     )
     level_ids = list(
-        session.scalars(
-            select(m.YearLevel.id).where(m.YearLevel.school_id == school.id)
-        ).all()
+        session.scalars(select(m.YearLevel.id).where(m.YearLevel.school_id == school.id)).all()
     )
     class_ids = (
         list(
             session.scalars(
-                select(m.ClassSection.id).where(
-                    m.ClassSection.academic_year_id.in_(year_ids)
-                )
+                select(m.ClassSection.id).where(m.ClassSection.academic_year_id.in_(year_ids))
             ).all()
         )
         if year_ids
@@ -364,11 +361,7 @@ def remove(session: Session) -> int:
         else []
     )
     term_ids = (
-        list(
-            session.scalars(
-                select(m.Term.id).where(m.Term.academic_year_id.in_(year_ids))
-            ).all()
-        )
+        list(session.scalars(select(m.Term.id).where(m.Term.academic_year_id.in_(year_ids))).all())
         if year_ids
         else []
     )
@@ -420,11 +413,7 @@ def remove(session: Session) -> int:
     if subject_ids:
         # Before the subjects themselves: the assignment rows point at both a subject and a
         # rung, and the rung outlives this statement by four lines.
-        wipe(
-            delete(m.SubjectYearLevel).where(
-                m.SubjectYearLevel.subject_id.in_(subject_ids)
-            )
-        )
+        wipe(delete(m.SubjectYearLevel).where(m.SubjectYearLevel.subject_id.in_(subject_ids)))
         wipe(delete(m.Subject).where(m.Subject.id.in_(subject_ids)))
     if term_ids:
         wipe(delete(m.Term).where(m.Term.id.in_(term_ids)))
@@ -494,83 +483,179 @@ def load_showcase_portfolio(session: Session) -> Counts:
     """
     counts = load(session)
     _load_compact_school(
-        session, counts, code="FUTURE", name_en="Future Pioneers Arabic School",
-        name_ar="مدرسة رواد المستقبل العربية", language="arabic", include_kg=False,
-        primary=6, preparatory=3, secondary=0,
+        session,
+        counts,
+        code="FUTURE",
+        name_en="Future Pioneers Arabic School",
+        name_ar="مدرسة رواد المستقبل العربية",
+        language="arabic",
+        include_kg=False,
+        primary=6,
+        preparatory=3,
+        secondary=0,
     )
     _load_compact_school(
-        session, counts, code="HORIZON", name_en="Horizon Language Academy",
-        name_ar="أكاديمية هورايزون للغات", language="languages", include_kg=True,
-        primary=6, preparatory=3, secondary=0,
+        session,
+        counts,
+        code="HORIZON",
+        name_en="Horizon Language Academy",
+        name_ar="أكاديمية هورايزون للغات",
+        language="languages",
+        include_kg=True,
+        primary=6,
+        preparatory=3,
+        secondary=0,
     )
     session.flush()
     return counts
 
 
-def _load_compact_school(session: Session, counts: Counts, *, code: str,
-    name_en: str, name_ar: str, language: str, include_kg: bool,
-    primary: int, preparatory: int, secondary: int) -> None:
+def _load_compact_school(
+    session: Session,
+    counts: Counts,
+    *,
+    code: str,
+    name_en: str,
+    name_ar: str,
+    language: str,
+    include_kg: bool,
+    primary: int,
+    preparatory: int,
+    secondary: int,
+) -> None:
     """Build a realistic independent tenant without sharing a row with another school."""
     now = datetime.now(UTC)
     school = m.School(
-        code=code, name_en=name_en, name_ar=name_ar, language_type=language,
-        kg_grade_count=2 if include_kg else 0, primary_grade_count=primary,
-        preparatory_grade_count=preparatory, secondary_grade_count=secondary,
-        term_count=2, is_active=True, created_at=now,
+        code=code,
+        name_en=name_en,
+        name_ar=name_ar,
+        language_type=language,
+        kg_grade_count=2 if include_kg else 0,
+        primary_grade_count=primary,
+        preparatory_grade_count=preparatory,
+        secondary_grade_count=secondary,
+        term_count=2,
+        is_active=True,
+        created_at=now,
     )
-    session.add(school); session.flush(); counts.schools += 1
+    session.add(school)
+    session.flush()
+    counts.schools += 1
     system = m.EducationalSystem(
-        school_id=school.id, code="AR" if language == "arabic" else "LANG",
+        school_id=school.id,
+        code="AR" if language == "arabic" else "LANG",
         department_key="arabic" if language == "arabic" else "languages",
-        kind=language, name_en="Arabic Section" if language == "arabic" else "Language Section",
+        kind=language,
+        name_en="Arabic Section" if language == "arabic" else "Language Section",
         name_ar="القسم العربي" if language == "arabic" else "قسم اللغات",
-        display_order=1, is_active=True, created_at=now,
+        display_order=1,
+        is_active=True,
+        created_at=now,
     )
-    session.add(system); session.flush(); counts.sections += 1
+    session.add(system)
+    session.flush()
+    counts.sections += 1
     year = m.AcademicYear(
-        code=f"{code}-2025-2026", school_id=school.id, name_en="2025 / 2026",
-        name_ar="٢٠٢٥ / ٢٠٢٦", starts_on=bp.YEAR_STARTS, ends_on=bp.YEAR_ENDS,
-        is_current=True, created_at=now, updated_at=now,
+        code=f"{code}-2025-2026",
+        school_id=school.id,
+        name_en="2025 / 2026",
+        name_ar="٢٠٢٥ / ٢٠٢٦",
+        starts_on=bp.YEAR_STARTS,
+        ends_on=bp.YEAR_ENDS,
+        is_current=True,
+        created_at=now,
+        updated_at=now,
     )
-    session.add(year); session.flush(); counts.academic_years += 1
+    session.add(year)
+    session.flush()
+    counts.academic_years += 1
     terms = []
     for spec in bp.TERMS:
-        row = m.Term(code=f"{code}-{spec.code}", academic_year_id=year.id,
-            name_en=spec.name_en, name_ar=spec.name_ar, starts_on=spec.starts_on,
-            ends_on=spec.ends_on, sequence=spec.sequence, is_closed=False,
-            created_at=now, updated_at=now)
-        session.add(row); session.flush(); terms.append(row); counts.terms += 1
+        row = m.Term(
+            code=f"{code}-{spec.code}",
+            academic_year_id=year.id,
+            name_en=spec.name_en,
+            name_ar=spec.name_ar,
+            starts_on=spec.starts_on,
+            ends_on=spec.ends_on,
+            sequence=spec.sequence,
+            is_closed=False,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(row)
+        session.flush()
+        terms.append(row)
+        counts.terms += 1
     subjects = {}
     for spec in bp.SUBJECTS:
-        row = m.Subject(code=spec.code, academic_year_id=year.id, name_en=spec.name_en,
-            name_ar=spec.name_ar, display_order=spec.display_order, is_active=True,
-            created_at=now)
-        session.add(row); session.flush(); subjects[spec.code] = row; counts.subjects += 1
+        row = m.Subject(
+            code=spec.code,
+            academic_year_id=year.id,
+            name_en=spec.name_en,
+            name_ar=spec.name_ar,
+            display_order=spec.display_order,
+            is_active=True,
+            created_at=now,
+        )
+        session.add(row)
+        session.flush()
+        subjects[spec.code] = row
+        counts.subjects += 1
 
     stages = ([] if not include_kg else [("KG", 2, "garden")]) + [
-        ("P", primary, "primary"), ("PR", preparatory, "preparatory"),
-        ("S", secondary, "secondary")]
+        ("P", primary, "primary"),
+        ("PR", preparatory, "preparatory"),
+        ("S", secondary, "secondary"),
+    ]
     rooms = []
     order = 0
     for prefix, total, stage in stages:
         for grade in range(1, total + 1):
             order += 1
-            level = m.YearLevel(code=f"{prefix}{grade}", school_id=school.id,
+            level = m.YearLevel(
+                code=f"{prefix}{grade}",
+                school_id=school.id,
                 name_en=(f"KG {grade}" if stage == "garden" else f"Grade {grade}"),
                 name_ar=(f"KG {grade}" if stage == "garden" else f"الصف {grade}"),
-                display_order=order, stage=stage, educational_system_id=system.id,
-                grade_number=grade, created_at=now)
-            session.add(level); session.flush(); counts.year_levels += 1
-            taught = ("AR", "EN", "MA", "SC") if stage in {"garden", "primary"} else ("AR", "EN", "MA", "SC", "SS", "CS")
+                display_order=order,
+                stage=stage,
+                educational_system_id=system.id,
+                grade_number=grade,
+                created_at=now,
+            )
+            session.add(level)
+            session.flush()
+            counts.year_levels += 1
+            taught = (
+                ("AR", "EN", "MA", "SC")
+                if stage in {"garden", "primary"}
+                else ("AR", "EN", "MA", "SC", "SS", "CS")
+            )
             for subject_code in taught:
-                session.add(m.SubjectYearLevel(subject_id=subjects[subject_code].id,
-                    year_level_id=level.id, created_at=now)); counts.subject_year_levels += 1
+                session.add(
+                    m.SubjectYearLevel(
+                        subject_id=subjects[subject_code].id, year_level_id=level.id, created_at=now
+                    )
+                )
+                counts.subject_year_levels += 1
             for room_no in range(1, 3 if stage == "garden" else 4):
-                room = m.ClassSection(academic_year_id=year.id, year_level_id=level.id,
-                    code=f"{code}-{prefix}{grade}-{room_no}", name_en=f"Class {room_no}",
-                    name_ar=f"فصل {room_no}", section_number=room_no, capacity=30,
-                    is_active=True, created_at=now, updated_at=now)
-                session.add(room); session.flush(); rooms.append((room, level, taught)); counts.class_sections += 1
+                room = m.ClassSection(
+                    academic_year_id=year.id,
+                    year_level_id=level.id,
+                    code=f"{code}-{prefix}{grade}-{room_no}",
+                    name_en=f"Class {room_no}",
+                    name_ar=f"فصل {room_no}",
+                    section_number=room_no,
+                    capacity=30,
+                    is_active=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(room)
+                session.flush()
+                rooms.append((room, level, taught))
+                counts.class_sections += 1
 
     roles = {row.code: row.id for row in session.scalars(select(m.Role)).all()}
     shared_hash = hash_password(bp.DEMO_PASSWORD)
@@ -578,69 +663,185 @@ def _load_compact_school(session: Session, counts: Counts, *, code: str,
         (RoleCode.SCHOOL_OWNER.value, "owner", "School Owner", "مالك المدرسة"),
         (RoleCode.PRINCIPAL.value, "principal", "School Principal", "مدير المدرسة"),
     ):
-        user = m.User(username=f"{code.lower()}.{suffix}", password_hash=shared_hash,
-            email=f"{suffix}@{code.lower()}.demo", full_name_en=f"{name_en} {title_en}",
-            full_name_ar=f"{title_ar} - {name_ar}", preferred_language="ar",
-            school_id=school.id, is_active=True, created_at=now, updated_at=now)
-        session.add(user); session.flush(); counts.users += 1
-        session.add(m.UserRole(user_id=user.id, role_id=roles[role_code],
-            scope_type=ScopeType.SCHOOL.value, scope_id=school.id, granted_by="seed",
-            created_at=now)); counts.role_grants += 1
+        user = m.User(
+            username=f"{code.lower()}.{suffix}",
+            password_hash=shared_hash,
+            email=f"{suffix}@{code.lower()}.demo",
+            full_name_en=f"{name_en} {title_en}",
+            full_name_ar=f"{title_ar} - {name_ar}",
+            preferred_language="ar",
+            school_id=school.id,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(user)
+        session.flush()
+        counts.users += 1
+        session.add(
+            m.UserRole(
+                user_id=user.id,
+                role_id=roles[role_code],
+                scope_type=ScopeType.SCHOOL.value,
+                scope_id=school.id,
+                granted_by="seed",
+                created_at=now,
+            )
+        )
+        counts.role_grants += 1
 
     serial = 0
     teacher_by_subject = {}
     for index, subject_code in enumerate(("AR", "EN", "MA", "SC", "SS", "CS"), 1):
-        user = m.User(username=f"{code.lower()}.t.{subject_code.lower()}",
-            password_hash=shared_hash, email=f"{subject_code.lower()}@{code.lower()}.demo",
+        user = m.User(
+            username=f"{code.lower()}.t.{subject_code.lower()}",
+            password_hash=shared_hash,
+            email=f"{subject_code.lower()}@{code.lower()}.demo",
             full_name_en=f"{subjects[subject_code].name_en} Teacher",
-            full_name_ar=f"معلم {subjects[subject_code].name_ar}", preferred_language="ar",
-            school_id=school.id, is_active=True, created_at=now, updated_at=now)
-        session.add(user); session.flush(); counts.users += 1
-        teacher = m.Teacher(staff_number=f"{code}-T{index:02d}", school_id=school.id,
-            user_id=user.id, full_name_en=user.full_name_en, full_name_ar=user.full_name_ar,
-            email=user.email, phone=f"0100000{index:04d}", is_active=True, created_at=now)
-        session.add(teacher); session.flush(); teacher_by_subject[subject_code] = (teacher, user); counts.teachers += 1
-        session.add(m.TeacherSubject(teacher_id=teacher.id, subject_id=subjects[subject_code].id,
-            academic_year_id=year.id, is_primary=True, created_at=now)); counts.teacher_subjects += 1
+            full_name_ar=f"معلم {subjects[subject_code].name_ar}",
+            preferred_language="ar",
+            school_id=school.id,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(user)
+        session.flush()
+        counts.users += 1
+        teacher = m.Teacher(
+            staff_number=f"{code}-T{index:02d}",
+            school_id=school.id,
+            user_id=user.id,
+            full_name_en=user.full_name_en,
+            full_name_ar=user.full_name_ar,
+            email=user.email,
+            phone=f"0100000{index:04d}",
+            is_active=True,
+            created_at=now,
+        )
+        session.add(teacher)
+        session.flush()
+        teacher_by_subject[subject_code] = (teacher, user)
+        counts.teachers += 1
+        session.add(
+            m.TeacherSubject(
+                teacher_id=teacher.id,
+                subject_id=subjects[subject_code].id,
+                academic_year_id=year.id,
+                is_primary=True,
+                created_at=now,
+            )
+        )
+        counts.teacher_subjects += 1
 
     for room, level, taught in rooms:
         student_ids = []
         for seat in range(1, 19):
-            serial += 1; female = serial % 2 == 0
-            ar_name, en_name = student_name(serial + (1000 if code == "FUTURE" else 2000), female=female)
-            student = m.Student(student_number=f"{code}-2026-{serial:05d}",
-                full_name_ar=ar_name, full_name_en=en_name, is_active=True,
+            serial += 1
+            female = serial % 2 == 0
+            ar_name, en_name = student_name(
+                serial + (1000 if code == "FUTURE" else 2000), female=female
+            )
+            student = m.Student(
+                student_number=f"{code}-2026-{serial:05d}",
+                full_name_ar=ar_name,
+                full_name_en=en_name,
+                is_active=True,
                 date_of_birth=date(2012, (seat % 12) + 1, (seat % 27) + 1),
                 gender=(Gender.FEMALE if female else Gender.MALE).value,
-                contact_phone="", contact_email="", address="", created_at=now, updated_at=now)
-            session.add(student); session.flush(); student_ids.append(student.id); counts.students += 1
-            session.add(m.ClassEnrolment(student_id=student.id, class_section_id=room.id,
-                starts_on=bp.YEAR_STARTS, ends_on=None, reason="initial", created_at=now,
-                updated_at=now)); counts.enrolments += 1
+                contact_phone="",
+                contact_email="",
+                address="",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(student)
+            session.flush()
+            student_ids.append(student.id)
+            counts.students += 1
+            session.add(
+                m.ClassEnrolment(
+                    student_id=student.id,
+                    class_section_id=room.id,
+                    starts_on=bp.YEAR_STARTS,
+                    ends_on=None,
+                    reason="initial",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            counts.enrolments += 1
         for subject_code in taught:
             teacher, user = teacher_by_subject[subject_code]
             if room.section_number == 1:
-                session.add(m.TeacherYearLevel(teacher_id=teacher.id, year_level_id=level.id,
-                    subject_id=subjects[subject_code].id, created_at=now))
+                session.add(
+                    m.TeacherYearLevel(
+                        teacher_id=teacher.id,
+                        year_level_id=level.id,
+                        subject_id=subjects[subject_code].id,
+                        created_at=now,
+                    )
+                )
                 counts.teacher_year_levels += 1
-            session.add(m.TeacherClassSection(teacher_id=teacher.id, class_section_id=room.id,
-                subject_id=subjects[subject_code].id, assigned_by="seed", created_at=now))
+            session.add(
+                m.TeacherClassSection(
+                    teacher_id=teacher.id,
+                    class_section_id=room.id,
+                    subject_id=subjects[subject_code].id,
+                    assigned_by="seed",
+                    created_at=now,
+                )
+            )
             counts.teacher_class_sections += 1
-            session.add(m.UserRole(user_id=user.id, role_id=roles[RoleCode.TEACHER.value],
-                scope_type=ScopeType.CLASS_SECTION.value, scope_id=room.id,
-                granted_by="seed", created_at=now)); counts.role_grants += 1
+            session.add(
+                m.UserRole(
+                    user_id=user.id,
+                    role_id=roles[RoleCode.TEACHER.value],
+                    scope_type=ScopeType.CLASS_SECTION.value,
+                    scope_id=room.id,
+                    granted_by="seed",
+                    created_at=now,
+                )
+            )
+            counts.role_grants += 1
             for student_id in student_ids:
                 score = 58 + _dice(code, room.code, subject_code, student_id).randint(0, 40)
-                session.add(m.SubjectGrade(student_id=student_id, subject_id=subjects[subject_code].id,
-                    term_id=terms[0].id, class_section_id=room.id, percentage=float(score),
-                    points=float(score), max_points=100.0, remark="", recorded_by="seed",
-                    created_at=now, updated_at=now)); counts.grades += 1
+                session.add(
+                    m.SubjectGrade(
+                        student_id=student_id,
+                        subject_id=subjects[subject_code].id,
+                        term_id=terms[0].id,
+                        class_section_id=room.id,
+                        percentage=float(score),
+                        points=float(score),
+                        max_points=100.0,
+                        remark="",
+                        recorded_by="seed",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                counts.grades += 1
         for day in school_days(ending=REGISTER_ANCHOR, count=5):
             for student_id in student_ids:
-                state = AttendanceState.ABSENT if _dice(code, student_id, day).random() < .06 else AttendanceState.PRESENT
-                session.add(m.Attendance(student_id=student_id, class_section_id=room.id,
-                    on_date=day, state=state.value, note="", recorded_by="seed",
-                    created_at=now, updated_at=now)); counts.attendance += 1
+                state = (
+                    AttendanceState.ABSENT
+                    if _dice(code, student_id, day).random() < 0.06
+                    else AttendanceState.PRESENT
+                )
+                session.add(
+                    m.Attendance(
+                        student_id=student_id,
+                        class_section_id=room.id,
+                        on_date=day,
+                        state=state.value,
+                        note="",
+                        recorded_by="seed",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                counts.attendance += 1
 
 
 def _load_school(session: Session, built: _Built, counts: Counts, now: datetime) -> None:
@@ -824,9 +1025,7 @@ def _load_students(session: Session, built: _Built, counts: Counts, now: datetim
                     full_name_ar=name_ar,
                     full_name_en=name_en,
                     is_active=True,
-                    date_of_birth=date(
-                        born_year, dice.randint(1, 12), dice.randint(1, 28)
-                    ),
+                    date_of_birth=date(born_year, dice.randint(1, 12), dice.randint(1, 28)),
                     gender=(Gender.FEMALE if female else Gender.MALE).value,
                     contact_phone="",
                     contact_email="",
@@ -1046,17 +1245,23 @@ def _load_timetable(session: Session, built: _Built, counts: Counts, now: dateti
         (7, "Period 6", "الحصة السادسة", time(12, 30), time(13, 15), True),
     )
     for number, name_en, name_ar, starts, ends, teaching in bells:
-        session.add(m.TimetablePeriod(
-            school_id=built.school_id, period_number=number, name_en=name_en,
-            name_ar=name_ar, starts_at=starts, ends_at=ends, is_teaching=teaching,
-            created_at=now, updated_at=now,
-        ))
+        session.add(
+            m.TimetablePeriod(
+                school_id=built.school_id,
+                period_number=number,
+                name_en=name_en,
+                name_ar=name_ar,
+                starts_at=starts,
+                ends_at=ends,
+                is_teaching=teaching,
+                created_at=now,
+                updated_at=now,
+            )
+        )
         counts.timetable_periods += 1
 
     rung_by_room = {
-        bp.room_ref(rung.code, label_en): rung
-        for rung in bp.RUNGS
-        for _, label_en, _ in rung.rooms
+        bp.room_ref(rung.code, label_en): rung for rung in bp.RUNGS for _, label_en, _ in rung.rooms
     }
     days = ("sunday", "monday", "tuesday", "wednesday", "thursday")
     teaching_periods = (1, 2, 3, 5, 6, 7)
@@ -1067,12 +1272,19 @@ def _load_timetable(session: Session, built: _Built, counts: Counts, now: dateti
         for day_index, day in enumerate(days):
             for period_index, period_number in enumerate(teaching_periods):
                 subject_code = subjects[(day_index + period_index) % len(subjects)]
-                session.add(m.TimetableEntry(
-                    class_section_id=room_id, academic_year_id=built.year_id,
-                    term_id=term_id, day_of_week=day, period_number=period_number,
-                    subject_id=built.subjects[subject_code], teacher_id=None,
-                    created_at=now, updated_at=now,
-                ))
+                session.add(
+                    m.TimetableEntry(
+                        class_section_id=room_id,
+                        academic_year_id=built.year_id,
+                        term_id=term_id,
+                        day_of_week=day,
+                        period_number=period_number,
+                        subject_id=built.subjects[subject_code],
+                        teacher_id=None,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
                 counts.timetable_entries += 1
 
 
@@ -1128,9 +1340,7 @@ def _load_marks(session: Session, built: _Built, counts: Counts, now: datetime) 
     """
     term_id = built.terms[bp.TERMS[0].code]
     rung_by_room = {
-        bp.room_ref(rung.code, label_en): rung
-        for rung in bp.RUNGS
-        for _, label_en, _ in rung.rooms
+        bp.room_ref(rung.code, label_en): rung for rung in bp.RUNGS for _, label_en, _ in rung.rooms
     }
 
     for key, plan in bp.CLASS_PLANS.items():
@@ -1261,9 +1471,7 @@ def status(session: Session) -> list[str]:
         else 0
     )
     usernames = [person.username for person in bp.STAFF]
-    users = len(
-        session.scalars(select(m.User.id).where(m.User.username.in_(usernames))).all()
-    )
+    users = len(session.scalars(select(m.User.id).where(m.User.username.in_(usernames))).all())
     teachers = len(
         session.scalars(select(m.Teacher.id).where(m.Teacher.school_id == school.id)).all()
     )

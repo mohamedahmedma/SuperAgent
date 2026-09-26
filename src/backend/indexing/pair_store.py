@@ -23,6 +23,7 @@ Routing therefore reads this table at query time and excludes filenames
 (`superseded_filenames`). Pairing a row takes effect on the next question, no re-index,
 and there is exactly one place that knows which documents are twins.
 """
+
 from __future__ import annotations
 
 import logging
@@ -69,7 +70,9 @@ class DocumentPairService:
             holders = uow.document_pairs.holding(name)
         return holders[0] if holders else None
 
-    def attach(self, pair_id: str, language: str, filename: str, title: str = "") -> DocumentPairRecord:
+    def attach(
+        self, pair_id: str, language: str, filename: str, title: str = ""
+    ) -> DocumentPairRecord:
         """Put `filename` on `language`'s side of `pair_id`, creating the entry if needed.
 
         Detaches the file from any OTHER entry first, so re-uploading a file under a new
@@ -222,7 +225,10 @@ class DocumentPairService:
             if unique:
                 logger.debug(
                     "keeping %s alongside %s: it carries %d figure(s) %s cannot show",
-                    drop, keep, len(unique), keep,
+                    drop,
+                    keep,
+                    len(unique),
+                    keep,
                 )
                 continue
             superseded.append(drop)
@@ -260,4 +266,3 @@ class DocumentPairService:
 def _default_title(filename: str) -> str:
     stem = (filename or "").rsplit(".", 1)[0].strip()
     return stem[:255] or filename[:255]
-

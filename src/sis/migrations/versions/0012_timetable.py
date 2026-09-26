@@ -27,6 +27,7 @@ drop of a plan that can be laid out again.
 Revision ID: 0012
 Revises: 0011
 """
+
 from alembic import op
 import sqlalchemy as sa
 

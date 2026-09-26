@@ -9,6 +9,7 @@ Figure extraction is the only stage with anything to say so far, and it is the o
 needed saying: it is minutes of model calls inside a step that otherwise reports 5% once
 and then nothing until the whole document is parsed.
 """
+
 from __future__ import annotations
 
 import logging

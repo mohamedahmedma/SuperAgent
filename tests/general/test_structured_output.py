@@ -4,6 +4,7 @@ Under load the serving process spent 10.4% of its CPU regenerating the same JSON
 and 4.5% re-creating the same pydantic classes. What these tests pin is that the cure
 changes nothing a model or a caller can see — only what it costs.
 """
+
 import unittest
 from typing import List, Literal
 
@@ -32,7 +33,9 @@ def _untitled(schema):
 
 class CachedSchemaTests(unittest.TestCase):
     def test_the_schema_is_the_one_pydantic_would_have_built(self):
-        self.assertEqual(_untitled(Plain.model_json_schema()), _untitled(Cached.model_json_schema()))
+        self.assertEqual(
+            _untitled(Plain.model_json_schema()), _untitled(Cached.model_json_schema())
+        )
 
     def test_a_caller_editing_its_copy_cannot_change_the_next_callers(self):
         """The OpenAI SDK's strict-schema pass edits the dict it is handed in place."""
@@ -57,7 +60,9 @@ class CachedSchemaTests(unittest.TestCase):
     def test_the_openai_sdks_strict_schema_is_unchanged(self):
         from openai.lib._pydantic import to_strict_json_schema
 
-        self.assertEqual(_untitled(to_strict_json_schema(Plain)), _untitled(to_strict_json_schema(Cached)))
+        self.assertEqual(
+            _untitled(to_strict_json_schema(Plain)), _untitled(to_strict_json_schema(Cached))
+        )
         self.assertEqual(to_strict_json_schema(Cached), to_strict_json_schema(Cached))
 
 
@@ -71,8 +76,14 @@ class EverySchemaAModelAnswersInTests(unittest.TestCase):
         from backend.agent.rag.scope_detector import ScopeVerdict
         from backend.agent.rag.utils import RewritePlan
 
-        for schema in (RequestEnvelope, ResolvedQuery, ScopeVerdict, EvidenceGrade,
-                       ComplexityResult, RewritePlan):
+        for schema in (
+            RequestEnvelope,
+            ResolvedQuery,
+            ScopeVerdict,
+            EvidenceGrade,
+            ComplexityResult,
+            RewritePlan,
+        ):
             self.assertTrue(issubclass(schema, StructuredOutput), schema.__name__)
 
     def test_the_hoisted_classes_still_read_what_a_model_returns(self):
@@ -81,11 +92,17 @@ class EverySchemaAModelAnswersInTests(unittest.TestCase):
         from backend.agent.rag.scope_detector import ScopeVerdict
 
         envelope = RequestEnvelope.model_validate({"scope": "in_domain", "needed_tools": ["x"]})
-        self.assertEqual(("in_domain", ["x"], "none"),
-                         (envelope.scope, envelope.needed_tools, envelope.child_reference))
+        self.assertEqual(
+            ("in_domain", ["x"], "none"),
+            (envelope.scope, envelope.needed_tools, envelope.child_reference),
+        )
         resolved = ResolvedQuery.model_validate({"question": "fees?"})
-        self.assertEqual(("fees?", "followup", ""), (resolved.question, resolved.intent, resolved.search_text))
-        self.assertEqual("out_of_domain", ScopeVerdict.model_validate({"scope": "out_of_domain"}).scope)
+        self.assertEqual(
+            ("fees?", "followup", ""), (resolved.question, resolved.intent, resolved.search_text)
+        )
+        self.assertEqual(
+            "out_of_domain", ScopeVerdict.model_validate({"scope": "out_of_domain"}).scope
+        )
 
 
 class KnowledgeToolTests(unittest.TestCase):
@@ -103,8 +120,10 @@ class KnowledgeToolTests(unittest.TestCase):
             ctx.close()
         self.assertIs(KnowledgeQuery, tool.args_schema)
         self.assertEqual("search_knowledge_base", spec["name"])
-        self.assertEqual({"properties": {"query": {"type": "string"}}, "required": ["query"],
-                          "type": "object"}, spec["parameters"])
+        self.assertEqual(
+            {"properties": {"query": {"type": "string"}}, "required": ["query"], "type": "object"},
+            spec["parameters"],
+        )
 
 
 if __name__ == "__main__":

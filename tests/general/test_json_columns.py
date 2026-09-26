@@ -6,6 +6,7 @@ These pin the serialiser that closes that gap, and pin that it stops there: JSON
 had the text columns' wider cleaning, and a character the caller wrote other than NUL
 comes back exactly as written.
 """
+
 import json
 import unittest
 
@@ -17,7 +18,7 @@ from tests.general.postgres_support import postgres_schema
 
 NUL = "\x00"
 # A family emoji: three people held together by zero-width joiners.
-FAMILY = "\U0001F468\u200d\U0001F469\u200d\U0001F467"
+FAMILY = "\U0001f468\u200d\U0001f469\u200d\U0001f467"
 # "é" written as a letter plus a combining accent, not normalised to one code point.
 DECOMPOSED = "e\u0301"
 
@@ -32,16 +33,24 @@ class JsonNulTests(unittest.TestCase):
             user = User(username="parent", password_hash="x")
             db.add(user)
             db.flush()
-            db.add(ChatSession(
-                user_id=user.id,
-                session_id="s1",
-                metadata_json={"title": f"fees{NUL}policy", "tags": [f"a{NUL}b"], "note": FAMILY + DECOMPOSED},
-            ))
+            db.add(
+                ChatSession(
+                    user_id=user.id,
+                    session_id="s1",
+                    metadata_json={
+                        "title": f"fees{NUL}policy",
+                        "tags": [f"a{NUL}b"],
+                        "note": FAMILY + DECOMPOSED,
+                    },
+                )
+            )
             db.commit()
 
         with sessions() as db:
             stored = db.scalars(select(ChatSession.metadata_json)).one()
-        self.assertEqual({"title": "feespolicy", "tags": ["ab"], "note": FAMILY + DECOMPOSED}, stored)
+        self.assertEqual(
+            {"title": "feespolicy", "tags": ["ab"], "note": FAMILY + DECOMPOSED}, stored
+        )
 
     def test_nul_is_removed_from_nested_values_and_keys(self):
         self.assertEqual('{"kq": ["ab"]}', serialize_json({f"k{NUL}q": [f"a{NUL}b"]}))

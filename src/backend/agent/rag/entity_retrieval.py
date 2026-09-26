@@ -11,6 +11,7 @@ enough that the scan is free.
 Doing it the other way round (filter the whole catalogue, then rank) throws away the
 query's meaning and returns everything red whether or not it is a shoe.
 """
+
 from __future__ import annotations
 
 import logging
@@ -158,13 +159,17 @@ class EntityRetriever:
 
         for dossier in self.asset_store.get_many(candidates[:limit]):
             text = dossier.extraction.text if dossier.extraction else None
-            result.hits.append(EntityHit(
-                asset_id=dossier.asset_id,
-                score=ranked.get(dossier.asset_id, 0.0),
-                caption=text.caption if text else "",
-                summary=text.description if text else "",
-                attributes=dict(dossier.extraction.structured.attributes) if dossier.extraction else {},
-                filename=dossier.source.filename,
-                page_number=dossier.source.page_number,
-            ))
+            result.hits.append(
+                EntityHit(
+                    asset_id=dossier.asset_id,
+                    score=ranked.get(dossier.asset_id, 0.0),
+                    caption=text.caption if text else "",
+                    summary=text.description if text else "",
+                    attributes=dict(dossier.extraction.structured.attributes)
+                    if dossier.extraction
+                    else {},
+                    filename=dossier.source.filename,
+                    page_number=dossier.source.page_number,
+                )
+            )
         return result

@@ -14,6 +14,7 @@ They take no credential. They hold no data and reveal nothing a reader of this r
 not already know, and a caller who cannot authenticate is exactly the one most in need of
 being told the route moved.
 """
+
 from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
@@ -40,9 +41,7 @@ def link_student_moved(guardian_id: str) -> dict:
     raise HTTPException(status_code=status.HTTP_410_GONE, detail=_MOVED_TO_SIS)
 
 
-@router.delete(
-    "/guardians/{guardian_id}/students/{student_id}", status_code=status.HTTP_410_GONE
-)
+@router.delete("/guardians/{guardian_id}/students/{student_id}", status_code=status.HTTP_410_GONE)
 def unlink_student_moved(guardian_id: str, student_id: str) -> dict:
     """Gone. Unlinking is a SIS operation."""
     raise HTTPException(status_code=status.HTTP_410_GONE, detail=_MOVED_TO_SIS)

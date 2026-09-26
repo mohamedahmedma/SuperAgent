@@ -30,6 +30,7 @@ There is deliberately no state in which the agent can call the knowledge tool an
 silently denied an answer. The cheap rung's failures cost latency; only the expensive
 rung's failures can cost a refusal, and that is the one that read the question.
 """
+
 from __future__ import annotations
 
 import logging
@@ -143,7 +144,9 @@ class TurnPlan:
     def as_trace(self) -> Dict[str, Any]:
         return {
             "turn_short_circuit": self.short_circuit,
-            "turn_exposed_tools": list(self.exposed_tools) if self.exposed_tools is not None else None,
+            "turn_exposed_tools": list(self.exposed_tools)
+            if self.exposed_tools is not None
+            else None,
             "turn_forced_tool": self.forced_tool or None,
             # The NAMES, never the arguments. This trace is persisted per message and
             # streamed to the browser, and a planned call's arguments carry the child's
@@ -178,11 +181,15 @@ def localized(copy, language: str) -> str:
         return ""
     if isinstance(copy, str):
         return copy
-    preferred = getattr(copy, language, None) or getattr(copy, "get", lambda _k, _d=None: None)(language)
+    preferred = getattr(copy, language, None) or getattr(copy, "get", lambda _k, _d=None: None)(
+        language
+    )
     if preferred:
         return preferred
     for fallback in (ENGLISH, ARABIC):
-        alternative = getattr(copy, fallback, None) or getattr(copy, "get", lambda _k, _d=None: None)(fallback)
+        alternative = getattr(copy, fallback, None) or getattr(
+            copy, "get", lambda _k, _d=None: None
+        )(fallback)
         if alternative:
             return alternative
     return ""
@@ -300,7 +307,10 @@ def resolve_turn(
     if signals.is_social:
         return _plan_social(signals, plan, agent_config, copy_config)
 
-    if signals.scope is Scope.OUT_OF_DOMAIN and signals.scope_certainty >= SHORT_CIRCUIT_MIN_CERTAINTY:
+    if (
+        signals.scope is Scope.OUT_OF_DOMAIN
+        and signals.scope_certainty >= SHORT_CIRCUIT_MIN_CERTAINTY
+    ):
         return _plan_out_of_domain(signals, plan, copy_config)
 
     if signals.scope is Scope.OUT_OF_DOMAIN:
@@ -578,7 +588,8 @@ def _needed_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> tupl
         if family and not set(named) & set(family):
             logger.info(
                 "classifier disagreed with itself (%s vs %s); using the family",
-                signals.child_question_kind, ", ".join(named),
+                signals.child_question_kind,
+                ", ".join(named),
             )
         else:
             return named, f"needs {', '.join(named)}", True
@@ -600,9 +611,7 @@ def _needed_tools(plan: TurnPlan, signals: RequestSignals, agent_config) -> tupl
     return wanted, f"{kind} question about one child", False
 
 
-def _plan_parallel_calls(
-    plan: TurnPlan, tools: List[str], agent_config, question: str
-) -> None:
+def _plan_parallel_calls(plan: TurnPlan, tools: List[str], agent_config, question: str) -> None:
     """Write the calls for `tools`, so they can be dispatched together instead of found.
 
     Nothing here is a guess about what the tools will RETURN — it is only a statement of
@@ -654,7 +663,8 @@ def _plan_parallel_calls(
         return
     plan.planned_calls = calls
     plan.reasons.append(
-        f"dispatching {len(calls)} tools together" if len(calls) > 1
+        f"dispatching {len(calls)} tools together"
+        if len(calls) > 1
         else f"dispatching {calls[0]['name']} ahead of the model"
     )
 

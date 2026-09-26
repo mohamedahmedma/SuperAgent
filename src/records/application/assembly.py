@@ -18,6 +18,7 @@ against her — there is nothing to match and nothing to drop.
 
 Nothing here calculates a grade. The LMS computed those; this classifies and reshapes.
 """
+
 from __future__ import annotations
 
 from records.domain.grading import DEFAULT_POLICY, GradingPolicy

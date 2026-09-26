@@ -11,6 +11,7 @@ whatever guardian id the row happened to carry, and nobody knows which rows got 
 applying to new access tokens immediately, existing ones die within their remaining
 lifetime, and the session itself dies now.
 """
+
 from __future__ import annotations
 
 from identity.application.dto import AccountSummary
@@ -88,9 +89,7 @@ class AdministrationService:
             raise NotFound("No such account.")
 
         self._accounts.set_guardian_binding(account, guardian_external_id)
-        self._audit.write(
-            username=username, event="guardian_bind", reason="ok", succeeded=True
-        )
+        self._audit.write(username=username, event="guardian_bind", reason="ok", succeeded=True)
         return AccountSummary(
             username=username,
             role=account.role,
@@ -110,12 +109,8 @@ class AdministrationService:
 
         self._accounts.set_guardian_binding(account, None)
         self._refresh.revoke_all_for_account(account.id)
-        self._audit.write(
-            username=username, event="guardian_unbind", reason="ok", succeeded=True
-        )
-        return AccountSummary(
-            username=username, role=account.role, guardian_external_id=None
-        )
+        self._audit.write(username=username, event="guardian_unbind", reason="ok", succeeded=True)
+        return AccountSummary(username=username, role=account.role, guardian_external_id=None)
 
     # -- managing accounts --------------------------------------------------
     #
@@ -181,9 +176,7 @@ class AdministrationService:
         stays_active = account.is_active if is_active is None else is_active
         guard_last_administrator(
             removing_an_active_admin=was_active_admin and not (stays_admin and stays_active),
-            other_active_admins=self._accounts.count_active_admins(
-                excluding_id=account.id
-            ),
+            other_active_admins=self._accounts.count_active_admins(excluding_id=account.id),
         )
 
         if role is not None:
@@ -200,9 +193,7 @@ class AdministrationService:
             self._accounts.set_password_hash(account, self._hasher.hash(password))
             self._refresh.revoke_all_for_account(account.id)
 
-        self._audit.write(
-            username=username, event="account_update", reason="ok", succeeded=True
-        )
+        self._audit.write(username=username, event="account_update", reason="ok", succeeded=True)
         return AccountSummary(
             username=account.username,
             role=account.role,
@@ -230,16 +221,12 @@ class AdministrationService:
 
         guard_last_administrator(
             removing_an_active_admin=account.role == "admin" and account.is_active,
-            other_active_admins=self._accounts.count_active_admins(
-                excluding_id=account.id
-            ),
+            other_active_admins=self._accounts.count_active_admins(excluding_id=account.id),
         )
 
         self._refresh.revoke_all_for_account(account.id)
         self._accounts.delete(account)
-        self._audit.write(
-            username=username, event="account_delete", reason="ok", succeeded=True
-        )
+        self._audit.write(username=username, event="account_delete", reason="ok", succeeded=True)
 
 
 __all__ = ["AdministrationService"]

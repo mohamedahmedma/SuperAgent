@@ -38,6 +38,7 @@ place.
 **The domain never reads the clock.** `at` is supplied by the caller, so a service that
 records an attempt is unit-testable against a fixed timestamp.
 """
+
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -87,9 +88,7 @@ class AccessAttempt:
 
     def __post_init__(self) -> None:
         if not self.guardian_public_id.strip():
-            raise ValidationError(
-                "an access attempt names a guardian", field="guardian_public_id"
-            )
+            raise ValidationError("an access attempt names a guardian", field="guardian_public_id")
         if self.at.tzinfo is None:
             # A naive timestamp in an audit is worse than none: it reads as local time to
             # whoever queries it next, and "when did this happen" is the whole point.

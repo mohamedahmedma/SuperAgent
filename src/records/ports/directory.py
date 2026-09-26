@@ -6,6 +6,7 @@ This port asks rather than remembers, and `sis/` re-checks the answer before ret
 mark — two independent refusals from one source of truth, instead of a second copy that
 goes stale the first time a court order is applied to the other one.
 """
+
 from __future__ import annotations
 
 from typing import Protocol

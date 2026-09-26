@@ -20,6 +20,7 @@ states which one this service chose.
 The rest is the ordinary contract: an upsert reports 201 then 200, a PATCH of one field
 leaves the others alone, and a child who has left keeps every record attached to her.
 """
+
 from datetime import date
 
 import pytest
@@ -61,7 +62,15 @@ def _seed_two_years_and_two_classes() -> None:
             ]
         )
         uow.year_levels.upsert_many(
-            [YearLevel(code="3", school_code="MAIN", name_en="Year 3", name_ar="السنة 3", display_order=3)]
+            [
+                YearLevel(
+                    code="3",
+                    school_code="MAIN",
+                    name_en="Year 3",
+                    name_ar="السنة 3",
+                    display_order=3,
+                )
+            ]
         )
         uow.class_sections.upsert_many(
             [
@@ -131,9 +140,7 @@ def _complete_admission() -> dict[str, object]:
 def test_complete_admission_creates_student_guardian_and_placement_atomically(
     seeded: TestClient, registrar: dict[str, str]
 ) -> None:
-    response = seeded.post(
-        "/v1/students/admissions", json=_complete_admission(), headers=registrar
-    )
+    response = seeded.post("/v1/students/admissions", json=_complete_admission(), headers=registrar)
     assert response.status_code == 201, response.text
     assert response.json()["placement"]["class_code"] == "3A"
     number = response.json()["student"]["student_number"]
@@ -156,9 +163,7 @@ def test_admission_accepts_national_guardian_phone_optional_contacts_and_lists_c
     body["guardian_phone"] = "01002222222"
     body["contact_email"] = ""
 
-    response = seeded.post(
-        "/v1/students/admissions", json=body, headers=registrar
-    )
+    response = seeded.post("/v1/students/admissions", json=body, headers=registrar)
     assert response.status_code == 201, response.text
     result = response.json()
     number = result["student"]["student_number"]
@@ -183,15 +188,11 @@ def test_admission_form_may_omit_the_optional_relationship_label(
     body = _complete_admission()
     body.pop("relationship_label")
 
-    response = seeded.post(
-        "/v1/students/admissions", json=body, headers=registrar
-    )
+    response = seeded.post("/v1/students/admissions", json=body, headers=registrar)
 
     assert response.status_code == 201, response.text
     number = response.json()["student"]["student_number"]
-    guardians = seeded.get(
-        f"/v1/students/{number}/guardians", headers=registrar
-    ).json()
+    guardians = seeded.get(f"/v1/students/{number}/guardians", headers=registrar).json()
     assert guardians["guardians"][0]["relationship_type"] == "father"
     assert guardians["guardians"][0]["relationship_label"] == ""
 
@@ -278,9 +279,7 @@ def test_patching_an_unknown_child_is_a_404_rather_than_creating_her(
     seeded: TestClient, registrar: dict[str, str]
 ) -> None:
     """A PATCH at a number nobody has is a typo, and inventing the child hides it."""
-    missing = seeded.patch(
-        "/v1/students/99999", json={"full_name_en": "Nobody"}, headers=registrar
-    )
+    missing = seeded.patch("/v1/students/99999", json={"full_name_en": "Nobody"}, headers=registrar)
     assert missing.status_code == 404, missing.text
     assert missing.json()["detail"]["field"] == "student_number"
 
@@ -305,9 +304,7 @@ def test_a_child_who_leaves_is_deactivated_and_keeps_her_record(
     # ...and out of the picker a registrar uses to place somebody today.
     search = seeded.get("/v1/students?q=10432", headers=registrar)
     assert search.json()["count"] == 0
-    with_left = seeded.get(
-        "/v1/students?q=10432&include_inactive=true", headers=registrar
-    )
+    with_left = seeded.get("/v1/students?q=10432&include_inactive=true", headers=registrar)
     assert with_left.json()["count"] == 1
 
     # The enrolment remains in the database for restore/audit purposes, but the normal

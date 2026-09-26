@@ -85,7 +85,9 @@ async def list_sessions(
     conversations: ConversationStorage = Depends(conversation_storage),
 ):
     try:
-        sessions = [SessionInfo(**item) for item in conversations.list_session_infos(current_user.username)]
+        sessions = [
+            SessionInfo(**item) for item in conversations.list_session_infos(current_user.username)
+        ]
         sessions.sort(key=lambda x: x.updated_at, reverse=True)
         return SessionListResponse(sessions=sessions)
     except Exception as e:

@@ -4,6 +4,7 @@ The existing ``is_current`` flag remains the compatibility projection of ``activ
 Existing current rows become active; every other existing row is conservatively marked
 upcoming rather than guessing an administrative decision from the server clock.
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -25,9 +26,7 @@ def upgrade() -> None:
             "ck_academic_years_status",
             "status IN ('upcoming', 'active', 'completed')",
         )
-    op.execute(
-        sa.text("UPDATE academic_years SET status = 'active' WHERE is_current = 1")
-    )
+    op.execute(sa.text("UPDATE academic_years SET status = 'active' WHERE is_current = 1"))
 
 
 def downgrade() -> None:

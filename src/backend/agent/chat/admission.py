@@ -27,6 +27,7 @@ replicas whose clocks drift still agree. Both FAIL OPEN: when Redis cannot be re
 the turn is admitted and the failure logged, because an outage of the limiter must not
 become an outage of the product.
 """
+
 from __future__ import annotations
 
 import logging
@@ -175,9 +176,11 @@ class TurnAdmission:
                 return TurnLease()
             leases = self._key(f"turns:inflight:{user}")
             lease_id = uuid.uuid4().hex
-            if not int(self._script(client, "lease", _LEASE_SCRIPT)(
-                keys=[leases], args=[self.concurrent, self.lease_seconds, lease_id]
-            )):
+            if not int(
+                self._script(client, "lease", _LEASE_SCRIPT)(
+                    keys=[leases], args=[self.concurrent, self.lease_seconds, lease_id]
+                )
+            ):
                 return Refusal("turn_in_progress", _IN_PROGRESS_RETRY_SECONDS)
             return TurnLease(lambda: client.zrem(leases, lease_id))
         except Exception:
@@ -195,8 +198,9 @@ class TurnAdmission:
         now = time.monotonic()
         if now - self._last_logged >= 60:
             self._last_logged = now
-            logger.warning("turn limits unavailable (Redis); admitting turns unlimited",
-                           exc_info=True)
+            logger.warning(
+                "turn limits unavailable (Redis); admitting turns unlimited", exc_info=True
+            )
 
 
 __all__ = ["Refusal", "TurnAdmission", "TurnLease"]

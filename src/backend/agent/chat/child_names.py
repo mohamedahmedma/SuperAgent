@@ -68,6 +68,7 @@ practice is the bare name, because both ways one arrives are bare: a parent typi
 
 Nothing here reads a clock, a database, a model or the environment.
 """
+
 from __future__ import annotations
 
 import re
@@ -104,38 +105,39 @@ _WAW = "و"
 #: A missing entry costs a cut that should not have happened; a spurious entry costs a
 #: name left in a query. The first is worse, so the list errs long.
 _ALSO_ORDINARY_WORDS_NATURAL = (
-    "على", "علي",      # the preposition, and the name it folds onto
-    "عمر",             # an age — «عمر الطالب» is a question this corpus answers
-    "نجاح",            # passing, a word a school corpus is built out of
-    "حسن",             # good, fine
-    "ملك",             # a king, and property — «ملك المدرسة»
-    "أمل",             # hope
-    "نور",             # light
-    "هنا",             # here
-    "آية",             # a verse; folds onto «إيه», the Egyptian "what"
-    "إيمان",           # faith
-    "فرح",             # joy
-    "سعيد",            # happy
-    "كريم",            # generous
-    "جميل",            # beautiful
-    "عادل",            # fair, just
-    "شريف",            # honourable
-    "هاجر",            # she emigrated
-    "ندى",             # dew
-    "سما",             # sky
-    "هدى",             # guidance
-    "رحمة",            # mercy
-    "بسمة",            # a smile
-    "أمير",            # a prince
-    "رضا",             # contentment
-    "وفاء",            # loyalty
-    "صفاء",            # clarity
-    "حياة",            # life
-    "سلام",            # peace
-    "عبير",            # fragrance
-    "منى",             # wishes
-    "جنى",             # a harvest
-    "زين",             # fine, adorned
+    "على",
+    "علي",  # the preposition, and the name it folds onto
+    "عمر",  # an age — «عمر الطالب» is a question this corpus answers
+    "نجاح",  # passing, a word a school corpus is built out of
+    "حسن",  # good, fine
+    "ملك",  # a king, and property — «ملك المدرسة»
+    "أمل",  # hope
+    "نور",  # light
+    "هنا",  # here
+    "آية",  # a verse; folds onto «إيه», the Egyptian "what"
+    "إيمان",  # faith
+    "فرح",  # joy
+    "سعيد",  # happy
+    "كريم",  # generous
+    "جميل",  # beautiful
+    "عادل",  # fair, just
+    "شريف",  # honourable
+    "هاجر",  # she emigrated
+    "ندى",  # dew
+    "سما",  # sky
+    "هدى",  # guidance
+    "رحمة",  # mercy
+    "بسمة",  # a smile
+    "أمير",  # a prince
+    "رضا",  # contentment
+    "وفاء",  # loyalty
+    "صفاء",  # clarity
+    "حياة",  # life
+    "سلام",  # peace
+    "عبير",  # fragrance
+    "منى",  # wishes
+    "جنى",  # a harvest
+    "زين",  # fine, adorned
 )
 
 #: Words that introduce a child by name. One of these immediately before a token is the
@@ -145,9 +147,22 @@ _ALSO_ORDINARY_WORDS_NATURAL = (
 #: «ابني الكبير على» and pays for it with «ابني في على», which is not a sentence but is
 #: the kind of thing messages reach this function as.
 _RELATIONSHIP_WORDS_NATURAL = (
-    "ابني", "إبني", "ابنتي", "بنتي", "ولدي", "ابن", "بنت",
-    "الطالب", "الطالبة", "التلميذ", "التلميذة",
-    "son", "daughter", "child", "student", "pupil",
+    "ابني",
+    "إبني",
+    "ابنتي",
+    "بنتي",
+    "ولدي",
+    "ابن",
+    "بنت",
+    "الطالب",
+    "الطالبة",
+    "التلميذ",
+    "التلميذة",
+    "son",
+    "daughter",
+    "child",
+    "student",
+    "pupil",
 )
 
 
@@ -160,9 +175,7 @@ def _also_ordinary_words() -> frozenset:
 
 @lru_cache(maxsize=1)
 def _relationship_words() -> frozenset:
-    return frozenset(
-        key for key in (name_key(word) for word in _RELATIONSHIP_WORDS_NATURAL) if key
-    )
+    return frozenset(key for key in (name_key(word) for word in _RELATIONSHIP_WORDS_NATURAL) if key)
 
 
 def _exact_key(text: str) -> str:
@@ -217,7 +230,7 @@ def occurs_as_written(text: str, name: str) -> bool:
     spans = _spans(text or "")
     key = _exact_key(name)
     for start in range(0, len(spans) - width + 1):
-        window = _exact_key(text[spans[start][0]:spans[start + width - 1][1]])
+        window = _exact_key(text[spans[start][0] : spans[start + width - 1][1]])
         if window == key or (window.startswith(_WAW) and window[1:] == key):
             return True
     return False
@@ -292,7 +305,7 @@ def _windows_to_cut(
     for start in range(0, len(spans) - width + 1):
         if any(start + offset in taken for offset in range(width)):
             continue
-        window = text[spans[start][0]:spans[start + width - 1][1]]
+        window = text[spans[start][0] : spans[start + width - 1][1]]
         if _exact_key(window) == _exact_key(surface):
             exact.append(start)
         elif name_key(window) == name_key(surface):

@@ -4,6 +4,7 @@ Group membership is deliberately not stored.  It is derived from the active acco
 role scopes and teaching assignments on every request, so removing a teacher or changing
 their subject/class assignment removes access immediately without a second sync job.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,9 +39,27 @@ MAX_MESSAGE_UPLOAD_BYTES = 50 * 1024 * 1024
 ONLINE_WINDOW_SECONDS = 45
 TYPING_WINDOW_SECONDS = 6
 ALLOWED_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp",
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".zip",
-    ".webm", ".ogg", ".mp3", ".m4a", ".wav", ".mp4",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".txt",
+    ".csv",
+    ".zip",
+    ".webm",
+    ".ogg",
+    ".mp3",
+    ".m4a",
+    ".wav",
+    ".mp4",
 }
 SCHOOL_LEADER_ROLES = {
     RoleCode.SYSTEM_ADMIN.value,
@@ -209,11 +228,13 @@ def _school(session, school_code: str, profile: AccessProfile) -> m.School:  # n
 
 
 def _roles_for(session, user_id: int) -> set[str]:  # noqa: ANN001
-    return set(session.scalars(
-        select(m.Role.code)
-        .join(m.UserRole, m.UserRole.role_id == m.Role.id)
-        .where(m.UserRole.user_id == user_id)
-    ).all())
+    return set(
+        session.scalars(
+            select(m.Role.code)
+            .join(m.UserRole, m.UserRole.role_id == m.Role.id)
+            .where(m.UserRole.user_id == user_id)
+        ).all()
+    )
 
 
 def _admin_user_ids():
@@ -228,15 +249,18 @@ def _admin_user_ids():
 def _is_admin_user(session, user_id: int | None) -> bool:  # noqa: ANN001
     if user_id is None:
         return False
-    return session.scalar(
-        select(m.UserRole.user_id)
-        .join(m.Role, m.Role.id == m.UserRole.role_id)
-        .where(
-            m.UserRole.user_id == user_id,
-            m.Role.code == RoleCode.SYSTEM_ADMIN.value,
+    return (
+        session.scalar(
+            select(m.UserRole.user_id)
+            .join(m.Role, m.Role.id == m.UserRole.role_id)
+            .where(
+                m.UserRole.user_id == user_id,
+                m.Role.code == RoleCode.SYSTEM_ADMIN.value,
+            )
+            .limit(1)
         )
-        .limit(1)
-    ) is not None
+        is not None
+    )
 
 
 def _presence_online(presence: m.ChatPresence | None, now: datetime | None = None) -> bool:
@@ -249,51 +273,79 @@ def _presence_online(presence: m.ChatPresence | None, now: datetime | None = Non
 
 
 def _named(row) -> NamedAssignmentOut:  # noqa: ANN001
-    return NamedAssignmentOut(code=row.code, name_en=row.name_en or row.code, name_ar=row.name_ar or row.name_en or row.code)
+    return NamedAssignmentOut(
+        code=row.code,
+        name_en=row.name_en or row.code,
+        name_ar=row.name_ar or row.name_en or row.code,
+    )
 
 
 def _staff_profile(session, school: m.School, user: m.User) -> PersonOut:  # noqa: ANN001
     roles = sorted(_roles_for(session, user.id))
-    current_year = session.scalar(select(m.AcademicYear).where(
-        m.AcademicYear.school_id == school.id,
-        m.AcademicYear.is_current.is_(True),
-    ).order_by(m.AcademicYear.starts_on.desc()).limit(1))
-    teacher = session.scalar(select(m.Teacher).where(
-        m.Teacher.school_id == school.id,
-        m.Teacher.user_id == user.id,
-        m.Teacher.is_active.is_(True),
-    ).limit(1))
+    current_year = session.scalar(
+        select(m.AcademicYear)
+        .where(
+            m.AcademicYear.school_id == school.id,
+            m.AcademicYear.is_current.is_(True),
+        )
+        .order_by(m.AcademicYear.starts_on.desc())
+        .limit(1)
+    )
+    teacher = session.scalar(
+        select(m.Teacher)
+        .where(
+            m.Teacher.school_id == school.id,
+            m.Teacher.user_id == user.id,
+            m.Teacher.is_active.is_(True),
+        )
+        .limit(1)
+    )
 
     subjects: list[m.Subject] = []
     grades: list[m.YearLevel] = []
     classes: list[m.ClassSection] = []
     if teacher is not None and current_year is not None:
-        subjects = list(session.scalars(
-            select(m.Subject).distinct()
-            .join(m.TeacherSubject, m.TeacherSubject.subject_id == m.Subject.id)
-            .where(
-                m.TeacherSubject.teacher_id == teacher.id,
-                m.Subject.academic_year_id == current_year.id,
-            ).order_by(m.Subject.display_order, m.Subject.code)
-        ).all())
-        grades = list(session.scalars(
-            select(m.YearLevel).distinct()
-            .join(m.TeacherYearLevel, m.TeacherYearLevel.year_level_id == m.YearLevel.id)
-            .join(m.Subject, m.Subject.id == m.TeacherYearLevel.subject_id)
-            .where(
-                m.TeacherYearLevel.teacher_id == teacher.id,
-                m.Subject.academic_year_id == current_year.id,
-            ).order_by(m.YearLevel.display_order, m.YearLevel.code)
-        ).all())
-        classes = list(session.scalars(
-            select(m.ClassSection).distinct()
-            .join(m.TeacherClassSection, m.TeacherClassSection.class_section_id == m.ClassSection.id)
-            .where(
-                m.TeacherClassSection.teacher_id == teacher.id,
-                m.ClassSection.academic_year_id == current_year.id,
-                m.ClassSection.is_active.is_(True),
-            ).order_by(m.ClassSection.code)
-        ).all())
+        subjects = list(
+            session.scalars(
+                select(m.Subject)
+                .distinct()
+                .join(m.TeacherSubject, m.TeacherSubject.subject_id == m.Subject.id)
+                .where(
+                    m.TeacherSubject.teacher_id == teacher.id,
+                    m.Subject.academic_year_id == current_year.id,
+                )
+                .order_by(m.Subject.display_order, m.Subject.code)
+            ).all()
+        )
+        grades = list(
+            session.scalars(
+                select(m.YearLevel)
+                .distinct()
+                .join(m.TeacherYearLevel, m.TeacherYearLevel.year_level_id == m.YearLevel.id)
+                .join(m.Subject, m.Subject.id == m.TeacherYearLevel.subject_id)
+                .where(
+                    m.TeacherYearLevel.teacher_id == teacher.id,
+                    m.Subject.academic_year_id == current_year.id,
+                )
+                .order_by(m.YearLevel.display_order, m.YearLevel.code)
+            ).all()
+        )
+        classes = list(
+            session.scalars(
+                select(m.ClassSection)
+                .distinct()
+                .join(
+                    m.TeacherClassSection,
+                    m.TeacherClassSection.class_section_id == m.ClassSection.id,
+                )
+                .where(
+                    m.TeacherClassSection.teacher_id == teacher.id,
+                    m.ClassSection.academic_year_id == current_year.id,
+                    m.ClassSection.is_active.is_(True),
+                )
+                .order_by(m.ClassSection.code)
+            ).all()
+        )
 
     if RoleCode.SCHOOL_MANAGER.value in roles:
         caption_en, caption_ar = "School manager", "مدير المدرسة"
@@ -301,18 +353,28 @@ def _staff_profile(session, school: m.School, user: m.User) -> PersonOut:  # noq
         caption_en, caption_ar = "School owner", "مالك المدرسة"
     elif RoleCode.FLOOR_SUPERVISOR.value in roles:
         if not grades:
-            grades = list(session.scalars(
-                select(m.YearLevel).distinct()
-                .join(m.UserRole, m.UserRole.scope_id == m.YearLevel.id)
-                .join(m.Role, m.Role.id == m.UserRole.role_id)
-                .where(
-                    m.UserRole.user_id == user.id,
-                    m.UserRole.scope_type == "year_level",
-                    m.Role.code == RoleCode.FLOOR_SUPERVISOR.value,
-                ).order_by(m.YearLevel.display_order, m.YearLevel.code)
-            ).all())
-        caption_en = "Grade supervisor" + (f" · {', '.join(row.name_en or row.code for row in grades)}" if grades else "")
-        caption_ar = "مشرف صفوف" + (f" · {'، '.join(row.name_ar or row.name_en or row.code for row in grades)}" if grades else "")
+            grades = list(
+                session.scalars(
+                    select(m.YearLevel)
+                    .distinct()
+                    .join(m.UserRole, m.UserRole.scope_id == m.YearLevel.id)
+                    .join(m.Role, m.Role.id == m.UserRole.role_id)
+                    .where(
+                        m.UserRole.user_id == user.id,
+                        m.UserRole.scope_type == "year_level",
+                        m.Role.code == RoleCode.FLOOR_SUPERVISOR.value,
+                    )
+                    .order_by(m.YearLevel.display_order, m.YearLevel.code)
+                ).all()
+            )
+        caption_en = "Grade supervisor" + (
+            f" · {', '.join(row.name_en or row.code for row in grades)}" if grades else ""
+        )
+        caption_ar = "مشرف صفوف" + (
+            f" · {'، '.join(row.name_ar or row.name_en or row.code for row in grades)}"
+            if grades
+            else ""
+        )
     elif RoleCode.ATTENDANCE_SUPERVISOR.value in roles:
         caption_en, caption_ar = "Attendance supervisor", "مشرف الحضور والغياب"
     elif teacher is not None:
@@ -320,8 +382,12 @@ def _staff_profile(session, school: m.School, user: m.User) -> PersonOut:  # noq
         subject_ar = "، ".join(row.name_ar or row.name_en or row.code for row in subjects)
         grade_en = ", ".join(row.name_en or row.code for row in grades)
         grade_ar = "، ".join(row.name_ar or row.name_en or row.code for row in grades)
-        caption_en = (f"{subject_en} teacher" if subject_en else "Teacher") + (f" · {grade_en}" if grade_en else "")
-        caption_ar = (f"مدرس {subject_ar}" if subject_ar else "مدرس") + (f" · {grade_ar}" if grade_ar else "")
+        caption_en = (f"{subject_en} teacher" if subject_en else "Teacher") + (
+            f" · {grade_en}" if grade_en else ""
+        )
+        caption_ar = (f"مدرس {subject_ar}" if subject_ar else "مدرس") + (
+            f" · {grade_ar}" if grade_ar else ""
+        )
     else:
         caption_en, caption_ar = "School staff", "هيئة المدرسة"
 
@@ -365,7 +431,9 @@ def _compact_column(column):  # noqa: ANN001
 
 
 def _like_term(value: str) -> str:
-    escaped = compact_for_search(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    escaped = (
+        compact_for_search(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
     return f"%{escaped}%"
 
 
@@ -382,15 +450,15 @@ def _safe_filename(value: str) -> str:
 def _attachment_kind(extension: str, content_type: str) -> Literal["image", "file", "audio"]:
     if extension in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
         return "image"
-    if extension in {".webm", ".ogg", ".mp3", ".m4a", ".wav", ".mp4"} and content_type.startswith("audio/"):
+    if extension in {".webm", ".ogg", ".mp3", ".m4a", ".wav", ".mp4"} and content_type.startswith(
+        "audio/"
+    ):
         return "audio"
     return "file"
 
 
 def _group_specs(session, school: m.School, profile: AccessProfile) -> dict[str, GroupSpec]:  # noqa: ANN001
-    specs = {
-        "school": GroupSpec("school", "All school staff", "كل هيئة المدرسة", "school")
-    }
+    specs = {"school": GroupSpec("school", "All school staff", "كل هيئة المدرسة", "school")}
     roles = _roles_for(session, profile.user_id)
     is_school_leader = bool(roles & SCHOOL_LEADER_ROLES)
     is_floor_supervisor = RoleCode.FLOOR_SUPERVISOR.value in roles
@@ -412,16 +480,18 @@ def _group_specs(session, school: m.School, profile: AccessProfile) -> dict[str,
         return specs
 
     teacher = session.scalar(
-        select(m.Teacher).where(
+        select(m.Teacher)
+        .where(
             m.Teacher.user_id == profile.user_id,
             m.Teacher.school_id == school.id,
             m.Teacher.is_active.is_(True),
-        ).limit(1)
+        )
+        .limit(1)
     )
 
-    school_levels = list(session.scalars(
-        select(m.YearLevel).where(m.YearLevel.school_id == school.id)
-    ).all())
+    school_levels = list(
+        session.scalars(select(m.YearLevel).where(m.YearLevel.school_id == school.id)).all()
+    )
     levels_by_id = {level.id: level for level in school_levels}
     level_ids: set[int] = set()
     managed_level_ids: set[int] = set()
@@ -443,15 +513,17 @@ def _group_specs(session, school: m.School, profile: AccessProfile) -> dict[str,
             level_ids.add(level.id)
             subject_memberships[(subject.id, level.id)] = (subject, level)
 
-        class_ids.update(session.scalars(
-            select(m.TeacherClassSection.class_section_id)
-            .join(m.ClassSection, m.ClassSection.id == m.TeacherClassSection.class_section_id)
-            .where(
-                m.TeacherClassSection.teacher_id == teacher.id,
-                m.ClassSection.academic_year_id == current_year.id,
-                m.ClassSection.is_active.is_(True),
-            )
-        ).all())
+        class_ids.update(
+            session.scalars(
+                select(m.TeacherClassSection.class_section_id)
+                .join(m.ClassSection, m.ClassSection.id == m.TeacherClassSection.class_section_id)
+                .where(
+                    m.TeacherClassSection.teacher_id == teacher.id,
+                    m.ClassSection.academic_year_id == current_year.id,
+                    m.ClassSection.is_active.is_(True),
+                )
+            ).all()
+        )
 
     # Scoped supervisors may not also have a Teacher row. Attendance supervisors retain
     # their own floor/class membership, while only floor supervisors inherit every group
@@ -491,13 +563,15 @@ def _group_specs(session, school: m.School, profile: AccessProfile) -> dict[str,
     # conversation rather than a supervisor copy of each conversation.
     if managed_level_ids:
         level_ids.update(managed_level_ids)
-        class_ids.update(session.scalars(
-            select(m.ClassSection.id).where(
-                m.ClassSection.academic_year_id == current_year.id,
-                m.ClassSection.year_level_id.in_(managed_level_ids),
-                m.ClassSection.is_active.is_(True),
-            )
-        ).all())
+        class_ids.update(
+            session.scalars(
+                select(m.ClassSection.id).where(
+                    m.ClassSection.academic_year_id == current_year.id,
+                    m.ClassSection.year_level_id.in_(managed_level_ids),
+                    m.ClassSection.is_active.is_(True),
+                )
+            ).all()
+        )
         managed_subjects = session.execute(
             select(m.Subject, m.YearLevel)
             .join(m.SubjectYearLevel, m.SubjectYearLevel.subject_id == m.Subject.id)
@@ -560,18 +634,23 @@ def _group_specs(session, school: m.School, profile: AccessProfile) -> dict[str,
 def _ensure_group_conversations(session, school: m.School, specs: dict[str, GroupSpec]):  # noqa: ANN001
     existing = {
         row.group_key: row
-        for row in session.scalars(select(m.ChatConversation).where(
-            m.ChatConversation.school_id == school.id,
-            m.ChatConversation.kind == "group",
-            m.ChatConversation.group_key.in_(specs),
-        )).all()
+        for row in session.scalars(
+            select(m.ChatConversation).where(
+                m.ChatConversation.school_id == school.id,
+                m.ChatConversation.kind == "group",
+                m.ChatConversation.group_key.in_(specs),
+            )
+        ).all()
     }
     for key, spec in specs.items():
         conversation = existing.get(key)
         if conversation is None:
             candidate = m.ChatConversation(
-                school_id=school.id, kind="group", group_key=key,
-                title_en=spec.title_en, title_ar=spec.title_ar,
+                school_id=school.id,
+                kind="group",
+                group_key=key,
+                title_en=spec.title_en,
+                title_ar=spec.title_ar,
             )
             try:
                 # Two staff opening chat for the first time can discover the same
@@ -582,11 +661,13 @@ def _ensure_group_conversations(session, school: m.School, specs: dict[str, Grou
                     session.flush([candidate])
                 conversation = candidate
             except IntegrityError:
-                conversation = session.scalar(select(m.ChatConversation).where(
-                    m.ChatConversation.school_id == school.id,
-                    m.ChatConversation.kind == "group",
-                    m.ChatConversation.group_key == key,
-                ))
+                conversation = session.scalar(
+                    select(m.ChatConversation).where(
+                        m.ChatConversation.school_id == school.id,
+                        m.ChatConversation.kind == "group",
+                        m.ChatConversation.group_key == key,
+                    )
+                )
                 if conversation is None:  # pragma: no cover - defensive database failure
                     raise
             existing[key] = conversation
@@ -598,12 +679,17 @@ def _ensure_group_conversations(session, school: m.School, specs: dict[str, Grou
 
 
 def _authorised_conversation(
-    session, school: m.School, profile: AccessProfile, conversation_id: int  # noqa: ANN001
+    session,
+    school: m.School,
+    profile: AccessProfile,
+    conversation_id: int,  # noqa: ANN001
 ) -> tuple[m.ChatConversation, dict[str, GroupSpec]]:
-    conversation = session.scalar(select(m.ChatConversation).where(
-        m.ChatConversation.id == conversation_id,
-        m.ChatConversation.school_id == school.id,
-    ))
+    conversation = session.scalar(
+        select(m.ChatConversation).where(
+            m.ChatConversation.id == conversation_id,
+            m.ChatConversation.school_id == school.id,
+        )
+    )
     if conversation is None:
         raise _refuse("unknown_reference", "No conversation with that id exists.", 404)
     specs = _group_specs(session, school, profile)
@@ -611,13 +697,10 @@ def _authorised_conversation(
         if conversation.group_key not in specs:
             raise _refuse("not_authorized", "You are no longer a member of this group.")
     else:
-        if (
-            not profile.is_system_admin
-            and profile.user_id not in {
-                conversation.direct_user_one_id,
-                conversation.direct_user_two_id,
-            }
-        ):
+        if not profile.is_system_admin and profile.user_id not in {
+            conversation.direct_user_one_id,
+            conversation.direct_user_two_id,
+        }:
             raise _refuse("not_authorized", "This private conversation belongs to other staff.")
         peer_id = None
         if profile.user_id in {
@@ -637,18 +720,24 @@ def _authorised_conversation(
 
 
 def _recipient_ids(
-    session, school: m.School, conversation: m.ChatConversation, sender_user_id: int  # noqa: ANN001
+    session,
+    school: m.School,
+    conversation: m.ChatConversation,
+    sender_user_id: int,  # noqa: ANN001
 ) -> list[int]:
     if conversation.kind == "direct":
-        return [user_id for user_id in (
-            conversation.direct_user_one_id, conversation.direct_user_two_id
-        ) if user_id is not None and user_id != sender_user_id]
+        return [
+            user_id
+            for user_id in (conversation.direct_user_one_id, conversation.direct_user_two_id)
+            if user_id is not None and user_id != sender_user_id
+        ]
 
     # Group membership remains derived, not copied into a membership table. At send
     # time we snapshot the current recipients so later staff changes do not rewrite
     # the historical meaning of delivered/read counts.
     eligible = session.scalars(
-        select(m.User).distinct()
+        select(m.User)
+        .distinct()
         .join(m.UserRole, m.UserRole.user_id == m.User.id)
         .join(m.RolePermission, m.RolePermission.role_id == m.UserRole.role_id)
         .join(m.PermissionRow, m.PermissionRow.id == m.RolePermission.permission_id)
@@ -658,63 +747,82 @@ def _recipient_ids(
             m.User.id != sender_user_id,
             ~m.User.id.in_(_admin_user_ids()),
             m.PermissionRow.code == Permission.CHAT_READ.value,
-            ~m.User.id.in_(select(m.Teacher.user_id).where(
-                m.Teacher.user_id.is_not(None), m.Teacher.is_active.is_(False)
-            )),
+            ~m.User.id.in_(
+                select(m.Teacher.user_id).where(
+                    m.Teacher.user_id.is_not(None), m.Teacher.is_active.is_(False)
+                )
+            ),
         )
     ).all()
     if conversation.group_key == "school":
         return [user.id for user in eligible]
     if conversation.group_key == "leadership:floor-supervisors":
-        leadership_ids = set(session.scalars(
-            select(m.UserRole.user_id)
-            .join(m.Role, m.Role.id == m.UserRole.role_id)
-            .where(
-                m.UserRole.user_id.in_([user.id for user in eligible]),
-                m.Role.code.in_((*SCHOOL_LEADER_ROLES, RoleCode.FLOOR_SUPERVISOR.value)),
-            )
-        ).all())
+        leadership_ids = set(
+            session.scalars(
+                select(m.UserRole.user_id)
+                .join(m.Role, m.Role.id == m.UserRole.role_id)
+                .where(
+                    m.UserRole.user_id.in_([user.id for user in eligible]),
+                    m.Role.code.in_((*SCHOOL_LEADER_ROLES, RoleCode.FLOOR_SUPERVISOR.value)),
+                )
+            ).all()
+        )
         return [user.id for user in eligible if user.id in leadership_ids]
     return [
-        user.id for user in eligible
-        if conversation.group_key in _group_specs(
-            session, school, AccessProfile(user_id=user.id, username=user.username, school_id=school.id)
+        user.id
+        for user in eligible
+        if conversation.group_key
+        in _group_specs(
+            session,
+            school,
+            AccessProfile(user_id=user.id, username=user.username, school_id=school.id),
         )
     ]
 
 
 def _add_receipts(
-    session, school: m.School, conversation: m.ChatConversation, message: m.ChatMessage  # noqa: ANN001
+    session,
+    school: m.School,
+    conversation: m.ChatConversation,
+    message: m.ChatMessage,  # noqa: ANN001
 ) -> None:
     # Admin activity is intentionally invisible to school accounts. Do not create a
     # delivery trail that could surface through presence counters or read receipts.
     if _is_admin_user(session, message.sender_user_id):
         return
     now = datetime.now(UTC)
-    online_ids = set(session.scalars(
-        select(m.ChatPresence.user_id).where(
-            m.ChatPresence.school_id == school.id,
-            m.ChatPresence.last_seen_at >= now - timedelta(seconds=ONLINE_WINDOW_SECONDS),
-        )
-    ).all())
-    session.add_all([
-        m.ChatReceipt(
-            message_id=message.id,
-            user_id=user_id,
-            delivered_at=now if user_id in online_ids else None,
-        )
-        for user_id in _recipient_ids(session, school, conversation, message.sender_user_id)
-    ])
+    online_ids = set(
+        session.scalars(
+            select(m.ChatPresence.user_id).where(
+                m.ChatPresence.school_id == school.id,
+                m.ChatPresence.last_seen_at >= now - timedelta(seconds=ONLINE_WINDOW_SECONDS),
+            )
+        ).all()
+    )
+    session.add_all(
+        [
+            m.ChatReceipt(
+                message_id=message.id,
+                user_id=user_id,
+                delivered_at=now if user_id in online_ids else None,
+            )
+            for user_id in _recipient_ids(session, school, conversation, message.sender_user_id)
+        ]
+    )
 
 
 def _message_out(
-    session, message: m.ChatMessage, sender: m.User, viewer: AccessProfile  # noqa: ANN001
+    session,
+    message: m.ChatMessage,
+    sender: m.User,
+    viewer: AccessProfile,  # noqa: ANN001
 ) -> MessageOut:
     reveal_deleted = message.deleted_at is None or viewer.is_system_admin
     attachments = []
     if reveal_deleted:
         attachments = session.scalars(
-            select(m.ChatAttachment).where(m.ChatAttachment.message_id == message.id)
+            select(m.ChatAttachment)
+            .where(m.ChatAttachment.message_id == message.id)
             .order_by(m.ChatAttachment.created_at, m.ChatAttachment.id)
         ).all()
     summary = None
@@ -740,13 +848,18 @@ def _message_out(
         edited=message.edited_at is not None,
         edited_at=_as_utc(message.edited_at),
         original_body=message.original_body if viewer.is_system_admin else None,
-        attachments=[AttachmentOut.model_validate(row, from_attributes=True) for row in attachments],
+        attachments=[
+            AttachmentOut.model_validate(row, from_attributes=True) for row in attachments
+        ],
         receipts=summary,
     )
 
 
 def _conversation_out(
-    session, conversation: m.ChatConversation, profile: AccessProfile, specs: dict[str, GroupSpec]  # noqa: ANN001
+    session,
+    conversation: m.ChatConversation,
+    profile: AccessProfile,
+    specs: dict[str, GroupSpec],  # noqa: ANN001
 ) -> ConversationOut:
     category = "direct"
     title_en, title_ar = conversation.title_en, conversation.title_ar
@@ -769,7 +882,8 @@ def _conversation_out(
         observer_view = profile.is_system_admin and profile.user_id not in participant_ids
         if observer_view:
             participants = {
-                user.id: user for user in session.scalars(
+                user.id: user
+                for user in session.scalars(
                     select(m.User).where(m.User.id.in_(participant_ids))
                 ).all()
             }
@@ -804,10 +918,15 @@ def _conversation_out(
     if not profile.is_system_admin:
         last_statement = last_statement.where(~m.ChatMessage.sender_user_id.in_(_admin_user_ids()))
     last = session.execute(last_statement.order_by(m.ChatMessage.id.desc()).limit(1)).first()
-    read_id = session.scalar(select(m.ChatRead.last_read_message_id).where(
-        m.ChatRead.conversation_id == conversation.id,
-        m.ChatRead.user_id == profile.user_id,
-    )) or 0
+    read_id = (
+        session.scalar(
+            select(m.ChatRead.last_read_message_id).where(
+                m.ChatRead.conversation_id == conversation.id,
+                m.ChatRead.user_id == profile.user_id,
+            )
+        )
+        or 0
+    )
     unread_statement = select(func.count(m.ChatMessage.id)).where(
         m.ChatMessage.conversation_id == conversation.id,
         m.ChatMessage.id > read_id,
@@ -823,14 +942,17 @@ def _conversation_out(
     if last_message is not None:
         if last_message.deleted_at is None or profile.is_system_admin:
             last_attachment_kind = session.scalar(
-                select(m.ChatAttachment.kind).where(m.ChatAttachment.message_id == last_message.id).limit(1)
+                select(m.ChatAttachment.kind)
+                .where(m.ChatAttachment.message_id == last_message.id)
+                .limit(1)
             )
     preference = session.get(m.ChatConversationPreference, (conversation.id, profile.user_id))
     now = datetime.now(UTC)
-    is_muted = bool(preference and preference.muted and (
-        preference.muted_until is None
-        or _timestamp(preference.muted_until) > _timestamp(now)
-    ))
+    is_muted = bool(
+        preference
+        and preference.muted
+        and (preference.muted_until is None or _timestamp(preference.muted_until) > _timestamp(now))
+    )
     return ConversationOut(
         id=conversation.id,
         kind=conversation.kind,
@@ -848,19 +970,23 @@ def _conversation_out(
         unread_count=unread,
         is_muted=is_muted,
         muted_until=(_as_utc(preference.muted_until) if is_muted and preference else None),
-        last_message=(LastMessageOut(
-            body=(
-                last_message.body
-                if last_message.deleted_at is None or profile.is_system_admin
-                else ""
-            ),
-            attachment_kind=last_attachment_kind,
-            deleted=last_message.deleted_at is not None,
-            edited=last_message.edited_at is not None,
-            sender_name_en=_name(last_sender, "en"),
-            sender_name_ar=_name(last_sender, "ar"),
-            created_at=_as_utc(last_message.created_at),
-        ) if last_message is not None else None),
+        last_message=(
+            LastMessageOut(
+                body=(
+                    last_message.body
+                    if last_message.deleted_at is None or profile.is_system_admin
+                    else ""
+                ),
+                attachment_kind=last_attachment_kind,
+                deleted=last_message.deleted_at is not None,
+                edited=last_message.edited_at is not None,
+                sender_name_en=_name(last_sender, "en"),
+                sender_name_ar=_name(last_sender, "ar"),
+                created_at=_as_utc(last_message.created_at),
+            )
+            if last_message is not None
+            else None
+        ),
         updated_at=_as_utc(conversation.updated_at),
     )
 
@@ -904,7 +1030,10 @@ def heartbeat_presence(
             if body.typing:
                 presence.typing_conversation_id = body.conversation_id
                 presence.typing_until = now + timedelta(seconds=TYPING_WINDOW_SECONDS)
-            elif body.conversation_id is None or presence.typing_conversation_id == body.conversation_id:
+            elif (
+                body.conversation_id is None
+                or presence.typing_conversation_id == body.conversation_id
+            ):
                 presence.typing_conversation_id = None
                 presence.typing_until = None
 
@@ -917,11 +1046,12 @@ def heartbeat_presence(
                 ~m.ChatMessage.sender_user_id.in_(_admin_user_ids())
             )
             delivery_conditions.append(m.ChatReceipt.message_id.in_(visible_message_ids))
-        delivered = session.execute(
-            update(m.ChatReceipt)
-            .where(*delivery_conditions)
-            .values(delivered_at=now)
-        ).rowcount or 0
+        delivered = (
+            session.execute(
+                update(m.ChatReceipt).where(*delivery_conditions).values(delivered_at=now)
+            ).rowcount
+            or 0
+        )
         uow.commit()
         return PresenceOut(delivered_messages=delivered)
 
@@ -938,26 +1068,35 @@ def conversation_members(
         school = _school(session, school_code, profile)
         conversation, _ = _authorised_conversation(session, school, profile, conversation_id)
         member_ids = [
-            user_id for user_id in _recipient_ids(session, school, conversation, -1)
+            user_id
+            for user_id in _recipient_ids(session, school, conversation, -1)
             if user_id != profile.user_id
         ]
-        users = session.scalars(
-            select(m.User).where(m.User.id.in_(member_ids)).order_by(m.User.full_name_en, m.User.username)
-        ).all() if member_ids else []
+        users = (
+            session.scalars(
+                select(m.User)
+                .where(m.User.id.in_(member_ids))
+                .order_by(m.User.full_name_en, m.User.username)
+            ).all()
+            if member_ids
+            else []
+        )
         now = datetime.now(UTC)
         result: list[PresenceMemberOut] = []
         for user in users:
             person = _staff_profile(session, school, user)
             presence = session.get(m.ChatPresence, user.id)
-            result.append(PresenceMemberOut(
-                **person.model_dump(),
-                typing=bool(
-                    presence is not None
-                    and presence.typing_conversation_id == conversation.id
-                    and presence.typing_until is not None
-                    and _timestamp(presence.typing_until) > _timestamp(now)
-                ),
-            ))
+            result.append(
+                PresenceMemberOut(
+                    **person.model_dump(),
+                    typing=bool(
+                        presence is not None
+                        and presence.typing_conversation_id == conversation.id
+                        and presence.typing_until is not None
+                        and _timestamp(presence.typing_until) > _timestamp(now)
+                    ),
+                )
+            )
         return result
 
 
@@ -985,7 +1124,9 @@ def list_conversations(
         # Admin deliberately receives the school's complete private-chat index without
         # being added as a participant or creating delivery/read receipts.
         directs = uow._session.scalars(direct_statement).all()
-        output = [_conversation_out(uow._session, row, profile, specs) for row in [*groups, *directs]]
+        output = [
+            _conversation_out(uow._session, row, profile, specs) for row in [*groups, *directs]
+        ]
         uow.commit()
     return sorted(
         output,
@@ -1005,18 +1146,20 @@ def search_people(
         school = _school(uow._session, school_code, profile)
         needle = _like_term(q)
         statement = select(m.User).where(
-                m.User.school_id == school.id,
-                m.User.is_active.is_(True),
-                m.User.id != profile.user_id,
-                or_(
-                    _compact_column(m.User.username).ilike(needle, escape="\\"),
-                    _compact_column(m.User.full_name_en).ilike(needle, escape="\\"),
-                    _compact_column(m.User.full_name_ar).ilike(needle, escape="\\"),
-                ),
-                ~m.User.id.in_(select(m.Teacher.user_id).where(
+            m.User.school_id == school.id,
+            m.User.is_active.is_(True),
+            m.User.id != profile.user_id,
+            or_(
+                _compact_column(m.User.username).ilike(needle, escape="\\"),
+                _compact_column(m.User.full_name_en).ilike(needle, escape="\\"),
+                _compact_column(m.User.full_name_ar).ilike(needle, escape="\\"),
+            ),
+            ~m.User.id.in_(
+                select(m.Teacher.user_id).where(
                     m.Teacher.user_id.is_not(None), m.Teacher.is_active.is_(False)
-                )),
-            )
+                )
+            ),
+        )
         if not profile.is_system_admin:
             statement = statement.where(~m.User.id.in_(_admin_user_ids()))
         users = uow._session.scalars(
@@ -1039,22 +1182,28 @@ def open_direct_conversation(
             raise _refuse("unknown_reference", "No active staff account with that id exists.", 404)
         if not profile.is_system_admin and _is_admin_user(uow._session, other.id):
             raise _refuse("unknown_reference", "No active staff account with that id exists.", 404)
-        inactive_teacher = uow._session.scalar(select(m.Teacher.id).where(
-            m.Teacher.user_id == other.id, m.Teacher.is_active.is_(False)
-        ))
+        inactive_teacher = uow._session.scalar(
+            select(m.Teacher.id).where(
+                m.Teacher.user_id == other.id, m.Teacher.is_active.is_(False)
+            )
+        )
         if inactive_teacher is not None:
             raise _refuse("unknown_reference", "That staff account is no longer active.", 404)
         first, second = sorted((profile.user_id, other.id))
-        conversation = uow._session.scalar(select(m.ChatConversation).where(
-            m.ChatConversation.school_id == school.id,
-            m.ChatConversation.kind == "direct",
-            m.ChatConversation.direct_user_one_id == first,
-            m.ChatConversation.direct_user_two_id == second,
-        ))
+        conversation = uow._session.scalar(
+            select(m.ChatConversation).where(
+                m.ChatConversation.school_id == school.id,
+                m.ChatConversation.kind == "direct",
+                m.ChatConversation.direct_user_one_id == first,
+                m.ChatConversation.direct_user_two_id == second,
+            )
+        )
         if conversation is None:
             candidate = m.ChatConversation(
-                school_id=school.id, kind="direct",
-                direct_user_one_id=first, direct_user_two_id=second,
+                school_id=school.id,
+                kind="direct",
+                direct_user_one_id=first,
+                direct_user_two_id=second,
             )
             try:
                 with uow._session.begin_nested():
@@ -1062,12 +1211,14 @@ def open_direct_conversation(
                     uow._session.flush([candidate])
                 conversation = candidate
             except IntegrityError:
-                conversation = uow._session.scalar(select(m.ChatConversation).where(
-                    m.ChatConversation.school_id == school.id,
-                    m.ChatConversation.kind == "direct",
-                    m.ChatConversation.direct_user_one_id == first,
-                    m.ChatConversation.direct_user_two_id == second,
-                ))
+                conversation = uow._session.scalar(
+                    select(m.ChatConversation).where(
+                        m.ChatConversation.school_id == school.id,
+                        m.ChatConversation.kind == "direct",
+                        m.ChatConversation.direct_user_one_id == first,
+                        m.ChatConversation.direct_user_two_id == second,
+                    )
+                )
                 if conversation is None:  # pragma: no cover - defensive database failure
                     raise
         specs = _group_specs(uow._session, school, profile)
@@ -1138,9 +1289,7 @@ def send_message(
         raise _refuse("invalid_value", "A message cannot be blank.", 422)
     with uow_factory() as uow:
         school = _school(uow._session, school_code, profile)
-        conversation, _ = _authorised_conversation(
-            uow._session, school, profile, conversation_id
-        )
+        conversation, _ = _authorised_conversation(uow._session, school, profile, conversation_id)
         sender = uow._session.get(m.User, profile.user_id)
         if sender is None or not sender.is_active:
             raise _refuse("not_authorized", "This account is no longer active.")
@@ -1174,9 +1323,7 @@ def delete_message(
     """Hide a sender's own message while retaining its original audit record for Admin."""
     with uow_factory() as uow:
         school = _school(uow._session, school_code, profile)
-        conversation, _ = _authorised_conversation(
-            uow._session, school, profile, conversation_id
-        )
+        conversation, _ = _authorised_conversation(uow._session, school, profile, conversation_id)
         row = uow._session.execute(
             select(m.ChatMessage, m.User)
             .join(m.User, m.User.id == m.ChatMessage.sender_user_id)
@@ -1221,9 +1368,7 @@ def edit_message(
         raise _refuse("invalid_value", "A message cannot be blank.", 422)
     with uow_factory() as uow:
         school = _school(uow._session, school_code, profile)
-        conversation, _ = _authorised_conversation(
-            uow._session, school, profile, conversation_id
-        )
+        conversation, _ = _authorised_conversation(uow._session, school, profile, conversation_id)
         row = uow._session.execute(
             select(m.ChatMessage, m.User)
             .join(m.User, m.User.id == m.ChatMessage.sender_user_id)
@@ -1279,7 +1424,9 @@ async def send_attachments(
     duration_seconds: Annotated[int | None, Form(ge=1, le=60)] = None,
 ) -> MessageOut:
     if not files or len(files) > MAX_MESSAGE_ATTACHMENTS:
-        raise _refuse("invalid_value", f"Attach between 1 and {MAX_MESSAGE_ATTACHMENTS} files.", 422)
+        raise _refuse(
+            "invalid_value", f"Attach between 1 and {MAX_MESSAGE_ATTACHMENTS} files.", 422
+        )
 
     prepared: list[tuple[str, str, str, bytes, str]] = []
     total = 0
@@ -1292,10 +1439,14 @@ async def send_attachments(
         if not blob:
             raise _refuse("empty_file", f"{original}: the selected file is empty.", 422)
         if len(blob) > MAX_ATTACHMENT_BYTES:
-            raise _refuse("upload_too_large", f"{original}: each attachment must be 20 MB or smaller.", 413)
+            raise _refuse(
+                "upload_too_large", f"{original}: each attachment must be 20 MB or smaller.", 413
+            )
         total += len(blob)
         if total > MAX_MESSAGE_UPLOAD_BYTES:
-            raise _refuse("upload_too_large", "Attachments in one message must total 50 MB or less.", 413)
+            raise _refuse(
+                "upload_too_large", "Attachments in one message must total 50 MB or less.", 413
+            )
         claimed = (upload.content_type or "").lower()
         guessed = mimetypes.guess_type(original)[0] or "application/octet-stream"
         kind = _attachment_kind(extension, claimed)
@@ -1330,12 +1481,18 @@ async def send_attachments(
                 temporary.write_bytes(blob)
                 temporary.replace(destination)
                 written.append(destination)
-                uow._session.add(m.ChatAttachment(
-                    id=str(uuid.uuid4()), message_id=message.id, kind=kind,
-                    file_key=stored, original_filename=original, mime_type=mime_type,
-                    size_bytes=len(blob),
-                    duration_seconds=duration_seconds if kind == "audio" else None,
-                ))
+                uow._session.add(
+                    m.ChatAttachment(
+                        id=str(uuid.uuid4()),
+                        message_id=message.id,
+                        kind=kind,
+                        file_key=stored,
+                        original_filename=original,
+                        mime_type=mime_type,
+                        size_bytes=len(blob),
+                        duration_seconds=duration_seconds if kind == "audio" else None,
+                    )
+                )
             _add_receipts(uow._session, school, conversation, message)
             uow._session.flush()
             result = _message_out(uow._session, message, sender, profile)
@@ -1407,13 +1564,16 @@ def message_receipts(
         rows = uow._session.execute(
             receipt_statement.order_by(m.User.full_name_en, m.User.username)
         ).all()
-        return [ReceiptPersonOut(
-            user_id=user.id,
-            full_name_en=_name(user, "en"),
-            full_name_ar=_name(user, "ar"),
-            delivered_at=receipt.delivered_at,
-            read_at=receipt.read_at,
-        ) for receipt, user in rows]
+        return [
+            ReceiptPersonOut(
+                user_id=user.id,
+                full_name_en=_name(user, "en"),
+                full_name_ar=_name(user, "ar"),
+                delivered_at=receipt.delivered_at,
+                read_at=receipt.read_at,
+            )
+            for receipt, user in rows
+        ]
 
 
 @router.post("/conversations/{conversation_id}/read", status_code=status.HTTP_204_NO_CONTENT)
@@ -1426,9 +1586,11 @@ def mark_read(
     with uow_factory() as uow:
         school = _school(uow._session, school_code, profile)
         _authorised_conversation(uow._session, school, profile, conversation_id)
-        latest = uow._session.scalar(select(func.max(m.ChatMessage.id)).where(
-            m.ChatMessage.conversation_id == conversation_id
-        ))
+        latest = uow._session.scalar(
+            select(func.max(m.ChatMessage.id)).where(
+                m.ChatMessage.conversation_id == conversation_id
+            )
+        )
         marker = uow._session.get(m.ChatRead, (conversation_id, profile.user_id))
         if marker is None:
             candidate = m.ChatRead(conversation_id=conversation_id, user_id=profile.user_id)

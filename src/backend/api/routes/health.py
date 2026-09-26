@@ -18,6 +18,7 @@ being unable to embed anything. Without a readiness gate a load balancer sends r
 users into that window and they wait it out — or time out. `/ready` stays false until
 the embedder is actually built.
 """
+
 import logging
 import os
 import time

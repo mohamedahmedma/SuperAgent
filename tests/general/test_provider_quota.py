@@ -6,6 +6,7 @@ allows 2 attempts and 6 s. The end-to-end tests here drive the real OpenAI SDK, 
 LangChain as production builds it, against a server that answers scripted statuses and
 counts what it is sent.
 """
+
 import asyncio
 import json
 import socket
@@ -50,18 +51,33 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(1.5, retry_after({"retry-after-ms": "1500", "retry-after": "9"}))
         self.assertEqual(9.0, retry_after({"retry-after": "9"}))
         self.assertAlmostEqual(
-            30.0, retry_after({"retry-after": "Thu, 01 Jan 2026 00:00:30 GMT"}, now=1767225600.0))
+            30.0, retry_after({"retry-after": "Thu, 01 Jan 2026 00:00:30 GMT"}, now=1767225600.0)
+        )
         self.assertIsNone(retry_after({}))
 
     def test_a_used_up_quota_is_read_from_the_rate_limit_headers(self):
-        self.assertEqual(120.0, exhausted_for({"x-ratelimit-remaining-requests": "0",
-                                               "x-ratelimit-reset-requests": "2m"}))
-        self.assertEqual(120.0, exhausted_for({"x-ratelimit-remaining-requests": "0",
-                                               "x-ratelimit-reset-requests": "2m",
-                                               "x-ratelimit-remaining-tokens": "0",
-                                               "x-ratelimit-reset-tokens": "7.5s"}))
-        self.assertIsNone(exhausted_for({"x-ratelimit-remaining-requests": "12",
-                                         "x-ratelimit-reset-requests": "2m"}))
+        self.assertEqual(
+            120.0,
+            exhausted_for(
+                {"x-ratelimit-remaining-requests": "0", "x-ratelimit-reset-requests": "2m"}
+            ),
+        )
+        self.assertEqual(
+            120.0,
+            exhausted_for(
+                {
+                    "x-ratelimit-remaining-requests": "0",
+                    "x-ratelimit-reset-requests": "2m",
+                    "x-ratelimit-remaining-tokens": "0",
+                    "x-ratelimit-reset-tokens": "7.5s",
+                }
+            ),
+        )
+        self.assertIsNone(
+            exhausted_for(
+                {"x-ratelimit-remaining-requests": "12", "x-ratelimit-reset-requests": "2m"}
+            )
+        )
 
 
 class RetryBudgetTests(unittest.TestCase):
@@ -159,8 +175,11 @@ class _ScriptedProvider:
                         return
                     buffer += data
                 head, _, body = buffer.partition(b"\r\n\r\n")
-                length = next(int(l.split(b":", 1)[1]) for l in head.split(b"\r\n")
-                              if l.lower().startswith(b"content-length:"))
+                length = next(
+                    int(l.split(b":", 1)[1])
+                    for l in head.split(b"\r\n")
+                    if l.lower().startswith(b"content-length:")
+                )
                 while len(body) < length:
                     body += conn.recv(65536)
                 buffer = body[length:]
@@ -170,14 +189,27 @@ class _ScriptedProvider:
                     scripted = (self.per_model in (None, model)) and self.script
                     status, headers = self.script.pop(0) if scripted else (200, {})
                 if status == 200:
-                    payload = {"id": "c", "object": "chat.completion", "created": 0, "model": model,
-                               "choices": [{"index": 0, "finish_reason": "stop",
-                                            "message": {"role": "assistant", "content": "ok"}}]}
+                    payload = {
+                        "id": "c",
+                        "object": "chat.completion",
+                        "created": 0,
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "finish_reason": "stop",
+                                "message": {"role": "assistant", "content": "ok"},
+                            }
+                        ],
+                    }
                 else:
                     payload = {"error": {"message": "Rate limit reached", "type": "requests"}}
                 raw = json.dumps(payload).encode()
-                lines = [f"HTTP/1.1 {status} X", "Content-Type: application/json",
-                         f"Content-Length: {len(raw)}"] + [f"{k}: {v}" for k, v in headers.items()]
+                lines = [
+                    f"HTTP/1.1 {status} X",
+                    "Content-Type: application/json",
+                    f"Content-Length: {len(raw)}",
+                ] + [f"{k}: {v}" for k, v in headers.items()]
                 conn.sendall(("\r\n".join(lines) + "\r\n\r\n").encode() + raw)
         except OSError:
             pass
@@ -192,7 +224,9 @@ class LiveTurnPolicyTests(unittest.TestCase):
     """Through `init_chat_model` with the shared clients, as every chat-path model is built."""
 
     def setUp(self):
-        self.clients = ProviderHttpClients(quotas=ProviderQuotas(max_wait=1.0, default_cooldown=0.1))
+        self.clients = ProviderHttpClients(
+            quotas=ProviderQuotas(max_wait=1.0, default_cooldown=0.1)
+        )
         self.servers = []
 
     def tearDown(self):
@@ -208,8 +242,13 @@ class LiveTurnPolicyTests(unittest.TestCase):
     def model(self, server, name="m"):
         from langchain.chat_models import init_chat_model
 
-        return init_chat_model(model=name, model_provider="openai", api_key="x",
-                               base_url=server.url, **self.clients.model_kwargs())
+        return init_chat_model(
+            model=name,
+            model_provider="openai",
+            api_key="x",
+            base_url=server.url,
+            **self.clients.model_kwargs(),
+        )
 
     def test_a_wait_longer_than_the_budget_fails_fast_on_one_request(self):
         server = self.provider([(429, {"retry-after": "30"})])
@@ -235,8 +274,9 @@ class LiveTurnPolicyTests(unittest.TestCase):
         self.assertEqual(1, len(server.requests), "calls during the cooldown reached the provider")
 
     def test_a_quota_reported_used_up_is_respected_before_any_429(self):
-        server = self.provider([(200, {"x-ratelimit-remaining-requests": "0",
-                                       "x-ratelimit-reset-requests": "30s"})])
+        server = self.provider(
+            [(200, {"x-ratelimit-remaining-requests": "0", "x-ratelimit-reset-requests": "30s"})]
+        )
         model = self.model(server)
         self.assertEqual("ok", model.invoke("q").content)
         with self.assertRaises(openai.RateLimitError):
@@ -303,10 +343,14 @@ class BusyCopyTests(unittest.TestCase):
     def rate_limited(self, seconds):
         import httpx
 
-        response = httpx.Response(429, headers={"retry-after": seconds},
-                                   request=httpx.Request("POST", "http://provider/v1/chat/completions"))
-        return openai.RateLimitError("rate limit: holding calls to provider/stub-model", response=response,
-                                     body=None)
+        response = httpx.Response(
+            429,
+            headers={"retry-after": seconds},
+            request=httpx.Request("POST", "http://provider/v1/chat/completions"),
+        )
+        return openai.RateLimitError(
+            "rate limit: holding calls to provider/stub-model", response=response, body=None
+        )
 
     def test_the_parent_is_told_how_long_to_wait_in_their_language(self):
         from backend.agent.chat.service import _agent_failure_text
@@ -342,8 +386,15 @@ class EmbeddingQuotaTests(unittest.TestCase):
     def remote(self):
         from backend.indexing.embedding import _RemoteEmbedder
 
-        with patch.dict("os.environ", {"EMBEDDING_BACKEND": "openai", "EMBEDDING_BASE_URL": "http://e/v1",
-                                       "EMBEDDING_MODEL": "m"}, clear=False):
+        with patch.dict(
+            "os.environ",
+            {
+                "EMBEDDING_BACKEND": "openai",
+                "EMBEDDING_BASE_URL": "http://e/v1",
+                "EMBEDDING_MODEL": "m",
+            },
+            clear=False,
+        ):
             remote = _RemoteEmbedder()
         remote.gate.max_wait = 1.0
         return remote
@@ -358,8 +409,9 @@ class EmbeddingQuotaTests(unittest.TestCase):
         import requests
 
         remote = self.remote()
-        with patch("requests.Session.post",
-                   return_value=_Throttled(429, {"retry-after": "30"})) as post:
+        with patch(
+            "requests.Session.post", return_value=_Throttled(429, {"retry-after": "30"})
+        ) as post:
             with self.assertRaises(requests.HTTPError):
                 remote.embed_documents(["q"])
             with self.assertRaises(QuotaExhausted):

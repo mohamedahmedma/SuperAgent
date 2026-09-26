@@ -26,6 +26,7 @@ correctly, and the failure mode is a person silently losing access they were gra
 The domain never reads the clock and never touches a database. An `AccessProfile` is built
 once per request from rows and then answers questions in memory.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -254,13 +255,15 @@ _READS: Final[tuple[Permission, ...]] = (
 # exceptions let an owner maintain their school's academic structure and teaching
 # coverage, while student records, marks, school creation and system administration
 # remain outside their reach.
-_SCHOOL_OWNER_STAFFING_WRITES: Final[frozenset[Permission]] = frozenset({
-    Permission.STRUCTURE_WRITE,
-    Permission.TEACHERS_ASSIGN_SUBJECTS,
-    Permission.TEACHERS_ASSIGN_CLASSES,
-    Permission.ROLES_ASSIGN,
-    Permission.CHAT_WRITE,
-})
+_SCHOOL_OWNER_STAFFING_WRITES: Final[frozenset[Permission]] = frozenset(
+    {
+        Permission.STRUCTURE_WRITE,
+        Permission.TEACHERS_ASSIGN_SUBJECTS,
+        Permission.TEACHERS_ASSIGN_CLASSES,
+        Permission.ROLES_ASSIGN,
+        Permission.CHAT_WRITE,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -546,20 +549,18 @@ class AccessProfile:
         if self.is_system_admin:
             return True
         if self.has_role(RoleCode.SCHOOL_OWNER.value) and (
-            not permission.value.endswith(".read") and permission not in _SCHOOL_OWNER_STAFFING_WRITES
+            not permission.value.endswith(".read")
+            and permission not in _SCHOOL_OWNER_STAFFING_WRITES
         ):
             return False
         override = self.override_for(permission)
         if override is not None:
             return override is OverrideEffect.ALLOW
         return any(
-            grant.permission is permission and grant.scope.covers(target)
-            for grant in self.grants
+            grant.permission is permission and grant.scope.covers(target) for grant in self.grants
         )
 
-    def allows_any(
-        self, permissions: Iterable[Permission], target: "Target" = ANYWHERE
-    ) -> bool:
+    def allows_any(self, permissions: Iterable[Permission], target: "Target" = ANYWHERE) -> bool:
         return any(self.allows(permission, target) for permission in permissions)
 
     def holds(self, permission: Permission) -> bool:
@@ -579,12 +580,15 @@ class AccessProfile:
         if self.is_system_admin:
             return True
         if self.has_role(RoleCode.SCHOOL_OWNER.value) and (
-            not permission.value.endswith(".read") and permission not in _SCHOOL_OWNER_STAFFING_WRITES
+            not permission.value.endswith(".read")
+            and permission not in _SCHOOL_OWNER_STAFFING_WRITES
         ):
             return False
         override = self.override_for(permission)
-        return override is OverrideEffect.ALLOW if override is not None else any(
-            grant.permission is permission for grant in self.grants
+        return (
+            override is OverrideEffect.ALLOW
+            if override is not None
+            else any(grant.permission is permission for grant in self.grants)
         )
 
     def override_for(self, permission: Permission) -> OverrideEffect | None:
@@ -603,7 +607,8 @@ class AccessProfile:
         if self.is_system_admin:
             return ScopeType.GLOBAL
         if self.has_role(RoleCode.SCHOOL_OWNER.value) and (
-            not permission.value.endswith(".read") and permission not in _SCHOOL_OWNER_STAFFING_WRITES
+            not permission.value.endswith(".read")
+            and permission not in _SCHOOL_OWNER_STAFFING_WRITES
         ):
             return None
         if self.override_for(permission) is OverrideEffect.ALLOW:
@@ -645,7 +650,8 @@ class AccessProfile:
     def scopes_for(self, permission: Permission) -> tuple[Scope, ...]:
         """Where this permission is held — how a screen knows which classes to list."""
         if self.has_role(RoleCode.SCHOOL_OWNER.value) and (
-            not permission.value.endswith(".read") and permission not in _SCHOOL_OWNER_STAFFING_WRITES
+            not permission.value.endswith(".read")
+            and permission not in _SCHOOL_OWNER_STAFFING_WRITES
         ):
             return ()
         if self.is_system_admin or self.override_for(permission) is OverrideEffect.ALLOW:

@@ -22,6 +22,7 @@ contradicts its storage key is refused outright, the planner's chosen child neve
 whose token is used or whose guardian is read, and the per-message trace — persisted and
 streamed to a browser — reports booleans about a child, never a name, an id or a year.
 """
+
 import os
 import unittest
 from unittest.mock import patch
@@ -319,9 +320,7 @@ class WhenTheRosterCannotBeRead(_SchoolTurn):
             with self.subTest(outcome=outcome):
                 ctx = _parent_ctx()
                 ahead = child_roster.prefetch(ctx, fetch=_fetch(outcome))
-                child = _settle_child(
-                    ctx, RequestSignals(question="q", about_child=True), ahead
-                )
+                child = _settle_child(ctx, RequestSignals(question="q", about_child=True), ahead)
 
                 self.assertFalse(child.resolved)
                 self.assertFalse(child.ask)
@@ -549,7 +548,9 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
         """`user_id` is the storage key. A caller naming somebody else would write one
         user's conversation under another's name while reading a third party's records,
         so the state is made impossible rather than merely unlikely."""
-        other = CallerIdentity(user_id="someone-else", guardian_id=GUARDIAN, guardian_token=PARENT_TOKEN)
+        other = CallerIdentity(
+            user_id="someone-else", guardian_id=GUARDIAN, guardian_token=PARENT_TOKEN
+        )
 
         with self.assertRaises(ValueError):
             ChatRequestContext(user_id="user-77", session_id=SESSION, caller=other)
@@ -558,7 +559,9 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
 
     def test_the_refusal_does_not_leak_the_other_sessions_token(self):
         """The error text reaches logs and trackers; a live bearer credential must not."""
-        other = CallerIdentity(user_id="someone-else", guardian_id=GUARDIAN, guardian_token=PARENT_TOKEN)
+        other = CallerIdentity(
+            user_id="someone-else", guardian_id=GUARDIAN, guardian_token=PARENT_TOKEN
+        )
 
         with self.assertRaises(ValueError) as caught:
             ChatRequestContext(user_id="user-77", session_id=SESSION, caller=other)
@@ -660,15 +663,18 @@ class TheTraceNamesNoChild(_SchoolTurn):
 
     def _plan(self, child, **signal_kwargs):
         signals = RequestSignals(question="q", **signal_kwargs)
-        return resolve_turn(
-            signals, agent_config=_Agent(), copy_config=_Copy(), child=child
-        )
+        return resolve_turn(signals, agent_config=_Agent(), copy_config=_Copy(), child=child)
 
     def test_no_shape_of_plan_puts_a_child_in_its_trace(self):
         cases = {
             "resolved": (resolve_child(reference="context", roster=[LAYLA]), True, False, True),
             "asking": (resolve_child(reference="child", roster=[LAYLA, OMAR]), False, True, False),
-            "no child": (resolve_child(reference="plural", roster=[LAYLA, OMAR]), False, False, False),
+            "no child": (
+                resolve_child(reference="plural", roster=[LAYLA, OMAR]),
+                False,
+                False,
+                False,
+            ),
         }
         for label, (child, resolved, asked, year_applied) in cases.items():
             with self.subTest(plan=label):
