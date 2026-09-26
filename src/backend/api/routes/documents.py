@@ -12,15 +12,15 @@ from backend.api.resources import (
     is_supported_document,
     save_upload_file,
 )
-from backend.chat.language import ARABIC, ENGLISH
+from backend.agent.chat.language import ARABIC, ENGLISH
 from backend.composition import Services
 from backend.db.models import User
 import backend.indexing.language_check as language_check
 from backend.infra.auth import require_admin
-from backend.profiles import get_profile
+from backend.agent.profiles import get_profile
 from backend.text_matching import fold
 from backend.jobs import DELETE_STEPS
-from backend.schemas import (
+from backend.agent.schemas import (
     AssetInfo,
     ChunkInfo,
     DocumentAssetListResponse,
@@ -318,7 +318,7 @@ def _detach_from_pair(document_pairs, filename: str) -> None:
 def _forget_corpus_languages() -> None:
     """Make the next question re-ask which languages the corpus is published in."""
     try:
-        from backend.rag.query_translation import reset_coverage
+        from backend.agent.rag.query_translation import reset_coverage
 
         reset_coverage()
     except Exception:  # pragma: no cover - a cache hint must never fail an upload

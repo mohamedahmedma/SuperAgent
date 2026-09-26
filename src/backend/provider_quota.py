@@ -259,7 +259,7 @@ class ProviderQuotas:
         """How long some model's calls will be refused: the longest cooldown past `max_wait`.
 
         0 when every model can be called now or within the budget. The turn limits ask
-        this before starting a turn (`backend/chat/admission.py`): a turn started while
+        this before starting a turn (`backend/agent/chat/admission.py`): a turn started while
         one of its models refuses calls fails partway, having spent the calls before it.
         """
         with self._lock:

@@ -45,11 +45,11 @@ if TYPE_CHECKING:
     from backend.assets.entity_store import EntityAttributeIndex
     from backend.assets.pipeline import FigurePipeline
     from backend.assets.store import AssetStore
-    from backend.chat.admission import TurnAdmission
-    from backend.chat.attachments import ChatAttachments
-    from backend.chat.background import JobRunner
-    from backend.chat.storage import ConversationStorage
-    from backend.chat.transcription import Transcriber
+    from backend.agent.chat.admission import TurnAdmission
+    from backend.agent.chat.attachments import ChatAttachments
+    from backend.agent.chat.background import JobRunner
+    from backend.agent.chat.storage import ConversationStorage
+    from backend.agent.chat.transcription import Transcriber
     from backend.indexing.document_loader import DocumentLoader
     from backend.indexing.embedding import EmbeddingService
     from backend.indexing.milvus_client import MilvusStore
@@ -63,8 +63,8 @@ if TYPE_CHECKING:
     from backend.jobs.upload_jobs import IngestJobTracker
     from backend.llm_http import ProviderHttpClients
     from backend.llm_models import ChatModelFactory
-    from backend.rag.entity_retrieval import EntityRetriever
-    from backend.rag.retrieval_cache import CorpusVersion, RetrievalCache
+    from backend.agent.rag.entity_retrieval import EntityRetriever
+    from backend.agent.rag.retrieval_cache import CorpusVersion, RetrievalCache
 
 T = TypeVar("T")
 
@@ -200,7 +200,7 @@ class Services:
     @property
     def conversations(self) -> ConversationStorage:
         def build() -> ConversationStorage:
-            from backend.chat.storage import ConversationStorage
+            from backend.agent.chat.storage import ConversationStorage
 
             return ConversationStorage(unit_of_work=self.unit_of_work, cache=self.cache)
 
@@ -211,11 +211,11 @@ class Services:
         """The door every chat turn passes: provider busy, and each user's turn limits.
 
         Over the process's provider quotas and the shared Redis, so the per-user counts
-        hold across workers and replicas (backend/chat/admission.py, items 37 and 38).
+        hold across workers and replicas (backend/agent/chat/admission.py, items 37 and 38).
         """
 
         def build() -> TurnAdmission:
-            from backend.chat.admission import TurnAdmission
+            from backend.agent.chat.admission import TurnAdmission
 
             return TurnAdmission.from_environment(self.cache, self.provider_http.quotas)
 
@@ -233,7 +233,7 @@ class Services:
         """
 
         def build() -> JobRunner:
-            from backend.chat.background import BackgroundJobs, SharedWriteBarrier
+            from backend.agent.chat.background import BackgroundJobs, SharedWriteBarrier
 
             return SharedWriteBarrier(
                 BackgroundJobs(),
@@ -249,7 +249,7 @@ class Services:
         there is none. Built from the environment once, like the chat models."""
 
         def build() -> Transcriber:
-            from backend.chat.transcription import build_transcriber
+            from backend.agent.chat.transcription import build_transcriber
 
             return build_transcriber()
 
@@ -260,7 +260,7 @@ class Services:
         """Voice notes: kept in the same blob store as the images, recorded in Postgres."""
 
         def build() -> ChatAttachments:
-            from backend.chat.attachments import ChatAttachments
+            from backend.agent.chat.attachments import ChatAttachments
 
             return ChatAttachments(
                 unit_of_work=self.unit_of_work,
@@ -325,11 +325,11 @@ class Services:
         """The counter every write to the searchable corpus moves forward.
 
         Bumped by the vector store and the parent-chunk store, the two things a retrieval
-        reads, and read with every cached retrieval (backend/rag/retrieval_cache.py).
+        reads, and read with every cached retrieval (backend/agent/rag/retrieval_cache.py).
         """
 
         def build() -> CorpusVersion:
-            from backend.rag.retrieval_cache import CorpusVersion
+            from backend.agent.rag.retrieval_cache import CorpusVersion
 
             return CorpusVersion.for_cache(self.cache)
 
@@ -340,8 +340,8 @@ class Services:
         """Retrieval results shared by every worker, valid for one corpus version (item 18)."""
 
         def build() -> RetrievalCache:
-            from backend.rag.retrieval_cache import RetrievalCache
-            from backend.rag.utils import retrieval_settings
+            from backend.agent.rag.retrieval_cache import RetrievalCache
+            from backend.agent.rag.utils import retrieval_settings
 
             return RetrievalCache.from_environment(self.cache, self.corpus_version, retrieval_settings())
 
@@ -414,7 +414,7 @@ class Services:
 
         def build() -> BlobStore:
             from backend.assets.blobs import build_blob_store
-            from backend.profiles import get_profile
+            from backend.agent.profiles import get_profile
 
             return build_blob_store(get_profile().assets)
 
@@ -475,7 +475,7 @@ class Services:
         """Retrieval over entity assets by their indexed attributes."""
 
         def build() -> EntityRetriever:
-            from backend.rag.entity_retrieval import EntityRetriever
+            from backend.agent.rag.entity_retrieval import EntityRetriever
 
             return EntityRetriever(
                 asset_store=self.asset_store,

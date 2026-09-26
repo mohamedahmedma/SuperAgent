@@ -36,18 +36,18 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
             self.answer_blocks = list(blocks)
 
     def test_the_block_goes_under_the_prose(self):
-        from backend.chat.answer_blocks import BLOCK_MARKER, _append_answer_blocks
+        from backend.agent.chat.answer_blocks import BLOCK_MARKER, _append_answer_blocks
 
         out = _append_answer_blocks("جدول بنتك:", self._Ctx([self.BLOCK]))
         self.assertEqual(f"جدول بنتك:\n\n{BLOCK_MARKER}\n{self.BLOCK}", out)
 
     def test_no_block_leaves_the_answer_untouched(self):
-        from backend.chat.answer_blocks import _append_answer_blocks
+        from backend.agent.chat.answer_blocks import _append_answer_blocks
 
         self.assertEqual("أهلاً", _append_answer_blocks("أهلاً", self._Ctx([])))
 
     def test_a_block_with_no_prose_stands_alone(self):
-        from backend.chat.answer_blocks import BLOCK_MARKER, _append_answer_blocks
+        from backend.agent.chat.answer_blocks import BLOCK_MARKER, _append_answer_blocks
 
         self.assertEqual(
             f"{BLOCK_MARKER}\nTABLE", _append_answer_blocks("   ", self._Ctx(["TABLE"]))
@@ -57,7 +57,7 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
         """An HTML comment, and only because the frontend drops raw HTML outright
         (`renderer.html = () => ''` in utils/markdown.ts). That is the whole reason a
         marker can live inside a message a parent reads."""
-        from backend.chat.answer_blocks import BLOCK_MARKER
+        from backend.agent.chat.answer_blocks import BLOCK_MARKER
 
         self.assertTrue(BLOCK_MARKER.startswith("<!--"))
         self.assertTrue(BLOCK_MARKER.endswith("-->"))
@@ -65,7 +65,7 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
     def test_relayed_evidence_is_cut_before_the_block_is_added(self):
         """Told not to reformat the grid, the live model pasted the MODEL-FACING render
         instead — outcome header, raw `07:45:00`, English day keys. First try."""
-        from backend.chat.answer_blocks import _append_answer_blocks
+        from backend.agent.chat.answer_blocks import _append_answer_blocks
 
         leaked = (
             "حضرتك، الجدول كالتالي:\n\n"
@@ -83,10 +83,10 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
         import io
         import re
 
-        from backend.chat.answer_blocks import _EVIDENCE_MARKERS
+        from backend.agent.chat.answer_blocks import _EVIDENCE_MARKERS
 
         rendered = io.open(
-            "src/backend/prompts/templates/tools/records_result.j2", encoding="utf-8"
+            "src/backend/agent/prompts/templates/tools/records_result.j2", encoding="utf-8"
         ).read()
         headers = set(re.findall(r"^([A-Z][A-Z_]{3,})(?: for|:)", rendered, re.MULTILINE))
         self.assertTrue(headers, "no headers found — did the template change shape?")
@@ -121,7 +121,7 @@ class TheBlockIsNarrowedToWhatWasAsked(unittest.TestCase):
             self.answer_blocks = list(blocks)
 
     def _shown(self, answer, kind, block):
-        from backend.chat.answer_blocks import BLOCK_MARKER, _append_answer_blocks
+        from backend.agent.chat.answer_blocks import BLOCK_MARKER, _append_answer_blocks
 
         out = _append_answer_blocks(answer, self._Ctx([{"kind": kind, "text": block}]))
         return out.split(BLOCK_MARKER, 1)[1].strip()
@@ -162,27 +162,27 @@ class TheBlockStaysOutOfTheModelsHistory(unittest.TestCase):
             self.answer_blocks = list(blocks)
 
     def test_the_stored_answer_keeps_the_block(self):
-        from backend.chat.answer_blocks import _append_answer_blocks
+        from backend.agent.chat.answer_blocks import _append_answer_blocks
 
         out = _append_answer_blocks("جدولها:", self._Ctx(["**الأحد**\n1) عربي"]))
         self.assertIn("**الأحد**", out)
 
     def test_the_model_reads_back_only_the_prose(self):
-        from backend.chat.answer_blocks import _append_answer_blocks, strip_answer_blocks
+        from backend.agent.chat.answer_blocks import _append_answer_blocks, strip_answer_blocks
 
         out = _append_answer_blocks("جدولها:", self._Ctx(["**الأحد**\n1) عربي"]))
         self.assertEqual("جدولها:", strip_answer_blocks(out))
 
     def test_an_answer_with_no_block_survives_intact(self):
-        from backend.chat.answer_blocks import strip_answer_blocks
+        from backend.agent.chat.answer_blocks import strip_answer_blocks
 
         self.assertEqual("أهلاً بحضرتك", strip_answer_blocks("أهلاً بحضرتك"))
 
     def test_the_resolver_sees_the_subject_not_the_rows(self):
         from langchain_core.messages import AIMessage, HumanMessage
 
-        from backend.chat.resolution import conversation_text
-        from backend.chat.answer_blocks import _append_answer_blocks
+        from backend.agent.chat.resolution import conversation_text
+        from backend.agent.chat.answer_blocks import _append_answer_blocks
 
         stored = _append_answer_blocks(
             "حضرتك، جدول فاطمة للفصل الدراسي الثاني:",
@@ -201,7 +201,7 @@ class TheBlockStaysOutOfTheModelsHistory(unittest.TestCase):
 # Each block also leaves the service as a structure a client can draw — a phone shows the
 # week one day at a time, a wide screen as a grid — while the text above stays exactly
 # what it was, for storage, for the model's history, and for every client that knows
-# nothing else. The contract is `AnswerBlock` in backend/schemas/chat.py.
+# nothing else. The contract is `AnswerBlock` in backend/agent/schemas/chat.py.
 
 WEEK_TEXT = (
     "**الأحد**\n1) اللغة العربية · 07:45–08:30\n3) — · 08:50–09:35\n"
@@ -249,7 +249,7 @@ class _TurnCtx:
 
 
 def _settle(answer, blocks, language="ar"):
-    from backend.chat.answer_blocks import settle_answer_blocks
+    from backend.agent.chat.answer_blocks import settle_answer_blocks
 
     return settle_answer_blocks(answer, _TurnCtx(blocks, language))
 
@@ -258,7 +258,7 @@ class TheRecordAlsoTravelsAsData(unittest.TestCase):
     """One decision, two copies: the text every client can show, the data one can draw."""
 
     def test_the_data_rides_beside_an_unchanged_text(self):
-        from backend.chat.answer_blocks import BLOCK_MARKER
+        from backend.agent.chat.answer_blocks import BLOCK_MARKER
 
         text, blocks = _settle(
             "دي جدولها:", [{"kind": "timetable", "text": WEEK_TEXT, "data": WEEK_DATA}]
@@ -279,7 +279,7 @@ class TheRecordAlsoTravelsAsData(unittest.TestCase):
 
     def test_the_index_names_its_own_marker_after_a_text_only_block(self):
         """Positional matching would draw the week in the grades' place."""
-        from backend.chat.answer_blocks import BLOCK_MARKER
+        from backend.agent.chat.answer_blocks import BLOCK_MARKER
 
         text, blocks = _settle("درجاتها وجدولها:", [
             {"kind": "grades", "text": GRADES_TEXT, "data": None},
@@ -315,7 +315,7 @@ class BothCopiesAreNarrowedAlike(unittest.TestCase):
     two answers to one question. The rules are separate code; these hold them in step."""
 
     def _both(self, answer, kind, text, data):
-        from backend.chat.answer_blocks import BLOCK_MARKER
+        from backend.agent.chat.answer_blocks import BLOCK_MARKER
 
         settled, blocks = _settle(answer, [{"kind": kind, "text": text, "data": data}])
         return settled.split(BLOCK_MARKER, 1)[1].strip(), blocks[0]["data"]
@@ -344,7 +344,7 @@ class TheBlocksSurviveTheTrace(unittest.TestCase):
     """The trace is where a stored message keeps its blocks, so a reload can draw them."""
 
     def test_a_valid_block_is_kept(self):
-        from backend.schemas.chat import normalize_rag_trace
+        from backend.agent.schemas.chat import normalize_rag_trace
 
         trace = normalize_rag_trace({"answer_blocks": [TIMETABLE_BLOCK]})
         self.assertEqual(
@@ -355,7 +355,7 @@ class TheBlocksSurviveTheTrace(unittest.TestCase):
     def test_one_bad_block_is_dropped_and_the_trace_around_it_survives(self):
         """This runs on every save and every history load. Raising here would cost a
         turn its save, or a whole conversation its reload, over one table."""
-        from backend.schemas.chat import normalize_rag_trace
+        from backend.agent.schemas.chat import normalize_rag_trace
 
         bad = {"kind": "timetable", "index": 1, "data": {"days": "not a list"}}
         trace = normalize_rag_trace({"route": "agent", "answer_blocks": [bad, TIMETABLE_BLOCK]})
@@ -363,13 +363,13 @@ class TheBlocksSurviveTheTrace(unittest.TestCase):
         self.assertEqual([0], [block["index"] for block in trace["answer_blocks"]])
 
     def test_a_trace_left_with_no_valid_block_loses_the_key(self):
-        from backend.schemas.chat import normalize_rag_trace
+        from backend.agent.schemas.chat import normalize_rag_trace
 
         trace = normalize_rag_trace({"route": "agent", "answer_blocks": [{"kind": "nope"}]})
         self.assertNotIn("answer_blocks", trace)
 
     def test_a_blank_grade_is_never_stored_as_zero(self):
-        from backend.schemas.chat import normalize_rag_trace
+        from backend.agent.schemas.chat import normalize_rag_trace
 
         block = {"kind": "grades", "index": 0, "data": GRADES_DATA}
         biology = normalize_rag_trace({"answer_blocks": [block]})["answer_blocks"][0][
@@ -379,25 +379,25 @@ class TheBlocksSurviveTheTrace(unittest.TestCase):
 
     def test_a_rejected_block_is_logged_without_the_child_s_record(self):
         """A validation error quotes its input, and the input is a child's marks."""
-        from backend.schemas.chat import normalize_answer_blocks
+        from backend.agent.schemas.chat import normalize_answer_blocks
 
         bad = {"kind": "grades", "index": 0,
                "data": {"courses": [{"subject": "اللغة العربية", "percentage": "ممتاز"}]}}
-        with self.assertLogs("backend.schemas.chat", level="WARNING") as logs:
+        with self.assertLogs("backend.agent.schemas.chat", level="WARNING") as logs:
             self.assertEqual([], normalize_answer_blocks([bad]))
         logged = "\n".join(logs.output)
         self.assertNotIn("ممتاز", logged)
         self.assertNotIn("اللغة العربية", logged)
 
     def test_a_turn_with_no_trace_gets_one_rather_than_losing_its_blocks(self):
-        from backend.chat.answer_blocks import attach_answer_blocks
+        from backend.agent.chat.answer_blocks import attach_answer_blocks
 
         self.assertEqual({"answer_blocks": [TIMETABLE_BLOCK]},
                          attach_answer_blocks(None, [TIMETABLE_BLOCK]))
         self.assertIsNone(attach_answer_blocks(None, []))
 
     def test_storage_keeps_the_blocks_while_it_trims_the_assets(self):
-        from backend.chat.assets_bridge import trace_for_storage
+        from backend.agent.chat.assets_bridge import trace_for_storage
 
         stored = trace_for_storage(
             {"answer_blocks": [TIMETABLE_BLOCK], "assets": [{"asset_id": "a::p0::img0"}]}
@@ -405,7 +405,7 @@ class TheBlocksSurviveTheTrace(unittest.TestCase):
         self.assertEqual([TIMETABLE_BLOCK], stored["answer_blocks"])
 
     def test_the_sync_response_carries_them_beside_the_assets(self):
-        from backend.schemas.chat import ChatResponse
+        from backend.agent.schemas.chat import ChatResponse
 
         response = ChatResponse(response="x", answer_blocks=[TIMETABLE_BLOCK])
         self.assertEqual("timetable", response.answer_blocks[0].kind)
@@ -428,7 +428,7 @@ class TheStreamSendsTheDataAheadOfItsText(scenarios.ParentTurnScenario):
 
     async def test_the_data_arrives_before_the_text_that_places_it(self):
         """The other way round, the reader sees the markdown for one event, then a swap."""
-        from backend.chat.answer_blocks import BLOCK_MARKER
+        from backend.agent.chat.answer_blocks import BLOCK_MARKER
 
         events, shown, _ = await self._timetable_turn()
         kinds = [event["type"] for event in events]

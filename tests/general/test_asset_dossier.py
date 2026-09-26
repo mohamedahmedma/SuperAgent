@@ -754,7 +754,7 @@ class S3BlobStoreTests(unittest.TestCase):
 
 class ProfileIntegrationTests(unittest.TestCase):
     def test_every_shipped_profile_exposes_an_assets_section(self):
-        from backend.profiles.registry import available_profiles, load_profile
+        from backend.agent.profiles.registry import available_profiles, load_profile
 
         for name in available_profiles():
             with self.subTest(profile=name):
@@ -764,7 +764,7 @@ class ProfileIntegrationTests(unittest.TestCase):
 
     def test_blob_store_is_built_from_the_profile(self):
         from backend.assets.blobs import build_blob_store
-        from backend.profiles.registry import load_profile
+        from backend.agent.profiles.registry import load_profile
 
         with TemporaryDirectory() as tmp:
             profile = load_profile("base")
@@ -775,7 +775,7 @@ class ProfileIntegrationTests(unittest.TestCase):
 
     def test_unknown_blob_backend_fails_loudly(self):
         from backend.assets.blobs import build_blob_store
-        from backend.profiles.registry import load_profile
+        from backend.agent.profiles.registry import load_profile
 
         profile = load_profile("base")
         profile.assets.blob_backend = "gopher"

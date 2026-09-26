@@ -35,7 +35,7 @@ class TheNumberIsTheHandle(unittest.TestCase):
     """The model is handed a number. It is never handed an id."""
 
     def test_each_asset_gets_its_own_number_in_retrieval_order(self):
-        from backend.tools.knowledge import _figure_markers
+        from backend.agent.tools.knowledge import _figure_markers
 
         per_chunk, mapping = _figure_markers([
             {"asset_ids": ["a.pdf::p1::img0"]},
@@ -49,7 +49,7 @@ class TheNumberIsTheHandle(unittest.TestCase):
         """`auto_merge_figure_threshold: null` keeps figure groups unmerged so this is
         rare, but a chunk that does carry two images must not force the answer to name
         both or neither."""
-        from backend.tools.knowledge import _figure_markers
+        from backend.agent.tools.knowledge import _figure_markers
 
         per_chunk, mapping = _figure_markers([{"asset_ids": ["k::p1::img0", "k::p1::img1"]}])
         self.assertEqual([[1, 2]], per_chunk)
@@ -58,7 +58,7 @@ class TheNumberIsTheHandle(unittest.TestCase):
     def test_an_empty_asset_id_is_not_given_a_number(self):
         """A number that resolves to nothing would render as a deleted marker — the
         model told there is a picture, and no picture."""
-        from backend.tools.knowledge import _figure_markers
+        from backend.agent.tools.knowledge import _figure_markers
 
         per_chunk, mapping = _figure_markers([{"asset_ids": ["", None, "real::p1::img0"]}])
         self.assertEqual([[1]], per_chunk)
@@ -68,7 +68,7 @@ class TheNumberIsTheHandle(unittest.TestCase):
         """Turn-local, so it does not inherit `build_asset_id`'s positional instability:
         one image added to page 2 shifts every later id, and a document-global figure
         number would have shifted with it."""
-        from backend.tools.knowledge import _figure_markers
+        from backend.agent.tools.knowledge import _figure_markers
 
         _, before = _figure_markers([{"asset_ids": ["kb.pdf::p9::img4"]}])
         _, after = _figure_markers([{"asset_ids": ["kb.pdf::p9::img5"]}])
@@ -80,7 +80,7 @@ class AnInventedMarkerCostsNothing(unittest.TestCase):
     """The rule that makes this feature safe to ship at all."""
 
     def test_a_known_marker_becomes_an_anchor(self):
-        from backend.chat.answer_blocks import resolve_figure_markers
+        from backend.agent.chat.answer_blocks import resolve_figure_markers
 
         out = resolve_figure_markers(
             "الزي الصيفي كالتالي [FIGURE 1] وبيتغير في الشتاء.",
@@ -92,7 +92,7 @@ class AnInventedMarkerCostsNothing(unittest.TestCase):
     def test_an_unknown_number_is_deleted_and_the_answer_survives(self):
         """The load-bearing test. A model that writes [FIGURE 9] on a turn that
         retrieved one figure must not cost the parent their answer."""
-        from backend.chat.answer_blocks import resolve_figure_markers
+        from backend.agent.chat.answer_blocks import resolve_figure_markers
 
         out = resolve_figure_markers(
             "المصروفات 12,000 جنيه [FIGURE 9] للعام الدراسي.",
@@ -104,7 +104,7 @@ class AnInventedMarkerCostsNothing(unittest.TestCase):
         self.assertIn("للعام الدراسي.", out)
 
     def test_deleting_a_marker_does_not_leave_a_double_space(self):
-        from backend.chat.answer_blocks import resolve_figure_markers
+        from backend.agent.chat.answer_blocks import resolve_figure_markers
 
         out = resolve_figure_markers("قبل [FIGURE 4] بعد", _Ctx({1: "a::p1::img0"}))
         self.assertEqual("قبل بعد", out)
@@ -112,7 +112,7 @@ class AnInventedMarkerCostsNothing(unittest.TestCase):
     def test_arabic_indic_digits_name_the_same_figure(self):
         """The corpus is Arabic and so is the prose. A parser that only knew ASCII would
         have dropped most real markers and shown no picture at all."""
-        from backend.chat.answer_blocks import resolve_figure_markers
+        from backend.agent.chat.answer_blocks import resolve_figure_markers
 
         for marker in ("[FIGURE ٢]", "[الشكل ٢]", "[شكل 2]", "[figure 2]"):
             with self.subTest(marker=marker):
@@ -122,13 +122,13 @@ class AnInventedMarkerCostsNothing(unittest.TestCase):
                 self.assertIn("<!--figure:kb.pdf::p5::img1-->", out)
 
     def test_an_answer_with_no_marker_is_untouched(self):
-        from backend.chat.answer_blocks import resolve_figure_markers
+        from backend.agent.chat.answer_blocks import resolve_figure_markers
 
         answer = "المصروفات 12,000 جنيه للعام الدراسي [1]."
         self.assertEqual(answer, resolve_figure_markers(answer, _Ctx({1: "a::p1::img0"})))
 
     def test_a_turn_that_retrieved_no_figure_still_drops_the_marker(self):
-        from backend.chat.answer_blocks import resolve_figure_markers
+        from backend.agent.chat.answer_blocks import resolve_figure_markers
 
         out = resolve_figure_markers("انظر [FIGURE 1] هنا", _Ctx({}))
         self.assertEqual("انظر هنا", out)
@@ -147,7 +147,7 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
             return list(self._surfaced)
 
     def test_the_anchored_asset_is_the_one_attached(self):
-        from backend.chat.assets_bridge import asset_ids_for_answer
+        from backend.agent.chat.assets_bridge import asset_ids_for_answer
 
         ids = asset_ids_for_answer(
             "الزي الصيفي <!--figure:kb.pdf::p2::img1--> كالتالي",
@@ -161,7 +161,7 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
         """An anchor is text in a message and a message can be replayed. Without the
         intersection, an old answer could name an asset this turn never retrieved and the
         turn would go and fetch it."""
-        from backend.chat.assets_bridge import asset_ids_for_answer
+        from backend.agent.chat.assets_bridge import asset_ids_for_answer
 
         ids = asset_ids_for_answer(
             "<!--figure:other.pdf::p1::img0-->",
@@ -172,7 +172,7 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
         self.assertEqual(["kb.pdf::p2::img0"], ids)
 
     def test_with_no_anchor_the_citation_path_still_decides(self):
-        from backend.chat.assets_bridge import asset_ids_for_answer
+        from backend.agent.chat.assets_bridge import asset_ids_for_answer
 
         ids = asset_ids_for_answer(
             "كما في [2]",
@@ -186,7 +186,7 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
         self.assertEqual(["b::p1::img0"], ids)
 
     def test_anchors_are_read_in_the_order_they_appear(self):
-        from backend.chat.assets_bridge import anchored_asset_ids
+        from backend.agent.chat.assets_bridge import anchored_asset_ids
 
         self.assertEqual(
             ["second::p1::img0", "first::p1::img0"],
@@ -199,7 +199,7 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
         """An HTML comment, and only because the frontend drops raw HTML outright
         (`renderer.html = () => ''`). Same reason BLOCK_MARKER is one, and the same
         payoff: a frontend that predates this renders clean prose."""
-        from backend.chat.answer_blocks import resolve_figure_markers
+        from backend.agent.chat.answer_blocks import resolve_figure_markers
 
         out = resolve_figure_markers("انظر [FIGURE 1]", _Ctx({1: "a::p1::img0"}))
         anchor = out[out.index("<!--"):]
@@ -210,7 +210,7 @@ class TheAnchorSelectsThePicture(unittest.TestCase):
         """The anchor carries an asset_id, and an id in the model's history is an id in
         its next answer — shown one, a small model writes it back as an image link that
         cannot load. The reader keeps the picture; the model reads the sentence."""
-        from backend.chat.answer_blocks import resolve_figure_markers, strip_answer_blocks
+        from backend.agent.chat.answer_blocks import resolve_figure_markers, strip_answer_blocks
 
         stored = resolve_figure_markers(
             "الزي الصيفي [FIGURE 1] كالتالي", _Ctx({1: "kb.pdf::p2::img0"})

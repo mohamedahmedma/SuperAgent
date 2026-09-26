@@ -232,7 +232,7 @@ class ProviderHttpClients:
     """
 
     def __init__(self, *, quotas: ProviderQuotas | None = None) -> None:
-        from backend.profiles import get_profile
+        from backend.agent.profiles import get_profile
 
         rag = get_profile().rag
         # `attempts` counts the first try, so it allows one fewer retry.

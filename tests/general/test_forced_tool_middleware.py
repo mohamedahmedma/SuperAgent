@@ -26,7 +26,7 @@ What is asserted here, and why each one is a way the guarantee can quietly die:
     Somebody "helpfully" building it here would double-wrap it.
 
   * THE ASYNC PATH, which nothing else covers and which is how this backend actually
-    runs: `backend/chat/service.py` streams every turn through `request_agent.astream`.
+    runs: `backend/agent/chat/service.py` streams every turn through `request_agent.astream`.
     See `TheStreamedPath` below — the finding there is the reason this file exists at
     this length.
 """
@@ -41,9 +41,9 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from pydantic import Field
 
-from backend.chat import runtime
-from backend.profiles import load_profile, registry, set_profile
-from backend.chat.answer_checks import enforce_forced_tool_ran
+from backend.agent.chat import runtime
+from backend.agent.profiles import load_profile, registry, set_profile
+from backend.agent.chat.answer_checks import enforce_forced_tool_ran
 
 RECORDS_TOOL = "get_student_grades"
 KNOWLEDGE_TOOL = "search_knowledge_base"
@@ -510,7 +510,7 @@ def _one_question():
 
 class TheStreamedPath(unittest.TestCase):
     """The middleware defines only the SYNCHRONOUS `wrap_model_call`, and this backend
-    runs every turn through `request_agent.astream` (backend/chat/service.py).
+    runs every turn through `request_agent.astream` (backend/agent/chat/service.py).
 
     Read in the installed langchain (`langchain/agents/factory.py`, v1.3.18): the async
     composition collects middleware into `middleware_w_awrap_model_call` when the class
@@ -625,7 +625,7 @@ class TheRequirementIsCheckedAfterTheTurn(unittest.TestCase):
         answer = "ليلى حصلت على ٩٥٪ في الرياضيات"
 
     def _verdict(self, forced, outcomes):
-        from backend.chat import service
+        from backend.agent.chat import service
 
         return enforce_forced_tool_ran(
             self._Finalizer(), self._Ctx(forced, outcomes), self._Plan()

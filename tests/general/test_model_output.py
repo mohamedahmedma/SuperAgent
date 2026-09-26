@@ -9,8 +9,8 @@ import unittest
 
 from langchain_core.messages import AIMessageChunk
 
-from backend.chat.finalize import Finalizer, finalize_text, message_text
-from backend.chat.model_output import HarmonyFilter, has_harmony_markup, strip_harmony
+from backend.agent.chat.finalize import Finalizer, finalize_text, message_text
+from backend.agent.chat.model_output import HarmonyFilter, has_harmony_markup, strip_harmony
 
 # The whole envelope, literal tokens intact. Captured from the agent's ANSWERING call —
 # the one whose content cannot be dropped, because the answer is inside it.

@@ -11,15 +11,15 @@ import json
 import unittest
 from unittest.mock import patch
 
-from backend.chat.orchestrator import plan_turn
-from backend.chat.signals import RequestSignals, Scope
-from backend.chat.turn_policy import TurnPlan
+from backend.agent.chat.orchestrator import plan_turn
+from backend.agent.chat.signals import RequestSignals, Scope
+from backend.agent.chat.turn_policy import TurnPlan
 from backend.composition import Services
-from backend.profiles import get_profile
-from backend.profiles.registry import load_profile, set_profile
-from backend.rag.evidence import Certainty
-from backend.tools import KNOWLEDGE_TOOL
-from backend.chat.answer_checks import terminal_reply
+from backend.agent.profiles import get_profile
+from backend.agent.profiles.registry import load_profile, set_profile
+from backend.agent.rag.evidence import Certainty
+from backend.agent.tools import KNOWLEDGE_TOOL
+from backend.agent.chat.answer_checks import terminal_reply
 
 
 class ForgetfulStorage:
@@ -128,7 +128,7 @@ class PlanTurnTests(unittest.TestCase):
         self.assertFalse(plan.short_circuit)
 
     def test_a_planner_failure_never_costs_the_turn(self):
-        with patch("backend.chat.orchestrator.build_ladder", side_effect=RuntimeError("boom")):
+        with patch("backend.agent.chat.orchestrator.build_ladder", side_effect=RuntimeError("boom")):
             plan, _ = plan_turn("what are the fees", [], None)
         self.assertFalse(plan.short_circuit)
         self.assertIsNone(plan.exposed_tools)
@@ -159,8 +159,8 @@ class PlanTurnTests(unittest.TestCase):
                 captured["gate"] = getattr(ctx.config, "domain_gate_min_similarity", None)
                 return None
 
-        with patch("backend.chat.orchestrator.build_ladder") as build:
-            from backend.chat.signals import SignalLadder
+        with patch("backend.agent.chat.orchestrator.build_ladder") as build:
+            from backend.agent.chat.signals import SignalLadder
 
             build.return_value = SignalLadder([Probe()], required=Certainty.MEDIUM)
             plan_turn("anything", [], None)
@@ -173,7 +173,7 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
     """The saving only exists if the agent is genuinely never constructed."""
 
     async def _stream(self, plan, signals=None):
-        import backend.chat.service as service
+        import backend.agent.chat.service as service
 
         built = []
 
@@ -229,7 +229,7 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, len(titles))
 
     async def test_a_normal_turn_passes_the_narrowed_list_to_the_factory(self):
-        import backend.chat.service as service
+        import backend.agent.chat.service as service
 
         captured = {}
 
@@ -256,7 +256,7 @@ class ServiceWiringTests(unittest.IsolatedAsyncioTestCase):
 
 class AgentFactoryTests(unittest.TestCase):
     def test_none_means_the_profile_list(self):
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         captured = {}
         with patch.object(runtime, "build_tools", lambda names, ctx: captured.setdefault("n", names) or []), \
@@ -265,7 +265,7 @@ class AgentFactoryTests(unittest.TestCase):
         self.assertEqual(get_profile().agent.tools, captured["n"])
 
     def test_an_explicit_list_narrows_what_is_bound(self):
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         captured = {}
         with patch.object(runtime, "build_tools", lambda names, ctx: captured.setdefault("n", names) or []), \
@@ -278,13 +278,13 @@ class RagGraphTests(unittest.TestCase):
     def test_the_rag_graph_no_longer_gates_domain_scope(self):
         """Scope moved one layer up. A gate here could no longer save the agent call it
         was meant to prevent, because the agent has already chosen to search."""
-        import backend.rag.pipeline as pipeline
+        import backend.agent.rag.pipeline as pipeline
 
         self.assertFalse(hasattr(pipeline, "domain_gate_node"))
         self.assertFalse(hasattr(pipeline, "_route_after_domain_gate"))
 
     def test_the_evidence_ladder_is_untouched(self):
-        import backend.rag.pipeline as pipeline
+        import backend.agent.rag.pipeline as pipeline
 
         self.assertTrue(hasattr(pipeline.grade_documents_node, "assess"))
         self.assertTrue(hasattr(pipeline, "LLMGraderAssessor"))
@@ -308,8 +308,8 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         return ToolMessage(content=content, tool_call_id="c1", name=name)
 
     async def _run(self, stream_items, trace, plan=None):
-        import backend.chat.service as service
-        from backend.chat.turn_policy import TurnPlan
+        import backend.agent.chat.service as service
+        from backend.agent.chat.turn_policy import TurnPlan
 
         generated = []
 
@@ -340,12 +340,12 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         return chunks, generated
 
     def test_terminal_statuses_are_named(self):
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         self.assertEqual({"no_knowledge", "retrieval_error"}, runtime.TERMINAL_STATUSES)
 
     def test_the_reply_comes_from_profile_copy_in_the_right_language(self):
-        import backend.chat.service as service
+        import backend.agent.chat.service as service
 
         english = terminal_reply("no_knowledge", "en")
         arabic = terminal_reply("no_knowledge", "ar")
@@ -355,7 +355,7 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
                          "an unknown language falls back rather than blanking")
 
     def test_retrieval_error_and_no_knowledge_read_differently(self):
-        import backend.chat.service as service
+        import backend.agent.chat.service as service
 
         self.assertNotEqual(
             terminal_reply("no_knowledge", "en"),
@@ -363,7 +363,7 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_a_non_terminal_status_is_not_short_circuited(self):
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         class Ctx:
             def peek_rag_trace(self):
@@ -372,7 +372,7 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(runtime.terminal_status(Ctx()))
 
     def test_a_terminal_status_is_recognised(self):
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         class Ctx:
             def peek_rag_trace(self):
@@ -381,7 +381,7 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("no_knowledge", runtime.terminal_status(Ctx()))
 
     def test_a_missing_trace_is_not_terminal(self):
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         class Ctx:
             def peek_rag_trace(self):
@@ -426,7 +426,7 @@ class TerminalShortCircuitMiddlewareTests(unittest.TestCase):
         return {"messages": messages}
 
     def _decide(self, status, tool_names):
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         ctx = self.Ctx(status)
         middleware = runtime._end_turn_on_terminal_retrieval(ctx)
@@ -473,7 +473,7 @@ class TerminalShortCircuitMiddlewareTests(unittest.TestCase):
     def test_the_jump_target_is_declared_to_the_graph(self):
         """`can_jump_to` is what builds the conditional edge. Without it the returned
         `jump_to` is silently ignored and the model call happens anyway."""
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         middleware = runtime._end_turn_on_terminal_retrieval(self.Ctx("no_knowledge"))
         self.assertEqual(["end"], getattr(middleware.before_model, "__can_jump_to__", None))
@@ -481,7 +481,7 @@ class TerminalShortCircuitMiddlewareTests(unittest.TestCase):
     def test_the_agent_is_built_with_both_guards_bound(self):
         """Named rather than counted: an unbound middleware is inert, and a bare count
         says nothing about WHICH of the two went missing."""
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         captured = {}
         # A real bound tool is what makes these tool-traffic guards relevant. Returning
@@ -515,7 +515,7 @@ class ShortCircuitedStreamTests(unittest.IsolatedAsyncioTestCase):
         from langchain_core.outputs import ChatGeneration, ChatResult
         from langchain_core.tools import tool
 
-        from backend.chat.runtime import _end_turn_on_terminal_retrieval
+        from backend.agent.chat.runtime import _end_turn_on_terminal_retrieval
 
         calls = {"model": 0}
 
@@ -587,9 +587,9 @@ class TheContextReceivesThePlan(unittest.TestCase):
     """
 
     def _handed(self, **plan_kwargs):
-        from backend.chat.caller_identity import CallerIdentity
-        from backend.chat.orchestrator import _hand_to_graph
-        from backend.chat.request_context import ChatRequestContext
+        from backend.agent.chat.caller_identity import CallerIdentity
+        from backend.agent.chat.orchestrator import _hand_to_graph
+        from backend.agent.chat.request_context import ChatRequestContext
 
         ctx = ChatRequestContext(
             user_id="u-1",
@@ -618,7 +618,7 @@ class TheContextReceivesThePlan(unittest.TestCase):
         simply carry fewer hints — the promise `note_turn_plan` makes in as many words.
         Anything added to the hints must go to the FRONT of the drop list, or the retry
         re-sends the argument that raised and the ladder hands over nothing at all."""
-        from backend.chat.orchestrator import _hand_to_graph
+        from backend.agent.chat.orchestrator import _hand_to_graph
 
         class _OldContext:
             def note_turn_plan(self, retrieval_sections, scope_options, *,

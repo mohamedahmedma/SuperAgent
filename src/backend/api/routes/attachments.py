@@ -22,10 +22,10 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Resp
 
 from backend.api.deps import get_services
 from backend.application.ports.repositories import AttachmentRecord
-from backend.chat.attachments import VoiceNoteRejected
+from backend.agent.chat.attachments import VoiceNoteRejected
 from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
-from backend.schemas import AttachmentInfo
+from backend.agent.schemas import AttachmentInfo
 
 logger = logging.getLogger(__name__)
 

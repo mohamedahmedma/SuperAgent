@@ -17,9 +17,9 @@ import unittest
 
 from jinja2 import UndefinedError
 
-from backend.profiles.registry import load_profile
-from backend.prompts import render, resolve, template_names
-from backend.tools import GROUNDED_TOOLS, TOOL_BUILDERS
+from backend.agent.profiles.registry import load_profile
+from backend.agent.prompts import render, resolve, template_names
+from backend.agent.tools import GROUNDED_TOOLS, TOOL_BUILDERS
 
 # The prompt is paid on every turn. ~4 chars/token for English, so this is roughly a
 # 150-token ceiling — well above the ~96 it renders at today, but low enough that
@@ -144,7 +144,7 @@ class SchoolOverrideKeepsTheContractTests(unittest.TestCase):
     def test_every_grounding_rule_survives_the_override(self):
         """Compared against the fragment itself, so editing _grounding.j2 without
         updating school.yaml fails here rather than in production."""
-        from backend.prompts import render
+        from backend.agent.prompts import render
 
         fragment = render("agent/_grounding.j2")
         rules = [line.strip() for line in fragment.splitlines() if line.strip().startswith("-")]
@@ -184,7 +184,7 @@ class TemplateEnvironmentTests(unittest.TestCase):
         self.assertNotIn("42", rendered)
 
     def test_every_shipped_template_is_syntactically_valid(self):
-        from backend.prompts import _environment
+        from backend.agent.prompts import _environment
 
         names = template_names()
         self.assertTrue(names, "no templates were discovered")
@@ -284,8 +284,8 @@ class LanguageDirectiveTests(unittest.TestCase):
 
     def test_the_plan_carries_the_language_to_the_agent(self):
         """The prompt can only name a language if the plan brought it this far."""
-        from backend.chat.signals import RequestSignals
-        from backend.chat.turn_policy import resolve_turn
+        from backend.agent.chat.signals import RequestSignals
+        from backend.agent.chat.turn_policy import resolve_turn
 
         profile = load_profile("base")
         plan = resolve_turn(
@@ -369,7 +369,7 @@ class ToolResultEnvelopeTests(unittest.TestCase):
                 self.assertIn("girls only", out)
 
     def test_the_figure_rule_is_paid_only_when_a_figure_was_retrieved(self):
-        """Rung 3 of the ladder in backend/prompts/__init__.py: an instruction that is
+        """Rung 3 of the ladder in backend/agent/prompts/__init__.py: an instruction that is
         only true when retrieval returned a figure is billed only on those turns."""
         without = self._chunks(figures=False)
         with_rule = self._chunks(figures=True)
@@ -439,7 +439,7 @@ class ToolResultEnvelopeTests(unittest.TestCase):
     def test_a_figure_bearing_chunk_is_numbered_but_never_identified(self):
         """A NUMBER, not an id. The number is what the model writes back to place the
         picture; the id would only give it something to paste as a broken image link."""
-        from backend.tools.knowledge import _format_chunk
+        from backend.agent.tools.knowledge import _format_chunk
 
         entry = _format_chunk(
             1,
@@ -458,7 +458,7 @@ class ToolResultEnvelopeTests(unittest.TestCase):
         """There is no picture to render, so there is no number to give — but the model
         is still told it is looking at an image, so it does not describe the prose
         beside it as though that were the figure."""
-        from backend.tools.knowledge import _format_chunk
+        from backend.agent.tools.knowledge import _format_chunk
 
         entry = _format_chunk(
             1, {"filename": "kb.pdf", "page_number": 2, "text": "t", "modality": "figure"}

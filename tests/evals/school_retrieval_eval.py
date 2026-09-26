@@ -79,10 +79,10 @@ from backend.env import load_env  # noqa: E402
 
 load_env()
 
-from backend.rag import utils as u  # noqa: E402
-from backend.rag.evidence_view import format_docs  # noqa: E402
-from backend.rag.query_translation import translate_for_search  # noqa: E402
-from backend.rag.utils import EVIDENCE_WINDOW_CHARS  # noqa: E402
+from backend.agent.rag import utils as u  # noqa: E402
+from backend.agent.rag.evidence_view import format_docs  # noqa: E402
+from backend.agent.rag.query_translation import translate_for_search  # noqa: E402
+from backend.agent.rag.utils import EVIDENCE_WINDOW_CHARS  # noqa: E402
 from tests.evals.school_dataset import (  # noqa: E402
     CORPUS_FILENAME,
     Case,

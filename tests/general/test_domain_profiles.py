@@ -11,8 +11,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-import backend.profiles.registry as registry
-from backend.profiles.registry import (
+import backend.agent.profiles.registry as registry
+from backend.agent.profiles.registry import (
     DEFAULT_PROFILE,
     ProfileError,
     available_profiles,
@@ -20,7 +20,7 @@ from backend.profiles.registry import (
     reload_profile,
     set_profile,
 )
-from backend.profiles.schema import DomainProfile
+from backend.agent.profiles.schema import DomainProfile
 
 
 class ProfileTestCase(unittest.TestCase):
@@ -354,11 +354,11 @@ class NoDriftTests(ProfileTestCase):
         self.assertEqual(0.3, models.answer_temperature)
 
     def test_prompt_placeholders_are_preserved(self):
-        """The prompts moved to backend/prompts/templates/, so the placeholders that
+        """The prompts moved to backend/agent/prompts/templates/, so the placeholders that
         must survive are the templates' — a template that stopped substituting its
         payload would render a grader prompt with no snippets in it and still look
         perfectly well-formed."""
-        from backend.prompts import render
+        from backend.agent.prompts import render
 
         marker = "PLACEHOLDER_MARKER"
         graded = render("rag/evidence_grade.j2", question=marker, context=marker, constraints=[])
@@ -400,8 +400,8 @@ class NoDriftTests(ProfileTestCase):
 
 class ToolRegistryTests(ProfileTestCase):
     def test_unknown_tool_name_fails_loudly(self):
-        from backend.chat.request_context import ChatRequestContext
-        from backend.tools import UnknownToolError, build_tools
+        from backend.agent.chat.request_context import ChatRequestContext
+        from backend.agent.tools import UnknownToolError, build_tools
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         with self.assertRaises(UnknownToolError) as err:
@@ -409,8 +409,8 @@ class ToolRegistryTests(ProfileTestCase):
         self.assertIn("not_a_tool", str(err.exception))
 
     def test_tools_are_built_in_declaration_order(self):
-        from backend.chat.request_context import ChatRequestContext
-        from backend.tools import build_tools
+        from backend.agent.chat.request_context import ChatRequestContext
+        from backend.agent.tools import build_tools
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         tools = build_tools(["get_student_grades", "search_knowledge_base"], ctx)

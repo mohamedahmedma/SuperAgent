@@ -36,9 +36,9 @@ from backend.assets.entity_store import EntityAttributeIndex
 from backend.assets.extractors import ExtractionRequest
 from backend.assets.pipeline import FigurePipeline, ImageInput
 from backend.assets.store import AssetStore
-from backend.profiles.registry import load_profile
-from backend.profiles.schema import DomainProfile, EntityPipelineConfig
-from backend.rag.entity_retrieval import EntityRetriever
+from backend.agent.profiles.registry import load_profile
+from backend.agent.profiles.schema import DomainProfile, EntityPipelineConfig
+from backend.agent.rag.entity_retrieval import EntityRetriever
 from tests.general.postgres_support import postgres_schema
 
 
@@ -738,7 +738,7 @@ class ProfileIntegrationTests(unittest.TestCase):
         self.assertEqual([], entities.attributes)
 
     def test_every_shipped_profile_builds_a_valid_schema(self):
-        from backend.profiles.registry import available_profiles
+        from backend.agent.profiles.registry import available_profiles
 
         for name in available_profiles():
             with self.subTest(profile=name):

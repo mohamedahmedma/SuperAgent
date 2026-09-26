@@ -28,7 +28,7 @@ export interface DocumentPair {
 /**
  * One indexed chunk, as the admin inspector shows it.
  *
- * Mirrors `backend/schemas/documents.py:ChunkInfo` field for field. Everything is read
+ * Mirrors `backend/agent/schemas/documents.py:ChunkInfo` field for field. Everything is read
  * out of the stores rather than recomputed, because the point of the view is to show
  * what retrieval will actually see.
  */
@@ -70,7 +70,7 @@ export interface ChunkNode extends ChunkInfo {
 /**
  * One image of a document and what extraction made of it.
  *
- * Mirrors `backend/schemas/documents.py:AssetInfo`. Deliberately NOT `AssetReference`,
+ * Mirrors `backend/agent/schemas/documents.py:AssetInfo`. Deliberately NOT `AssetReference`,
  * which is the public contract a chat client consumes: this carries the model, its
  * confidence and the error behind a failure, which is what an admin needs to judge an
  * extraction and what a parent should never be shown.

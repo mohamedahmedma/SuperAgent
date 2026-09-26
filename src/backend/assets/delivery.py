@@ -141,7 +141,7 @@ class AssetPresenter:
     @property
     def config(self):
         if self._config is None:
-            from backend.profiles import get_profile
+            from backend.agent.profiles import get_profile
 
             self._config = get_profile().assets.delivery
         return self._config

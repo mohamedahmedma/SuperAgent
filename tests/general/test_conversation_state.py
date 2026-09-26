@@ -9,15 +9,15 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from backend.chat.background import InlineJobs
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.child_context import SESSION_CHILD_KEY
-from backend.chat.clarification import build_pending_hitl, enter_turn
-from backend.chat.request_context import ChatRequestContext
-from backend.chat.resolution import unresolved
-from backend.chat.turn_pipeline import TurnCollaborators, TurnPipeline
-from backend.profiles import get_profile
-from backend.rag.hitl_resume import build_hitl_resume_state
+from backend.agent.chat.background import InlineJobs
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.child_context import SESSION_CHILD_KEY
+from backend.agent.chat.clarification import build_pending_hitl, enter_turn
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.resolution import unresolved
+from backend.agent.chat.turn_pipeline import TurnCollaborators, TurnPipeline
+from backend.agent.profiles import get_profile
+from backend.agent.rag.hitl_resume import build_hitl_resume_state
 from tests.general.test_chat_hitl_resume import FakeStorage
 
 ASKED_AT = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
@@ -229,7 +229,7 @@ class APendingQuestionExpires(unittest.TestCase):
     def test_a_ttl_of_zero_never_expires(self):
         profile = SimpleNamespace(agent=SimpleNamespace(clarification_ttl_minutes=0))
         resolution = SimpleNamespace(supersedes_pending_question=False, question="", constraints=[], resolved=False)
-        with patch("backend.chat.clarification.get_profile", return_value=profile):
+        with patch("backend.agent.chat.clarification.get_profile", return_value=profile):
             entry = enter_turn(
                 "Year 4", [], {"pending_hitl": _pending_asked_at(ASKED_AT)},
                 resolve=Mock(return_value=resolution), now=ASKED_AT + timedelta(days=365),

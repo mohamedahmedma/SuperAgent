@@ -13,7 +13,7 @@ wrong.
 import re
 import unittest
 
-from backend.chat.language import ARABIC, ENGLISH, detect_language
+from backend.agent.chat.language import ARABIC, ENGLISH, detect_language
 from backend.composition import Services, set_default_services
 from backend.db.models import DocumentPair
 from backend.indexing.pair_store import DocumentPairService
@@ -227,7 +227,7 @@ class RetrievalFilterShapeTests(unittest.TestCase):
         self.addCleanup(set_default_services, None)
 
     def _clause(self, question):
-        from backend.rag.utils import language_filter_clause
+        from backend.agent.rag.utils import language_filter_clause
 
         return language_filter_clause(detect_language(question))
 

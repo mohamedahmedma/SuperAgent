@@ -67,14 +67,14 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-import backend.chat.child_roster as child_roster
-import backend.tools.records as records
-from backend.chat import runtime
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.orchestrator import plan_turn
-from backend.chat.request_context import ChatRequestContext
-from backend.profiles import get_profile
-from backend.tools import build_tools
+import backend.agent.chat.child_roster as child_roster
+import backend.agent.tools.records as records
+from backend.agent.chat import runtime
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.orchestrator import plan_turn
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.profiles import get_profile
+from backend.agent.tools import build_tools
 
 GUARDIAN = "G-1"
 TOKEN = "test-token"
@@ -1561,7 +1561,7 @@ def main() -> int:
     records._get = _records_get
     child_roster._fetch = _roster_fetch
 
-    import backend.rag.pipeline as pipeline
+    import backend.agent.rag.pipeline as pipeline
 
     pipeline.run_rag_graph = _fake_rag
 

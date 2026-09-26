@@ -7,14 +7,14 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from backend.api.deps import get_services
-from backend.chat import chat_with_agent, chat_with_agent_stream
-from backend.chat.admission import Refusal, TurnLease
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.language import detect_language
+from backend.agent.chat import chat_with_agent, chat_with_agent_stream
+from backend.agent.chat.admission import Refusal, TurnLease
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.language import detect_language
 from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
-from backend.profiles import get_profile
-from backend.schemas import ChatRequest, ChatResponse
+from backend.agent.profiles import get_profile
+from backend.agent.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(tags=["chat"])
 
@@ -56,7 +56,7 @@ def _thread_id(header_value: str | None, body_value: str | None) -> str:
     writing into `default_session` while believing otherwise.
 
     Sanitised rather than rejected. This value becomes part of a cache key
-    (`chat_messages:{user_id}:{session_id}`, backend/chat/storage.py:24) and a database
+    (`chat_messages:{user_id}:{session_id}`, backend/agent/chat/storage.py:24) and a database
     column, and a caller-supplied string reaching either unfiltered is worth closing off
     even though the key is already namespaced per user. A client sending something odd
     should get a working conversation, not a 422 it cannot act on.
@@ -72,7 +72,7 @@ def _admit(message: str, user: AuthenticatedUser, services: Services) -> TurnLea
     """The turn's place at the door, or the 429 that says why it has none.
 
     Asked after the request is known to be valid and before any work is spent on it
-    (backend/chat/admission.py, RAG_FIX_PLAN items 37 and 38). The refusal is the
+    (backend/agent/chat/admission.py, RAG_FIX_PLAN items 37 and 38). The refusal is the
     profile's copy in the language of the message, with `Retry-After`, so the web app
     can show it as it is.
     """

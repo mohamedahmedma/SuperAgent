@@ -66,7 +66,7 @@ from tests.evals.planner_execution_eval import (
     _roster_fetch,
     run_case,
 )
-from backend.profiles.registry import get_profile
+from backend.agent.profiles.registry import get_profile
 
 # ---------------------------------------------------------------------------
 # The family this suite talks about.
@@ -714,13 +714,13 @@ CASES = [
 
 def main() -> int:
     """Same harness, same flags, a different corpus. See the module docstring."""
-    from backend.chat import child_roster
-    from backend.tools import records
+    from backend.agent.chat import child_roster
+    from backend.agent.tools import records
 
     records._get = _records_get
     child_roster._fetch = _roster_fetch
 
-    import backend.rag.pipeline as pipeline
+    import backend.agent.rag.pipeline as pipeline
 
     pipeline.run_rag_graph = _fake_rag
 

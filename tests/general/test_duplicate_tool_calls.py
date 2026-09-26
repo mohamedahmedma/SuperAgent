@@ -16,9 +16,9 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
-import backend.chat.runtime as runtime
-from backend.chat.request_context import ChatRequestContext
-from backend.chat.runtime import dedupe_tool_calls
+import backend.agent.chat.runtime as runtime
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.runtime import dedupe_tool_calls
 
 
 def _call(query, call_id, name="search_knowledge_base"):
@@ -141,7 +141,7 @@ class RetrievalMemoTests(unittest.TestCase):
     """The graph's half: an identical query asked again in the same turn is free."""
 
     def _run(self, questions):
-        from backend.rag import pipeline
+        from backend.agent.rag import pipeline
 
         ctx = ChatRequestContext(user_id="u", session_id="s")
         invocations = []
@@ -175,7 +175,7 @@ class RetrievalMemoTests(unittest.TestCase):
 
     def test_the_memo_does_not_outlive_the_turn(self):
         """Two contexts are two turns, and the corpus may have changed between them."""
-        from backend.rag import pipeline
+        from backend.agent.rag import pipeline
 
         invocations = []
 

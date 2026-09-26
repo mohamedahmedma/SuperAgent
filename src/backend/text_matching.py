@@ -151,7 +151,7 @@ _MIN_LETTERS_AFTER_PLURAL = 3
 # index entirely. The general rule for adding to this list: never add a token that is
 # also a plausible Egyptian given name (على, هنا, أمل, نور).
 #
-# `backend/chat/child_names.py` keeps the same collision's mirror image — the names that
+# `backend/agent/chat/child_names.py` keeps the same collision's mirror image — the names that
 # are also ordinary words — for deciding when a child's name may be cut out of a
 # retrieval query. The two lists answer opposite questions about one fact, so a token
 # added to either is worth a moment's thought about the other.

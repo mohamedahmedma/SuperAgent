@@ -13,13 +13,13 @@ the corpus at all.
 """
 import unittest
 
-from backend.chat.signals import RequestSignals, Scope, SignalContext, build_ladder
-from backend.chat.turn_policy import resolve_turn
-from backend.profiles import get_profile
-from backend.profiles.registry import load_profile
-from backend.rag.evidence import Certainty
-from backend.rag.scope_detector import CatalogueScopeDetector, index_store
-from backend.rag.scope_index import build_index
+from backend.agent.chat.signals import RequestSignals, Scope, SignalContext, build_ladder
+from backend.agent.chat.turn_policy import resolve_turn
+from backend.agent.profiles import get_profile
+from backend.agent.profiles.registry import load_profile
+from backend.agent.rag.evidence import Certainty
+from backend.agent.rag.scope_detector import CatalogueScopeDetector, index_store
+from backend.agent.rag.scope_index import build_index
 from tests.general.integration_support import (
     requires_embedder,
     requires_llm,
@@ -66,7 +66,7 @@ def config(**overrides):
 
 
 class LadderConfig:
-    """The shape build_ladder expects, matching backend.chat.orchestrator."""
+    """The shape build_ladder expects, matching backend.agent.chat.orchestrator."""
 
     def __init__(self, agent, rag):
         self._agent = agent
@@ -330,7 +330,7 @@ class ScopePromptTests(unittest.TestCase):
 
     def render(self, question="when does term two start"):
         from backend.indexing.embedding import embed_query
-        from backend.prompts import render
+        from backend.agent.prompts import render
 
         matches = self.index.best_matches(embed_query(question), limit=3)
         return render(
@@ -389,7 +389,7 @@ class ScopeIndexRebuildTests(unittest.TestCase):
         self.assertEqual(first.floor, second.floor, "the floor moved without the corpus")
 
     def test_a_failing_builder_leaves_the_gate_abstaining_not_refusing(self):
-        from backend.rag.scope_detector import ScopeIndexStore
+        from backend.agent.rag.scope_detector import ScopeIndexStore
 
         def broken():
             raise RuntimeError("database gone")
@@ -398,7 +398,7 @@ class ScopeIndexRebuildTests(unittest.TestCase):
         self.assertFalse(store.get().ready)
 
     def test_a_broken_builder_is_not_retried_on_every_request(self):
-        from backend.rag.scope_detector import ScopeIndexStore
+        from backend.agent.rag.scope_detector import ScopeIndexStore
 
         calls = []
 
@@ -487,7 +487,7 @@ class LiveScopeModelTests(unittest.TestCase):
     focused on the property that matters rather than on breadth."""
 
     def verdict(self, question):
-        from backend.rag.scope_detector import ScopeModelDetector
+        from backend.agent.rag.scope_detector import ScopeModelDetector
 
         profile = get_profile()
         # Rung 1 enabled for the same reason as in ScopeGateRecallTests: this asks what

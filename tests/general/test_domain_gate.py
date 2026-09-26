@@ -9,15 +9,15 @@ from unittest.mock import patch
 
 from backend.composition import Services, set_default_services
 
-from backend.profiles.registry import load_profile
-from backend.rag.domain_gate import (
+from backend.agent.profiles.registry import load_profile
+from backend.agent.rag.domain_gate import (
     DomainReference,
     DomainReferenceStore,
     classify,
     should_run,
 )
-from backend.rag.evidence import AssessmentContext, Certainty
-from backend.rag.rerank_assessor import CrossEncoderAssessor, _to_unit, reset_model_cache
+from backend.agent.rag.evidence import AssessmentContext, Certainty
+from backend.agent.rag.rerank_assessor import CrossEncoderAssessor, _to_unit, reset_model_cache
 
 
 def rag_config(**overrides):
@@ -208,7 +208,7 @@ class CrossEncoderAssessorTests(unittest.TestCase):
         config = load_profile("base").rag.model_copy(
             update={"rerank_cross_encoder_enabled": True, **overrides})
         ctx = AssessmentContext(question="what is the uniform", docs=self.docs, config=config)
-        with patch("backend.rag.rerank_assessor.score_pairs", lambda *a, **k: scores):
+        with patch("backend.agent.rag.rerank_assessor.score_pairs", lambda *a, **k: scores):
             return CrossEncoderAssessor().assess(ctx)
 
     def test_disabled_by_default(self):
@@ -218,7 +218,7 @@ class CrossEncoderAssessorTests(unittest.TestCase):
     def test_an_unavailable_model_abstains_so_the_ladder_climbs(self):
         config = load_profile("base").rag.model_copy(update={"rerank_cross_encoder_enabled": True})
         ctx = AssessmentContext(question="q", docs=self.docs, config=config)
-        with patch("backend.rag.rerank_assessor.score_pairs", lambda *a, **k: None):
+        with patch("backend.agent.rag.rerank_assessor.score_pairs", lambda *a, **k: None):
             self.assertIsNone(CrossEncoderAssessor().assess(ctx))
 
     def test_high_scores_conclude_sufficient_at_medium_certainty(self):

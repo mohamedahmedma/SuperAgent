@@ -778,7 +778,7 @@ class QueryIndexSymmetryTests(unittest.TestCase):
 
         spec = importlib.util.spec_from_file_location(
             "rag_utils_symmetry",
-            REPO_ROOT / "src" / "backend" / "rag" / "utils.py",
+            REPO_ROOT / "src" / "backend" / "agent" / "rag" / "utils.py",
         )
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {
@@ -820,7 +820,7 @@ class ArabicComplexityRoutingTests(unittest.TestCase):
     exist for the agent's primary language."""
 
     def _reason(self, question):
-        import backend.rag.pipeline as pipeline
+        import backend.agent.rag.pipeline as pipeline
 
         return pipeline.classify_complexity.fast_path_reason(question)
 

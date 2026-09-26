@@ -27,16 +27,16 @@ from unittest.mock import Mock, patch
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from backend.chat.background import WRITES, BackgroundJobs, InlineJobs
-from backend.chat.signals import RequestSignals
-from backend.chat.storage import ConversationStorage, MessageToStore
-from backend.chat.turn_policy import TurnPlan
+from backend.agent.chat.background import WRITES, BackgroundJobs, InlineJobs
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.storage import ConversationStorage, MessageToStore
+from backend.agent.chat.turn_policy import TurnPlan
 from backend.composition import Services
 from tests.general.postgres_support import postgres_schema
 from tests.general.test_asset_delivery import DictCache
 from tests.general.test_chat_hitl_resume import FakeStorage, FakeStreamAgent
 
-service = importlib.import_module("backend.chat.service")
+service = importlib.import_module("backend.agent.chat.service")
 
 
 class BackgroundJobsTests(unittest.TestCase):
@@ -108,7 +108,7 @@ class BackgroundJobsTests(unittest.TestCase):
         def failing():
             raise RuntimeError("database down")
 
-        with self.assertLogs("backend.chat.background", level="ERROR") as logs:
+        with self.assertLogs("backend.agent.chat.background", level="ERROR") as logs:
             self.jobs.submit("k", failing, describe="store the answer (u/s)")
             self.jobs.submit("k", lambda: ran.append("next"))
             self.assertTrue(self.jobs.flush("k", timeout=5))
@@ -413,7 +413,7 @@ class StreamedTurnStorageTests(unittest.TestCase):
         """Two messages in quick succession: the second turn opens while the first turn's
         save is still queued, and must still see that turn in its history — here, by not
         mistaking itself for the conversation's first message and naming the session."""
-        from backend.chat.turn_pipeline import TurnPipeline
+        from backend.agent.chat.turn_pipeline import TurnPipeline
 
         storage = FakeStorage()
         gate = threading.Event()

@@ -13,7 +13,7 @@ so checking it costs a character scan and no model call.
 
 ## Why a ratio and not a language identifier
 
-The same reason `backend/chat/language.py` gives: the question is never "which of the
+The same reason `backend/agent/chat/language.py` gives: the question is never "which of the
 world's languages is this", it is "is this the Arabic side or the English side". Script
 counting answers that exactly, and a langid model would be more accurate at a question
 nobody is asking.
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from backend.chat.language import ARABIC, ENGLISH, arabic_ratio
+from backend.agent.chat.language import ARABIC, ENGLISH, arabic_ratio
 
 #: At or above this share of Arabic letters, the text is Arabic beyond argument.
 ARABIC_FLOOR = 0.50

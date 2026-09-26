@@ -29,7 +29,7 @@ from backend.assets.store import AssetStore
 from backend.assets.triage import ImageFacts, count_digest_pages, probe_dimensions, triage_image
 from backend.indexing.asset_enrichment import enrich_image_blocks
 from backend.indexing.ingest_progress import IngestProgress
-from backend.profiles.registry import load_profile
+from backend.agent.profiles.registry import load_profile
 from tests.general.postgres_support import postgres_schema
 
 

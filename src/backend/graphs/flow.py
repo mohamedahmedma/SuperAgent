@@ -6,7 +6,7 @@
     python -m backend.graphs --check            # only verify the map, draw nothing
 
 A turn is only partly a LangGraph graph. The HTTP door, the turn pipeline, the planner and
-the answer checks are plain Python (`backend/chat/turn_pipeline.py` makes every decision a
+the answer checks are plain Python (`backend/agent/chat/turn_pipeline.py` makes every decision a
 turn involves, in order), and the agent and the RAG graph are compiled graphs inside it.
 So the picture is built from two kinds of part, and neither is allowed to drift:
 
@@ -66,11 +66,11 @@ SECTIONS = {
     "http": "HTTP door · backend/api/routes/chat.py",
     "entry": "Turn entry · TurnPipeline",
     "resume": "Resumed clarification · a paused search picks up",
-    "planner": "Planner · plan_turn (backend/chat/orchestrator.py)",
+    "planner": "Planner · plan_turn (backend/agent/chat/orchestrator.py)",
     "agent": "Agent · create_agent_for_request (compiled LangGraph)",
     "tools": "Tools bound by the profile",
     "rag": "RAG graph · rag_graph (compiled LangGraph, live shape)",
-    "retrieval": "retrieve_documents · backend/rag/utils.py",
+    "retrieval": "retrieve_documents · backend/agent/rag/utils.py",
     "settle": "Answer settlement · TurnPipeline.settle_agent_answer",
     "save": "Save · off the request, in the background",
 }
@@ -85,111 +85,111 @@ STEPS = [
      "backend.api.routes.chat:_attachment_id"),
     ("admit", "http", "TurnAdmission.admit",
      "provider cooldown → per-user GCRA rate → per-user concurrent lease · Redis Lua, fails open",
-     "step", "backend.chat.admission:TurnAdmission.admit"),
+     "step", "backend.agent.chat.admission:TurnAdmission.admit"),
     ("r429", "http", "429 + Retry-After", "refused at the door", "refuse", ""),
     ("stream", "http", "chat_with_agent_stream", "SSE: rag_step · content · trace · done", "step",
-     "backend.chat.service:chat_with_agent_stream"),
+     "backend.agent.chat.service:chat_with_agent_stream"),
     # Turn entry
     ("open", "entry", "TurnPipeline.open", "waits ≤10s for the previous save · loads window + child pin",
-     "step", "backend.chat.turn_pipeline:TurnPipeline.open"),
+     "step", "backend.agent.chat.turn_pipeline:TurnPipeline.open"),
     ("enter", "entry", "enter_turn", "reads the message against a pending clarification (TTL)", "step",
-     "backend.chat.clarification:enter_turn"),
+     "backend.agent.chat.clarification:enter_turn"),
     ("resolve_reply", "entry", "resolve_turn_question", "FAST_MODEL · answer, correction or new question?",
-     "llm", "backend.chat.orchestrator:resolve_turn_question"),
+     "llm", "backend.agent.chat.orchestrator:resolve_turn_question"),
     ("child_choice", "entry", "TurnPipeline.settle_child_choice", "a reply to 'which child?' pins the child",
-     "step", "backend.chat.turn_pipeline:TurnPipeline.settle_child_choice"),
+     "step", "backend.agent.chat.turn_pipeline:TurnPipeline.settle_child_choice"),
     ("record", "entry", "TurnPipeline.record_question", "queued, not awaited", "step",
-     "backend.chat.turn_pipeline:TurnPipeline.record_question"),
+     "backend.agent.chat.turn_pipeline:TurnPipeline.record_question"),
     ("resumes", "entry", "TurnPipeline.resumes_a_search", "is this the answer to a paused search?", "decision",
-     "backend.chat.turn_pipeline:TurnPipeline.resumes_a_search"),
+     "backend.agent.chat.turn_pipeline:TurnPipeline.resumes_a_search"),
     # Resumed clarification
     ("run_resume", "resume", "TurnPipeline.run_resumed_search", "carries the paused turn's language, year, names",
-     "step", "backend.chat.turn_pipeline:TurnPipeline.run_resumed_search"),
+     "step", "backend.agent.chat.turn_pipeline:TurnPipeline.run_resumed_search"),
     ("resume_rag", "resume", "resume_rag_from_hitl", "refines the question with the reply", "step",
-     "backend.rag.pipeline:resume_rag_from_hitl"),
+     "backend.agent.rag.pipeline:resume_rag_from_hitl"),
     ("resume_retrieval", "resume", "ResumeRetrieval", "targeted search, graded like any other", "step",
-     "backend.rag.graph_nodes:ResumeRetrieval"),
+     "backend.agent.rag.graph_nodes:ResumeRetrieval"),
     ("settle_resume", "resume", "TurnPipeline.settle_resumed_search", "", "decision",
-     "backend.chat.turn_pipeline:TurnPipeline.settle_resumed_search"),
+     "backend.agent.chat.turn_pipeline:TurnPipeline.settle_resumed_search"),
     ("resume_answer", "resume", "build_resume_answer_messages", "MODEL answers from the retrieved documents",
-     "llm", "backend.chat.context_messages:build_resume_answer_messages"),
+     "llm", "backend.agent.chat.context_messages:build_resume_answer_messages"),
     ("resume_static", "resume", "resumed_static_reply", "profile copy: nothing to answer from", "reply",
-     "backend.chat.answer_checks:resumed_static_reply"),
+     "backend.agent.chat.answer_checks:resumed_static_reply"),
     # Planner
     ("plan", "planner", "TurnPipeline.plan → plan_turn", "never raises: a failed plan runs the turn unplanned",
-     "step", "backend.chat.orchestrator:plan_turn"),
+     "step", "backend.agent.chat.orchestrator:plan_turn"),
     ("roster", "planner", "_start_roster", "records roster prefetch, in parallel · cached per guardian", "io",
-     "backend.chat.orchestrator:_start_roster"),
+     "backend.agent.chat.orchestrator:_start_roster"),
     ("resolve", "planner", "resolve_question", "FAST_MODEL · only for a follow-up (needs_resolution)", "llm",
-     "backend.chat.resolution:resolve_question"),
+     "backend.agent.chat.resolution:resolve_question"),
     ("ladder", "planner", "SignalLadder.run", "cheapest rung first, stops once scope is settled", "step",
-     "backend.chat.signals:SignalLadder.run"),
+     "backend.agent.chat.signals:SignalLadder.run"),
     ("settle_child", "planner", "_settle_child → resolve_child", "which child this turn is about", "step",
-     "backend.chat.orchestrator:_settle_child"),
+     "backend.agent.chat.orchestrator:_settle_child"),
     ("resolve_turn", "planner", "resolve_turn", "the plan: what runs, with which tools", "decision",
-     "backend.chat.turn_policy:resolve_turn"),
-    ("plan_social", "planner", "_plan_social", "greeting / thanks", "step", "backend.chat.turn_policy:_plan_social"),
+     "backend.agent.chat.turn_policy:resolve_turn"),
+    ("plan_social", "planner", "_plan_social", "greeting / thanks", "step", "backend.agent.chat.turn_policy:_plan_social"),
     ("plan_ood", "planner", "_plan_out_of_domain", "out of scope, with certainty", "step",
-     "backend.chat.turn_policy:_plan_out_of_domain"),
+     "backend.agent.chat.turn_policy:_plan_out_of_domain"),
     ("plan_child_choice", "planner", "_plan_child_choice", "several children, none named", "step",
-     "backend.chat.turn_policy:_plan_child_choice"),
+     "backend.agent.chat.turn_policy:_plan_child_choice"),
     ("plan_tools", "planner", "_plan_tools", "narrow tools · planned parallel calls · forced tool", "step",
-     "backend.chat.turn_policy:_plan_tools"),
+     "backend.agent.chat.turn_policy:_plan_tools"),
     ("short_circuit", "planner", "TurnPipeline.settle_short_circuit",
      "static reply, refusal, or 'which child?' — no agent is built", "reply",
-     "backend.chat.turn_pipeline:TurnPipeline.settle_short_circuit"),
+     "backend.agent.chat.turn_pipeline:TurnPipeline.settle_short_circuit"),
     # Agent (its graph is compiled in; these are the doors in and out)
     ("agent_call", "agent", "TurnPipeline.agent_call", "recursion_limit from the profile", "step",
-     "backend.chat.turn_pipeline:TurnPipeline.agent_call"),
+     "backend.agent.chat.turn_pipeline:TurnPipeline.agent_call"),
     # Knowledge tool internals (the tool boxes themselves are read from the profile)
     ("run_rag", "tools", "run_rag_graph", "turn memo: an identical query is answered from the first run",
-     "step", "backend.rag.pipeline:run_rag_graph"),
+     "step", "backend.agent.rag.pipeline:run_rag_graph"),
     ("kb_outcome", "tools", "knowledge outcome",
      "chunks · no_knowledge · needs_clarification · needs_scope_selection · retrieval_error · empty",
-     "decision", "backend.tools.knowledge:make_search_knowledge_base"),
+     "decision", "backend.agent.tools.knowledge:make_search_knowledge_base"),
     ("records_service", "tools", "records service :8100", "guardian ↔ student check · access audit", "io", ""),
     # Retrieval internals
     ("translate", "retrieval", "translate_for_search", "FAST_MODEL · only when not in the corpus's language",
-     "llm", "backend.rag.query_translation:translate_for_search"),
+     "llm", "backend.agent.rag.query_translation:translate_for_search"),
     ("cache_lookup", "retrieval", "RetrievalCache.lookup", "Redis · keyed on corpus_version", "io",
-     "backend.rag.retrieval_cache:RetrievalCache.lookup"),
+     "backend.agent.rag.retrieval_cache:RetrievalCache.lookup"),
     ("embed", "retrieval", "embed_query", "bge-m3 · in-process memo → Redis", "io",
      "backend.indexing.embedding:embed_query"),
     ("hybrid", "retrieval", "MilvusStore.hybrid_retrieve", "dense + BM25 · RRF k=60 · leaf chunks (L3)", "io",
      "backend.indexing.milvus_client:MilvusStore.hybrid_retrieve"),
     ("merge", "retrieval", "_auto_merge_candidates", "leaves → L2/L1 parents from Postgres", "io",
-     "backend.rag.utils:_auto_merge_candidates"),
+     "backend.agent.rag.utils:_auto_merge_candidates"),
     ("rerank", "retrieval", "_rerank_documents", "Jina rerank, optional · min-score filter", "step",
-     "backend.rag.utils:_rerank_documents"),
-    ("cache_store", "retrieval", "RetrievalCache.store", "", "io", "backend.rag.retrieval_cache:RetrievalCache.store"),
+     "backend.agent.rag.utils:_rerank_documents"),
+    ("cache_store", "retrieval", "RetrievalCache.store", "", "io", "backend.agent.rag.retrieval_cache:RetrievalCache.store"),
     # Answer settlement
     ("settle", "settle", "TurnPipeline.settle_agent_answer", "evidence in hand for the first time", "decision",
-     "backend.chat.turn_pipeline:TurnPipeline.settle_agent_answer"),
+     "backend.agent.chat.turn_pipeline:TurnPipeline.settle_agent_answer"),
     ("ask", "settle", "build_pending_hitl", "retrieval asked a question · the next message answers it", "reply",
-     "backend.chat.clarification:build_pending_hitl"),
+     "backend.agent.chat.clarification:build_pending_hitl"),
     ("check_records", "settle", "enforce_records_agreement", "figures must match the records", "step",
-     "backend.chat.answer_checks:enforce_records_agreement"),
+     "backend.agent.chat.answer_checks:enforce_records_agreement"),
     ("check_forced", "settle", "enforce_forced_tool_ran", "a required tool must have run", "step",
-     "backend.chat.answer_checks:enforce_forced_tool_ran"),
+     "backend.agent.chat.answer_checks:enforce_forced_tool_ran"),
     ("check_figures", "settle", "enforce_answer_figures", "numbers must appear in the retrieved chunks", "step",
-     "backend.chat.answer_checks:enforce_answer_figures"),
+     "backend.agent.chat.answer_checks:enforce_answer_figures"),
     ("check_empty", "settle", "nothing_usable_reply", "the model said nothing usable", "step",
-     "backend.chat.answer_checks:nothing_usable_reply"),
+     "backend.agent.chat.answer_checks:nothing_usable_reply"),
     ("replace", "settle", "content_replace", "answer withdrawn and replaced", "reply", ""),
     ("blocks", "settle", "settle_answer_blocks", "record tables as typed blocks · figure markers resolved",
-     "reply", "backend.chat.answer_blocks:settle_answer_blocks"),
+     "reply", "backend.agent.chat.answer_blocks:settle_answer_blocks"),
     ("assets", "settle", "TurnPipeline.attach_assets", "figures, rendered for this client", "step",
-     "backend.chat.turn_pipeline:TurnPipeline.attach_assets"),
+     "backend.agent.chat.turn_pipeline:TurnPipeline.attach_assets"),
     # Save
     ("save_meta", "save", "TurnPipeline.save_metadata", "a patch: child pin, pending question, title", "step",
-     "backend.chat.turn_pipeline:TurnPipeline.save_metadata"),
+     "backend.agent.chat.turn_pipeline:TurnPipeline.save_metadata"),
     ("commit", "save", "TurnPipeline.commit", "BackgroundJobs lane per conversation · retry · idempotency keys",
-     "step", "backend.chat.turn_pipeline:TurnPipeline.commit"),
+     "step", "backend.agent.chat.turn_pipeline:TurnPipeline.commit"),
     ("interrupted", "save", "TurnPipeline.commit_interrupted", "stop pressed / connection dropped", "step",
-     "backend.chat.turn_pipeline:TurnPipeline.commit_interrupted"),
+     "backend.agent.chat.turn_pipeline:TurnPipeline.commit_interrupted"),
     ("postgres", "save", "Postgres · conversations", "append-only messages", "io", ""),
     ("hold", "save", "_hold_until_stored", "'stored' event with the row ids", "step",
-     "backend.chat.service:_hold_until_stored"),
+     "backend.agent.chat.service:_hold_until_stored"),
     ("done", "save", "Reply delivered", "SSE done", "finish", ""),
 ]
 
@@ -294,11 +294,11 @@ RAG_RETRIEVAL_ENTRY = {
 }
 
 LADDER_NOTES = {
-    "backend.chat.signals:SocialDetector": ("social phrases · no model", "step"),
-    "backend.rag.scope_detector:CatalogueScopeDetector": ("scope catalogue · vector match", "step"),
-    "backend.rag.scope_detector:ScopeModelDetector": ("FAST_MODEL · second opinion on scope", "llm"),
-    "backend.chat.signals:CorpusSimilarityDetector": ("domain gate · corpus similarity", "step"),
-    "backend.chat.signals:EnvelopeDetector": ("FAST_MODEL · request envelope", "llm"),
+    "backend.agent.chat.signals:SocialDetector": ("social phrases · no model", "step"),
+    "backend.agent.rag.scope_detector:CatalogueScopeDetector": ("scope catalogue · vector match", "step"),
+    "backend.agent.rag.scope_detector:ScopeModelDetector": ("FAST_MODEL · second opinion on scope", "llm"),
+    "backend.agent.chat.signals:CorpusSimilarityDetector": ("domain gate · corpus similarity", "step"),
+    "backend.agent.chat.signals:EnvelopeDetector": ("FAST_MODEL · request envelope", "llm"),
 }
 
 
@@ -590,13 +590,13 @@ class Compiled:
 
 
 def compile_parts() -> Compiled:
-    from backend.chat.orchestrator import _LadderConfig
-    from backend.chat.request_context import ChatRequestContext
-    from backend.chat.runtime import create_agent_for_request
-    from backend.chat.signals import build_ladder
-    from backend.profiles.registry import get_profile
-    from backend.rag.pipeline import rag_graph
-    from backend.tools import KNOWLEDGE_TOOL, RECORDS_TOOLS, build_tools
+    from backend.agent.chat.orchestrator import _LadderConfig
+    from backend.agent.chat.request_context import ChatRequestContext
+    from backend.agent.chat.runtime import create_agent_for_request
+    from backend.agent.chat.signals import build_ladder
+    from backend.agent.profiles.registry import get_profile
+    from backend.agent.rag.pipeline import rag_graph
+    from backend.agent.tools import KNOWLEDGE_TOOL, RECORDS_TOOLS, build_tools
 
     profile = get_profile()
     # A context no turn will ever use: nothing here invokes a graph, only compiles it.

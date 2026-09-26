@@ -130,7 +130,7 @@ class VisionEntityExtractor(FigureExtractor):
         return "\n".join(parts) or "(no surrounding text)"
 
     def extract(self, request: ExtractionRequest) -> ExtractionPayload:
-        from backend.prompts import resolve as resolve_prompt
+        from backend.agent.prompts import resolve as resolve_prompt
 
         prompt = resolve_prompt(
             self._config.extraction_prompt,

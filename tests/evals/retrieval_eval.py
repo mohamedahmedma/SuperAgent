@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from backend.rag import utils as u  # noqa: E402
+from backend.agent.rag import utils as u  # noqa: E402
 
 # (id, language, query, [acceptable gold substrings])
 CASES: list[tuple[str, str, str, list[str]]] = [

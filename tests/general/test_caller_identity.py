@@ -11,8 +11,8 @@ organised around:
 import asyncio
 import unittest
 
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.request_context import ChatRequestContext
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.request_context import ChatRequestContext
 
 TOKEN = "eyJhbGciOiJSUzI1NiJ9.super-secret-bearer-value.signature"
 
@@ -181,7 +181,7 @@ class ServiceSignatureTests(unittest.TestCase):
     def test_both_entry_points_accept_a_keyword_only_caller(self):
         import inspect
 
-        from backend.chat.service import chat_with_agent, chat_with_agent_stream
+        from backend.agent.chat.service import chat_with_agent, chat_with_agent_stream
 
         for function in (chat_with_agent, chat_with_agent_stream):
             with self.subTest(function=function.__name__):
@@ -191,14 +191,14 @@ class ServiceSignatureTests(unittest.TestCase):
                 self.assertIsNone(parameter.default)
 
     def test_a_caller_is_authoritative_over_the_positional_user_id(self):
-        from backend.chat.turn_pipeline import resolve_caller
+        from backend.agent.chat.turn_pipeline import resolve_caller
 
         caller, user_id = resolve_caller(CallerIdentity("real", "G-1", TOKEN), "default_user")
         self.assertEqual("real", user_id)
         self.assertEqual("G-1", caller.guardian_id)
 
     def test_no_caller_falls_back_to_the_positional_user_id(self):
-        from backend.chat.turn_pipeline import resolve_caller
+        from backend.agent.chat.turn_pipeline import resolve_caller
 
         caller, user_id = resolve_caller(None, "someone")
         self.assertEqual("someone", user_id)

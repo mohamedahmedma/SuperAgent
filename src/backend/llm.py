@@ -33,13 +33,13 @@ the next call through the pool paid a new handshake: 130 discarded connections i
 turns. `disable_streaming` makes these roles plain request/response calls.
 
 Resolution order is the backend's usual one — env > profile > schema default — and is
-implemented once, in backend/profiles/registry.py. Nothing here reads the environment.
+implemented once, in backend/agent/profiles/registry.py. Nothing here reads the environment.
 """
 from __future__ import annotations
 
 from typing import Any, Dict
 
-from backend.profiles import get_profile
+from backend.agent.profiles import get_profile
 
 # Each entry is a `<role>_*` field group on ModelConfig, and names the node it serves.
 ROLES = (

@@ -25,7 +25,7 @@ from backend.indexing.section_summary import (
     sections_fingerprint,
     summarise_section,
 )
-from backend.profiles import get_profile
+from backend.agent.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,7 @@ def _derive_floor_for(profile, records: List[SectionRecord]):
     """The scope floor for this catalogue, computed once here rather than at every boot."""
     import os
 
-    from backend.rag.scope_index import derive_floor, floor_fingerprint
+    from backend.agent.rag.scope_index import derive_floor, floor_fingerprint
 
     questions: List[str] = []
     chunk_ids: List[str] = []

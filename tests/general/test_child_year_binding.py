@@ -7,20 +7,20 @@ answer. Retrieval ranked the whole fee table and the wrong row won.
 
 The obvious fix is the one that must NOT be made. Appending conditions to the retrieval
 query was tried and reverted here after costing three of twenty turns
-(`backend/rag/graph_nodes.py:search_query`): a year group appears in no passage the corpus
+(`backend/agent/rag/graph_nodes.py:search_query`): a year group appears in no passage the corpus
 wrote once for everybody, so every such query term is dilution. The year therefore
 travels beside the question to the two stages that can act on it without costing recall
 — the grader, and the answer prompt.
 """
 import unittest
 
-from backend.chat.child_resolution import ResolvedChild
-from backend.chat.request_context import ChatRequestContext
-from backend.chat.turn_policy import _plan_child, TurnPlan, question_names_a_year
-from backend.profiles import get_profile
-from backend.prompts import render as render_prompt, resolve as resolve_prompt
-from backend.rag import pipeline
-from backend.rag.graph_nodes import search_query
+from backend.agent.chat.child_resolution import ResolvedChild
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.turn_policy import _plan_child, TurnPlan, question_names_a_year
+from backend.agent.profiles import get_profile
+from backend.agent.prompts import render as render_prompt, resolve as resolve_prompt
+from backend.agent.rag import pipeline
+from backend.agent.rag.graph_nodes import search_query
 
 MARKERS = get_profile().agent.year_reference_markers
 YEAR = "الصف الأول الابتدائي"
@@ -110,7 +110,7 @@ class ItReachesTheGraphTests(unittest.TestCase):
 
     def test_the_condition_says_the_records_are_its_source(self):
         """A condition that misreports where it came from is the fabricated-provenance
-        pattern `backend/rag/evidence.py` exists to prevent — the user did not say this."""
+        pattern `backend/agent/rag/evidence.py` exists to prevent — the user did not say this."""
         conditions = pipeline.grade_documents_node.conditions({"child_year": YEAR})
         self.assertIn("school's records", conditions[0])
 
@@ -203,7 +203,7 @@ class OlderContextCompatibilityTests(unittest.TestCase):
             self.language = language
 
     def test_an_older_context_still_receives_every_hint_it_understands(self):
-        from backend.chat.orchestrator import _hand_to_graph
+        from backend.agent.chat.orchestrator import _hand_to_graph
 
         plan = TurnPlan(
             retrieval_sections=["fees"],
@@ -219,7 +219,7 @@ class OlderContextCompatibilityTests(unittest.TestCase):
         self.assertEqual(ctx.language, "ar")
 
     def test_a_context_taking_only_the_two_positional_arguments_still_works(self):
-        from backend.chat.orchestrator import _hand_to_graph
+        from backend.agent.chat.orchestrator import _hand_to_graph
 
         class Minimal:
             def __init__(self):

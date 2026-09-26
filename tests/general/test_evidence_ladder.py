@@ -10,8 +10,8 @@ about individual signals than about two invariants:
 import unittest
 from unittest.mock import patch
 
-from backend.profiles.registry import load_profile
-from backend.rag.evidence import (
+from backend.agent.profiles.registry import load_profile
+from backend.agent.rag.evidence import (
     AssessmentContext,
     AssessmentLadder,
     Certainty,
@@ -22,7 +22,7 @@ from backend.rag.evidence import (
     build_ladder,
     parse_certainty,
 )
-from backend.rag.policy import (
+from backend.agent.rag.policy import (
     can_ask_human,
     decide_route,
     select_context_indices,
@@ -482,7 +482,7 @@ class GraderAssessorTests(unittest.TestCase):
     """The one rung that can name which chunks carried the answer."""
 
     def _assessor_with(self, grade):
-        import backend.rag.pipeline as pipeline
+        import backend.agent.rag.pipeline as pipeline
 
         class FakeStructured:
             def invoke(self, _messages):
@@ -495,7 +495,7 @@ class GraderAssessorTests(unittest.TestCase):
         return pipeline, FakeGrader()
 
     def test_supporting_chunks_become_per_chunk_judgements(self):
-        import backend.rag.pipeline as pipeline
+        import backend.agent.rag.pipeline as pipeline
 
         grade = pipeline.EvidenceGrade(
             relevance="strong", answerability="sufficient", route="answer",
@@ -511,7 +511,7 @@ class GraderAssessorTests(unittest.TestCase):
     def test_an_empty_supporting_list_leaves_every_chunk_unjudged(self):
         """"It did not tell us" and "it excluded this chunk" are different facts, and
         conflating them would silently drop evidence."""
-        import backend.rag.pipeline as pipeline
+        import backend.agent.rag.pipeline as pipeline
 
         grade = pipeline.EvidenceGrade(
             relevance="strong", answerability="sufficient", route="answer",
@@ -525,7 +525,7 @@ class GraderAssessorTests(unittest.TestCase):
         self.assertTrue(all(chunk.supported is None for chunk in report.chunks))
 
     def test_out_of_range_chunk_numbers_are_ignored(self):
-        import backend.rag.pipeline as pipeline
+        import backend.agent.rag.pipeline as pipeline
 
         grade = pipeline.EvidenceGrade(
             relevance="strong", answerability="sufficient", route="answer",
@@ -625,7 +625,7 @@ class HumanInTheLoopTests(unittest.TestCase):
 
     def test_the_round_count_survives_the_resume_boundary(self):
         """Without this, "ask once" would mean "once per graph run", which is every run."""
-        from backend.schemas.chat import HitlResumeState
+        from backend.agent.schemas.chat import HitlResumeState
 
         state = HitlResumeState(question="q", route="clarify",
                                 retrieval_status="needs_clarification", hitl_rounds=1)

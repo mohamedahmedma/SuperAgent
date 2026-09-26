@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.api.deps import conversation_storage, get_services
 from backend.api.routes.attachments import attachment_info
-from backend.chat.assets_bridge import restore_session_assets
-from backend.chat.storage import ConversationStorage
+from backend.agent.chat.assets_bridge import restore_session_assets
+from backend.agent.chat.storage import ConversationStorage
 from backend.composition import Services
 from backend.db.models import User
 from backend.infra.auth import get_current_user
-from backend.schemas import (
+from backend.agent.schemas import (
     MessageInfo,
     SessionDeleteResponse,
     SessionInfo,

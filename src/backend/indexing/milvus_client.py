@@ -133,7 +133,7 @@ class MilvusStore:
 
     `on_change` is called after every write that changes what a search can return (an
     insert, a delete, dropping the collection). The composition root points it at the
-    corpus version, which is what retires cached retrievals (backend/rag/retrieval_cache.py).
+    corpus version, which is what retires cached retrievals (backend/agent/rag/retrieval_cache.py).
     """
 
     def __init__(

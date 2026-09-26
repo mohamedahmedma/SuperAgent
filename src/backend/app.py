@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.api.router import router
 from backend.composition import Services, set_default_services
 from backend.infra.database import log_database_status, verify_connectivity
-from backend.profiles import get_profile
+from backend.agent.profiles import get_profile
 
 FRONTEND_DIR = PROJECT_ROOT / "src" / "frontend" / "dist"
 
@@ -148,7 +148,7 @@ def create_app(services: Services | None = None) -> FastAPI:
             yield
         finally:
             # A turn hands its save to background threads so the parent is not kept
-            # waiting for it (backend/chat/background.py). A stop signal arriving seconds
+            # waiting for it (backend/agent/chat/background.py). A stop signal arriving seconds
             # after an answer must not lose that save, so the queue is drained before the
             # process goes. Bounded below the container's
             # stop grace period (docker-compose.yml), or the drain itself would be what

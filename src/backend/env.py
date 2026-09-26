@@ -7,7 +7,7 @@ routinely contain `FOO=` for a value someone meant to disable, and the bare
 `os.getenv(name, default)` form returns `""` in that case rather than the default —
 which then either crashes (`int("")`) or, worse, silently evaluates to the wrong
 branch. These readers also keep the modules consistent with
-backend/profiles/registry.py, which applies the same blank-is-unset rule when
+backend/agent/profiles/registry.py, which applies the same blank-is-unset rule when
 overlaying env onto a profile.
 """
 import logging
@@ -119,10 +119,10 @@ RECORDS_BASE_URL_DEFAULT = "http://localhost:8100"
 def records_base_url() -> str:
     """The records facade's origin, with no trailing slash.
 
-    Read here rather than in the two modules that need it. `backend/tools/records.py` and
-    `backend/chat/child_roster.py` each used to call `os.getenv` with their own copy of the
+    Read here rather than in the two modules that need it. `backend/agent/tools/records.py` and
+    `backend/agent/chat/child_roster.py` each used to call `os.getenv` with their own copy of the
     default, and the second one carried a comment explaining why: `tools.records` imports
-    from `backend.chat`, so importing back the other way is a cycle. The explanation was
+    from `backend.agent.chat`, so importing back the other way is a cycle. The explanation was
     correct and the conclusion was not — `backend.env` imports nothing from either, so it
     can hold the value both need.
 

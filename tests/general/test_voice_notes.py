@@ -18,9 +18,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.assets.blobs import LocalBlobStore
-from backend.chat.attachments import ChatAttachments, VoiceNoteLimits, VoiceNoteRejected
-from backend.chat.storage import ConversationStorage, MessageToStore
-from backend.chat.transcription import NoTranscriber, Transcript, WhisperTranscriber, build_transcriber
+from backend.agent.chat.attachments import ChatAttachments, VoiceNoteLimits, VoiceNoteRejected
+from backend.agent.chat.storage import ConversationStorage, MessageToStore
+from backend.agent.chat.transcription import NoTranscriber, Transcript, WhisperTranscriber, build_transcriber
 from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
 from tests.general.postgres_support import postgres_schema
@@ -159,7 +159,7 @@ class WhisperTranscriberTests(unittest.TestCase):
         client, _ = self._client(error=RuntimeError("502 from the provider"))
         transcriber = WhisperTranscriber(api_key="k", model="m", client_factory=lambda: client)
 
-        with self.assertLogs("backend.chat.transcription", level="WARNING"):
+        with self.assertLogs("backend.agent.chat.transcription", level="WARNING"):
             transcript = transcriber.transcribe(WEBM, "audio/webm")
         self.assertEqual(Transcript("", Transcript.UNAVAILABLE), transcript)
 
@@ -190,14 +190,14 @@ class WhisperTranscriberTests(unittest.TestCase):
         and the only thing that reported it was a parent reading an alert. The line names
         the variable to set, because "which one?" is the next question.
         """
-        with self.assertLogs("backend.chat.transcription", level=logging.WARNING) as captured:
+        with self.assertLogs("backend.agent.chat.transcription", level=logging.WARNING) as captured:
             self.assertIsInstance(build_transcriber({"ARK_API_KEY": "k"}), NoTranscriber)
         line = "\n".join(captured.output)
         self.assertIn("TRANSCRIPTION_MODEL", line)
         self.assertIn("voice notes", line)
 
     def test_a_configured_model_is_named_in_the_log_and_the_key_is_not(self):
-        with self.assertLogs("backend.chat.transcription", level=logging.INFO) as captured:
+        with self.assertLogs("backend.agent.chat.transcription", level=logging.INFO) as captured:
             build_transcriber({"TRANSCRIPTION_MODEL": "openai/whisper-large-v3", "ARK_API_KEY": "secret-key"})
         line = "\n".join(captured.output)
         self.assertIn("openai/whisper-large-v3", line)

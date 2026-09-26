@@ -31,7 +31,7 @@ from dataclasses import replace
 
 from backend.application.ports.repositories import DocumentPairRecord
 from backend.application.ports.unit_of_work import UnitOfWorkFactory
-from backend.chat.language import ARABIC, ENGLISH
+from backend.agent.chat.language import ARABIC, ENGLISH
 from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -245,7 +245,7 @@ class DocumentPairService:
         figure can actually reach the user.
         """
         try:
-            from backend.profiles import get_profile
+            from backend.agent.profiles import get_profile
 
             if not get_profile().assets.enabled:
                 return None

@@ -1,6 +1,6 @@
 """Retrying a database write through the failures that pass by themselves.
 
-RAG_FIX_PLAN item 21. A turn's save runs in the background (`backend/chat/background.py`)
+RAG_FIX_PLAN item 21. A turn's save runs in the background (`backend/agent/chat/background.py`)
 so the parent is answered without waiting for it, and a save that failed was logged and
 dropped: a Postgres restart, a dropped connection or a pool timeout under load cost the
 parent the answer they had just read. These are the failures that succeed if tried again

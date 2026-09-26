@@ -18,8 +18,8 @@ import unittest
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from backend.chat import runtime
-from backend.profiles import load_profile, registry, set_profile
+from backend.agent.chat import runtime
+from backend.agent.profiles import load_profile, registry, set_profile
 
 
 class _Request:
@@ -89,7 +89,7 @@ class TheBudgetComesFromOnePlacePerTool(ProfileScopedTest):
         Enumerated from `RECORDS_TOOLS` rather than listed here, because a list written out
         is one a fifth record tool would silently drop off — it would keep passing while
         covering one tool fewer, which is the failure a budget test cannot afford."""
-        from backend.tools import RECORDS_TOOLS
+        from backend.agent.tools import RECORDS_TOOLS
 
         for name in RECORDS_TOOLS:
             with self.subTest(tool=name):
@@ -172,7 +172,7 @@ class TheBudgetsMustFitTheStepLimit(ProfileScopedTest):
     """
 
     def test_every_shipped_profile_can_afford_its_own_budgets(self):
-        from backend.profiles import available_profiles
+        from backend.agent.profiles import available_profiles
 
         for name in available_profiles():
             with self.subTest(profile=name):
@@ -183,7 +183,7 @@ class TheBudgetsMustFitTheStepLimit(ProfileScopedTest):
     def test_a_budget_the_graph_cannot_spend_is_refused_at_load(self):
         """Caught when the profile loads rather than on the one question that needed the
         last call — which is where it was found the first time."""
-        from backend.profiles.schema import AgentConfig
+        from backend.agent.profiles.schema import AgentConfig
 
         with self.assertRaises(Exception) as raised:
             AgentConfig(tools=["search_knowledge_base", "get_student_grades"],

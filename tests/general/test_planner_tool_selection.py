@@ -25,16 +25,16 @@ import unittest
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from backend.chat import runtime
-from backend.chat.child_resolution import no_child, resolve_child
-from backend.chat.child_roster import ChildOption
-from backend.chat.signals import RequestSignals
-from backend.chat.turn_policy import (
+from backend.agent.chat import runtime
+from backend.agent.chat.child_resolution import no_child, resolve_child
+from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.turn_policy import (
     KNOWLEDGE_TOOL,
     GRADES_TOOL as RECORDS_TOOL,
     resolve_turn,
 )
-from backend.chat.answer_checks import _denies_the_records
+from backend.agent.chat.answer_checks import _denies_the_records
 
 LAYLA = ChildOption(student_id="S-1", label="ليلى أحمد", gender="female", year_level="Year 4")
 OMAR = ChildOption(student_id="S-2", label="عمر أحمد", gender="male")
@@ -427,7 +427,7 @@ class TheChoiceComesBackAsAnAnswer(unittest.TestCase):
     """The second half: what the parent taps becomes a pinned child, not a search term."""
 
     def _pending(self):
-        from backend.chat.clarification import child_choice_pending
+        from backend.agent.chat.clarification import child_choice_pending
 
         plan = _plan(resolve_child(reference="son", roster=[ALI, AHMED]),
                      about_child=True, child_question_kind="records")
@@ -447,7 +447,7 @@ class TheChoiceComesBackAsAnAnswer(unittest.TestCase):
         self.assertIsNone(pending["resume_state"])
 
     def test_a_plan_that_settled_the_child_asks_nothing(self):
-        from backend.chat.clarification import child_choice_pending
+        from backend.agent.chat.clarification import child_choice_pending
 
         plan = _plan(resolve_child(reference="son", roster=[ALI, SARA]),
                      about_child=True, child_question_kind="records")
@@ -456,7 +456,7 @@ class TheChoiceComesBackAsAnAnswer(unittest.TestCase):
     def test_the_reply_reopens_the_original_question_rather_than_searching_for_a_name(self):
         """Folding "علي" into the query the way the retrieval clarifications do would
         search for a child's name instead of for what the parent actually asked."""
-        from backend.chat.clarification import enter_turn
+        from backend.agent.chat.clarification import enter_turn
 
         entry = enter_turn("علي", [], {"pending_hitl": self._pending()})
 
@@ -469,7 +469,7 @@ class TheChoiceComesBackAsAnAnswer(unittest.TestCase):
         a model — a resolver call on this path would be paying to re-derive a fact."""
         from unittest.mock import Mock
 
-        from backend.chat.clarification import enter_turn
+        from backend.agent.chat.clarification import enter_turn
 
         resolver = Mock()
         enter_turn("علي", [], {"pending_hitl": self._pending()}, resolve=resolver)

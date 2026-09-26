@@ -17,7 +17,7 @@ from backend.assets.vision import (
     resolve_vision_credentials,
     vision_status,
 )
-from backend.profiles.registry import load_profile
+from backend.agent.profiles.registry import load_profile
 
 # Everything the resolver reads, cleared so a real .env cannot leak into a test.
 VISION_ENV = {
@@ -253,7 +253,7 @@ class RateLimitRetryTests(unittest.TestCase):
     what silently stripped every figure out of a document."""
 
     def setUp(self):
-        from backend.profiles.registry import load_profile as _load
+        from backend.agent.profiles.registry import load_profile as _load
 
         self.config = _load("base").assets.figures.model_copy(
             update={"vision_retry_attempts": 3, "vision_retry_base_seconds": 0.01,
@@ -384,6 +384,6 @@ class VisionParameterTests(unittest.TestCase):
 
     def test_the_output_budget_default_fits_a_small_quota(self):
         """input (~3k for a page image) + this must stay inside an 8k/min window."""
-        from backend.profiles.registry import load_profile as _load
+        from backend.agent.profiles.registry import load_profile as _load
 
         self.assertLessEqual(_load("base").assets.figures.vision_max_output_tokens, 5000)

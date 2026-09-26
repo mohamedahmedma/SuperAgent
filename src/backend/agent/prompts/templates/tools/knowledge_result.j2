@@ -1,0 +1,121 @@
+{# Everything search_knowledge_base says back to the model.
+
+   This is the Class B half of prompt routing: instructions that depend on what
+   retrieval actually RETURNED, which the system prompt cannot know because it is
+   fixed before the tool runs. Each branch below is paid only on the turns where its
+   condition is real, which is why the system prompt can stay silent about all of it.
+
+   `outcome` is DECIDED in backend/agent/tools/knowledge.py and merely rendered here. The
+   template selects wording; it does not inspect the trace or apply policy. Keep it
+   that way — a condition richer than "which outcome" belongs in the tool.
+
+   The sentence lines below run long ON PURPOSE. A model reads what is rendered, not
+   the source, and hard-wrapping a sentence here puts real newlines mid-phrase in the
+   prompt — extra tokens, and it breaks any downstream match on a phrase that now
+   straddles a line break. Let the editor soft-wrap; do not reflow these by hand.
+
+   Whitespace: trim_blocks is on, so the newline after every {% %} tag is swallowed. #}
+{% if outcome == "call_limit" %}
+TOOL_CALL_LIMIT_REACHED: search_knowledge_base has already been called once in this turn. Use the existing retrieval result and provide the final answer directly.
+{% elif outcome == "needs_clarification" %}
+NEEDS_CLARIFICATION: {{ prompt }}
+Put this question to the user directly. Do not answer from the retrieved context.
+{% elif outcome == "needs_scope_selection" %}
+NEEDS_SCOPE_SELECTION: {{ prompt }}
+{% if options %}
+Options: {{ options | join("; ") }}
+{% endif %}
+Ask the user to choose. Do not answer from the retrieved context.
+{% elif outcome == "retrieval_error" %}
+RETRIEVAL_ERROR: The knowledge base could not be searched right now due to a temporary technical issue. Tell the user a brief technical problem interrupted the search and to try again in a moment. Do NOT claim the knowledge base lacks this information, and do not answer from your own knowledge.
+{% elif outcome == "no_knowledge" %}
+NO_KNOWLEDGE: No reliable relevant documents were found in the knowledge base. Tell the user it does not contain reliable information on this, and do not answer from your own knowledge.
+{% elif outcome == "empty" %}
+No relevant documents found in the knowledge base.
+{% else %}
+Retrieved Chunks:
+{{ chunks }}
+{# The no-narration rule lives HERE, not in agent/system.j2, for the same reason as
+   everything else in this file: it is only true when chunks came back. It is also the
+   turn where the chunk header (filename, page, "figure available") tempts the model
+   into a closing sentence describing its own sources, which readers see as filler. #}
+
+Answer the question itself. Do not close with a sentence about the material: where in a document it sits, which figure or note it came from, or what it leaves open. The citation markers already carry provenance.
+{% if figures %}
+{# Paid only on turns that retrieved a figure, which is the minority of them.
+
+   This is the whole of the image feature at query time. There is no tool to look at a
+   picture and no second model call to choose one: the figure was read into text at
+   ingest, so the chunk already answers the question, and the marker the model copies
+   into its own sentence is what puts the picture on screen — and now also WHERE.
+
+   Two things have to be true for that to work, and this sentence is both of them: the
+   model has to know which chunks are pictures (the numbered marker in the chunk
+   header), and it has to know the marker is something to REPRODUCE rather than a
+   label to read past. Without the second half the model describes an image nobody
+   attached.
+
+   Writing a marker is free to get wrong. An unknown number is deleted from the answer
+   in backend/agent/chat/service.py and nothing else happens — no refusal, no correction, no
+   annotation. That is deliberate: the previous version of this feature withheld
+   answers whose citations it could not verify, and withdrawing a correct answer over
+   a marker is far worse than dropping a picture. #}
+
+One or more chunks above carry a numbered marker like [FIGURE 1]: that is a real image. Write the same marker into your answer where the picture belongs — on its own line, or straight after the sentence it illustrates, never inside a sentence — and the image is shown at that point. Use the marker from the chunk you actually described, and only for a figure you are genuinely talking about. Never invent a number, and never write an image, a link or a file path; those cannot render.
+{% endif %}
+{% if constraints %}
+{# Three states, because a carried condition and the material can stand in three
+   relations, and the first version of this block assumed only one of them. It told the
+   model to answer within the conditions or else say nothing covered them — which is
+   right for a per-year fee table and catastrophic for a document list written once for
+   everybody: the answer was sitting in chunk 1 and the turn refused. `discriminate` is
+   the grader's verdict, taken on the same call that graded the evidence.
+
+   The `no` and `unknown` branches each end by forbidding a refusal. `yes` did not, and
+   it is the only one that can narrow to NOTHING: told to answer for Year 12 out of
+   material written for Reception and Years 1-6, a model has been left an empty set and
+   the one move still open to it is to deny. So `yes` now says what to do when their case
+   is the one missing — report the coverage rather than report nothing. #}
+{% if discriminate == "yes" %}
+
+SCOPE OF THE ANSWER: the user set these conditions earlier and has not withdrawn them — {{ constraints | join("; ") }}. The material above gives different answers depending on them, so answer only for what they cover and leave the other cases out rather than listing them as extra detail. If the material turns out to cover OTHER cases and not theirs, do not refuse: say which cases it does cover, and that theirs is not among them. Narrowing is how to answer this question, never a reason to withhold everything.
+{% elif discriminate == "no" %}
+
+SCOPE OF THE ANSWER: the user set these conditions earlier — {{ constraints | join("; ") }} — but the material above does not vary by them: it is one answer that applies to everyone. Give it in full, and say plainly that it is the same regardless of {{ constraints | join(" or ") }}. Do NOT withhold it, hedge it, or claim the knowledge base lacks a version for their case — a general rule IS the answer to a specific question, and the user asked because they need the rule.
+{% else %}
+
+SCOPE OF THE ANSWER: the user set these conditions earlier — {{ constraints | join("; ") }}. Where the material distinguishes by them, answer for their case; where it states one rule for everyone, give that rule and say it applies generally. Answer either way — never refuse because the conditions are not named above.
+{% endif %}
+{% endif %}
+{% if child_year is defined and child_year %}
+{# `is defined` because the environment is StrictUndefined and this block is optional:
+   the resume path and the direct renders in tests pass the variables they know about,
+   and a turn that is not about a child must not have to name a variable to say so.
+
+   The child's year is the condition the PARENT did not have to state, and the one the
+   corpus is most likely to vary by. It gets the same three-state treatment as a carried
+   condition and for the same reason: told to answer only within it, a model handed a
+   document list written once for everybody refuses a question whose answer is in chunk
+   1. `discriminate` is the grader's verdict on whether this material varies by year. #}
+{% if discriminate == "yes" %}
+
+THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}. The material above gives different answers by year group, so state the figures and rules for {{ child_year }} and leave the other year groups out — do not list them as extra detail, and never state a figure for a different year group as though it were theirs.
+
+If the material covers other year groups and NOT {{ child_year }}, say exactly that: name the year groups it does cover, give any rule above that applies to every year, and tell the user the school's material here does not cover {{ child_year }}. Do not reply as though nothing was found — the chunks above are real, the user cannot see them, and "I have Reception to Year 6, not yours" is a true and useful answer where "I have nothing on this" is neither.
+{% elif discriminate == "no" %}
+
+THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}, but the material above does not vary by year group — it is one answer that applies to every year. Give it in full and say plainly that it is the same for every year. Do NOT withhold it or claim the knowledge base lacks a version for their year.
+{% else %}
+
+THE YEAR TO ANSWER FOR: the school's records put this student in {{ child_year }}. Where the material above distinguishes by year group, answer for {{ child_year }}; where it states one rule for every year, give that rule and say it applies generally. Never state a figure for a different year group as though it were theirs, and never refuse because {{ child_year }} is not among the year groups above — name the ones that are.
+{% endif %}
+{% endif %}
+{% if partial %}
+
+PARTIAL_EVIDENCE: these chunks are about what the user asked, but they were graded as not settling it on their own. Answer anyway, from what they do establish, and cite it. Read the subject of the question rather than its exact words: chunks that cover partnerships answer "what is partner" even though they never phrase it that way. Refusing here is the wrong outcome — the material is above, and the user cannot see it.
+{% endif %}
+{% if rewritten %}
+
+Note: this turn re-queried using a step-back question or a HyDE document. Those are retrieval aids, not evidence — cite only the chunks above.
+{% endif %}
+{% endif %}

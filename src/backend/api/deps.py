@@ -18,7 +18,7 @@ from fastapi import Depends, Request
 from backend.composition import Services, default_services
 
 if TYPE_CHECKING:
-    from backend.chat.storage import ConversationStorage
+    from backend.agent.chat.storage import ConversationStorage
     from backend.indexing.pair_store import DocumentPairService
     from backend.jobs.upload_jobs import IngestJobTracker
 

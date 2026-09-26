@@ -42,19 +42,19 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
-import backend.chat.runtime as runtime
+import backend.agent.chat.runtime as runtime
 from backend.composition import Services
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.child_roster import _as_options
-from backend.chat.orchestrator import plan_turn as _real_plan_turn
-from backend.chat.resolution import FOLLOWUP, ResolvedQuestion, unresolved
-from backend.chat.runtime import planned_tool_calls
-from backend.profiles.registry import load_profile, set_profile
-from backend.tools import build_tools
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.child_roster import _as_options
+from backend.agent.chat.orchestrator import plan_turn as _real_plan_turn
+from backend.agent.chat.resolution import FOLLOWUP, ResolvedQuestion, unresolved
+from backend.agent.chat.runtime import planned_tool_calls
+from backend.agent.profiles.registry import load_profile, set_profile
+from backend.agent.tools import build_tools
 from tests.general.test_chat_hitl_resume import FakeStorage
-from backend.chat.answer_blocks import _EVIDENCE_MARKERS
+from backend.agent.chat.answer_blocks import _EVIDENCE_MARKERS
 
-service = importlib.import_module("backend.chat.service")
+service = importlib.import_module("backend.agent.chat.service")
 
 GUARDIAN = "G-replay"
 TOKEN = "signed.identity.token"
@@ -566,11 +566,11 @@ class _Replay:
                 self.observed.append(await self._one(self._reply_to_which_child()))
 
     def run(self) -> "_Replay":
-        fake_rag = types.ModuleType("backend.rag.pipeline")
+        fake_rag = types.ModuleType("backend.agent.rag.pipeline")
         fake_rag.run_rag_graph = _retrieval
         with (
             patch.dict(os.environ, {"CHILD_ROSTER_TTL_SECONDS": "0"}),
-            patch.dict(sys.modules, {"backend.rag.pipeline": fake_rag}),
+            patch.dict(sys.modules, {"backend.agent.rag.pipeline": fake_rag}),
             patch("backend.records_http.get", self.facade),
             patch.object(service, "_PROFILE", self.profile),
             patch.object(service, "_COPY", self.profile.user_copy),

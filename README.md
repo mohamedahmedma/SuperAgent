@@ -265,24 +265,24 @@ npm run build
     - `routes/`: split into `auth`, `sessions`, `chat`, `documents` files.
     - [resources.py](backend/api/resources.py): shared resources such as Milvus and the upload directory.
   - `chat/`: conversation domain
-    - [service.py](backend/chat/service.py): non-streaming / streaming chat entry points.
-    - [runtime.py](backend/chat/runtime.py): model clients and per-request Agent creation.
-    - [request_context.py](backend/chat/request_context.py): per-request RAG step, RAG trace, and tool-budget context.
-    - [storage.py](backend/chat/storage.py): session storage in PostgreSQL + Redis.
+    - [service.py](backend/agent/chat/service.py): non-streaming / streaming chat entry points.
+    - [runtime.py](backend/agent/chat/runtime.py): model clients and per-request Agent creation.
+    - [request_context.py](backend/agent/chat/request_context.py): per-request RAG step, RAG trace, and tool-budget context.
+    - [storage.py](backend/agent/chat/storage.py): session storage in PostgreSQL + Redis.
   - `rag/`: retrieval augmentation
-    - [pipeline.py](backend/rag/pipeline.py): the LangGraph RAG workflow.
-    - [utils.py](backend/rag/utils.py): hybrid retrieval, reranking, auto-merging.
+    - [pipeline.py](backend/agent/rag/pipeline.py): the LangGraph RAG workflow.
+    - [utils.py](backend/agent/rag/utils.py): hybrid retrieval, reranking, auto-merging.
   - `indexing/`: document ingestion and vectors
     - [embedding.py](backend/indexing/embedding.py): dense + BM25 sparse vectors.
     - [document_loader.py](backend/indexing/document_loader.py): PDF/Word/Excel chunking.
     - [milvus_client.py](backend/indexing/milvus_client.py), [milvus_writer.py](backend/indexing/milvus_writer.py).
     - [parent_chunk_store.py](backend/indexing/parent_chunk_store.py): the parent-chunk DocStore.
   - `tools/`: `@tool`-decorated functions callable by the LangChain Agent. Bound per
-    profile through `TOOL_BUILDERS` in [tools/__init__.py](backend/tools/__init__.py) —
+    profile through `TOOL_BUILDERS` in [tools/__init__.py](backend/agent/tools/__init__.py) —
     knowledge-base retrieval, figure reading, and student records.
   - `profiles/`: the domain profile system. A YAML file per deployment declares which
     tools are bound, which RAG rungs run, and what the assistant is called. `school` is
-    the profile this deployment runs; see [registry.py](backend/profiles/registry.py).
+    the profile this deployment runs; see [registry.py](backend/agent/profiles/registry.py).
   - `infra/`: [database.py](backend/infra/database.py), [cache.py](backend/infra/cache.py), [auth.py](backend/infra/auth.py).
   - `db/`: [models/](backend/db/models/__init__.py): ORM models, one module per aggregate, imported from the package.
   - `schemas/`: Pydantic request/response schemas (chat / documents).
@@ -328,7 +328,7 @@ npm run build
 3. The LangChain Agent decides whether to call a tool based on the question type:
   - Knowledge question -> `search_knowledge_base`
   - Figure or diagram -> `view_figure`
-4. If the knowledge-base tool is triggered, execution enters `backend/rag/pipeline.py` to run the retrieval workflow, with each stage pushed to the frontend in real time via `ChatRequestContext`.
+4. If the knowledge-base tool is triggered, execution enters `backend/agent/rag/pipeline.py` to run the retrieval workflow, with each stage pushed to the frontend in real time via `ChatRequestContext`.
 5. The retrieval results and RAG trace are returned together, and the Agent streams the final answer (pushed token by token).
 6. The frontend's ReadableStream parses the SSE chunks and renders them in real time with a typewriter effect.
 7. Meanwhile, messages are persisted to PostgreSQL, with Redis caching speeding up replay of historical sessions.
@@ -338,7 +338,7 @@ npm run build
   - Obviously short, single-fact questions are classified `simple` directly by local rules, without a model call.
   - Everything else has FAST_MODEL make the simple/complex determination in a single call; a `complex` result also returns 2-4 sub-questions in that same call, with no extra decomposition call needed.
 2. **Retrieval execution**
-  - The text searched for is `_search_query(state)`, not the question itself. Conditions carried from earlier turns, the child's year group and the child's NAME all travel beside the question rather than inside it: the knowledge base is the school's material, written once for every family, so a pupil's name is a rare high-IDF term the corpus cannot match. `backend/chat/child_names.py` decides what is safe to remove — folding makes the preposition على and the name علي one string, so an ambiguous name is only cut where the spelling or a word like «ابني» settles it.
+  - The text searched for is `_search_query(state)`, not the question itself. Conditions carried from earlier turns, the child's year group and the child's NAME all travel beside the question rather than inside it: the knowledge base is the school's material, written once for every family, so a pupil's name is a rare high-IDF term the corpus cannot match. `backend/agent/chat/child_names.py` decides what is safe to remove — folding makes the preposition على and the name علي one string, so an ambiguous name is only cut where the spelling or a word like «ابني» settles it.
   - simple: goes to `retrieve_initial` and runs a single standard retrieval.
   - complex: each sub-question's "retrieve -> grade evidence" step runs in parallel via LangGraph's `Send`, then `synthesis` deduplicates and merges the results.
   - Calls `retrieve_documents`.
@@ -537,16 +537,16 @@ chat_with_agent_stream()
 
 ### Backend Implementation
 
-#### 1) Streaming generation (`backend/chat/service.py`)
+#### 1) Streaming generation (`backend/agent/chat/service.py`)
 - Uses LangGraph's `agent.astream(stream_mode="messages")` to get `AIMessageChunk` token by token.
 - Filters out `tool_call_chunks`, forwarding only text content to the frontend.
 - **Key design**: the Agent's streaming loop runs inside an `asyncio.create_task` background task; the main generator is only responsible for pulling events off the unified `output_queue` and yielding them. This lets RAG steps keep streaming to the frontend in real time even while a tool is executing (i.e. while the agent is blocked waiting on a tool's return value).
 
-#### 2) Real-time RAG step pushing (`backend/tools/knowledge.py` + `backend/rag/pipeline.py`)
+#### 2) Real-time RAG step pushing (`backend/agent/tools/knowledge.py` + `backend/agent/rag/pipeline.py`)
 - `ChatRequestContext.emit_rag_step(icon, label, detail)` uses the `loop.call_soon_threadsafe()` captured when the request context was created to safely push a step from a synchronous thread into this request's async queue.
 - `make_search_knowledge_base(ctx)` creates a tool dedicated to this request; the LLM still only sees the `query` parameter, while the Python closure holds the current request's `ctx`.
-- `backend/rag/pipeline.py` receives the context via `run_rag_graph(question, ctx)`, grouping sub-question progress under safe labels (e.g. `Sub-question 1`).
-- `backend/rag/pipeline.py` emits a step at each key node:
+- `backend/agent/rag/pipeline.py` receives the context via `run_rag_graph(question, ctx)`, grouping sub-question progress under safe labels (e.g. `Sub-question 1`).
+- `backend/agent/rag/pipeline.py` emits a step at each key node:
   - `retrieve_initial` → "Searching the knowledge base..."
   - `grade_documents` → "Evaluating document relevance..."
   - `rewrite_question` → "Choosing a Step-back / HyDE rewrite method"
@@ -652,6 +652,6 @@ StreamingResponse(
 - **Problem**: because the Agent ran synchronous tools (like `search_knowledge_base`) inside a thread pool, it couldn't correctly access the main thread's asyncio event loop, causing `emit_rag_step` events to be dropped and leaving the frontend's "thinking" bubble frozen.
 - **Fix**:
   1. **Backend (`service.py`)**: create a `ChatRequestContext` per request, capturing the main thread's `loop` and this request's `output_queue`.
-  2. **Backend (`backend/tools/knowledge.py` + `backend/rag/pipeline.py`)**: use a per-request tool factory and an explicit `ctx` parameter to dispatch RAG steps across threads, avoiding cross-request mix-ups.
+  2. **Backend (`backend/agent/tools/knowledge.py` + `backend/agent/rag/pipeline.py`)**: use a per-request tool factory and an explicit `ctx` parameter to dispatch RAG steps across threads, avoiding cross-request mix-ups.
   3. **Frontend (`stores/chat.ts`)**: initialize an empty `ragSteps: []` array when sending a message, so Vue's reactivity system can immediately track subsequent `push()` calls.
 - **Result**: after a user asks a question, the thinking bubble now shows retrieval steps updating live (e.g. "🔍 Searching the knowledge base..." -> "📊 Evaluating document relevance..."), instead of a static "Thinking...".

@@ -34,16 +34,16 @@ import os
 import unittest
 from unittest.mock import patch
 
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.child_context import SessionChild
-from backend.chat.child_resolution import resolve_child
-from backend.chat.child_roster import ChildOption
-from backend.chat.orchestrator import plan_turn
-from backend.chat.request_context import ChatRequestContext
-from backend.chat.resolution import unresolved
-from backend.chat.signals import RequestSignals
-from backend.chat.turn_policy import resolve_turn
-from backend.profiles.registry import load_profile, set_profile
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.child_context import SessionChild
+from backend.agent.chat.child_resolution import resolve_child
+from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.orchestrator import plan_turn
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.resolution import unresolved
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.turn_policy import resolve_turn
+from backend.agent.profiles.registry import load_profile, set_profile
 
 KNOWLEDGE_TOOL = "search_knowledge_base"
 RECORDS_TOOL = "get_student_grades"
@@ -614,7 +614,7 @@ class AWholeConversationThroughThePlanner(unittest.TestCase):
         measured win: the knowledge tool is not on the wire for a question about a child's
         own record, so it cannot be chosen by mistake.
         """
-        from backend.tools import RECORDS_TOOLS
+        from backend.agent.tools import RECORDS_TOOLS
 
         self.chat.settle(self.chat.ask("درجات ليلى؟", reference="named", name="ليلى"))
         records = self.chat.ask("طيب وغيابها؟", kind="records")

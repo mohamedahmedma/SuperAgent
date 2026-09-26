@@ -41,7 +41,7 @@ renderer.html = () => '';
 /**
  * A figure anchor, and the answer split around them.
  *
- * `_resolve_figure_markers` in backend/chat/service.py turns each `[FIGURE n]` the model
+ * `_resolve_figure_markers` in backend/agent/chat/service.py turns each `[FIGURE n]` the model
  * wrote into `<!--figure:{asset_id}-->` at that point in the prose, so the picture can be
  * rendered where the answer put it rather than as a card underneath the whole message.
  *
@@ -72,7 +72,7 @@ export function splitFigureAnchors(text: string): AnswerPart[] {
 /**
  * Where each tool-rendered record starts in an answer.
  *
- * `_settle_answer_blocks` in backend/chat/service.py appends every record under the prose,
+ * `_settle_answer_blocks` in backend/agent/chat/service.py appends every record under the prose,
  * each on the line after `<!--record-block-->`. The same record may also have arrived as
  * data (an `AnswerBlock`) naming its marker by `index` — the marker's position here,
  * counted from 0 — in which case it is drawn in that place instead of printed.

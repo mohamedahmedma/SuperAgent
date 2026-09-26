@@ -140,7 +140,7 @@ def scope_catalogue_built() -> bool:
         # `ScopeIndexStore()` has no builder and `get()` returns an empty index for it
         # unconditionally — so probing with one reports "no catalogue" however healthy
         # the catalogue is, and every guarded test skips for a reason that is not true.
-        from backend.rag.scope_detector import index_store
+        from backend.agent.rag.scope_detector import index_store
 
         return bool(index_store.get().ready)
     except Exception:

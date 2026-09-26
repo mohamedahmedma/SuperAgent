@@ -20,7 +20,7 @@ import os
 from backend.env import env_bool, env_float
 from backend.indexing.embedding import EmbeddingService
 from backend.indexing.milvus_client import MilvusStore
-from backend.profiles import get_profile
+from backend.agent.profiles import get_profile
 from backend.text_matching import search_key
 
 logger = logging.getLogger(__name__)

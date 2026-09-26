@@ -29,16 +29,16 @@ import os
 import unittest
 from unittest.mock import Mock, patch
 
-from backend.chat import service
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.child_resolution import resolve_child
-from backend.chat.child_roster import ChildOption
-from backend.chat.request_context import ChatRequestContext
-from backend.chat.resolution import CORRECTION, STANDALONE, ResolvedQuestion
-from backend.chat.clarification import _current_pending_hitl, child_choice_pending, enter_turn, pin_the_child_the_parent_named
-from backend.chat.signals import RequestSignals
-from backend.chat.turn_policy import resolve_turn
-from backend.schemas.chat import PendingHitlState
+from backend.agent.chat import service
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.child_resolution import resolve_child
+from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.resolution import CORRECTION, STANDALONE, ResolvedQuestion
+from backend.agent.chat.clarification import _current_pending_hitl, child_choice_pending, enter_turn, pin_the_child_the_parent_named
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.turn_policy import resolve_turn
+from backend.agent.schemas.chat import PendingHitlState
 
 # A clarification asked a moment ago. Pending questions expire after a day
 # (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.

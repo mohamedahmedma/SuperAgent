@@ -26,7 +26,7 @@ import re
 import statistics
 from typing import Any, Dict, List, Optional
 
-from backend.profiles import get_profile
+from backend.agent.profiles import get_profile
 
 # Max vertical gap (pt) between consecutive lines that still belong to one paragraph.
 PARA_LINE_GAP = 15.0
