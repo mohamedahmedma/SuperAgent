@@ -191,6 +191,7 @@ services:
       # ephemeral layer and is re-fetched on every recreate. Pointing it at a named
       # volume makes that a one-time cost.
       HF_HOME: /app/hf-cache
+      GRAPHS_OUTPUT_DIR: /app/graphs
     ports: ["127.0.0.1:${BACKEND_HOST_PORT:-8000}:8000"]
     # The backend finishes queued conversation saves on the way down (its lifespan
     # drains them for up to 20s). Docker's default of 10s would SIGKILL that drain.
@@ -199,6 +200,7 @@ services:
       - backend_data:/app/data
       - uploads_data:/app/uploads
       - hf_cache:/app/hf-cache
+      - graphs_data:/app/graphs
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -241,5 +243,6 @@ volumes:
   identity_data:
   sis_data:
   backend_data:
+  graphs_data:
   uploads_data:
   hf_cache:
