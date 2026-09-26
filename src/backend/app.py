@@ -23,7 +23,7 @@ from backend.composition import Services, set_default_services
 from backend.infra.database import log_database_status, verify_connectivity
 from backend.profiles import get_profile
 
-FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
+FRONTEND_DIR = PROJECT_ROOT / "src" / "frontend" / "dist"
 
 # Response headers a cross-origin caller is allowed to read. The list is short by
 # design: only headers a UI acts on belong here.

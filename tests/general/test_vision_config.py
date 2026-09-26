@@ -193,7 +193,7 @@ class SingleSourceOfTruthTests(unittest.TestCase):
         import pathlib
         import re
 
-        assets_dir = pathlib.Path(__file__).resolve().parents[2] / "backend" / "assets"
+        assets_dir = pathlib.Path(__file__).resolve().parents[2] / "src" / "backend" / "assets"
         offenders = []
         for path in assets_dir.glob("*.py"):
             if path.name == "vision.py":

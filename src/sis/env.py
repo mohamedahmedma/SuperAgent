@@ -14,7 +14,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# parents[2]: this package sits under src/, and .env is a level above src/.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _LOADED = False
 
 

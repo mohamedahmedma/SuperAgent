@@ -129,7 +129,7 @@ class RouteImportTests(unittest.TestCase):
         process cannot differ. Declaring the dependency instead is what makes both
         possible, so this asserts the shape rather than the object.
         """
-        path = REPO_ROOT / "backend" / "api" / "routes" / "sessions.py"
+        path = REPO_ROOT / "src" / "backend" / "api" / "routes" / "sessions.py"
         spec = importlib.util.spec_from_file_location("sessions_route_under_test", path)
         sessions = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(sessions)
@@ -147,7 +147,7 @@ class RouteImportTests(unittest.TestCase):
 
 class ImportShapeTests(unittest.TestCase):
     def test_backend_imports_do_not_pull_child_modules_from_packages(self):
-        backend_root = REPO_ROOT / "backend"
+        backend_root = REPO_ROOT / "src" / "backend"
         files = list(backend_root.rglob("*.py")) + list((REPO_ROOT / "tests").glob("test_*.py"))
         offenders = []
 
@@ -159,7 +159,7 @@ class ImportShapeTests(unittest.TestCase):
                 if not node.module.startswith("backend.") and node.module != "backend":
                     continue
 
-                package_path = REPO_ROOT / Path(*node.module.split("."))
+                package_path = REPO_ROOT / "src" / Path(*node.module.split("."))
                 for alias in node.names:
                     if alias.name == "*":
                         continue

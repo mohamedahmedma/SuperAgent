@@ -53,6 +53,11 @@ os.environ.setdefault("ACTIVE_PROFILE", "school")
 # into the next and make the run order-dependent.
 os.environ["CHILD_ROSTER_TTL_SECONDS"] = "0"
 
+# Run as a plain script, so nothing else puts the services on the path.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
+
 from backend.env import load_env
 
 load_env()

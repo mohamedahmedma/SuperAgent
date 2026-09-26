@@ -84,7 +84,7 @@ from sis import tenancy  # noqa: E402
 from sis.infrastructure.db.session import reset_engine  # noqa: E402
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork  # noqa: E402
 
-_ALEMBIC_INI = Path(__file__).resolve().parents[2] / "sis" / "alembic.ini"
+_ALEMBIC_INI = Path(__file__).resolve().parents[2] / "src" / "sis" / "alembic.ini"
 
 REGISTRAR_KEY = "registrar-fixture-key-0000000000"
 READER_KEY = "reader-fixture-key-00000000000000"

@@ -38,7 +38,7 @@ def load_milvus_writer_module():
             "backend.indexing.milvus_client": fake_client,
         },
     ):
-        path = REPO_ROOT / "backend" / "indexing" / "milvus_writer.py"
+        path = REPO_ROOT / "src" / "backend" / "indexing" / "milvus_writer.py"
         spec = importlib.util.spec_from_file_location("milvus_writer_under_test", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

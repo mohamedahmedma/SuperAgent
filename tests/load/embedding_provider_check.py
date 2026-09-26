@@ -38,7 +38,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+# The repository root stays for `tests.evals.*`; src/ is where the services live.
+sys.path.insert(0, str(_REPO_ROOT))
+sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 # Rules of thumb for bge-m3, not guarantees: fp32 vs fp32 differs only by kernel
 # rounding; fp16/bf16 differ in the 4th-5th decimal; an int8 or fp8 quantisation, or a

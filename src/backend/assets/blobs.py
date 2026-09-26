@@ -228,7 +228,9 @@ def build_blob_store(assets_config, project_root: Optional[Path] = None) -> Blob
     if backend == "local":
         root = Path(assets_config.blob_root)
         if not root.is_absolute():
-            base = project_root or Path(__file__).resolve().parents[2]
+            # parents[3]: a relative blob_root such as `uploads` resolves against the
+            # repository root, which is one level above src/.
+            base = project_root or Path(__file__).resolve().parents[3]
             root = base / root
         return LocalBlobStore(root)
 

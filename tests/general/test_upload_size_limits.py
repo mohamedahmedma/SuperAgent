@@ -54,7 +54,7 @@ UPLOAD_UPSTREAMS = (
 #: Configs that must always be on that path. Named so a rename cannot quietly empty the
 #: discovery below and leave this file asserting nothing; new vhosts need no edit here.
 REQUIRED_ON_PATH = (
-    "frontend/nginx.conf",
+    "src/frontend/nginx.conf",
     "deploy/nginx/api.aurexis.cc.conf",
     "deploy/nginx/superagent.aurexis.cc.conf",
 )
@@ -70,7 +70,7 @@ def _nginx_configs() -> list[Path]:
     the day somebody remembers this file. `volumes/` is excluded: it holds postgres's
     runtime `.conf` files, which are not nginx's and share only the extension.
     """
-    found = [REPO_ROOT / "frontend" / "nginx.conf"]
+    found = [REPO_ROOT / "src" / "frontend" / "nginx.conf"]
     found += sorted((REPO_ROOT / "deploy" / "nginx").glob("*.conf"))
     return [path for path in found if path.is_file()]
 

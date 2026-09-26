@@ -33,7 +33,7 @@ import pytest
 
 from sis.app import app
 
-_SIS = Path(__file__).resolve().parents[2] / "sis"
+_SIS = Path(__file__).resolve().parents[2] / "src" / "sis"
 
 #: What a person edits.
 SRC = _SIS / "frontend" / "src"

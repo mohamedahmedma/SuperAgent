@@ -84,7 +84,7 @@ def load_pipeline(
     module_name = f"rag_pipeline_under_test_{id(retrieve_documents)}"
     spec = importlib.util.spec_from_file_location(
         module_name,
-        REPO_ROOT / "backend" / "rag" / "pipeline.py",
+        REPO_ROOT / "src" / "backend" / "rag" / "pipeline.py",
     )
     module = importlib.util.module_from_spec(spec)
 

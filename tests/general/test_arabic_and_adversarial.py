@@ -778,7 +778,7 @@ class QueryIndexSymmetryTests(unittest.TestCase):
 
         spec = importlib.util.spec_from_file_location(
             "rag_utils_symmetry",
-            REPO_ROOT / "backend" / "rag" / "utils.py",
+            REPO_ROOT / "src" / "backend" / "rag" / "utils.py",
         )
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {

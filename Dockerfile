@@ -10,17 +10,19 @@ COPY pyproject.toml uv.lock README.md ./
 # builds, ships and then dies at import — which is how a missing snowballstemmer reached
 # production. The check costs nothing and turns that into a failed build.
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-install-project
-COPY backend ./backend
-COPY schoolauth ./schoolauth
+COPY src/backend ./src/backend
+COPY src/schoolauth ./src/schoolauth
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
 
 FROM python:3.12.11-slim-bookworm
-ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+# PYTHONPATH, because nothing is installed: uv locks this project as virtual, so the
+# packages are found on the path or not at all.
+ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app/src
 RUN groupadd --system app && useradd --system --gid app --home /app app
 WORKDIR /app
 COPY --from=builder --chown=app:app /app/.venv ./.venv
-COPY --chown=app:app backend ./backend
-COPY --chown=app:app schoolauth ./schoolauth
+COPY --chown=app:app src/backend ./src/backend
+COPY --chown=app:app src/schoolauth ./src/schoolauth
 # /app/hf-cache is a mount point for the HuggingFace model cache. Creating it here,
 # owned by app, means the named volume mounted over it inherits that ownership —
 # a volume mounted onto a path absent from the image would land root-owned and be
@@ -39,4 +41,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=300s --retries=5 CMD pyth
 # upgrade: before the server, not inside the app's startup. `--on-start` makes it a
 # no-op unless GRAPHS_DRAW_ON_START is set, and it exits 0 even when mermaid.ink is
 # unreachable, so it can never be the reason a container fails to come up.
-CMD ["sh", "-c", "alembic -c backend/alembic.ini upgrade head && python -m backend.graphs --on-start && exec uvicorn backend.app:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "alembic -c src/backend/alembic.ini upgrade head && python -m backend.graphs --on-start && exec uvicorn backend.app:app --host 0.0.0.0 --port 8000"]

@@ -86,7 +86,13 @@ study = [
     "bilibili-api-python>=17.0.0",
 ]
 
+# NOTE: there is no [build-system] here and uv locks this project as
+# `source = { virtual = "." }`, so setuptools never runs and this table is inert
+# today. It is kept correct for the day the project is built: src/ is the package
+# root. What actually puts the packages on sys.path is pythonpath below for pytest,
+# PYTHONPATH in each image, and an explicit insert in each standalone script.
 [tool.setuptools.packages.find]
+where = ["src"]
 # `schoolauth` ships with the backend because the backend imports it: it is the shared
 # token verifier every enforcement point compiles in. Leaving it out builds a wheel that
 # imports fine until the first authenticated request.
@@ -100,6 +106,11 @@ exclude = ["frontend*", "tests*"]
 "backend.profiles" = ["definitions/*.yaml"]
 # The migration directory is not a package either, and the app reads its head at startup.
 "backend" = ["alembic.ini", "migrations/*.py", "migrations/*.mako", "migrations/versions/*.py"]
+
+# The suites import the services directly and nothing is installed, so pytest has to
+# be told where they live. Without this every `from backend...` under tests/ fails.
+[tool.pytest.ini_options]
+pythonpath = ["src"]
 
 [dependency-groups]
 dev = [

@@ -14,7 +14,9 @@ from pathlib import Path
 from backend.profiles import get_profile
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR.parent / "data"
+# BASE_DIR is the package itself; data/ sits at the repository root, which is now two
+# levels up rather than one.
+DATA_DIR = BASE_DIR.parent.parent / "data"
 UPLOAD_DIR = DATA_DIR / "documents"
 
 

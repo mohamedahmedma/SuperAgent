@@ -208,7 +208,7 @@ def cmd_provision(args: argparse.Namespace) -> int:
         provisioner_for(
             plan.database_url, admin_url=os.getenv("SIS_ADMIN_DATABASE_URL", "")
         ),
-        DotEnvConfigStore(PROJECT_ROOT / ".env"),
+        DotEnvConfigStore(PROJECT_ROOT.parent / ".env"),
     )
     service.provision(args.code, template=template, existing_codes=existing)
 

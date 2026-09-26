@@ -29,7 +29,7 @@ import pathlib
 
 import pytest
 
-RECORDS = pathlib.Path(__file__).resolve().parents[2] / "records"
+RECORDS = pathlib.Path(__file__).resolve().parents[2] / "src" / "records"
 
 
 def _modules(package: str) -> list[pathlib.Path]:
@@ -107,7 +107,7 @@ def test_the_use_cases_touch_no_transport(path: pathlib.Path) -> None:
     for module in _imports(path):
         assert module.split(".")[0] not in _IO, (
             f"{path.name} imports {module}. Use cases talk to ports — declare the need in "
-            f"records/ports/ and implement it under records/adapters/."
+            f"src/records/ports/ and implement it under src/records/adapters/."
         )
         assert not module.startswith("records.adapters"), (
             f"{path.name} imports {module}. The concrete side implements the ports; the "

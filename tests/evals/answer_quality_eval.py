@@ -46,9 +46,10 @@ import re
 import sys
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The repository root stays for `tests.*`; src/ is where the services now live.
+sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
 
 # `load_env`, not a bare `load_dotenv`: this deployment selects its provider with
 # `LLM_PROVIDER` and collapses that block onto the generic `MODEL` / `BASE_URL` /

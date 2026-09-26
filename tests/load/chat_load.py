@@ -53,7 +53,10 @@ from pathlib import Path
 
 import httpx
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+# The repository root stays for `tests.*`; src/ is where the services now live.
+sys.path.insert(0, str(_REPO_ROOT))
+sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 
 def backend_env(stub: str = "http://127.0.0.1:8900/v1") -> dict:

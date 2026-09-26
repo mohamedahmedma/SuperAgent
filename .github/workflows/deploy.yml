@@ -51,12 +51,12 @@ jobs:
               # otherwise the pipeline can go green while silently skipping the app
               # commit whose previous production run never published its image.
               .github/workflows/ci.yml|.github/workflows/deploy.yml|docker-compose*.yml|Dockerfile|pyproject.toml|uv.lock) all=true ;;
-              backend/*) backend=true ;;
-              frontend/*) frontend=true ;;
-              identity/*) identity=true ;;
-              records/*) records=true ;;
-              sis/*) sis=true ;;
-              schoolauth/*) backend=true; identity=true; records=true ;;
+              src/backend/*) backend=true ;;
+              src/frontend/*) frontend=true ;;
+              src/identity/*) identity=true ;;
+              src/records/*) records=true ;;
+              src/sis/*) sis=true ;;
+              src/schoolauth/*) backend=true; identity=true; records=true ;;
             esac
           done <<< "$changed"
           if [ "$all" = true ]; then backend=true; frontend=true; identity=true; records=true; sis=true; fi
@@ -108,7 +108,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: frontend/Dockerfile
+          file: src/frontend/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE_PREFIX }}/frontend:${{ github.sha }}
@@ -134,7 +134,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: identity/Dockerfile
+          file: src/identity/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE_PREFIX }}/identity:${{ github.sha }}
@@ -158,7 +158,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: records/Dockerfile
+          file: src/records/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE_PREFIX }}/records:${{ github.sha }}
@@ -182,7 +182,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: sis/Dockerfile
+          file: src/sis/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE_PREFIX }}/sis:${{ github.sha }}
@@ -432,11 +432,11 @@ jobs:
             # healthy has already migrated. This covers the release where sis was not
             # recreated at all, and it runs after the health gate rather than before it so
             # it cannot race a container that is still coming up.
-            $compose exec -T sis alembic -c sis/alembic.ini upgrade head </dev/null || return 1
+            $compose exec -T sis alembic -c src/sis/alembic.ini upgrade head </dev/null || return 1
             # The backend likewise upgrades before uvicorn and will not start on a database
             # behind its build, so a healthy backend has migrated too; this covers the
             # release that did not recreate it.
-            $compose exec -T backend alembic -c backend/alembic.ini upgrade head </dev/null || return 1
+            $compose exec -T backend alembic -c src/backend/alembic.ini upgrade head </dev/null || return 1
           }
 
           if attempt "$image_tag"; then

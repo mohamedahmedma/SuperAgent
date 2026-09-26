@@ -105,8 +105,8 @@ class BothCallersAgreeTests(unittest.TestCase):
         from pathlib import Path
 
         for module_path in (
-            "backend/tools/records.py",
-            "backend/chat/child_roster.py",
+            "src/backend/tools/records.py",
+            "src/backend/chat/child_roster.py",
         ):
             source = Path(module_path).read_text(encoding="utf-8")
             self.assertNotIn(

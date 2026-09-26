@@ -22,7 +22,7 @@ from sqlalchemy.engine import Engine
 logger = logging.getLogger(__name__)
 
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
-UPGRADE_COMMAND = "alembic -c backend/alembic.ini upgrade head"
+UPGRADE_COMMAND = "alembic -c src/backend/alembic.ini upgrade head"
 
 #: Not alembic's default `alembic_version`: identity and sis are expected to move onto
 #: Postgres, and a shared version table would make each service read another's revision.

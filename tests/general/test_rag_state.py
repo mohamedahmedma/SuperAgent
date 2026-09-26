@@ -14,7 +14,7 @@ from langgraph.graph import END, StateGraph
 
 from backend.rag.graph_nodes import RAGState
 
-PIPELINE = Path(__file__).resolve().parents[2] / "backend" / "rag" / "pipeline.py"
+PIPELINE = Path(__file__).resolve().parents[2] / "src" / "backend" / "rag" / "pipeline.py"
 
 
 def _keys_initial_state_writes() -> list:

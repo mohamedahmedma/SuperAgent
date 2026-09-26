@@ -111,7 +111,7 @@ def provision_school(
         plan = plan_provision(body.code, template=template, existing_codes=existing)
         service = EstateService(
             provisioner_for(plan.database_url, admin_url=admin_url),
-            DotEnvConfigStore(PROJECT_ROOT / ".env"),
+            DotEnvConfigStore(PROJECT_ROOT.parent / ".env"),
         )
         service.provision(body.code, template=template, existing_codes=existing)
 

@@ -74,7 +74,7 @@ def load_utils(env):
     module_name = f"rag_utils_under_test_{id(embedding_service)}"
     spec = importlib.util.spec_from_file_location(
         module_name,
-        REPO_ROOT / "backend" / "rag" / "utils.py",
+        REPO_ROOT / "src" / "backend" / "rag" / "utils.py",
     )
     module = importlib.util.module_from_spec(spec)
 

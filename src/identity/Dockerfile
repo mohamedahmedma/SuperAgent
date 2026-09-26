@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1.7
 FROM python:3.12.11-slim-bookworm
-ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app/src
 RUN groupadd --system app && useradd --system --gid app --home /app app
 WORKDIR /app
-COPY identity/requirements.txt /tmp/requirements.txt
+COPY src/identity/requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip pip install --no-cache-dir -r /tmp/requirements.txt
-COPY --chown=app:app identity ./identity
-COPY --chown=app:app schoolauth ./schoolauth
+COPY --chown=app:app src/identity ./src/identity
+COPY --chown=app:app src/schoolauth ./src/schoolauth
 RUN mkdir -p /app/data && chown app:app /app/data
 USER app
 EXPOSE 8200

@@ -40,6 +40,12 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+# Run as a plain script, so nothing else puts the services on the path. The
+# repository root stays for `tests.*`; src/ is where the services now live.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
+
 import tests.evals.planner_execution_eval as pe
 from tests.evals.planner_execution_eval import (
     A,

@@ -38,7 +38,8 @@ from schoolauth import DEFAULT_AUDIENCE, DEFAULT_ISSUER
 
 logger = logging.getLogger(__name__)
 
-PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
+# parents[2]: this package sits under src/, and .env is a level above src/.
+PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
 _LOADED = False
 

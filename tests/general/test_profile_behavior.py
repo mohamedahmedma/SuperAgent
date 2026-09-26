@@ -300,7 +300,7 @@ class CacheNamespaceTests(ProfileTestCase):
 class PipelineBehaviourTests(ProfileTestCase):
     @staticmethod
     def _pipeline():
-        return reexec_module("backend/rag/pipeline.py", _fake_rag_utils())
+        return reexec_module("src/backend/rag/pipeline.py", _fake_rag_utils())
 
     def test_fast_path_vocabulary_comes_from_the_active_profile(self):
         shop = load_profile("base").model_copy(deep=True)
@@ -464,7 +464,7 @@ class PipelineBehaviourTests(ProfileTestCase):
 class ChunkingBehaviourTests(ProfileTestCase):
     @staticmethod
     def _loader_module():
-        return reexec_module("backend/indexing/document_loader.py")
+        return reexec_module("src/backend/indexing/document_loader.py")
 
     def test_chunk_sizes_come_from_the_profile(self):
         body = "name: chunky\nchunking:\n  chunk_size: 400\n  chunk_overlap: 40\n"
@@ -558,7 +558,7 @@ class WriterBehaviourTests(ProfileTestCase):
 class RetrievalBehaviourTests(ProfileTestCase):
     @staticmethod
     def _utils_module():
-        return reexec_module("backend/rag/utils.py", _fake_indexing())
+        return reexec_module("src/backend/rag/utils.py", _fake_indexing())
 
     def test_retrieval_tuning_comes_from_the_profile(self):
         body = (
