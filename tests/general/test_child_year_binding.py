@@ -18,8 +18,8 @@ import unittest
 from backend.agent.chat.child_resolution import ResolvedChild
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.turn_policy import _plan_child, TurnPlan, question_names_a_year
-from backend.agent.profiles import get_profile
-from backend.agent.prompts import render as render_prompt, resolve as resolve_prompt
+from backend.profiles import get_profile
+from backend.prompts import render as render_prompt, resolve as resolve_prompt
 from backend.agent.rag import pipeline
 from backend.agent.rag.graph_nodes import search_query
 

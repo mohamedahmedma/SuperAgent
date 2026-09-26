@@ -393,7 +393,7 @@ def _plan_child(
 
     The mutual exclusion lives here because it is a decision. Expressed in the template
     it would become `{% if hint and not options %}`, which is policy that no test covers
-    and no type checker sees — the thing `backend/agent/prompts/__init__.py` forbids in as
+    and no type checker sees — the thing `backend/prompts/__init__.py` forbids in as
     many words.
 
     A turn that is not about a child sets neither, and `_turn_context_message` then

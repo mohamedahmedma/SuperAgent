@@ -26,7 +26,7 @@ from backend.indexing.section_summary import (
     sections_fingerprint,
     summarise_section,
 )
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 

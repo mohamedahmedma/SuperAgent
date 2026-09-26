@@ -12,7 +12,7 @@ tests are weighted toward proving it is NOT skipped when it matters.
 
 import unittest
 
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 from backend.agent.rag.confidence import (
     ConfidenceVerdict,
     assess,

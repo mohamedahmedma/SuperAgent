@@ -50,7 +50,7 @@ from backend.agent.chat.child_roster import _as_options
 from backend.agent.chat.orchestrator import plan_turn as _real_plan_turn
 from backend.agent.chat.resolution import FOLLOWUP, ResolvedQuestion, unresolved
 from backend.agent.chat.runtime import planned_tool_calls
-from backend.agent.profiles.registry import load_profile, set_profile
+from backend.profiles.registry import load_profile, set_profile
 from backend.agent.tools import build_tools
 from tests.general.test_chat_hitl_resume import FakeStorage
 from backend.agent.chat.answer_blocks import _EVIDENCE_MARKERS

@@ -13,7 +13,7 @@ from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.language import detect_language
 from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.agent.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(tags=["chat"])

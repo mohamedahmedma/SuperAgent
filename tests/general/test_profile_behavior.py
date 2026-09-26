@@ -22,8 +22,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-import backend.agent.profiles.registry as registry
-from backend.agent.profiles.registry import load_profile, set_profile
+import backend.profiles.registry as registry
+from backend.profiles.registry import load_profile, set_profile
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -160,7 +160,7 @@ class UploadPolicyTests(ProfileTestCase):
             self.assertFalse(is_supported_document("anything.pdf"))
 
     def test_rejection_message_comes_from_profile_copy(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         body = 'name: shouty\nuser_copy:\n  unsupported_file_type: "Nope, PDFs only."\n'
         with temp_profile(body):
@@ -519,7 +519,7 @@ class ChunkingBehaviourTests(ProfileTestCase):
         self.assertEqual("sentence", loader._strategy)
 
     def test_invalid_profile_strategy_is_rejected_at_load(self):
-        from backend.agent.profiles.registry import ProfileError
+        from backend.profiles.registry import ProfileError
 
         with self.assertRaises(ProfileError):
             with temp_profile("name: bogus\nchunking:\n  strategy: quantum\n"):

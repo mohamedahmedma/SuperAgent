@@ -67,7 +67,7 @@ from tests.evals.planner_execution_eval import (
     _roster_fetch,
     run_case,
 )
-from backend.agent.profiles.registry import get_profile
+from backend.profiles.registry import get_profile
 
 # ---------------------------------------------------------------------------
 # The family this suite talks about.

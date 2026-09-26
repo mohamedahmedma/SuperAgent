@@ -21,7 +21,7 @@ from backend.indexing.section_summary import (
     plan_sections,
     summarise_section,
 )
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 from backend.agent.rag.evidence import Certainty
 from backend.agent.rag.scope_detector import (
     CatalogueScopeDetector,

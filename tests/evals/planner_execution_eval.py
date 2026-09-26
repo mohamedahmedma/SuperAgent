@@ -74,7 +74,7 @@ from backend.agent.chat import runtime
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.orchestrator import plan_turn
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.agent.tools import build_tools
 
 GUARDIAN = "G-1"

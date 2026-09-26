@@ -17,7 +17,7 @@ from backend.composition import Services
 from backend.db.models import User
 import backend.indexing.language_check as language_check
 from backend.infra.auth import require_admin
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.text_matching import fold
 from backend.jobs import DELETE_STEPS
 from backend.agent.schemas import (

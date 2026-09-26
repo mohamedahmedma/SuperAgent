@@ -10,7 +10,7 @@ from backend.agent.rag.evidence import (
     ChunkAssessment,
     EvidenceReport,
 )
-from backend.agent.prompts import resolve as resolve_prompt
+from backend.prompts import resolve as resolve_prompt
 from backend.agent.rag.evidence_view import format_docs
 from backend.agent.rag.graph_nodes import (
     ClassifyComplexity,
@@ -36,7 +36,7 @@ from backend.agent.rag.hitl_resume import (
     refined_question_for_hitl,
 )
 from backend.agent.rag.rerank_assessor import CrossEncoderAssessor
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.agent.schemas.chat import HitlResumeState
 from backend.text_normalization import normalize_query
 from backend.agent.rag.utils import (

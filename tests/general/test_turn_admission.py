@@ -203,7 +203,7 @@ class ChatRouteTests(_RedisTest):
 
 class RefusalCopyTests(unittest.TestCase):
     def test_the_parent_is_told_in_their_language_how_long_to_wait(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         copy = get_profile().user_copy
         self.assertIn("5 seconds", Refusal("too_many_turns", 4.2).message(copy, "en"))

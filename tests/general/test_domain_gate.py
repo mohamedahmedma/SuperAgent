@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from backend.composition import Services, set_default_services
 
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 from backend.agent.rag.domain_gate import (
     DomainReference,
     DomainReferenceStore,

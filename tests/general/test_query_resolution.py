@@ -41,7 +41,7 @@ from backend.agent.chat.resolution import (
 )
 from backend.agent.chat.signals import RequestSignals, SignalContext
 from backend.agent.chat.turn_policy import resolve_turn
-from backend.agent.profiles.registry import load_profile, set_profile
+from backend.profiles.registry import load_profile, set_profile
 from backend.agent.rag.evidence import Certainty, EvidenceReport
 from backend.agent.rag.policy import can_ask_human, decide_route, offerable_directions
 from backend.agent.rag.scope_index import ScopeMatch

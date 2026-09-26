@@ -451,8 +451,8 @@ def _default_resolve_invoke(  # pragma: no cover - needs a model
 
     from backend.assets.vision import invoke_structured
     from backend.llm import sampling
-    from backend.agent.profiles import get_profile
-    from backend.agent.prompts import resolve as resolve_prompt
+    from backend.profiles import get_profile
+    from backend.prompts import resolve as resolve_prompt
     from backend.composition import default_services
 
     profile = get_profile()

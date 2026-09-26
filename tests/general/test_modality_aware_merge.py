@@ -335,7 +335,7 @@ class MergeKeepsItsPromisesTests(unittest.TestCase):
         Derived from the profile rather than written twice: widen `chunking.l1_size` and
         this must widen with it, or merging starts trimming parents that were never too
         big."""
-        from backend.agent.profiles.registry import load_profile
+        from backend.profiles.registry import load_profile
 
         profile = load_profile("base")
         chunking = profile.chunking
@@ -348,7 +348,7 @@ class MergeKeepsItsPromisesTests(unittest.TestCase):
 
 class ProfileWiringTests(unittest.TestCase):
     def test_the_default_keeps_figures_separate(self):
-        from backend.agent.profiles.registry import load_profile
+        from backend.profiles.registry import load_profile
 
         self.assertIsNone(load_profile("base").retrieval.auto_merge_figure_threshold)
         self.assertEqual(2, load_profile("base").retrieval.auto_merge_threshold)

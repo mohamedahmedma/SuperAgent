@@ -7,7 +7,7 @@ whenever there is any doubt.
 
 import unittest
 
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 from backend.agent.rag.context_selection import (
     ContextSelection,
     select_context,

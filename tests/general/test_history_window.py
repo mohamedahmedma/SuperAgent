@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from backend.agent.chat.context_messages import build_context_messages, history_window
 from backend.agent.chat.resolution import conversation_text
 from backend.agent.chat.signals import _last_user_text
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 
 def _conversation(length: int) -> list:

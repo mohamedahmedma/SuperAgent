@@ -252,7 +252,7 @@ def restore_session_assets(
         return records
 
     if delivery_config is None:
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         delivery_config = get_profile().assets.delivery
     capabilities = effective_capabilities(capabilities, delivery_config)

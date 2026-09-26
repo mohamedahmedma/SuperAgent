@@ -12,8 +12,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-import backend.agent.profiles.registry as registry
-from backend.agent.profiles.registry import (
+import backend.profiles.registry as registry
+from backend.profiles.registry import (
     DEFAULT_PROFILE,
     ProfileError,
     available_profiles,
@@ -21,7 +21,7 @@ from backend.agent.profiles.registry import (
     reload_profile,
     set_profile,
 )
-from backend.agent.profiles.schema import DomainProfile
+from backend.profiles.schema import DomainProfile
 
 
 class ProfileTestCase(unittest.TestCase):
@@ -360,11 +360,11 @@ class NoDriftTests(ProfileTestCase):
         self.assertEqual(0.3, models.answer_temperature)
 
     def test_prompt_placeholders_are_preserved(self):
-        """The prompts moved to backend/agent/prompts/templates/, so the placeholders that
+        """The prompts moved to backend/prompts/templates/, so the placeholders that
         must survive are the templates' — a template that stopped substituting its
         payload would render a grader prompt with no snippets in it and still look
         perfectly well-formed."""
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         marker = "PLACEHOLDER_MARKER"
         graded = render("rag/evidence_grade.j2", question=marker, context=marker, constraints=[])

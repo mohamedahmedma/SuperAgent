@@ -17,7 +17,7 @@ import unittest
 
 import tiktoken
 
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 
 #: The gpt-oss / modern OpenAI-family encoding. The deployment's MODEL is
 #: openai/gpt-oss-20b; this is the closest public tokenizer to what it bills on, and it

@@ -14,10 +14,10 @@ turn and offers the model a capability it will occasionally try to use.
 import os
 import unittest
 
-import backend.agent.profiles.registry as registry
+import backend.profiles.registry as registry
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.profiles.registry import (
+from backend.profiles.registry import (
     available_profiles,
     load_profile,
     set_profile,

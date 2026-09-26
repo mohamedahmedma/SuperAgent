@@ -18,7 +18,7 @@ from backend.agent.chat.request_context import ChatRequestContext
 from backend.composition import default_services
 from backend.llm import sampling
 from backend.provider_compat import fold_tool_results_into_text
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.agent.tools import KNOWLEDGE_TOOL, build_tools
 
 API_KEY = os.getenv("ARK_API_KEY")

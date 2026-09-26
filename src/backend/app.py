@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.api.router import router
 from backend.composition import Services, set_default_services
 from backend.infra.database import log_database_status, verify_connectivity
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 FRONTEND_DIR = PROJECT_ROOT / "src" / "frontend" / "dist"
 

@@ -18,8 +18,8 @@ import unittest
 
 from jinja2 import UndefinedError
 
-from backend.agent.profiles.registry import load_profile
-from backend.agent.prompts import render, resolve, template_names
+from backend.profiles.registry import load_profile
+from backend.prompts import render, resolve, template_names
 from backend.agent.tools import GROUNDED_TOOLS, TOOL_BUILDERS
 
 # The prompt is paid on every turn. ~4 chars/token for English, so this is roughly a
@@ -145,7 +145,7 @@ class SchoolOverrideKeepsTheContractTests(unittest.TestCase):
     def test_every_grounding_rule_survives_the_override(self):
         """Compared against the fragment itself, so editing _grounding.j2 without
         updating school.yaml fails here rather than in production."""
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         fragment = render("agent/_grounding.j2")
         rules = [line.strip() for line in fragment.splitlines() if line.strip().startswith("-")]
@@ -185,7 +185,7 @@ class TemplateEnvironmentTests(unittest.TestCase):
         self.assertNotIn("42", rendered)
 
     def test_every_shipped_template_is_syntactically_valid(self):
-        from backend.agent.prompts import _environment
+        from backend.prompts import _environment
 
         names = template_names()
         self.assertTrue(names, "no templates were discovered")
@@ -370,7 +370,7 @@ class ToolResultEnvelopeTests(unittest.TestCase):
                 self.assertIn("girls only", out)
 
     def test_the_figure_rule_is_paid_only_when_a_figure_was_retrieved(self):
-        """Rung 3 of the ladder in backend/agent/prompts/__init__.py: an instruction that is
+        """Rung 3 of the ladder in backend/prompts/__init__.py: an instruction that is
         only true when retrieval returned a figure is billed only on those turns."""
         without = self._chunks(figures=False)
         with_rule = self._chunks(figures=True)

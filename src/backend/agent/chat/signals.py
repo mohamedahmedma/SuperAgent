@@ -655,8 +655,8 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
 
     from backend.assets.vision import invoke_structured
     from backend.llm import sampling
-    from backend.agent.profiles import get_profile
-    from backend.agent.prompts import render
+    from backend.profiles import get_profile
+    from backend.prompts import render
     from backend.composition import default_services
 
     profile = get_profile()

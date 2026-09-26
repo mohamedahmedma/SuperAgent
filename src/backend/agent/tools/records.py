@@ -50,7 +50,7 @@ parameters the model can reach — the worst a hostile message achieves is askin
 a student the signed token already authorises.
 
 What this module SAYS back to the model lives in
-backend/agent/prompts/templates/tools/records_result.j2, matching the split used by
+backend/prompts/templates/tools/records_result.j2, matching the split used by
 search_knowledge_base: this file decides which outcome occurred, the template renders
 it. Every branch depends on what the call actually returned, so the system prompt
 cannot state any of it in advance.
@@ -67,7 +67,7 @@ from backend.agent.chat.child_resolution import resolve_child
 from backend.agent.chat.child_roster import ChildOption, forget, load_roster
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.env import records_api_key, records_base_url
-from backend.agent.prompts import render as render_prompt
+from backend.prompts import render as render_prompt
 from backend.school_week import AskedDay, resolve_day
 from backend.text_matching import name_key
 

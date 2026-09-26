@@ -48,8 +48,8 @@ from threading import Lock
 from typing import Dict, Optional, Tuple
 
 from backend.agent.chat.language import detect_language
-from backend.agent.profiles import get_profile
-from backend.agent.prompts import resolve as resolve_prompt
+from backend.profiles import get_profile
+from backend.prompts import resolve as resolve_prompt
 from backend.text_normalization import normalize_query
 
 logger = logging.getLogger(__name__)

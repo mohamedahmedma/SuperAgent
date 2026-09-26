@@ -195,7 +195,7 @@ class VisionExtractor(FigureExtractor):
         return f"data:{content_type};base64,{encoded}"
 
     def extract(self, request: ExtractionRequest) -> ExtractionPayload:
-        from backend.agent.prompts import resolve as resolve_prompt
+        from backend.prompts import resolve as resolve_prompt
 
         prompt = resolve_prompt(
             self._config.extraction_prompt,

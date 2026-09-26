@@ -251,7 +251,7 @@ class DocumentPairService:
         figure can actually reach the user.
         """
         try:
-            from backend.agent.profiles import get_profile
+            from backend.profiles import get_profile
 
             if not get_profile().assets.enabled:
                 return None

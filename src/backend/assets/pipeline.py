@@ -143,7 +143,7 @@ class FigurePipeline:
     @property
     def profile(self):
         if self._profile is None:
-            from backend.agent.profiles import get_profile
+            from backend.profiles import get_profile
 
             self._profile = get_profile()
         return self._profile

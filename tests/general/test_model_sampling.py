@@ -15,9 +15,9 @@ import os
 import unittest
 from unittest.mock import patch
 
-import backend.agent.profiles.registry as registry
+import backend.profiles.registry as registry
 from backend.llm import ROLES, sampling
-from backend.agent.profiles.registry import ProfileError, load_profile, set_profile
+from backend.profiles.registry import ProfileError, load_profile, set_profile
 
 
 class SamplingTestCase(unittest.TestCase):

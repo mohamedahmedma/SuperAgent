@@ -16,8 +16,8 @@ from backend.agent.chat.orchestrator import plan_turn
 from backend.agent.chat.signals import RequestSignals, Scope
 from backend.agent.chat.turn_policy import TurnPlan
 from backend.composition import Services
-from backend.agent.profiles import get_profile
-from backend.agent.profiles.registry import load_profile, set_profile
+from backend.profiles import get_profile
+from backend.profiles.registry import load_profile, set_profile
 from backend.agent.rag.evidence import Certainty
 from backend.agent.tools import KNOWLEDGE_TOOL
 from backend.agent.chat.answer_checks import terminal_reply

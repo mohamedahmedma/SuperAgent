@@ -43,7 +43,7 @@ from langchain_core.tools import tool
 from pydantic import Field
 
 from backend.agent.chat import runtime
-from backend.agent.profiles import load_profile, registry, set_profile
+from backend.profiles import load_profile, registry, set_profile
 from backend.agent.chat.answer_checks import enforce_forced_tool_ran
 
 RECORDS_TOOL = "get_student_grades"

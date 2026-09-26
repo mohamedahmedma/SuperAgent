@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from backend.agent.prompts import render
+from backend.prompts import render
 
 logger = logging.getLogger(__name__)
 

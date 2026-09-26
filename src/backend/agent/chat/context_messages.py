@@ -11,8 +11,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from backend.agent.chat.answer_blocks import strip_answer_blocks
 from backend.agent.chat.resolution import conversation_text
-from backend.agent.profiles import get_profile
-from backend.agent.prompts import resolve as resolve_prompt
+from backend.profiles import get_profile
+from backend.prompts import resolve as resolve_prompt
 
 
 def _format_retrieved_chunks(docs: list[dict]) -> str:

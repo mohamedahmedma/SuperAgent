@@ -44,7 +44,7 @@ from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import unresolved
 from backend.agent.chat.signals import RequestSignals
 from backend.agent.chat.turn_policy import resolve_turn
-from backend.agent.profiles.registry import load_profile, set_profile
+from backend.profiles.registry import load_profile, set_profile
 
 KNOWLEDGE_TOOL = "search_knowledge_base"
 RECORDS_TOOL = "get_student_grades"

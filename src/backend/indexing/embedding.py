@@ -100,7 +100,7 @@ class _RemoteEmbedder:
         self._session = None
         self._session_lock = threading.Lock()
         # The embedding provider's own quota, separate from the chat models' (item 37).
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
         from backend.provider_quota import ProviderGate
 
         rag = get_profile().rag

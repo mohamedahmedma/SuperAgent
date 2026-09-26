@@ -20,7 +20,7 @@ import unittest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from backend.agent.chat import runtime
-from backend.agent.profiles import load_profile, registry, set_profile
+from backend.profiles import load_profile, registry, set_profile
 
 
 class _Request:
@@ -181,7 +181,7 @@ class TheBudgetsMustFitTheStepLimit(ProfileScopedTest):
     """
 
     def test_every_shipped_profile_can_afford_its_own_budgets(self):
-        from backend.agent.profiles import available_profiles
+        from backend.profiles import available_profiles
 
         for name in available_profiles():
             with self.subTest(profile=name):
@@ -192,7 +192,7 @@ class TheBudgetsMustFitTheStepLimit(ProfileScopedTest):
     def test_a_budget_the_graph_cannot_spend_is_refused_at_load(self):
         """Caught when the profile loads rather than on the one question that needed the
         last call — which is where it was found the first time."""
-        from backend.agent.profiles.schema import AgentConfig
+        from backend.profiles.schema import AgentConfig
 
         with self.assertRaises(Exception) as raised:
             AgentConfig(

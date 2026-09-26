@@ -2,7 +2,7 @@
 
 Import `get_profile` and read the section you need:
 
-    from backend.agent.profiles import get_profile
+    from backend.profiles import get_profile
 
     profile = get_profile()
     prompt = profile.render_system_prompt()
@@ -14,7 +14,7 @@ overridden by their original environment variables — see ENV_OVERRIDES in regi
 the full list.
 """
 
-from backend.agent.profiles.registry import (
+from backend.profiles.registry import (
     DEFAULT_PROFILE,
     ENV_OVERRIDES,
     PROFILE_ENV_VAR,
@@ -25,7 +25,7 @@ from backend.agent.profiles.registry import (
     reload_profile,
     set_profile,
 )
-from backend.agent.profiles.schema import (
+from backend.profiles.schema import (
     AgentConfig,
     ChunkingConfig,
     CopyConfig,

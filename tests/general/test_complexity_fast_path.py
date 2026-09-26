@@ -127,7 +127,7 @@ class ArabicBehaviourTests(unittest.TestCase):
 
 class ProfileWiringTests(unittest.TestCase):
     def test_the_override_list_is_profile_data(self):
-        from backend.agent.profiles.registry import load_profile
+        from backend.profiles.registry import load_profile
 
         markers = load_profile("base").rag.simple_override_markers
         self.assertIn("how many", markers)
@@ -136,7 +136,7 @@ class ProfileWiringTests(unittest.TestCase):
     def test_the_planner_prompt_tells_the_model_to_prefer_simple(self):
         """Decomposition costs a retrieval and a grader call per sub-question, so the
         prompt has to say that rather than leaving it to taste."""
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         prompt = render("rag/complexity.j2", question="q").lower()
         self.assertIn("default to simple", prompt)

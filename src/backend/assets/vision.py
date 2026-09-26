@@ -365,7 +365,7 @@ def vision_status(profile=None) -> dict:
     the heuristic path forever. This turns that into one line in the boot log.
     """
     if profile is None:
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         profile = get_profile()
 

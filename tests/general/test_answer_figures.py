@@ -692,7 +692,7 @@ class WhatItReportsAndWhatItReplacesTests(unittest.TestCase):
         return {"retrieved_chunks": [{"text": t} for t in texts]}
 
     def _run(self, mode, answer, trace, plan=None):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         with patch.object(get_profile().agent, "answer_figures_mode", mode):
             return enforce_answer_figures(
@@ -709,7 +709,7 @@ class WhatItReportsAndWhatItReplacesTests(unittest.TestCase):
         self.assertTrue(self._run("enforce", "the fee is 111,000 EGP", self._trace(FEES)))
 
     def test_enforce_serves_the_profiles_own_copy(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         replacement = self._run("enforce", "the fee is 111,000 EGP", self._trace(FEES))
         self.assertEqual(get_profile().user_copy.unverified_answer, replacement)
@@ -738,7 +738,7 @@ class WhatItReportsAndWhatItReplacesTests(unittest.TestCase):
         self.assertEqual("", self._run("enforce", "the fee is 111,000 EGP", None))
 
     def test_a_turn_with_no_plan_is_not_checked(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         with patch.object(get_profile().agent, "answer_figures_mode", "enforce"):
             self.assertEqual(
@@ -776,7 +776,7 @@ class WhatItReportsAndWhatItReplacesTests(unittest.TestCase):
         self.assertEqual("", self._run("watch", "the fee is 111,000 EGP", self._trace(FEES)))
 
     def test_the_shipped_default_observes(self):
-        from backend.agent.profiles.registry import load_profile
+        from backend.profiles.registry import load_profile
 
         self.assertEqual("observe", load_profile("school").agent.answer_figures_mode)
 

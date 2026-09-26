@@ -7,7 +7,7 @@ routinely contain `FOO=` for a value someone meant to disable, and the bare
 `os.getenv(name, default)` form returns `""` in that case rather than the default —
 which then either crashes (`int("")`) or, worse, silently evaluates to the wrong
 branch. These readers also keep the modules consistent with
-backend/agent/profiles/registry.py, which applies the same blank-is-unset rule when
+backend/profiles/registry.py, which applies the same blank-is-unset rule when
 overlaying env onto a profile.
 """
 

@@ -14,7 +14,7 @@ import logging
 import re
 
 from backend.agent.chat.finalize import Finalizer
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.text_matching import name_key
 
 logger = logging.getLogger(__name__)

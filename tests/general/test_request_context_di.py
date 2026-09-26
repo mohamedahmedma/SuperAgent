@@ -61,7 +61,7 @@ class ChatRequestContextTests(unittest.IsolatedAsyncioTestCase):
 
 class KnowledgeToolFactoryTests(unittest.TestCase):
     def test_knowledge_tool_counter_is_per_context(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         budget = get_profile().agent.max_knowledge_calls_per_turn
         spent = [True] * budget + [False]

@@ -65,7 +65,7 @@ RECORDS_TOOLS: tuple = (
 # sees both structures together and has to decide which side it falls on.
 #
 # It drives whether the agent's system prompt includes its grounding-and-citation
-# block at all (backend/agent/prompts/templates/agent/system.j2). A deployment binding only
+# block at all (backend/prompts/templates/agent/system.j2). A deployment binding only
 # get_student_records has nothing to cite, and paying for citation rules on every one
 # of its turns would be pure waste.
 #

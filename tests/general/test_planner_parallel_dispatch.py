@@ -815,7 +815,7 @@ class TheSeededCallsAreCountedAgainstTheirBudgets(unittest.TestCase):
         script whatever it was offered — so an agent-level assertion here would pass on a
         middleware that had stopped withholding anything at all.
         """
-        from backend.agent.profiles.registry import load_profile, set_profile
+        from backend.profiles.registry import load_profile, set_profile
 
         # One knowledge call is the base profile's whole budget for a turn, so one seeded
         # call is enough to spend it. Named here rather than read from whichever profile

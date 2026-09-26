@@ -417,7 +417,7 @@ class Services:
 
         def build() -> BlobStore:
             from backend.assets.blobs import build_blob_store
-            from backend.agent.profiles import get_profile
+            from backend.profiles import get_profile
 
             return build_blob_store(get_profile().assets)
 

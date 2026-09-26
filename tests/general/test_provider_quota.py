@@ -323,7 +323,7 @@ class LiveTurnPolicyTests(unittest.TestCase):
 
 class ClientPolicyTests(unittest.TestCase):
     def test_the_policy_is_the_profiles_live_turn_budget(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         rag = get_profile().rag
         clients = ProviderHttpClients()

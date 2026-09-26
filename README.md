@@ -282,7 +282,7 @@ npm run build
     knowledge-base retrieval, figure reading, and student records.
   - `profiles/`: the domain profile system. A YAML file per deployment declares which
     tools are bound, which RAG rungs run, and what the assistant is called. `school` is
-    the profile this deployment runs; see [registry.py](src/backend/agent/profiles/registry.py).
+    the profile this deployment runs; see [registry.py](src/backend/profiles/registry.py).
   - `infra/`: [database.py](src/backend/infra/database.py), [cache.py](src/backend/infra/cache.py), [auth.py](src/backend/infra/auth.py).
   - `db/`: [models/](src/backend/db/models/__init__.py): ORM models, one module per aggregate, imported from the package.
   - `schemas/`: Pydantic request/response schemas (chat / documents).

@@ -34,7 +34,7 @@ from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import ResolvedQuestion, resolve_question, unresolved
 from backend.agent.chat.signals import RequestSignals, SignalContext, build_ladder
 from backend.agent.chat.turn_policy import TurnPlan, resolve_turn
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 

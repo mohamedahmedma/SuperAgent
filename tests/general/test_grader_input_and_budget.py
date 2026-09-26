@@ -31,7 +31,7 @@ from unittest.mock import patch
 
 from backend.indexing.document_loader import DocumentLoader
 from backend.llm_models import GRADE_RETRY_MAX_TOKENS
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.agent.rag.evidence import AssessmentContext, Certainty
 from backend.agent.rag.evidence_view import format_docs
 from backend.agent.rag.pipeline import EvidenceGrade, LLMGraderAssessor

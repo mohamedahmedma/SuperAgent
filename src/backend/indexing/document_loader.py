@@ -19,7 +19,7 @@ from backend.indexing.ingest_progress import IngestProgress
 from backend.indexing.html_layout import parse_html_blocks
 from backend.indexing.pdf_layout import parse_pdf_blocks
 from backend.indexing.xlsx_layout import parse_xlsx_blocks
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 

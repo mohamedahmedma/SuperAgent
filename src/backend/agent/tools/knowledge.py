@@ -1,7 +1,7 @@
 """The search_knowledge_base tool.
 
 What this tool SAYS back to the model lives in
-backend/agent/prompts/templates/tools/knowledge_result.j2, not in this file. That text is
+backend/prompts/templates/tools/knowledge_result.j2, not in this file. That text is
 prompt — it instructs the model — and it is the Class B half of prompt routing: every
 branch of it depends on what retrieval actually returned, which the system prompt
 cannot know because it is built before the tool runs. Keeping it in a template means
@@ -13,7 +13,7 @@ This module decides WHICH outcome occurred. The template renders it.
 from langchain_core.tools import tool
 
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.prompts import render as render_prompt
+from backend.prompts import render as render_prompt
 from pydantic import BaseModel
 
 #: The name the model calls, the planner forces, and the turn records. One spelling,

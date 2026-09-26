@@ -33,8 +33,8 @@ from typing import List, Optional
 from backend.agent.chat.orchestrator import plan_turn
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import CORRECTION, FOLLOWUP, NEW_TOPIC, STANDALONE
-from backend.agent.profiles.registry import load_profile, set_profile
-from backend.agent.prompts import render
+from backend.profiles.registry import load_profile, set_profile
+from backend.prompts import render
 from tests.general.test_rag_short_circuit import FakeStructuredModel, load_pipeline, _meta
 
 

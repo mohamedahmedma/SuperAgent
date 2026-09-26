@@ -16,8 +16,8 @@ import unittest
 
 from backend.agent.chat.signals import RequestSignals, Scope, SignalContext, build_ladder
 from backend.agent.chat.turn_policy import resolve_turn
-from backend.agent.profiles import get_profile
-from backend.agent.profiles.registry import load_profile
+from backend.profiles import get_profile
+from backend.profiles.registry import load_profile
 from backend.agent.rag.evidence import Certainty
 from backend.agent.rag.scope_detector import CatalogueScopeDetector, index_store
 from backend.agent.rag.scope_index import build_index
@@ -330,7 +330,7 @@ class ScopePromptTests(unittest.TestCase):
 
     def render(self, question="when does term two start"):
         from backend.indexing.embedding import embed_query
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         matches = self.index.best_matches(embed_query(question), limit=3)
         return render(

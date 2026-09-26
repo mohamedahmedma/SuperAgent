@@ -26,7 +26,7 @@ from backend.indexing.section_summary import (
     build_corpus_digest,
     sections_fingerprint,
 )
-from backend.agent.prompts import render
+from backend.prompts import render
 from backend.agent.rag.scope_index import (
     build_index,
     derive_floor,

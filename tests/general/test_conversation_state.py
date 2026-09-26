@@ -17,7 +17,7 @@ from backend.agent.chat.clarification import build_pending_hitl, enter_turn
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import unresolved
 from backend.agent.chat.turn_pipeline import TurnCollaborators, TurnPipeline
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 from backend.agent.rag.hitl_resume import build_hitl_resume_state
 from tests.general.test_chat_hitl_resume import FakeStorage
 

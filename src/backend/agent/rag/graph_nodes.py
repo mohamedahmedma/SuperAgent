@@ -23,7 +23,7 @@ from langgraph.types import Send
 
 from backend.agent.chat.child_names import strip_child_names
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.prompts import resolve as resolve_prompt
+from backend.prompts import resolve as resolve_prompt
 from backend.agent.rag.evidence import (
     AssessmentContext,
     Certainty,

@@ -187,7 +187,7 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
 
     @staticmethod
     def _config(**overrides):
-        from backend.agent.profiles.registry import load_profile
+        from backend.profiles.registry import load_profile
 
         settings = {"query_resolution_enabled": True, "query_resolution_max_chars": 24, **overrides}
         return load_profile("school").agent.model_copy(update=settings)

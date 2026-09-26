@@ -10,8 +10,8 @@ from langsmith import traceable
 from backend.indexing.embedding import embed_query
 from backend.agent.rag.rerank_assessor import CrossEncoderProvider
 from backend.env import env_bool, env_float, env_int, env_value
-from backend.agent.profiles import get_profile
-from backend.agent.prompts import resolve as resolve_prompt
+from backend.profiles import get_profile
+from backend.prompts import resolve as resolve_prompt
 from backend.text_matching import search_key
 from backend.text_normalization import normalize_query
 from pydantic import BaseModel, Field
@@ -36,7 +36,7 @@ def _optional_env(name: str) -> Optional[str]:
 # Retrieval tuning defaults come from the active domain profile; the environment
 # readers below still take precedence, so the effective order is
 # env > profile > schema default. The profile object itself is env-overlaid by
-# backend/agent/profiles/registry.py, so both paths agree on the final value.
+# backend/profiles/registry.py, so both paths agree on the final value.
 _PROFILE = get_profile()
 _RETRIEVAL = _PROFILE.retrieval
 
@@ -820,7 +820,7 @@ class RewritePlan(StructuredOutput):
     )
 
 
-# Prompt text lives in the active profile (backend/agent/profiles/definitions/*.yaml) so a
+# Prompt text lives in the active profile (backend/profiles/definitions/*.yaml) so a
 # domain can retune retrieval wording without a code change.
 REWRITE_PROMPT = _PROFILE.rag.rewrite_prompt
 

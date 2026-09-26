@@ -32,9 +32,9 @@ from pathlib import Path
 from backend.assets.dossier import DOSSIER_VERSION, MIGRATIONS
 from backend.agent.chat.signals import _names_the_child
 from backend.indexing.document_loader import DocumentLoader
-from backend.agent.prompts import render as render_prompt
+from backend.prompts import render as render_prompt
 
-TEMPLATES = Path("src/backend/agent/prompts/templates")
+TEMPLATES = Path("src/backend/prompts/templates")
 
 
 def _template(name: str) -> str:

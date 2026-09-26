@@ -11,7 +11,7 @@ about individual signals than about two invariants:
 import unittest
 from unittest.mock import patch
 
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 from backend.agent.rag.evidence import (
     AssessmentContext,
     AssessmentLadder,

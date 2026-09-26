@@ -24,7 +24,7 @@ from backend.agent.chat.signals import (
     build_ladder,
 )
 from backend.agent.chat.turn_policy import TurnPlan, localized, resolve_turn
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 from backend.agent.rag.evidence import Certainty
 
 
@@ -426,7 +426,7 @@ class TurnPolicyTests(unittest.TestCase):
 
     def test_missing_copy_falls_through_to_the_agent(self):
         """Refusing with an empty string is worse than answering."""
-        from backend.agent.profiles.schema import LocalizedText
+        from backend.profiles.schema import LocalizedText
 
         signals = RequestSignals(
             question="q", scope=Scope.OUT_OF_DOMAIN, scope_certainty=Certainty.HIGH
@@ -466,20 +466,20 @@ class TurnPolicyTests(unittest.TestCase):
 
 class LocalizedTextTests(unittest.TestCase):
     def test_it_picks_the_requested_language(self):
-        from backend.agent.profiles.schema import LocalizedText
+        from backend.profiles.schema import LocalizedText
 
         text = LocalizedText(en="hello", ar="مرحبا")
         self.assertEqual("hello", localized(text, ENGLISH))
         self.assertEqual("مرحبا", localized(text, ARABIC))
 
     def test_a_missing_translation_falls_back_rather_than_blanking(self):
-        from backend.agent.profiles.schema import LocalizedText
+        from backend.profiles.schema import LocalizedText
 
         self.assertEqual("hello", localized(LocalizedText(en="hello"), ARABIC))
         self.assertEqual("مرحبا", localized(LocalizedText(ar="مرحبا"), ENGLISH))
 
     def test_empty_and_none_are_handled(self):
-        from backend.agent.profiles.schema import LocalizedText
+        from backend.profiles.schema import LocalizedText
 
         self.assertEqual("", localized(LocalizedText(), ENGLISH))
         self.assertEqual("", localized(None, ENGLISH))

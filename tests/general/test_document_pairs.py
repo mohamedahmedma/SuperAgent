@@ -326,11 +326,11 @@ class FigureAwarenessDegradationTests(PairStoreTestCase):
         self.pairs.attach(pair_id, ENGLISH, "uniform_en.docx")
 
     def test_assets_disabled_by_profile_uses_the_plain_rule(self):
-        from backend.agent.profiles.registry import load_profile
+        from backend.profiles.registry import load_profile
 
         profile = load_profile("base")
         profile.assets.enabled = False
-        with patch("backend.agent.profiles.get_profile", return_value=profile):
+        with patch("backend.profiles.get_profile", return_value=profile):
             self._pair()
             self.assertEqual(["uniform_en.docx"], self.pairs.superseded_filenames(ARABIC))
 

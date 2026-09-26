@@ -85,7 +85,7 @@ def _default_builder() -> ScopeIndex:
 
     from backend.composition import default_services
     from backend.indexing.section_summary import corpus_catalogue
-    from backend.agent.profiles import get_profile
+    from backend.profiles import get_profile
 
     profile = get_profile()
     section_catalogue = default_services().section_catalogue
@@ -242,8 +242,8 @@ def _default_scope_invoke(ctx, signals: RequestSignals) -> Optional[Dict[str, An
     from langchain.chat_models import init_chat_model
 
     from backend.assets.vision import invoke_structured
-    from backend.agent.prompts import render
-    from backend.agent.profiles import get_profile
+    from backend.prompts import render
+    from backend.profiles import get_profile
     from backend.composition import default_services
 
     profile = get_profile()

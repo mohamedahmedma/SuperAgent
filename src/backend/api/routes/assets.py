@@ -32,7 +32,7 @@ from backend.assets.delivery import AssetReference, ClientCapabilities
 from backend.composition import Services
 from backend.db.models import User
 from backend.infra.auth import get_current_user
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 

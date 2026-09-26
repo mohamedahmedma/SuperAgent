@@ -104,7 +104,7 @@ agent:
   # to write the answer, at six nodes a pass: 114 needed, which the previous 78 could not
   # spend. Note `tests/general/test_tool_budgets.py` only asserts `>= rounds * 5`, so a
   # number between 95 and 113 passes that test and still refuses to load — trust the
-  # validator's own arithmetic in `backend/agent/profiles/schema.py`, not that assertion.
+  # validator's own arithmetic in `backend/profiles/schema.py`, not that assertion.
   #
   # That profile has the most tools of any shipped one and so is what this number is sized
   # against; it deliberately does not override it, and `test_school_profile.py` asserts the
@@ -175,7 +175,7 @@ agent:
      "what about", "how about", "no i mean", "no, i mean", "no i meant",
      "و", "وما", "وكم", "وهل", "طب ", "طيب ", "لا اقصد", "لا أقصد"]
 
-  # No prompt text here. Prompts live in backend/agent/prompts/templates/ and a profile sets
+  # No prompt text here. Prompts live in backend/prompts/templates/ and a profile sets
   # one of these keys only to OVERRIDE the shipped template — which is why the shipped
   # profiles leave them all empty:
   #
@@ -295,7 +295,7 @@ rag:
   fast_path_max_chars: 48
   fast_path_short_intent_chars: 18
 
-  # The RAG prompts live in backend/agent/prompts/templates/rag/ — evidence_grade.j2,
+  # The RAG prompts live in backend/prompts/templates/rag/ — evidence_grade.j2,
   # complexity.j2, rewrite.j2 — and the matching keys here exist only to override one.
   #
   # The marker vocabularies below, by contrast, stay: they are domain vocabulary rather

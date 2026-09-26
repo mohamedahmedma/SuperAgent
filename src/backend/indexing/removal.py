@@ -47,7 +47,7 @@ class DocumentRemover:
     def _current_profile(self):
         if self._profile is not None:
             return self._profile()
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         return get_profile()
 

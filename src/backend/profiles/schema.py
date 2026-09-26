@@ -134,7 +134,7 @@ class AgentConfig(_Section):
     """The tool-calling agent's contract."""
 
     # Empty means "use the shipped template", which is the normal case — the agent
-    # prompt is composed from backend/agent/prompts/templates/agent/system.j2 so that a turn
+    # prompt is composed from backend/prompts/templates/agent/system.j2 so that a turn
     # pays only for the capabilities it actually bound.
     #
     # Setting it is an escape hatch: the string is used verbatim (with {persona}
@@ -1375,7 +1375,7 @@ class DomainProfile(BaseModel):
         # Imported here, not at module scope: backend.agent.tools pulls in the request context
         # and every tool module, and the profile package is imported by several of them.
         from backend.agent.chat.language import ARABIC, language_name
-        from backend.agent.prompts import render
+        from backend.prompts import render
 
         # The profile's own map first: a deployment that knows its languages may name
         # one the global map deliberately will not. See AgentConfig.language_names.

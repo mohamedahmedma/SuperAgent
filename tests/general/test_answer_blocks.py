@@ -87,7 +87,7 @@ class TheRecordIsRenderedNotRetyped(unittest.TestCase):
         from backend.agent.chat.answer_blocks import _EVIDENCE_MARKERS
 
         rendered = io.open(
-            "src/backend/agent/prompts/templates/tools/records_result.j2", encoding="utf-8"
+            "src/backend/prompts/templates/tools/records_result.j2", encoding="utf-8"
         ).read()
         headers = set(re.findall(r"^([A-Z][A-Z_]{3,})(?: for|:)", rendered, re.MULTILINE))
         self.assertTrue(headers, "no headers found — did the template change shape?")

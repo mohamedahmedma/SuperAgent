@@ -32,7 +32,7 @@ from backend.agent.chat.turn_pipeline import (
     resolve_caller,
 )
 from backend.composition import Services, default_services
-from backend.agent.profiles import get_profile
+from backend.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 

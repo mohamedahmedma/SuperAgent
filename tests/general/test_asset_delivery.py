@@ -47,7 +47,7 @@ from backend.agent.chat.assets_bridge import (
     trace_for_storage,
 )
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.profiles.registry import load_profile
+from backend.profiles.registry import load_profile
 from tests.general.postgres_support import postgres_schema
 
 
@@ -310,7 +310,7 @@ class RequestContextAssetTests(unittest.TestCase):
         self.assertEqual(["a", "b", "c"], ctx.surfaced_asset_ids())
 
     def test_resetting_restores_the_knowledge_budget(self):
-        from backend.agent.profiles import get_profile
+        from backend.profiles import get_profile
 
         budget = get_profile().agent.max_knowledge_calls_per_turn
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
@@ -948,7 +948,7 @@ class AssetRouteTests(unittest.TestCase):
         self.assertEqual(404, self.client.get(self._url()).status_code)
 
     def test_asset_support_can_be_disabled_by_profile(self):
-        from backend.agent.profiles.registry import load_profile as load, set_profile
+        from backend.profiles.registry import load_profile as load, set_profile
 
         profile = load("base").model_copy(deep=True)
         profile.assets.enabled = False
