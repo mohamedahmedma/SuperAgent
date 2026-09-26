@@ -109,6 +109,47 @@ exclude = ["frontend*", "tests*"]
 
 # The suites import the services directly and nothing is installed, so pytest has to
 # be told where they live. Without this every `from backend...` under tests/ fails.
+[tool.ruff]
+# The codebase's own convention, measured rather than guessed: p95 of every line under src/
+# is 89 characters and p99 is 97. Ruff's default of 88 would rewrap 6.5% of all lines for
+# nothing; 100 leaves the existing hand-wrapping alone.
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Deliberately narrow. `F` and `B` find real defects, `E4`/`E7`/`E9` find real mistakes, and
+# `I` is mechanical and safe. Left OUT for now, each for a reason rather than by oversight:
+#   UP    1,327 sites of `List[x]` -> `list[x]` and `Optional[x]` -> `x | None`. Worth doing,
+#         but it is a modernisation pass of its own, not a foundation commit.
+#   ARG   775 hits, and nearly all are Protocol conformance or callback signatures, where an
+#         unused argument is the point.
+#   E1/E2/E3, E501  code width and whitespace belong to the formatter; comments and
+#         docstrings here are wrapped by hand and are the most valuable text in the repo.
+select = ["E4", "E7", "E9", "F", "W", "I", "B"]
+ignore = [
+    # `Depends(...)`, `File(...)` and `Form(...)` in a default argument IS FastAPI's idiom.
+    "B008",
+    # 29 sites. `zip(strict=True)` would be a real improvement, but it CHANGES behaviour by
+    # raising on length mismatch, and `strict=False` just restates the status quo. Audit the
+    # sites deliberately in their own commit instead of sweeping them here.
+    "B905",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# E402 (imports not at top of file) is load-order, not sloppiness: every one of these sets
+# an environment variable, or stubs a module, BEFORE the first import of a service, because
+# the modules it reaches read their configuration once at import. conftest.py's docstring
+# explains the same constraint for the suites.
+"conftest.py" = ["E402"]
+"src/backend/app.py" = ["E402"]
+"src/backend/infra/database.py" = ["E402"]
+"src/backend/agent/rag/utils.py" = ["E402"]
+"tests/sis/conftest.py" = ["E402"]
+"tests/evals/*.py" = ["E402"]
+# Asserting against a bare Exception is how these check that a boundary refuses at all,
+# separately from the tests that pin which error it refuses with.
+"tests/**/*.py" = ["B017"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
@@ -116,6 +157,12 @@ pythonpath = ["src"]
 dev = [
     "graphviz>=0.21",
     "pytest>=8.3.0",
+    # Lint and format. Configured under [tool.ruff] below; CI runs both as checks so a
+    # formatting difference fails the build rather than arriving in someone else's diff.
+    "ruff>=0.14",
+    # Enforces the dependency rule between the layers. Contracts live in .importlinter,
+    # and they cover the NEW packages only until step 6G moves the last slice.
+    "import-linter>=2.3",
 ]
 
 # Linux containers run the embedding model on CPU. Without an explicit source,
