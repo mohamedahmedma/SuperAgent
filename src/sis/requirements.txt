@@ -5,7 +5,7 @@
 # without any of the machinery the chat backend needs.
 #
 #   pip install -r sis/requirements.txt
-#   alembic -c sis/alembic.ini upgrade head
+#   alembic -c src/sis/alembic.ini upgrade head
 #   uvicorn sis.api.app:app --port 8300
 
 fastapi>=0.115.0

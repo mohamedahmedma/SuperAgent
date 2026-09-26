@@ -5,7 +5,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# Supports both `python backend/app.py` and `uvicorn backend.app:app` startup methods
+# Supports both `python src/backend/app.py` and `uvicorn backend.app:app --app-dir src` startup methods
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))

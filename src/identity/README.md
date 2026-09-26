@@ -88,7 +88,7 @@ what lets a test replace any of it through `app.dependency_overrides`.
 
 ```bash
 pip install -r identity/requirements.txt
-IDENTITY_BOOTSTRAP_ADMIN_USER=registrar IDENTITY_BOOTSTRAP_ADMIN_PASSWORD=$(python -c "import secrets;print(secrets.token_urlsafe(24))")   uvicorn identity.app:app --port 8200
+IDENTITY_BOOTSTRAP_ADMIN_USER=registrar IDENTITY_BOOTSTRAP_ADMIN_PASSWORD=$(python -c "import secrets;print(secrets.token_urlsafe(24))")   uvicorn identity.app:app --app-dir src --port 8200
 pytest tests/identity -q
 ```
 

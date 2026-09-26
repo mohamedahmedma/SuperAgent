@@ -144,8 +144,8 @@ arrives, and a cached "yes" keeps letting somebody in for as long as the entry l
 
 ```bash
 pip install -r records/requirements.txt
-python -m records.export_openapi              # regenerate the contract
-RECORDS_API_KEY=... uvicorn records.app:app --port 8100
+PYTHONPATH=src python -m records.export_openapi              # regenerate the contract
+RECORDS_API_KEY=... uvicorn records.app:app --app-dir src --port 8100
 pytest tests/records -q
 ```
 
@@ -330,7 +330,7 @@ assembler or the tool layer changed to accommodate it.
 
 ```bash
 RECORDS_LMS=sis SIS_BASE_URL=http://localhost:8300 \
-  uvicorn records.app:app --port 8100
+  uvicorn records.app:app --app-dir src --port 8100
 ```
 
 Four things to know before switching a deployment to it:

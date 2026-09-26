@@ -40,7 +40,7 @@ export interface AssetReference {
 
 /**
  * A record a tool rendered for the reader, as data. Mirrors backend `AnswerBlock`
- * (backend/agent/schemas/chat.py).
+ * (src/backend/agent/schemas/chat.py).
  *
  * The same record also travels as markdown inside the answer, after a `<!--record-block-->`
  * marker; `index` says which marker this block draws. The backend sends no markup, so
@@ -249,7 +249,7 @@ export interface Message {
 }
 
 /**
- * A voice note the server holds. Mirrors backend `AttachmentInfo` (backend/agent/schemas/chat.py).
+ * A voice note the server holds. Mirrors backend `AttachmentInfo` (src/backend/agent/schemas/chat.py).
  * `url` needs the bearer token, so the player fetches it through the auth store.
  */
 export interface AttachmentInfo {

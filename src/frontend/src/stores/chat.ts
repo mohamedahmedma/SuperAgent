@@ -37,7 +37,7 @@ function replacedAClarification(reply: any): boolean {
 
 /** A turn the server refused to start: the parent's own limits, or a provider that is
  *  refusing calls. Its message is the server's copy, already in the parent's language
- *  and naming how long to wait (backend/agent/chat/admission.py, RAG_FIX_PLAN items 37-38). */
+ *  and naming how long to wait (src/backend/agent/chat/admission.py, RAG_FIX_PLAN items 37-38). */
 class TurnRefusedError extends Error {}
 
 async function refusalMessage(response: Response): Promise<string> {

@@ -6,7 +6,7 @@
 # chat backend needs, and its container image is a fraction of the size.
 #
 #   pip install -r records/requirements.txt
-#   uvicorn records.app:app --port 8100
+#   uvicorn records.app:app --app-dir src --port 8100
 
 fastapi>=0.115.0
 uvicorn>=0.30.0

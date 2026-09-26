@@ -9,11 +9,11 @@ tags: []
 Five processes, started separately, deployed separately, failing separately.
 
 ```
-frontend/    Vue app                     (existing)
-backend/     chat agent + RAG            (existing)  :8000
-records/     academic records facade     :8100
-identity/    authentication              :8200
-sis/         student information service :8300
+src/frontend/    Vue app                     (existing)
+src/backend/     chat agent + RAG            (existing)  :8000
+src/records/     academic records facade     :8100
+src/identity/    authentication              :8200
+src/sis/         student information service :8300
 
 tests/       every pytest suite in the estate — not a process
 ```
@@ -31,8 +31,8 @@ suite was collected before it. See [tests/README.md](tests/README.md).
 either direction with `backend/` — verified by:
 
 ```bash
-grep -rn "from backend\|import backend" records/ identity/ sis/  # nothing
-grep -rn "from records\|from identity\|from sis" backend/        # nothing
+grep -rn "from backend\|import backend" src/records/ src/identity/ src/sis/  # nothing
+grep -rn "from records\|from identity\|from sis" src/backend/        # nothing
 ```
 
 `sis/` is the school's own registrar-facing system of record: year levels, classes,
@@ -94,19 +94,19 @@ its own terminal.
 # you reach /v1/admin/* — there is no shared admin key any more.
 IDENTITY_BOOTSTRAP_ADMIN_USER=registrar \
 IDENTITY_BOOTSTRAP_ADMIN_PASSWORD=dev-registrar-password \
-  uvicorn identity.app:app --port 8200
+  uvicorn identity.app:app --app-dir src --port 8200
 
 # 2. records   :8100
 RECORDS_API_KEY=dev-records-agent \
 IDENTITY_JWKS_URL=http://localhost:8200/.well-known/jwks.json \
-  uvicorn records.app:app --port 8100
+  uvicorn records.app:app --app-dir src --port 8100
 
 # 3. backend   :8000
 RECORDS_BASE_URL=http://localhost:8100 RECORDS_API_KEY=dev-records-agent \
-  uvicorn backend.app:app --port 8000
+  uvicorn backend.app:app --app-dir src --port 8000
 
 # 4. sis       :8300  (only when RECORDS_LMS=sis; takes no credential — see below)
-uvicorn sis.app:app --port 8300
+uvicorn sis.app:app --app-dir src --port 8300
 ```
 
 `SIS_DEFAULT_COUNTRY_CODE` (default `+20`, Egypt) is what a guardian's phone number is
@@ -120,7 +120,7 @@ school points at another country.
 
 ### SIS authenticates nobody
 
-**`sis/` has no authentication.** API-key checking was removed from `sis/api/deps.py`:
+**`sis/` has no authentication.** API-key checking was removed from `src/sis/api/deps.py`:
 `X-API-Key` is not read, the `api_keys` table is not consulted on a request, and every
 route answers whoever reaches port 8300 — the imports that rewrite a term's marks and the
 custody route that grants a parent access to a child included. Sign-in with a username and
@@ -147,7 +147,7 @@ database answers, which was never a question about who is asking.
 
 
 Course bindings must key on the SIS subject code — details in
-[records/README.md](records/README.md#records_lmssis).
+[records/README.md](src/records/README.md#records_lmssis).
 
 `IDENTITY_ISSUER` and `IDENTITY_AUDIENCE` must match across identity and records. They
 default to `school-identity` / `school-services` on both sides.
@@ -181,7 +181,7 @@ It costs nothing because the parent messages first: replies inside the 24-hour c
 service window are not template messages, and Meta does not charge for those. It creates
 nobody — a number `sis/` does not hold is refused, because whose parent somebody is stays
 the registrar's fact. Setup, and the reason the number must carry its `+`, are in
-[identity/README.md](identity/README.md#parent-login-by-whatsapp).
+[identity/README.md](src/identity/README.md#parent-login-by-whatsapp).
 
 ## First-run setup
 
@@ -214,7 +214,7 @@ credential is `RECORDS_API_KEY` in the environment, the same value the chat back
 `get_student_records` is bound by exactly one profile, `school`:
 
 ```bash
-ACTIVE_PROFILE=school uvicorn backend.app:app --port 8000
+ACTIVE_PROFILE=school uvicorn backend.app:app --app-dir src --port 8000
 ```
 
 `base`, the profile `school` extends, does not bind it, and a test asserts it never

@@ -17,7 +17,7 @@ column — so a transfer in March leaves October saying what October said.
 
 ```bash
 # from the repository root, with the virtualenv active
-python -m uvicorn sis.app:app --port 8300 --reload
+python -m uvicorn sis.app:app --app-dir src --port 8300 --reload
 ```
 
 - API: <http://127.0.0.1:8300/v1>
@@ -28,7 +28,7 @@ python -m uvicorn sis.app:app --port 8300 --reload
 The database is SQLite at `sis.db` by default. Migrations are Alembic:
 
 ```bash
-python -m alembic -c sis/alembic.ini upgrade head
+python -m alembic -c src/sis/alembic.ini upgrade head
 ```
 
 Back the file up before a migration. `sis/migrations/env.py` turns foreign keys off for the
@@ -43,7 +43,7 @@ The console is a **build**. This is the thing to know before anything else:
 > The source is `sis/frontend/src/`.
 
 ```bash
-cd sis/frontend
+cd src/sis/frontend
 npm install          # first time only
 npm run build        # writes ../web, which the service already serves
 ```
@@ -56,7 +56,7 @@ Then reload `/ui`. `index.html` is served `no-cache` and the hashed assets are s
 `npm run build` after every change is slow. For real work, run the dev server:
 
 ```bash
-cd sis/frontend
+cd src/sis/frontend
 npm run dev          # http://127.0.0.1:5173
 ```
 
@@ -76,9 +76,9 @@ Schools are separated physically — one database each — so creating one is a 
 migration and a row, not an `INSERT`. Two ways in, the same code behind both:
 
 ```bash
-python -m sis.schools provision NCS --name-en "Nasr City" --dry-run   # what it would do
-python -m sis.schools provision NCS --name-en "Nasr City"             # do it
-python -m sis.schools list                                            # every school and its revision
+PYTHONPATH=src python -m sis.schools provision NCS --name-en "Nasr City" --dry-run   # what it would do
+PYTHONPATH=src python -m sis.schools provision NCS --name-en "Nasr City"             # do it
+PYTHONPATH=src python -m sis.schools list                                            # every school and its revision
 ```
 
 ```
@@ -119,7 +119,7 @@ python -m pytest tests/sis -q
 
 # 2. The console renders. Mounts the app in jsdom against stubbed responses and walks
 #    every screen, failing on a blank screen or anything written to console.error.
-cd sis/frontend && npm run smoke
+cd src/sis/frontend && npm run smoke
 ```
 
 The third is inside the first. `tests/sis/test_ui_contract.py` reads the console's source as

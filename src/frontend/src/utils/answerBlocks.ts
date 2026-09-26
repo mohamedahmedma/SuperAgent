@@ -3,7 +3,7 @@
  *
  * A timetable or a term's marks reaches the client twice: as markdown inside the answer,
  * after a `<!--record-block-->` marker, and as an `AnswerBlock`, the same record as data
- * (backend/agent/schemas/chat.py). The backend has already decided everything that is a matter
+ * (src/backend/agent/schemas/chat.py). The backend has already decided everything that is a matter
  * of FACT — which rows, which figures, in which order. What is left here is presentation:
  * which day a phone opens on, where a break sits in the day, what "now" is.
  *
@@ -128,7 +128,7 @@ const ARABIC_SCRIPT = /[؀-ۿݐ-ݿࢠ-ࣿ]/;
  * The words in a record that were written for THIS reader, as opposed to the school's own.
  *
  * A timetable's day names are rendered in the turn's language (`_day_label` in
- * backend/agent/tools/records.py) while its subjects are always the school's Arabic-first names.
+ * src/backend/agent/tools/records.py) while its subjects are always the school's Arabic-first names.
  * So the days are what say which language the record was put into — not the subjects, and
  * not the class name. Marks carry no such words; their subjects are all there is.
  */

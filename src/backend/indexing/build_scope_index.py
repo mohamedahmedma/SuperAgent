@@ -1,8 +1,8 @@
 """Build or refresh the scope catalogue for the active profile.
 
-    uv run python -m backend.indexing.build_scope_index
-    uv run python -m backend.indexing.build_scope_index --dry-run
-    uv run python -m backend.indexing.build_scope_index --force
+    uv run PYTHONPATH=src python -m backend.indexing.build_scope_index
+    uv run PYTHONPATH=src python -m backend.indexing.build_scope_index --dry-run
+    uv run PYTHONPATH=src python -m backend.indexing.build_scope_index --force
 
 Run after ingesting or editing a corpus. Sections whose text is unchanged are reused,
 so a re-run after editing one page costs one model call, and a re-run after editing

@@ -2,7 +2,7 @@
 # surface in the estate, and every dependency here is one someone else audits.
 #
 #   pip install -r identity/requirements.txt
-#   uvicorn identity.app:app --port 8200
+#   uvicorn identity.app:app --app-dir src --port 8200
 
 fastapi>=0.115.0
 uvicorn>=0.30.0

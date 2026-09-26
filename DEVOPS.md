@@ -181,7 +181,7 @@ among them is the one that answers. All three are now in this repository.
 | Hop | Where | Ceiling |
 | --- | --- | --- |
 | Host nginx, `superagent.aurexis.cc` -> `127.0.0.1:3000` | `deploy/nginx/superagent.aurexis.cc.conf` | `512m` |
-| Frontend container nginx | `frontend/nginx.conf` | `512m` |
+| Frontend container nginx | `src/frontend/nginx.conf` | `512m` |
 | Host nginx, `api.aurexis.cc` -> `127.0.0.1:8000` | `deploy/nginx/api.aurexis.cc.conf` | `512m` |
 
 Which hops apply depends on how the image was built. `frontend/Dockerfile` accepts only
@@ -267,8 +267,8 @@ fails the run, so a bad release does not stay live.
 database. Keep each migration backwards-compatible with the release before it, or an
 image rollback will meet a schema it cannot read.
 
-The backend and sis each own their schema through Alembic (`backend/alembic.ini`,
-`sis/alembic.ini`). Each container runs `alembic upgrade head` before its server starts,
+The backend and sis each own their schema through Alembic (`src/backend/alembic.ini`,
+`src/sis/alembic.ini`). Each container runs `alembic upgrade head` before its server starts,
 the release runs it once more after the health gate, and each service refuses to start
 on a database that is not at its own head revision. The backend records its revision in
 `backend_alembic_version` rather than the default table, so both histories can live in
