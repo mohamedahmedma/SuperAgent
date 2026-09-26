@@ -1,0 +1,9 @@
+# Revisions to walk past when attributing lines.
+#
+# Enable locally, once:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# Or per command:
+#   git blame --ignore-revs-file .git-blame-ignore-revs <file>
+
+# style(format): run ruff format across the repository, and nothing else
+c703b9d302255145085a6e75cd2d17ccbb8434a0
