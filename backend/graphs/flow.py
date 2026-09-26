@@ -723,7 +723,7 @@ def _fetch(httpx, url: str, attempts: int = 4):
         time.sleep(2**attempt)
 
 
-def _write(name: str, mermaid: str, out: Path) -> bool:
+def write_chart(name: str, mermaid: str, out: Path) -> bool:
     """Draw one chart. Returns whether it was written.
 
     A rendering failure is reported and swallowed: this runs on the way into the server,

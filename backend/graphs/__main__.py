@@ -48,31 +48,38 @@ def main(argv=None) -> int:
 
 
 def _draw(args) -> int:
-    from backend.graphs import flow
+    from backend.graphs.flow import (
+        build_flow,
+        build_target,
+        compile_parts,
+        output_dir,
+        stale_references,
+        write_chart,
+    )
 
-    stale = flow.stale_references()
+    stale = stale_references()
     if stale:
         print("The flow map names code that no longer exists — update STEPS in backend/graphs/flow.py:")
         for ref in stale:
             print(f"  {ref}")
         return 0 if args.on_start else 2
 
-    parts = flow.compile_parts()
-    chart, _ = flow.build_flow(parts)
+    parts = compile_parts()
+    chart, _ = build_flow(parts)
     if args.check:
         print(f"flow map OK for profile {parts.profile_name!r}: {len(chart.nodes)} steps, {len(chart.edges)} edges")
         return 0
 
-    out = args.out or flow.output_dir()
+    out = args.out or output_dir()
     out.mkdir(parents=True, exist_ok=True)
     print(f"profile {parts.profile_name!r} -> {out}")
-    flow._write("project_flow", chart.render(), out)
+    write_chart("project_flow", chart.render(), out)
     # Always drawn beside the live one: a target nobody can put next to today's shape is
     # a target nobody checks their work against.
-    flow._write("target_flow", flow.build_target().render(), out)
+    write_chart("target_flow", build_target().render(), out)
     if args.parts:
         for name, graph in ((f"agent_{parts.profile_name}", parts.agent), ("rag", parts.rag)):
-            flow._write(name, graph.get_graph(xray=True).draw_mermaid(), out)
+            write_chart(name, graph.get_graph(xray=True).draw_mermaid(), out)
     return 0
 
 
