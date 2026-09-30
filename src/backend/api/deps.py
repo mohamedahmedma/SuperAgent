@@ -2,7 +2,7 @@
 
 One base dependency reads the container off the application, and one small provider per
 service unwraps it. Routes then declare what they need in their signature —
-`conversations: ConversationStorage = Depends(conversation_storage)` — instead of
+`sessions: SessionService = Depends(session_service)` — instead of
 importing a module-level instance, which is what makes a route testable with
 `app.dependency_overrides` and what keeps `backend/composition.py` the only file that
 knows how anything is built.
@@ -19,7 +19,7 @@ from fastapi import Depends, Request
 from backend.composition import Services, default_services
 
 if TYPE_CHECKING:
-    from backend.agent.chat.storage import ConversationStorage
+    from backend.application.services import SessionService
     from backend.indexing.pair_store import DocumentPairService
     from backend.jobs.upload_jobs import IngestJobTracker
 
@@ -35,8 +35,8 @@ def get_services(request: Request) -> Services:
     return services if services is not None else default_services()
 
 
-def conversation_storage(services: Services = Depends(get_services)) -> ConversationStorage:
-    return services.conversations
+def session_service(services: Services = Depends(get_services)) -> SessionService:
+    return services.sessions
 
 
 def document_pair_service(services: Services = Depends(get_services)) -> DocumentPairService:
@@ -52,9 +52,9 @@ def delete_job_tracker(services: Services = Depends(get_services)) -> IngestJobT
 
 
 __all__ = [
-    "conversation_storage",
     "delete_job_tracker",
     "document_pair_service",
     "get_services",
+    "session_service",
     "upload_job_tracker",
 ]

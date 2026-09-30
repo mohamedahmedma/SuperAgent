@@ -145,8 +145,8 @@ class RouteImportTests(unittest.TestCase):
             sessions.delete_session,
         )
         for endpoint in endpoints:
-            parameter = inspect.signature(endpoint).parameters["conversations"]
-            self.assertIs(parameter.default.dependency, sessions.conversation_storage)
+            parameter = inspect.signature(endpoint).parameters["sessions"]
+            self.assertIs(parameter.default.dependency, sessions.session_service)
 
 
 class ImportShapeTests(unittest.TestCase):

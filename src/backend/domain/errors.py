@@ -17,6 +17,8 @@ handler rather than to every route.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import ClassVar
 
 
@@ -105,6 +107,25 @@ class OperationFailed(BackendError):
         self.cause = cause
 
 
+@contextmanager
+def operation(message: str | None = None) -> Iterator[None]:
+    """Run a block whose unanticipated failure is reported as this operation's.
+
+        with operation("Failed to retrieve document list"):
+            ...
+
+    A `BackendError` raised inside passes through untouched - a `NotFound` stays a 404, the
+    way `except HTTPException: raise` kept it one in the routes this replaced. Anything else
+    becomes `OperationFailed(message, cause)`.
+    """
+    try:
+        yield
+    except BackendError:
+        raise
+    except Exception as exc:
+        raise OperationFailed(message, exc) from exc
+
+
 __all__ = [
     "BackendError",
     "FeatureDisabled",
@@ -113,4 +134,5 @@ __all__ = [
     "NotFound",
     "OperationFailed",
     "TurnRefused",
+    "operation",
 ]

@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from backend.agent.rag.entity_retrieval import EntityRetriever
     from backend.agent.rag.retrieval_cache import CorpusVersion, RetrievalCache
     from backend.application.ports import UnitOfWorkFactory
+    from backend.application.services import SessionService
     from backend.assets.blobs import BlobStore
     from backend.assets.delivery import AssetPresenter
     from backend.assets.entity_store import EntityAttributeIndex
@@ -104,6 +105,7 @@ class Services:
         figure_pipeline: FigurePipeline | None = None,
         entity_retriever: EntityRetriever | None = None,
         models: ChatModelFactory | None = None,
+        sessions: SessionService | None = None,
     ) -> None:
         """Every service is nameable here, and anything named is used as given.
 
@@ -143,6 +145,7 @@ class Services:
                 ("figure_pipeline", figure_pipeline),
                 ("entity_retriever", entity_retriever),
                 ("models", models),
+                ("sessions", sessions),
             )
             if value is not None
         }
@@ -270,6 +273,26 @@ class Services:
             )
 
         return self._singleton("attachments", build)
+
+    @property
+    def sessions(self) -> SessionService:
+        """A user's conversations, as the session routes ask for them.
+
+        Built over this container's conversation storage and voice notes, so a test that
+        names either one gets a session service wired to its stand-in.
+        """
+
+        def build() -> SessionService:
+            from backend.agent.chat.assets_bridge import restore_session_assets
+            from backend.application.services import SessionService
+
+            return SessionService(
+                conversations=self.conversations,
+                attachments=self.attachments,
+                restore_assets=restore_session_assets,
+            )
+
+        return self._singleton("sessions", build)
 
     # -- the corpus -------------------------------------------------------------
 

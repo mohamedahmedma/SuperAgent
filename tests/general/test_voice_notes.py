@@ -256,11 +256,13 @@ class VoiceNoteRouteTests(_VoiceNoteTestCase):
         self.client = self._client_for("parent")
 
     def _client_for(self, username: str) -> TestClient:
+        from backend.api.errors import install_error_handlers
         from backend.api.routes.attachments import router as attachments_router
         from backend.api.routes.sessions import router as sessions_router
 
         app = FastAPI()
         app.state.services = self.services
+        install_error_handlers(app)
         app.include_router(attachments_router)
         app.include_router(sessions_router)
         app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(

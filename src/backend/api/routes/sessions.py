@@ -1,8 +1,10 @@
+"""A user's conversations over HTTP. Each route reads the request, calls `SessionService`, and
+shapes the answer; the rules, and the errors, are the service's."""
+
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
-from backend.agent.chat.assets_bridge import restore_session_assets
 from backend.agent.chat.storage import ConversationStorage
 from backend.agent.schemas import (
     MessageInfo,
@@ -11,13 +13,26 @@ from backend.agent.schemas import (
     SessionListResponse,
     SessionMessagesResponse,
 )
-from backend.api.deps import conversation_storage, get_services
+from backend.api.deps import session_service
 from backend.api.routes.attachments import attachment_info
-from backend.composition import Services
+from backend.application.ports import AttachmentRecord
+from backend.application.services import SessionService
 from backend.db.models import User
 from backend.infra.auth import get_current_user
 
 router = APIRouter(tags=["sessions"])
+
+
+def _message_info(message: dict, attachments: dict[str, AttachmentRecord]) -> MessageInfo:
+    attachment = attachments.get(message.get("attachment_id") or "")
+    return MessageInfo(
+        id=message.get("id"),
+        type=message["type"],
+        content=message["content"],
+        timestamp=message["timestamp"],
+        rag_trace=message.get("rag_trace"),
+        attachment=attachment_info(attachment) if attachment is not None else None,
+    )
 
 
 @router.get("/sessions/{session_id}", response_model=SessionMessagesResponse)
@@ -35,77 +50,35 @@ async def get_session_messages(
         description="Return the batch immediately older than this message id.",
     ),
     current_user: User = Depends(get_current_user),
-    conversations: ConversationStorage = Depends(conversation_storage),
-    services: Services = Depends(get_services),
+    sessions: SessionService = Depends(session_service),
 ):
-    """One batch of a stored conversation, with its images and voice notes made displayable again.
+    """One batch of a stored conversation, with its images and voice notes displayable.
 
-    Batched rather than whole: opening a chat costs the last screenful of it, and
-    scrolling back asks for the batch before the oldest message on screen by passing its
-    id as `before`. `has_more` says when there is nothing older left to ask for.
-
-    Storage keeps assets as ids; a client needs renditions, so they are resolved here —
-    once per batch, in a single lookup, not once per message. Capabilities are the
-    browser defaults because this endpoint serves the web app; a client with other
-    constraints reads the ids off the trace and calls POST /media/resolve with its own.
-    A message spoken as a voice note carries the note the same way: one lookup per
-    batch, owner-scoped, so the player comes back with the conversation.
+    Capabilities are the browser defaults because this endpoint serves the web app; a client
+    with other constraints reads the asset ids off the trace and calls POST /media/resolve
+    with its own.
     """
-    try:
-        page = conversations.get_session_page(
-            current_user.username, session_id, limit=limit, before_id=before
-        )
-        records = restore_session_assets(page["messages"])
-        attachments = services.attachments.get_many(
-            current_user.username, [record.get("attachment_id") or "" for record in records]
-        )
-        messages = [
-            MessageInfo(
-                id=msg.get("id"),
-                type=msg["type"],
-                content=msg["content"],
-                timestamp=msg["timestamp"],
-                rag_trace=msg.get("rag_trace"),
-                attachment=(
-                    attachment_info(attachments[msg["attachment_id"]])
-                    if msg.get("attachment_id") in attachments
-                    else None
-                ),
-            )
-            for msg in records
-        ]
-        return SessionMessagesResponse(messages=messages, has_more=page["has_more"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    page = sessions.page(current_user.username, session_id, limit=limit, before=before)
+    return SessionMessagesResponse(
+        messages=[_message_info(message, page.attachments) for message in page.messages],
+        has_more=page.has_more,
+    )
 
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     current_user: User = Depends(get_current_user),
-    conversations: ConversationStorage = Depends(conversation_storage),
+    sessions: SessionService = Depends(session_service),
 ):
-    try:
-        sessions = [
-            SessionInfo(**item) for item in conversations.list_session_infos(current_user.username)
-        ]
-        sessions.sort(key=lambda x: x.updated_at, reverse=True)
-        return SessionListResponse(sessions=sessions)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    infos = sessions.list_sessions(current_user.username)
+    return SessionListResponse(sessions=[SessionInfo(**info) for info in infos])
 
 
 @router.delete("/sessions/{session_id}", response_model=SessionDeleteResponse)
 async def delete_session(
     session_id: str,
     current_user: User = Depends(get_current_user),
-    conversations: ConversationStorage = Depends(conversation_storage),
+    sessions: SessionService = Depends(session_service),
 ):
-    try:
-        deleted = conversations.delete_session(current_user.username, session_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Session does not exist")
-        return SessionDeleteResponse(session_id=session_id, message="Session deleted successfully")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    sessions.delete(current_user.username, session_id)
+    return SessionDeleteResponse(session_id=session_id, message="Session deleted successfully")
