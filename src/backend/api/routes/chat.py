@@ -12,7 +12,9 @@ from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.language import detect_language
 from backend.agent.schemas import ChatRequest, ChatResponse
 from backend.api.deps import get_services
+from backend.api.errors import provider_failure
 from backend.composition import Services
+from backend.domain.errors import BackendError
 from backend.infra.auth import AuthenticatedUser, get_current_user
 from backend.profiles import get_profile
 
@@ -124,26 +126,10 @@ def chat_endpoint(
         if isinstance(resp, dict):
             return ChatResponse(**resp)
         return ChatResponse(response=resp)
-    except HTTPException:
+    except (HTTPException, BackendError):
         raise
     except Exception as e:
-        message = str(e)
-        match = re.search(r"Error code:\s*(\d{3})", message)
-        if match:
-            code = int(match.group(1))
-            if code == 429:
-                raise HTTPException(
-                    status_code=429,
-                    detail=(
-                        "The upstream model service triggered rate limiting/quota limits (429). "
-                        "Please check your account quota/model status.\n"
-                        f"Original error: {message}"
-                    ),
-                )
-            if code in (401, 403):
-                raise HTTPException(status_code=code, detail=message)
-            raise HTTPException(status_code=code, detail=message)
-        raise HTTPException(status_code=500, detail=message)
+        raise provider_failure(e) from e
 
 
 @router.post("/chat/stream")
