@@ -22,15 +22,16 @@ contains.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Depends, Request, Response
 
 from backend.api.deps import get_services
+from backend.api.schemas.assets import AssetResolveRequest, AssetResolveResponse
+from backend.api.validation import require_assets_enabled
 from backend.assets.delivery import AssetReference, ClientCapabilities
 from backend.composition import Services
 from backend.db.models import User
+from backend.domain.errors import NotFound, OperationFailed
 from backend.infra.auth import get_current_user
 from backend.profiles import get_profile
 
@@ -42,31 +43,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["assets"])
 
 
-class AssetResolveRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    asset_ids: List[str] = Field(default_factory=list, max_length=64)
-    capabilities: Optional[ClientCapabilities] = None
-
-
-class AssetResolveResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    assets: List[AssetReference] = Field(default_factory=list)
-    missing: List[str] = Field(default_factory=list)
-
-
-def _require_assets_enabled() -> None:
-    if not get_profile().assets.enabled:
-        raise HTTPException(
-            status_code=404, detail="Asset support is disabled for this deployment."
-        )
-
-
 def _load(services: Services, asset_id: str):
     dossier = services.asset_store.get(asset_id)
     if dossier is None:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise NotFound("Asset not found")
     return dossier
 
 
@@ -77,7 +57,7 @@ async def get_asset_metadata(
     services: Services = Depends(get_services),
 ) -> AssetReference:
     """Caption, dimensions, and source for one asset — no bytes."""
-    _require_assets_enabled()
+    require_assets_enabled()
     return services.asset_presenter.present(_load(services, asset_id), ClientCapabilities())
 
 
@@ -88,7 +68,7 @@ async def resolve_assets(
     services: Services = Depends(get_services),
 ) -> AssetResolveResponse:
     """Batch-resolve asset ids into renditions the calling client can actually use."""
-    _require_assets_enabled()
+    require_assets_enabled()
     ids = [item.strip() for item in request.asset_ids if item and item.strip()]
     if not ids:
         return AssetResolveResponse()
@@ -116,10 +96,10 @@ async def get_asset_bytes(
     strong ETag and the response can be cached indefinitely. A client that already has
     the bytes gets a 304 and transfers nothing.
     """
-    _require_assets_enabled()
+    require_assets_enabled()
     dossier = _load(services, asset_id)
     if not dossier.blob.uri:
-        raise HTTPException(status_code=404, detail="Asset has no stored bytes")
+        raise NotFound("Asset has no stored bytes")
 
     etag = f'"{dossier.sha256}"'
     if request.headers.get("if-none-match") == etag:
@@ -131,10 +111,9 @@ async def get_asset_bytes(
         # The row survived but the blob did not — a real inconsistency worth logging
         # loudly, and a 404 rather than a 500 because the resource genuinely is gone.
         logger.error("Blob missing for asset %s (%s)", asset_id, dossier.blob.uri)
-        raise HTTPException(status_code=404, detail="Asset bytes are no longer available")
+        raise NotFound("Asset bytes are no longer available") from None
     except Exception as exc:
-        logger.exception("Failed to read blob for asset %s", asset_id)
-        raise HTTPException(status_code=500, detail=f"Failed to read asset: {exc}")
+        raise OperationFailed("Failed to read asset", exc) from exc
 
     max_age = get_profile().assets.delivery.cache_max_age_seconds
     return Response(

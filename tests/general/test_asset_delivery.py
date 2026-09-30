@@ -874,7 +874,10 @@ class AssetRouteTests(unittest.TestCase):
         self.dossier = make_dossier(uri=uri, sha256=digest, byte_size=len(self.data))
         self.store.record(self.dossier)
 
+        from backend.api.errors import install_error_handlers
+
         app = FastAPI()
+        install_error_handlers(app)
         app.include_router(router)
         app.dependency_overrides[get_current_user] = lambda: User(id=1, username="u", role="user")
         self.client = TestClient(app)

@@ -155,7 +155,10 @@ class _ChatRoute:
 
         self._patch = patch.object(routes, "chat_with_agent_stream", turn)
         self._patch.start()
+        from backend.api.errors import install_error_handlers
+
         app = FastAPI()
+        install_error_handlers(app)
         app.include_router(routes.router)
         app.dependency_overrides[get_services] = lambda: SimpleNamespace(turn_admission=door)
         app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser("parent", "user")

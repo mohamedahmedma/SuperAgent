@@ -14,7 +14,7 @@ from backend.agent.schemas import ChatRequest, ChatResponse
 from backend.api.deps import get_services
 from backend.api.errors import provider_failure
 from backend.composition import Services
-from backend.domain.errors import BackendError
+from backend.domain.errors import BackendError, NotFound, TurnRefused
 from backend.infra.auth import AuthenticatedUser, get_current_user
 from backend.profiles import get_profile
 
@@ -44,7 +44,7 @@ def _attachment_id(request: ChatRequest, username: str, services: Services) -> s
     if not attachment_id:
         return None
     if services.attachments.get(username, attachment_id) is None:
-        raise HTTPException(status_code=404, detail="Attachment not found")
+        raise NotFound("Attachment not found")
     return attachment_id
 
 
@@ -80,10 +80,9 @@ def _admit(message: str, user: AuthenticatedUser, services: Services) -> TurnLea
     """
     decision = services.turn_admission.admit(user.username)
     if isinstance(decision, Refusal):
-        raise HTTPException(
-            status_code=429,
-            detail=decision.message(get_profile().user_copy, detect_language(message)),
-            headers={"Retry-After": str(decision.retry_after_seconds)},
+        raise TurnRefused(
+            decision.message(get_profile().user_copy, detect_language(message)),
+            retry_after_seconds=decision.retry_after_seconds,
         )
     return decision
 
