@@ -16,10 +16,14 @@
 #   - `protected` only catches DIRECT imports, so it is a weaker guarantee than its name
 #     suggests. Where the rule must hold through a chain, `independence` is the type to reach
 #     for.
-# And one trap: `layers` and `forbidden` ERROR on a module that does not exist, rather than
-# passing vacuously. Every module named here has to be importable, which is why boto3 and
-# minio are absent from the forbidden list below - neither is installed in this environment,
-# and naming them would fail the run rather than guard anything.
+# And one trap, which runs in the direction that looks like safety: `layers` ERRORS on a
+# module that does not exist, but `forbidden` PASSES VACUOUSLY on one - internal or external,
+# installed or not. A misspelled name in a forbidden list therefore guards nothing, and says
+# nothing. Check each new entry by planting a probe import and watching the contract break.
+#
+# Nor does this tool need the packages it names to be installed: it reads source statically.
+# It passes with every contract below from an environment holding only the dev group, which
+# is why CI installs that group alone to run it.
 
 [importlinter]
 root_packages =
@@ -61,6 +65,8 @@ forbidden_modules =
     openai
     psycopg2
     jinja2
+    boto3
+    minio
 # Pydantic is deliberately NOT here. The sibling domains already use it
 # (sis/domain/value_objects.py, sis/domain/grades.py), and a validated value object is a
 # domain concept whichever library spells it.

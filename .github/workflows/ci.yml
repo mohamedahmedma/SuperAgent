@@ -45,6 +45,26 @@ jobs:
         with: {python-version: "3.12"}
       - run: python -m compileall -q src
 
+  backend-lint:
+    name: CI - Lint, format and import contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {version: "0.8.14", enable-cache: true}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      # The dev group ONLY. ruff and import-linter both read source statically, so neither
+      # needs the project's runtime dependencies - which include torch. Measured: every
+      # check below passes from an environment holding nothing but this group.
+      - run: uv sync --locked --only-group dev
+      # --no-sync, or `uv run` would go back and install the full default environment.
+      - run: uv run --no-sync ruff check src tests scripts conftest.py
+      - run: uv run --no-sync ruff format --check src tests scripts conftest.py
+      # Nothing is installed, so the packages are found through PYTHONPATH here too.
+      - run: uv run --no-sync lint-imports
+        env: {PYTHONPATH: src}
+
   backend-tests-general:
     name: CI - Backend tests (general)
     runs-on: ubuntu-latest
