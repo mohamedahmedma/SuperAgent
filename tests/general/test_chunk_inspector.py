@@ -22,10 +22,8 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from backend.api.routes.documents import (
-    _CHUNK_PAGE_LIMIT,
-    list_document_chunks,
-)
+from backend.api.routes.documents import list_document_chunks
+from backend.application.services.documents import CHUNK_PAGE_LIMIT, DocumentCatalogue
 
 
 class _Milvus:
@@ -80,8 +78,10 @@ class _ParentChunks:
 def inspect(rows, filename="kb.docx", q="", parents=(), parent_store=None):
     milvus = _Milvus(rows)
     parent_chunks = parent_store or _ParentChunks(parents)
-    services = SimpleNamespace(milvus=milvus, parent_chunks=parent_chunks)
-    response = asyncio.run(list_document_chunks(filename, q=q, _=None, services=services))
+    catalogue = DocumentCatalogue(
+        vectors=milvus, parent_chunks=parent_chunks, pairs=None, assets=None
+    )
+    response = asyncio.run(list_document_chunks(filename, q=q, _=None, catalogue=catalogue))
     return response, milvus
 
 
@@ -138,7 +138,7 @@ class WhatItReadsTests(unittest.TestCase):
 class BothHalvesOfTheCorpusTests(unittest.TestCase):
     """Only leaves are vectorised. The levels above them live in Postgres.
 
-    `_process_upload_job` writes levels 1 and 2 to `parent_chunks` and level 3 to Milvus,
+    `DocumentIngestion.ingest` writes levels 1 and 2 to `parent_chunks` and level 3 to Milvus,
     so a view reading Milvus alone shows every leaf pointing at a parent that is not in
     the response. Measured on the shipped corpus before this was fixed: 175 leaves, 175
     orphans, 0 roots — a tree that was really a flat list claiming to be a tree.
@@ -181,12 +181,14 @@ class BothHalvesOfTheCorpusTests(unittest.TestCase):
     def test_a_parent_store_failure_is_reported_rather_than_half_a_tree(self):
         """Showing the leaves alone would draw a structure that is not the corpus's. An
         inspector that lies is worse than one that says it could not read."""
-        from fastapi import HTTPException
+        from backend.api.errors import status_for
+        from backend.domain.errors import OperationFailed
 
         broken = _ParentChunks(error=RuntimeError("postgres is down"))
-        with self.assertRaises(HTTPException) as raised:
+        with self.assertRaises(OperationFailed) as raised:
             inspect(self.LEAVES, parent_store=broken)
-        self.assertEqual(500, raised.exception.status_code)
+        self.assertEqual(500, status_for(raised.exception))
+        self.assertEqual("Failed to read chunks: postgres is down", raised.exception.message)
 
 
 class TheHierarchyTests(unittest.TestCase):
@@ -371,17 +373,17 @@ class WhatItReportsTests(unittest.TestCase):
     def test_a_match_beyond_the_ceiling_is_not_counted_as_shown(self):
         """`match_count` describes what came back, so it cannot promise a hit the UI was
         never given."""
-        rows = [row(str(i), text="fees", idx=i) for i in range(_CHUNK_PAGE_LIMIT + 10)]
+        rows = [row(str(i), text="fees", idx=i) for i in range(CHUNK_PAGE_LIMIT + 10)]
         response, _ = inspect(rows, q="fees")
-        self.assertEqual(_CHUNK_PAGE_LIMIT, response.match_count)
+        self.assertEqual(CHUNK_PAGE_LIMIT, response.match_count)
 
     def test_a_document_past_the_ceiling_says_so(self):
         """The count stays truthful so the UI can report the cut rather than quietly
         showing less than the document holds."""
-        response, _ = inspect([row(str(i), idx=i) for i in range(_CHUNK_PAGE_LIMIT + 25)])
+        response, _ = inspect([row(str(i), idx=i) for i in range(CHUNK_PAGE_LIMIT + 25)])
         self.assertTrue(response.truncated)
-        self.assertEqual(_CHUNK_PAGE_LIMIT + 25, response.total)
-        self.assertEqual(_CHUNK_PAGE_LIMIT, len(response.chunks))
+        self.assertEqual(CHUNK_PAGE_LIMIT + 25, response.total)
+        self.assertEqual(CHUNK_PAGE_LIMIT, len(response.chunks))
 
 
 class WhoMayReadItTests(unittest.TestCase):

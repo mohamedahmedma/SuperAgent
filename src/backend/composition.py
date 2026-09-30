@@ -48,7 +48,12 @@ if TYPE_CHECKING:
     from backend.agent.rag.entity_retrieval import EntityRetriever
     from backend.agent.rag.retrieval_cache import CorpusVersion, RetrievalCache
     from backend.application.ports import UnitOfWorkFactory
-    from backend.application.services import SessionService
+    from backend.application.services import (
+        DocumentCatalogue,
+        DocumentIngestion,
+        DocumentRemoval,
+        SessionService,
+    )
     from backend.assets.blobs import BlobStore
     from backend.assets.delivery import AssetPresenter
     from backend.assets.entity_store import EntityAttributeIndex
@@ -69,6 +74,18 @@ if TYPE_CHECKING:
     from backend.llm_models import ChatModelFactory
 
 T = TypeVar("T")
+
+
+def forget_corpus_languages() -> None:
+    """Clear the memoized answer to which languages the corpus is published in.
+
+    Looked up when called rather than captured when a service is built, as the upload route
+    always did: a patch on `query_translation.reset_coverage` still lands, and a failure to
+    import it stays inside the ingest job's own guard instead of failing the build.
+    """
+    from backend.agent.rag.query_translation import reset_coverage
+
+    reset_coverage()
 
 
 class Services:
@@ -106,6 +123,9 @@ class Services:
         entity_retriever: EntityRetriever | None = None,
         models: ChatModelFactory | None = None,
         sessions: SessionService | None = None,
+        document_catalogue: DocumentCatalogue | None = None,
+        document_ingestion: DocumentIngestion | None = None,
+        document_removal: DocumentRemoval | None = None,
     ) -> None:
         """Every service is nameable here, and anything named is used as given.
 
@@ -146,6 +166,9 @@ class Services:
                 ("entity_retriever", entity_retriever),
                 ("models", models),
                 ("sessions", sessions),
+                ("document_catalogue", document_catalogue),
+                ("document_ingestion", document_ingestion),
+                ("document_removal", document_removal),
             )
             if value is not None
         }
@@ -583,6 +606,67 @@ class Services:
             return IngestJobTracker("delete", unit_of_work=self.unit_of_work)
 
         return self._singleton("delete_jobs", build)
+
+    # -- the document use cases -------------------------------------------------
+    #
+    # Built over this container's own stores, so a test that names any one of them - a fake
+    # loader, a fake job tracker - gets a service wired to it and the genuine article for
+    # everything it did not name.
+
+    @property
+    def document_catalogue(self) -> DocumentCatalogue:
+        """The corpus as the admin views read it."""
+
+        def build() -> DocumentCatalogue:
+            from backend.application.services import DocumentCatalogue
+
+            return DocumentCatalogue(
+                vectors=self.milvus,
+                parent_chunks=self.parent_chunks,
+                pairs=self.document_pairs,
+                assets=self.asset_store,
+            )
+
+        return self._singleton("document_catalogue", build)
+
+    @property
+    def document_ingestion(self) -> DocumentIngestion:
+        """Documents into the corpus: accepted in the request, ingested in the background."""
+
+        def build() -> DocumentIngestion:
+            from backend.api.resources import UPLOAD_DIR
+            from backend.application.services import DocumentIngestion
+
+            return DocumentIngestion(
+                loader=self.document_loader,
+                parent_chunks=self.parent_chunks,
+                vector_writer=self.milvus_writer,
+                remover=self.document_remover,
+                pairs=self.document_pairs,
+                jobs=self.upload_jobs,
+                upload_dir=UPLOAD_DIR,
+                forget_corpus_languages=forget_corpus_languages,
+            )
+
+        return self._singleton("document_ingestion", build)
+
+    @property
+    def document_removal(self) -> DocumentRemoval:
+        """Documents out of the corpus, and off their pair rows."""
+
+        def build() -> DocumentRemoval:
+            from backend.application.services import DocumentRemoval
+            from backend.jobs import DELETE_STEPS
+
+            return DocumentRemoval(
+                remover=self.document_remover,
+                pairs=self.document_pairs,
+                jobs=self.delete_jobs,
+                delete_steps=DELETE_STEPS,
+                forget_corpus_languages=forget_corpus_languages,
+            )
+
+        return self._singleton("document_removal", build)
 
 
 _default: Services | None = None

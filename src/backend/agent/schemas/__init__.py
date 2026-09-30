@@ -13,26 +13,11 @@ from backend.agent.schemas.chat import (
     SessionListResponse,
     SessionMessagesResponse,
 )
-from backend.agent.schemas.documents import (
-    AssetInfo,
-    ChunkInfo,
-    DocumentAssetListResponse,
-    DocumentChunkListResponse,
-    DocumentDeleteJobResponse,
-    DocumentDeleteResponse,
-    DocumentDeleteStartResponse,
-    DocumentInfo,
-    DocumentListResponse,
-    DocumentPairInfo,
-    DocumentPairListResponse,
-    DocumentUploadJobResponse,
-    DocumentUploadResponse,
-    DocumentUploadStartResponse,
-    UploadStepInfo,
-)
 
 # Auth request/response shapes are gone: login, registration and "who am I" are the
 # identity service's routes now, and their schemas live with them in identity/.
+# The document and asset-review models moved to backend/api/schemas/documents.py: nothing in
+# the agent uses them, and the API layer is where the sibling services keep theirs.
 __all__ = [
     "AttachmentInfo",
     "ChatRequest",
@@ -47,19 +32,4 @@ __all__ = [
     "SessionInfo",
     "SessionListResponse",
     "SessionDeleteResponse",
-    "AssetInfo",
-    "ChunkInfo",
-    "DocumentAssetListResponse",
-    "DocumentChunkListResponse",
-    "DocumentInfo",
-    "DocumentListResponse",
-    "DocumentPairInfo",
-    "DocumentPairListResponse",
-    "DocumentUploadResponse",
-    "DocumentUploadStartResponse",
-    "UploadStepInfo",
-    "DocumentUploadJobResponse",
-    "DocumentDeleteStartResponse",
-    "DocumentDeleteJobResponse",
-    "DocumentDeleteResponse",
 ]

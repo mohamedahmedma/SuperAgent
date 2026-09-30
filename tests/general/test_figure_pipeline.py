@@ -1139,7 +1139,7 @@ class FigureProgressStepTests(unittest.TestCase):
     """What the admin actually sees, in the step the upload job already has."""
 
     def setUp(self):
-        from backend.api.routes.documents import _FigureProgress
+        from backend.application.services.documents import FigureProgress
 
         self.calls = []
 
@@ -1150,7 +1150,7 @@ class FigureProgressStepTests(unittest.TestCase):
                 self.calls.append((key, percent, status, message))
                 self.sub_args.append(kwargs)
 
-        self.progress = _FigureProgress(Jobs(), "job-1")
+        self.progress = FigureProgress(Jobs(), "job-1")
 
     def test_progress_drives_a_nested_bar_rather_than_a_number_in_prose(self):
         """The sub-bar the UI draws: a percentage buried in `message` cannot be drawn,

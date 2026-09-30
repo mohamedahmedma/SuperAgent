@@ -8,6 +8,17 @@ Services raise the errors in `backend/domain/errors.py` and never an HTTP status
 each error becomes is decided once, in `backend/api/errors.py`.
 """
 
+from backend.application.services.documents import (
+    DocumentCatalogue,
+    DocumentIngestion,
+    DocumentRemoval,
+)
 from backend.application.services.sessions import SessionPage, SessionService
 
-__all__ = ["SessionPage", "SessionService"]
+__all__ = [
+    "DocumentCatalogue",
+    "DocumentIngestion",
+    "DocumentRemoval",
+    "SessionPage",
+    "SessionService",
+]

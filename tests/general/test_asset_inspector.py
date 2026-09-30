@@ -12,7 +12,9 @@ import json
 import unittest
 from types import SimpleNamespace
 
+from backend.api.errors import status_for
 from backend.api.routes.documents import list_document_assets, mark_asset_reviewed
+from backend.application.services.documents import DocumentCatalogue
 from backend.assets.dossier import (
     AssetDossier,
     AssetRole,
@@ -24,6 +26,7 @@ from backend.assets.dossier import (
     SourceRef,
     TextSurface,
 )
+from backend.domain.errors import NotFound, OperationFailed
 
 
 def dossier(
@@ -105,8 +108,8 @@ def review(dossiers, filename="kb.docx", chunks=(), milvus_error=None, store_err
             return list(dossiers)
 
     milvus = _Milvus(chunks, error=milvus_error)
-    services = SimpleNamespace(asset_store=Store(), milvus=milvus)
-    return asyncio.run(list_document_assets(filename, _=None, services=services)), milvus
+    catalogue = DocumentCatalogue(vectors=milvus, parent_chunks=None, pairs=None, assets=Store())
+    return asyncio.run(list_document_assets(filename, _=None, catalogue=catalogue)), milvus
 
 
 class WhatItReturnsTests(unittest.TestCase):
@@ -221,11 +224,10 @@ class WhenSomethingIsDownTests(unittest.TestCase):
 
     def test_an_unreadable_asset_store_is_an_error_rather_than_an_empty_list(self):
         """Empty means this document has no images, which is a different fact."""
-        from fastapi import HTTPException
-
-        with self.assertRaises(HTTPException) as caught:
+        with self.assertRaises(OperationFailed) as caught:
             review([dossier()], store_error=RuntimeError("postgres is down"))
-        self.assertEqual(500, caught.exception.status_code)
+        self.assertEqual(500, status_for(caught.exception))
+        self.assertEqual("Failed to read assets: postgres is down", caught.exception.message)
 
 
 class WhoMayReadItTests(unittest.TestCase):
@@ -252,7 +254,7 @@ class MarkReviewedTests(unittest.TestCase):
     """Clearing the flag. Until this existed `needs_review` only ever went up, which
     makes it a permanent label rather than a queue."""
 
-    def _services(self, dossier_out=None, error=None):
+    def _catalogue(self, dossier_out=None, error=None):
         calls = []
 
         class Store:
@@ -262,30 +264,29 @@ class MarkReviewedTests(unittest.TestCase):
                     raise error
                 return dossier_out
 
-        return SimpleNamespace(asset_store=Store()), calls
+        catalogue = DocumentCatalogue(vectors=None, parent_chunks=None, pairs=None, assets=Store())
+        return catalogue, calls
 
     def test_it_returns_the_asset_as_it_now_reads(self):
         accepted = dossier(needs_review=False)
-        services, _calls = self._services(accepted)
-        result = asyncio.run(mark_asset_reviewed("kb.docx#p1#a", _=None, services=services))
+        catalogue, _calls = self._catalogue(accepted)
+        result = asyncio.run(mark_asset_reviewed("kb.docx#p1#a", _=None, catalogue=catalogue))
         self.assertFalse(result.needs_review)
         self.assertEqual("kb.docx#p1#a", result.asset_id)
 
     def test_an_unknown_asset_is_a_404_rather_than_a_silent_success(self):
-        from fastapi import HTTPException
-
-        services, _calls = self._services(None)
-        with self.assertRaises(HTTPException) as caught:
-            asyncio.run(mark_asset_reviewed("nope", _=None, services=services))
-        self.assertEqual(404, caught.exception.status_code)
+        catalogue, _calls = self._catalogue(None)
+        with self.assertRaises(NotFound) as caught:
+            asyncio.run(mark_asset_reviewed("nope", _=None, catalogue=catalogue))
+        self.assertEqual(404, status_for(caught.exception))
+        self.assertEqual("Asset not found", caught.exception.message)
 
     def test_a_write_failure_is_reported_rather_than_read_as_accepted(self):
-        from fastapi import HTTPException
-
-        services, _calls = self._services(error=RuntimeError("postgres is down"))
-        with self.assertRaises(HTTPException) as caught:
-            asyncio.run(mark_asset_reviewed("a", _=None, services=services))
-        self.assertEqual(500, caught.exception.status_code)
+        catalogue, _calls = self._catalogue(error=RuntimeError("postgres is down"))
+        with self.assertRaises(OperationFailed) as caught:
+            asyncio.run(mark_asset_reviewed("a", _=None, catalogue=catalogue))
+        self.assertEqual(500, status_for(caught.exception))
+        self.assertEqual("Failed to record the review: postgres is down", caught.exception.message)
 
     def test_the_route_is_admin_only(self):
         from backend.api.routes import documents
