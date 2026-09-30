@@ -50,6 +50,7 @@ from backend.agent.chat.assets_bridge import (
     effective_capabilities,
     trace_for_storage,
 )
+from backend.agent.chat.background import JobRunner
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.child_context import SESSION_CHILD_KEY, load_child_state, save_child_state
 from backend.agent.chat.clarification import (
@@ -67,11 +68,10 @@ from backend.agent.chat.context_messages import (
     build_resume_answer_messages,
     history_window,
 )
-from backend.agent.chat.background import JobRunner
 from backend.agent.chat.finalize import Finalizer, finalize_text, message_text
 from backend.agent.chat.storage import MessageToStore
-from backend.infra.retry import retry_transient
 from backend.agent.schemas.chat import normalize_rag_trace
+from backend.infra.retry import retry_transient
 
 logger = logging.getLogger(__name__)
 

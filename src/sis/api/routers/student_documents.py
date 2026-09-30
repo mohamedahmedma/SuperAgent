@@ -1,14 +1,19 @@
 """Authenticated, soft-deletable files attached to one student record."""
 
 from __future__ import annotations
-import os, re, uuid
+
+import os
+import re
+import uuid
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
+
 from sis.api.deps import Principal, UowFactoryDep, require_permission
 from sis.domain.rbac import Permission
 from sis.infrastructure.db import models as m

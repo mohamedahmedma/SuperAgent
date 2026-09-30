@@ -119,8 +119,8 @@ def all_routers() -> tuple["APIRouter", ...]:
     composition root in `sis/app.py` stays the only thing that knows an app exists.
     """
     from sis.api.routers import (
-        admin,
         access,
+        admin,
         attendance,
         chat,
         classroom,
@@ -135,9 +135,9 @@ def all_routers() -> tuple["APIRouter", ...]:
         student_documents,
         students,
         system,
-        timetable,
         teachers,
         teaching,
+        timetable,
     )
 
     # An explicit tuple, not discovery over the package. A new module that nobody adds

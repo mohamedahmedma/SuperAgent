@@ -145,7 +145,7 @@ async def lifespan(app: FastAPI):
     app.state.signing_key = signing_key_from(resolved)
     # Force the load here rather than lazily. A key that cannot be read must stop the
     # deploy, not the first sign-in.
-    app.state.signing_key.kid
+    app.state.signing_key.kid  # noqa: B018 - the access IS the load, see above
 
     app.state.token_issuer = JwtTokenIssuer(
         key=app.state.signing_key,

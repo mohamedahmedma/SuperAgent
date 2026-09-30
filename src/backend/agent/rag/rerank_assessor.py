@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
 from backend.agent.rag.evidence import AssessmentContext, Certainty, ChunkAssessment, EvidenceReport
 

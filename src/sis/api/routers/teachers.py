@@ -1,8 +1,8 @@
 """Teacher identity, optional account, and valid teaching assignments."""
 
 from datetime import UTC, date, datetime
-from uuid import uuid4
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -18,9 +18,9 @@ from sis.api.deps import (
 from sis.api.routers import domain_errors, error_responses
 from sis.application.ports.repositories import TeacherRecord
 from sis.application.services.teachers import TeacherManagementService
-from sis.domain.staff import PASSWORD_MIN_LENGTH, StaffAttendanceState
 from sis.domain.people import Gender
 from sis.domain.rbac import Permission, RoleCode
+from sis.domain.staff import PASSWORD_MIN_LENGTH, StaffAttendanceState
 from sis.domain.value_objects import SchoolCode, YearCode
 from sis.infrastructure.db import models as m
 

@@ -12,15 +12,15 @@ import json
 import unittest
 from unittest.mock import patch
 
+from backend.agent.chat.answer_checks import terminal_reply
 from backend.agent.chat.orchestrator import plan_turn
 from backend.agent.chat.signals import RequestSignals, Scope
 from backend.agent.chat.turn_policy import TurnPlan
+from backend.agent.rag.evidence import Certainty
+from backend.agent.tools import KNOWLEDGE_TOOL
 from backend.composition import Services
 from backend.profiles import get_profile
 from backend.profiles.registry import load_profile, set_profile
-from backend.agent.rag.evidence import Certainty
-from backend.agent.tools import KNOWLEDGE_TOOL
-from backend.agent.chat.answer_checks import terminal_reply
 
 
 class ForgetfulStorage:
@@ -333,6 +333,8 @@ class TerminalToolResultTests(unittest.IsolatedAsyncioTestCase):
         return ToolMessage(content=content, tool_call_id="c1", name=name)
 
     async def _run(self, stream_items, trace, plan=None):
+        from langchain_core.messages import AIMessageChunk
+
         import backend.agent.chat.service as service
         from backend.agent.chat.turn_policy import TurnPlan
 

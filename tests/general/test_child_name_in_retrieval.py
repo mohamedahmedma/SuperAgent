@@ -23,8 +23,8 @@ import unittest
 from backend.agent.chat.child_names import name_surfaces, strip_child_names
 from backend.agent.chat.child_resolution import ResolvedChild, no_child, resolve_child
 from backend.agent.chat.child_roster import ChildOption
-from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.context_messages import _turn_context_message
+from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.signals import RequestSignals
 from backend.agent.chat.turn_policy import resolve_turn
 from backend.agent.rag.graph_nodes import search_query

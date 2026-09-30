@@ -25,11 +25,11 @@ from sis.api.deps import (
     require_registrar,
     require_user_permission,
 )
-from sis.domain.rbac import AccessProfile, Permission, RoleCode, ScopeType
-from sis.infrastructure.db import models as m
 from sis.api.routers import domain_errors, error_responses
 from sis.domain.access import AccessAttempt
 from sis.domain.auth import ApiKey, Scope
+from sis.domain.rbac import AccessProfile, Permission, RoleCode, ScopeType
+from sis.infrastructure.db import models as m
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 AuditReader = Annotated[AccessProfile, Depends(require_user_permission(Permission.AUDIT_READ))]

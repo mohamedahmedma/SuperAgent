@@ -23,11 +23,11 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 from uuid import uuid4
 
+from backend.agent.chat.transcription import Transcriber
 from backend.application.ports.repositories import AttachmentRecord, NewAttachment
 from backend.application.ports.unit_of_work import UnitOfWorkFactory
 from backend.assets.blobs import BlobStore
 from backend.assets.dossier import compute_sha256
-from backend.agent.chat.transcription import Transcriber
 
 logger = logging.getLogger(__name__)
 

@@ -5,11 +5,11 @@ from typing import Sequence
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from backend.agent.schemas.chat import normalize_rag_trace
 from backend.application.ports.repositories import NewMessage, StoredMessage
 from backend.application.ports.unit_of_work import UnitOfWorkFactory
 from backend.infra.cache import RedisCache
 from backend.infra.unit_of_work import SqlAlchemyUnitOfWork
-from backend.agent.schemas.chat import normalize_rag_trace
 
 
 @dataclass(frozen=True)

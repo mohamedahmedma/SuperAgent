@@ -36,21 +36,21 @@ from sis.infrastructure.db.session import get_sessionmaker
 if TYPE_CHECKING:
     from sis.application.ports.repositories import (
         AcademicYearRepository,
-        AttendanceRepository,
         AccessAuditRepository,
         ApiKeyRepository,
+        AttendanceRepository,
         ClassSectionRepository,
         EnrolmentRepository,
         GradeRepository,
         GuardianRepository,
         ImportBatchRepository,
+        SchoolRepository,
         StudentGuardianRepository,
         StudentRepository,
-        SchoolRepository,
         SubjectRepository,
+        TeacherRepository,
         TermRepository,
         TimetableRepository,
-        TeacherRepository,
         YearLevelRepository,
     )
 

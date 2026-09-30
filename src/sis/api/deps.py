@@ -52,23 +52,23 @@ from typing import Annotated, Final
 
 from fastapi import Depends, Header, HTTPException, status
 
-from sis.application.dto import Page, PageRequest
+from sis.api.errors import error_detail
+from sis.application.dto import TERM_LABELS, Page, PageRequest, TermPlan, term_code_for
+from sis.application.ports.repositories import GradeSubjects
 from sis.application.ports.unit_of_work import UnitOfWork
+from sis.application.services.access import resolve
 from sis.application.services.attendance import AttendanceService
 from sis.application.services.classroom import ClassroomService
 from sis.application.services.grade_import import GradeImportService
 from sis.application.services.guardian_import import GuardianImportService
+from sis.application.services.marks import MarkSheetService
 from sis.application.services.queries import QueryService
 from sis.application.services.roster_import import RosterImportService
-from sis.application.services.structure import StructureGenerationService
-from sis.application.services.timetable import TimetableService
-from sis.application.services.teachers import TeacherManagementService
-from sis.application.services.marks import MarkSheetService
-from sis.application.services.teaching import TeachingService
-from sis.application.services.access import resolve
 from sis.application.services.scopes import ScopeResolver
-from sis.api.errors import error_detail
-from sis.domain.rbac import ANYWHERE, AccessProfile, Permission, ScopeType, Target
+from sis.application.services.structure import StructureGenerationService
+from sis.application.services.teachers import TeacherManagementService
+from sis.application.services.teaching import TeachingService
+from sis.application.services.timetable import TimetableService
 from sis.config import get_settings
 from sis.domain.attendance import AttendanceMark, AttendanceState
 from sis.domain.auth import PREFIX_LENGTH, ApiKey, Scope
@@ -76,6 +76,7 @@ from sis.domain.errors import ImportBatchNotFound, UnknownReference, ValidationE
 from sis.domain.guardians import Guardian, StudentGuardian
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import ClassEnrolment, Student
+from sis.domain.rbac import ANYWHERE, AccessProfile, Permission, ScopeType, Target
 from sis.domain.structure import (
     SCHOOL_CONFIGURATION,
     AcademicTrack,
@@ -95,14 +96,12 @@ from sis.domain.value_objects import (
     SubjectCode,
     YearCode,
 )
-from sis.application.ports.repositories import GradeSubjects
-from sis.application.dto import TERM_LABELS, TermPlan, term_code_for
-from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from sis.infrastructure.audit import actor_context
+from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from sis.infrastructure.parsers import (
+    SpreadsheetFamilyRosterParser,
     SpreadsheetGradeParser,
     SpreadsheetGuardianParser,
-    SpreadsheetFamilyRosterParser,
 )
 from sis.tenancy import get_registry
 

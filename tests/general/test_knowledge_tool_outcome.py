@@ -28,11 +28,11 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
+from backend.agent.chat.answer_checks import enforce_forced_tool_ran
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.composition import Services
 from backend.agent.tools import KNOWLEDGE_TOOL
 from backend.agent.tools.knowledge import make_search_knowledge_base
-from backend.agent.chat.answer_checks import enforce_forced_tool_ran
+from backend.composition import Services
 
 CHUNKS = [
     {

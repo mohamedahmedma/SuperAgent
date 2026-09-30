@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Iterator, TypeVar
 
-from pymilvus import AnnSearchRequest, DataType, MilvusClient, RRFRanker, Function, FunctionType
+from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, MilvusClient, RRFRanker
 
 QUERY_MAX_LIMIT = 16384
 T = TypeVar("T")

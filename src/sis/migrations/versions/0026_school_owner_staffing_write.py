@@ -1,8 +1,7 @@
 """Allow the School Owner to manage teaching staff only."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0026"
 down_revision = "0025"

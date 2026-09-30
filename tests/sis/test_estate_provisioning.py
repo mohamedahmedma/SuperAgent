@@ -249,7 +249,7 @@ def test_the_provisioner_finds_the_real_alembic_config() -> None:
     with `sis/sis/alembic.ini` and every provision failed with alembic reporting a
     missing `script_location` -- a message that says nothing about the real cause.
     """
-    from sis.infrastructure.estate.provisioners import PROJECT_ROOT, _ALEMBIC_INI
+    from sis.infrastructure.estate.provisioners import _ALEMBIC_INI, PROJECT_ROOT
 
     assert (PROJECT_ROOT / "sis" / "app.py").exists()
     assert _ALEMBIC_INI.exists()

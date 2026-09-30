@@ -42,7 +42,6 @@ from functools import lru_cache
 from typing import Final
 
 from identity.env import env_value, load_env
-
 from schoolauth import DEFAULT_AUDIENCE, DEFAULT_ISSUER
 
 logger = logging.getLogger(__name__)

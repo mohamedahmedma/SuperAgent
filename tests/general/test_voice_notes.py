@@ -18,7 +18,6 @@ from unittest.mock import Mock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.assets.blobs import LocalBlobStore
 from backend.agent.chat.attachments import ChatAttachments, VoiceNoteLimits, VoiceNoteRejected
 from backend.agent.chat.storage import ConversationStorage, MessageToStore
 from backend.agent.chat.transcription import (
@@ -27,6 +26,7 @@ from backend.agent.chat.transcription import (
     WhisperTranscriber,
     build_transcriber,
 )
+from backend.assets.blobs import LocalBlobStore
 from backend.composition import Services
 from backend.infra.auth import AuthenticatedUser, get_current_user
 from tests.general.postgres_support import postgres_schema

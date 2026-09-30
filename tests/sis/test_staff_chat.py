@@ -9,7 +9,6 @@ from sis.infrastructure.crypto import hash_password
 from sis.infrastructure.db import models as m
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
-
 PASSWORD = "StrongPass123!"
 SCHOOL = "CHAT"
 

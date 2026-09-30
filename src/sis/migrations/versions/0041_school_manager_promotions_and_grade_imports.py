@@ -1,8 +1,7 @@
 """Allow school managers to run promotions and end-term grade imports."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0041"
 down_revision = "0040"

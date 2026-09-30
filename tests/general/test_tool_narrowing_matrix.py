@@ -40,8 +40,10 @@ from backend.agent.chat.child_resolution import ResolvedChild, no_child
 from backend.agent.chat.child_roster import ChildOption
 from backend.agent.chat.signals import RequestSignals, Scope
 from backend.agent.chat.turn_policy import (
-    KNOWLEDGE_TOOL,
     GRADES_TOOL as RECORDS_TOOL,
+)
+from backend.agent.chat.turn_policy import (
+    KNOWLEDGE_TOOL,
     TurnPlan,
     _tools_for,
     resolve_turn,

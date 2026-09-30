@@ -1014,9 +1014,9 @@ def compile_parts() -> Compiled:
     from backend.agent.chat.request_context import ChatRequestContext
     from backend.agent.chat.runtime import create_agent_for_request
     from backend.agent.chat.signals import build_ladder
-    from backend.profiles.registry import get_profile
     from backend.agent.rag.pipeline import rag_graph
     from backend.agent.tools import KNOWLEDGE_TOOL, RECORDS_TOOLS, build_tools
+    from backend.profiles.registry import get_profile
 
     profile = get_profile()
     # A context no turn will ever use: nothing here invokes a graph, only compiles it.

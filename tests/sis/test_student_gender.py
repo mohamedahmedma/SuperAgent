@@ -84,8 +84,9 @@ class TestTheImport:
         then re-uploads a corrected name list that has no gender column — without this,
         every child silently reverts to unspecified and the feature stops working with no
         error anywhere."""
-        from sis.application.services.roster_import import _Assertion, RosterImportService
         from datetime import date
+
+        from sis.application.services.roster_import import RosterImportService, _Assertion
         from sis.domain.value_objects import AcademicYearCode, ClassCode
 
         existing = Student(
@@ -107,8 +108,9 @@ class TestTheImport:
         assert merged.gender is Gender.MALE
 
     def test_a_stated_sex_corrects_a_blank_one(self):
-        from sis.application.services.roster_import import _Assertion, RosterImportService
         from datetime import date
+
+        from sis.application.services.roster_import import RosterImportService, _Assertion
         from sis.domain.value_objects import AcademicYearCode, ClassCode
 
         existing = Student(student_number="S1", full_name_ar="علي", full_name_en="Ali")
@@ -131,8 +133,9 @@ class TestTheImport:
         """Commit rebuilds the assertion from this dict rather than from the file, so a
         field missing here previews correctly and is silently dropped on the way to
         being stored."""
-        from sis.application.services.roster_import import _Assertion, _K_GENDER
         from datetime import date
+
+        from sis.application.services.roster_import import _K_GENDER, _Assertion
         from sis.domain.value_objects import AcademicYearCode, ClassCode
 
         payload = _Assertion(

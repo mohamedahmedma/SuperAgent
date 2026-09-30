@@ -894,4 +894,4 @@ def test_unknown_codes_are_refused_rather_than_answered_empty(
         ).status_code
         == 404
     )
-    assert client.get(f"/v1/schools/NOPE/timetable-periods", headers=registrar).status_code == 404
+    assert client.get("/v1/schools/NOPE/timetable-periods", headers=registrar).status_code == 404

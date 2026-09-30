@@ -38,8 +38,8 @@ that carry one go through batch mode. `sis/migrations/env.py` already turns
 docstring explains why.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "0007"
 down_revision: str | None = "0006"

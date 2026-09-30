@@ -18,9 +18,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.composition import Services, set_default_services
-
 import backend.indexing.document_loader as document_loader_module
+from backend.composition import Services, set_default_services
 from backend.indexing.document_loader import DocumentLoader, SentenceSplitter
 from backend.indexing.pdf_layout import (
     build_blocks_from_pages,
@@ -781,7 +780,11 @@ class ArabicTatweelTests(unittest.TestCase):
             def get_embeddings(self, texts):
                 return [[1.0] for _ in texts]
 
-        writer = module.MilvusWriter(
+        # KNOWN GAP: built exactly as `_kept` above builds its writer, and never written
+        # through. This test therefore checks that the two leaves' TEXT converges, not that
+        # the writer dedups them to one insert as its name says. Text equality implies it
+        # only while the dedup key is a pure function of that text.
+        writer = module.MilvusWriter(  # noqa: F841
             embedding_service=_Service(), milvus_manager=FakeMilvusStore(events)
         )
         loader = DocumentLoader()

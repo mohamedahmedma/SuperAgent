@@ -32,13 +32,13 @@ name list that can drift.
 # ruff: noqa: F401, F403
 import types as _types
 
+from sis.domain.auth import *
 from sis.domain.errors import *
-from sis.domain.value_objects import *
-from sis.domain.structure import *
-from sis.domain.people import *
 from sis.domain.grades import *
 from sis.domain.imports import *
-from sis.domain.auth import *
+from sis.domain.people import *
+from sis.domain.structure import *
+from sis.domain.value_objects import *
 
 __all__ = sorted(
     name

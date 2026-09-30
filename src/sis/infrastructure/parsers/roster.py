@@ -24,24 +24,23 @@ must not read.
 """
 
 from collections.abc import Mapping
-from typing import Final
-
 from dataclasses import replace
+from typing import Final
 
 from sis.application.dto import ParsedRosterRow, ParseResult, RowCode, RowOutcome
 from sis.domain.errors import UnreadableImportFile, ValidationError
 from sis.domain.people import Gender
 from sis.domain.value_objects import ClassCode, StudentNumber
 from sis.infrastructure.parsers.columns import (
-    normalise_header,
     CLASS_CODE,
     FULL_NAME_AR,
-    GENDER,
     FULL_NAME_EN,
+    GENDER,
     STUDENT_NUMBER,
     ColumnMap,
     ColumnSpec,
     map_columns,
+    normalise_header,
 )
 from sis.infrastructure.parsers.workbook import MAX_ROWS, Sheet, load_sheet
 

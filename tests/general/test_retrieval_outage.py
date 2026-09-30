@@ -9,10 +9,10 @@ from unittest.mock import patch
 from backend.agent.chat.request_context import ChatRequestContext
 from tests.general.test_rag_short_circuit import (
     FakeStructuredModel,
-    enable_complexity_planning,
-    load_pipeline,
     _doc,
     _meta,
+    enable_complexity_planning,
+    load_pipeline,
 )
 
 

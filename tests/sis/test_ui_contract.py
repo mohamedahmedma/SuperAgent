@@ -779,8 +779,6 @@ def test_the_action_colour_is_systemblue_with_its_stated_label() -> None:
     """
     tokens = _css("tokens.css")
 
-    literals = dict(re.findall(r"(--[\w-]+)\s*:\s*(#[0-9a-fA-F]{6})", tokens))
-
     def resolve(name: str) -> str:
         """Follow the small chain of semantic theme variables to its literal colour."""
         current = name

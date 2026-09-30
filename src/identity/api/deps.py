@@ -33,14 +33,13 @@ the next.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from identity.application.dto import SchoolChannel, TokenSubject
+from identity.application.dto import TokenSubject
 from identity.application.ports.directory import GuardianDirectory
 from identity.application.services.administration import AdministrationService
 from identity.application.services.parent_sessions import ParentSessionService

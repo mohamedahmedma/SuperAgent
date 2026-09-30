@@ -149,8 +149,8 @@ def milvus_reference_provider(
     scoring, and `best_matches` keeps only the strongest leaf per section, so a section
     with many leaves does not out-vote a focused one.
     """
-    from backend.composition import default_services
     from backend.agent.rag.utils import LEAF_RETRIEVE_LEVEL
+    from backend.composition import default_services
 
     milvus_manager = default_services().milvus
 

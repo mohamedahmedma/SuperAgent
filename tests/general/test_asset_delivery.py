@@ -16,6 +16,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from backend.agent.chat.assets_bridge import (
+    asset_ids_for_turn,
+    attach_assets_to_trace,
+    build_asset_references,
+    effective_capabilities,
+    restore_session_assets,
+    trace_for_storage,
+)
+from backend.agent.chat.request_context import ChatRequestContext
 from backend.assets.blobs import LocalBlobStore
 from backend.assets.delivery import (
     AssetPresenter,
@@ -38,15 +47,6 @@ from backend.assets.dossier import (
     compute_sha256,
 )
 from backend.assets.store import AssetStore
-from backend.agent.chat.assets_bridge import (
-    asset_ids_for_turn,
-    attach_assets_to_trace,
-    build_asset_references,
-    effective_capabilities,
-    restore_session_assets,
-    trace_for_storage,
-)
-from backend.agent.chat.request_context import ChatRequestContext
 from backend.profiles.registry import load_profile
 from tests.general.postgres_support import postgres_schema
 
@@ -948,7 +948,8 @@ class AssetRouteTests(unittest.TestCase):
         self.assertEqual(404, self.client.get(self._url()).status_code)
 
     def test_asset_support_can_be_disabled_by_profile(self):
-        from backend.profiles.registry import load_profile as load, set_profile
+        from backend.profiles.registry import load_profile as load
+        from backend.profiles.registry import set_profile
 
         profile = load("base").model_copy(deep=True)
         profile.assets.enabled = False

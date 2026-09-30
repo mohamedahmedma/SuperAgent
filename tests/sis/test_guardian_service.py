@@ -31,10 +31,10 @@ from sis.domain.errors import (
     UploadTooLarge,
 )
 from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
-from sis.domain.imports import ImportKind, RowOutcome as StoredOutcome
+from sis.domain.imports import ImportKind
+from sis.domain.imports import RowOutcome as StoredOutcome
 from sis.domain.people import Student
 from sis.domain.value_objects import Phone, StudentNumber
-
 from tests.sis.conftest import FakeUnitOfWork, StubParser
 
 NOW = datetime(2026, 3, 1, 9, 0, tzinfo=UTC)

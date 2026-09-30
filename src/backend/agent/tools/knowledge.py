@@ -11,10 +11,10 @@ This module decides WHICH outcome occurred. The template renders it.
 """
 
 from langchain_core.tools import tool
+from pydantic import BaseModel
 
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.prompts import render as render_prompt
-from pydantic import BaseModel
 
 #: The name the model calls, the planner forces, and the turn records. One spelling,
 #: so the three cannot drift apart.

@@ -1693,8 +1693,6 @@ class BM25SectionPrefixTests(unittest.TestCase):
         """The flat fallback splitter carries no section path."""
         import backend.indexing.milvus_writer as module
 
-        events = []
-
         class _Service:
             def get_embeddings(self, texts):
                 return [[0.1, 0.2] for _ in texts]

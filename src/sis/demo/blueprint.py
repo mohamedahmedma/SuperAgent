@@ -18,7 +18,7 @@ told to (see `sis/demo/seeder.py`).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import Final
 

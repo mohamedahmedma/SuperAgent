@@ -10,13 +10,13 @@ import os
 import time
 import unittest
 
-import backend.infra.auth as backend_auth
-import backend.infra.identity as backend_identity
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from jose import jwt
 
+import backend.infra.auth as backend_auth
+import backend.infra.identity as backend_identity
 from backend.db.models import User
 from tests.general.postgres_support import postgres_schema
 

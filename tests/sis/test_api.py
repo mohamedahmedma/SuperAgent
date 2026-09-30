@@ -28,13 +28,13 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from sis.api.deps import hash_api_key, key_prefix
 from sis.app import create_app
 from sis.config import reset_settings_cache
-from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.domain.auth import ApiKey, Scope
-from sis.api.deps import hash_api_key, key_prefix
-from sis.infrastructure.db.session import reset_engine
+from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db import models as m
+from sis.infrastructure.db.session import reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[2] / "src" / "sis" / "alembic.ini"

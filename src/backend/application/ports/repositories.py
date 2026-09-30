@@ -21,8 +21,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    # Named only in annotations. Importing from `backend.indexing` at runtime runs its
-    # package `__init__`, which loads the document loader, Milvus and the embedder.
+    # Named only in annotations. Importing `backend.indexing` or `backend.assets` at
+    # runtime runs the package `__init__`, which loads the document loader, Milvus, the
+    # embedder or the asset store.
+    from backend.assets.dossier import AssetDossier
     from backend.indexing.section_summary import SectionRecord
 
 

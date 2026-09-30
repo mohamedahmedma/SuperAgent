@@ -20,6 +20,11 @@ production:
 import unittest
 from unittest.mock import patch
 
+from backend.agent.rag.scope_index import (
+    build_index,
+    derive_floor,
+    floor_fingerprint,
+)
 from backend.indexing.section_summary import (
     DIGEST_INPUT_BUDGET,
     SectionRecord,
@@ -27,11 +32,6 @@ from backend.indexing.section_summary import (
     sections_fingerprint,
 )
 from backend.prompts import render
-from backend.agent.rag.scope_index import (
-    build_index,
-    derive_floor,
-    floor_fingerprint,
-)
 
 
 def unit(index, dimension=8):

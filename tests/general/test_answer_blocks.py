@@ -175,8 +175,8 @@ class TheBlockStaysOutOfTheModelsHistory(unittest.TestCase):
     def test_the_resolver_sees_the_subject_not_the_rows(self):
         from langchain_core.messages import AIMessage, HumanMessage
 
-        from backend.agent.chat.resolution import conversation_text
         from backend.agent.chat.answer_blocks import _append_answer_blocks
+        from backend.agent.chat.resolution import conversation_text
 
         stored = _append_answer_blocks(
             "حضرتك، جدول فاطمة للفصل الدراسي الثاني:",

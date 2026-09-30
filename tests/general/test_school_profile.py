@@ -17,12 +17,12 @@ import unittest
 import backend.profiles.registry as registry
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.tools import TOOL_BUILDERS, build_tools
 from backend.profiles.registry import (
     available_profiles,
     load_profile,
     set_profile,
 )
-from backend.agent.tools import TOOL_BUILDERS, build_tools
 
 RECORDS_TOOL = "get_student_grades"
 

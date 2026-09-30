@@ -3,7 +3,6 @@
 import logging
 import os
 import re
-import unicodedata
 from typing import Dict, List, Optional
 
 from langchain_community.document_loaders import (
@@ -15,8 +14,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from backend.env import env_bool
 from backend.indexing.docx_layout import parse_docx_blocks
-from backend.indexing.ingest_progress import IngestProgress
 from backend.indexing.html_layout import parse_html_blocks
+from backend.indexing.ingest_progress import IngestProgress
 from backend.indexing.pdf_layout import parse_pdf_blocks
 from backend.indexing.xlsx_layout import parse_xlsx_blocks
 from backend.profiles import get_profile

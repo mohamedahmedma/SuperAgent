@@ -20,8 +20,8 @@ import backend.indexing.embedding as embedding_module
 from backend.indexing.embedding import (
     CoalescingEmbedder,
     EmbeddingService,
-    _RemoteEmbedder,
     _create_dense_embedder,
+    _RemoteEmbedder,
 )
 
 

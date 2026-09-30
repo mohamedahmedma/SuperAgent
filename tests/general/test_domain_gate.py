@@ -8,9 +8,6 @@ false acceptance costs one search the grader would have caught anyway.
 import unittest
 from unittest.mock import patch
 
-from backend.composition import Services, set_default_services
-
-from backend.profiles.registry import load_profile
 from backend.agent.rag.domain_gate import (
     DomainReference,
     DomainReferenceStore,
@@ -19,6 +16,8 @@ from backend.agent.rag.domain_gate import (
 )
 from backend.agent.rag.evidence import AssessmentContext, Certainty
 from backend.agent.rag.rerank_assessor import CrossEncoderAssessor, _to_unit, reset_model_cache
+from backend.composition import Services, set_default_services
+from backend.profiles.registry import load_profile
 
 
 def rag_config(**overrides):

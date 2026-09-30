@@ -28,16 +28,17 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Protocol, Sequence
+from typing import List as _List
+from typing import Literal as _Literal
 
-from backend.agent.chat.language import detect_language
-from backend.agent.rag.evidence import Certainty
-from backend.agent.chat.child_names import is_also_an_ordinary_word, occurs_as_written
-from backend.text_matching import name_key
-from backend.text_normalization import normalize_query
-from typing import List as _List, Literal as _Literal
 from pydantic import Field
 
+from backend.agent.chat.child_names import is_also_an_ordinary_word, occurs_as_written
+from backend.agent.chat.language import detect_language
+from backend.agent.rag.evidence import Certainty
 from backend.structured_output import StructuredOutput
+from backend.text_matching import name_key
+from backend.text_normalization import normalize_query
 
 logger = logging.getLogger(__name__)
 
@@ -296,9 +297,11 @@ class CorpusSimilarityDetector:
     certainty = Certainty.MEDIUM
 
     def detect(self, ctx: SignalContext, signals: RequestSignals) -> Optional[RequestSignals]:
-        from backend.agent.chat.language import detect_language as _  # noqa: F401  (module cohesion)
-        from backend.indexing.embedding import embed_query
+        from backend.agent.chat.language import (
+            detect_language as _,  # noqa: F401  (module cohesion)
+        )
         from backend.agent.rag.domain_gate import classify, reference_store
+        from backend.indexing.embedding import embed_query
 
         text = ctx.text_to_score
         normalized = normalize_query(text) or text
@@ -654,10 +657,10 @@ def _default_envelope_invoke(question, history, config):  # pragma: no cover - n
     from langchain.chat_models import init_chat_model
 
     from backend.assets.vision import invoke_structured
+    from backend.composition import default_services
     from backend.llm import sampling
     from backend.profiles import get_profile
     from backend.prompts import render
-    from backend.composition import default_services
 
     profile = get_profile()
     personal_fields = list(getattr(config, "personal_data_fields", None) or [])

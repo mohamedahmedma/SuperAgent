@@ -12,8 +12,7 @@ from pydantic import BaseModel, Field
 from sis.api.deps import Principal, UowFactoryDep, require_permission
 from sis.domain.people import ClassEnrolment
 from sis.domain.rbac import Permission
-from sis.domain.structure import AcademicYearCode, ClassCode, SchoolCode, YearCode
-
+from sis.domain.structure import AcademicYearCode, ClassCode, SchoolCode
 
 router = APIRouter(prefix="/v1/promotions", tags=["student promotions"])
 Manager = Annotated[Principal, Depends(require_permission(Permission.STUDENTS_WRITE))]

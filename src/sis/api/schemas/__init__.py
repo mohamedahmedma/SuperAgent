@@ -43,9 +43,9 @@ from sis.api.schemas.roster import (
 from sis.api.schemas.structure import (
     AcademicYearOut,
     ClassSectionOut,
+    GeneratedItemOut,
     GenerateStructureRequest,
     GenerateStructureResponse,
-    GeneratedItemOut,
     SubjectOut,
     TermOut,
     YearLevelOut,

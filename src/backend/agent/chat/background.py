@@ -34,7 +34,8 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Mapping
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Protocol
 
 logger = logging.getLogger(__name__)

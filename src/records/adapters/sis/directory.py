@@ -8,8 +8,6 @@ entry lived. This is asked once per parent question, not once per page view.
 from __future__ import annotations
 
 import logging
-import threading
-from typing import Final
 from urllib.parse import quote
 
 from records.adapters.sis.http import PooledClient, error_code
@@ -18,6 +16,11 @@ from records.domain.errors import GuardianDirectoryUnavailable
 from records.domain.people import PermittedStudent
 
 logger = logging.getLogger(__name__)
+
+#: The code SIS puts on a 404 that means "no such guardian", as distinct from a 404 off
+#: a wrong path. Every sibling adapter defines its own copy; this one was missing it, so
+#: an unknown guardian raised NameError instead of reaching the `return []` below.
+_UNKNOWN_REFERENCE = "unknown_reference"
 
 
 class SisGuardianDirectory:

@@ -29,8 +29,8 @@ import re
 import unittest
 from pathlib import Path
 
-from backend.assets.dossier import DOSSIER_VERSION, MIGRATIONS
 from backend.agent.chat.signals import _names_the_child
+from backend.assets.dossier import DOSSIER_VERSION, MIGRATIONS
 from backend.indexing.document_loader import DocumentLoader
 from backend.prompts import render as render_prompt
 

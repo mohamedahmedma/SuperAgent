@@ -24,11 +24,10 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
+from sis.api.deps import hash_api_key, key_prefix
 from sis.app import create_app
 from sis.config import reset_settings_cache
-from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.domain.auth import ApiKey, Scope
-from sis.api.deps import hash_api_key, key_prefix
 from sis.domain.people import ClassEnrolment
 from sis.domain.structure import AcademicYear, ClassSection, School, Term, YearLevel
 from sis.domain.value_objects import StudentNumber

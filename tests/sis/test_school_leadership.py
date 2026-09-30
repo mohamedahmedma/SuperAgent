@@ -10,7 +10,14 @@ from sis.domain.rbac import RoleCode, ScopeType
 from sis.infrastructure.crypto import hash_password
 from sis.infrastructure.db import models as m
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
-from tests.sis.test_rbac_api import PASSWORD, _grant, _make_user, _sign_in, ids, principal  # noqa: F401
+from tests.sis.test_rbac_api import (  # noqa: F401
+    PASSWORD,
+    _grant,
+    _make_user,
+    _sign_in,
+    ids,
+    principal,
+)
 from tests.sis.test_timetable_api import SCHOOL, registrar, school  # noqa: F401
 
 

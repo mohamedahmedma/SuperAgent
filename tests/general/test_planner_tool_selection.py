@@ -27,15 +27,17 @@ import unittest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from backend.agent.chat import runtime
+from backend.agent.chat.answer_checks import _denies_the_records
 from backend.agent.chat.child_resolution import no_child, resolve_child
 from backend.agent.chat.child_roster import ChildOption
 from backend.agent.chat.signals import RequestSignals
 from backend.agent.chat.turn_policy import (
-    KNOWLEDGE_TOOL,
     GRADES_TOOL as RECORDS_TOOL,
+)
+from backend.agent.chat.turn_policy import (
+    KNOWLEDGE_TOOL,
     resolve_turn,
 )
-from backend.agent.chat.answer_checks import _denies_the_records
 
 LAYLA = ChildOption(student_id="S-1", label="ليلى أحمد", gender="female", year_level="Year 4")
 OMAR = ChildOption(student_id="S-2", label="عمر أحمد", gender="male")

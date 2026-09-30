@@ -17,8 +17,8 @@ from backend.agent.chat.clarification import build_pending_hitl, enter_turn
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import unresolved
 from backend.agent.chat.turn_pipeline import TurnCollaborators, TurnPipeline
-from backend.profiles import get_profile
 from backend.agent.rag.hitl_resume import build_hitl_resume_state
+from backend.profiles import get_profile
 from tests.general.test_chat_hitl_resume import FakeStorage
 
 ASKED_AT = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)

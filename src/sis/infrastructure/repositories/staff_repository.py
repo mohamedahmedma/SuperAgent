@@ -1,7 +1,7 @@
 """SQL persistence for teacher identities, accounts, and teaching assignments."""
 
-from datetime import UTC, datetime
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -365,7 +365,7 @@ class SqlAlchemyTeacherRepository:
             statement.order_by(m.AcademicYear.code, m.YearLevel.display_order, m.Subject.code)
         ).all()
         assignments = []
-        for link, subject, year, level, track in rows:
+        for _link, subject, year, level, track in rows:
             classes = self._session.scalars(
                 select(m.ClassSection.code)
                 .join(m.TeacherClassSection)

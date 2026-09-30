@@ -32,7 +32,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from records.adapters.sis.http import PooledClient, REDIRECT_STATUSES, error_code
+from records.adapters.sis.http import REDIRECT_STATUSES, PooledClient, error_code
 from records.config import settings
 from records.domain.errors import LmsUnavailable
 from records.domain.marks import SubjectAttendance, SubjectGrade

@@ -13,13 +13,12 @@ import time
 import unittest
 from unittest.mock import patch
 
-from backend.composition import Services, set_default_services
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import backend.indexing.embedding as embedding_module
 from backend.api.routes.health import router as health_router
+from backend.composition import Services, set_default_services
 from backend.indexing.embedding import CoalescingEmbedder, EmbeddingService
 
 

@@ -48,26 +48,26 @@ sys.path.insert(0, _REPO_ROOT)
 sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
 
 import tests.evals.planner_execution_eval as pe
+from backend.profiles.registry import get_profile
 from tests.evals.planner_execution_eval import (
+    _RATE_LIMITS,
+    SUBJ,
+    TCH,
+    TSUB,
     A,
     C,
     Case,
     G,
     K,
     S,
-    SUBJ,
     T,
-    TCH,
-    TSUB,
     _fake_rag,
     _load_report,
-    _RATE_LIMITS,
     _records_get,
     _report,
     _roster_fetch,
     run_case,
 )
-from backend.profiles.registry import get_profile
 
 # ---------------------------------------------------------------------------
 # The family this suite talks about.
@@ -1504,7 +1504,7 @@ def main() -> int:
 
     profile = get_profile()
     print(f"profile      {profile.name}")
-    print(f"suite        parent regression corpus (second suite)")
+    print("suite        parent regression corpus (second suite)")
     print(f"roster       {[row['full_name_ar'] for row in ROSTER]}")
     print(f"model        FAST_MODEL={os.getenv('FAST_MODEL')} (classifier + resolver)")
 

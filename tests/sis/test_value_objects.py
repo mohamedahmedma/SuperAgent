@@ -29,7 +29,6 @@ from sis.domain.value_objects import (
     YearCode,
 )
 
-
 # --------------------------------------------------------------------------- Percentage
 
 

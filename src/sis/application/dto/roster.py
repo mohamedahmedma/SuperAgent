@@ -10,9 +10,9 @@ would discard that at the boundary, before any service could preserve it.
 from dataclasses import dataclass
 from datetime import date
 
+from sis.application.dto.guardians import ParsedGuardianRow
 from sis.domain.people import Gender
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
-from sis.application.dto.guardians import ParsedGuardianRow
 
 
 @dataclass(frozen=True, slots=True)

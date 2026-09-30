@@ -53,10 +53,12 @@ from sis.domain.imports import (
     ImportBatch,
     ImportKind,
     ImportRow,
+    tally,
+)
+from sis.domain.imports import (
     # See `roster_import` for why the storage vocabulary is aliased: the domain's
     # `RowOutcome` is the write verb, the DTO's is the row report the API returns.
     RowOutcome as StoredOutcome,
-    tally,
 )
 from sis.domain.people import Student
 from sis.domain.value_objects import Phone, StudentNumber

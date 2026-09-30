@@ -26,24 +26,24 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from langchain_core.messages import AIMessage, AIMessageChunk
 
+from backend.agent.chat.answer_blocks import _append_answer_blocks, settle_answer_blocks
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.child_context import SessionChild
 from backend.agent.chat.child_resolution import resolve_child
 from backend.agent.chat.child_roster import ChildOption, _as_options
-from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.chat.signals import RequestSignals
-from backend.agent.chat.resolution import NEW_TOPIC, ResolvedQuestion, unresolved
-from backend.agent.chat.turn_policy import TurnPlan
-from backend.composition import Services
-from backend.school_week import day_phrase
-from tests.general.test_chat_hitl_resume import FakeStorage
-from backend.agent.chat.answer_blocks import _append_answer_blocks, settle_answer_blocks
 from backend.agent.chat.clarification import (
     TurnEntry,
     build_pending_hitl,
     child_choice_pending,
     pin_the_child_the_parent_named,
 )
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.resolution import NEW_TOPIC, ResolvedQuestion, unresolved
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.turn_policy import TurnPlan
+from backend.composition import Services
+from backend.school_week import day_phrase
+from tests.general.test_chat_hitl_resume import FakeStorage
 
 service = importlib.import_module("backend.agent.chat.service")
 

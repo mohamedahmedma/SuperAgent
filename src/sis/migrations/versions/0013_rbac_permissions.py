@@ -22,8 +22,8 @@ there would put them straight back on the next sign-in. What downgrade *does* re
 grants this revision added to roles, which is the change it actually made.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0013"
 down_revision = "0012"

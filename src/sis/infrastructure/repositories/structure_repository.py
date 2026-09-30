@@ -37,7 +37,6 @@ from sqlalchemy.orm import Session
 
 from sis.application.ports.repositories import ClassSectionKey, GradeSubjects
 from sis.domain.errors import DuplicateCode, UnknownReference
-from sis.domain.timetable import TimetableEntry, TimetablePeriod, TimetableSlot
 from sis.domain.structure import (
     AcademicTrack,
     AcademicYear,
@@ -50,6 +49,7 @@ from sis.domain.structure import (
     WorkingDay,
     YearLevel,
 )
+from sis.domain.timetable import TimetableEntry, TimetablePeriod, TimetableSlot
 from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,

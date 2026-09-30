@@ -15,8 +15,8 @@ import uuid
 
 from sqlalchemy import text
 
-from backend.indexing.section_summary import SectionRecord, sections_fingerprint
 from backend.application.ports.repositories import DigestRecord
+from backend.indexing.section_summary import SectionRecord, sections_fingerprint
 from backend.indexing.summary_store import SectionCatalogueStore
 from backend.infra.database import engine
 from tests.general.integration_support import TEST_PREFIX, requires_postgres, temporary_profile

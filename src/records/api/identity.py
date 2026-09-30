@@ -21,7 +21,6 @@ accepts unsigned identity is worse than one that is down.
 """
 
 from records.config import settings
-
 from schoolauth import (
     IdentityConfig,
     IdentityError,

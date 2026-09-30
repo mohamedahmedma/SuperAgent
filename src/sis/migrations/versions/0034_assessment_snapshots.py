@@ -6,9 +6,8 @@ schema revision, so every save reached the final INSERT and failed with a 500 in
 migrated production database.  These tables make that write durable.
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0034"
 down_revision = "0033"

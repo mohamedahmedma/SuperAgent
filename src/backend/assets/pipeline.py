@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from backend.assets.attributes import AttributeSchema, build_attribute_schema
 from backend.assets.dossier import (
     DOSSIER_VERSION,
     AssetDossier,
@@ -36,12 +37,6 @@ from backend.assets.dossier import (
     build_asset_id,
     compute_sha256,
 )
-from backend.indexing.ingest_progress import (
-    IngestProgress,
-    report_finished,
-    report_progress,
-)
-from backend.assets.attributes import AttributeSchema, build_attribute_schema
 from backend.assets.entity_extractor import build_entity_extractor, resolve_role
 from backend.assets.extractors import (
     ExtractionRequest,
@@ -51,6 +46,11 @@ from backend.assets.extractors import (
 )
 from backend.assets.store import AssetStore
 from backend.assets.triage import ImageFacts, count_digest_pages, probe_dimensions, triage_image
+from backend.indexing.ingest_progress import (
+    IngestProgress,
+    report_finished,
+    report_progress,
+)
 
 logger = logging.getLogger(__name__)
 

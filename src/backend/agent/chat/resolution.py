@@ -46,14 +46,15 @@ import inspect
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, List, Sequence, Tuple
+from typing import List as _List
+from typing import Literal as _Literal
 
-from backend.agent.rag.query_translation import needs_translation, remember_translation
-from backend.text_normalization import normalize_query
-from typing import List as _List, Literal as _Literal
 from pydantic import Field
 
+from backend.agent.rag.query_translation import needs_translation, remember_translation
 from backend.structured_output import StructuredOutput
+from backend.text_normalization import normalize_query
 
 logger = logging.getLogger(__name__)
 
@@ -450,10 +451,10 @@ def _default_resolve_invoke(  # pragma: no cover - needs a model
     from langchain.chat_models import init_chat_model
 
     from backend.assets.vision import invoke_structured
+    from backend.composition import default_services
     from backend.llm import sampling
     from backend.profiles import get_profile
     from backend.prompts import resolve as resolve_prompt
-    from backend.composition import default_services
 
     profile = get_profile()
 

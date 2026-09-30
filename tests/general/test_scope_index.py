@@ -14,6 +14,13 @@ import unittest
 from unittest.mock import patch
 
 from backend.agent.chat.signals import RequestSignals, Scope, SignalContext
+from backend.agent.rag.evidence import Certainty
+from backend.agent.rag.scope_detector import (
+    CatalogueScopeDetector,
+    ScopeIndexStore,
+    ScopeModelDetector,
+)
+from backend.agent.rag.scope_index import ScopeIndex, build_index, derive_floor, percentile
 from backend.indexing.section_summary import (
     SectionRecord,
     content_hash,
@@ -22,13 +29,6 @@ from backend.indexing.section_summary import (
     summarise_section,
 )
 from backend.profiles.registry import load_profile
-from backend.agent.rag.evidence import Certainty
-from backend.agent.rag.scope_detector import (
-    CatalogueScopeDetector,
-    ScopeIndexStore,
-    ScopeModelDetector,
-)
-from backend.agent.rag.scope_index import ScopeIndex, build_index, derive_floor, percentile
 
 VOCABULARY = ["admissions", "fees", "uniform", "transport"]
 

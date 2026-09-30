@@ -67,6 +67,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from identity.app import app  # noqa: E402
 from identity.config import reset_settings  # noqa: E402
+from identity.domain.schools import SchoolRegistry  # noqa: E402
 from identity.infrastructure.db.base import Base  # noqa: E402
 from identity.infrastructure.db.session import (  # noqa: E402
     get_engine,
@@ -78,7 +79,6 @@ from identity.infrastructure.whatsapp.channels import WhatsAppChannels  # noqa: 
 from identity.infrastructure.whatsapp.gateways import (  # noqa: E402
     RecordingWhatsAppGateway,
 )
-from identity.domain.schools import SchoolRegistry  # noqa: E402
 
 
 def use_setting(monkeypatch, name: str, value: str) -> None:

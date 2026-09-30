@@ -24,8 +24,8 @@ from backend.agent.chat.signals import (
     build_ladder,
 )
 from backend.agent.chat.turn_policy import TurnPlan, localized, resolve_turn
-from backend.profiles.registry import load_profile
 from backend.agent.rag.evidence import Certainty
+from backend.profiles.registry import load_profile
 
 
 def agent_config(**overrides):

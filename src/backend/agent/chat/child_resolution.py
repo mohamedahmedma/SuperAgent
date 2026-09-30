@@ -29,7 +29,7 @@ children — which is why the rules below degrade toward asking rather than gues
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Sequence, Tuple
 
 from backend.agent.chat.child_context import SessionChild

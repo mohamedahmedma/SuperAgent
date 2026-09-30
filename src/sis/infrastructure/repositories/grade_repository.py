@@ -26,13 +26,13 @@ from sqlalchemy.orm import Session
 from sis.application.ports.repositories import GradeKey
 from sis.domain.errors import UnknownReference
 from sis.domain.grades import SubjectGrade
-from sis.infrastructure.audit import actor_context
 from sis.domain.value_objects import (
     Percentage,
     StudentNumber,
     SubjectCode,
     TermCode,
 )
+from sis.infrastructure.audit import actor_context
 from sis.infrastructure.db import models
 
 

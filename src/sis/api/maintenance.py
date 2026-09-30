@@ -18,7 +18,6 @@ from sis.application.services.access import read_system_state, resolve
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from sis.tenancy import get_registry
 
-
 _ALWAYS_AVAILABLE = frozenset({"/health", "/v1/auth/login", "/v1/auth/logout"})
 _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 

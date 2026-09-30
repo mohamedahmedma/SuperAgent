@@ -11,7 +11,6 @@ about individual signals than about two invariants:
 import unittest
 from unittest.mock import patch
 
-from backend.profiles.registry import load_profile
 from backend.agent.rag.evidence import (
     AssessmentContext,
     AssessmentLadder,
@@ -29,6 +28,7 @@ from backend.agent.rag.policy import (
     select_context_indices,
     select_evidence,
 )
+from backend.profiles.registry import load_profile
 
 
 def rag_config(**overrides):

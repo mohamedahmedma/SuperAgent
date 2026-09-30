@@ -13,7 +13,6 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from identity.domain import challenges as rules
-from identity.domain.accounts import as_aware
 from identity.infrastructure.db.models import VerificationChallenge
 
 

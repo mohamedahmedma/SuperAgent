@@ -24,8 +24,8 @@ the same thing but was never reconciled, and a partial history presented as a co
 is worse than a clean start with a documented cut-over date.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "0006"
 down_revision: str | None = "0005"

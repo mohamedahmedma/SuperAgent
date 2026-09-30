@@ -17,36 +17,32 @@ here.
 """
 
 from datetime import UTC, date, datetime
-from zoneinfo import ZoneInfo
-from uuid import uuid4
 from typing import Annotated
+from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Body, Depends, Query, Response, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from sis.api.deps import (
-    Caller,
+    Principal,
     StudentDesk,
+    UowFactoryDep,
     get_query_service,
     get_student_desk,
-    require_read_access,
-    require_registrar,
-    Principal,
     require_permission,
-    UowFactoryDep,
 )
-from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services import QueryService
 from sis.application.services.queries import ClassRosterEntry
+from sis.config import get_settings
 from sis.domain.errors import UnknownReference
 from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
 from sis.domain.people import ClassEnrolment, Gender, Student
-from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
-from sis.domain.value_objects import Phone
+from sis.domain.rbac import Permission
+from sis.domain.value_objects import AcademicYearCode, ClassCode, Phone, StudentNumber
 from sis.infrastructure.db import models as m
-from sis.config import get_settings
 
 router = APIRouter(prefix="/v1", tags=["students"])
 _SCHOOL_TZ = ZoneInfo("Africa/Cairo")

@@ -44,13 +44,14 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol
 
-from sis.domain.attendance import AttendanceMark
 from sis.domain.access import AccessAttempt
+from sis.domain.attendance import AttendanceMark
 from sis.domain.auth import ApiKey
 from sis.domain.grades import SubjectGrade
 from sis.domain.guardians import Guardian, StudentGuardian
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome
 from sis.domain.people import ClassEnrolment, Gender, Student
+from sis.domain.staff import Teacher
 from sis.domain.structure import (
     AcademicTrack,
     AcademicYear,
@@ -61,7 +62,6 @@ from sis.domain.structure import (
     YearLevel,
 )
 from sis.domain.timetable import TimetableEntry, TimetablePeriod, TimetableSlot
-from sis.domain.staff import Teacher
 from sis.domain.value_objects import (
     AcademicYearCode,
     ClassCode,

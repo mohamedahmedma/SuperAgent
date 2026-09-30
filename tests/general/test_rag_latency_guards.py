@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 from backend.composition import Services, set_default_services
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

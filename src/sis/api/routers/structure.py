@@ -18,36 +18,32 @@ it without detaching one grade.
 
 from collections.abc import Sequence
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
 from typing import Annotated, Literal, Protocol
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from sis.api.deps import (
-    Caller,
+    Principal,
+    UowFactoryDep,
     get_query_service,
     get_structure_catalogue,
     get_structure_service,
-    require_read_access,
-    require_registrar,
-    Principal,
     require_permission,
-    UowFactoryDep,
 )
-from sis.domain.rbac import Permission, RoleCode
-from sis.domain.errors import UnknownReference
 from sis.api.routers import domain_errors, error_responses
 from sis.application.dto import GenerateStructureCommand, TermPlan
 from sis.application.services import QueryService, StructureGenerationService
+from sis.domain.errors import UnknownReference, ValidationError
+from sis.domain.rbac import Permission, RoleCode
 from sis.domain.structure import (
     AcademicYear,
     AcademicYearStatus,
     ClassSection,
     School,
     SchoolLanguage,
-    Stage,
     Subject,
     Term,
     WorkingDay,

@@ -7,13 +7,13 @@ whenever there is any doubt.
 
 import unittest
 
-from backend.profiles.registry import load_profile
 from backend.agent.rag.context_selection import (
     ContextSelection,
     select_context,
     wants_exhaustive_answer,
 )
 from backend.agent.rag.evidence_view import format_docs
+from backend.profiles.registry import load_profile
 
 
 def rag_config(**overrides):

@@ -39,11 +39,11 @@ from typing import Any, Dict, List, Optional
 
 from backend.agent.chat.child_names import name_surfaces
 from backend.agent.chat.child_resolution import ResolvedChild
-from backend.school_week import day_phrase
-from backend.text_matching import name_key
 from backend.agent.chat.language import ARABIC, ENGLISH
 from backend.agent.chat.signals import RequestSignals, Scope
 from backend.agent.rag.evidence import Certainty
+from backend.school_week import day_phrase
+from backend.text_matching import name_key
 
 logger = logging.getLogger(__name__)
 

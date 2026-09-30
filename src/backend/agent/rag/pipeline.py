@@ -1,7 +1,8 @@
-from typing import Literal, List, Optional
 import logging
-from langgraph.graph import StateGraph, END
-from pydantic import BaseModel, Field
+from typing import List, Literal, Optional
+
+from langgraph.graph import END, StateGraph
+from pydantic import Field
 
 from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.rag.evidence import (
@@ -10,7 +11,6 @@ from backend.agent.rag.evidence import (
     ChunkAssessment,
     EvidenceReport,
 )
-from backend.prompts import resolve as resolve_prompt
 from backend.agent.rag.evidence_view import format_docs
 from backend.agent.rag.graph_nodes import (
     ClassifyComplexity,
@@ -29,25 +29,26 @@ from backend.agent.rag.graph_nodes import (
     route_after_grade,
     route_after_rewrite,
 )
-from backend.agent.rag.query_translation import translate_for_search
 from backend.agent.rag.hitl_resume import (
     build_hitl_resume_state,
     is_hitl_result,
     refined_question_for_hitl,
 )
+from backend.agent.rag.query_translation import translate_for_search
 from backend.agent.rag.rerank_assessor import CrossEncoderAssessor
-from backend.profiles import get_profile
-from backend.agent.schemas.chat import HitlResumeState
-from backend.text_normalization import normalize_query
 from backend.agent.rag.utils import (
     EVIDENCE_WINDOW_CHARS,
     RETRIEVAL_TOP_K,
-    retrieve_documents,
-    rewrite_query_once,
     dedupe_documents,
     retrieval_trace_fields,
+    retrieve_documents,
+    rewrite_query_once,
 )
+from backend.agent.schemas.chat import HitlResumeState
+from backend.profiles import get_profile
+from backend.prompts import resolve as resolve_prompt
 from backend.structured_output import StructuredOutput
+from backend.text_normalization import normalize_query
 
 logger = logging.getLogger(__name__)
 

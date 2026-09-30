@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Final
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 from records.adapters.sis.http import PooledClient

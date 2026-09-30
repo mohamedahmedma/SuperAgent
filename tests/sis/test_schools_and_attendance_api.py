@@ -28,9 +28,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from tests.sis.conftest import Clock, registrar_headers
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+from tests.sis.conftest import Clock, registrar_headers
 
 NC = "NC"
 MD = "MD"

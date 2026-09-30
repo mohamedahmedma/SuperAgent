@@ -28,7 +28,7 @@ import logging
 from typing import Any
 from urllib.parse import quote
 
-from records.adapters.sis.http import PooledClient, REDIRECT_STATUSES, error_code
+from records.adapters.sis.http import REDIRECT_STATUSES, PooledClient, error_code
 from records.domain.errors import TimetableUnavailable
 from records.domain.timetable import (
     StudentTimetable,

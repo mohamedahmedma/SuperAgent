@@ -17,8 +17,8 @@ from uuid import uuid4
 
 from backend.agent.chat.orchestrator import resolve_turn_question
 from backend.agent.chat.resolution import ResolvedQuestion
-from backend.profiles import get_profile
 from backend.agent.schemas.chat import PendingHitlState
+from backend.profiles import get_profile
 from backend.text_matching import name_key
 
 logger = logging.getLogger(__name__)

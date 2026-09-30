@@ -1,7 +1,7 @@
-import asyncio
 import ast
-import inspect
+import asyncio
 import importlib.util
+import inspect
 import sys
 import types
 import unittest

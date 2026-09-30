@@ -29,7 +29,6 @@ much costs correctness, and only one of those is recoverable.
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 

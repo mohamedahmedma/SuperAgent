@@ -17,8 +17,8 @@ import unittest
 from backend.agent.rag.utils import (
     EVIDENCE_WINDOW_CHARS,
     _is_figure_chunk,
-    _merge_to_parent_level,
     _match_spans,
+    _merge_to_parent_level,
     _parent_window,
 )
 

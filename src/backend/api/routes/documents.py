@@ -3,23 +3,8 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
-from backend.assets.delivery import asset_url_path
-from backend.indexing.ingest_progress import IngestProgress
-from backend.api.deps import get_services
-from backend.api.resources import (
-    UPLOAD_DIR,
-    ensure_upload_dir,
-    is_supported_document,
-    save_upload_file,
-)
-from backend.agent.chat.language import ARABIC, ENGLISH
-from backend.composition import Services
-from backend.db.models import User
 import backend.indexing.language_check as language_check
-from backend.infra.auth import require_admin
-from backend.profiles import get_profile
-from backend.text_matching import fold
-from backend.jobs import DELETE_STEPS
+from backend.agent.chat.language import ARABIC, ENGLISH
 from backend.agent.schemas import (
     AssetInfo,
     ChunkInfo,
@@ -36,6 +21,21 @@ from backend.agent.schemas import (
     DocumentUploadResponse,
     DocumentUploadStartResponse,
 )
+from backend.api.deps import get_services
+from backend.api.resources import (
+    UPLOAD_DIR,
+    ensure_upload_dir,
+    is_supported_document,
+    save_upload_file,
+)
+from backend.assets.delivery import asset_url_path
+from backend.composition import Services
+from backend.db.models import User
+from backend.indexing.ingest_progress import IngestProgress
+from backend.infra.auth import require_admin
+from backend.jobs import DELETE_STEPS
+from backend.profiles import get_profile
+from backend.text_matching import fold
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +353,6 @@ def _forget_corpus_languages() -> None:
 
 def _process_delete_job(services: Services, job_id: str, filename: str) -> None:
     jobs = services.delete_jobs
-    failed_step = "prepare"
     try:
         chunks_deleted = services.document_remover.remove(filename, jobs, job_id)
         # Clear the file off its pair row. Done HERE and not in

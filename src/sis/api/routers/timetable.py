@@ -35,7 +35,7 @@ record of what happened, and connecting them is not this stage.
 """
 
 from datetime import time
-from typing import Annotated, Protocol
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -47,7 +47,6 @@ from sis.api.deps import (
     get_timetable_service,
     require_permission,
 )
-from sis.domain.rbac import Permission, RoleCode
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services import (
     QueryService,
@@ -55,6 +54,7 @@ from sis.application.services import (
     TimetableService,
     WeekPlan,
 )
+from sis.domain.rbac import Permission, RoleCode
 from sis.domain.timetable import (
     MAX_PERIODS_PER_DAY,
     TimetableEntry,

@@ -20,8 +20,8 @@ prefix-of-anything match would pass a test that only checked the Arabic.
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.sis.conftest import registrar_headers
 from sis.domain.arabic import compact_for_search, fold_for_search
+from tests.sis.conftest import registrar_headers
 
 
 @pytest.fixture()

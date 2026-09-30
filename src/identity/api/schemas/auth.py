@@ -7,7 +7,7 @@ that returned one would have the JSON field names as part of its signature.
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class LoginIn(BaseModel):

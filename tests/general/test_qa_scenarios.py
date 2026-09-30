@@ -16,11 +16,11 @@ import unittest
 
 from backend.agent.chat.signals import RequestSignals, Scope, SignalContext, build_ladder
 from backend.agent.chat.turn_policy import resolve_turn
-from backend.profiles import get_profile
-from backend.profiles.registry import load_profile
 from backend.agent.rag.evidence import Certainty
 from backend.agent.rag.scope_detector import CatalogueScopeDetector, index_store
 from backend.agent.rag.scope_index import build_index
+from backend.profiles import get_profile
+from backend.profiles.registry import load_profile
 from tests.general.integration_support import (
     requires_embedder,
     requires_llm,
@@ -175,7 +175,7 @@ class ScopeGateRecallTests(unittest.TestCase):
         reached in production today. That is a real fact about the deployment and it
         belongs in exactly one assertion — not spread across every test in the class as
         an abstention nobody reads as configuration."""
-        self.assertIn(getattr(self.profile.rag, "scope_index_enabled"), (True, False))
+        self.assertIn(self.profile.rag.scope_index_enabled, (True, False))
         if not self.profile.rag.scope_index_enabled:
             signals = RequestSignals(question=IN_DOMAIN[0])
             shipped = LadderConfig(self.profile.agent, self.profile.rag)

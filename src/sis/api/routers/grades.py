@@ -36,11 +36,11 @@ from sis.api.deps import (
     get_teaching_service,
     require_permission,
 )
-from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services import QueryService
-from sis.application.services.teaching import TeachingService
 from sis.application.services.queries import GradeLine, StudentTermGrades
+from sis.application.services.teaching import TeachingService
+from sis.domain.rbac import Permission
 from sis.domain.value_objects import StudentNumber, TermCode
 
 router = APIRouter(prefix="/v1", tags=["grades"])

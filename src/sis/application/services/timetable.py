@@ -34,8 +34,8 @@ Per-lesson attendance would need exactly this table and is deliberately not buil
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import time
+
 from sqlalchemy import select
-from sis.infrastructure.db import models as m
 
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.application.services.queries import resolve_section_for_term
@@ -51,6 +51,7 @@ from sis.domain.value_objects import (
     TermCode,
     YearCode,
 )
+from sis.infrastructure.db import models as m
 
 __all__ = ["StudentWeek", "TimetableConflict", "TimetableService", "WeekPlan"]
 

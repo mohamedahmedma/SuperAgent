@@ -17,7 +17,6 @@ import math
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
-from backend.assets.delivery import ClientCapabilities
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.clarification import build_hitl_event, pending_resume_state
 from backend.agent.chat.finalize import Finalizer, visible_text
@@ -31,6 +30,7 @@ from backend.agent.chat.turn_pipeline import (
     TurnPipeline,
     resolve_caller,
 )
+from backend.assets.delivery import ClientCapabilities
 from backend.composition import Services, default_services
 from backend.profiles import get_profile
 
@@ -65,8 +65,8 @@ def _agent_failure_text(exc: BaseException, language: str) -> str:
     it reached one parent in three (RAG_FIX_PLAN item 37). Anything else is shown as
     before.
     """
-    from backend.assets.vision import is_rate_limit_error, retry_after_seconds
     from backend.agent.chat.turn_policy import localized
+    from backend.assets.vision import is_rate_limit_error, retry_after_seconds
 
     if not is_rate_limit_error(exc):
         return str(exc)

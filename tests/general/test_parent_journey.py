@@ -108,12 +108,12 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from identity.config import reset_settings as reset_identity_settings  # noqa: E402
 from identity.config import settings as identity_settings  # noqa: E402
+from identity.domain.schools import SchoolRegistry  # noqa: E402
 from identity.infrastructure.crypto.keys import signing_key_from  # noqa: E402
 from identity.infrastructure.directory.fake import (  # noqa: E402
     FakeGuardianDirectory,
 )
 from identity.infrastructure.directory.sis import SisGuardianDirectory  # noqa: E402
-from identity.domain.schools import SchoolRegistry  # noqa: E402
 from identity.infrastructure.whatsapp.channels import (  # noqa: E402
     WhatsAppChannels,
 )
@@ -953,7 +953,7 @@ class TestSigningIn:
 
     def test_an_unsigned_webhook_is_refused(self, identity, gateway):
         """The webhook is public. Without the signature anyone could claim any number."""
-        started = identity.post("/v1/auth/whatsapp/start").json()
+        identity.post("/v1/auth/whatsapp/start").json()
         before = len(gateway.sent)
 
         unsigned = identity.post(

@@ -51,14 +51,13 @@ from sis.application.services.estate import (  # noqa: E402
     plan_provision,
 )
 from sis.domain.errors import SisError  # noqa: E402
-from sis.infrastructure.estate.seeding import seed_school_row  # noqa: E402
 from sis.infrastructure.estate import (  # noqa: E402
     ConfigStoreUnavailable,
     DotEnvConfigStore,
     ProvisioningFailed,
     provisioner_for,
 )
-
+from sis.infrastructure.estate.seeding import seed_school_row  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Shared helpers

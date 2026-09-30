@@ -28,9 +28,9 @@ folding an English name is a no-op, and case is handled by `ILIKE` as it always 
 Nothing here reads a clock, a database or the environment.
 """
 
-from typing import Final
 import re
 import unicodedata
+from typing import Final
 
 # Every pair is (as it may be written, as it is matched). Written with the codepoint in
 # the comment because a literal Arabic mark is a literal no reviewer can see — several

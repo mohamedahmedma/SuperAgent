@@ -24,10 +24,10 @@ from __future__ import annotations
 import logging
 from urllib.parse import quote
 
-from records.adapters.sis.http import PooledClient, REDIRECT_STATUSES, error_code
+from records.adapters.sis.http import REDIRECT_STATUSES, PooledClient, error_code
 from records.domain.classroom import (
-    ClassTeacher,
     ClassroomStatus,
+    ClassTeacher,
     StudentClassroom,
     StudySubject,
 )

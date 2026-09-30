@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
@@ -23,7 +22,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.assets.attributes import AttributeSchema
 from backend.assets.dossier import (
     AssetRole,
-    AssetTier,
     ExtractionPayload,
     Provenance,
     StructuredSurface,

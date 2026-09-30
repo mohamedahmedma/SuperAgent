@@ -5,8 +5,8 @@ from collections.abc import Callable, Sequence
 from sis.application.ports.repositories import TeacherRecord
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.domain.errors import UnknownReference, ValidationError
-from sis.domain.staff import PASSWORD_MIN_LENGTH
 from sis.domain.people import Gender
+from sis.domain.staff import PASSWORD_MIN_LENGTH
 from sis.domain.value_objects import AcademicYearCode, ClassCode, SchoolCode, SubjectCode, YearCode
 from sis.infrastructure.crypto import hash_password
 

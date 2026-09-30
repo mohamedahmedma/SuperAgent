@@ -11,8 +11,8 @@ import tempfile
 import pytest
 from sqlalchemy import create_engine, text
 
-from identity.import_legacy_accounts import import_accounts
 from identity.config import settings
+from identity.import_legacy_accounts import import_accounts
 from identity.infrastructure.crypto.passwords import PBKDF2_PREFIX, Pbkdf2PasswordHasher
 from identity.infrastructure.db.models import Account
 from identity.infrastructure.db.session import new_session

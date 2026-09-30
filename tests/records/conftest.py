@@ -50,15 +50,15 @@ from fastapi.testclient import TestClient  # noqa: E402
 from jose import jwt  # noqa: E402
 
 from records.adapters.fake.calendar import FakeSchoolCalendar  # noqa: E402
-from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
 from records.adapters.fake.classroom import FakeClassrooms  # noqa: E402
+from records.adapters.fake.directory import FakeGuardianDirectory  # noqa: E402
 from records.adapters.fake.lms import FakeLms  # noqa: E402
 from records.adapters.fake.timetable import FakeTimetables  # noqa: E402
 from records.app import app  # noqa: E402
 from records.config import reset_settings  # noqa: E402
 from records.domain.classroom import (  # noqa: E402
-    ClassTeacher,
     ClassroomStatus,
+    ClassTeacher,
     StudentClassroom,
     StudySubject,
 )

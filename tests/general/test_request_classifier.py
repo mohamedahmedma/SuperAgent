@@ -19,9 +19,9 @@ from backend.agent.chat.signals import (
     Scope,
     SignalContext,
 )
-from backend.prompts import render
-from backend.profiles import load_profile
 from backend.agent.rag.evidence import Certainty
+from backend.profiles import load_profile
+from backend.prompts import render
 
 
 def _config(**overrides):

@@ -52,8 +52,6 @@ from identity.application.ports.security import PasswordHasher, TokenIssuer
 from identity.domain.accounts import LockoutPolicy
 from identity.domain.errors import (
     AccountLocked,
-    BadRequest,
-    Conflict,
     NotAuthorized,
 )
 

@@ -8,8 +8,8 @@ creation sends explicit values, including zero for levels the operator did not s
 No year-level, term or timetable rows are created by this migration.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "0008"
 down_revision: str | None = "0007"

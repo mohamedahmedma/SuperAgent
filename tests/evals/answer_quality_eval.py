@@ -71,10 +71,11 @@ from langchain_core.messages import (  # noqa: E402
 )
 from langchain_core.tools import tool  # noqa: E402
 
+import backend.agent.chat.runtime as runtime  # noqa: E402
 from backend.agent.chat.finalize import Finalizer  # noqa: E402
 from backend.agent.chat.model_output import TOKENS as HARMONY_TOKENS  # noqa: E402
-from backend.prompts import render as render_prompt, resolve as resolve_prompt  # noqa: E402
-import backend.agent.chat.runtime as runtime  # noqa: E402
+from backend.prompts import render as render_prompt  # noqa: E402
+from backend.prompts import resolve as resolve_prompt
 
 _RETRY_COPY = "__retry__"  # stands in for user_copy.retrieval_error; only its presence is scored
 

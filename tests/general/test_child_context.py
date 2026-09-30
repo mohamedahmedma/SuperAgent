@@ -13,7 +13,6 @@ family's conversation, and that is the only failure here that is worse than the 
 
 import unittest
 
-from backend.api.routes.chat import DEFAULT_THREAD, _thread_id
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.child_context import (
     SESSION_CHILD_KEY,
@@ -22,6 +21,7 @@ from backend.agent.chat.child_context import (
     save_child_state,
 )
 from backend.agent.chat.request_context import ChatRequestContext
+from backend.api.routes.chat import DEFAULT_THREAD, _thread_id
 
 
 class SessionChildTests(unittest.TestCase):

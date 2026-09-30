@@ -1,8 +1,7 @@
 """Add durable staff conversations with automatically-derived group membership."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0035"
 down_revision = "0034"

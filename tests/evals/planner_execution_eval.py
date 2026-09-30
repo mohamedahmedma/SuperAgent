@@ -74,8 +74,8 @@ from backend.agent.chat import runtime
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.orchestrator import plan_turn
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.profiles import get_profile
 from backend.agent.tools import build_tools
+from backend.profiles import get_profile
 
 GUARDIAN = "G-1"
 TOKEN = "test-token"
@@ -2173,7 +2173,7 @@ def main() -> int:
     print(f"profile      {profile.name}")
     print(f"tools        {profile.agent.tools}")
     print(f"model        FAST_MODEL={os.getenv('FAST_MODEL')} (classifier + resolver)")
-    print(f"agent model  stubbed — no answer is generated")
+    print("agent model  stubbed — no answer is generated")
 
     workers = 1
     wanted = ""

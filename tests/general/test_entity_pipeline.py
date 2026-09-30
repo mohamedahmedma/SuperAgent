@@ -17,6 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from backend.agent.rag.entity_retrieval import EntityRetriever
 from backend.assets.attributes import (
     AttributeSchema,
     AttributeSpec,
@@ -39,7 +40,6 @@ from backend.assets.pipeline import FigurePipeline, ImageInput
 from backend.assets.store import AssetStore
 from backend.profiles.registry import load_profile
 from backend.profiles.schema import DomainProfile, EntityPipelineConfig
-from backend.agent.rag.entity_retrieval import EntityRetriever
 from tests.general.postgres_support import postgres_schema
 
 

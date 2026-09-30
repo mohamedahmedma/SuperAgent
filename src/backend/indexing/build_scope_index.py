@@ -67,9 +67,11 @@ def _structured_invoke(model_name: str, profile):
     `json_schema` by falling back to function calling and then to prompted JSON — the
     same failures would otherwise surface here as an empty catalogue.
     """
-    from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
-    from langchain.chat_models import init_chat_model
     import os
+
+    from langchain.chat_models import init_chat_model
+
+    from backend.assets.vision import call_with_rate_limit_retry, invoke_structured
 
     model = init_chat_model(
         model=model_name,

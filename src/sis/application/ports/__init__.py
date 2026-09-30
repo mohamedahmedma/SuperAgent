@@ -17,9 +17,8 @@ from sis.application.ports.parsers import (
 )
 from sis.application.ports.repositories import (
     AcademicYearRepository,
-    SchoolRepository,
-    AttendanceRepository,
     ApiKeyRepository,
+    AttendanceRepository,
     ClassSectionKey,
     ClassSectionRepository,
     EnrolmentKey,
@@ -28,6 +27,7 @@ from sis.application.ports.repositories import (
     GradeRepository,
     GuardianRepository,
     ImportBatchRepository,
+    SchoolRepository,
     StudentGuardianKey,
     StudentGuardianRepository,
     StudentRepository,

@@ -63,7 +63,9 @@ def triage_image(facts: ImageFacts, config) -> TriageResult:
     page-furniture rule runs before any size rule so that a large repeated
     letterhead is still recognised as furniture rather than promoted for extraction.
     """
-    drop = lambda reason: TriageResult(AssetRole.DECORATIVE, AssetTier.DROP, reason)
+
+    def drop(reason: str) -> TriageResult:
+        return TriageResult(AssetRole.DECORATIVE, AssetTier.DROP, reason)
 
     if facts.declared_decorative:
         return drop("declared_decorative")

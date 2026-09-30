@@ -26,9 +26,9 @@ from datetime import date
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.sis.conftest import registrar_headers
 from sis.domain.structure import AcademicYear, ClassSection, School, YearLevel
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
+from tests.sis.conftest import registrar_headers
 
 YEAR = "2025-2026"
 NEXT_YEAR = "2026-2027"

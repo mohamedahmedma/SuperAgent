@@ -24,9 +24,8 @@ Created: 2026-08-16 12:28:48.032220
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "0002"
 down_revision: str | None = "f27c8792d023"

@@ -25,10 +25,10 @@ Four separate defects produced that, and each has tests below:
      the correction onto the reading it was correcting — so it retrieved both
 """
 
-from datetime import datetime, timezone
 import unittest
+from datetime import datetime, timezone
 
-
+from backend.agent.chat.context_messages import _turn_context_message, build_context_messages
 from backend.agent.chat.resolution import (
     CORRECTION,
     FOLLOWUP,
@@ -41,11 +41,10 @@ from backend.agent.chat.resolution import (
 )
 from backend.agent.chat.signals import RequestSignals, SignalContext
 from backend.agent.chat.turn_policy import resolve_turn
-from backend.profiles.registry import load_profile, set_profile
 from backend.agent.rag.evidence import Certainty, EvidenceReport
 from backend.agent.rag.policy import can_ask_human, decide_route, offerable_directions
 from backend.agent.rag.scope_index import ScopeMatch
-from backend.agent.chat.context_messages import _turn_context_message, build_context_messages
+from backend.profiles.registry import load_profile, set_profile
 
 # A clarification asked a moment ago. Pending questions expire after a day
 # (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
@@ -814,9 +813,10 @@ class TurnContextMessageTests(unittest.TestCase):
         self.assertIn("bind the answer", message.content)
 
     def test_it_sits_between_the_history_and_the_message(self):
+        from langchain_core.messages import HumanMessage
+
         import backend.agent.chat.service as service
         from backend.agent.chat.turn_policy import TurnPlan
-        from langchain_core.messages import HumanMessage
 
         built = build_context_messages(
             [HumanMessage(content="earlier")],

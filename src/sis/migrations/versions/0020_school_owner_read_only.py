@@ -4,9 +4,8 @@ The built-in catalogue remains authoritative at runtime. This migration applies 
 boundary immediately for existing databases, before any owner can call an API manually.
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0020"
 down_revision = "0019"

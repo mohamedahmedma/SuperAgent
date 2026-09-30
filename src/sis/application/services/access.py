@@ -37,12 +37,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from sis.domain.rbac import (
-    AccessProfile,
     BUILT_IN_ROLES,
-    Permission,
-    RoleCode,
+    AccessProfile,
     OverrideEffect,
+    Permission,
     RoleAssignment,
+    RoleCode,
     Scope,
     ScopeType,
     SystemStatus,

@@ -848,9 +848,8 @@ class IdentityBackendIntegrationTests(unittest.TestCase):
         """
         from unittest.mock import patch
 
-        import schoolauth.verification as verification
-
         import backend.infra.identity as backend_identity
+        import schoolauth.verification as verification
 
         with temporary_user() as (username, password):
             register(username, password)

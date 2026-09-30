@@ -20,7 +20,6 @@ the embedder is actually built.
 """
 
 import logging
-import os
 import time
 
 from fastapi import APIRouter, Response, status

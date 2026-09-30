@@ -34,9 +34,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from sis.api.maintenance import SystemMaintenanceMiddleware
 import sis.infrastructure.audit  # noqa: F401 - registers the SQLAlchemy audit listener
-
+from sis.api.maintenance import SystemMaintenanceMiddleware
 from sis.env import load_env
 
 # Before anything reads the environment. `sis.config` memoises its settings on
@@ -463,9 +462,9 @@ def ensure_integration_keys() -> None:
     row would turn a recoverable misconfiguration into an outage, and the API-key door
     already reports its own refusals clearly.
     """
-    from sqlalchemy.exc import SQLAlchemyError
-
     from datetime import UTC, datetime
+
+    from sqlalchemy.exc import SQLAlchemyError
 
     from sis.api.deps import hash_api_key, key_prefix
     from sis.domain.auth import ApiKey, Scope

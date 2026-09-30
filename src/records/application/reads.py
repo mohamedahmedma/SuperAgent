@@ -37,8 +37,8 @@ from datetime import datetime, timezone
 
 from records.application.access import AccessService
 from records.application.assembly import AttendanceAssembler, GradeAssembler
+from records.domain.classroom import StudentClassroom
 from records.domain.errors import (
-    CalendarUnavailable,
     NotConfigured,
     StudentNotFound,
     UnknownTerm,
@@ -47,7 +47,6 @@ from records.domain.grading import GradingPolicy
 from records.domain.marks import SubjectAttendance
 from records.domain.people import PermittedStudent
 from records.domain.terms import SchoolTerm
-from records.domain.classroom import StudentClassroom
 from records.domain.timetable import StudentTimetable
 from records.ports.calendar import SchoolCalendar
 from records.ports.classroom import StudentClassrooms

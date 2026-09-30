@@ -18,9 +18,9 @@ import unittest
 
 from jinja2 import UndefinedError
 
+from backend.agent.tools import GROUNDED_TOOLS, TOOL_BUILDERS
 from backend.profiles.registry import load_profile
 from backend.prompts import render, resolve, template_names
-from backend.agent.tools import GROUNDED_TOOLS, TOOL_BUILDERS
 
 # The prompt is paid on every turn. ~4 chars/token for English, so this is roughly a
 # 150-token ceiling — well above the ~96 it renders at today, but low enough that

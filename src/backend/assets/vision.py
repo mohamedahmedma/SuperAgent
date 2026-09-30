@@ -305,8 +305,12 @@ def invoke_structured(model, schema: Type, messages: list, prompt_index: int = 0
                 if method is None
                 else model.with_structured_output(schema, method=method)
             )
+            # The lambda is invoked synchronously inside this iteration, before `bound`
+            # is rebound, so the late binding B023 warns about cannot happen here.
             return call_with_rate_limit_retry(
-                lambda: bound.invoke(messages), config, f"structured output ({label})"
+                lambda: bound.invoke(messages),  # noqa: B023
+                config,
+                f"structured output ({label})",
             )
         except Exception as exc:  # provider rejection, or an unparsable response
             if is_rate_limit_error(exc):

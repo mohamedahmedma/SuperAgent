@@ -27,8 +27,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select, update
 
-from sis.api.errors import error_detail
 from sis.api.deps import SessionProfile, UowFactoryDep, require_user_permission
+from sis.api.errors import error_detail
 from sis.application.services.access import (
     ROLE_POLICY_KEY_PREFIX,
     SCOPE_TABLES,
@@ -50,9 +50,9 @@ from sis.domain.rbac import (
     ScopeType,
     Target,
 )
-from sis.infrastructure.db import models as m
-from sis.infrastructure.crypto import hash_password
 from sis.domain.staff import PASSWORD_MIN_LENGTH, USERNAME_MAX_LENGTH
+from sis.infrastructure.crypto import hash_password
+from sis.infrastructure.db import models as m
 
 router = APIRouter(prefix="/v1", tags=["access"])
 
@@ -1230,7 +1230,9 @@ def add_role(
     """
     with uow_factory() as uow:
         session = uow._session
-        subject_user = _subject_user(session, manager, user_id)
+        # Called for its refusal, not its value: it raises 404 for no such user and 403
+        # for one in another school. Deleting this line deletes that check.
+        _subject_user(session, manager, user_id)
         if body.role_code is RoleCode.SCHOOL_OWNER and body.scope_type is not ScopeType.SCHOOL:
             raise _refuse(
                 422,

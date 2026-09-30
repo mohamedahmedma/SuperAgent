@@ -1,14 +1,14 @@
-from datetime import datetime, timezone
 import importlib
 import json
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from backend.agent.chat.background import InlineJobs
-from backend.composition import Services
 from backend.agent.chat.clarification import PENDING_HITL_KEY
+from backend.composition import Services
 
 # A clarification asked a moment ago. Pending questions expire after a day
 # (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
@@ -106,8 +106,8 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
     """
 
     def setUp(self):
-        from backend.agent.chat.turn_policy import TurnPlan
         from backend.agent.chat.signals import RequestSignals
+        from backend.agent.chat.turn_policy import TurnPlan
 
         self._planner = patch.object(
             service,

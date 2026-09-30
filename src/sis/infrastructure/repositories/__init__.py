@@ -27,6 +27,9 @@ from sis.infrastructure.repositories.access_audit_repository import (
     SqlAlchemyAccessAuditRepository,
 )
 from sis.infrastructure.repositories.api_key_repository import SqlAlchemyApiKeyRepository
+from sis.infrastructure.repositories.attendance_repository import (
+    SqlAlchemyAttendanceRepository,
+)
 from sis.infrastructure.repositories.grade_repository import SqlAlchemyGradeRepository
 from sis.infrastructure.repositories.guardian_repository import (
     SqlAlchemyGuardianRepository,
@@ -39,20 +42,17 @@ from sis.infrastructure.repositories.people_repository import (
     SqlAlchemyEnrolmentRepository,
     SqlAlchemyStudentRepository,
 )
-from sis.infrastructure.repositories.attendance_repository import (
-    SqlAlchemyAttendanceRepository,
-)
+from sis.infrastructure.repositories.staff_repository import SqlAlchemyTeacherRepository
 from sis.infrastructure.repositories.structure_repository import (
     SqlAlchemyAcademicYearRepository,
     SqlAlchemyClassSectionRepository,
     SqlAlchemySchoolRepository,
     SqlAlchemySubjectRepository,
-    SqlAlchemyTimetableRepository,
     SqlAlchemyTermRepository,
+    SqlAlchemyTimetableRepository,
     SqlAlchemyYearLevelRepository,
     bulk_upsert,
 )
-from sis.infrastructure.repositories.staff_repository import SqlAlchemyTeacherRepository
 
 __all__ = [
     "SqlAlchemyAcademicYearRepository",

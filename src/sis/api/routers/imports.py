@@ -28,7 +28,8 @@ can revoke, and it is the one identity this layer actually knows.
 
 import re
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Final, Protocol
@@ -37,16 +38,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from sis.api.deps import (
-    Caller,
+    Principal,
     get_grade_import_service,
     get_guardian_import_service,
     get_import_reports,
     get_roster_import_service,
-    require_registrar,
-    Principal,
     require_permission,
 )
-from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.dto import (
     GradeCommitCommand,
@@ -73,6 +71,7 @@ from sis.application.services import (
 )
 from sis.config import Settings, get_settings
 from sis.domain.imports import ImportBatch, ImportKind, ImportRow, ImportStatus, RowOutcome
+from sis.domain.rbac import Permission
 from sis.domain.value_objects import AcademicYearCode, ClassCode, SubjectCode, TermCode, YearCode
 
 # One source of truth for what the door accepts, so the extension check here and the

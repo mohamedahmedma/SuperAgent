@@ -1,8 +1,7 @@
 """Allow School Owners to read their school's daily registers."""
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0029"
 down_revision = "0028"

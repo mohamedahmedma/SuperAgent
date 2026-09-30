@@ -30,7 +30,7 @@ the three cases and alarming in all of them. The read model keeps them apart and
 keeps them apart; see `StudentClassroom`.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sis.application.ports.repositories import SectionTeacher

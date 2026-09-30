@@ -35,8 +35,7 @@ from backend.agent.chat.request_context import ChatRequestContext
 from backend.agent.chat.resolution import CORRECTION, FOLLOWUP, NEW_TOPIC, STANDALONE
 from backend.profiles.registry import load_profile, set_profile
 from backend.prompts import render
-from tests.general.test_rag_short_circuit import FakeStructuredModel, load_pipeline, _meta
-
+from tests.general.test_rag_short_circuit import FakeStructuredModel, _meta, load_pipeline
 
 # ---------------------------------------------------------------------------
 # A corpus with both kinds of section

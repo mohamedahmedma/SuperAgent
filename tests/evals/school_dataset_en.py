@@ -35,13 +35,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import List
 
+from tests.evals.school_dataset import CASES as _ARABIC_CASES
 from tests.evals.school_dataset import (  # noqa: F401 — re-exported so the two read alike
     CORPUS_FILENAME,
     Case,
     missing,
     satisfied,
 )
-from tests.evals.school_dataset import CASES as _ARABIC_CASES
 from tests.evals.school_dataset import DATASET_VERSION as _ARABIC_VERSION
 
 #: Tied to the Arabic set's version: these are the same cases in another language, so a

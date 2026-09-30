@@ -26,8 +26,8 @@ import pytest
 
 from sis.application.dto import RowCode
 from sis.domain.errors import UnreadableImportFile, UnsupportedFileType
-from sis.domain.value_objects import Percentage, SubjectCode, TermCode
 from sis.domain.guardians import RelationshipType
+from sis.domain.value_objects import Percentage, SubjectCode, TermCode
 from sis.infrastructure.parsers import (
     ROSTER_COLUMNS,
     SpreadsheetGradeParser,

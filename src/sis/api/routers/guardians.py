@@ -16,6 +16,7 @@ order arrives, the office needs to revoke one parent's access in the next minute
 answer of "re-upload the guardians file" is not one.
 """
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends
@@ -23,27 +24,22 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, update
 
 from sis.api.deps import (
-    Caller,
+    Principal,
     get_query_service,
     get_unit_of_work_factory,
-    require_read_access,
-    require_registrar,
-    Principal,
     require_permission,
 )
-from sis.domain.rbac import Permission
 from sis.api.routers import domain_errors, error_responses
 from sis.application.ports.unit_of_work import UnitOfWork
 from sis.application.services import QueryService
 from sis.application.services.queries import GuardianIdentity, GuardianLink
-from sis.domain.errors import UnknownReference, ValidationError
-from datetime import UTC, datetime
-
 from sis.config import get_settings
-from sis.infrastructure.db import models as m
-from sis.domain.people import Gender
+from sis.domain.errors import UnknownReference, ValidationError
 from sis.domain.guardians import RelationshipType
+from sis.domain.people import Gender
+from sis.domain.rbac import Permission
 from sis.domain.value_objects import Phone, StudentNumber
+from sis.infrastructure.db import models as m
 
 router = APIRouter(prefix="/v1", tags=["guardians"])
 

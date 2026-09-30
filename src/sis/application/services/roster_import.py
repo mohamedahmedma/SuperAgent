@@ -58,19 +58,21 @@ from sis.domain.errors import (
     UnknownReference,
     UploadTooLarge,
 )
+from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
 from sis.domain.imports import (
     ImportBatch,
     ImportKind,
     ImportRow,
+    tally,
+)
+from sis.domain.imports import (
     # The domain's `RowOutcome` is the *write verb* — created, updated, unchanged — while
     # the DTO's is the row report the API returns. Both names are correct in their own
     # module and neither may be renamed from here, so the storage one is aliased and the
     # reported one keeps the name it has in the public return types.
     RowOutcome as StoredOutcome,
-    tally,
 )
 from sis.domain.people import ClassEnrolment, Gender, Student
-from sis.domain.guardians import Guardian, RelationshipType, StudentGuardian
 from sis.domain.value_objects import AcademicYearCode, ClassCode, Phone, StudentNumber
 
 __all__ = ["BATCH_FAILURE_ROW_CODE", "RosterImportService"]

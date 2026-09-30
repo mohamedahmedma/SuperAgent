@@ -25,23 +25,23 @@ or the world around it, can go wrong — plus the guarantee that the two older H
 did not change when this branch was added in front of them.
 """
 
-from datetime import datetime, timezone
 import os
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from backend.agent.chat import service
 from backend.agent.chat.caller_identity import CallerIdentity
 from backend.agent.chat.child_resolution import resolve_child
 from backend.agent.chat.child_roster import ChildOption
-from backend.agent.chat.request_context import ChatRequestContext
-from backend.agent.chat.resolution import CORRECTION, STANDALONE, ResolvedQuestion
 from backend.agent.chat.clarification import (
     _current_pending_hitl,
     child_choice_pending,
     enter_turn,
     pin_the_child_the_parent_named,
 )
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.resolution import CORRECTION, STANDALONE, ResolvedQuestion
 from backend.agent.chat.signals import RequestSignals
 from backend.agent.chat.turn_policy import resolve_turn
 from backend.agent.schemas.chat import PendingHitlState

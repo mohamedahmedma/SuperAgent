@@ -30,7 +30,7 @@ to whatever today happens to be turns a green suite into one that goes red overn
 no commit in between. The default is the real clock, so production wiring says nothing.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -40,7 +40,6 @@ from sis.domain.attendance import AttendanceMark, AttendanceState, AttendanceTal
 from sis.domain.errors import UnknownReference, ValidationError
 from sis.domain.people import Student
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber
-
 
 _SIS_TIMEZONE = ZoneInfo("Africa/Cairo")
 

@@ -1,20 +1,21 @@
-from collections import defaultdict
-import math
-from typing import List, Tuple, Dict, Any, Literal, Optional
-import logging
-import os
 import json
+import logging
+import math
+import os
+from collections import defaultdict
+from typing import Any, Dict, List, Literal, Optional, Tuple
+
 import requests
 from langsmith import traceable
+from pydantic import Field
 
-from backend.indexing.embedding import embed_query
 from backend.agent.rag.rerank_assessor import CrossEncoderProvider
 from backend.env import env_bool, env_float, env_int, env_value
+from backend.indexing.embedding import embed_query
 from backend.profiles import get_profile
 from backend.prompts import resolve as resolve_prompt
 from backend.text_matching import search_key
 from backend.text_normalization import normalize_query
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

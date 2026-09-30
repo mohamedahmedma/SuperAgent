@@ -10,22 +10,22 @@ These are also the specification for folding the two paths into one turn pipelin
 every case passes on both, the unification has nothing left to reconcile.
 """
 
-from datetime import datetime, timezone
 import asyncio
 import importlib
 import unittest
 from contextlib import ExitStack
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from backend.agent.chat.signals import RequestSignals
-from backend.agent.chat.turn_policy import TurnPlan
-from backend.composition import Services
-from backend.agent.tools import KNOWLEDGE_TOOL
-from tests.general.test_chat_hitl_resume import FakeStorage, _parse_sse_events
 from backend.agent.chat.answer_checks import terminal_reply
 from backend.agent.chat.clarification import PENDING_HITL_KEY
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.turn_policy import TurnPlan
+from backend.agent.tools import KNOWLEDGE_TOOL
+from backend.composition import Services
+from tests.general.test_chat_hitl_resume import FakeStorage, _parse_sse_events
 
 # A clarification asked a moment ago. Pending questions expire after a day
 # (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.

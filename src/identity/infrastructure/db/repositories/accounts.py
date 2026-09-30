@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from identity.application.ports.repositories import RefreshTokenRecord

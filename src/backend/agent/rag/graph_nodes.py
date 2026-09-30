@@ -23,7 +23,6 @@ from langgraph.types import Send
 
 from backend.agent.chat.child_names import strip_child_names
 from backend.agent.chat.request_context import ChatRequestContext
-from backend.prompts import resolve as resolve_prompt
 from backend.agent.rag.evidence import (
     AssessmentContext,
     Certainty,
@@ -39,6 +38,7 @@ from backend.agent.rag.policy import (
     select_evidence,
 )
 from backend.agent.schemas.chat import normalize_rag_sub_trace
+from backend.prompts import resolve as resolve_prompt
 
 
 class RAGState(TypedDict):

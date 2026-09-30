@@ -31,12 +31,12 @@ _TEMPLATE_DB = os.path.join(_TMPDIR, "template.db")
 os.environ["SIS_DATABASE_URL"] = f"sqlite:///{_LIVE_DB}"
 
 import csv  # noqa: E402
-from hashlib import sha1  # noqa: E402
 import io  # noqa: E402
 import shutil  # noqa: E402
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence  # noqa: E402
 from dataclasses import replace  # noqa: E402
 from datetime import UTC, date, datetime  # noqa: E402
+from hashlib import sha1  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Any, Final, Protocol  # noqa: E402
 
@@ -44,6 +44,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
 
+from sis import tenancy  # noqa: E402
 from sis.application.dto import ParseResult  # noqa: E402
 from sis.application.ports.repositories import (  # noqa: E402
     ClassSectionKey,
@@ -64,9 +65,9 @@ from sis.domain.guardians import (  # noqa: E402
 from sis.domain.imports import ImportBatch, ImportRow, RowOutcome  # noqa: E402
 from sis.domain.people import ClassEnrolment, Student  # noqa: E402
 from sis.domain.structure import (
-    School,  # noqa: E402
     AcademicYear,
     ClassSection,
+    School,  # noqa: E402
     Subject,
     Term,
     YearLevel,
@@ -81,7 +82,6 @@ from sis.domain.value_objects import (  # noqa: E402
     TermCode,
     YearCode,
 )
-from sis import tenancy  # noqa: E402
 from sis.infrastructure.db.session import reset_engine  # noqa: E402
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork  # noqa: E402
 

@@ -129,7 +129,9 @@ class StructureGenerationService:
             # One school's ladder, and only that school's. Read across all schools this
             # would report another branch's `Y1` as "already present" and generate nothing
             # — leaving a new school with a year, no rungs, and a run that claimed success.
-            existing_levels = {str(l.code): l for l in uow.year_levels.list_for_school(school_code)}
+            existing_levels = {
+                str(level.code): level for level in uow.year_levels.list_for_school(school_code)
+            }
             self._refuse_parallel_ladder(requested, existing_levels, allowed=allow_new_convention)
             # Section codes are unique per academic year, and this query is already
             # scoped to one, so the code alone is a sufficient key here.

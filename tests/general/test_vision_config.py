@@ -227,7 +227,6 @@ class SingleSourceOfTruthTests(unittest.TestCase):
     def test_every_builder_degrades_without_credentials(self):
         from backend.assets.entity_extractor import HeuristicEntityExtractor, build_entity_extractor
         from backend.assets.extractors import HeuristicExtractor, build_extractor
-
         from tests.general.test_entity_pipeline import shop_profile
 
         profile = shop_profile()
@@ -244,10 +243,9 @@ class SingleSourceOfTruthTests(unittest.TestCase):
             )
 
     def test_every_builder_activates_with_credentials(self):
+        from backend.assets.attributes import build_attribute_schema
         from backend.assets.entity_extractor import VisionEntityExtractor, build_entity_extractor
         from backend.assets.extractors import VisionExtractor, build_extractor
-        from backend.assets.attributes import build_attribute_schema
-
         from tests.general.test_entity_pipeline import shop_profile
 
         profile = shop_profile()

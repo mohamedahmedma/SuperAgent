@@ -12,8 +12,8 @@ Moved out of `service.py` with its behaviour unchanged.
 import logging
 import re
 
-from backend.profiles import get_profile
 from backend.agent.schemas.chat import normalize_answer_blocks
+from backend.profiles import get_profile
 from backend.text_matching import name_key
 
 logger = logging.getLogger(__name__)

@@ -27,7 +27,6 @@ from identity.infrastructure.db.base import Base
 from identity.infrastructure.db.bootstrap import has_any_admin, seed_bootstrap_admin
 from identity.infrastructure.db.models import Account
 from identity.infrastructure.db.session import get_engine, new_session
-
 from tests.identity.conftest import _claim_database
 
 #: Cheap on purpose. These tests hash on nearly every case, and the round count is a property

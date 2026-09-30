@@ -33,7 +33,8 @@ tested by sleeping or by monkeypatching a module global.
 """
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field as dataclass_field, replace
+from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType

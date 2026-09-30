@@ -9,7 +9,6 @@ from sis.domain.auth import ApiKey, Scope
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from tests.sis.conftest import reader_headers
 
-
 WRITE_ROUTE = "/v1/admin/api-keys"
 READ_ROUTE = "/v1/schools"
 

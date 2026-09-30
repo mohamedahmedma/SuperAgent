@@ -40,17 +40,17 @@ import asyncio
 import hashlib
 import json
 import math
+
+# Started as its own uvicorn process, so nothing else puts the services on the path.
+import os.path as _p
 import random
+import sys as _sys
 import time
 import uuid
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-
-# Started as its own uvicorn process, so nothing else puts the services on the path.
-import os.path as _p
-import sys as _sys
 
 _sys.path.insert(0, _p.join(_p.dirname(_p.dirname(_p.dirname(_p.abspath(__file__)))), "src"))
 

@@ -5,9 +5,8 @@ Existing current rows become active; every other existing row is conservatively 
 upcoming rather than guessing an administrative decision from the server clock.
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0016"
 down_revision = "0015"

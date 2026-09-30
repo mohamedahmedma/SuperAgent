@@ -16,8 +16,8 @@ Batch mode for the ALTER, as everywhere else in this history: SQLite cannot add 
 constrained column in place and rebuilds the table instead.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "0005"
 down_revision: str | None = "0004"

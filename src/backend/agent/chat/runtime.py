@@ -9,17 +9,16 @@ from langchain.agents.middleware import (
     after_model,
     before_model,
 )
-from langchain_core.messages import AIMessage
-from typing_extensions import NotRequired
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
+from typing_extensions import NotRequired
 
 from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.tools import KNOWLEDGE_TOOL, build_tools
 from backend.composition import default_services
 from backend.llm import sampling
-from backend.provider_compat import fold_tool_results_into_text
 from backend.profiles import get_profile
-from backend.agent.tools import KNOWLEDGE_TOOL, build_tools
+from backend.provider_compat import fold_tool_results_into_text
 
 API_KEY = os.getenv("ARK_API_KEY")
 MODEL = os.getenv("MODEL")

@@ -12,7 +12,6 @@ tests are weighted toward proving it is NOT skipped when it matters.
 
 import unittest
 
-from backend.profiles.registry import load_profile
 from backend.agent.rag.confidence import (
     ConfidenceVerdict,
     assess,
@@ -21,6 +20,7 @@ from backend.agent.rag.confidence import (
     should_grade,
     term_coverage,
 )
+from backend.profiles.registry import load_profile
 
 
 def rag_config(**overrides):
@@ -165,7 +165,7 @@ class SkippedGradeShapeTests(unittest.TestCase):
         be enforced by a helper that hand-built a fake grade; it is now structural — the
         report's ambiguity defaults to the inert value and only an LLM assessor sets it,
         so no cheap rung can invent an ambiguity it never assessed."""
-        from backend.agent.rag.evidence import LexicalAssessor, AssessmentContext
+        from backend.agent.rag.evidence import AssessmentContext, LexicalAssessor
         from backend.agent.rag.policy import decide_route
 
         config = rag_config()

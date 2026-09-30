@@ -19,12 +19,11 @@ from __future__ import annotations
 import base64
 import io
 import logging
-import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 from pydantic import BaseModel, Field
 

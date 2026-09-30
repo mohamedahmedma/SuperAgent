@@ -19,28 +19,25 @@ figure that pretends otherwise.
 """
 
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Body, Depends, Query
-from sqlalchemy import func, or_, select
 from pydantic import BaseModel, Field
+from sqlalchemy import func, or_, select
 
 from sis.api.deps import (
     AttendanceServiceDep,
-    UowFactoryDep,
-    Caller,
-    RequestId,
-    require_read_access,
-    require_registrar,
     Principal,
+    RequestId,
+    UowFactoryDep,
     require_permission,
 )
-from sis.domain.rbac import Permission, RoleCode, ScopeType, Target
 from sis.api.routers import domain_errors, error_responses
 from sis.application.services.attendance import ClassRegister, StudentAttendance
-from sis.domain.attendance import AttendanceState, AttendanceTally
+from sis.domain.attendance import AttendanceTally
 from sis.domain.errors import UnknownReference
+from sis.domain.rbac import Permission, RoleCode, ScopeType, Target
 from sis.domain.value_objects import AcademicYearCode, ClassCode, StudentNumber, TermCode
 from sis.infrastructure.db import models as m
 
