@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 import unittest
 
 
-from backend.chat.resolution import (
+from backend.agent.chat.resolution import (
     CORRECTION,
     FOLLOWUP,
     NEW_TOPIC,
@@ -38,13 +38,13 @@ from backend.chat.resolution import (
     needs_resolution,
     resolve_question,
 )
-from backend.chat.signals import RequestSignals, SignalContext
-from backend.chat.turn_policy import resolve_turn
-from backend.profiles.registry import load_profile, set_profile
-from backend.rag.evidence import Certainty, EvidenceReport
-from backend.rag.policy import can_ask_human, decide_route, offerable_directions
-from backend.rag.scope_index import ScopeMatch
-from backend.chat.context_messages import _turn_context_message, build_context_messages
+from backend.agent.chat.signals import RequestSignals, SignalContext
+from backend.agent.chat.turn_policy import resolve_turn
+from backend.agent.profiles.registry import load_profile, set_profile
+from backend.agent.rag.evidence import Certainty, EvidenceReport
+from backend.agent.rag.policy import can_ask_human, decide_route, offerable_directions
+from backend.agent.rag.scope_index import ScopeMatch
+from backend.agent.chat.context_messages import _turn_context_message, build_context_messages
 
 # A clarification asked a moment ago. Pending questions expire after a day
 # (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
@@ -289,7 +289,7 @@ class DirectionGatingTests(unittest.TestCase):
         return ScopeMatch(question=question, score=score, chunk_id="c", vector=vector)
 
     def test_paraphrases_collapse_into_one_direction(self):
-        from backend.rag.scope_detector import distinct_directions
+        from backend.agent.rag.scope_detector import distinct_directions
 
         options = distinct_directions(
             [
@@ -303,7 +303,7 @@ class DirectionGatingTests(unittest.TestCase):
     def test_genuinely_different_questions_both_survive(self):
         """The case the section-based rule got wrong: two different questions living in
         one chunk. Similarity between the questions says the right thing here."""
-        from backend.rag.scope_detector import distinct_directions
+        from backend.agent.rag.scope_detector import distinct_directions
 
         options = distinct_directions(
             [
@@ -315,7 +315,7 @@ class DirectionGatingTests(unittest.TestCase):
         self.assertEqual(2, len(options))
 
     def test_a_clear_leader_is_not_an_ambiguity(self):
-        from backend.rag.scope_detector import distinct_directions
+        from backend.agent.rag.scope_detector import distinct_directions
 
         options = distinct_directions(
             [
@@ -328,7 +328,7 @@ class DirectionGatingTests(unittest.TestCase):
         self.assertEqual(["What are the school fees?"], options)
 
     def test_below_the_floor_is_never_offered(self):
-        from backend.rag.scope_detector import distinct_directions
+        from backend.agent.rag.scope_detector import distinct_directions
 
         options = distinct_directions(
             [
@@ -342,7 +342,7 @@ class DirectionGatingTests(unittest.TestCase):
     def test_a_match_with_no_vector_is_never_treated_as_a_duplicate(self):
         """An index built before vectors were carried offers the list it always did,
         rather than silently collapsing options it cannot compare."""
-        from backend.rag.scope_detector import distinct_directions
+        from backend.agent.rag.scope_detector import distinct_directions
 
         options = distinct_directions(
             [self._match("A", 0.61, None), self._match("B", 0.60, None)], floor=0.5
@@ -444,7 +444,7 @@ class ConstraintTests(unittest.TestCase):
     """
 
     def test_the_search_query_is_the_question_alone(self):
-        from backend.rag.graph_nodes import search_query
+        from backend.agent.rag.graph_nodes import search_query
 
         state = {
             "question": "what time does the school day start",
@@ -455,7 +455,7 @@ class ConstraintTests(unittest.TestCase):
     def test_nothing_appends_conditions_to_a_query_any_more(self):
         """A guard against reintroducing it. The condition still reaches the grader and
         the answer prompt — those can act on it without costing a document its rank."""
-        import backend.chat.resolution as resolution
+        import backend.agent.chat.resolution as resolution
 
         self.assertFalse(hasattr(resolution, "apply_constraints"))
 
@@ -493,7 +493,7 @@ class TurnPlanTests(unittest.TestCase):
 
     def test_a_short_circuited_turn_still_records_what_it_thought_was_asked(self):
         """An out-of-domain refusal has to be arguable from the trace."""
-        from backend.chat.signals import Scope
+        from backend.agent.chat.signals import Scope
 
         plan = self._plan(
             scope=Scope.OUT_OF_DOMAIN,
@@ -544,7 +544,7 @@ class PlanTurnWiringTests(unittest.TestCase):
             self.child_year = child_year
 
     def test_the_resolution_reaches_the_rag_graph(self):
-        from backend.chat.orchestrator import plan_turn
+        from backend.agent.chat.orchestrator import plan_turn
 
         ctx = self.Ctx()
         plan, signals = plan_turn(
@@ -566,7 +566,7 @@ class PlanTurnWiringTests(unittest.TestCase):
     def test_a_precomputed_resolution_is_not_recomputed(self):
         """The HITL path resolves before it can decide which branch to take. Resolving
         again in the planner would pay for the same call twice."""
-        from backend.chat.orchestrator import plan_turn
+        from backend.agent.chat.orchestrator import plan_turn
 
         calls = []
 
@@ -587,7 +587,7 @@ class PlanTurnWiringTests(unittest.TestCase):
         self.assertEqual("already resolved", plan.resolved_question)
 
     def test_a_resolver_failure_leaves_the_turn_running(self):
-        from backend.chat.orchestrator import plan_turn
+        from backend.agent.chat.orchestrator import plan_turn
 
         def boom(*_args, **_kwargs):
             raise RuntimeError("down")
@@ -612,7 +612,7 @@ class ResumeQuestionTests(unittest.TestCase):
     }
 
     def test_a_correction_replaces_rather_than_concatenates(self):
-        from backend.rag.hitl_resume import refined_question_for_hitl
+        from backend.agent.rag.hitl_resume import refined_question_for_hitl
 
         refined = refined_question_for_hitl(
             self.RESUME_STATE,
@@ -631,7 +631,7 @@ class ResumeQuestionTests(unittest.TestCase):
     def test_without_a_resolution_it_anchors_on_the_users_question(self):
         """`resume_state["question"]` holds the query the AGENT wrote, so a condition
         the user set and the agent dropped was already gone before this ran."""
-        from backend.rag.hitl_resume import refined_question_for_hitl
+        from backend.agent.rag.hitl_resume import refined_question_for_hitl
 
         refined = refined_question_for_hitl(
             self.RESUME_STATE,
@@ -643,7 +643,7 @@ class ResumeQuestionTests(unittest.TestCase):
         self.assertIn("Primary", refined)
 
     def test_an_abstaining_resolver_falls_back_rather_than_blanking(self):
-        from backend.rag.hitl_resume import refined_question_for_hitl
+        from backend.agent.rag.hitl_resume import refined_question_for_hitl
 
         refined = refined_question_for_hitl(
             self.RESUME_STATE,
@@ -658,7 +658,7 @@ class ResumeStateTests(unittest.TestCase):
     def test_conditions_survive_the_resume_boundary(self):
         """The graph starts fresh on a resume, and the turn that established
         "up to Year 6" is several messages back by the time the user answers."""
-        from backend.rag.pipeline import _state_from_resume
+        from backend.agent.rag.pipeline import _state_from_resume
 
         class Ctx:
             retrieval_sections = []
@@ -721,7 +721,7 @@ class TurnEntryTests(unittest.TestCase):
     }
 
     def _enter(self, user_text, resolution):
-        from backend.chat.clarification import PENDING_HITL_KEY, enter_turn
+        from backend.agent.chat.clarification import PENDING_HITL_KEY, enter_turn
 
         return enter_turn(
             user_text,
@@ -767,7 +767,7 @@ class TurnEntryTests(unittest.TestCase):
         self.assertFalse(entry.is_hitl_resume)
 
     def test_no_pending_clarification_means_no_resolver_call_here(self):
-        from backend.chat.clarification import enter_turn
+        from backend.agent.chat.clarification import enter_turn
 
         calls = []
         entry = enter_turn(
@@ -786,15 +786,15 @@ class TurnContextMessageTests(unittest.TestCase):
         self.addCleanup(set_profile, None)
 
     def test_nothing_to_say_produces_no_message(self):
-        import backend.chat.service as service
-        from backend.chat.turn_policy import TurnPlan
+        import backend.agent.chat.service as service
+        from backend.agent.chat.turn_policy import TurnPlan
 
         self.assertIsNone(_turn_context_message(TurnPlan()))
         self.assertIsNone(_turn_context_message(None))
 
     def test_the_resolved_question_and_conditions_are_both_stated(self):
-        import backend.chat.service as service
-        from backend.chat.turn_policy import TurnPlan
+        import backend.agent.chat.service as service
+        from backend.agent.chat.turn_policy import TurnPlan
 
         message = _turn_context_message(
             TurnPlan(
@@ -808,8 +808,8 @@ class TurnContextMessageTests(unittest.TestCase):
         self.assertIn("bind the answer", message.content)
 
     def test_it_sits_between_the_history_and_the_message(self):
-        import backend.chat.service as service
-        from backend.chat.turn_policy import TurnPlan
+        import backend.agent.chat.service as service
+        from backend.agent.chat.turn_policy import TurnPlan
         from langchain_core.messages import HumanMessage
 
         built = build_context_messages(

@@ -368,7 +368,7 @@ class RealRosterSpellingsTests(unittest.TestCase):
         ]
 
     def _roster(self):
-        from backend.chat.child_roster import _as_options
+        from backend.agent.chat.child_roster import _as_options
 
         return _as_options([
             {"student_id": str(index), "full_name_ar": arabic, "full_name_en": english}
@@ -376,7 +376,7 @@ class RealRosterSpellingsTests(unittest.TestCase):
         ])
 
     def test_correct_spelling_resolves_against_a_variant_row(self):
-        from backend.chat.child_resolution import resolve_child
+        from backend.agent.chat.child_resolution import resolve_child
 
         for typed, expected in [
             ("محمد أحمد", "محمد احمد"),
@@ -391,7 +391,7 @@ class RealRosterSpellingsTests(unittest.TestCase):
                 self.assertEqual(expected, out.label)
 
     def test_a_latin_first_name_resolves_to_an_arabic_row(self):
-        from backend.chat.child_resolution import resolve_child
+        from backend.agent.chat.child_resolution import resolve_child
 
         out = resolve_child(reference="named", child_name="Layla", roster=self._roster())
         self.assertTrue(out.resolved)
@@ -400,7 +400,7 @@ class RealRosterSpellingsTests(unittest.TestCase):
     def test_an_ambiguous_first_name_still_asks(self):
         """Folding must widen matching without weakening the uniqueness rule: four
         children carry أحمد, and picking one would show the wrong child's marks."""
-        from backend.chat.child_resolution import resolve_child
+        from backend.agent.chat.child_resolution import resolve_child
 
         out = resolve_child(reference="named", child_name="أحمد", roster=self._roster())
         self.assertFalse(out.resolved)
@@ -411,7 +411,7 @@ class RealRosterSpellingsTests(unittest.TestCase):
         """«فاكمه» is ك for ط — a wrong consonant, not a spelling variant. Folding
         deliberately does not reach it, and a fuzzy matcher that did could select a
         sibling. The fix belongs in the SIS row."""
-        from backend.chat.child_resolution import resolve_child
+        from backend.agent.chat.child_resolution import resolve_child
 
         out = resolve_child(reference="named", child_name="فاطمة أحمد", roster=self._roster())
         self.assertFalse(out.resolved)

@@ -13,7 +13,7 @@ sized by the corpus. It now returns the text around the match instead.
 """
 import unittest
 
-from backend.rag.utils import (
+from backend.agent.rag.utils import (
     EVIDENCE_WINDOW_CHARS,
     _is_figure_chunk,
     _merge_to_parent_level,
@@ -314,7 +314,7 @@ class MergeKeepsItsPromisesTests(unittest.TestCase):
         Derived from the profile rather than written twice: widen `chunking.l1_size` and
         this must widen with it, or merging starts trimming parents that were never too
         big."""
-        from backend.profiles.registry import load_profile
+        from backend.agent.profiles.registry import load_profile
 
         profile = load_profile("base")
         chunking = profile.chunking
@@ -327,14 +327,14 @@ class MergeKeepsItsPromisesTests(unittest.TestCase):
 
 class ProfileWiringTests(unittest.TestCase):
     def test_the_default_keeps_figures_separate(self):
-        from backend.profiles.registry import load_profile
+        from backend.agent.profiles.registry import load_profile
 
         self.assertIsNone(load_profile("base").retrieval.auto_merge_figure_threshold)
         self.assertEqual(2, load_profile("base").retrieval.auto_merge_threshold)
 
     def test_the_threshold_is_reported_in_the_retrieval_trace(self):
         """So a diagnostic can explain why a figure group did or did not merge."""
-        from backend.rag.utils import RETRIEVAL_TRACE_FIELDS
+        from backend.agent.rag.utils import RETRIEVAL_TRACE_FIELDS
 
         self.assertIn("auto_merge_figure_threshold", RETRIEVAL_TRACE_FIELDS)
 

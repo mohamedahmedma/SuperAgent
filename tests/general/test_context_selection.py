@@ -6,13 +6,13 @@ whenever there is any doubt.
 """
 import unittest
 
-from backend.profiles.registry import load_profile
-from backend.rag.context_selection import (
+from backend.agent.profiles.registry import load_profile
+from backend.agent.rag.context_selection import (
     ContextSelection,
     select_context,
     wants_exhaustive_answer,
 )
-from backend.rag.evidence_view import format_docs
+from backend.agent.rag.evidence_view import format_docs
 
 
 def rag_config(**overrides):
@@ -176,7 +176,7 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(1.0, trace["context_coverage"])
 
     def test_the_trace_schema_carries_the_new_fields(self):
-        from backend.schemas.chat import normalize_rag_trace
+        from backend.agent.schemas.chat import normalize_rag_trace
 
         trace = normalize_rag_trace({
             "context_chunks_kept": 1, "context_chunks_available": 4,
@@ -193,7 +193,7 @@ class PipelineIntegrationTests(unittest.TestCase):
         attribution both index into it, so a stale full list mis-attributes images."""
         from unittest.mock import patch
 
-        import backend.rag.pipeline as pipeline
+        import backend.agent.rag.pipeline as pipeline
 
         class SilentContext:
             def emit_rag_step(self, *args, **kwargs):

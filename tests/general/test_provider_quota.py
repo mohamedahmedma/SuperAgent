@@ -283,7 +283,7 @@ class LiveTurnPolicyTests(unittest.TestCase):
 
 class ClientPolicyTests(unittest.TestCase):
     def test_the_policy_is_the_profiles_live_turn_budget(self):
-        from backend.profiles import get_profile
+        from backend.agent.profiles import get_profile
 
         rag = get_profile().rag
         clients = ProviderHttpClients()
@@ -309,7 +309,7 @@ class BusyCopyTests(unittest.TestCase):
                                      body=None)
 
     def test_the_parent_is_told_how_long_to_wait_in_their_language(self):
-        from backend.chat.service import _agent_failure_text
+        from backend.agent.chat.service import _agent_failure_text
 
         english = _agent_failure_text(self.rate_limited("6.2"), "en")
         self.assertIn("7 seconds", english)
@@ -317,7 +317,7 @@ class BusyCopyTests(unittest.TestCase):
         self.assertIn("7 ثانية", _agent_failure_text(self.rate_limited("6.2"), "ar"))
 
     def test_any_other_failure_is_reported_as_before(self):
-        from backend.chat.service import _agent_failure_text
+        from backend.agent.chat.service import _agent_failure_text
 
         self.assertEqual("boom", _agent_failure_text(RuntimeError("boom"), "en"))
 

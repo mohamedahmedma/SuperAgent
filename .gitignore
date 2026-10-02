@@ -21,8 +21,8 @@ data/
 
 # Node / Frontend development
 node_modules/
-frontend/node_modules/
-frontend/dist/
+src/frontend/node_modules/
+src/frontend/dist/
 
 # Knowledge-base source documents. Corpus content is deployment data, often
 # contains real personal information, and is loaded through the ingest API — it
@@ -46,7 +46,7 @@ records.db
 *.db.before-*
 
 # Vite dependency-optimisation cache for the SIS console.
-sis/frontend/.vite/
+src/sis/frontend/.vite/
 
 # Database backups taken before a migration. Local safety copies, never shared.
 sis.db.backup-*
@@ -88,7 +88,7 @@ UPLOAD_ENV.txt
 # never looks inside an excluded DIRECTORY, and a negation under one does nothing.
 /scripts/*
 
-# The turn-flow diagram's output. `python -m backend.graphs` redraws it from the code at
+# The turn-flow diagram's output. `PYTHONPATH=src python -m backend.graphs` redraws it from the code at
 # any time, and the drawer itself is source under backend/graphs/ — so these are derived
 # files, and a PNG re-rendered on every run is noise in a diff nobody can read.
 # GRAPHS_OUTPUT_DIR moves them; this ignores the default place they land.

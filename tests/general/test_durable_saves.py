@@ -16,8 +16,8 @@ import uuid
 
 from sqlalchemy import exc as sa_exc
 
-from backend.chat.background import BackgroundJobs, SharedWriteBarrier
-from backend.chat.storage import ConversationStorage, MessageToStore
+from backend.agent.chat.background import BackgroundJobs, SharedWriteBarrier
+from backend.agent.chat.storage import ConversationStorage, MessageToStore
 from backend.infra.retry import is_transient, retry_transient
 from tests.general.postgres_support import postgres_schema
 from tests.general.test_asset_delivery import DictCache

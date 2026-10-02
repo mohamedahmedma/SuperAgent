@@ -11,11 +11,11 @@ to verify. See tests/general/test_answer_blocks.py for what replaced it.
 """
 import unittest
 
-from backend.chat.child_context import SessionChild
-from backend.chat.child_resolution import resolve_child
-from backend.chat.child_roster import ChildOption
-from backend.chat.turn_policy import TurnPlan, _plan_child
-from backend.profiles import get_profile
+from backend.agent.chat.child_context import SessionChild
+from backend.agent.chat.child_resolution import resolve_child
+from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.turn_policy import TurnPlan, _plan_child
+from backend.agent.profiles import get_profile
 
 MARKERS = get_profile().agent.year_reference_markers
 

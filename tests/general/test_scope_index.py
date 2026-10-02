@@ -12,7 +12,7 @@ Most of these tests exist to pin those.
 import unittest
 from unittest.mock import patch
 
-from backend.chat.signals import RequestSignals, Scope, SignalContext
+from backend.agent.chat.signals import RequestSignals, Scope, SignalContext
 from backend.indexing.section_summary import (
     SectionRecord,
     content_hash,
@@ -20,14 +20,14 @@ from backend.indexing.section_summary import (
     plan_sections,
     summarise_section,
 )
-from backend.profiles.registry import load_profile
-from backend.rag.evidence import Certainty
-from backend.rag.scope_detector import (
+from backend.agent.profiles.registry import load_profile
+from backend.agent.rag.evidence import Certainty
+from backend.agent.rag.scope_detector import (
     CatalogueScopeDetector,
     ScopeIndexStore,
     ScopeModelDetector,
 )
-from backend.rag.scope_index import ScopeIndex, build_index, derive_floor, percentile
+from backend.agent.rag.scope_index import ScopeIndex, build_index, derive_floor, percentile
 
 VOCABULARY = ["admissions", "fees", "uniform", "transport"]
 
@@ -373,7 +373,7 @@ class ScopeModelRungTests(unittest.TestCase):
 
 class LadderCompositionTests(unittest.TestCase):
     def test_the_catalogue_supersedes_the_chunk_gate(self):
-        from backend.chat.signals import build_ladder
+        from backend.agent.chat.signals import build_ladder
 
         names = [d.name for d in build_ladder(
             config(scope_index_enabled=True, domain_gate_enabled=True)
@@ -382,7 +382,7 @@ class LadderCompositionTests(unittest.TestCase):
         self.assertNotIn("corpus_similarity", names)
 
     def test_the_chunk_gate_remains_for_deployments_without_a_catalogue(self):
-        from backend.chat.signals import build_ladder
+        from backend.agent.chat.signals import build_ladder
 
         names = [d.name for d in build_ladder(
             config(scope_index_enabled=False, domain_gate_enabled=True)
@@ -390,7 +390,7 @@ class LadderCompositionTests(unittest.TestCase):
         self.assertIn("corpus_similarity", names)
 
     def test_the_scope_model_needs_both_switches(self):
-        from backend.chat.signals import build_ladder
+        from backend.agent.chat.signals import build_ladder
 
         names = [d.name for d in build_ladder(
             config(scope_index_enabled=True, request_envelope_enabled=False)

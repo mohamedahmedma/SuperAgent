@@ -145,7 +145,7 @@ class ConfigurationTests(unittest.TestCase):
 class WireTests(unittest.TestCase):
     """Where the packets actually went.
 
-    `backend.chat.runtime` builds its clients at MODULE IMPORT, from the environment as it
+    `backend.agent.chat.runtime` builds its clients at MODULE IMPORT, from the environment as it
     stands at that moment. In production that moment is boot, just after `load_env()`, so
     the clients get the resolved provider. Inside a suite it is whenever some earlier test
     first imported the module -- and several of them (`test_llm_provider`,
@@ -164,7 +164,7 @@ class WireTests(unittest.TestCase):
     def setUpClass(cls):
         import importlib
 
-        import backend.chat.runtime as runtime
+        import backend.agent.chat.runtime as runtime
 
         if not (os.environ.get("MODEL") or "").strip():
             raise unittest.SkipTest("MODEL is unset; nothing to route")

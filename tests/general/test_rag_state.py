@@ -12,13 +12,13 @@ from pathlib import Path
 
 from langgraph.graph import END, StateGraph
 
-from backend.rag.graph_nodes import RAGState
+from backend.agent.rag.graph_nodes import RAGState
 
-PIPELINE = Path(__file__).resolve().parents[2] / "backend" / "rag" / "pipeline.py"
+PIPELINE = Path(__file__).resolve().parents[2] / "src" / "backend" / "agent" / "rag" / "pipeline.py"
 
 
 def _keys_initial_state_writes() -> list:
-    """Read off the source: importing `backend.rag.pipeline` compiles the graph and
+    """Read off the source: importing `backend.agent.rag.pipeline` compiles the graph and
     reaches for the embedder, which this test has no business doing."""
     tree = ast.parse(PIPELINE.read_text(encoding="utf-8"))
     function = next(

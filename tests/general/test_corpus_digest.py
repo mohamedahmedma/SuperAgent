@@ -25,8 +25,8 @@ from backend.indexing.section_summary import (
     build_corpus_digest,
     sections_fingerprint,
 )
-from backend.prompts import render
-from backend.rag.scope_index import (
+from backend.agent.prompts import render
+from backend.agent.rag.scope_index import (
     build_index,
     derive_floor,
     floor_fingerprint,
@@ -53,7 +53,7 @@ class BlockedFloorTests(unittest.TestCase):
         """The original implementation, kept here as the oracle."""
         import numpy as np
 
-        from backend.rag.scope_index import percentile
+        from backend.agent.rag.scope_index import percentile
 
         matrix = np.asarray(vectors, dtype=np.float32)
         if matrix.ndim != 2 or matrix.shape[0] < 2:
@@ -90,13 +90,13 @@ class BlockedFloorTests(unittest.TestCase):
         expected = self.reference(vectors, chunk_ids, 10.0)
         for budget in (64, 512, 4096, 1 << 20):
             with self.subTest(block_bytes=budget):
-                with patch("backend.rag.scope_index.FLOOR_BLOCK_BYTES", budget):
+                with patch("backend.agent.rag.scope_index.FLOOR_BLOCK_BYTES", budget):
                     self.assertAlmostEqual(expected, derive_floor(vectors, chunk_ids, 10.0), places=6)
 
     def test_a_single_row_block_still_agrees(self):
         """The degenerate blocking: one row at a time."""
         vectors, chunk_ids = self.corpus(40)
-        with patch("backend.rag.scope_index.FLOOR_BLOCK_BYTES", 1):
+        with patch("backend.agent.rag.scope_index.FLOOR_BLOCK_BYTES", 1):
             self.assertAlmostEqual(
                 self.reference(vectors, chunk_ids, 10.0),
                 derive_floor(vectors, chunk_ids, 10.0),
@@ -107,7 +107,7 @@ class BlockedFloorTests(unittest.TestCase):
         """A question must never be calibrated against its own siblings, and blocking
         must not let a sibling in through the seam."""
         vectors = [unit(0), unit(0), unit(1)]
-        with patch("backend.rag.scope_index.FLOOR_BLOCK_BYTES", 1):
+        with patch("backend.agent.rag.scope_index.FLOOR_BLOCK_BYTES", 1):
             # s1's two identical questions would score 1.0 against each other.
             self.assertEqual(0.0, derive_floor(vectors, ["s1", "s1", "s2"], point=0))
 
@@ -125,7 +125,7 @@ class FloorCacheTests(unittest.TestCase):
             self.records(), embed=self.embed(), embedding_model="m",
             cached_floor=("", 0.0),
         )
-        with patch("backend.rag.scope_index.derive_floor") as derive:
+        with patch("backend.agent.rag.scope_index.derive_floor") as derive:
             reused = build_index(
                 self.records(), embed=self.embed(), embedding_model="m",
                 cached_floor=(index.floor_sha256, 0.4242),

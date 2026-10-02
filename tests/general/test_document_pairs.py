@@ -10,7 +10,7 @@ changed, not the test.
 import unittest
 from unittest.mock import patch
 
-from backend.chat.language import ARABIC, ENGLISH
+from backend.agent.chat.language import ARABIC, ENGLISH
 from backend.composition import Services, set_default_services
 from backend.db.models import DocumentPair
 from backend.indexing import language_check
@@ -319,11 +319,11 @@ class FigureAwarenessDegradationTests(PairStoreTestCase):
         self.pairs.attach(pair_id, ENGLISH, "uniform_en.docx")
 
     def test_assets_disabled_by_profile_uses_the_plain_rule(self):
-        from backend.profiles.registry import load_profile
+        from backend.agent.profiles.registry import load_profile
 
         profile = load_profile("base")
         profile.assets.enabled = False
-        with patch("backend.profiles.get_profile", return_value=profile):
+        with patch("backend.agent.profiles.get_profile", return_value=profile):
             self._pair()
             self.assertEqual(["uniform_en.docx"], self.pairs.superseded_filenames(ARABIC))
 
@@ -344,7 +344,7 @@ class FilterExpressionTests(PairStoreTestCase):
     """What routing actually hands to Milvus."""
 
     def _clause(self, language):
-        from backend.rag.utils import language_filter_clause
+        from backend.agent.rag.utils import language_filter_clause
 
         return language_filter_clause(language)
 

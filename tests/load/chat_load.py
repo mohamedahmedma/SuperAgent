@@ -53,7 +53,10 @@ from pathlib import Path
 
 import httpx
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+# The repository root stays for `tests.*`; src/ is where the services now live.
+sys.path.insert(0, str(_REPO_ROOT))
+sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 
 def backend_env(stub: str = "http://127.0.0.1:8900/v1") -> dict:
@@ -65,7 +68,7 @@ def backend_env(stub: str = "http://127.0.0.1:8900/v1") -> dict:
 
     The per-user turn limits are off: every simulated parent signs in as the ONE load
     account, so the limits would measure themselves and nothing else. The door's provider
-    check stays on (backend/chat/admission.py).
+    check stays on (backend/agent/chat/admission.py).
 
     The shared query-vector and retrieval caches are off too. Runs repeat the same
     question pool, so with them on the second run of anything would be served from the

@@ -37,7 +37,7 @@ from sis.domain.value_objects import AcademicYearCode, Phone, StudentNumber
 from sis.infrastructure.db.session import get_engine, reset_engine
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
-_ALEMBIC_INI = Path(__file__).resolve().parents[2] / "sis" / "alembic.ini"
+_ALEMBIC_INI = Path(__file__).resolve().parents[2] / "src" / "sis" / "alembic.ini"
 
 YEAR = AcademicYearCode("2025-2026")
 LAYLA = StudentNumber("S001")

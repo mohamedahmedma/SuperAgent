@@ -37,7 +37,7 @@ from backend.assets.dossier import (
     compute_sha256,
 )
 from backend.assets.store import AssetStore
-from backend.chat.assets_bridge import (
+from backend.agent.chat.assets_bridge import (
     asset_ids_for_turn,
     attach_assets_to_trace,
     build_asset_references,
@@ -45,8 +45,8 @@ from backend.chat.assets_bridge import (
     restore_session_assets,
     trace_for_storage,
 )
-from backend.chat.request_context import ChatRequestContext
-from backend.profiles.registry import load_profile
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.profiles.registry import load_profile
 from tests.general.postgres_support import postgres_schema
 
 
@@ -296,7 +296,7 @@ class RequestContextAssetTests(unittest.TestCase):
         self.assertEqual(["a", "b", "c"], ctx.surfaced_asset_ids())
 
     def test_resetting_restores_the_knowledge_budget(self):
-        from backend.profiles import get_profile
+        from backend.agent.profiles import get_profile
 
         budget = get_profile().agent.max_knowledge_calls_per_turn
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
@@ -398,10 +398,10 @@ class AssetsBridgeTests(unittest.TestCase):
     def test_the_pipeline_stores_every_turns_trace_by_id(self):
         """The wiring, not just the function: a commit path that skipped it would put
         renditions back in the database without any test noticing."""
-        from backend.chat.background import InlineJobs
-        from backend.chat.caller_identity import CallerIdentity
-        from backend.chat.child_context import SessionChild
-        from backend.chat.turn_pipeline import Turn, TurnCollaborators, TurnPipeline
+        from backend.agent.chat.background import InlineJobs
+        from backend.agent.chat.caller_identity import CallerIdentity
+        from backend.agent.chat.child_context import SessionChild
+        from backend.agent.chat.turn_pipeline import Turn, TurnCollaborators, TurnPipeline
         from tests.general.test_chat_hitl_resume import FakeStorage
 
         storage = FakeStorage()
@@ -490,7 +490,7 @@ class StoredConversationAssetTests(unittest.TestCase):
     """
 
     def setUp(self):
-        from backend.chat.storage import ConversationStorage
+        from backend.agent.chat.storage import ConversationStorage
         from backend.db.models import ChatMessage, ChatSession, User
 
         schema = postgres_schema(self, User, ChatSession, ChatMessage)
@@ -519,7 +519,7 @@ class StoredConversationAssetTests(unittest.TestCase):
     def _turn(self, question, answer, trace=None):
         """One turn, stored the way the chat service stores it: the question appended
         when it arrives, the answer appended when it is complete, its trace by id."""
-        from backend.chat.storage import MessageToStore
+        from backend.agent.chat.storage import MessageToStore
 
         self.storage.append("u", "s", [MessageToStore("human", question)])
         self.storage.append(
@@ -773,7 +773,7 @@ class StoredPointerRoundTripTests(AssetStoreTestCase):
 
 class SchemaContractTests(unittest.TestCase):
     def test_retrieved_chunks_carry_asset_ids_through_normalisation(self):
-        from backend.schemas.chat import normalize_rag_trace
+        from backend.agent.schemas.chat import normalize_rag_trace
 
         trace = normalize_rag_trace({
             "retrieved_chunks": [{
@@ -787,7 +787,7 @@ class SchemaContractTests(unittest.TestCase):
 
     def test_the_chat_response_exposes_assets_independently_of_the_trace(self):
         """A client must be able to show images without depending on the trace shape."""
-        from backend.schemas.chat import ChatResponse
+        from backend.agent.schemas.chat import ChatResponse
 
         response = ChatResponse(response="hi", assets=[AssetReference(asset_id="a")])
         payload = response.model_dump(mode="json")
@@ -795,7 +795,7 @@ class SchemaContractTests(unittest.TestCase):
         self.assertIsNone(payload["rag_trace"])
 
     def test_the_chat_request_accepts_declared_capabilities(self):
-        from backend.schemas.chat import ChatRequest
+        from backend.agent.schemas.chat import ChatRequest
 
         request = ChatRequest(
             message="hi", client_capabilities={"accepts_images": False, "max_assets": 2}
@@ -803,7 +803,7 @@ class SchemaContractTests(unittest.TestCase):
         self.assertFalse(request.client_capabilities.accepts_images)
 
     def test_omitting_capabilities_is_valid(self):
-        from backend.schemas.chat import ChatRequest
+        from backend.agent.schemas.chat import ChatRequest
 
         self.assertIsNone(ChatRequest(message="hi").client_capabilities)
 
@@ -904,7 +904,7 @@ class AssetRouteTests(unittest.TestCase):
         self.assertEqual(404, self.client.get(self._url()).status_code)
 
     def test_asset_support_can_be_disabled_by_profile(self):
-        from backend.profiles.registry import load_profile as load, set_profile
+        from backend.agent.profiles.registry import load_profile as load, set_profile
 
         profile = load("base").model_copy(deep=True)
         profile.assets.enabled = False
@@ -938,12 +938,12 @@ class CitationFilteringTests(unittest.TestCase):
         self.ctx.note_surfaced_assets(["a1", "a2", "a3", "a4"])
 
     def _ids(self, answer, config=None):
-        from backend.chat.assets_bridge import asset_ids_for_answer
+        from backend.agent.chat.assets_bridge import asset_ids_for_answer
 
         return asset_ids_for_answer(answer, self.ctx, self.trace, config or self.delivery)
 
     def test_citation_markers_are_parsed_in_all_the_shapes_a_model_emits(self):
-        from backend.chat.assets_bridge import cited_chunk_indices
+        from backend.agent.chat.assets_bridge import cited_chunk_indices
 
         self.assertEqual([1], cited_chunk_indices("The uniform is navy [1]."))
         self.assertEqual([2, 3], cited_chunk_indices("Both apply [2][3]."))
@@ -1024,13 +1024,13 @@ class CitationFilteringTests(unittest.TestCase):
 
     def test_no_surfaced_assets_short_circuits(self):
         empty_ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
-        from backend.chat.assets_bridge import asset_ids_for_answer
+        from backend.agent.chat.assets_bridge import asset_ids_for_answer
 
         self.assertEqual([], asset_ids_for_answer("Answer [1].", empty_ctx, {}, self.delivery))
 
     def test_a_trace_without_chunks_falls_back_rather_than_dropping_everything(self):
         """Nothing to map the markers against, so the same one-figure fallback applies."""
-        from backend.chat.assets_bridge import asset_ids_for_answer
+        from backend.agent.chat.assets_bridge import asset_ids_for_answer
 
         self.assertEqual(
             ["a1"],
@@ -1039,7 +1039,7 @@ class CitationFilteringTests(unittest.TestCase):
 
     def test_duplicate_assets_across_cited_chunks_appear_once(self):
         trace = {"retrieved_chunks": [{"asset_ids": ["a1"]}, {"asset_ids": ["a1", "a2"]}]}
-        from backend.chat.assets_bridge import asset_ids_for_answer
+        from backend.agent.chat.assets_bridge import asset_ids_for_answer
 
         self.assertEqual(["a1", "a2"], asset_ids_for_answer("[1][2]", self.ctx, trace, self.delivery))
 
@@ -1054,7 +1054,7 @@ class AttachmentEdgeCaseTests(unittest.TestCase):
         self.empty_ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
 
     def _ids(self, answer, ctx, trace, config=None):
-        from backend.chat.assets_bridge import asset_ids_for_answer
+        from backend.agent.chat.assets_bridge import asset_ids_for_answer
 
         return asset_ids_for_answer(answer, ctx, trace, config or self.delivery)
 
@@ -1077,7 +1077,7 @@ class AttachmentEdgeCaseTests(unittest.TestCase):
         }
         self.assertEqual([], self._ids("I don't have that.", self.empty_ctx, trace))
 
-        from backend.chat.assets_bridge import asset_ids_for_turn
+        from backend.agent.chat.assets_bridge import asset_ids_for_turn
 
         self.assertEqual([], asset_ids_for_turn(self.empty_ctx, trace))
 
@@ -1137,9 +1137,9 @@ class FigureMarkerTests(unittest.TestCase):
         import sys
         import types
 
-        from backend.tools.knowledge import make_search_knowledge_base
+        from backend.agent.tools.knowledge import make_search_knowledge_base
 
-        fake_pipeline = types.ModuleType("backend.rag.pipeline")
+        fake_pipeline = types.ModuleType("backend.agent.rag.pipeline")
         fake_pipeline.run_rag_graph = lambda query, ctx: {
             "docs": docs,
             "rag_trace": {"retrieval_status": "answer", "route": "answer"},
@@ -1147,7 +1147,7 @@ class FigureMarkerTests(unittest.TestCase):
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         try:
             tool = make_search_knowledge_base(ctx)
-            with patch.dict(sys.modules, {"backend.rag.pipeline": fake_pipeline}):
+            with patch.dict(sys.modules, {"backend.agent.rag.pipeline": fake_pipeline}):
                 return tool.invoke({"query": "where is the uniform picture"}), ctx
         finally:
             ctx.close()

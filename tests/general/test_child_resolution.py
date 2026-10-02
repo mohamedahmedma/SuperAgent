@@ -7,9 +7,9 @@ that outranks a name answers about the sister of the child they just asked about
 """
 import unittest
 
-from backend.chat.child_context import SessionChild
-from backend.chat.child_resolution import resolve_child
-from backend.chat.child_roster import ChildOption
+from backend.agent.chat.child_context import SessionChild
+from backend.agent.chat.child_resolution import resolve_child
+from backend.agent.chat.child_roster import ChildOption
 
 ALI = ChildOption(student_id="S-1", label="علي حسن", gender="male", year_level="Year 4")
 AHMED = ChildOption(student_id="S-2", label="أحمد حسن", gender="male")

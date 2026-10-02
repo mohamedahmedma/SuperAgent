@@ -1,0 +1,353 @@
+---
+noteId: "3e5d04b095c711f1a6d4fb6c6accc4db"
+tags: []
+
+---
+
+# Academic Records Facade
+
+A small, AI-free service between the school assistant agent and the school's system of
+record. It answers "what are my child's grades" for a parent, and nothing else.
+
+It runs on its own port, against its own database, with its own five dependencies.
+Nothing here imports `backend/`, and nothing in `backend/` imports this. The only
+coupling is the HTTP contract in [openapi.json](openapi.json).
+
+## Why it exists
+
+Three jobs, none of which belongs in the chat backend and none of which Moodle does
+well:
+
+1. **Enforcement.** Two credentials on every parent-facing read — a key proving which
+   *system* is calling, and a signed token proving *which parent* it asks for — plus a
+   refusal for anything it cannot justify.
+2. **The school's vocabulary.** Grading policy (letter bands, the pass mark, which of the
+   two percentages leads), and the course binding that maps a flat course list onto
+   "subject x section x term" for a backend whose titles are whatever a teacher typed.
+3. **An audit trail.** Every attempt to read a student record, allowed or denied,
+   correlated back to the chat turn that caused it.
+
+**Authorisation is no longer on that list, and that is the important change.** Which
+guardian may see which student is the registrar's fact: entered from paperwork, amended by
+custody decisions, and audited in `sis/`. This service asks rather than remembers, and
+since the guardian handle now travels with every read, `sis/` re-checks the answer before
+returning a mark. Two independent refusals from one source of truth, instead of a second
+copy that goes stale the first time a court order is applied to the other one.
+
+Grades, attendance, guardians, students and the academic calendar are *not* stored here.
+They are read at request time. Copying them is how two systems start disagreeing about a
+child.
+
+## The rule everything else follows
+
+> An API key proves **which system** is calling. It never proves **which parent** is
+> asking. Both are required before a single grade is returned.
+
+So every parent-facing read carries two independent credentials:
+
+| Header | Proves | Issued by |
+| --- | --- | --- |
+| `X-API-Key` | which system is calling | this service's admin routes |
+| `Authorization: Bearer` | which parent it asks for | the [identity service](../identity/) |
+
+The token's `guardian_id` claim **must match** the `guardian_id` in the URL path. That
+equality check is what stops the calling system choosing whose records it reads — it
+relays a parent's token and cannot produce a signature for a different one. A fully
+compromised chat backend still cannot read a family it holds no token for.
+
+Verification is offline against a public key, so this service holds nothing that could
+mint a token, and identity being down does not take records down. It **fails closed**:
+with no public key configured every parent-facing read returns 503 rather than falling
+back to trusting the path.
+
+The permitted-student set is then resolved server-side from `guardian_students` on
+every request — never from anything the caller supplies, and never as a filter applied
+to results after the fact.
+
+This matters more than usual because the caller is a language model. No prompt, no
+injected instruction inside a parent's chat message, and no clever phrasing reaches
+this decision: the LMS is never asked about a student the link check excluded.
+
+## How it is laid out
+
+**Hexagonal — ports and adapters.** Not the onion `sis/` and `identity/` use, and the
+difference is the service rather than taste: this one is a stateless translator between
+two contracts. It has no database, no entities with identity and no persistence to invert,
+so a repository layer would be indirection on the latency path of every parent question,
+buying nothing. What it does have is three seams to other systems, which is exactly what
+a hexagon is for.
+
+```
+domain/          the school's vocabulary, no I/O
+  errors.py        every refusal, and the rule that "could not ask" is never "no"
+  grading.py       letter bands, the pass mark, which percentage leads
+  marks.py         SubjectGrade, SubjectAttendance — as a system of record states them
+  terms.py         SchoolTerm
+  people.py        PermittedStudent
+
+ports/           what this facade needs from outside — the driven side
+  lms.py           where the marks are
+  directory.py     which children a guardian may be told about
+  calendar.py      when a term runs
+
+application/     the use cases
+  reads.py         the four reads, and the three-step order that is a security property
+  access.py        the guardian link check
+  assembly.py      domain values -> the wire contract
+  audit.py         what is refused, and why
+
+adapters/        the driven side, implemented
+  sis/             the school's SIS over HTTP, sharing one pooled transport
+  fake/            in-memory, and what an unconfigured deployment falls back to
+
+api/             the driving side: routers, schemas, deps, error mapping
+config.py        every environment variable, read lazily, in one place
+app.py           the composition root
+```
+
+**Dependencies point inward**, and it is checked rather than described:
+[tests/records/test_layering.py](../tests/records/test_layering.py) reads the imports out
+of the source and fails the build when one points the wrong way — including a fourth
+`httpx.Client(...)` appearing anywhere but `adapters/sis/http.py`.
+
+### Why that last rule exists
+
+There were three HTTP clients to one service, built three different ways, and two of them
+were wrong. The marks adapter capped its pool at 10 while FastAPI serves sync endpoints
+from a threadpool of 40, so thirty requests could be in flight and blocked inside `httpx`
+waiting for a connection — a queue on this side of the wire, invisible to the SIS, showing
+up only as latency. Measured against a stub answering in 20ms, with 40 calling threads:
+
+| `max_connections` | throughput | p50 | p95 |
+| --- | --- | --- | --- |
+| 10 | 231 req/s | 86ms | 453ms |
+| 40 | 715 req/s | 47ms | 84ms |
+
+One number now, `RECORDS_POOL_SIZE`, for all three — because they are three clients to
+**one** service called from **one** worker pool, and sizing them separately means two of
+them are wrong. Raise it alongside the worker count; lower it only to protect a SIS that
+genuinely cannot take the concurrency, knowing the queue moves here rather than vanishing.
+
+### What was deliberately not made faster
+
+A grades request makes **two sequential SIS calls** — the link check, then the marks — and
+the second's arguments are all known before the first returns, so they could be issued
+together and the request would be a round trip shorter. They are not. That would ask the
+system of record for a child's marks before establishing that this parent may see them,
+and the caller here is a language model reading untrusted text. The ordering is the
+enforcement, not a formality.
+
+Nor is there a response cache. A guardian link can be revoked the minute a court order
+arrives, and a cached "yes" keeps letting somebody in for as long as the entry lives.
+
+## Running it
+
+```bash
+pip install -r records/requirements.txt
+PYTHONPATH=src python -m records.export_openapi              # regenerate the contract
+RECORDS_API_KEY=... uvicorn records.app:app --app-dir src --port 8100
+pytest tests/records -q
+```
+
+**There is no database, and no migration to run before starting.** Every fact this service
+serves is asked for at request time, so its entire configuration is who to ask and what
+credentials to ask with.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `RECORDS_API_KEY` | — | **Required.** The secret the chat backend presents. Fails closed: unset means every request is refused, not admitted. |
+| `RECORDS_LMS` | `fake` | `fake`, or `sis` (the school's own SIS on :8300). |
+| `IDENTITY_JWKS_URL` | — | **Required.** e.g. `http://localhost:8200/.well-known/jwks.json`. |
+| `IDENTITY_PUBLIC_KEY_PEM` | — | A pinned key instead of JWKS. Takes precedence. |
+| `IDENTITY_ISSUER` / `IDENTITY_AUDIENCE` | `school-identity` / `school-services` | Must match the identity service. |
+| `SIS_BASE_URL` / `SIS_API_KEY` | — | Required when `RECORDS_LMS=sis`. The key must be `reader`-scoped, and the service refuses to start with a base URL and no key. |
+| `SIS_TIMEOUT_SECONDS` | `10` | Per-call ceiling for the marks read. No retries: a retry budget multiplies it. |
+| `SIS_LOOKUP_TIMEOUT_SECONDS` | `5` | The guardian-link and calendar reads, which answer smaller questions. |
+| `RECORDS_POOL_SIZE` | `40` | Connections held to the SIS, shared by all three clients. Size it to the worker pool — see [above](#why-that-last-rule-exists). |
+| `RECORDS_CALENDAR_CACHE_SECONDS` | `600` | How long term dates are reused. One refresh at a time; the rest wait. |
+| `RECORDS_PRIMARY_GRADE` | `academic` | `academic` or `official`. Which percentage a parent is shown first. |
+
+Every one of these is read **lazily, once, in [`config.py`](config.py)** and cached, never
+at import — so a value set after the module loads still takes effect, which is what the
+per-call `IdentityConfig` rebuild in the old `identity.py` existed to work around. Junk
+falls back to the documented default and says so in the log.
+
+Two are deliberately read per request instead: `RECORDS_API_KEY`, so rotating it is a
+restart rather than a rebuild, and `IDENTITY_PUBLIC_KEY_PEM`.
+
+`RECORDS_API_KEY` is one shared secret rather than a row in a key table, which is what a
+service holding no state can verify. It buys rotation-by-restart and no revocation list —
+the trade for holding nothing. Minting short-lived service tokens in `identity/` and
+verifying them offline through `schoolauth` is the upgrade path, and `records/api/deps.py` is
+shaped so that swapping it changes one function.
+
+## The contract
+
+Every parent-facing read lives under `/v1/guardians/{guardian_id}/...`. The subject is
+part of the path rather than an optional parameter, so a route that reads a record
+without naming a guardian has nowhere to put one.
+
+```
+GET  /v1/terms
+GET  /v1/guardians/{gid}/students
+GET  /v1/guardians/{gid}/students/{sid}/grades?term=
+GET  /v1/guardians/{gid}/students/{sid}/grades/{course_id}
+GET  /v1/guardians/{gid}/students/{sid}/attendance?term=
+GET  /v1/guardians/{gid}/students/{sid}/timetable?term=
+GET  /v1/guardians/{gid}/students/{sid}/class?term=
+GET  /v1/guardians/{gid}/students/{sid}/subjects?term=
+GET  /v1/guardians/{gid}/students/{sid}/teachers?term=
+```
+
+The last three are **three URLs over one read**. Which class she is in, what she studies and
+who teaches her are all answers about the same room, resolved from one time-bounded
+placement — so they are separate questions and one call to the system of record. Asked as
+three reads, a placement edited in between could answer with one room's subjects beside
+another room's staff.
+
+`/class` answers with the room's NAME — "Primary 1 Class 1", "3/1" — which is what a family
+recognises; `class_code` ("3A", "P1-01") is the school's internal key and is carried for
+correlation, not for reading out. All three share a two-value `status`: `no_class` means no
+placement covered the term, and is a fact about the child. An empty `subjects` or `teachers`
+list beside `status: ok` is a fact about the school's admin instead — nobody has curated the
+board, or entered the staffing — and the two must never be reported alike.
+
+`/teachers` carries a name and a subject per entry and nothing else: no staff number, no
+email, no phone. The shape is the privacy boundary rather than a filter a consumer has to
+remember. It is also **present tense** — the term resolves which room she sat in, but the
+school's assignment table carries no term, so this cannot report who taught that room last
+November.
+
+The timetable is the one read whose subject is not the child. A week belongs to the *class*
+she is placed in, and that placement is time-bounded — so the route still names only a
+student, and the system of record resolves the room for the term asked about. Nothing above
+SIS holds a class code, which is what stops a cached one naming a room a child has left. It
+answers three states, in `status`: `ok`, `no_class` (no placement covered the term) and
+`no_timetable` (she has a class whose week is not published). The last two are both empty
+and must never be reported alike — one is a fact about the child, the other about the
+school's admin.
+
+`/v1/admin/...` holds three routes and all three answer **410**, naming the SIS routes that
+replaced them. A 404 would read as "wrong URL" and invite a retry; accepting the write
+silently would leave a registrar believing a parent had been granted access when nobody
+had. They take no credential — they carry no data, and a caller who cannot authenticate is
+exactly the one most in need of being told the route moved.
+
+There is no key-minting route and no audit route. This service mints no credentials, and
+the access audit is kept by `sis/`, where the decision it records is made:
+`GET /v1/admin/access-audit`. Making admin a superset would mean the school's most widely copied
+credential is also the one that reads every record.
+
+Two conventions in every response, both defences against a model reading a record wrong:
+
+- **Nothing is silently absent.** A missing grade carries a `status` explaining why.
+  A model handed `null` will narrate a plausible reason; one handed `"excused"` will not.
+- **Every payload is stamped** with `as_of`.
+
+On `503 {"code": "lms_unavailable"}` the agent must say records are temporarily
+unavailable. Never a remembered or inferred figure.
+
+## Decisions baked into the schema
+
+These are the ones that are cheap now and brutal to retrofit once real data lands.
+
+- **Excused ≠ zero.** An excused assignment leaves the denominator entirely. A missing
+  one stays in it as a real zero. This is the most common way a home-built gradebook
+  quietly harms a real student — see `test_excused_and_missing_are_not_the_same`.
+- **Linking a guardian is not granting access.** `can_view_records` defaults to `False`,
+  so a half-finished import leaks nothing.
+- **Restricted ≠ deleted.** A guardian barred by a court order stays on file as a
+  contact, with the reason attached, because deleting the row loses a fact the school
+  needs.
+- **Denials are indistinguishable to the caller.** Unknown, unrelated and restricted all
+  return the same 404 with the same message; the audit records which actually happened.
+  A caller who could tell them apart could enumerate the student body.
+- **Course bindings are explicit.** An unbound or unpublished course is invisible to
+  parents, so a teacher's sandbox cannot reach a rollup. Unused on the SIS path, which
+  reports its own subjects against the school's own codes — and kept for exactly that
+  reason, since it is what a *different* system of record would need.
+- **The audit belongs to the decision.** `sis/` records every answer about a child,
+  allowed or refused, with the reason that was really true. What this service reports is
+  only what never reaches SIS — a bad key, an unverifiable token, a guardian mismatch —
+  as structured log lines, because those have nowhere else to be recorded.
+
+## What is not built yet
+
+**`MoodleAdapter` is a skeleton** — its methods raise. The questions it was blocked on
+have now been answered against a real Moodle 5.1.6 with mod_attendance 2026042100; the
+full findings and a reproducible local instance live in `~/moodle-dev/` inside the
+Ubuntu-22.04 WSL2 distro (moved there off the Windows disk for speed), and the
+implementation notes are in the `MoodleAdapter` docstring in
+[ports/lms.py](ports/lms.py).
+
+Two results change this service's design.
+
+**Grades: read Moodle's computed total, do not re-aggregate.** The web service exposes
+no exclusion flag — an excused assignment is indistinguishable from a counted one. But
+the course-total row's `percentageformatted` is correct, because Moodle applies
+exclusions, weights and drop-lowest itself. Measured on a student with 90/100, an
+excluded 10/100 and one ungraded item, the three candidate approaches give **50 %**,
+**30 %** and **90 %** — only the last is right.
+
+So [domain/grading.py](domain/grading.py)'s per-course arithmetic should be replaced by reading that
+figure. Its term-level rollup stays: Moodle still has no concept of a term. The
+`EXCUSED` status survives in the contract because a future SIS may report it, but
+Moodle will never populate it.
+
+**Attendance: the core web services are unusable for this.** Reading one child's
+attendance returns every classmate's name and status, requires write-capable
+permissions, and requires the service account to be enrolled as a teacher in every
+course. A `local_` Moodle plugin exposing a read-only per-student endpoint is the
+supported path.
+
+Build caching and a hard timeout into that adapter from the first line. These calls are
+chatty; a parent asking three questions should not trigger thirty round trips, and a
+hung call must raise `LmsUnavailable` rather than hang a chat turn.
+
+Also still open: a `GradingPolicy` loaded per school rather than per process, and rate
+limiting per `(key, guardian)`.
+
+Report cards were removed rather than finished. The read route had been broken since the
+guardian tables stopped being populated — it looked up `student.id` on an object with no
+`id` — and nothing tested it. Freezing a published term is a real requirement, but it is a
+write path over marks, and it belongs where the marks are.
+
+## Swapping the LMS
+
+Everything LMS-shaped is behind the `LmsAdapter` protocol in
+[ports/lms.py](ports/lms.py). Routes
+never import a Moodle symbol, never see a web-service function name, never handle a
+Moodle error type. Replacing Moodle means writing one class — the blast radius is that
+file, and the agent's tool layer does not change.
+
+### `RECORDS_LMS=sis`
+
+[adapters/sis/grades.py](adapters/sis/grades.py) is that claim tested. It reads the school's own Student
+Information Service (`:8300`, see [../SERVICES.md](../SERVICES.md)) —
+`GET /v1/students/{student_number}/grades?term=`, with a `reader`-scoped `X-API-Key` that
+SIS no longer checks (see [../SERVICES.md](../SERVICES.md)) — and nothing in the routes, the
+assembler or the tool layer changed to accommodate it.
+
+```bash
+RECORDS_LMS=sis SIS_BASE_URL=http://localhost:8300 \
+  uvicorn records.app:app --app-dir src --port 8100
+```
+
+Four things to know before switching a deployment to it:
+
+- **Bind courses on the subject code.** `records.application.assembly` matches on the reference the
+  system of record reports, which for SIS is the subject code (`MATH`), so a
+  `CourseBinding` needs `lms_idnumber` set to that. Unbound subjects are dropped, exactly
+  as they are under Moodle — a subject the school has not published is not on a report.
+- **Attendance is unavailable.** SIS records grades only, so `get_subject_attendance`
+  raises `LmsUnavailable` and the attendance route answers 503. Returning an empty
+  register instead would have reported every child as perfectly attending.
+- **One figure per subject.** SIS states the mark a teacher wrote; there is no assignment
+  ledger, no weighting and no attendance mixed in, so `academic` carries the same figure
+  as the course total rather than a second one. A mark stated only as points ("17 out of
+  20") arrives with `academic.unavailable: "points_not_percentage"` — this adapter will
+  not divide to manufacture a percentage.
+- **An unknown student reads as no records, not as an error**, which is the same answer a
+  restricted or unlinked student gets. Any other refusal — a revoked key, a wrong base
+  URL, a timeout — is `LmsUnavailable` and reaches the parent as "records are temporarily
+  unavailable".

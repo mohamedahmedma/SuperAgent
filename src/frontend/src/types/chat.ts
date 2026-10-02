@@ -1,0 +1,293 @@
+export interface RetrievedChunk {
+  filename: string;
+  page_number?: number;
+  rrf_rank?: number;
+  rerank_score?: number | null;
+  text?: string;
+  chunk_id?: string;
+  modality?: 'text' | 'table' | 'figure' | string;
+  asset_ids?: string[];
+}
+
+/**
+ * An image the backend surfaced for this answer.
+ *
+ * Mirrors backend AssetReference. The backend never sends markup — it sends this
+ * descriptor and lets each client decide how to present it, which is why the same
+ * payload serves this UI, a bot, or a downstream service.
+ *
+ * `mode` says how the bytes arrive:
+ *   reference — fetch `url` (needs the auth header, see useAssetImage)
+ *   inline    — `inline_data` is already a complete data: URI
+ *   metadata  — no bytes at all; caption only
+ */
+export interface AssetReference {
+  asset_id: string;
+  sha256?: string;
+  mode: 'reference' | 'inline' | 'metadata';
+  url?: string | null;
+  inline_data?: string | null;
+  content_type?: string;
+  byte_size?: number;
+  width?: number;
+  height?: number;
+  caption?: string;
+  alt_text?: string;
+  tags?: string[];
+  role?: string;
+  source?: { filename?: string; page_number?: number; bbox?: number[] | null };
+}
+
+/**
+ * A record a tool rendered for the reader, as data. Mirrors backend `AnswerBlock`
+ * (src/backend/agent/schemas/chat.py).
+ *
+ * The same record also travels as markdown inside the answer, after a `<!--record-block-->`
+ * marker; `index` says which marker this block draws. The backend sends no markup, so
+ * each client decides how to present it — a phone one day at a time, a wide screen as a
+ * grid — and a client that knows none of this prints the markdown instead.
+ */
+export interface TimetableSlot {
+  period: number;
+  subject?: string;
+  /** A period the class deliberately has off. */
+  is_free?: boolean;
+}
+
+export interface TimetableDay {
+  /** The school's own key ("sunday") — what today is matched against. */
+  day: string;
+  /** The day as the reader says it ("الأحد"). */
+  label?: string;
+  slots: TimetableSlot[];
+}
+
+export interface TimetablePeriod {
+  number: number;
+  label?: string;
+  /** `HH:MM`, or empty where the school has not fixed the bell. */
+  starts_at?: string;
+  ends_at?: string;
+  /** False for a break, assembly or prayer. */
+  is_teaching?: boolean;
+}
+
+export interface TimetableBlockData {
+  class_label?: string;
+  term_label?: string;
+  periods: TimetablePeriod[];
+  /** Only days with a lesson, in the school's week order. */
+  days: TimetableDay[];
+}
+
+export interface GradeRow {
+  subject: string;
+  /** Absent or null: no grade recorded yet. Never zero. */
+  percentage?: number | null;
+  letter?: string;
+  missing_count?: number;
+  in_progress?: boolean;
+}
+
+export interface GradesBlockData {
+  term_label?: string;
+  courses: GradeRow[];
+}
+
+interface AnswerBlockBase {
+  index: number;
+  language?: string;
+}
+
+export interface TimetableAnswerBlock extends AnswerBlockBase {
+  kind: 'timetable';
+  data: TimetableBlockData;
+}
+
+export interface GradesAnswerBlock extends AnswerBlockBase {
+  kind: 'grades';
+  data: GradesBlockData;
+}
+
+export type AnswerBlock = TimetableAnswerBlock | GradesAnswerBlock;
+export type AnswerBlockKind = AnswerBlock['kind'];
+
+export interface RagTraceFields {
+  tool_used?: boolean;
+  tool_name?: string;
+  query?: string;
+  retrieval_stage?: string;
+  /** Whether the search text dropped this turn's child name. The flag only — never the
+   *  name: this trace is persisted per message and rendered in the browser. */
+  child_name_removed?: boolean;
+  route?: string;
+  retrieval_status?: string;
+  evidence_relevance?: string;
+  evidence_answerability?: string;
+  evidence_ambiguity?: string;
+  evidence_confidence?: number | null;
+  evidence_reason?: string;
+  missing_slots?: string[];
+  hitl_prompt?: string;
+  hitl_options?: string[];
+  hitl_resumed?: boolean;
+  hitl_answer?: string;
+  hitl_resume_strategy?: string;
+  hitl_resume_from_status?: string;
+  hitl_resume_from_route?: string;
+  hitl_targeted_retrieved_chunks?: RetrievedChunk[];
+  retrieval_pipeline?: string;
+  retrieval_mode?: string;
+  candidate_k?: number;
+  candidate_k_config_error?: string;
+  candidate_k_source?: string;
+  retrieval_candidate_multiplier?: number;
+  recall_count?: number | null;
+  post_merge_candidate_count?: number | null;
+  candidate_count?: number | null;
+  retrieval_top_k?: number;
+  retrieved_chunks?: RetrievedChunk[];
+  assets?: AssetReference[];
+  leaf_retrieve_level?: number;
+  auto_merge_enabled?: boolean | null;
+  auto_merge_applied?: boolean | null;
+  auto_merge_threshold?: number;
+  auto_merge_replaced_chunks?: number;
+  auto_merge_steps?: number;
+  rerank_enabled?: boolean | null;
+  rerank_applied?: boolean | null;
+  rerank_model?: string;
+  rerank_error?: string;
+  rerank_timeout_seconds?: number;
+  rerank_min_score?: number;
+  post_rerank_count?: number;
+  post_threshold_count?: number;
+  retrieval_empty?: boolean;
+  rewrite_method?: 'step_back' | 'hyde';
+  step_back_question?: string;
+  hyde_document?: string;
+  rewritten_query?: string;
+  complexity?: 'simple' | 'complex' | string;
+  complexity_reason?: string;
+  sub_questions?: string[];
+  sub_agent_count?: number;
+  synthesis_merged_count?: number;
+  initial_retrieved_chunks?: RetrievedChunk[];
+  rewrite_retrieved_chunks?: RetrievedChunk[];
+  /** The stream was stopped or dropped; the stored answer is what had arrived by then. */
+  turn_interrupted?: boolean;
+  /** What the message before this answer did to a pending clarification: settled it, or
+   *  replaced it with a new question. Absent on answers stored before this existed. */
+  turn_clarification?: 'answered' | 'replaced' | string;
+}
+
+export interface RagSubTrace extends RagTraceFields {}
+
+export interface RagTrace extends RagTraceFields {
+  sub_traces?: RagSubTrace[];
+  /** Untrusted until read through `readAnswerBlocks` (utils/answerBlocks.ts). */
+  answer_blocks?: unknown[];
+}
+
+export interface RagStep {
+  key?: string;
+  group?: string | null;
+  group_label?: string | null;
+  label: string;
+  icon?: string;
+  detail?: string;
+  status?: string;
+  percent?: number;
+  message?: string;
+  elapsed_ms?: number;
+  stage_elapsed_ms?: number;
+}
+
+export interface GroupedRagStep {
+  group: string | null;
+  label: string | null;
+  steps: RagStep[];
+  collapsed: boolean;
+}
+
+export interface HitlRequest {
+  id?: string;
+  prompt: string;
+  options?: string[];
+  route?: 'clarify' | 'scope_select' | string;
+  retrieval_status?: string;
+  original_question?: string;
+}
+
+export interface Message {
+  /**
+   * The server's row id, once the message is stored. Absent while a turn sent from this
+   * tab is still being stored — the composer is released at `[DONE]` and the `stored`
+   * event follows — and for a message the server never confirmed. It is what tells this
+   * tab's copy from the server's when a conversation is reopened.
+   */
+  id?: number;
+  /** Sent from this tab and never confirmed stored: the stream ended without a `stored`
+   *  event. Yields to the server's copy when the conversation is reopened. */
+  unconfirmed?: boolean;
+  text: string;
+  isUser: boolean;
+  voice?: VoiceMessage;
+  isThinking?: boolean;
+  thinkingStartedAt?: number;
+  isHitlRequest?: boolean;
+  isHitlAnswer?: boolean;
+  hitlPrompt?: string;
+  hitlOptions?: string[];
+  hitlResumeText?: string;
+  ragTrace?: RagTrace | null;
+  assets?: AssetReference[];
+  /** The records this answer shows as tables, already read and checked. */
+  answerBlocks?: AnswerBlock[];
+  ragSteps?: RagStep[];
+  _groupedSteps?: GroupedRagStep[];
+}
+
+/**
+ * A voice note the server holds. Mirrors backend `AttachmentInfo` (src/backend/agent/schemas/chat.py).
+ * `url` needs the bearer token, so the player fetches it through the auth store.
+ */
+export interface AttachmentInfo {
+  id: string;
+  kind: 'voice' | string;
+  url: string;
+  content_type: string;
+  byte_size: number;
+  duration_ms: number;
+  transcript?: string | null;
+  /** ok — `transcript` is what was said; empty — nothing was heard; unavailable — no
+   *  transcriber, or it failed. Only `ok` is sent as a message. */
+  transcript_status: 'ok' | 'empty' | 'unavailable' | string;
+}
+
+/** A voice note on a user turn: the parent's own recording, played back from `url`. */
+export interface VoiceMessage {
+  /** A `blob:` URL while the tab that recorded it holds it; the server's URL on reload. */
+  url: string;
+  duration: number;
+  mimeType: string;
+  /** The server's note, once uploaded. Sent with the message so the two stay together. */
+  attachmentId?: string;
+  transcript?: string;
+}
+
+/** How far back through a conversation the client has read. */
+export interface SessionPaging {
+  /** Id of the oldest message held, and the cursor the next batch is fetched before. */
+  oldestId: number | null;
+  hasMore: boolean;
+  loadingOlder: boolean;
+}
+
+export interface ChatSession {
+  session_id: string;
+  title?: string;
+  message_count: number;
+  updated_at: string;
+  isStreaming?: boolean;
+}

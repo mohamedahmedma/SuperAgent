@@ -502,7 +502,7 @@ def _own_the_environment():
 
 @pytest.fixture(scope="session", autouse=True)
 def estate(_own_the_environment):
-    """sis/ and records/ running for real, for the whole session.
+    """src/sis/ and src/records/ running for real, for the whole session.
 
     Session-scoped because starting two ASGI servers per test would dominate the runtime
     and none of these tests mutate the schema. The ones that *do* change data — a
@@ -511,7 +511,7 @@ def estate(_own_the_environment):
     from sis.config import reset_settings_cache
 
     reset_settings_cache()
-    command.upgrade(AlembicConfig("sis/alembic.ini"), "head")
+    command.upgrade(AlembicConfig("src/sis/alembic.ini"), "head")
 
     from sis.infrastructure.db.session import reset_engine
 
@@ -693,7 +693,7 @@ def _sign_in(identity, gateway, wa_id: str, *, message_id: str = "") -> dict:
 
 
 def _parent_client(token: str, agent_key: str) -> httpx.Client:
-    """records/, addressed the way the chat backend addresses it.
+    """src/records/, addressed the way the chat backend addresses it.
 
     Two credentials, and both are required: the key says which *system* is calling, the
     bearer token says which *parent* it is calling for. Neither substitutes for the other.

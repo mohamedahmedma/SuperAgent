@@ -65,20 +65,20 @@ class EverySchemaAModelAnswersInTests(unittest.TestCase):
     """Built once, at import — never again inside the function that calls the model."""
 
     def test_they_all_use_the_cached_base(self):
-        from backend.chat.resolution import ResolvedQuery
-        from backend.chat.signals import RequestEnvelope
-        from backend.rag.pipeline import ComplexityResult, EvidenceGrade
-        from backend.rag.scope_detector import ScopeVerdict
-        from backend.rag.utils import RewritePlan
+        from backend.agent.chat.resolution import ResolvedQuery
+        from backend.agent.chat.signals import RequestEnvelope
+        from backend.agent.rag.pipeline import ComplexityResult, EvidenceGrade
+        from backend.agent.rag.scope_detector import ScopeVerdict
+        from backend.agent.rag.utils import RewritePlan
 
         for schema in (RequestEnvelope, ResolvedQuery, ScopeVerdict, EvidenceGrade,
                        ComplexityResult, RewritePlan):
             self.assertTrue(issubclass(schema, StructuredOutput), schema.__name__)
 
     def test_the_hoisted_classes_still_read_what_a_model_returns(self):
-        from backend.chat.resolution import ResolvedQuery
-        from backend.chat.signals import RequestEnvelope
-        from backend.rag.scope_detector import ScopeVerdict
+        from backend.agent.chat.resolution import ResolvedQuery
+        from backend.agent.chat.signals import RequestEnvelope
+        from backend.agent.rag.scope_detector import ScopeVerdict
 
         envelope = RequestEnvelope.model_validate({"scope": "in_domain", "needed_tools": ["x"]})
         self.assertEqual(("in_domain", ["x"], "none"),
@@ -92,8 +92,8 @@ class KnowledgeToolTests(unittest.TestCase):
     def test_the_model_facing_definition_is_unchanged(self):
         from langchain_core.utils.function_calling import convert_to_openai_tool
 
-        from backend.chat.request_context import ChatRequestContext
-        from backend.tools.knowledge import KnowledgeQuery, make_search_knowledge_base
+        from backend.agent.chat.request_context import ChatRequestContext
+        from backend.agent.tools.knowledge import KnowledgeQuery, make_search_knowledge_base
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         try:

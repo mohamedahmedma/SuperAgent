@@ -26,7 +26,7 @@ What is asserted here, and why each is a way the architecture quietly stops work
   * THE TOOLS ACTUALLY OVERLAP. Proved with a barrier rather than a stopwatch: each tool
     waits for the other to arrive, so a sequential dispatch deadlocks and fails the test
     instead of passing slowly on a fast machine. Asserted on BOTH the sync and the async
-    path, because `backend/chat/service.py` streams every real turn through `astream`
+    path, because `backend/agent/chat/service.py` streams every real turn through `astream`
     and the two go through different `ToolNode` internals.
 
   * THE FOUR THINGS THAT BITE, each with its own class below: the planner is not given
@@ -45,12 +45,12 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 
-from backend.chat import runtime
-from backend.chat.child_resolution import no_child, resolve_child
-from backend.chat.child_roster import ChildOption
-from backend.chat.request_context import ChatRequestContext
-from backend.chat.signals import EnvelopeDetector, RequestSignals
-from backend.chat.turn_policy import (
+from backend.agent.chat import runtime
+from backend.agent.chat.child_resolution import no_child, resolve_child
+from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.signals import EnvelopeDetector, RequestSignals
+from backend.agent.chat.turn_policy import (
     ATTENDANCE_TOOL,
     GRADES_TOOL,
     KNOWLEDGE_TOOL,
@@ -296,7 +296,7 @@ class SelectionGeneralisesPastTwoTools(unittest.TestCase):
     def test_the_records_family_is_every_record_tool(self):
         """One name per record now, so the family has to be spelled out somewhere; this
         pins the policy layer's copy against the registry's."""
-        from backend.tools import RECORDS_TOOLS as REGISTERED
+        from backend.agent.tools import RECORDS_TOOLS as REGISTERED
 
         self.assertEqual(set(RECORDS_TOOLS), set(REGISTERED))
 
@@ -591,7 +591,7 @@ class TheToolsActuallyOverlap(unittest.TestCase):
         self.assertEqual(len(results), 2)
 
     def test_the_streamed_path_overlaps_too(self):
-        """`backend/chat/service.py` streams every real turn through `astream`, which
+        """`backend/agent/chat/service.py` streams every real turn through `astream`, which
         composes different `ToolNode` internals from the sync path."""
         meeting = _Meeting()
         ctx = _ctx(PLANNED)
@@ -786,7 +786,7 @@ class TheSeededCallsAreCountedAgainstTheirBudgets(unittest.TestCase):
         script whatever it was offered — so an agent-level assertion here would pass on a
         middleware that had stopped withholding anything at all.
         """
-        from backend.profiles.registry import load_profile, set_profile
+        from backend.agent.profiles.registry import load_profile, set_profile
 
         # One knowledge call is the base profile's whole budget for a turn, so one seeded
         # call is enough to spend it. Named here rather than read from whichever profile

@@ -265,7 +265,7 @@ class RemovedSurfaceTests(unittest.TestCase):
             self.assertNotIn(removed, paths)
 
     def test_the_auth_schemas_are_gone(self):
-        import backend.schemas as schemas
+        import backend.agent.schemas as schemas
 
         for name in ("LoginRequest", "RegisterRequest", "AuthResponse", "CurrentUserResponse"):
             self.assertNotIn(name, schemas.__all__)

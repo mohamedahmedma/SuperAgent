@@ -39,7 +39,7 @@ class TurnFlowMapTests(unittest.TestCase):
 
     def test_rag_notes_name_nodes_one_of_its_shapes_still_has(self):
         """Either shape, because which one is live is a profile switch."""
-        from backend.rag.pipeline import build_rag_graph
+        from backend.agent.rag.pipeline import build_rag_graph
 
         nodes = set()
         for planning in (True, False):
@@ -49,7 +49,7 @@ class TurnFlowMapTests(unittest.TestCase):
 
     def test_the_live_graphs_are_drawn_whole(self):
         """Every node the compiled graphs have appears in the chart — nothing is filtered out."""
-        from backend.rag.pipeline import rag_graph
+        from backend.agent.rag.pipeline import rag_graph
 
         rag = {n.name for n in rag_graph.get_graph().nodes.values()} - {"__start__", "__end__"}
         self.assertEqual(rag, self.compiled["rag"])

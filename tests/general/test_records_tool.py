@@ -9,9 +9,9 @@ import pytest
 import requests
 
 import backend.records_http as records_http
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.request_context import ChatRequestContext
-from backend.tools.records import (
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.tools.records import (
     make_get_student_attendance,
     make_get_student_class,
     make_get_student_grades,
@@ -603,7 +603,7 @@ def test_the_narrowed_outcome_counts_as_a_record_that_came_back(monkeypatch):
     A turn that read tomorrow's lessons and then told the parent nothing was found would
     pass unnoticed — on the commonest question this deployment gets.
     """
-    from backend.chat.answer_checks import RECORDS_RETRIEVED
+    from backend.agent.chat.answer_checks import RECORDS_RETRIEVED
 
     monkeypatch.setattr(
         records_http, "get", _route({"/students": ONE_CHILD, "/timetable": _week()})
@@ -630,7 +630,7 @@ def _the_block(ctx) -> dict:
 
 
 def _passes_the_contract(kind: str, data: dict) -> bool:
-    from backend.schemas.chat import normalize_answer_blocks
+    from backend.agent.schemas.chat import normalize_answer_blocks
 
     return bool(normalize_answer_blocks([{"kind": kind, "index": 0, "data": data}]))
 
@@ -1102,7 +1102,7 @@ def test_each_classroom_tool_reports_its_own_outcome(
 ):
     """So the turn can tell a record WAS retrieved.
 
-    Every one of these names has to appear in `backend.chat.answer_checks.RECORDS_RETRIEVED` too,
+    Every one of these names has to appear in `backend.agent.chat.answer_checks.RECORDS_RETRIEVED` too,
     or the check that catches an answer denying the record it just read cannot fire — which
     is exactly how `timetable` was missed.
     """
@@ -1112,7 +1112,7 @@ def test_each_classroom_tool_reports_its_own_outcome(
 
     assert ctx.tool_outcomes == [(tool_name, outcome)]
 
-    from backend.chat.answer_checks import RECORDS_RETRIEVED
+    from backend.agent.chat.answer_checks import RECORDS_RETRIEVED
 
     assert outcome in RECORDS_RETRIEVED
 

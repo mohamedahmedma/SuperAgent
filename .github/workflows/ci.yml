@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: python -m compileall -q backend schoolauth identity records sis
+      - run: python -m compileall -q src
 
   backend-tests-general:
     name: CI - Backend tests (general)
@@ -133,28 +133,28 @@ jobs:
   frontend-tests:
     name: CI - Frontend tests
     runs-on: ubuntu-latest
-    defaults: {run: {working-directory: frontend}}
+    defaults: {run: {working-directory: src/frontend}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24.19.0"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: src/frontend/package-lock.json
       - run: npm ci
       - run: npm test
 
   frontend-build:
     name: CI - Frontend type-check and build
     runs-on: ubuntu-latest
-    defaults: {run: {working-directory: frontend}}
+    defaults: {run: {working-directory: src/frontend}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24.19.0"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: src/frontend/package-lock.json
       - run: npm ci
       - run: npm run build
       - name: Report dependency vulnerabilities
@@ -164,42 +164,42 @@ jobs:
   sis-frontend-smoke:
     name: CI - SIS frontend smoke tests
     runs-on: ubuntu-latest
-    defaults: {run: {working-directory: sis/frontend}}
+    defaults: {run: {working-directory: src/sis/frontend}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24.19.0"
           cache: npm
-          cache-dependency-path: sis/frontend/package-lock.json
+          cache-dependency-path: src/sis/frontend/package-lock.json
       - run: npm ci
       - run: npm run smoke
 
   sis-frontend-i18n:
     name: CI - SIS frontend translation audit
     runs-on: ubuntu-latest
-    defaults: {run: {working-directory: sis/frontend}}
+    defaults: {run: {working-directory: src/sis/frontend}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24.19.0"
           cache: npm
-          cache-dependency-path: sis/frontend/package-lock.json
+          cache-dependency-path: src/sis/frontend/package-lock.json
       - run: npm ci
       - run: npm run i18n:audit
 
   sis-frontend-build:
     name: CI - SIS frontend build
     runs-on: ubuntu-latest
-    defaults: {run: {working-directory: sis/frontend}}
+    defaults: {run: {working-directory: src/sis/frontend}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24.19.0"
           cache: npm
-          cache-dependency-path: sis/frontend/package-lock.json
+          cache-dependency-path: src/sis/frontend/package-lock.json
       - run: npm ci
       - run: npm run build
 
@@ -242,10 +242,10 @@ jobs:
       matrix:
         include:
           - {name: backend, file: Dockerfile}
-          - {name: frontend, file: frontend/Dockerfile}
-          - {name: identity, file: identity/Dockerfile}
-          - {name: records, file: records/Dockerfile}
-          - {name: sis, file: sis/Dockerfile}
+          - {name: frontend, file: src/frontend/Dockerfile}
+          - {name: identity, file: src/identity/Dockerfile}
+          - {name: records, file: src/records/Dockerfile}
+          - {name: sis, file: src/sis/Dockerfile}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

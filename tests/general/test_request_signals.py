@@ -11,8 +11,8 @@ them:
 import unittest
 from unittest.mock import patch
 
-from backend.chat.language import ARABIC, ENGLISH, arabic_ratio, detect_language
-from backend.chat.signals import (
+from backend.agent.chat.language import ARABIC, ENGLISH, arabic_ratio, detect_language
+from backend.agent.chat.signals import (
     CorpusSimilarityDetector,
     EnvelopeDetector,
     RequestSignals,
@@ -22,9 +22,9 @@ from backend.chat.signals import (
     SocialDetector,
     build_ladder,
 )
-from backend.chat.turn_policy import TurnPlan, localized, resolve_turn
-from backend.profiles.registry import load_profile
-from backend.rag.evidence import Certainty
+from backend.agent.chat.turn_policy import TurnPlan, localized, resolve_turn
+from backend.agent.profiles.registry import load_profile
+from backend.agent.rag.evidence import Certainty
 
 
 def agent_config(**overrides):
@@ -178,8 +178,8 @@ class CorpusSimilarityTests(unittest.TestCase):
     def _detect(self, verdict, question="what is the uniform policy", history=()):
         signals = RequestSignals(question=question)
         with patch("backend.indexing.embedding.embed_query", lambda _t: [0.1, 0.2]), \
-             patch("backend.rag.domain_gate.classify", lambda *a, **k: verdict), \
-             patch("backend.rag.domain_gate.reference_store"):
+             patch("backend.agent.rag.domain_gate.classify", lambda *a, **k: verdict), \
+             patch("backend.agent.rag.domain_gate.reference_store"):
             return CorpusSimilarityDetector().detect(ctx(question, history), signals)
 
     def test_a_match_admits_at_medium_certainty(self):
@@ -214,8 +214,8 @@ class CorpusSimilarityTests(unittest.TestCase):
         signals = RequestSignals(question="what about grade 6")
         history = [user_message("what are the fees for grade 5")]
         with patch("backend.indexing.embedding.embed_query", fake_embed), \
-             patch("backend.rag.domain_gate.classify", lambda *a, **k: Verdict(True)), \
-             patch("backend.rag.domain_gate.reference_store"):
+             patch("backend.agent.rag.domain_gate.classify", lambda *a, **k: Verdict(True)), \
+             patch("backend.agent.rag.domain_gate.reference_store"):
             CorpusSimilarityDetector().detect(ctx("what about grade 6", history), signals)
 
         self.assertIn("grade 5", captured["text"])
@@ -229,8 +229,8 @@ class CorpusSimilarityTests(unittest.TestCase):
             return [0.1, 0.2]
 
         with patch("backend.indexing.embedding.embed_query", fake_embed), \
-             patch("backend.rag.domain_gate.classify", lambda *a, **k: Verdict(True)), \
-             patch("backend.rag.domain_gate.reference_store"):
+             patch("backend.agent.rag.domain_gate.classify", lambda *a, **k: Verdict(True)), \
+             patch("backend.agent.rag.domain_gate.reference_store"):
             CorpusSimilarityDetector().detect(ctx("what are the fees"), RequestSignals())
 
         self.assertEqual("what are the fees", captured["text"].strip())
@@ -392,7 +392,7 @@ class TurnPolicyTests(unittest.TestCase):
 
     def test_missing_copy_falls_through_to_the_agent(self):
         """Refusing with an empty string is worse than answering."""
-        from backend.profiles.schema import LocalizedText
+        from backend.agent.profiles.schema import LocalizedText
 
         signals = RequestSignals(question="q", scope=Scope.OUT_OF_DOMAIN,
                                  scope_certainty=Certainty.HIGH)
@@ -425,20 +425,20 @@ class TurnPolicyTests(unittest.TestCase):
 
 class LocalizedTextTests(unittest.TestCase):
     def test_it_picks_the_requested_language(self):
-        from backend.profiles.schema import LocalizedText
+        from backend.agent.profiles.schema import LocalizedText
 
         text = LocalizedText(en="hello", ar="مرحبا")
         self.assertEqual("hello", localized(text, ENGLISH))
         self.assertEqual("مرحبا", localized(text, ARABIC))
 
     def test_a_missing_translation_falls_back_rather_than_blanking(self):
-        from backend.profiles.schema import LocalizedText
+        from backend.agent.profiles.schema import LocalizedText
 
         self.assertEqual("hello", localized(LocalizedText(en="hello"), ARABIC))
         self.assertEqual("مرحبا", localized(LocalizedText(ar="مرحبا"), ENGLISH))
 
     def test_empty_and_none_are_handled(self):
-        from backend.profiles.schema import LocalizedText
+        from backend.agent.profiles.schema import LocalizedText
 
         self.assertEqual("", localized(LocalizedText(), ENGLISH))
         self.assertEqual("", localized(None, ENGLISH))

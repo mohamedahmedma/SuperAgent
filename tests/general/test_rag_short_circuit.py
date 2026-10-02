@@ -13,15 +13,15 @@ from langchain.chat_models import init_chat_model  # noqa: F401
 from langgraph.graph import StateGraph  # noqa: F401
 from langgraph.types import Send  # noqa: F401
 
-# Same reason, one level closer to home: `load_pipeline` replaces `backend.rag` with a
-# package whose `__path__` is empty, so pipeline.py's own `from backend.rag.evidence
+# Same reason, one level closer to home: `load_pipeline` replaces `backend.agent.rag` with a
+# package whose `__path__` is empty, so pipeline.py's own `from backend.agent.rag.evidence
 # import ...` can only resolve if that module is ALREADY in sys.modules. Importing it
 # here is what puts it there. Without these two lines the file passes in a full run —
 # some earlier test file happened to import them — and fails 17 of 18 when run alone.
-import backend.rag.evidence  # noqa: F401
-import backend.rag.policy  # noqa: F401
-from backend.chat.request_context import ChatRequestContext
-from backend.schemas.chat import HitlResumeState  # noqa: F401
+import backend.agent.rag.evidence  # noqa: F401
+import backend.agent.rag.policy  # noqa: F401
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.schemas.chat import HitlResumeState  # noqa: F401
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -62,10 +62,10 @@ def load_pipeline(
     retrieve_documents,
     rewrite_query_once=None,
 ):
-    fake_rag = types.ModuleType("backend.rag")
+    fake_rag = types.ModuleType("backend.agent.rag")
     fake_rag.__path__ = []
 
-    fake_utils = types.ModuleType("backend.rag.utils")
+    fake_utils = types.ModuleType("backend.agent.rag.utils")
     fake_utils.RETRIEVAL_TOP_K = 5
     # Wide enough that the evidence budget binds on the CHUNK COUNT here and never on
     # the size: these fixtures use one-line documents, and a size bound firing on them
@@ -84,11 +84,11 @@ def load_pipeline(
     module_name = f"rag_pipeline_under_test_{id(retrieve_documents)}"
     spec = importlib.util.spec_from_file_location(
         module_name,
-        REPO_ROOT / "backend" / "rag" / "pipeline.py",
+        REPO_ROOT / "src" / "backend" / "agent" / "rag" / "pipeline.py",
     )
     module = importlib.util.module_from_spec(spec)
 
-    with patch.dict(sys.modules, {"backend.rag": fake_rag, "backend.rag.utils": fake_utils}):
+    with patch.dict(sys.modules, {"backend.agent.rag": fake_rag, "backend.agent.rag.utils": fake_utils}):
         spec.loader.exec_module(module)
 
     return module
@@ -554,9 +554,9 @@ class RagShortCircuitTests(unittest.TestCase):
     def test_partial_status_tells_the_model_to_answer_from_what_there_is(self):
         """The tool decides the outcome, the template renders it. Without this the model
         sees chunks it was told nothing about and refuses on its own."""
-        from backend.tools.knowledge import make_search_knowledge_base
+        from backend.agent.tools.knowledge import make_search_knowledge_base
 
-        fake_pipeline = types.ModuleType("backend.rag.pipeline")
+        fake_pipeline = types.ModuleType("backend.agent.rag.pipeline")
         fake_pipeline.run_rag_graph = lambda query, ctx: {
             "docs": [_doc("Our partners include Cairo University.", "chunk-partners")],
             "rag_trace": {"retrieval_status": "partial", "route": "answer"},
@@ -565,7 +565,7 @@ class RagShortCircuitTests(unittest.TestCase):
         ctx = self._ctx()
         try:
             tool = make_search_knowledge_base(ctx)
-            with patch.dict(sys.modules, {"backend.rag.pipeline": fake_pipeline}):
+            with patch.dict(sys.modules, {"backend.agent.rag.pipeline": fake_pipeline}):
                 message = tool.invoke({"query": "what is partner"})
         finally:
             ctx.close()

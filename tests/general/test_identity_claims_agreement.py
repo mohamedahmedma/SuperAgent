@@ -119,9 +119,9 @@ class NoLiteralsRemainTests(unittest.TestCase):
         from pathlib import Path
 
         for module_path in (
-            "backend/infra/identity.py",
-            "records/config.py",
-            "identity/config.py",
+            "src/backend/infra/identity.py",
+            "src/records/config.py",
+            "src/identity/config.py",
         ):
             source = Path(module_path).read_text(encoding="utf-8")
             for literal in ('"school-identity"', '"school-services"'):

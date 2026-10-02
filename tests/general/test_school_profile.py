@@ -13,15 +13,15 @@ turn and offers the model a capability it will occasionally try to use.
 import os
 import unittest
 
-import backend.profiles.registry as registry
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.request_context import ChatRequestContext
-from backend.profiles.registry import (
+import backend.agent.profiles.registry as registry
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.profiles.registry import (
     available_profiles,
     load_profile,
     set_profile,
 )
-from backend.tools import TOOL_BUILDERS, build_tools
+from backend.agent.tools import TOOL_BUILDERS, build_tools
 
 RECORDS_TOOL = "get_student_grades"
 
@@ -84,7 +84,7 @@ class SchoolProfileTests(ProfileTestCase):
         """Regression, from a production transcript. «Thanks for your help» was not on
         the list, so it was planned as a question, given a required tool it had no
         reason to call, and answered with the provider's protocol error."""
-        from backend.chat.signals import _social_key
+        from backend.agent.chat.signals import _social_key
 
         phrases = {_social_key(p) for p in load_profile("school").agent.social_phrases}
         for observed in ("Thanks for your help", "شكرا على مساعدتك", "متشكر جدا"):
@@ -257,7 +257,7 @@ class DeterministicToolSelectionTests(ProfileTestCase):
     def test_every_placeholder_it_uses_is_one_the_planner_can_resolve(self):
         """An unknown `$name` silently drops its argument, so a typo here would degrade a
         planned records call to a blank one and nothing would say so at startup."""
-        from backend.chat.turn_policy import PLAN_PLACEHOLDERS
+        from backend.agent.chat.turn_policy import PLAN_PLACEHOLDERS
 
         agent = load_profile("school").agent
         for tool_name, args in agent.planned_tool_arguments.items():

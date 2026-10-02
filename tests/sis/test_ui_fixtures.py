@@ -28,7 +28,7 @@ import pytest
 
 from sis.app import app
 
-FIXTURES = Path(__file__).resolve().parents[2] / "sis" / "frontend" / "tests" / "fixtures.json"
+FIXTURES = Path(__file__).resolve().parents[2] / "src" / "sis" / "frontend" / "tests" / "fixtures.json"
 
 #: Answered by the app itself and outside the versioned contract, so there is no model to
 #: compare it against.

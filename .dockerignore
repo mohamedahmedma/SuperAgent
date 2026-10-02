@@ -6,9 +6,9 @@
 **/.pytest_cache
 **/.mypy_cache
 **/.ruff_cache
-frontend/node_modules
-frontend/dist
-sis/frontend/node_modules
+src/frontend/node_modules
+src/frontend/dist
+src/sis/src/frontend/node_modules
 volumes
 data
 .env

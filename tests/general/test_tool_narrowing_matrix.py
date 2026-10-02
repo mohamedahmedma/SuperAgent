@@ -34,19 +34,19 @@ one can be seen.
 """
 import unittest
 
-from backend.chat import orchestrator
-from backend.chat.child_resolution import ResolvedChild, no_child
-from backend.chat.child_roster import ChildOption
-from backend.chat.signals import RequestSignals, Scope
-from backend.chat.turn_policy import (
+from backend.agent.chat import orchestrator
+from backend.agent.chat.child_resolution import ResolvedChild, no_child
+from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.signals import RequestSignals, Scope
+from backend.agent.chat.turn_policy import (
     KNOWLEDGE_TOOL,
     GRADES_TOOL as RECORDS_TOOL,
     TurnPlan,
     _tools_for,
     resolve_turn,
 )
-from backend.rag.evidence import Certainty
-from backend.tools import build_tools
+from backend.agent.rag.evidence import Certainty
+from backend.agent.tools import build_tools
 
 #: A tool name neither family claims. It exists in this file only to prove narrowing
 #: never drags in a tool the question did not ask for; narrowing reads names, so it does
@@ -76,7 +76,7 @@ class _Copy:
 class _FakeCtx:
     """Enough of a `ChatRequestContext` for a tool BUILDER to close over.
 
-    The builders registered in `backend/tools/__init__.py` only capture the context;
+    The builders registered in `backend/agent/tools/__init__.py` only capture the context;
     nothing is called until a tool runs, and no tool runs here.
     """
 

@@ -3,7 +3,7 @@
 
 Two halves, and the second is the one that will actually break.
 
-The first is the decision itself — `backend/chat/child_names.py` — which is pure and can
+The first is the decision itself — `backend/agent/chat/child_names.py` — which is pure and can
 be asserted case by case. Most of it is about ONE hazard: `name_key` folds ى onto ي, so
 the preposition على and the given name علي are the same string by the time anything
 compares them, and this deployment's roster really does carry a child called علي. Cutting
@@ -19,14 +19,14 @@ answer stops saying which child it is about.
 """
 import unittest
 
-from backend.chat.child_names import name_surfaces, strip_child_names
-from backend.chat.child_resolution import ResolvedChild, no_child, resolve_child
-from backend.chat.child_roster import ChildOption
-from backend.chat.request_context import ChatRequestContext
-from backend.chat.context_messages import _turn_context_message
-from backend.chat.signals import RequestSignals
-from backend.chat.turn_policy import resolve_turn
-from backend.rag.graph_nodes import search_query
+from backend.agent.chat.child_names import name_surfaces, strip_child_names
+from backend.agent.chat.child_resolution import ResolvedChild, no_child, resolve_child
+from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.context_messages import _turn_context_message
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.turn_policy import resolve_turn
+from backend.agent.rag.graph_nodes import search_query
 
 #: The homograph, as this deployment actually carries it.
 ALI = ChildOption(student_id="S-1", label="علي حسن", gender="male", year_level="Year 4")
@@ -254,7 +254,7 @@ class TheGraphSearchesWithoutItAndAnswersWithIt(unittest.TestCase):
     def test_a_context_that_never_heard_of_the_hint_still_gets_the_others(self):
         """`orchestrator._hand_to_graph` drops unknown hints newest-first. A context
         written before this feature must still receive the sections and the language."""
-        from backend.chat.orchestrator import _hand_to_graph
+        from backend.agent.chat.orchestrator import _hand_to_graph
 
         class _OldContext:
             def __init__(self):

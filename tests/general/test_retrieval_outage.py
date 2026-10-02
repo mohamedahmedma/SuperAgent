@@ -5,7 +5,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from backend.chat.request_context import ChatRequestContext
+from backend.agent.chat.request_context import ChatRequestContext
 from tests.general.test_rag_short_circuit import (
     FakeStructuredModel,
     enable_complexity_planning,
@@ -148,7 +148,7 @@ class RetrievalOutageTests(unittest.TestCase):
         Unreachable through the graph — routing denies before rewriting when the first
         pass is empty — so the node is called directly.
         """
-        from backend.rag.graph_nodes import RetrieveRewritten
+        from backend.agent.rag.graph_nodes import RetrieveRewritten
 
         class _Deps:
             top_k = 5
@@ -263,7 +263,7 @@ class RetrievalOutageTests(unittest.TestCase):
         self.assertNotIn("hitl_resume_state", result)
 
     def test_trace_normalization_preserves_outage_fields(self):
-        from backend.schemas.chat import normalize_rag_trace
+        from backend.agent.schemas.chat import normalize_rag_trace
 
         trace = {
             "tool_used": True,
@@ -280,9 +280,9 @@ class RetrievalOutageTests(unittest.TestCase):
         self.assertEqual("retrieve_failed", normalized.get("retrieval_error"))
 
     def test_knowledge_tool_returns_static_retrieval_error_message(self):
-        from backend.tools.knowledge import make_search_knowledge_base
+        from backend.agent.tools.knowledge import make_search_knowledge_base
 
-        fake_pipeline = types.ModuleType("backend.rag.pipeline")
+        fake_pipeline = types.ModuleType("backend.agent.rag.pipeline")
         fake_pipeline.run_rag_graph = lambda query, ctx: {
             "docs": [],
             "rag_trace": {
@@ -294,7 +294,7 @@ class RetrievalOutageTests(unittest.TestCase):
         ctx = self._ctx()
         try:
             tool = make_search_knowledge_base(ctx)
-            with patch.dict(sys.modules, {"backend.rag.pipeline": fake_pipeline}):
+            with patch.dict(sys.modules, {"backend.agent.rag.pipeline": fake_pipeline}):
                 message = tool.invoke({"query": "anything"})
         finally:
             ctx.close()

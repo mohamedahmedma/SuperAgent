@@ -11,16 +11,16 @@ invisible to every other test in the suite.
 """
 import unittest
 
-from backend.chat.signals import (
+from backend.agent.chat.signals import (
     CHILD_REFERENCES,
     EnvelopeDetector,
     RequestSignals,
     Scope,
     SignalContext,
 )
-from backend.prompts import render
-from backend.profiles import load_profile
-from backend.rag.evidence import Certainty
+from backend.agent.prompts import render
+from backend.agent.profiles import load_profile
+from backend.agent.rag.evidence import Certainty
 
 
 def _config(**overrides):

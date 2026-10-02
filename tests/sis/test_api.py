@@ -36,7 +36,7 @@ from sis.infrastructure.db.session import reset_engine
 from sis.infrastructure.db import models as m
 from sis.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
-_ALEMBIC_INI = Path(__file__).resolve().parents[2] / "sis" / "alembic.ini"
+_ALEMBIC_INI = Path(__file__).resolve().parents[2] / "src" / "sis" / "alembic.ini"
 
 # Long enough that its 12-character prefix is a handle rather than most of the secret.
 BOOTSTRAP_KEY = "bootstrap-registrar-key-0123456789abcdef"

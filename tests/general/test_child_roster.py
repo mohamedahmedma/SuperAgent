@@ -7,9 +7,9 @@ than the extra HTTP call the cache exists to save.
 """
 import pytest
 
-import backend.chat.child_roster as child_roster
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.child_roster import (
+import backend.agent.chat.child_roster as child_roster
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.child_roster import (
     NONE,
     NOT_AUTHORIZED,
     OK,
@@ -17,7 +17,7 @@ from backend.chat.child_roster import (
     ChildOption,
     load_roster,
 )
-from backend.chat.request_context import ChatRequestContext
+from backend.agent.chat.request_context import ChatRequestContext
 from backend.composition import Services, set_default_services
 
 ROWS = [

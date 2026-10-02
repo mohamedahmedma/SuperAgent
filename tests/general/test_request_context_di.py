@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.chat.request_context import ChatRequestContext
-from backend.tools.knowledge import make_search_knowledge_base
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.tools.knowledge import make_search_knowledge_base
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -61,7 +61,7 @@ class ChatRequestContextTests(unittest.IsolatedAsyncioTestCase):
 
 class KnowledgeToolFactoryTests(unittest.TestCase):
     def test_knowledge_tool_counter_is_per_context(self):
-        from backend.profiles import get_profile
+        from backend.agent.profiles import get_profile
 
         budget = get_profile().agent.max_knowledge_calls_per_turn
         spent = [True] * budget + [False]
@@ -76,9 +76,9 @@ class KnowledgeToolFactoryTests(unittest.TestCase):
             ctx_b.close()
 
     def test_tool_closure_records_trace_to_own_context(self):
-        fake_rag = types.ModuleType("backend.rag")
+        fake_rag = types.ModuleType("backend.agent.rag")
         fake_rag.__path__ = []
-        fake_pipeline = types.ModuleType("backend.rag.pipeline")
+        fake_pipeline = types.ModuleType("backend.agent.rag.pipeline")
 
         def run_rag_graph(query, ctx):
             return {
@@ -104,8 +104,8 @@ class KnowledgeToolFactoryTests(unittest.TestCase):
             with patch.dict(
                 sys.modules,
                 {
-                    "backend.rag": fake_rag,
-                    "backend.rag.pipeline": fake_pipeline,
+                    "backend.agent.rag": fake_rag,
+                    "backend.agent.rag.pipeline": fake_pipeline,
                 },
             ):
                 output_a = tool_a.invoke({"query": "A"})
@@ -129,7 +129,7 @@ class RouteImportTests(unittest.TestCase):
         process cannot differ. Declaring the dependency instead is what makes both
         possible, so this asserts the shape rather than the object.
         """
-        path = REPO_ROOT / "backend" / "api" / "routes" / "sessions.py"
+        path = REPO_ROOT / "src" / "backend" / "api" / "routes" / "sessions.py"
         spec = importlib.util.spec_from_file_location("sessions_route_under_test", path)
         sessions = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(sessions)
@@ -147,7 +147,7 @@ class RouteImportTests(unittest.TestCase):
 
 class ImportShapeTests(unittest.TestCase):
     def test_backend_imports_do_not_pull_child_modules_from_packages(self):
-        backend_root = REPO_ROOT / "backend"
+        backend_root = REPO_ROOT / "src" / "backend"
         files = list(backend_root.rglob("*.py")) + list((REPO_ROOT / "tests").glob("test_*.py"))
         offenders = []
 
@@ -159,7 +159,7 @@ class ImportShapeTests(unittest.TestCase):
                 if not node.module.startswith("backend.") and node.module != "backend":
                     continue
 
-                package_path = REPO_ROOT / Path(*node.module.split("."))
+                package_path = REPO_ROOT / "src" / Path(*node.module.split("."))
                 for alias in node.names:
                     if alias.name == "*":
                         continue

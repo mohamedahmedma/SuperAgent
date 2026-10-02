@@ -1,6 +1,6 @@
 """One answer to "where is the records facade", shared by the two callers that need it.
 
-`backend/tools/records.py` fetches a child's marks; `backend/chat/child_roster.py` fetches
+`backend/agent/tools/records.py` fetches a child's marks; `backend/agent/chat/child_roster.py` fetches
 the list of children to ask about. Same service, same credentials — and until this was
 consolidated, each called `os.getenv` with its own copy of the default, with a comment
 explaining that importing one from the other would be a cycle. The explanation was right
@@ -75,8 +75,8 @@ class BothCallersAgreeTests(unittest.TestCase):
     """
 
     def _reload_both(self):
-        import backend.chat.child_roster as roster
-        import backend.tools.records as tool
+        import backend.agent.chat.child_roster as roster
+        import backend.agent.tools.records as tool
 
         return importlib.reload(tool), importlib.reload(roster)
 
@@ -105,8 +105,8 @@ class BothCallersAgreeTests(unittest.TestCase):
         from pathlib import Path
 
         for module_path in (
-            "backend/tools/records.py",
-            "backend/chat/child_roster.py",
+            "src/backend/agent/tools/records.py",
+            "src/backend/agent/chat/child_roster.py",
         ):
             source = Path(module_path).read_text(encoding="utf-8")
             self.assertNotIn(

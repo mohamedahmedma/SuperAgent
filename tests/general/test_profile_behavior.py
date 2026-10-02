@@ -21,8 +21,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-import backend.profiles.registry as registry
-from backend.profiles.registry import load_profile, set_profile
+import backend.agent.profiles.registry as registry
+from backend.agent.profiles.registry import load_profile, set_profile
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -75,18 +75,18 @@ def reexec_module(relative_path: str, fake_modules: dict | None = None):
 
 
 def _fake_rag_utils():
-    """Stand-in for backend.rag.utils so pipeline.py can be re-executed without
+    """Stand-in for backend.agent.rag.utils so pipeline.py can be re-executed without
     pulling in embeddings, Milvus, or the rerank client."""
-    fake_rag = types.ModuleType("backend.rag")
+    fake_rag = types.ModuleType("backend.agent.rag")
     fake_rag.__path__ = []
-    fake_utils = types.ModuleType("backend.rag.utils")
+    fake_utils = types.ModuleType("backend.agent.rag.utils")
     fake_utils.RETRIEVAL_TOP_K = 5
     fake_utils.EVIDENCE_WINDOW_CHARS = 2600
     fake_utils.retrieve_documents = lambda *a, **k: {"docs": [], "meta": {}}
     fake_utils.rewrite_query_once = lambda query: {}
     fake_utils.dedupe_documents = lambda docs: docs
     fake_utils.retrieval_trace_fields = lambda meta: dict(meta)
-    return {"backend.rag": fake_rag, "backend.rag.utils": fake_utils}
+    return {"backend.agent.rag": fake_rag, "backend.agent.rag.utils": fake_utils}
 
 
 def _fake_indexing():
@@ -156,7 +156,7 @@ class UploadPolicyTests(ProfileTestCase):
             self.assertFalse(is_supported_document("anything.pdf"))
 
     def test_rejection_message_comes_from_profile_copy(self):
-        from backend.profiles import get_profile
+        from backend.agent.profiles import get_profile
 
         body = 'name: shouty\nuser_copy:\n  unsupported_file_type: "Nope, PDFs only."\n'
         with temp_profile(body):
@@ -165,7 +165,7 @@ class UploadPolicyTests(ProfileTestCase):
 
 class AgentBudgetTests(ProfileTestCase):
     def test_knowledge_tool_budget_follows_the_profile(self):
-        from backend.chat.request_context import ChatRequestContext
+        from backend.agent.chat.request_context import ChatRequestContext
 
         with temp_profile("name: chatty\nagent:\n  max_knowledge_calls_per_turn: 3\n"):
             ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
@@ -175,7 +175,7 @@ class AgentBudgetTests(ProfileTestCase):
             )
 
     def test_default_budget_is_a_single_call(self):
-        from backend.chat.request_context import ChatRequestContext
+        from backend.agent.chat.request_context import ChatRequestContext
 
         with active_profile("base"):
             ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
@@ -183,7 +183,7 @@ class AgentBudgetTests(ProfileTestCase):
             self.assertFalse(ctx.acquire_knowledge_tool_slot())
 
     def test_budget_reset_respects_the_profile_limit(self):
-        from backend.chat.request_context import ChatRequestContext
+        from backend.agent.chat.request_context import ChatRequestContext
 
         with temp_profile("name: two\nagent:\n  max_knowledge_calls_per_turn: 2\n"):
             ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
@@ -194,7 +194,7 @@ class AgentBudgetTests(ProfileTestCase):
             self.assertTrue(ctx.acquire_knowledge_tool_slot())
 
     def test_zero_budget_blocks_the_knowledge_tool_entirely(self):
-        from backend.chat.request_context import ChatRequestContext
+        from backend.agent.chat.request_context import ChatRequestContext
 
         with temp_profile("name: none\nagent:\n  max_knowledge_calls_per_turn: 0\n"):
             ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
@@ -203,8 +203,8 @@ class AgentBudgetTests(ProfileTestCase):
 
 class AgentAssemblyTests(ProfileTestCase):
     def _built_kwargs(self, profile_ctx):
-        import backend.chat.runtime as runtime
-        from backend.chat.request_context import ChatRequestContext
+        import backend.agent.chat.runtime as runtime
+        from backend.agent.chat.request_context import ChatRequestContext
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         with profile_ctx:
@@ -228,9 +228,9 @@ class AgentAssemblyTests(ProfileTestCase):
         )
 
     def test_unregistered_tool_in_a_profile_fails_agent_construction(self):
-        import backend.chat.runtime as runtime
-        from backend.chat.request_context import ChatRequestContext
-        from backend.tools import UnknownToolError
+        import backend.agent.chat.runtime as runtime
+        from backend.agent.chat.request_context import ChatRequestContext
+        from backend.agent.tools import UnknownToolError
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="s")
         with temp_profile('name: future\nagent:\n  tools: ["a_tool_nobody_has_written_yet"]\n'):
@@ -257,8 +257,8 @@ class AgentAssemblyTests(ProfileTestCase):
         found unknown target 'tools'`, raised during construction. `assertNotIn` merely
         records what the graph is; with no tools there is no such node either way.
         """
-        import backend.chat.runtime as runtime
-        from backend.chat.request_context import ChatRequestContext
+        import backend.agent.chat.runtime as runtime
+        from backend.agent.chat.request_context import ChatRequestContext
 
         ctx = ChatRequestContext.for_sync(user_id="u", session_id="social")
         with temp_profile("name: bare\nagent:\n  tools: []\n"):
@@ -300,7 +300,7 @@ class CacheNamespaceTests(ProfileTestCase):
 class PipelineBehaviourTests(ProfileTestCase):
     @staticmethod
     def _pipeline():
-        return reexec_module("backend/rag/pipeline.py", _fake_rag_utils())
+        return reexec_module("src/backend/agent/rag/pipeline.py", _fake_rag_utils())
 
     def test_fast_path_vocabulary_comes_from_the_active_profile(self):
         shop = load_profile("base").model_copy(deep=True)
@@ -355,7 +355,7 @@ class PipelineBehaviourTests(ProfileTestCase):
     def _rewrite_report():
         """A HIGH-certainty report asking to rewrite — what the grader produces when the
         evidence is only partially on topic."""
-        from backend.rag.evidence import Certainty, ChunkAssessment, EvidenceReport
+        from backend.agent.rag.evidence import Certainty, ChunkAssessment, EvidenceReport
 
         return EvidenceReport(
             chunks=[ChunkAssessment(index=1)],
@@ -370,7 +370,7 @@ class PipelineBehaviourTests(ProfileTestCase):
         """As above, but with something specific to ask the user for. Without a named
         slot the policy answers from partial evidence rather than asking — see
         HumanInTheLoopTests."""
-        from backend.rag.evidence import Certainty, ChunkAssessment, EvidenceReport
+        from backend.agent.rag.evidence import Certainty, ChunkAssessment, EvidenceReport
 
         return EvidenceReport(
             chunks=[ChunkAssessment(index=1)],
@@ -383,7 +383,7 @@ class PipelineBehaviourTests(ProfileTestCase):
         )
 
     def test_rewrite_budget_is_profile_driven(self):
-        from backend.rag.policy import decide_route
+        from backend.agent.rag.policy import decide_route
 
         with temp_profile("name: patient\nrag:\n  max_rewrites: 3\n"):
             pipeline = self._pipeline()
@@ -398,7 +398,7 @@ class PipelineBehaviourTests(ProfileTestCase):
         self.assertEqual("answer", decide_route(report, rewrite_count=3, **kwargs)[0])
 
     def test_zero_rewrite_budget_never_rewrites(self):
-        from backend.rag.policy import decide_route
+        from backend.agent.rag.policy import decide_route
 
         with temp_profile("name: strict\nrag:\n  max_rewrites: 0\n"):
             pipeline = self._pipeline()
@@ -464,7 +464,7 @@ class PipelineBehaviourTests(ProfileTestCase):
 class ChunkingBehaviourTests(ProfileTestCase):
     @staticmethod
     def _loader_module():
-        return reexec_module("backend/indexing/document_loader.py")
+        return reexec_module("src/backend/indexing/document_loader.py")
 
     def test_chunk_sizes_come_from_the_profile(self):
         body = "name: chunky\nchunking:\n  chunk_size: 400\n  chunk_overlap: 40\n"
@@ -505,7 +505,7 @@ class ChunkingBehaviourTests(ProfileTestCase):
         self.assertEqual("sentence", loader._strategy)
 
     def test_invalid_profile_strategy_is_rejected_at_load(self):
-        from backend.profiles.registry import ProfileError
+        from backend.agent.profiles.registry import ProfileError
 
         with self.assertRaises(ProfileError):
             with temp_profile("name: bogus\nchunking:\n  strategy: quantum\n"):
@@ -558,7 +558,7 @@ class WriterBehaviourTests(ProfileTestCase):
 class RetrievalBehaviourTests(ProfileTestCase):
     @staticmethod
     def _utils_module():
-        return reexec_module("backend/rag/utils.py", _fake_indexing())
+        return reexec_module("src/backend/agent/rag/utils.py", _fake_indexing())
 
     def test_retrieval_tuning_comes_from_the_profile(self):
         body = (

@@ -29,11 +29,11 @@ import unittest
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from backend.chat.orchestrator import plan_turn
-from backend.chat.request_context import ChatRequestContext
-from backend.chat.resolution import CORRECTION, FOLLOWUP, NEW_TOPIC, STANDALONE
-from backend.profiles.registry import load_profile, set_profile
-from backend.prompts import render
+from backend.agent.chat.orchestrator import plan_turn
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.resolution import CORRECTION, FOLLOWUP, NEW_TOPIC, STANDALONE
+from backend.agent.profiles.registry import load_profile, set_profile
+from backend.agent.prompts import render
 from tests.general.test_rag_short_circuit import FakeStructuredModel, load_pipeline, _meta
 
 
@@ -566,7 +566,7 @@ class TwentyTurnConversationTests(unittest.TestCase):
     def test_every_answered_turn_records_why_it_routed_that_way(self):
         """`route_reason` was written and then dropped by normalize_rag_trace, which is
         why the reported bug took a code read rather than a trace read to find."""
-        from backend.schemas.chat import RagTraceFields
+        from backend.agent.schemas.chat import RagTraceFields
 
         self.assertIn("route_reason", RagTraceFields.model_fields)
         self.assertIn("evidence_constraints_discriminate", RagTraceFields.model_fields)

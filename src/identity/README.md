@@ -1,0 +1,295 @@
+---
+noteId: "3e5c416095c711f1a6d4fb6c6accc4db"
+tags: []
+
+---
+
+# Identity Service
+
+The one place in the system that decides **who someone is**. Every other service
+verifies a signed token and reads the answer; none of them resolve identity, and none
+of them can mint a token.
+
+Runs on its own port, against its own database, with six dependencies. Nothing here
+imports `backend/`, `records/`, or `frontend/`, and nothing imports this.
+
+## Why it is separate
+
+Before it existed, the guardian id reached the records facade as a path parameter that
+the chat backend filled in. That made the chat process — the one running a language
+model, parsing untrusted input, and calling out to third parties — the thing standing
+between a parent and every family's records.
+
+Now the chat backend relays a token it cannot forge and cannot alter. It has no idea
+how identity is established and no ability to change the answer.
+
+## RS256, not a shared secret
+
+With HS256 every service that *verifies* a token also holds the key that *mints* one.
+A leaked config file on the chat backend would forge parent identities.
+
+With an asymmetric pair only this service signs. Everyone else fetches
+`/.well-known/jwks.json`, holds a public key, and can do nothing with it but check a
+signature. That is what makes "authentication is handled at the authentication layer"
+a structural fact rather than a convention someone has to remember.
+
+Verification elsewhere is **offline** — no service calls this one per request. Identity
+being down does not take records down, and it is not in the latency path of a parent's
+question.
+
+## How it is laid out
+
+Clean/onion layering, the same shape `sis/` uses, so an engineer moving between the two
+services meets one convention rather than two.
+
+```
+domain/          the rules, with no I/O at all
+  errors.py        every refusal, as one hierarchy
+  accounts.py      roles, the lockout policy, the guardian-binding invariant
+  challenges.py    the nonce alphabet, the code, the state machine
+  phone.py         E.164, and the one conversion this service may make
+  schools.py       the registry and its three lookups
+  claims.py        what a token says, and what it must not
+  guardians.py     a parent and a child, as values
+
+application/     the use cases, over ports they declare themselves
+  ports/           Protocols — repositories, the directory, the gateway, the hasher
+  dto.py           what a use case returns
+  services/        sessions · whatsapp_login · parent_sessions · administration
+
+infrastructure/  everything that touches the outside world
+  db/              engine, tables, schema, and the repositories behind the ports
+  crypto/          password hashing, the signing key, JWT minting
+  whatsapp/        the Cloud API gateway, inbound parsing, per-school channels
+  directory/       the SIS client, and the in-memory fake it falls back to
+
+api/             routers, wire schemas, the error mapping, the wiring
+config.py        every environment variable, read lazily, in one place
+app.py           the composition root
+```
+
+**Dependencies point inward.** `application/` imports `domain/`; `infrastructure/` and
+`api/` import `application/`; nothing in `domain/` or `application/` imports either of
+those, or `config.py`, or FastAPI, or SQLAlchemy.
+
+That last clause is what the layering buys, and it is worth stating concretely: "does eight
+bad passwords lock the account" is a function of a count and a threshold, so it is tested by
+calling `LockoutPolicy.next_failure` three times — not by making eight HTTP requests against
+a database. The rules are checked rather than described: see
+[`tests/identity/test_layering.py`](../tests/identity/test_layering.py), which reads the
+imports out of the source and fails the build when one points the wrong way.
+
+**`api/deps.py` is the only place that composes.** A router declares the service it needs
+and receives one already bound to this request's transaction; it never builds a repository,
+never reads configuration, and never learns which gateway it is sending through. That is
+what lets a test replace any of it through `app.dependency_overrides`.
+
+## Running it
+
+```bash
+pip install -r identity/requirements.txt
+IDENTITY_BOOTSTRAP_ADMIN_USER=registrar IDENTITY_BOOTSTRAP_ADMIN_PASSWORD=$(python -c "import secrets;print(secrets.token_urlsafe(24))")   uvicorn identity.app:app --app-dir src --port 8200
+pytest tests/identity -q
+```
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `IDENTITY_DATABASE_URL` | `sqlite:///./identity.db` | Point at Postgres for real data. |
+| `IDENTITY_PRIVATE_KEY_PEM` | — | **Required in production.** Without it a dev key is generated and a warning logged. |
+| `IDENTITY_BOOTSTRAP_ADMIN_USER` / `_PASSWORD` | — | The administrator seeded on **every** startup, so one exists however the database arrived. Never overwrites an existing username, so a password changed through the API survives the next deploy. Set both or neither. |
+| `IDENTITY_ISSUER` / `IDENTITY_AUDIENCE` | `school-identity` / `school-services` | Must match the verifier's settings. |
+| `IDENTITY_ACCESS_TTL_MINUTES` | `30` | Bounds the revocation window. |
+| `IDENTITY_REFRESH_TTL_DAYS` | `365` | The session's **inactivity** window. Every refresh issues a new refresh token that lives this long again, so a parent who keeps using the app stays signed in until they sign out. |
+| `IDENTITY_REFRESH_REUSE_GRACE_SECONDS` | `60` | How long a spent refresh token may be presented again (a retried request, a second tab) before that counts as a replay and revokes the whole session. |
+| `IDENTITY_MAX_FAILED_ATTEMPTS` | `8` | Then locked for `IDENTITY_LOCKOUT_MINUTES`. |
+| `IDENTITY_SIS_TIMEOUT_SECONDS` | `5.0` | The guardian lookup a parent's sign-in waits on. |
+| `IDENTITY_SIS_CHILDREN_TIMEOUT_SECONDS` | `1.5` | The children claim, which no sign-in waits on. See below. |
+
+Every one of these is read **lazily, once, in [`config.py`](config.py)** and cached —
+never at import. Junk falls back to the documented default and says so in the log, because
+a typo'd `IDENTITY_ACCESS_TTL_MINUTES=thirty` should not take a school's sign-in down at
+7am.
+
+**The two SIS timeouts are separate on purpose.** `resolve` *is* the sign-in — the parent
+cannot proceed without it, so it gets the full budget. `children_of` only decorates the
+token with a convenience claim that the chat backend looks up for itself anyway, and it
+runs *inside* the latency a parent is waiting on. Under one shared budget, a slow SIS added
+five seconds to every parent's login to save the backend one call it makes regardless.
+
+## The claim that matters
+
+```json
+{ "iss": "school-identity", "aud": "school-services",
+  "sub": "0501234567", "role": "parent", "guardian_id": "G-1", "exp": 1234567890 }
+```
+
+`guardian_id` is the whole integration. It is set **only** by an administrator through
+`PUT /v1/admin/accounts/{username}/guardian-binding` — never at self-registration,
+never from a request body on a public route, never inferred. An account that could name
+its own guardian id could read any family's records.
+
+It is **omitted entirely** when there is no binding, rather than sent as null. A staff
+token and an unbound parent arrive at the records facade as the same absence, and both
+read nothing.
+
+Creation and binding are two separate calls on purpose: a bulk parent import that runs
+only the first produces accounts that can log in and read nothing, which is the safe
+half-finished state.
+
+## Endpoints
+
+```
+GET  /.well-known/jwks.json                              public key, for verifiers
+POST /v1/auth/login                                      credentials -> tokens
+POST /v1/auth/refresh                                    re-reads the binding; rotates the refresh token
+POST /v1/auth/logout                                     revokes the whole session (every rotated token)
+GET  /v1/auth/me                                         decode your own token
+
+POST /v1/auth/whatsapp/start                             begin a parent verification
+GET  /v1/auth/whatsapp/webhook                           Meta's subscription handshake
+POST /v1/auth/whatsapp/webhook                           inbound messages, signed
+POST /v1/auth/whatsapp/status                            poll a verification
+POST /v1/auth/whatsapp/verify                            code -> tokens
+
+GET    /v1/admin/accounts                                list, paged (limit/offset)
+POST   /v1/admin/accounts                                create a login
+PATCH  /v1/admin/accounts/{username}                     change password/role/active/profile
+DELETE /v1/admin/accounts/{username}                     delete; revokes sessions
+PUT    /v1/admin/accounts/{username}/guardian-binding    bind a guardian
+DELETE /v1/admin/accounts/{username}/guardian-binding    unbind; revokes sessions
+```
+
+Every route above `/v1/admin/` takes an **administrator's own bearer token** — there is no
+shared admin key. `PATCH` cannot write `guardian_external_id`: the field is absent from its
+schema and extras are forbidden, so binding stays a deliberate act with its own audit event.
+The last active administrator cannot be deleted, demoted or deactivated.
+
+```
+```
+
+## Decisions worth knowing
+
+- **Refresh re-reads the binding** rather than copying it from the old token. A custody
+  change takes effect within one access-token lifetime instead of persisting until the
+  parent happens to log out.
+- **Refresh tokens rotate, and a session is a family of them** (RFC 9700 §4.14). Each
+  refresh spends the token presented and returns a new one, valid for a full inactivity
+  window again — so a parent who keeps using the app is never asked to sign in. A spent
+  token presented again inside a short grace window is a retry and is honoured; outside it
+  the token was copied, and the whole family is revoked. Sign-out revokes the family too.
+  Spent tokens are kept for a week so a replay is still recognised, then pruned.
+- **Unbinding revokes refresh tokens.** The urgent custody path: the session dies.
+- **Wrong password and unknown user are indistinguishable**, and the timing is
+  equalised. Otherwise this endpoint confirms which parents are registered at the
+  school.
+- **Lockout is per account, not per IP.** The threat is credential stuffing against a
+  known parent, and an attacker has more IPs than the school has parents. The cost is
+  that a parent can be locked out deliberately — the better failure, since a locked-out
+  parent phones the school and a breached one does not know to.
+- **Access tokens cannot be revoked**, because verification is offline. Keeping them
+  short is what bounds that window; refresh revocation is the real control.
+
+## Parent login by WhatsApp
+
+Parents have no password and are never given one. The school already holds their phone
+number, entered by a registrar from paperwork, and WhatsApp proves control of that number
+at no cost.
+
+```
+browser  POST /v1/auth/whatsapp/start
+         <- { poll_secret, link, message, business_number, expires_at }
+
+parent   taps the link; WhatsApp opens with the message already typed; parent taps send
+         (WhatsApp never sends it for them -- say so on the page)
+
+Meta     POST /v1/auth/whatsapp/webhook   signed with X-Hub-Signature-256
+         identity asks sis: POST /v1/guardians/resolve { phone }
+         known   -> reply over WhatsApp with a six-digit code
+         unknown -> reply "contact the school office", challenge rejected
+
+browser  POST /v1/auth/whatsapp/status  { poll_secret }   -> pending | code_sent | ...
+browser  POST /v1/auth/whatsapp/verify  { poll_secret, code }  -> the same TokenOut
+                                                                  as a password login
+```
+
+### Two secrets, and why
+
+`nonce` travels out in the link and back over WhatsApp. `poll_secret` never leaves the
+browser. Holding one without the other is worth nothing:
+
+- A nonce lifted from a screenshot and sent from the attacker's own phone delivers the code
+  to **their** WhatsApp — but they have no poll secret, so they cannot finish. The parent
+  whose nonce it was is merely blocked, not impersonated.
+- A parent tricked into sending an attacker's nonce delivers the code to **the parent's**
+  WhatsApp, which the attacker cannot read.
+
+### Why it costs nothing
+
+The parent messages first, which opens a 24-hour customer service window. Meta made
+service conversations free on 1 November 2024, and under the per-message pricing that
+started on 1 July 2025 "All non-template messages are free". We never send a template, so
+we are never billed. That is a policy rather than a contract — `WhatsAppUnavailable` is a
+handled outcome, and `identity/infrastructure/whatsapp/` is the only package that would
+have to change.
+
+### It never creates a guardian
+
+An account never names its own guardian — the invariant `identity/domain/accounts.py`
+states. This is a second authority for that column, not an exception to it: the binding
+comes from the school's own records, keyed on a number WhatsApp proved, and a number `sis/`
+does not hold is refused. The binding is re-asserted on every sign-in, so a registrar's
+correction takes effect without an administrator touching this service.
+
+### Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `IDENTITY_WHATSAPP_NUMBER` | — | The school's number, **E.164 with a leading `+`**, e.g. `+201288339613`. Refused at startup otherwise; see below. |
+| `IDENTITY_WHATSAPP_PHONE_NUMBER_ID` | — | Meta's own id for that number. Not the number. |
+| `IDENTITY_WHATSAPP_TOKEN` | — | A **System User** token. The dashboard's token expires in under 24 hours. |
+| `IDENTITY_WHATSAPP_APP_SECRET` | — | Signs every inbound webhook. Unset means every message is rejected. |
+| `IDENTITY_WHATSAPP_VERIFY_TOKEN` | — | Any string; must match what you type into the App Dashboard. |
+| `IDENTITY_SIS_BASE_URL` | — | Where `sis/` lives, e.g. `http://localhost:8300`. Unset means every parent is refused. |
+| `IDENTITY_SIS_API_KEY` | — | Sent as `X-API-Key`. `sis/` does not currently check it. |
+| `IDENTITY_VERIFICATION_TTL_MINUTES` | `10` | How long a challenge lives. |
+
+**The number must carry its `+`.** `01288339613` produces a link to `wa.me/01288339613`,
+which is a different number that does not exist — the link opens, the chat is empty, no
+message ever arrives, and nothing logs an error. `e164_or_raise` refuses it at startup so
+that a silent estate-wide outage becomes a deploy that does not come up.
+
+With no credentials the flow still runs end to end against a recording gateway and an empty
+directory: developable with no Meta account, and an unconfigured production refuses every
+parent rather than authenticating them against nothing.
+
+### Going live
+
+1. Meta business portfolio -> an app -> a WhatsApp Business Account.
+2. Register the number. **It must not be active on WhatsApp Messenger or the WhatsApp
+   Business app** — delete it there first, which destroys that number's message history and
+   cannot be undone while it is on Cloud API. If staff currently chat to parents on it, use
+   a different number.
+3. Set a 6-digit two-step PIN during registration and keep it; re-registering needs it.
+4. Create a **System User**, assign the app and the WABA, and generate a never-expiring
+   token with `whatsapp_business_messaging`.
+5. Point the webhook at `https://<host>/v1/auth/whatsapp/webhook` with your verify token,
+   and **subscribe to the `messages` field** — nothing arrives otherwise. Public HTTPS on
+   443 with a real certificate; `ngrok` for local work.
+6. New portfolios start at a 250-recipient tier until business verification. Replies inside
+   an open service window should not count against it — worth confirming before a rollout.
+
+### Operational notes
+
+- Meta retries an unacknowledged webhook for up to **seven days**, so duplicates are
+  guaranteed. Deduplicated on the message id; without that, one parent tap sends several
+  conflicting codes.
+- The webhook answers 200 for anything it cannot use, and 403 only for a bad signature.
+- WhatsApp throttles replies to one user to roughly one every six seconds.
+- A parent sending from a number the school does not hold — dad's work phone — is refused
+  by design. The fix is a registrar adding that number, not a looser rule here.
+
+## Not built yet
+
+Password reset, and per-IP rate limiting in front of `/v1/auth/login`. The lockout policy
+limits damage per account but does nothing about a broad sweep across many accounts.
+(Parent login by WhatsApp, formerly listed here, is above.)

@@ -118,7 +118,7 @@ services:
     <<: *app-common
     build:
       context: .
-      dockerfile: sis/Dockerfile
+      dockerfile: src/sis/Dockerfile
     image: superagent/sis:${IMAGE_TAG:-local}
     container_name: superagent-sis
     environment:
@@ -136,7 +136,7 @@ services:
     <<: *app-common
     build:
       context: .
-      dockerfile: identity/Dockerfile
+      dockerfile: src/identity/Dockerfile
     image: superagent/identity:${IMAGE_TAG:-local}
     container_name: superagent-identity
     environment:
@@ -154,7 +154,7 @@ services:
     <<: *app-common
     build:
       context: .
-      dockerfile: records/Dockerfile
+      dockerfile: src/records/Dockerfile
     image: superagent/records:${IMAGE_TAG:-local}
     container_name: superagent-records
     environment:
@@ -211,7 +211,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: frontend/Dockerfile
+      dockerfile: src/frontend/Dockerfile
       args:
         VITE_IDENTITY_BASE_URL: ${VITE_IDENTITY_BASE_URL:-}
     image: superagent/frontend:${IMAGE_TAG:-local}

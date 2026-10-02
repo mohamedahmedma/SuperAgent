@@ -29,11 +29,11 @@ import unittest
 from pathlib import Path
 
 from backend.assets.dossier import DOSSIER_VERSION, MIGRATIONS
-from backend.chat.signals import _names_the_child
+from backend.agent.chat.signals import _names_the_child
 from backend.indexing.document_loader import DocumentLoader
-from backend.prompts import render as render_prompt
+from backend.agent.prompts import render as render_prompt
 
-TEMPLATES = Path("backend/prompts/templates")
+TEMPLATES = Path("src/backend/agent/prompts/templates")
 
 
 def _template(name: str) -> str:

@@ -18,19 +18,19 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from backend.chat.signals import RequestSignals
-from backend.chat.turn_policy import TurnPlan
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.turn_policy import TurnPlan
 from backend.composition import Services
-from backend.tools import KNOWLEDGE_TOOL
+from backend.agent.tools import KNOWLEDGE_TOOL
 from tests.general.test_chat_hitl_resume import FakeStorage, _parse_sse_events
-from backend.chat.answer_checks import terminal_reply
-from backend.chat.clarification import PENDING_HITL_KEY
+from backend.agent.chat.answer_checks import terminal_reply
+from backend.agent.chat.clarification import PENDING_HITL_KEY
 
 # A clarification asked a moment ago. Pending questions expire after a day
 # (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
 _ASKED_JUST_NOW = datetime.now(timezone.utc).isoformat()
 
-service = importlib.import_module("backend.chat.service")
+service = importlib.import_module("backend.agent.chat.service")
 
 
 def _stream_shown(*args, **kwargs) -> str:

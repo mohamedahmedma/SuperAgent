@@ -9,12 +9,12 @@ import os
 import unittest
 from unittest.mock import patch
 
-from backend.chat.child_context import SessionChild
-from backend.chat.child_resolution import ResolvedChild, no_child, resolve_child
-from backend.chat.child_roster import ChildOption
-from backend.chat.context_messages import _turn_context_message
-from backend.chat.signals import RequestSignals
-from backend.chat.turn_policy import resolve_turn
+from backend.agent.chat.child_context import SessionChild
+from backend.agent.chat.child_resolution import ResolvedChild, no_child, resolve_child
+from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.context_messages import _turn_context_message
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.turn_policy import resolve_turn
 
 ALI = ChildOption(student_id="S-1", label="علي حسن", gender="male", year_level="Year 4")
 AHMED = ChildOption(student_id="S-2", label="أحمد حسن", gender="male")
@@ -133,7 +133,7 @@ class TheRosterReadStarts(unittest.TestCase):
         self.addCleanup(self._env.stop)
 
     def test_no_thread_is_started_for_someone_who_is_not_a_parent(self):
-        import backend.chat.child_roster as child_roster
+        import backend.agent.chat.child_roster as child_roster
 
         class _NotAParent:
             guardian_id = ""
@@ -142,7 +142,7 @@ class TheRosterReadStarts(unittest.TestCase):
         self.assertIsNone(child_roster.prefetch(_NotAParent()))
 
     def test_a_prefetch_returns_what_the_fetch_produced(self):
-        import backend.chat.child_roster as child_roster
+        import backend.agent.chat.child_roster as child_roster
 
         class _Parent:
             guardian_id = "G-1"
@@ -159,7 +159,7 @@ class TheRosterReadStarts(unittest.TestCase):
         self.assertEqual([c.student_id for c in children], ["S-1"])
 
     def test_a_failing_fetch_degrades_to_unavailable_rather_than_raising(self):
-        import backend.chat.child_roster as child_roster
+        import backend.agent.chat.child_roster as child_roster
 
         class _Parent:
             guardian_id = "G-1"
@@ -180,7 +180,7 @@ class ThePinIsWrittenBack(unittest.TestCase):
     def test_the_resolver_and_the_tool_agree_on_the_same_child(self):
         """One route table. Two matchers with different rules drift, and drift here
         means the prompt naming one child while the tool answers about another."""
-        from backend.tools.records import _match_student
+        from backend.agent.tools.records import _match_student
 
         class _Ctx:
             child = SessionChild(student_id="S-2")

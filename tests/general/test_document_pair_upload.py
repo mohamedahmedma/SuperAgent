@@ -9,7 +9,7 @@ with no obvious way back.
 import unittest
 from unittest.mock import MagicMock, patch
 
-from backend.chat.language import ARABIC, ENGLISH
+from backend.agent.chat.language import ARABIC, ENGLISH
 from backend.composition import Services
 from backend.db.models import DocumentPair
 from backend.indexing.pair_store import DocumentPairService

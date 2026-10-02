@@ -53,6 +53,11 @@ os.environ.setdefault("ACTIVE_PROFILE", "school")
 # into the next and make the run order-dependent.
 os.environ["CHILD_ROSTER_TTL_SECONDS"] = "0"
 
+# Run as a plain script, so nothing else puts the services on the path.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
+
 from backend.env import load_env
 
 load_env()
@@ -62,14 +67,14 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-import backend.chat.child_roster as child_roster
-import backend.tools.records as records
-from backend.chat import runtime
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.orchestrator import plan_turn
-from backend.chat.request_context import ChatRequestContext
-from backend.profiles import get_profile
-from backend.tools import build_tools
+import backend.agent.chat.child_roster as child_roster
+import backend.agent.tools.records as records
+from backend.agent.chat import runtime
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.orchestrator import plan_turn
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.profiles import get_profile
+from backend.agent.tools import build_tools
 
 GUARDIAN = "G-1"
 TOKEN = "test-token"
@@ -1556,7 +1561,7 @@ def main() -> int:
     records._get = _records_get
     child_roster._fetch = _roster_fetch
 
-    import backend.rag.pipeline as pipeline
+    import backend.agent.rag.pipeline as pipeline
 
     pipeline.run_rag_graph = _fake_rag
 

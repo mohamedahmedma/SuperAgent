@@ -41,7 +41,7 @@ class FakeParentChunks:
 
 
 def load_utils(env):
-    """Re-execute `backend/rag/utils.py` under `env`, with fake retrieval dependencies.
+    """Re-execute `backend/agent/rag/utils.py` under `env`, with fake retrieval dependencies.
 
     The module is re-executed rather than imported because it reads its rerank settings
     from the environment AT IMPORT, and these tests are about what those settings do.
@@ -74,7 +74,7 @@ def load_utils(env):
     module_name = f"rag_utils_under_test_{id(embedding_service)}"
     spec = importlib.util.spec_from_file_location(
         module_name,
-        REPO_ROOT / "backend" / "rag" / "utils.py",
+        REPO_ROOT / "src" / "backend" / "agent" / "rag" / "utils.py",
     )
     module = importlib.util.module_from_spec(spec)
 

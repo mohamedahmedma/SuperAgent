@@ -1,0 +1,510 @@
+import logging
+from typing import Annotated, List, Literal, Optional, Union  # noqa: F401
+
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+
+from backend.assets.delivery import AssetReference, ClientCapabilities
+
+logger = logging.getLogger(__name__)
+
+
+class StrictSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChatRequest(StrictSchema):
+    message: str
+    session_id: Optional[str] = "default_session"
+    # What this client can render. Omitted means "an ordinary browser"; a bot or a
+    # downstream service declares its own limits instead of the server guessing.
+    client_capabilities: Optional[ClientCapabilities] = None
+    # The voice note this message was spoken as, uploaded first through
+    # POST /chat/attachments. `message` then carries its transcript — the words the
+    # assistant answers — and the note is what the parent hears back on every device.
+    attachment_id: Optional[str] = None
+
+
+class AttachmentInfo(StrictSchema):
+    """A recording a parent sent, as a client shows it. Mirrors `AttachmentRecord`; the
+    bytes are behind `url`, which needs the caller's bearer token."""
+
+    id: str
+    kind: str
+    url: str
+    content_type: str
+    byte_size: int
+    duration_ms: int
+    transcript: Optional[str] = None
+    # "ok" | "empty" | "unavailable" — see `backend/agent/chat/transcription.py`.
+    transcript_status: str
+
+
+class RetrievedChunk(StrictSchema):
+    filename: str
+    page_number: Optional[str | int] = None
+    text: Optional[str] = None
+    score: Optional[float] = None
+    rrf_rank: Optional[int] = None
+    rerank_score: Optional[float] = None
+    chunk_id: Optional[str] = None
+    # "text" | "table" | "figure" — lets a client style or filter a chunk without
+    # parsing its content.
+    modality: Optional[str] = None
+    # Images this chunk was derived from; resolve them via /media/resolve.
+    asset_ids: Optional[List[str]] = None
+
+
+# --- rich answer blocks -----------------------------------------------------------------
+#
+# A record a tool rendered for the reader, as DATA rather than as text. The same record
+# still travels as markdown inside the answer, after `<!--record-block-->` (see
+# `backend/agent/chat/service.py`), and that copy is what any client that has never heard of
+# blocks shows. A client that has draws this instead, however suits its screen.
+#
+# The same contract as `AssetReference`: the backend never sends markup. It sends a
+# descriptor and each client decides how to present it — which is how a phone can show the
+# week one day at a time while a wide screen shows it as a grid, from one payload.
+#
+# Adding a kind: a data model and a block class here, a line in `AnswerBlock`, `data=` on
+# the tool's `note_answer_block` call, and a renderer registered in the frontend. A client
+# that does not know the kind shows the markdown, so nothing has to ship in lockstep.
+
+
+class TimetableSlot(StrictSchema):
+    """One lesson on one day. Its times are its period's, which every day shares."""
+
+    period: int
+    subject: str = ""
+    # A period the class deliberately has off. Not the same as a period with no row at
+    # all, which the week simply does not show.
+    is_free: bool = False
+
+
+class TimetableDay(StrictSchema):
+    # The school's own key for the day ("sunday"): stable, and what a client matches
+    # against its own calendar to find today.
+    day: str
+    # The day as the reader says it ("الأحد").
+    label: str = ""
+    slots: List[TimetableSlot] = Field(default_factory=list)
+
+
+class TimetablePeriod(StrictSchema):
+    """One slot of the school day, breaks included."""
+
+    number: int
+    label: str = ""
+    # `HH:MM`, or empty where the school has not fixed the bell. Never a placeholder.
+    starts_at: str = ""
+    ends_at: str = ""
+    # False for a break, assembly or prayer: part of the day, never a lesson.
+    is_teaching: bool = True
+
+
+class TimetableBlockData(StrictSchema):
+    class_label: str = ""
+    term_label: str = ""
+    # The school's whole day, in its own order.
+    periods: List[TimetablePeriod] = Field(default_factory=list)
+    # Only days with a lesson on them, in the school's week order — never re-sorted.
+    days: List[TimetableDay] = Field(default_factory=list)
+
+
+class GradeRow(StrictSchema):
+    subject: str
+    # None means no grade is recorded yet. It is never zero, and must not be drawn as one.
+    percentage: Optional[float] = None
+    letter: str = ""
+    missing_count: int = 0
+    # The result so far rather than a final grade.
+    in_progress: bool = False
+
+
+class GradesBlockData(StrictSchema):
+    term_label: str = ""
+    courses: List[GradeRow] = Field(default_factory=list)
+
+
+class _AnswerBlockBase(StrictSchema):
+    # Which `<!--record-block-->` in the answer text this block draws, counted from 0.
+    # Explicit rather than positional, so a block dropped on the way cannot shift every
+    # later one onto the wrong table.
+    index: int = Field(ge=0)
+    # The language the turn was answered in, for the client's own labels ("Today",
+    # "Break"). Empty when the turn did not establish one.
+    language: str = ""
+
+
+class TimetableAnswerBlock(_AnswerBlockBase):
+    kind: Literal["timetable"]
+    data: TimetableBlockData
+
+
+class GradesAnswerBlock(_AnswerBlockBase):
+    kind: Literal["grades"]
+    data: GradesBlockData
+
+
+AnswerBlock = Annotated[
+    Union[TimetableAnswerBlock, GradesAnswerBlock], Field(discriminator="kind")
+]
+_ANSWER_BLOCK = TypeAdapter(AnswerBlock)
+
+
+def normalize_answer_blocks(value) -> list[dict]:
+    """The blocks that match the contract, each validated on its own.
+
+    One malformed block must cost the reader that one table — which then shows as the
+    markdown it also travels as — and never the trace around it. This runs on every save
+    and every history load, and one bad row raising here would take a turn's save, or a
+    whole conversation's reload, down with it.
+
+    What is logged is where the block failed and why, never the values: a block is a
+    child's marks or week, and a validation error quotes its input.
+    """
+    if not isinstance(value, list):
+        return []
+    kept = []
+    for item in value:
+        try:
+            block = _ANSWER_BLOCK.validate_python(item)
+        except ValidationError as exc:
+            logger.warning(
+                "dropped an answer block that does not match the contract: %s",
+                [(error.get("loc"), error.get("type")) for error in exc.errors()[:3]],
+            )
+            continue
+        kept.append(block.model_dump(mode="json", exclude_none=True))
+    return kept
+
+
+class RagTraceFields(StrictSchema):
+    tool_used: Optional[bool] = None
+    tool_name: Optional[str] = None
+    query: Optional[str] = None
+    rewrite_method: Optional[Literal["step_back", "hyde"]] = None
+    rewritten_query: Optional[str] = None
+    step_back_question: Optional[str] = None
+    hyde_document: Optional[str] = None
+    retrieval_stage: Optional[str] = None
+    # Whether the search text dropped this turn's child name before it was searched for.
+    # Declared here or dropped, as the comment on `route_reason` below records the hard
+    # way — and worth declaring, because a query that lost a word is otherwise a change
+    # nobody can see: `query` above shows what was searched for and never what was not.
+    #
+    # The FLAG, never the name, for the same reason `turn_child_resolved` is a boolean.
+    child_name_removed: Optional[bool] = None
+    route: Optional[str] = None
+    retrieval_status: Optional[str] = None
+    retrieval_error: Optional[str] = None
+    evidence_relevance: Optional[str] = None
+    evidence_answerability: Optional[str] = None
+    evidence_ambiguity: Optional[str] = None
+    evidence_confidence: Optional[float] = None
+    evidence_reason: Optional[str] = None
+    evidence_constraints_discriminate: Optional[str] = None
+    # Why `route` was chosen. Written by grade_documents_node since routing began, but
+    # never declared here — so `normalize_rag_trace` dropped it and the single most
+    # useful field for diagnosing an unexpected denial never reached a client.
+    route_reason: Optional[str] = None
+    grading_skipped: Optional[bool] = None
+    grading_confident: Optional[bool] = None
+    grading_term_coverage: Optional[float] = None
+    grading_chunk_count: Optional[int] = None
+    grading_reason: Optional[str] = None
+    context_chunks_kept: Optional[int] = None
+    context_chunks_available: Optional[int] = None
+    context_trimmed: Optional[bool] = None
+    context_coverage: Optional[float] = None
+    context_selection_reason: Optional[str] = None
+    # Set by the turn planner, before the agent runs. Present on every turn it
+    # touched — including the ones it ended without a model, where these are the only
+    # trace fields there are.
+    turn_short_circuit: Optional[bool] = None
+    turn_exposed_tools: Optional[List[str]] = None
+    turn_retrieval_sections: Optional[List[str]] = None
+    # Declared here or dropped: `normalize_rag_trace` keeps only the keys this model
+    # names, so a field the planner emits but this does not never reaches a client.
+    # These three were emitted and discarded, which is why a turn that ended in
+    # "which one are you asking about?" carried no record of where the options came
+    # from — the one question a trace of that turn has to be able to answer.
+    turn_scope_options: Optional[List[str]] = None
+    turn_language: Optional[str] = None
+    turn_capture_user_info: Optional[bool] = None
+    # Whether the turn settled on one child, and whether it had to ask. The NAME is
+    # deliberately absent for the same reason it is absent from the request half:
+    # this trace is persisted per message and streamed to the browser.
+    turn_child_resolved: Optional[bool] = None
+    turn_child_asked: Optional[bool] = None
+    turn_reason: Optional[str] = None
+    # What the turn was taken to be about, once references were resolved against the
+    # conversation, and the conditions inherited with it.
+    turn_resolved_question: Optional[str] = None
+    turn_carried_constraints: Optional[List[str]] = None
+    turn_is_followup: Optional[bool] = None
+    # The stream was cut off — the parent pressed Stop or the connection dropped — and
+    # what is stored as the answer is what had reached them by then, not a finished one.
+    turn_interrupted: Optional[bool] = None
+    # What the message before this answer did to a pending clarification: settled it, or
+    # set it aside for a new question. A reopened conversation folds an answered
+    # exchange together and shows a replacing question as the parent typed it.
+    turn_clarification: Optional[Literal["answered", "replaced"]] = None
+    request_scope: Optional[str] = None
+    request_scope_certainty: Optional[str] = None
+    request_language: Optional[str] = None
+    request_is_social: Optional[bool] = None
+    request_personal_data: Optional[List[str]] = None
+    # Whether the classifier read this message as being about one of the caller's own
+    # children, and how it was referred to. Anything not declared in this model is
+    # silently dropped, so a signal that is not here cannot be debugged from a trace.
+    #
+    # The child's NAME is deliberately absent. This trace is persisted per message and
+    # streamed to the browser, and a turn may resolve a child silently without ever
+    # showing that name — putting it here would disclose it anyway. The boolean and the
+    # reference kind answer every question a name would.
+    request_about_child: Optional[bool] = None
+    request_child_reference: Optional[str] = None
+    request_candidate_sections: Optional[List[str]] = None
+    request_scope_options: Optional[List[str]] = None
+    request_top_match: Optional[dict] = None
+    request_resolved_question: Optional[str] = None
+    request_carried_constraints: Optional[List[str]] = None
+    request_followup_intent: Optional[str] = None
+    request_assessed_by: Optional[List[str]] = None
+    request_reason: Optional[str] = None
+    missing_slots: Optional[List[str]] = None
+    hitl_prompt: Optional[str] = None
+    hitl_options: Optional[List[str]] = None
+    hitl_resumed: Optional[bool] = None
+    hitl_answer: Optional[str] = None
+    hitl_resume_strategy: Optional[str] = None
+    hitl_resume_from_status: Optional[str] = None
+    hitl_resume_from_route: Optional[str] = None
+    hitl_targeted_retrieved_chunks: Optional[List[RetrievedChunk]] = None
+    rerank_enabled: Optional[bool] = None
+    rerank_applied: Optional[bool] = None
+    rerank_model: Optional[str] = None
+    rerank_endpoint: Optional[str] = None
+    rerank_error: Optional[str] = None
+    rerank_timeout_seconds: Optional[float] = None
+    rerank_min_score: Optional[float] = None
+    post_rerank_count: Optional[int] = None
+    post_threshold_count: Optional[int] = None
+    retrieval_empty: Optional[bool] = None
+    retrieval_mode: Optional[str] = None
+    retrieval_pipeline: Optional[str] = None
+    candidate_k: Optional[int] = None
+    candidate_k_source: Optional[str] = None
+    candidate_k_config_error: Optional[str] = None
+    retrieval_candidate_multiplier: Optional[int] = None
+    retrieval_top_k: Optional[int] = None
+    recall_count: Optional[int] = None
+    post_merge_candidate_count: Optional[int] = None
+    candidate_count: Optional[int] = None
+    leaf_retrieve_level: Optional[int] = None
+    auto_merge_enabled: Optional[bool] = None
+    auto_merge_applied: Optional[bool] = None
+    auto_merge_threshold: Optional[int] = None
+    auto_merge_figure_threshold: Optional[int] = None
+    auto_merge_replaced_chunks: Optional[int] = None
+    auto_merge_steps: Optional[int] = None
+    # What the finalize stage did between the model and the reader, and what it made of
+    # the answer. Carried here because both are facts about how this turn's retrieval
+    # and its answer relate — see backend/agent/chat/finalize.py.
+    finalize_dropped_tool_call_messages: Optional[int] = None
+    finalize_dropped_chars: Optional[int] = None
+    finalize_harmony_messages: Optional[int] = None
+    finalize_tool_results: Optional[int] = None
+    grounding_ok: Optional[bool] = None
+    grounding_evidence_chunks: Optional[int] = None
+    grounding_numbers_checked: Optional[int] = None
+    grounding_ungrounded_numbers: Optional[List[str]] = None
+    grounding_invalid_citations: Optional[List[int]] = None
+    grounding_reason: Optional[str] = None
+
+    retrieved_chunks: Optional[List[RetrievedChunk]] = None
+    initial_retrieved_chunks: Optional[List[RetrievedChunk]] = None
+    rewrite_retrieved_chunks: Optional[List[RetrievedChunk]] = None
+    # Fields added for complexity-based routing
+    complexity: Optional[str] = None
+    complexity_reason: Optional[str] = None
+    sub_questions: Optional[List[str]] = None
+    sub_agent_count: Optional[int] = None
+    synthesis_merged_count: Optional[int] = None
+    # Renditions for every asset the retrieved chunks referenced, already adapted to
+    # the calling client's declared capabilities. What goes on the wire.
+    assets: Optional[List[AssetReference]] = None
+    # The same assets as ids alone — what a STORED trace keeps instead. A rendition is a
+    # copy of what the asset store already holds, and in inline mode that copy is the
+    # image itself, base64'd into a conversation row once per message that showed it.
+    # Ids cost a few dozen bytes, cannot go stale, and resolve by primary key on load.
+    asset_ids: Optional[List[str]] = None
+
+
+class RagSubTrace(RagTraceFields):
+    pass
+
+
+class RagTrace(RagTraceFields):
+    sub_traces: Optional[List[RagSubTrace]] = None
+    # The records this answer showed as tables, as data. On the top-level trace only: a
+    # block belongs to the answer, not to any one retrieval. The trace is where a stored
+    # message keeps it, which is what lets a reloaded conversation draw its tables again.
+    answer_blocks: Optional[List[AnswerBlock]] = None
+
+
+class HitlResumeState(StrictSchema):
+    question: str = Field(min_length=1)
+    route: Literal["clarify", "scope_select"]
+    retrieval_status: Literal["needs_clarification", "needs_scope_selection"]
+    rewrite_count: int = Field(default=0, ge=0)
+    # How many times this question has already been handed back. Carried across the
+    # resume boundary because the graph starts fresh there: without it, "ask once" would
+    # mean "ask once per graph run", which is every run.
+    hitl_rounds: int = Field(default=0, ge=0)
+    complexity: Optional[Literal["simple", "complex"]] = None
+    complexity_reason: Optional[str] = None
+    sub_questions: List[str] = Field(default_factory=list, max_length=4)
+    # Conditions set before the clarification was asked ("grades up to Year 6").
+    # Carried across the resume boundary for the same reason as `hitl_rounds`: the graph
+    # starts fresh there, and the turn that established them is several messages back by
+    # the time the user answers.
+    carried_constraints: List[str] = Field(default_factory=list, max_length=8)
+    # What the planner handed the graph for the turn that asked — see
+    # `ChatRequestContext.note_turn_plan`. The planner runs only on a fresh question, so
+    # a resumed search got a context nothing had planned into: no language (both halves
+    # of a bilingual document competing), no year group, the child's name back in the
+    # query, no sections. Carried here and handed over again when the search resumes.
+    # Empty on a question paused before they were carried, which resumes as before.
+    language: str = ""
+    child_year: str = ""
+    retrieval_sections: List[str] = Field(default_factory=list)
+    child_names: List[str] = Field(default_factory=list)
+
+
+class PendingHitlState(StrictSchema):
+    """A question the assistant put to the user, and what to do with the answer.
+
+    `child_select` is unlike the other two routes, and the difference is the point of
+    the feature: the other two are asked because RETRIEVAL could not settle something,
+    so they carry a `resume_state` that lets the graph pick up where it stopped. This one
+    is asked because a parent has two children who both match what they said, and the
+    answer settles a fact rather than a search — the child is pinned to the session and
+    the ORIGINAL question is simply planned again, now that it resolves. There is no
+    graph state to resume, which is why `resume_state` is optional.
+    """
+
+    id: str = Field(min_length=1)
+    original_question: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    options: List[str] = Field(default_factory=list)
+    route: Literal["clarify", "scope_select", "child_select"]
+    retrieval_status: Literal[
+        "needs_clarification", "needs_scope_selection", "needs_child_choice"
+    ]
+    answers: List[str] = Field(default_factory=list)
+    resume_state: Optional[HitlResumeState] = None
+    created_at: str
+
+
+def _normalize_chunks(value) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    fields = RetrievedChunk.model_fields
+    return [
+        RetrievedChunk.model_validate({key: item[key] for key in fields if key in item}).model_dump(
+            exclude_none=True
+        )
+        for item in value
+        if isinstance(item, dict) and item.get("filename")
+    ]
+
+
+def _normalize_trace_fields(trace: dict, fields: dict) -> dict:
+    normalized = {key: trace[key] for key in fields if key in trace}
+    for key in (
+        "retrieved_chunks",
+        "initial_retrieved_chunks",
+        "rewrite_retrieved_chunks",
+        "hitl_targeted_retrieved_chunks",
+    ):
+        if key in normalized:
+            normalized[key] = _normalize_chunks(normalized[key])
+    return normalized
+
+
+def normalize_rag_sub_trace(trace: dict | None) -> Optional[dict]:
+    if not isinstance(trace, dict) or not trace:
+        return None
+    normalized = _normalize_trace_fields(trace, RagSubTrace.model_fields)
+    return RagSubTrace.model_validate(normalized).model_dump(exclude_none=True)
+
+
+def normalize_rag_trace(trace: dict | None) -> Optional[dict]:
+    if not isinstance(trace, dict) or not trace:
+        return None
+    normalized = _normalize_trace_fields(trace, RagTrace.model_fields)
+    if "answer_blocks" in normalized:
+        # Block by block, before the whole trace is validated: one bad block is dropped
+        # rather than failing the trace it sits on. See `normalize_answer_blocks`.
+        blocks = normalize_answer_blocks(normalized.pop("answer_blocks"))
+        if blocks:
+            normalized["answer_blocks"] = blocks
+    if "sub_traces" in normalized:
+        sub_traces = normalized["sub_traces"] if isinstance(normalized["sub_traces"], list) else []
+        normalized["sub_traces"] = [
+            item
+            for item in (
+                normalize_rag_sub_trace(sub_trace)
+                for sub_trace in sub_traces
+                if isinstance(sub_trace, dict)
+            )
+            if item is not None
+        ]
+    return RagTrace.model_validate(normalized).model_dump(exclude_none=True)
+
+
+class ChatResponse(StrictSchema):
+    response: str
+    rag_trace: Optional[RagTrace] = None
+    # Duplicated out of the trace so a client can show images without depending on
+    # the trace's shape, which is diagnostic and may change.
+    assets: List[AssetReference] = Field(default_factory=list)
+    # Duplicated out of the trace for the same reason as `assets`.
+    answer_blocks: List[AnswerBlock] = Field(default_factory=list)
+
+
+class MessageInfo(StrictSchema):
+    # The row id, and the cursor a client scrolls back from. Optional because a message
+    # cached before ids were stored has none; such a page simply cannot be paged from.
+    id: Optional[int] = None
+    type: str
+    content: str
+    timestamp: str
+    rag_trace: Optional[RagTrace] = None
+    # The recording this message was spoken as, when it was one.
+    attachment: Optional[AttachmentInfo] = None
+
+
+class SessionMessagesResponse(StrictSchema):
+    # Oldest-first: reading order, whichever batch this is.
+    messages: List[MessageInfo]
+    # Whether anything older than `messages[0]` exists. A client scrolling back stops
+    # asking when this is false, rather than probing until it gets an empty page.
+    has_more: bool = False
+
+
+class SessionInfo(StrictSchema):
+    session_id: str
+    title: Optional[str] = None
+    updated_at: str
+    message_count: int
+
+
+class SessionListResponse(StrictSchema):
+    sessions: List[SessionInfo]
+
+
+class SessionDeleteResponse(StrictSchema):
+    session_id: str
+    message: str

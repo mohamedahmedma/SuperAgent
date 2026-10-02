@@ -16,7 +16,7 @@ cannot verify searches with the original.
 import unittest
 from unittest.mock import patch
 
-from backend.rag import query_translation as qt
+from backend.agent.rag import query_translation as qt
 
 
 class _Reply:
@@ -181,21 +181,21 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
     most Arabic turns, which is most of the traffic."""
 
     def setUp(self):
-        from backend.rag import query_translation
+        from backend.agent.rag import query_translation
 
         query_translation.reset_cache()
         self.addCleanup(query_translation.reset_cache)
 
     @staticmethod
     def _config(**overrides):
-        from backend.profiles.registry import load_profile
+        from backend.agent.profiles.registry import load_profile
 
         settings = {"query_resolution_enabled": True, "query_resolution_max_chars": 24,
                     **overrides}
         return load_profile("school").agent.model_copy(update=settings)
 
     def _resolve(self, question, history, payload, **kw):
-        from backend.chat.resolution import resolve_question
+        from backend.agent.chat.resolution import resolve_question
 
         seen = {}
 
@@ -224,7 +224,7 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
     def test_the_translation_lands_in_the_memo_retrieval_reads(self):
         """What makes this ONE call rather than two: retrieval later asks for the same
         translation and finds it, without knowing the resolver exists."""
-        from backend.rag import query_translation as qt
+        from backend.agent.rag import query_translation as qt
 
         long_arabic = "ما هي مصاريف Year 3 للطالب المصري في العام الدراسي القادم؟"
         self._resolve(
@@ -286,7 +286,7 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
         caller's broad except would have swallowed as "resolver error" — resolution would
         have stopped happening silently and looked like a model gone quiet. It is asked
         what it accepts instead."""
-        from backend.chat.resolution import resolve_question
+        from backend.agent.chat.resolution import resolve_question
 
         legacy = lambda *args: {  # noqa: E731 — the shape being tested is the signature
             "question": "مصاريف Year 3 للدولي كام؟", "intent": "followup", "constraints": [],
@@ -300,7 +300,7 @@ class OneCallDoesWhicheverJobsTheTurnNeedsTests(unittest.TestCase):
         self.assertEqual("", resolved.search_text, "it was never asked to translate")
 
     def test_an_english_standalone_question_costs_no_call_at_all(self):
-        from backend.chat.resolution import resolve_question
+        from backend.agent.chat.resolution import resolve_question
 
         calls = []
 

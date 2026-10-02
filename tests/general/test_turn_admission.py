@@ -11,7 +11,7 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-from backend.chat.admission import Refusal, TurnAdmission, TurnLease
+from backend.agent.chat.admission import Refusal, TurnAdmission, TurnLease
 from backend.provider_quota import ProviderQuotas
 
 TEST_REDIS_URL = os.getenv("TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
@@ -103,7 +103,7 @@ class FailOpenTests(unittest.TestCase):
             raise redis.ConnectionError("no route to Redis")
 
         door = TurnAdmission(redis=unreachable, turns_per_minute=12, concurrent=3)
-        with self.assertLogs("backend.chat.admission", logging.WARNING):
+        with self.assertLogs("backend.agent.chat.admission", logging.WARNING):
             self.assertIsInstance(door.admit("parent"), TurnLease)
 
 
@@ -193,7 +193,7 @@ class ChatRouteTests(_RedisTest):
 
 class RefusalCopyTests(unittest.TestCase):
     def test_the_parent_is_told_in_their_language_how_long_to_wait(self):
-        from backend.profiles import get_profile
+        from backend.agent.profiles import get_profile
 
         copy = get_profile().user_copy
         self.assertIn("5 seconds", Refusal("too_many_turns", 4.2).message(copy, "en"))

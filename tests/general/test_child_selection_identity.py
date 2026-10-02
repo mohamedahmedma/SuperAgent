@@ -28,18 +28,18 @@ from unittest.mock import patch
 
 import requests
 
-import backend.chat.child_roster as child_roster
+import backend.agent.chat.child_roster as child_roster
 import backend.records_http as records_http
-from backend.chat.caller_identity import CallerIdentity
-from backend.chat.child_resolution import resolve_child
-from backend.chat.child_roster import ChildOption
-from backend.chat.orchestrator import _settle_child, _start_roster, plan_turn
-from backend.chat.request_context import ChatRequestContext
-from backend.chat.resolution import unresolved
-from backend.chat.signals import RequestSignals
-from backend.chat.turn_policy import resolve_turn
-from backend.profiles.registry import load_profile, set_profile
-from backend.tools.records import make_get_student_grades
+from backend.agent.chat.caller_identity import CallerIdentity
+from backend.agent.chat.child_resolution import resolve_child
+from backend.agent.chat.child_roster import ChildOption
+from backend.agent.chat.orchestrator import _settle_child, _start_roster, plan_turn
+from backend.agent.chat.request_context import ChatRequestContext
+from backend.agent.chat.resolution import unresolved
+from backend.agent.chat.signals import RequestSignals
+from backend.agent.chat.turn_policy import resolve_turn
+from backend.agent.profiles.registry import load_profile, set_profile
+from backend.agent.tools.records import make_get_student_grades
 
 PARENT_TOKEN = "signed.identity.token"
 GUARDIAN = "G-77"
@@ -533,7 +533,7 @@ class ThePlannerNeverCostsTheTurn(_SchoolTurn):
         def boom(*args, **kwargs):
             raise RuntimeError("policy exploded")
 
-        with patch("backend.chat.orchestrator.resolve_turn", boom):
+        with patch("backend.agent.chat.orchestrator.resolve_turn", boom):
             plan, signals = self.plan(_parent_ctx(), roster_fetch=_fetch(child_roster.OK, []))
 
         self.assertFalse(plan.short_circuit)
@@ -592,7 +592,7 @@ class TheSessionsOwnIdentityIsTheOnlyAuthority(_NoRosterCache):
         set — splitting one tool into three multiplied the places this can regress, and a
         fourth added later has to be caught by the same test rather than by remembering
         to extend it."""
-        from backend.tools import RECORDS_TOOLS, build_tools
+        from backend.agent.tools import RECORDS_TOOLS, build_tools
 
         for bound in build_tools(list(RECORDS_TOOLS), _parent_ctx()):
             with self.subTest(tool=bound.name):

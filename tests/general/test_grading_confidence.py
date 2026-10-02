@@ -11,8 +11,8 @@ tests are weighted toward proving it is NOT skipped when it matters.
 """
 import unittest
 
-from backend.profiles.registry import load_profile
-from backend.rag.confidence import (
+from backend.agent.profiles.registry import load_profile
+from backend.agent.rag.confidence import (
     ConfidenceVerdict,
     assess,
     content_tokens,
@@ -161,8 +161,8 @@ class SkippedGradeShapeTests(unittest.TestCase):
         be enforced by a helper that hand-built a fake grade; it is now structural — the
         report's ambiguity defaults to the inert value and only an LLM assessor sets it,
         so no cheap rung can invent an ambiguity it never assessed."""
-        from backend.rag.evidence import LexicalAssessor, AssessmentContext
-        from backend.rag.policy import decide_route
+        from backend.agent.rag.evidence import LexicalAssessor, AssessmentContext
+        from backend.agent.rag.policy import decide_route
 
         config = rag_config()
         ctx = AssessmentContext(
@@ -193,7 +193,7 @@ class SkippedGradeShapeTests(unittest.TestCase):
         self.assertIn("4 chunks", trace["grading_reason"])
 
     def test_the_trace_schema_carries_the_new_fields(self):
-        from backend.schemas.chat import normalize_rag_trace
+        from backend.agent.schemas.chat import normalize_rag_trace
 
         trace = normalize_rag_trace({
             "grading_skipped": True, "grading_confident": True,

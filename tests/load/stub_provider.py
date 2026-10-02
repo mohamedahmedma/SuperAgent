@@ -47,6 +47,11 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+# Started as its own uvicorn process, so nothing else puts the services on the path.
+import os.path as _p
+import sys as _sys
+_sys.path.insert(0, _p.join(_p.dirname(_p.dirname(_p.dirname(_p.abspath(__file__)))), "src"))
+
 from backend.provider_compat import CONTEXT_HEADING
 
 KNOWLEDGE_TOOL = "search_knowledge_base"

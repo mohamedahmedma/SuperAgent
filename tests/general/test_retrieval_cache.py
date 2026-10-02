@@ -2,7 +2,7 @@
 import unittest
 import uuid
 
-from backend.rag.retrieval_cache import CorpusVersion, RetrievalCache
+from backend.agent.rag.retrieval_cache import CorpusVersion, RetrievalCache
 from tests.general.test_turn_admission import _CLIENT, requires_redis
 
 RESULT = {
@@ -90,7 +90,7 @@ class RetrieveDocumentsTests(unittest.TestCase):
     def setUp(self):
         from unittest.mock import patch
 
-        import backend.rag.utils as utils
+        import backend.agent.rag.utils as utils
 
         self.prefix = f"test-rd-{uuid.uuid4().hex[:8]}"
         key = lambda name: f"{self.prefix}:{name}"  # noqa: E731

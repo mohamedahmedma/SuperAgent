@@ -46,9 +46,10 @@ import re
 import sys
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The repository root stays for `tests.*`; src/ is where the services now live.
+sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.join(_REPO_ROOT, "src"))
 
 # `load_env`, not a bare `load_dotenv`: this deployment selects its provider with
 # `LLM_PROVIDER` and collapses that block onto the generic `MODEL` / `BASE_URL` /
@@ -69,10 +70,10 @@ from langchain_core.messages import (  # noqa: E402
 )
 from langchain_core.tools import tool  # noqa: E402
 
-from backend.chat.finalize import Finalizer  # noqa: E402
-from backend.chat.model_output import TOKENS as HARMONY_TOKENS  # noqa: E402
-from backend.prompts import render as render_prompt, resolve as resolve_prompt  # noqa: E402
-import backend.chat.runtime as runtime  # noqa: E402
+from backend.agent.chat.finalize import Finalizer  # noqa: E402
+from backend.agent.chat.model_output import TOKENS as HARMONY_TOKENS  # noqa: E402
+from backend.agent.prompts import render as render_prompt, resolve as resolve_prompt  # noqa: E402
+import backend.agent.chat.runtime as runtime  # noqa: E402
 
 _RETRY_COPY = "__retry__"  # stands in for user_copy.retrieval_error; only its presence is scored
 

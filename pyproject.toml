@@ -50,11 +50,11 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "beautifulsoup4>=4.12.0",
     "langsmith>=0.7.22",
-    # Domain profile definitions (backend/profiles/definitions/*.yaml). Previously
+    # Domain profile definitions (backend/agent/profiles/definitions/*.yaml). Previously
     # available only transitively via langchain-core; imported directly now.
     "pyyaml>=6.0",
-    # Prompt templates (backend/prompts/templates/**/*.j2). Same story as pyyaml: it
-    # arrives transitively via fastapi/langchain today, but backend.prompts imports it
+    # Prompt templates (backend/agent/prompts/templates/**/*.j2). Same story as pyyaml: it
+    # arrives transitively via fastapi/langchain today, but backend.agent.prompts imports it
     # directly, so it is declared rather than relied on as someone else's dependency.
     "jinja2>=3.1",
     # Arabic matching (backend/text_matching.py), on the BM25 and name-lookup lanes.
@@ -86,7 +86,13 @@ study = [
     "bilibili-api-python>=17.0.0",
 ]
 
+# NOTE: there is no [build-system] here and uv locks this project as
+# `source = { virtual = "." }`, so setuptools never runs and this table is inert
+# today. It is kept correct for the day the project is built: src/ is the package
+# root. What actually puts the packages on sys.path is pythonpath below for pytest,
+# PYTHONPATH in each image, and an explicit insert in each standalone script.
 [tool.setuptools.packages.find]
+where = ["src"]
 # `schoolauth` ships with the backend because the backend imports it: it is the shared
 # token verifier every enforcement point compiles in. Leaving it out builds a wheel that
 # imports fine until the first authenticated request.
@@ -96,10 +102,15 @@ exclude = ["frontend*", "tests*"]
 # Templates and profile definitions are data, not modules, so packages.find alone does
 # not ship them — an installed build would import fine and then fail at first render.
 [tool.setuptools.package-data]
-"backend.prompts" = ["templates/**/*.j2"]
-"backend.profiles" = ["definitions/*.yaml"]
+"backend.agent.prompts" = ["templates/**/*.j2"]
+"backend.agent.profiles" = ["definitions/*.yaml"]
 # The migration directory is not a package either, and the app reads its head at startup.
 "backend" = ["alembic.ini", "migrations/*.py", "migrations/*.mako", "migrations/versions/*.py"]
+
+# The suites import the services directly and nothing is installed, so pytest has to
+# be told where they live. Without this every `from backend...` under tests/ fails.
+[tool.pytest.ini_options]
+pythonpath = ["src"]
 
 [dependency-groups]
 dev = [

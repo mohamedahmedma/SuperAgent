@@ -27,11 +27,11 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
-from backend.chat.request_context import ChatRequestContext
+from backend.agent.chat.request_context import ChatRequestContext
 from backend.composition import Services
-from backend.tools import KNOWLEDGE_TOOL
-from backend.tools.knowledge import make_search_knowledge_base
-from backend.chat.answer_checks import enforce_forced_tool_ran
+from backend.agent.tools import KNOWLEDGE_TOOL
+from backend.agent.tools.knowledge import make_search_knowledge_base
+from backend.agent.chat.answer_checks import enforce_forced_tool_ran
 
 CHUNKS = [
     {
@@ -53,9 +53,9 @@ def _rag(status, docs=CHUNKS, route="answer", **trace):
 
 def _pipeline(result):
     """Retrieval replaced at the module boundary the tool imports lazily."""
-    module = types.ModuleType("backend.rag.pipeline")
+    module = types.ModuleType("backend.agent.rag.pipeline")
     module.run_rag_graph = lambda query, ctx: result
-    return patch.dict(sys.modules, {"backend.rag.pipeline": module})
+    return patch.dict(sys.modules, {"backend.agent.rag.pipeline": module})
 
 
 def _ctx():
@@ -140,7 +140,7 @@ class TheForcedToolCheckSeesARealSearch(unittest.TestCase):
         answer = ANSWER
 
     def _verdict(self, ctx):
-        from backend.chat import service
+        from backend.agent.chat import service
 
         return enforce_forced_tool_ran(self._Finalizer(), ctx, self._Plan())
 
@@ -165,7 +165,7 @@ class TheForcedToolCheckSeesARealSearch(unittest.TestCase):
             ctx.close()
 
     def test_a_required_search_that_never_ran_is_still_replaced(self):
-        from backend.chat import service
+        from backend.agent.chat import service
 
         ctx = _ctx()
         try:
@@ -234,10 +234,10 @@ class AKnowledgeBaseTurnKeepsItsAnswer(unittest.IsolatedAsyncioTestCase):
     """
 
     async def _shown(self, plan):
-        import backend.chat.runtime as runtime
-        from backend.chat import service
-        from backend.chat.orchestrator import _hand_to_graph
-        from backend.chat.signals import RequestSignals
+        import backend.agent.chat.runtime as runtime
+        from backend.agent.chat import service
+        from backend.agent.chat.orchestrator import _hand_to_graph
+        from backend.agent.chat.signals import RequestSignals
         from tests.general.test_chat_hitl_resume import FakeStorage
         from tests.general.test_parent_turn_scenarios import _parse_sse, _text_shown
 
@@ -264,13 +264,13 @@ class AKnowledgeBaseTurnKeepsItsAnswer(unittest.IsolatedAsyncioTestCase):
         return _text_shown(_parse_sse(chunks))
 
     def _assert_answered(self, shown):
-        from backend.chat import service
+        from backend.agent.chat import service
 
         self.assertNotEqual(service._COPY.unverified_answer, shown)
         self.assertIn("جامعة القاهرة", shown)
 
     async def test_a_turn_that_required_the_search_keeps_the_answer(self):
-        from backend.chat.turn_policy import TurnPlan
+        from backend.agent.chat.turn_policy import TurnPlan
 
         plan = TurnPlan(exposed_tools=[KNOWLEDGE_TOOL], forced_tool=KNOWLEDGE_TOOL)
         self._assert_answered(await self._shown(plan))
@@ -278,7 +278,7 @@ class AKnowledgeBaseTurnKeepsItsAnswer(unittest.IsolatedAsyncioTestCase):
     async def test_a_turn_whose_search_the_planner_dispatched_keeps_the_answer(self):
         """The other path a knowledge-base turn takes: the classifier NAMED the tool, so
         the planner wrote the call itself and the model only saw the result."""
-        from backend.chat.turn_policy import TurnPlan
+        from backend.agent.chat.turn_policy import TurnPlan
 
         plan = TurnPlan(
             exposed_tools=[KNOWLEDGE_TOOL],

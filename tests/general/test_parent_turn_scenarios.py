@@ -27,10 +27,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-import backend.chat.runtime as runtime
+import backend.agent.chat.runtime as runtime
 from backend.composition import Services
 
-service = importlib.import_module("backend.chat.service")
+service = importlib.import_module("backend.agent.chat.service")
 
 # ---------------------------------------------------------------------------
 # The school's actual material, as retrieval would hand it over.
@@ -94,7 +94,7 @@ class ScriptedAgent:
             # the context, and `_agent_worker`'s `finally` puts the profile copy on the
             # wire from that record. A scripted agent that skipped this would make the
             # no-knowledge scenarios assert against an empty bubble and pass for the
-            # wrong reason. See `backend/chat/runtime.py`.
+            # wrong reason. See `backend/agent/chat/runtime.py`.
             status = self.trace.get("retrieval_status")
             if status in runtime.TERMINAL_STATUSES:
                 self.ctx.note_short_circuit(status)
@@ -143,9 +143,9 @@ class ParentTurnScenario(unittest.IsolatedAsyncioTestCase):
     """Base: run one turn through the real stream and read what arrived."""
 
     def setUp(self):
-        from backend.chat.orchestrator import _hand_to_graph
-        from backend.chat.signals import RequestSignals
-        from backend.chat.turn_policy import TurnPlan
+        from backend.agent.chat.orchestrator import _hand_to_graph
+        from backend.agent.chat.signals import RequestSignals
+        from backend.agent.chat.turn_policy import TurnPlan
 
         self.plan = TurnPlan()
         # What the parent typed. Overridden per scenario where the wording matters.

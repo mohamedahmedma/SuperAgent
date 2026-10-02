@@ -6,15 +6,15 @@ from unittest.mock import Mock, patch
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from backend.chat.background import InlineJobs
+from backend.agent.chat.background import InlineJobs
 from backend.composition import Services
-from backend.chat.clarification import PENDING_HITL_KEY
+from backend.agent.chat.clarification import PENDING_HITL_KEY
 
 # A clarification asked a moment ago. Pending questions expire after a day
 # (agent.clarification_ttl_minutes), so a fixture modelling a LIVE one is dated now.
 _ASKED_JUST_NOW = datetime.now(timezone.utc).isoformat()
 
-service = importlib.import_module("backend.chat.service")
+service = importlib.import_module("backend.agent.chat.service")
 
 
 class FakeStorage:
@@ -106,8 +106,8 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
     """
 
     def setUp(self):
-        from backend.chat.turn_policy import TurnPlan
-        from backend.chat.signals import RequestSignals
+        from backend.agent.chat.turn_policy import TurnPlan
+        from backend.agent.chat.signals import RequestSignals
 
         self._planner = patch.object(
             service, "plan_turn", lambda *a, **k: (TurnPlan(), RequestSignals()),
@@ -131,7 +131,7 @@ class ChatHitlResumeTests(unittest.IsolatedAsyncioTestCase):
 
         events = _parse_sse_events(chunks)
         self.assertEqual("rag_step", events[0].get("type"))
-        # NOTE: this label is a hardcoded string in backend/chat/service.py and must
+        # NOTE: this label is a hardcoded string in backend/agent/chat/service.py and must
         # stay in sync with that file.
         self.assertEqual("Request received, preparing response", events[0]["step"]["label"])
 

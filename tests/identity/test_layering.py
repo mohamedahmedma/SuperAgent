@@ -27,7 +27,7 @@ import pathlib
 
 import pytest
 
-IDENTITY = pathlib.Path(__file__).resolve().parents[2] / "identity"
+IDENTITY = pathlib.Path(__file__).resolve().parents[2] / "src" / "identity"
 
 
 def _modules(package: str) -> list[pathlib.Path]:
