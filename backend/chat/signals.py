@@ -728,6 +728,11 @@ class SignalLadder:
         self._detectors = list(detectors)
         self._required = required
 
+    @property
+    def detectors(self) -> tuple:
+        """The rungs in the order they climb — which is profile data, so read, not assumed."""
+        return tuple(self._detectors)
+
     def run(self, ctx: SignalContext) -> RequestSignals:
         signals = RequestSignals(
             question=ctx.question,

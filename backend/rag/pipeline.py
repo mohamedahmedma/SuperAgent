@@ -426,7 +426,12 @@ def build_rag_graph(complexity_planning_enabled: Optional[bool] = None):
             },
         )
 
-        graph.add_conditional_edges("prepare_sub_questions", fanout_sub_questions)
+        # The router returns `Send`s, which route on their own; the path map only
+        # declares where they can go. Without it LangGraph cannot see the edge, and
+        # `get_graph()` draws this node ending the graph with the sub-agent unreachable.
+        graph.add_conditional_edges(
+            "prepare_sub_questions", fanout_sub_questions, ["rag_sub_agent"]
+        )
 
         # Parallel sub-agents → synthesis
         graph.add_edge("rag_sub_agent", "synthesis")

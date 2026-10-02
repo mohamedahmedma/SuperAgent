@@ -83,7 +83,19 @@ UPLOAD_ENV.txt
 # Anchored: this was written for the top-level scratch folder that left the index in
 # 5607171. Unanchored it also swallowed deploy/scripts/, which is deployment source and
 # has to ship — a directory silently absent from a release is a hard failure to spot.
-/scripts/
+#
+# `/scripts/*` rather than `/scripts/`, so a single file below can be re-included: git
+# never looks inside an excluded DIRECTORY, and a negation under one does nothing.
+/scripts/*
+
+# The turn-flow diagram's output. `python -m backend.graphs` redraws it from the code at
+# any time, and the drawer itself is source under backend/graphs/ — so these are derived
+# files, and a PNG re-rendered on every run is noise in a diff nobody can read.
+# GRAPHS_OUTPUT_DIR moves them; this ignores the default place they land.
+/graphs/
+
+# A local launcher for this machine, not something another checkout should inherit.
+/SUPERAGENT.bat
 
 # pytest run logs; a stray test*.txt at the root is collected as a doctest file
 # and a UTF-16 one fails collection before a single test runs.
