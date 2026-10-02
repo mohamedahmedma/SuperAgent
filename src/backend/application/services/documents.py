@@ -12,6 +12,13 @@ What each does is what `api/routes/documents.py` did inline, moved without chang
 step, percentage, message and error string below is the one the route used, because the admin
 UI renders them and the tests pin them. The route now keeps only what is HTTP's - reading the
 upload, validating the request, scheduling the background task, shaping the response.
+
+Every collaborator is a `Provider`, called inside the operation that first uses it and never
+when the service is built: a job poll builds the job tracker and nothing else, and a loader
+that cannot be built fails the job at `parse`. Every store whose construction can fail is built
+where the route built it, and fails with the route's message. The two whose constructors only
+keep a unit of work - the job tracker and the pair store - are now built after the request is
+validated rather than before, and the pair list builds its store inside its operation.
 """
 
 from __future__ import annotations
@@ -31,6 +38,7 @@ from backend.application.ports.collaborators import (
     DocumentParser,
     JobTracker,
     ParentChunks,
+    Provider,
     VectorIndex,
     VectorWriter,
 )
@@ -168,10 +176,10 @@ class DocumentCatalogue:
     def __init__(
         self,
         *,
-        vectors: VectorIndex,
-        parent_chunks: ParentChunks,
-        pairs: DocumentPairs,
-        assets: AssetReview,
+        vectors: Provider[VectorIndex],
+        parent_chunks: Provider[ParentChunks],
+        pairs: Provider[DocumentPairs],
+        assets: Provider[AssetReview],
     ) -> None:
         self._vectors = vectors
         self._parent_chunks = parent_chunks
@@ -181,8 +189,9 @@ class DocumentCatalogue:
     def list_documents(self) -> list[dict]:
         """Each indexed file with its type and how many leaf chunks it has in the index."""
         with operation("Failed to retrieve document list"):
-            self._vectors.init_collection()
-            results = self._vectors.query(output_fields=["filename", "file_type"], limit=10000)
+            vectors = self._vectors()
+            vectors.init_collection()
+            results = vectors.query(output_fields=["filename", "file_type"], limit=10000)
             stats: dict[str, dict] = {}
             for item in results:
                 filename = item.get("filename", "")
@@ -211,11 +220,12 @@ class DocumentCatalogue:
         browser keeps one implementation of it.
         """
         with operation("Failed to read chunks"):
-            self._vectors.init_collection()
-            rows = self._vectors.query_all(
+            vectors = self._vectors()
+            vectors.init_collection()
+            rows = vectors.query_all(
                 filter_expr=_filename_filter(filename), output_fields=CHUNK_FIELDS
             )
-            rows = list(rows) + self._parent_chunks.documents_by_filename(filename)
+            rows = list(rows) + self._parent_chunks().documents_by_filename(filename)
 
         chunks = sorted(
             (_chunk(row) for row in rows),
@@ -248,12 +258,13 @@ class DocumentCatalogue:
         chunk ids and nothing else.
         """
         with operation("Failed to read assets"):
-            dossiers = self._assets.list_by_filename(filename)
+            dossiers = self._assets().list_by_filename(filename)
 
         chunk_ids_by_asset: dict[str, list[str]] = {}
         try:
-            self._vectors.init_collection()
-            rows = self._vectors.query_all(
+            vectors = self._vectors()
+            vectors.init_collection()
+            rows = vectors.query_all(
                 filter_expr=_filename_filter(filename), output_fields=CHUNK_FIELDS
             )
             for row in sorted(rows, key=lambda r: (r.get("chunk_level", 0), r.get("chunk_idx", 0))):
@@ -275,7 +286,7 @@ class DocumentCatalogue:
         letterhead accepted on page 1 does not ask again on page 40.
         """
         with operation("Failed to record the review"):
-            dossier = self._assets.mark_reviewed(asset_id)
+            dossier = self._assets().mark_reviewed(asset_id)
         if dossier is None:
             raise NotFound("Asset not found")
         return dossier
@@ -290,13 +301,14 @@ class DocumentCatalogue:
         are listed too, because they still answer questions.
         """
         with operation("Failed to retrieve document pairs"):
-            self._vectors.init_collection()
+            vectors = self._vectors()
+            vectors.init_collection()
             counts: dict[str, int] = {}
-            for item in self._vectors.query(output_fields=["filename"], limit=10000):
+            for item in vectors.query(output_fields=["filename"], limit=10000):
                 name = item.get("filename", "")
                 counts[name] = counts.get(name, 0) + 1
 
-            pairs = self._pairs.list_pairs()
+            pairs = self._pairs().list_pairs()
             rows = [
                 {
                     "pair_id": pair.pair_id,
@@ -427,12 +439,12 @@ class DocumentIngestion:
     def __init__(
         self,
         *,
-        loader: DocumentParser,
-        parent_chunks: ParentChunks,
-        vector_writer: VectorWriter,
-        remover: DocumentEraser,
-        pairs: DocumentPairs,
-        jobs: JobTracker,
+        loader: Provider[DocumentParser],
+        parent_chunks: Provider[ParentChunks],
+        vector_writer: Provider[VectorWriter],
+        remover: Provider[DocumentEraser],
+        pairs: Provider[DocumentPairs],
+        jobs: Provider[JobTracker],
         upload_dir: Path,
         forget_corpus_languages: Callable[[], None],
     ) -> None:
@@ -449,23 +461,24 @@ class DocumentIngestion:
 
     async def accept_upload(self, filename: str, save: SaveUpload) -> AcceptedUpload:
         """Save one file and create its job. The filename is already validated."""
+        jobs = self._jobs()
         self._upload_dir.mkdir(parents=True, exist_ok=True)
-        job = self._jobs.create_job(filename)
+        job = jobs.create_job(filename)
         path = self._upload_dir / filename
         try:
-            self._jobs.update_step(job["job_id"], "upload", 1, "running", "Saving file to server")
+            jobs.update_step(job["job_id"], "upload", 1, "running", "Saving file to server")
             await save(path)
-            self._jobs.complete_step(
+            jobs.complete_step(
                 job["job_id"], "upload", "File uploaded, waiting for background processing"
             )
         except Exception as exc:
-            self._jobs.fail_job(job["job_id"], "upload", f"Failed to save file: {exc}")
+            jobs.fail_job(job["job_id"], "upload", f"Failed to save file: {exc}")
             raise OperationFailed("Failed to save file", exc) from exc
         return AcceptedUpload(job_id=job["job_id"], filename=filename, path=path)
 
     def require_pair(self, pair_id: str) -> None:
         """Refuse a `pair_id` that names no row. An empty one means a new row."""
-        if pair_id and not self._pairs.get_pair(pair_id):
+        if pair_id and not self._pairs().get_pair(pair_id):
             raise NotFound(f"No document pair {pair_id}")
 
     async def accept_pair(self, uploads: Sequence[tuple[str, str, SaveUpload]]) -> AcceptedPair:
@@ -475,22 +488,23 @@ class DocumentIngestion:
         at least one file, each of a supported type, and not the same file twice.
         """
         names = [filename for _language, filename, _save in uploads]
+        jobs = self._jobs()
         self._upload_dir.mkdir(parents=True, exist_ok=True)
-        job = self._jobs.create_job(", ".join(names))
+        job = jobs.create_job(", ".join(names))
         saved: list[tuple[str, str, str]] = []
         try:
-            self._jobs.update_step(job["job_id"], "upload", 1, "running", "Saving files to server")
+            jobs.update_step(job["job_id"], "upload", 1, "running", "Saving files to server")
             for language, filename, save in uploads:
                 path = self._upload_dir / filename
                 await save(path)
                 saved.append((language, str(path), filename))
-            self._jobs.complete_step(
+            jobs.complete_step(
                 job["job_id"],
                 "upload",
                 f"{len(saved)} file(s) uploaded, waiting for background processing",
             )
         except Exception as exc:
-            self._jobs.fail_job(job["job_id"], "upload", f"Failed to save file: {exc}")
+            jobs.fail_job(job["job_id"], "upload", f"Failed to save file: {exc}")
             raise OperationFailed("Failed to save file", exc) from exc
         return AcceptedPair(job_id=job["job_id"], names=", ".join(names), sides=saved)
 
@@ -498,7 +512,7 @@ class DocumentIngestion:
 
     def ingest(self, job_id: str, file_path: str, filename: str) -> None:
         """Parse, chunk and index one saved file, replacing any document of the same name."""
-        jobs = self._jobs
+        jobs = self._jobs()
         failed_step = "cleanup"
         try:
             jobs.complete_step(job_id, "upload", "File saved to server")
@@ -507,7 +521,7 @@ class DocumentIngestion:
             jobs.update_step(
                 job_id, "cleanup", 10, "running", "Cleaning up old document with the same name"
             )
-            self._remover.remove(filename)
+            self._remover().remove(filename)
             jobs.complete_step(job_id, "cleanup", "Old version cleanup complete")
 
             failed_step = "parse"
@@ -523,7 +537,7 @@ class DocumentIngestion:
             # `createUploadSteps()` as well - `updateUploadStep` drops an unknown key with
             # `if (idx === -1) return`, so half the change would show nothing and log nothing.
             progress = FigureProgress(jobs, job_id)
-            new_docs = self._loader.load_document(file_path, filename, progress=progress)
+            new_docs = self._loader().load_document(file_path, filename, progress=progress)
             if not new_docs:
                 raise ValueError("Document processing failed: could not extract content")
 
@@ -546,7 +560,7 @@ class DocumentIngestion:
 
             failed_step = "parent_store"
             jobs.update_step(job_id, "parent_store", 20, "running", "Writing parent chunks")
-            self._parent_chunks.upsert_documents(parent_docs)
+            self._parent_chunks().upsert_documents(parent_docs)
             jobs.complete_step(job_id, "parent_store", f"Parent chunks stored: {len(parent_docs)}")
 
             failed_step = "vector_store"
@@ -573,7 +587,7 @@ class DocumentIngestion:
                     processed_chunks=processed,
                 )
 
-            self._vector_writer.write_documents(leaf_docs, progress_callback=on_vector_progress)
+            self._vector_writer().write_documents(leaf_docs, progress_callback=on_vector_progress)
             jobs.complete_step(
                 job_id,
                 "vector_store",
@@ -591,7 +605,7 @@ class DocumentIngestion:
         column would leave the corpus in a state the form cannot express - one side indexed,
         the row unpaired - and the admin with no obvious way back.
         """
-        docs = self._loader.load_document(file_path, filename)
+        docs = self._loader().load_document(file_path, filename)
         if not docs:
             raise ValueError(f"{filename}: could not extract content")
 
@@ -613,7 +627,7 @@ class DocumentIngestion:
         writes: both files are parsed and language-checked first, and only then is either
         indexed. That is what keeps a rejected pair from leaving half a document behind.
         """
-        jobs = self._jobs
+        jobs = self._jobs()
         failed_step = "parse"
         try:
             jobs.complete_step(job_id, "upload", "Files saved to server")
@@ -650,7 +664,7 @@ class DocumentIngestion:
             failed_step = "cleanup"
             jobs.update_step(job_id, "cleanup", 10, "running", "Cleaning up old versions")
             for _, filename, _ in parsed:
-                self._remover.remove(filename, include_assets=False)
+                self._remover().remove(filename, include_assets=False)
             jobs.complete_step(job_id, "cleanup", "Old version cleanup complete")
 
             failed_step = "parent_store"
@@ -658,7 +672,7 @@ class DocumentIngestion:
             parent_written = 0
             for _, _, docs in parsed:
                 parents = [d for d in docs if _level(d) in (1, 2)]
-                self._parent_chunks.upsert_documents(parents)
+                self._parent_chunks().upsert_documents(parents)
                 parent_written += len(parents)
             jobs.complete_step(job_id, "parent_store", f"Parent chunks stored: {parent_written}")
 
@@ -688,7 +702,7 @@ class DocumentIngestion:
                         processed_chunks=done,
                     )
 
-                self._vector_writer.write_documents(leaves, progress_callback=on_progress)
+                self._vector_writer().write_documents(leaves, progress_callback=on_progress)
                 written += len(leaves)
             jobs.complete_step(
                 job_id, "vector_store", f"Vectorization and storage complete: {written} leaf chunks"
@@ -698,7 +712,7 @@ class DocumentIngestion:
             # this entry's Arabic or English half, or routing would exclude the twin in favour
             # of a document that is not in the corpus.
             for language, filename, _ in parsed:
-                pair_id = self._pairs.attach(pair_id, language, filename, title=title).pair_id
+                pair_id = self._pairs().attach(pair_id, language, filename, title=title).pair_id
 
             _forget_corpus_languages(self._forget_corpus_languages)
 
@@ -718,12 +732,12 @@ class DocumentIngestion:
         with operation("Document upload failed"):
             self._upload_dir.mkdir(parents=True, exist_ok=True)
             # Clean up an existing document with the same name, to keep the stores consistent.
-            self._remover.remove(filename)
+            self._remover().remove(filename)
             path = self._upload_dir / filename
             path.write_bytes(content)
 
             try:
-                new_docs = self._loader.load_document(str(path), filename)
+                new_docs = self._loader().load_document(str(path), filename)
             except Exception as exc:
                 raise OperationFailed("Document processing failed", exc) from exc
             if not new_docs:
@@ -735,8 +749,8 @@ class DocumentIngestion:
                     "Document processing failed: no retrievable leaf chunks were generated"
                 )
 
-            self._parent_chunks.upsert_documents(parent_docs)
-            self._vector_writer.write_documents(leaf_docs)
+            self._parent_chunks().upsert_documents(parent_docs)
+            self._vector_writer().write_documents(leaf_docs)
             return IngestedDocument(
                 filename=filename, leaf_chunks=len(leaf_docs), parent_chunks=len(parent_docs)
             )
@@ -744,14 +758,14 @@ class DocumentIngestion:
     # -- the upload jobs --
 
     def upload_job(self, job_id: str) -> dict:
-        job = self._jobs.get_job(job_id)
+        job = self._jobs().get_job(job_id)
         if not job:
             raise NotFound("Upload job does not exist or has expired")
         return job
 
     def upload_jobs(self) -> list[dict]:
         """Every upload job, newest first."""
-        jobs = self._jobs.list_jobs()
+        jobs = self._jobs().list_jobs()
         jobs.sort(key=lambda item: item.get("created_at", ""), reverse=True)
         return jobs
 
@@ -765,9 +779,9 @@ class DocumentRemoval:
     def __init__(
         self,
         *,
-        remover: DocumentEraser,
-        pairs: DocumentPairs,
-        jobs: JobTracker,
+        remover: Provider[DocumentEraser],
+        pairs: Provider[DocumentPairs],
+        jobs: Provider[JobTracker],
         delete_steps: list[tuple[str, str]],
         forget_corpus_languages: Callable[[], None],
     ) -> None:
@@ -779,25 +793,26 @@ class DocumentRemoval:
 
     def start(self, filename: str) -> dict:
         """Create the delete job the admin UI will poll. The work is the caller's to schedule."""
-        job = self._jobs.create_job(
+        jobs = self._jobs()
+        job = jobs.create_job(
             filename,
             steps=self._delete_steps,
             current_step="prepare",
             message="Waiting to delete",
             completion_step="parent_store",
         )
-        self._jobs.update_step(job["job_id"], "prepare", 1, "running", "Delete job submitted")
+        jobs.update_step(job["job_id"], "prepare", 1, "running", "Delete job submitted")
         return job
 
     def remove(self, job_id: str, filename: str) -> None:
         """Delete a document in the background, reporting through its job."""
-        jobs = self._jobs
+        jobs = self._jobs()
         try:
-            chunks_deleted = self._remover.remove(filename, jobs, job_id)
+            chunks_deleted = self._remover().remove(filename, jobs, job_id)
             # Clear the file off its pair row. Done HERE and not in the remover, which upload
             # also calls to replace a same-named document - detaching there would silently
             # unpair a document every time somebody re-uploaded one side of it.
-            _detach_from_pair(self._pairs, filename, self._forget_corpus_languages)
+            _detach_from_pair(self._pairs(), filename, self._forget_corpus_languages)
             jobs.complete_job(
                 job_id, f"Deleted {filename}, {chunks_deleted} vector records removed"
             )
@@ -809,12 +824,12 @@ class DocumentRemoval:
     def remove_now(self, filename: str) -> int:
         """Delete a document while the request waits; how many vector records went."""
         with operation("Failed to delete document"):
-            chunks_deleted = self._remover.remove(filename)
-            _detach_from_pair(self._pairs, filename, self._forget_corpus_languages)
+            chunks_deleted = self._remover().remove(filename)
+            _detach_from_pair(self._pairs(), filename, self._forget_corpus_languages)
             return chunks_deleted
 
     def delete_job(self, job_id: str) -> dict:
-        job = self._jobs.get_job(job_id)
+        job = self._jobs().get_job(job_id)
         if not job:
             raise NotFound("Delete job does not exist or has expired")
         return job

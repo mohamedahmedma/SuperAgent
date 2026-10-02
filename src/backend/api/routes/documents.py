@@ -121,10 +121,35 @@ async def list_document_chunks(
     _: User = Depends(require_admin),
     catalogue: DocumentCatalogue = Depends(document_catalogue),
 ):
-    """Every chunk a document was indexed into, for the admin inspector, with `q` marked.
+    """Every chunk a document was indexed into, for the admin inspector.
 
-    See `DocumentCatalogue.list_chunks` for why both stores are read and why matching is on
-    folded text.
+    The corpus as retrieval sees it, which is the one thing no other view shows. The
+    document list gives a count; this gives the chunks themselves, their hierarchy
+    (`chunk_level` with `parent_chunk_id`/`root_chunk_id`) and the metadata a developer
+    needs to explain why a question did or did not find something.
+
+    `q` MARKS rather than removes. Each chunk comes back with `matched`, and the document
+    stays whole: the view that draws the corpus as a bordered document needs the whole
+    structure to draw, and a response filtered down to the hits would have it rendering
+    fragments of a document and calling them the document. The list view narrows itself
+    on the flag.
+
+    Matching is on FOLDED text — `text_matching.fold`, the same folding the sparse
+    retrieval lane keys on. That is what makes it usable on this corpus: an admin typing
+    مدرسة finds مدرسه, typing without diacritics finds text with them, and case never
+    matters. Folding on the server rather than in the browser keeps one implementation of
+    it; a second one in TypeScript would drift from this one the first time either was
+    edited, and the filter would quietly stop agreeing with retrieval.
+
+    BOTH stores are read, and that is not an optimisation. Only leaf chunks are
+    vectorised: an upload writes levels 1 and 2 to `parent_chunks` and level 3
+    to Milvus. Reading Milvus alone returns every leaf with a `parent_chunk_id` naming a
+    chunk that is not in the response — measured on the shipped corpus, 175 of 175 — so
+    the tree would be 175 orphans and the view would be lying about the structure it
+    claims to show.
+
+    Ordered by level then index, so the flat list reads the way the document does and the
+    tree can be built from it without a second pass.
     """
     listing = catalogue.list_chunks(filename, q)
     return DocumentChunkListResponse(
@@ -169,8 +194,8 @@ async def upload_document_pair(
 ):
     """Upload one bilingual entry: an Arabic file, an English file, or one of the two.
 
-    `pair_id` names an EXISTING row to fill in, which is how the second language gets added
-    months after the first without re-uploading it. Omitted, a new row is created.
+    `pair_id` names an EXISTING row to fill in, which is how the second language gets
+    added months after the first without re-uploading it. Omitted, a new row is created.
     """
     provided = _pair_uploads(file_ar, file_en, pair_id, ingestion)
     accepted = await ingestion.accept_pair(
@@ -197,11 +222,25 @@ async def list_document_assets(
 ):
     """Every image of a document with what extraction made of it, for manual review.
 
-    The counterpart to `/documents/{filename}/chunks`: that view shows the corpus as retrieval
-    holds it, this one shows where a figure chunk's text CAME FROM - the description, the
-    transcription, the model, its confidence, the error that explains a failure. The public
-    asset routes answer with `AssetReference`, which carries none of it and should not.
-    `needs_review` is what the extractor stored, not something computed here.
+    The counterpart to `/documents/{filename}/chunks`: that view shows the corpus as
+    retrieval holds it, this one shows where a figure chunk's text CAME FROM, which is
+    the one thing a reviewer needs and no other view has ever had. Until now the whole
+    of it — the description, the transcription, the model, its confidence, the error
+    that explains a failure — existed only on the dossier and was returned by nothing.
+    The only asset routes answer with `AssetReference`, the public contract a chat
+    client consumes, which carries none of it and should not.
+
+    `needs_review` is not computed here. Every extraction has been setting it since the
+    pipeline was written — a vision confidence under the profile's
+    `escalate_below_confidence`, or a heuristic run that recovered no text at all — and
+    storing it in its own column. Nothing had ever read it back.
+
+    Each asset carries the ids of the chunks it produced. The link is only ever written
+    the other way (a chunk names its `asset_ids`; `SourceRef.doc_chunk_id` is never
+    filled, because enrichment runs before chunking assigns an id), so the reverse is
+    built here by inverting it. Chunks are read best-effort: a document's images are
+    still worth reviewing when the vector store cannot be reached, so an unreadable
+    index costs the `chunk_ids` and nothing else.
     """
     listing = catalogue.list_assets(filename)
     assets = [_asset_info(dossier, listing.chunk_ids_by_asset) for dossier in listing.dossiers]
@@ -221,10 +260,20 @@ async def mark_asset_reviewed(
 ):
     """Record that an admin looked at this extraction and accepted it.
 
-    `needs_review` was raised by the extractor and until this existed nothing could lower it -
-    a flag that only goes up is a permanent label, not a queue. The response is the asset as it
-    now reads, so the caller updates from what was stored rather than assuming the write did
-    what it asked.
+    `needs_review` is raised by the extractor — a vision confidence under the profile's
+    threshold, or a heuristic run that recovered no text — and until now nothing could
+    lower it. A flag that only ever goes up is not a queue; it is a permanent label, and
+    an admin who has checked every image would still see the same count tomorrow.
+
+    This clears the flag and nothing else. It does not re-extract, does not edit the
+    text, and does not change whether the asset is indexed: it records a judgement about
+    an extraction that stays exactly as it is. Correcting a wrong transcription is a
+    different action and is not built.
+
+    Accepting is keyed by DIGEST, because the extraction is: the same bytes have one
+    extraction shared by every occurrence, so a letterhead accepted on page 1 does not
+    ask again on page 40. The response is the asset as it now reads, so the caller
+    updates from what was stored rather than assuming the write did what it asked.
     """
     require_assets_enabled()
     return _asset_info(catalogue.mark_reviewed(asset_id), {})
@@ -235,7 +284,13 @@ async def list_document_pairs(
     _: User = Depends(require_admin),
     catalogue: DocumentCatalogue = Depends(document_catalogue),
 ):
-    """The bilingual view of the corpus: one row per entry, up to two files on it."""
+    """The bilingual view of the corpus: one row per entry, up to two files on it.
+
+    Chunk counts come from Milvus, which remains the only place that knows how much of a
+    document was actually indexed. A file present on a row but absent from Milvus shows
+    zero — worth surfacing rather than hiding, because it means an ingest failed after
+    the row was written.
+    """
     return DocumentPairListResponse(
         pairs=[DocumentPairInfo(**row) for row in catalogue.list_pairs()]
     )

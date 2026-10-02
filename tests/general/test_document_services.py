@@ -124,6 +124,15 @@ class _Pairs:
         return list(self.pairs)
 
 
+def _broken(store):
+    """A provider whose store cannot be built - a malformed setting, a missing tokenizer."""
+
+    def provide():
+        raise RuntimeError(f"{store} cannot be built")
+
+    return provide
+
+
 def _docs(parents=1, leaves=2, figures=0):
     return (
         [{"chunk_level": 1, "text": "p"} for _ in range(parents)]
@@ -145,14 +154,20 @@ class _IngestionCase(unittest.TestCase):
         self.pairs = _Pairs(known={"pair-1"})
         self.forgotten = []
 
-    def ingestion(self):
+    def ingestion(self, **broken):
+        """The service over this case's fakes. `broken` names stores whose provider raises,
+        as building a real one does when its configuration is wrong."""
+        given = {
+            "loader": lambda: self.loader,
+            "parent_chunks": lambda: self.parents,
+            "vector_writer": lambda: self.writer,
+            "remover": lambda: self.remover,
+            "pairs": lambda: self.pairs,
+            "jobs": lambda: self.jobs,
+        }
+        given.update(broken)
         return DocumentIngestion(
-            loader=self.loader,
-            parent_chunks=self.parents,
-            vector_writer=self.writer,
-            remover=self.remover,
-            pairs=self.pairs,
-            jobs=self.jobs,
+            **given,
             upload_dir=self.upload_dir,
             forget_corpus_languages=lambda: self.forgotten.append(True),
         )
@@ -288,6 +303,8 @@ class IngestNowTests(_IngestionCase):
         self.assertEqual([("remove", "fees.pdf"), ("load", "fees.pdf")], log)
         self.assertEqual(b"%PDF", (self.upload_dir / "fees.pdf").read_bytes())
         self.assertEqual((2, 1), (result.leaf_chunks, result.parent_chunks))
+        self.assertEqual([[{"chunk_level": 1, "text": "p"}]], self.parents.upserted)
+        self.assertEqual([[{"chunk_level": 3, "text": "leaf"}] * 2], self.writer.written)
 
     def test_each_failure_is_reported_in_the_routes_own_words(self):
         cases = [
@@ -334,11 +351,15 @@ class RemovalTests(unittest.TestCase):
         self.pairs = _Pairs()
         self.forgotten = []
 
-    def removal(self):
+    def removal(self, **broken):
+        given = {
+            "remover": lambda: self.remover,
+            "pairs": lambda: self.pairs,
+            "jobs": lambda: self.jobs,
+        }
+        given.update(broken)
         return DocumentRemoval(
-            remover=self.remover,
-            pairs=self.pairs,
-            jobs=self.jobs,
+            **given,
             delete_steps=[("prepare", "Preparing deletion")],
             forget_corpus_languages=lambda: self.forgotten.append(True),
         )
@@ -409,10 +430,15 @@ class _Index:
 
 
 class CatalogueTests(unittest.TestCase):
-    def catalogue(self, index, pairs=None):
-        return DocumentCatalogue(
-            vectors=index, parent_chunks=_Parents(), pairs=pairs or _Pairs(), assets=None
-        )
+    def catalogue(self, index, pairs=None, **broken):
+        given = {
+            "vectors": lambda: index,
+            "parent_chunks": _Parents,
+            "pairs": lambda: pairs or _Pairs(),
+            "assets": _broken("the asset store"),
+        }
+        given.update(broken)
+        return DocumentCatalogue(**given)
 
     def test_documents_are_counted_by_file(self):
         index = _Index(
@@ -469,6 +495,162 @@ class CatalogueTests(unittest.TestCase):
         with self.assertRaises(OperationFailed) as caught:
             self.catalogue(_Index(error=RuntimeError("milvus down"))).list_pairs()
         self.assertEqual("Failed to retrieve document pairs: milvus down", caught.exception.message)
+
+
+class StoresAreBuiltWhereTheyAreUsedTests(_IngestionCase):
+    """Each operation builds only the stores it reads, inside the operation that reads them.
+
+    The services are built while FastAPI resolves a route's dependencies, before the route
+    body and outside every `operation(...)`. Were the stores built there too, one that could
+    not be built would answer every document route with a plain-text 500 - the job polls, and
+    an upload refused for its file type, included. These pin the answers the routes gave when
+    they built each store themselves.
+    """
+
+    def test_a_job_poll_builds_the_job_tracker_and_nothing_else(self):
+        ingestion = self.ingestion(
+            loader=_broken("the document loader"),
+            parent_chunks=_broken("the parent-chunk store"),
+            vector_writer=_broken("the vector writer"),
+            remover=_broken("the document remover"),
+            pairs=_broken("the pair store"),
+        )
+        self.jobs.jobs = {"job-1": {"job_id": "job-1", "created_at": "2026-09-01"}}
+        self.assertEqual("job-1", ingestion.upload_job("job-1")["job_id"])
+        self.assertEqual(["job-1"], [job["job_id"] for job in ingestion.upload_jobs()])
+
+    def _only_the_tracker(self):
+        return self.ingestion(
+            loader=_broken("the document loader"),
+            parent_chunks=_broken("the parent-chunk store"),
+            vector_writer=_broken("the vector writer"),
+            remover=_broken("the document remover"),
+            pairs=_broken("the pair store"),
+        )
+
+    def test_accepting_an_upload_builds_the_job_tracker_and_nothing_else(self):
+        async def save(path):
+            pass
+
+        accepted = asyncio.run(self._only_the_tracker().accept_upload("fees.pdf", save))
+        self.assertEqual("job-1", accepted.job_id)
+
+    def test_accepting_a_pair_builds_the_job_tracker_and_nothing_else(self):
+        async def save(path):
+            pass
+
+        accepted = asyncio.run(
+            self._only_the_tracker().accept_pair(
+                [("ar", "fees_ar.pdf", save), ("en", "fees_en.pdf", save)]
+            )
+        )
+        self.assertEqual("job-1", accepted.job_id)
+
+    def test_a_loader_that_cannot_be_built_fails_the_job_at_parse(self):
+        self.ingestion(loader=_broken("the document loader")).ingest(
+            "job-1", "/tmp/fees.pdf", "fees.pdf"
+        )
+        self.assertEqual(["fees.pdf"], self.remover.calls)
+        self.assertEqual(
+            [("fail_job", "parse", "the document loader cannot be built")],
+            self.jobs.of("fail_job"),
+        )
+
+    def test_a_pair_whose_loader_cannot_be_built_fails_at_parse_before_any_write(self):
+        self.ingestion(loader=_broken("the document loader")).ingest_pair(
+            "job-1", "", "Fees", [("en", "/tmp/fees.pdf", "fees.pdf")]
+        )
+        self.assertEqual(
+            [("fail_job", "parse", "the document loader cannot be built")],
+            self.jobs.of("fail_job"),
+        )
+        self.assertEqual([], self.remover.calls)
+
+    def test_ingesting_now_reports_each_unbuildable_store_under_its_operation(self):
+        cases = [
+            ("loader", "Document processing failed: the document loader cannot be built"),
+            ("remover", "Document upload failed: the document remover cannot be built"),
+            ("vector_writer", "Document upload failed: the vector writer cannot be built"),
+        ]
+        names = {
+            "loader": "the document loader",
+            "remover": "the document remover",
+            "vector_writer": "the vector writer",
+        }
+        for store, message in cases:
+            with self.subTest(store=store):
+                ingestion = self.ingestion(**{store: _broken(names[store])})
+                with self.assertRaises(OperationFailed) as caught:
+                    ingestion.ingest_now("fees.pdf", b"%PDF")
+                self.assertEqual(message, caught.exception.message)
+
+    def removal(self, **broken):
+        given = {
+            "remover": lambda: self.remover,
+            "pairs": lambda: self.pairs,
+            "jobs": lambda: self.jobs,
+        }
+        given.update(broken)
+        return DocumentRemoval(
+            **given,
+            delete_steps=[("prepare", "Preparing deletion")],
+            forget_corpus_languages=lambda: None,
+        )
+
+    @staticmethod
+    def catalogue(**given):
+        """A catalogue in which every store it is not `given` cannot be built."""
+        stores = {
+            "vectors": _broken("the vector index"),
+            "parent_chunks": _broken("the parent-chunk store"),
+            "pairs": _broken("the pair store"),
+            "assets": _broken("the asset store"),
+        }
+        stores.update(given)
+        return DocumentCatalogue(**stores)
+
+    def test_a_delete_job_is_started_and_polled_without_the_remover(self):
+        removal = self.removal(
+            remover=_broken("the document remover"), pairs=_broken("the pair store")
+        )
+        self.assertEqual("job-1", removal.start("fees.pdf")["job_id"])
+        self.jobs.jobs = {"job-1": {"job_id": "job-1"}}
+        self.assertEqual("job-1", removal.delete_job("job-1")["job_id"])
+
+    def test_a_remover_that_cannot_be_built_fails_the_delete_job(self):
+        self.removal(remover=_broken("the document remover")).remove("job-1", "fees.pdf")
+        self.assertEqual(
+            [("fail_job", "prepare", "the document remover cannot be built")],
+            self.jobs.of("fail_job"),
+        )
+
+    def test_a_delete_while_waiting_reports_an_unbuildable_pair_store_as_the_delete(self):
+        with self.assertRaises(OperationFailed) as caught:
+            self.removal(pairs=_broken("the pair store")).remove_now("fees.pdf")
+        self.assertEqual(
+            "Failed to delete document: the pair store cannot be built", caught.exception.message
+        )
+
+    def test_the_document_list_reports_an_unbuildable_index_as_the_list_failing(self):
+        with self.assertRaises(OperationFailed) as caught:
+            self.catalogue().list_documents()
+        self.assertEqual(
+            "Failed to retrieve document list: the vector index cannot be built",
+            caught.exception.message,
+        )
+
+    def test_the_document_list_builds_only_the_index(self):
+        index = _Index([{"filename": "a.pdf", "file_type": "pdf"}])
+        self.assertEqual(1, len(self.catalogue(vectors=lambda: index).list_documents()))
+
+    def test_an_unbuildable_index_costs_the_asset_view_only_its_chunk_ids(self):
+        dossier = SimpleNamespace(asset_id="a1", source=SimpleNamespace(page_number=1))
+        store = SimpleNamespace(list_by_filename=lambda filename: [dossier])
+        catalogue = self.catalogue(assets=lambda: store)
+        with self.assertLogs("backend.application.services.documents", "ERROR"):
+            listing = catalogue.list_assets("fees.pdf")
+        self.assertEqual([dossier], listing.dossiers)
+        self.assertEqual({}, listing.chunk_ids_by_asset)
 
 
 if __name__ == "__main__":

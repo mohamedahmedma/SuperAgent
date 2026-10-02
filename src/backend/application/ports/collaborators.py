@@ -21,6 +21,17 @@ from backend.application.ports.repositories import AttachmentRecord, DocumentPai
 if TYPE_CHECKING:
     from backend.assets.dossier import AssetDossier
 
+#: A collaborator handed over unbuilt, for the service to build where it first uses it.
+#:
+#: A service is built while FastAPI resolves a route's dependencies: before the route body
+#: runs, and outside every `operation(...)`. A collaborator built there turns a failure to
+#: build it - a malformed `MILVUS_TIMEOUT`, a tokenizer that has to be downloaded - into a
+#: plain-text 500 from every route of that service, including the ones that never touch it:
+#: a job poll, an upload refused for its file type. Provided instead, each one is built
+#: inside the operation that uses it, and fails as that operation, with its message - which
+#: is where the routes built it when they did the work themselves.
+type Provider[T] = Callable[[], T]
+
 # -- conversations ------------------------------------------------------------------
 
 
@@ -171,6 +182,7 @@ __all__ = [
     "DocumentParser",
     "JobTracker",
     "ParentChunks",
+    "Provider",
     "VectorIndex",
     "VectorWriter",
 ]

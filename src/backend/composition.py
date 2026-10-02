@@ -302,7 +302,9 @@ class Services:
         """A user's conversations, as the session routes ask for them.
 
         Built over this container's conversation storage and voice notes, so a test that
-        names either one gets a session service wired to its stand-in.
+        names either one gets a session service wired to its stand-in. The voice notes are
+        provided, not built: only opening a conversation reads them, and building them builds
+        the blob store and the speech-to-text model.
         """
 
         def build() -> SessionService:
@@ -311,7 +313,7 @@ class Services:
 
             return SessionService(
                 conversations=self.conversations,
-                attachments=self.attachments,
+                attachments=lambda: self.attachments,
                 restore_assets=restore_session_assets,
             )
 
@@ -612,6 +614,14 @@ class Services:
     # Built over this container's own stores, so a test that names any one of them - a fake
     # loader, a fake job tracker - gets a service wired to it and the genuine article for
     # everything it did not name.
+    #
+    # Every store is PROVIDED, not built. These services are built while FastAPI resolves a
+    # route's dependencies, outside the operation that reports a failure; building the stores
+    # there made one unbuildable store - a malformed MILVUS_TIMEOUT, a tokenizer that has to
+    # be downloaded - a plain-text 500 from every document route, the job polls included.
+    # Provided, each is built inside the operation that first needs it, failing with that
+    # operation's message - which, for every store whose construction can fail, is where the
+    # routes built it when they did the work themselves.
 
     @property
     def document_catalogue(self) -> DocumentCatalogue:
@@ -621,10 +631,10 @@ class Services:
             from backend.application.services import DocumentCatalogue
 
             return DocumentCatalogue(
-                vectors=self.milvus,
-                parent_chunks=self.parent_chunks,
-                pairs=self.document_pairs,
-                assets=self.asset_store,
+                vectors=lambda: self.milvus,
+                parent_chunks=lambda: self.parent_chunks,
+                pairs=lambda: self.document_pairs,
+                assets=lambda: self.asset_store,
             )
 
         return self._singleton("document_catalogue", build)
@@ -638,12 +648,12 @@ class Services:
             from backend.application.services import DocumentIngestion
 
             return DocumentIngestion(
-                loader=self.document_loader,
-                parent_chunks=self.parent_chunks,
-                vector_writer=self.milvus_writer,
-                remover=self.document_remover,
-                pairs=self.document_pairs,
-                jobs=self.upload_jobs,
+                loader=lambda: self.document_loader,
+                parent_chunks=lambda: self.parent_chunks,
+                vector_writer=lambda: self.milvus_writer,
+                remover=lambda: self.document_remover,
+                pairs=lambda: self.document_pairs,
+                jobs=lambda: self.upload_jobs,
                 upload_dir=UPLOAD_DIR,
                 forget_corpus_languages=forget_corpus_languages,
             )
@@ -659,9 +669,9 @@ class Services:
             from backend.jobs import DELETE_STEPS
 
             return DocumentRemoval(
-                remover=self.document_remover,
-                pairs=self.document_pairs,
-                jobs=self.delete_jobs,
+                remover=lambda: self.document_remover,
+                pairs=lambda: self.document_pairs,
+                jobs=lambda: self.delete_jobs,
                 delete_steps=DELETE_STEPS,
                 forget_corpus_languages=forget_corpus_languages,
             )

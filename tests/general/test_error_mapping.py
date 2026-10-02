@@ -91,7 +91,7 @@ class WireFormatTests(unittest.TestCase):
             (VoiceNoteRejected.TOO_LONG, 400),
         ]
         for reason, expected in cases:
-            with self.subTest(reason=reason):
+            with self.subTest(reason=reason), self.assertNoLogs("backend.api.errors"):
                 response = _client(("/x", VoiceNoteRejected(reason, "nope"))).get("/x")
                 self.assertEqual(expected, response.status_code)
                 self.assertEqual({"detail": {"code": reason, "message": "nope"}}, response.json())

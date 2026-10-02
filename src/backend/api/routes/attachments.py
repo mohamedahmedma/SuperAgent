@@ -64,11 +64,12 @@ async def upload_attachment(
     Read to one byte past the limit and no further, so an oversized upload is refused
     without being held in memory whole. Storage, hashing and the transcription call all
     block, so they run on a worker thread: the event loop is streaming other parents'
-    answers meanwhile. A recording refused as too large, too long or of the wrong type
-    raises `VoiceNoteRejected`, which `backend/api/errors.py` answers with its code.
+    answers meanwhile.
     """
     limit = services.attachments.limits.max_bytes
     data = await file.read(limit + 1)
+    # A recording refused as too large, too long or of the wrong type raises
+    # `VoiceNoteRejected`, which `backend/api/errors.py` answers with its code.
     try:
         record = await asyncio.to_thread(
             services.attachments.store_voice_note,

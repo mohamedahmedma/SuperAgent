@@ -74,10 +74,12 @@ def status_for(exc: BackendError) -> int:
 async def backend_error_handler(request: Request, exc: BackendError) -> JSONResponse:
     """Every deliberate failure, as the `{"detail": message}` body the routes always sent.
 
-    A 4xx logs its code and path and not its message: messages quote what failed - a
-    filename, a session id - and a log line is read by more people than a response is. A
-    500 logs the underlying traceback, which is the only way an operator learns what
-    actually broke; the routes this replaced logged nothing at all.
+    A 500 logs the underlying traceback, which is the only way an operator learns what
+    actually broke. Of the routes this replaced, only the media route logged a failure it
+    answered with a 500 (as "Failed to read blob for asset <id>"; the path in this line still
+    names the asset); the session and document routes logged none of theirs. A 4xx is not
+    logged here, as it was not before: the access log already records every request's
+    method, path and status.
     """
     status_code = status_for(exc)
     if status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
@@ -90,8 +92,6 @@ async def backend_error_handler(request: Request, exc: BackendError) -> JSONResp
             exc.code,
             exc_info=(type(cause), cause, cause.__traceback__),
         )
-    else:
-        logger.info("%s %s -> %s (%s)", request.method, request.url.path, status_code, exc.code)
 
     headers = None
     if isinstance(exc, TurnRefused):
@@ -102,7 +102,6 @@ async def backend_error_handler(request: Request, exc: BackendError) -> JSONResp
 async def voice_note_rejected_handler(request: Request, exc: VoiceNoteRejected) -> JSONResponse:
     """A recording refused, in the object form the recorder reads its `code` out of."""
     status_code = _VOICE_NOTE_STATUS.get(exc.reason, status.HTTP_400_BAD_REQUEST)
-    logger.info("%s %s -> %s (%s)", request.method, request.url.path, status_code, exc.reason)
     return JSONResponse(
         status_code=status_code,
         content={"detail": {"code": exc.reason, "message": str(exc)}},

@@ -12,6 +12,7 @@ from backend.application.ports.collaborators import (
     AssetRestorer,
     AttachmentLookup,
     ConversationStore,
+    Provider,
 )
 from backend.application.ports.repositories import AttachmentRecord
 from backend.domain.errors import NotFound, operation
@@ -36,13 +37,17 @@ class SessionService:
 
     Every method takes the user id first and never returns another account's data: storage
     is keyed on (user, session), and a voice note resolves only for its owner.
+
+    The conversation store is given, because every method uses it. The voice notes are
+    provided, because only `page` does: listing or deleting a conversation builds nothing it
+    does not read.
     """
 
     def __init__(
         self,
         *,
         conversations: ConversationStore,
-        attachments: AttachmentLookup,
+        attachments: Provider[AttachmentLookup],
         restore_assets: AssetRestorer,
     ) -> None:
         self._conversations = conversations
@@ -68,7 +73,7 @@ class SessionService:
                 user_id, session_id, limit=limit, before_id=before
             )
             messages = self._restore_assets(stored["messages"])
-            attachments = self._attachments.get_many(
+            attachments = self._attachments().get_many(
                 user_id, [message.get("attachment_id") or "" for message in messages]
             )
             return SessionPage(

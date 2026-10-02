@@ -673,8 +673,8 @@ class StorageRoutingInvariantTests(unittest.TestCase):
             self.assertLessEqual(len(parent["text"]), loader._level_1_size + 151)
 
     def test_upload_route_partitioning_matches_this_assumption(self):
-        # Mirrors backend/api/routes/documents.py: level 1-2 -> parent store,
-        # level 3 -> Milvus. Guards against a silent change in either place.
+        # Mirrors `_split` in backend/application/services/documents.py: level 1-2 -> parent
+        # store, level 3 -> Milvus. Guards against a silent change in either place.
         loader = DocumentLoader()
         with patch.object(
             document_loader_module,

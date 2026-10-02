@@ -75,11 +75,18 @@ class _ParentChunks:
         return list(self.rows)
 
 
+def _unused():
+    raise AssertionError("the chunk inspector must not build this store")
+
+
 def inspect(rows, filename="kb.docx", q="", parents=(), parent_store=None):
     milvus = _Milvus(rows)
     parent_chunks = parent_store or _ParentChunks(parents)
     catalogue = DocumentCatalogue(
-        vectors=milvus, parent_chunks=parent_chunks, pairs=None, assets=None
+        vectors=lambda: milvus,
+        parent_chunks=lambda: parent_chunks,
+        pairs=_unused,
+        assets=_unused,
     )
     response = asyncio.run(list_document_chunks(filename, q=q, _=None, catalogue=catalogue))
     return response, milvus

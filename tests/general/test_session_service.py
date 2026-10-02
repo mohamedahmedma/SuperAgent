@@ -65,11 +65,16 @@ class _Attachments:
 
 
 def _service(conversations=None, attachments=None, restore=None):
+    attachments = attachments or _Attachments()
     return SessionService(
         conversations=conversations or _Conversations(),
-        attachments=attachments or _Attachments(),
+        attachments=lambda: attachments,
         restore_assets=restore or (lambda messages: messages),
     )
+
+
+def _no_voice_notes():
+    raise AssertionError("only opening a conversation may build the voice notes")
 
 
 class ListSessionsTests(unittest.TestCase):
@@ -154,6 +159,32 @@ class DeleteTests(unittest.TestCase):
     def test_a_storage_failure_is_not_mistaken_for_not_found(self):
         with self.assertRaises(OperationFailed):
             _service(_Conversations(fail=RuntimeError("db gone"))).delete("parent", "s1")
+
+
+class WhatEachMethodBuildsTests(unittest.TestCase):
+    def test_listing_and_deleting_never_build_the_voice_notes(self):
+        """Building them builds the blob store and the speech-to-text model; the old list and
+        delete routes depended on the conversation storage alone."""
+        service = SessionService(
+            conversations=_Conversations(infos=[{"session_id": "a", "updated_at": "1"}]),
+            attachments=_no_voice_notes,
+            restore_assets=lambda messages: messages,
+        )
+        self.assertEqual(1, len(service.list_sessions("parent")))
+        service.delete("parent", "a")
+
+    def test_voice_notes_that_cannot_be_built_fail_the_page_as_its_operation(self):
+        def unbuildable():
+            raise RuntimeError("blob backend misconfigured")
+
+        service = SessionService(
+            conversations=_Conversations(),
+            attachments=unbuildable,
+            restore_assets=lambda messages: messages,
+        )
+        with self.assertRaises(OperationFailed) as caught:
+            service.page("parent", "s1", limit=20, before=None)
+        self.assertEqual("blob backend misconfigured", caught.exception.message)
 
 
 class OperationTests(unittest.TestCase):

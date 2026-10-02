@@ -52,11 +52,18 @@ async def get_session_messages(
     current_user: User = Depends(get_current_user),
     sessions: SessionService = Depends(session_service),
 ):
-    """One batch of a stored conversation, with its images and voice notes displayable.
+    """One batch of a stored conversation, with its images and voice notes made displayable again.
 
-    Capabilities are the browser defaults because this endpoint serves the web app; a client
-    with other constraints reads the asset ids off the trace and calls POST /media/resolve
-    with its own.
+    Batched rather than whole: opening a chat costs the last screenful of it, and
+    scrolling back asks for the batch before the oldest message on screen by passing its
+    id as `before`. `has_more` says when there is nothing older left to ask for.
+
+    Storage keeps assets as ids; a client needs renditions, so they are resolved here —
+    once per batch, in a single lookup, not once per message. Capabilities are the
+    browser defaults because this endpoint serves the web app; a client with other
+    constraints reads the ids off the trace and calls POST /media/resolve with its own.
+    A message spoken as a voice note carries the note the same way: one lookup per
+    batch, owner-scoped, so the player comes back with the conversation.
     """
     page = sessions.page(current_user.username, session_id, limit=limit, before=before)
     return SessionMessagesResponse(

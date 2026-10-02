@@ -108,8 +108,14 @@ def review(dossiers, filename="kb.docx", chunks=(), milvus_error=None, store_err
             return list(dossiers)
 
     milvus = _Milvus(chunks, error=milvus_error)
-    catalogue = DocumentCatalogue(vectors=milvus, parent_chunks=None, pairs=None, assets=Store())
+    catalogue = DocumentCatalogue(
+        vectors=lambda: milvus, parent_chunks=_unused, pairs=_unused, assets=Store
+    )
     return asyncio.run(list_document_assets(filename, _=None, catalogue=catalogue)), milvus
+
+
+def _unused():
+    raise AssertionError("the asset views must not build this store")
 
 
 class WhatItReturnsTests(unittest.TestCase):
@@ -264,7 +270,9 @@ class MarkReviewedTests(unittest.TestCase):
                     raise error
                 return dossier_out
 
-        catalogue = DocumentCatalogue(vectors=None, parent_chunks=None, pairs=None, assets=Store())
+        catalogue = DocumentCatalogue(
+            vectors=_unused, parent_chunks=_unused, pairs=_unused, assets=Store
+        )
         return catalogue, calls
 
     def test_it_returns_the_asset_as_it_now_reads(self):
