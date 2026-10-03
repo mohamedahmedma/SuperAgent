@@ -16,7 +16,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * pointed at the wrong identity service builds, deploys, and fails only when a parent
  * tries to sign in.
  */
-const REPO_ROOT = resolve(HERE, '..');
+const REPO_ROOT = resolve(HERE, '..', '..');
 
 /** Where the dev server proxies to when the root `.env` says nothing. The ports each
  *  service documents for itself — backend 8000, identity 8200. */

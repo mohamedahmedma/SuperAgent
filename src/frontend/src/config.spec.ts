@@ -31,7 +31,7 @@ const config: any = typeof viteConfig === 'function'
   : viteConfig;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(HERE, '..', '..');
+const REPO_ROOT = resolve(HERE, '..', '..', '..');
 
 /** Names that must never be exposed to a browser, whatever they are called. */
 const SECRET_NAMES = [
@@ -75,9 +75,10 @@ describe('the frontend reads the repo-root .env', () => {
   });
 
   it('no longer keeps a second env file beside the config', () => {
-    // The specific regression. A leftover `frontend/.env` is now silently ignored, which
-    // is worse than it was before: an operator edits it and nothing at all happens.
-    expect(existsSync(resolve(REPO_ROOT, 'frontend', '.env'))).toBe(false);
+    // The specific regression. A leftover `.env` beside vite.config.ts is now silently
+    // ignored, which is worse than it was before: an operator edits it and nothing at all
+    // happens. `HERE` is this file's own directory; vite.config.ts is one level up from it.
+    expect(existsSync(resolve(HERE, '..', '.env'))).toBe(false);
   });
 
   it('finds the settings the app actually reads', () => {
